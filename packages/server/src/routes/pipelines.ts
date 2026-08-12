@@ -1,4 +1,4 @@
-import type { PipelineDefinition, PipelineStepExecutor, SixbHostRuntime } from "@sixb/core"
+import type { PipelineDefinition, PipelineStepExecutor, SixbHostView } from "@sixb/core"
 import type { PipelineRunRecord, PipelineStepRunRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { requireRequestSixb } from "../auth/scope"
@@ -120,7 +120,7 @@ function serializePipeline(
   })
 }
 
-export function registerPipelineRoutes(app: Elysia, host: SixbHostRuntime) {
+export function registerPipelineRoutes(app: Elysia, host: SixbHostView) {
   return app
     .get(
       "/api/pipelines",

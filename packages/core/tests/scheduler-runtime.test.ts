@@ -3,14 +3,14 @@ import type { SixbErrorContext } from "../src"
 import { InMemoryBroker } from "../src"
 import { attachSixbErrorReporter, flushSixbErrors } from "../src/error-reporting/internal"
 import type { StoredScheduleTriggeredEvent } from "../src/events"
-import { EventsRuntime } from "../src/events"
+import { DomainEventService } from "../src/events"
 import { SchedulerRuntime, SchedulerValidationError } from "../src/scheduler"
 import { defineSchedule } from "../src/schedules"
 
 const PROJECT = "test"
 
 function createEvents(host?: object) {
-  return new EventsRuntime({ projectId: PROJECT, broker: new InMemoryBroker(), host })
+  return new DomainEventService({ projectId: PROJECT, broker: new InMemoryBroker(), host })
 }
 
 function createTestClock(initial: Date) {

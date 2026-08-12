@@ -27,7 +27,7 @@ import {
   stringEnum,
   valueTypeRef,
 } from "@sixb/core"
-import type { EventsRuntime } from "@sixb/core/internal/events"
+import type { DomainEventService } from "@sixb/core/internal/events"
 import { bindPrimitiveExecution } from "@sixb/core/internal/primitive-execution"
 import {
   createProjectionRunId,
@@ -296,18 +296,18 @@ interface TestProjectionWorkerContext extends ProjectionWorkerContext {
 function createRuntime(
   host: ProjectionWorkerHost,
   primitive: { readonly id: string; readonly runId: string } = {
-    id: host.projections.list()[0]?.id ?? "direct-projection-test",
+    id: host.definitions.projections.list()[0]?.id ?? "direct-projection-test",
     runId: "direct-projection-job-test",
   }
 ): TestProjectionWorkerContext {
   const runtime = {
     host,
     projectId: host.id,
-    ontology: host.ontology,
+    ontology: host.definitions.ontology,
     lakeStorage: host.lakeStorage,
     projectionRunsStorage: requireProjectionRunsStorage(host),
-    datasets: host.datasets,
-    projections: host.projections,
+    datasets: host.definitions.datasets,
+    projections: host.definitions.projections,
   } satisfies TestProjectionWorkerContext
   const execution = bindPrimitiveExecution(host, {
     primitive: { kind: "projection", ...primitive },
@@ -1859,7 +1859,7 @@ describe("runProjectionJob", () => {
       await createTestSixb(sixb).objects.upsert("Building", { id: buildingId, name: buildingId })
     }
 
-    const events = sixb.events as EventsRuntime
+    const events = sixb.events as DomainEventService
     const publish = events.publishEnvelopes.bind(events)
     const publishedB1Creates: string[] = []
     events.publishEnvelopes = async (envelopes) => {
@@ -2618,7 +2618,7 @@ describe("runProjectionJob", () => {
       },
       deps
     )
-    const events = sixb.events as EventsRuntime
+    const events = sixb.events as DomainEventService
     const publish = events.publishEnvelopes.bind(events)
     let aborted = false
     events.publishEnvelopes = async (envelopes) => {

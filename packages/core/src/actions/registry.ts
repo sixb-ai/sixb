@@ -8,7 +8,14 @@ import {
 import type { ActionDefinition, ObjectActionDefinition } from "./types"
 import { isObjectActionDefinition } from "./validation"
 
-export class ActionRegistry {
+export interface ActionDefinitionCatalog {
+  list(): readonly ActionDefinition[]
+  getById(id: string): ActionDefinition | null
+  listGlobal(): readonly ActionDefinition[]
+  listForType(type: ObjectType): readonly ObjectActionDefinition[]
+}
+
+export class ActionRegistry implements ActionDefinitionCatalog {
   private readonly byId = new Map<string, ActionDefinition>()
   private readonly globalActions: ActionDefinition[] = []
   private readonly byTargetId = new Map<string, ObjectActionDefinition[]>()
@@ -76,11 +83,11 @@ export class ActionRegistry {
     return this.byId.get(id) ?? null
   }
 
-  getGlobalActions(): readonly ActionDefinition[] {
+  listGlobal(): readonly ActionDefinition[] {
     return [...this.globalActions]
   }
 
-  getActionsForType(type: ObjectType): readonly ObjectActionDefinition[] {
+  listForType(type: ObjectType): readonly ObjectActionDefinition[] {
     this.ontology.resolveObjectType(type.id)
 
     const seen = new Set<string>()

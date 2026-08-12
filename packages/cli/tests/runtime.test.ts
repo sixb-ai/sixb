@@ -692,7 +692,7 @@ describe("startSixbRuntime", () => {
       queues: new InMemoryQueues(),
       rules: [postedRule],
     })
-    sixb.connectors.disconnectAll = async () => {
+    sixb.closeConnectors = async () => {
       calls.push("connectors:stop")
     }
 
@@ -717,7 +717,7 @@ describe("startSixbRuntime", () => {
       queues: new ClosableQueues(calls),
       logger: new ClosableLogger(calls),
     })
-    sixb.connectors.disconnectAll = async () => {
+    sixb.closeConnectors = async () => {
       calls.push("connectors:stop")
     }
 
@@ -794,10 +794,10 @@ describe("split production runtime roles", () => {
       queues: new InMemoryQueues(),
       schedules: [defineSchedule("role-daily").cron("0 2 * * *")],
     })
-    sixb.schedules.start = async () => {
+    sixb.scheduler.start = async () => {
       calls.push("scheduler:start")
     }
-    sixb.schedules.stop = async () => {
+    sixb.scheduler.stop = async () => {
       calls.push("scheduler:stop")
     }
     const runtime = await startSchedulerRuntime(sixb)
@@ -821,7 +821,7 @@ describe("split production runtime roles", () => {
       queues: new InMemoryQueues(),
       rules: [postedRule],
     })
-    sixb.schedules.start = async () => {
+    sixb.scheduler.start = async () => {
       calls.push("scheduler:start")
     }
 
@@ -853,7 +853,7 @@ describe("split production runtime roles", () => {
       schedules: [daily],
       workflows: [workflow],
     })
-    sixb.schedules.start = async () => {
+    sixb.scheduler.start = async () => {
       calls.push("scheduler:start")
     }
 

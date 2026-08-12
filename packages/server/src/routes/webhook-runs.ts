@@ -1,4 +1,4 @@
-import type { SixbHostRuntime } from "@sixb/core"
+import type { SixbHostView } from "@sixb/core"
 import type { WebhookRunRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { OPENAPI_TAGS } from "../openapi/tags"
@@ -31,7 +31,7 @@ function serializeWebhookRun(run: WebhookRunRecord) {
   }
 }
 
-export function registerWebhookRunRoutes(app: Elysia, host: SixbHostRuntime) {
+export function registerWebhookRunRoutes(app: Elysia, host: SixbHostView) {
   return app.get(
     "/api/webhook-runs",
     async ({ query, set }) => {

@@ -2,6 +2,7 @@ import { ActionRegistry } from "../actions"
 import type { ActionDefinition } from "../actions/types"
 import type { AgentDefinition } from "../agents"
 import { validateAgentGroupReferences, validateAgentToolsAtStartup } from "../agents"
+import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets/types"
 import { assertDatasetDefinition } from "../datasets/validation"
 import { OntologyRegistry } from "../ontology"
@@ -10,12 +11,7 @@ import { ProjectionRegistry } from "../projections/registry"
 import type { ProjectionDefinition } from "../projections/types"
 import { type RuleDefinition, validateRulesAtStartup } from "../rules"
 import { type ScheduleDefinition, validateSchedulesAtStartup } from "../schedules"
-import type {
-  GroupDefinition,
-  MembershipPolicyDefinition,
-  RoleDefinition,
-  SecurityRegistry,
-} from "../security"
+import type { GroupDefinition, MembershipPolicyDefinition, RoleDefinition } from "../security"
 import { createRuntimeSecurityRegistry } from "../security/runtime"
 import type { SyncDefinition } from "../syncs"
 import {
@@ -24,12 +20,14 @@ import {
 } from "../syncs/validation"
 import type { WorkflowDefinition } from "../workflows"
 import { validateWorkflowsAtStartup } from "../workflows"
+import { createDefinitionCatalog, type SixbDefinitions } from "./definitions"
 import { RuntimeError } from "./errors"
 import type { OntologySource } from "./types"
 
-interface RuntimeDefinitionOptions {
+interface DefinitionOptions {
   readonly ontology: readonly OntologySource[]
   readonly actions?: readonly ActionDefinition[]
+  readonly connectors?: readonly ConnectorDefinition[]
   readonly datasets?: readonly DatasetDefinition[]
   readonly schedules?: readonly ScheduleDefinition[]
   readonly syncs?: readonly SyncDefinition[]
@@ -43,24 +41,13 @@ interface RuntimeDefinitionOptions {
   readonly membershipPolicies?: readonly MembershipPolicyDefinition[]
 }
 
-export interface ResolvedRuntimeDefinitions {
-  readonly ontology: OntologyRegistry
-  readonly actionRegistry: ActionRegistry
-  readonly security: SecurityRegistry
-  readonly projectionRegistry: ProjectionRegistry
-  readonly datasets: readonly DatasetDefinition[]
-  readonly schedules: readonly ScheduleDefinition[]
-  readonly syncs: readonly SyncDefinition[]
-  readonly pipelines: readonly PipelineDefinition[]
-  readonly rules: readonly RuleDefinition[]
-  readonly workflows: readonly WorkflowDefinition[]
-  readonly agents: readonly AgentDefinition[]
+interface ResolvedDefinitions extends SixbDefinitions {
+  readonly actions: ActionRegistry
+  readonly projections: ProjectionRegistry
 }
 
 /** Resolve and cross-validate every registered definition before runtime services are composed. */
-export function resolveRuntimeDefinitions(
-  options: RuntimeDefinitionOptions
-): ResolvedRuntimeDefinitions {
+export function resolveDefinitions(options: DefinitionOptions): ResolvedDefinitions {
   const ontology = new OntologyRegistry({ sources: options.ontology })
   const actionRegistry = new ActionRegistry(options.actions ?? [], ontology)
   const registeredActionIds = new Set(actionRegistry.list().map((action) => action.id))
@@ -68,6 +55,7 @@ export function resolveRuntimeDefinitions(
   const agents = options.agents ?? []
   validateAgentToolsAtStartup(agents)
   const agentsById = indexUniqueDefinitions("agent", agents)
+  const connectorsById = indexUniqueDefinitions("connector", options.connectors ?? [])
 
   // Datasets resolve first because syncs, pipelines, projections, and security depend on them.
   const datasetsById = new Map<string, DatasetDefinition>()
@@ -99,7 +87,6 @@ export function resolveRuntimeDefinitions(
     pipelinesById.set(pipeline.id, pipeline)
   }
 
-  const datasets = [...datasetsById.values()]
   const schedules = [...schedulesById.values()]
   const syncs = [...syncsById.values()]
   const pipelines = [...pipelinesById.values()]
@@ -109,7 +96,7 @@ export function resolveRuntimeDefinitions(
   // Rules resolve against the complete ontology so inherited properties and links are available.
   const rules = options.rules ?? []
   validateRulesAtStartup(rules, ontology)
-  const rulesById = new Map(rules.map((rule) => [rule.id, rule]))
+  const rulesById = indexUniqueDefinitions("rule", rules)
 
   validateSchedulesAtStartup(schedules, ontology, {
     registeredRuleIds: new Set(rulesById.keys()),
@@ -155,26 +142,27 @@ export function resolveRuntimeDefinitions(
   })
   validateMergeSyncProjectionSafety({
     syncs,
-    telemetryProjections: projectionRegistry.listTelemetryProjections(),
+    telemetryProjections: projectionRegistry.listTelemetry(),
   })
 
-  return {
+  return Object.freeze({
     ontology,
-    actionRegistry,
+    actions: actionRegistry,
+    agents: createDefinitionCatalog(agentsById),
+    connectors: createDefinitionCatalog(connectorsById),
+    datasets: createDefinitionCatalog(datasetsById),
+    pipelines: createDefinitionCatalog(pipelinesById),
+    projections: projectionRegistry,
+    rules: createDefinitionCatalog(rulesById),
+    schedules: createDefinitionCatalog(schedulesById),
     security,
-    projectionRegistry,
-    datasets,
-    schedules,
-    syncs,
-    pipelines,
-    rules,
-    workflows: [...workflowsById.values()],
-    agents: [...agentsById.values()],
-  }
+    syncs: createDefinitionCatalog(syncsById),
+    workflows: createDefinitionCatalog(workflowsById),
+  })
 }
 
 function indexUniqueDefinitions<TDefinition extends { readonly id: string }>(
-  kind: "schedule" | "workflow" | "agent",
+  kind: "schedule" | "workflow" | "agent" | "connector" | "rule",
   definitions: readonly TDefinition[]
 ): ReadonlyMap<string, TDefinition> {
   const definitionsById = new Map<string, TDefinition>()
@@ -186,7 +174,7 @@ function indexUniqueDefinitions<TDefinition extends { readonly id: string }>(
 }
 
 function assertUniqueDefinitionId(
-  kind: "dataset" | "schedule" | "sync" | "pipeline" | "workflow" | "agent",
+  kind: "dataset" | "schedule" | "sync" | "pipeline" | "workflow" | "agent" | "connector" | "rule",
   id: string,
   definitionsById: ReadonlyMap<string, unknown>
 ): void {

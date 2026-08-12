@@ -16,10 +16,10 @@ export function createAgentExecutionContext(input: {
   const authorization = resolveAuthorizationContext({
     principal: input.identity.principal,
     groupIds: input.identity.groupMemberships.map((membership) => membership.groupId),
-    roles: input.host.security.listResolvedRoles(),
+    roles: input.host.definitions.security.listResolvedRoles(),
   })
   const requestedBy = authorizablePrincipal(input.requestedBy)
-  const execution = bindAgentExecution(input.host, {
+  const sixb = bindAgentExecution(input.host, {
     agentId: input.agentId,
     runId: input.runId,
     authorization,
@@ -29,8 +29,8 @@ export function createAgentExecutionContext(input: {
 
   return {
     ...input.context,
-    blobStorage: execution.blobs,
-    connector: execution.connector,
+    blobStorage: sixb.blobs,
+    connector: sixb.connector,
   }
 }
 

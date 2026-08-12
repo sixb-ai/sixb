@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto"
-import type { AuthSessionAudience, GroupDefinition, SixbHostRuntime } from "@sixb/core"
+import type { AuthSessionAudience, GroupDefinition, SixbHostView } from "@sixb/core"
 import {
   type AuthenticatedUserRequestSession,
   type AuthRequestResult,
@@ -117,7 +117,7 @@ export interface AuthRoutesOptions {
   ) => AuthInvitationRedirectContext
 }
 
-export function registerAuthRoutes(app: Elysia, host: SixbHostRuntime, options: AuthRoutesOptions) {
+export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: AuthRoutesOptions) {
   return app
     .get(
       "/api/auth/session",
@@ -405,7 +405,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostRuntime, options: 
 
           return jsonResponse(
             {
-              groups: host.security
+              groups: host.definitions.security
                 .listGroups()
                 // V1 avoids privilege escalation by only offering groups the
                 // current session already has. Runtime token auth still
@@ -1493,7 +1493,7 @@ function matchesMagicLinkRequester(pendingSecret: string, requesterHash: string)
 // navigation and the cookie must accompany that GET for the fast path to work.
 function magicLinkPendingCookieHeader(params: {
   readonly request: Request
-  readonly host: SixbHostRuntime
+  readonly host: SixbHostView
   readonly value: string
   readonly maxAgeSeconds: number
 }): string {
@@ -1513,7 +1513,7 @@ function magicLinkPendingCookieHeader(params: {
 // Shared by POST /auth/callback (confirmation click) and the same-device fast
 // path on GET. Consumes the single-use token and mints the session cookies.
 async function completeMagicLinkCallback(input: {
-  readonly host: SixbHostRuntime
+  readonly host: SixbHostView
   readonly strategy: MagicLinkAuthStrategy
   readonly options: AuthRoutesOptions
   readonly request: Request
@@ -1585,7 +1585,7 @@ function resolveSessionDevice(request: Request): {
 }
 
 function sessionCallbackCompletionResponse(input: {
-  readonly host: SixbHostRuntime
+  readonly host: SixbHostView
   readonly request: Request
   readonly apiOrigin: string
   readonly sessionCredential: ReturnType<typeof createSessionCredential>
@@ -2004,7 +2004,7 @@ function htmlMessageResponse(message: string, status = 200, heading?: string): R
   )
 }
 
-function requireAuthStorage(host: SixbHostRuntime): AuthStorage {
+function requireAuthStorage(host: SixbHostView): AuthStorage {
   if (!host.storage.auth) {
     throw new Error("[SixbServer] Auth storage is required for auth routes.")
   }

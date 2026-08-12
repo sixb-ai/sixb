@@ -27,7 +27,7 @@ export interface RuntimeCheck {
 /**
  * Probes the configured providers with read-only round trips.
  *
- * There is no `events` row because there is no events provider: `EventsRuntime` is built over
+ * There is no `events` row because there is no events provider: `DomainEventService` is built over
  * the broker, so probing both was one round trip reported twice.
  */
 export async function checkRuntimeHealth(

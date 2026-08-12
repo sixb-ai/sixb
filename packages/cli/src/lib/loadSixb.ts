@@ -1,23 +1,23 @@
 import { pathToFileURL } from "node:url"
-import type { SixbHostRuntime } from "@sixb/core"
+import type { SixbHostView } from "@sixb/core"
 
-export type LoadedSixbHost = SixbHostRuntime
+export type LoadedSixbHost = SixbHostView
 
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   return !!value && typeof value === "object" && "then" in value
 }
 
 const REQUIRED_HOST_PROPERTIES = [
-  "ontology",
-  "actionRegistry",
+  "definitions",
   "events",
+  "logging",
   "broker",
   "storage",
   "lakeStorage",
-  "blobs",
+  "blobStorage",
   "queues",
   "auth",
-  "agents",
+  "scheduler",
 ] as const
 
 const REQUIRED_LIFECYCLE_METHODS = [
@@ -26,6 +26,8 @@ const REQUIRED_LIFECYCLE_METHODS = [
   "getOntologyOperationalStatus",
   "checkReadiness",
   "closeLogger",
+  "closeConnectors",
+  "closeBlobs",
   "closeBroker",
 ] as const
 
@@ -46,39 +48,48 @@ function hasMethods(value: unknown, methods: readonly PropertyKey[]): boolean {
   return methods.every((method) => typeof candidate[method] === "function")
 }
 
-function hasWorkflows(value: Record<PropertyKey, unknown>): boolean {
-  return isRecord(value.workflows) && hasMethods(value.workflows, ["list", "getById"])
-}
-
-function hasPrimitiveFacades(value: Record<PropertyKey, unknown>): boolean {
+function hasDefinitionCatalogs(value: Record<PropertyKey, unknown>): boolean {
+  if (!isRecord(value.definitions)) return false
+  const definitions = value.definitions
   return (
-    isRecord(value.objects) &&
-    hasMethods(value.objects, ["listTypes", "listSubTypes"]) &&
-    isRecord(value.actions) &&
-    hasMethods(value.actions, ["list", "getById"]) &&
-    isRecord(value.datasets) &&
-    hasMethods(value.datasets, ["list", "getById"]) &&
-    isRecord(value.syncs) &&
-    hasMethods(value.syncs, ["list", "getById"]) &&
-    isRecord(value.pipelines) &&
-    hasMethods(value.pipelines, ["list", "getById"]) &&
-    isRecord(value.schedules) &&
-    hasMethods(value.schedules, ["list", "getById", "start", "stop"]) &&
-    isRecord(value.rules) &&
-    hasMethods(value.rules, ["list", "getById"]) &&
-    isRecord(value.projections) &&
-    hasMethods(value.projections, [
+    isRecord(definitions.ontology) &&
+    hasMethods(definitions.ontology, ["listObjectTypes", "getObjectTypeById"]) &&
+    isRecord(definitions.actions) &&
+    hasMethods(definitions.actions, ["list", "getById", "listGlobal", "listForType"]) &&
+    isRecord(definitions.connectors) &&
+    hasMethods(definitions.connectors, ["list", "getById"]) &&
+    isRecord(definitions.datasets) &&
+    hasMethods(definitions.datasets, ["list", "getById"]) &&
+    isRecord(definitions.syncs) &&
+    hasMethods(definitions.syncs, ["list", "getById"]) &&
+    isRecord(definitions.pipelines) &&
+    hasMethods(definitions.pipelines, ["list", "getById"]) &&
+    isRecord(definitions.schedules) &&
+    hasMethods(definitions.schedules, ["list", "getById"]) &&
+    isRecord(definitions.rules) &&
+    hasMethods(definitions.rules, ["list", "getById"]) &&
+    isRecord(definitions.projections) &&
+    hasMethods(definitions.projections, [
       "list",
       "listObjects",
       "listLinks",
       "listTelemetry",
       "getById",
     ]) &&
-    typeof value.connector === "function" &&
-    isRecord(value.connectors) &&
-    hasMethods(value.connectors, ["list", "getById", "disconnectAll"]) &&
-    isRecord(value.blobs) &&
-    hasMethods(value.blobs, ["put", "open", "stat"])
+    isRecord(definitions.workflows) &&
+    hasMethods(definitions.workflows, ["list", "getById"]) &&
+    isRecord(definitions.agents) &&
+    hasMethods(definitions.agents, ["list", "getById"]) &&
+    isRecord(definitions.security) &&
+    hasMethods(definitions.security, [
+      "listGroups",
+      "getGroupById",
+      "listRoles",
+      "getRoleById",
+      "listResolvedRoles",
+      "listMembershipPolicies",
+      "getMembershipPolicyById",
+    ])
   )
 }
 
@@ -90,8 +101,13 @@ function isSixbHost(value: unknown): value is LoadedSixbHost {
     typeof value.projectId === "string" &&
     hasProperties(value, REQUIRED_HOST_PROPERTIES) &&
     hasMethods(value, REQUIRED_LIFECYCLE_METHODS) &&
-    hasPrimitiveFacades(value) &&
-    hasWorkflows(value)
+    hasDefinitionCatalogs(value) &&
+    isRecord(value.logging) &&
+    hasMethods(value.logging, ["startExecution", "read", "tail"]) &&
+    isRecord(value.blobStorage) &&
+    hasMethods(value.blobStorage, ["put", "open", "stat"]) &&
+    isRecord(value.scheduler) &&
+    hasMethods(value.scheduler, ["start", "stop"])
   )
 }
 

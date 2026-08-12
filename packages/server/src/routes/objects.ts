@@ -5,7 +5,7 @@ import {
   ObjectQueryPlanningError,
   ObjectQueryValidationError,
   type ObjectRef,
-  type SixbHostRuntime,
+  type SixbHostView,
 } from "@sixb/core"
 import type {
   ExpandedLinkValue,
@@ -181,7 +181,7 @@ interface ObjectSearchItem {
 }
 
 async function searchObjects(
-  host: SixbHostRuntime,
+  host: SixbHostView,
   sixb: ReturnType<typeof requireRequestSixb>,
   query: string,
   limit: number
@@ -247,7 +247,7 @@ function objectRefIdentity(ref: ObjectRef): string {
 }
 
 async function objectFileContentResponse(
-  host: SixbHostRuntime,
+  host: SixbHostView,
   context: {
     readonly params: { readonly objectTypeId: string; readonly objectId: string }
     readonly query: unknown
@@ -259,7 +259,7 @@ async function objectFileContentResponse(
   const sixb = requireRequestSixb(context)
 
   return createContextualFileContentResponse({
-    blobStorage: host.blobs,
+    blobStorage: host.blobStorage,
     query: context.query,
     querySchema: ObjectFileContentQuerySchema,
     request: context.request,
@@ -277,7 +277,7 @@ async function objectFileContentResponse(
   })
 }
 
-export function registerObjectRoutes(app: Elysia, host: SixbHostRuntime) {
+export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
   return app
     .get(
       "/api/objects/search",

@@ -1,5 +1,5 @@
 import type { AgentDefinition, Sandbox } from "@sixb/core"
-import { resolveLogsRuntime } from "@sixb/core/internal/logging"
+import { resolveLoggingService } from "@sixb/core/internal/logging"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type { AgentRunRecord, WorkflowAgentNodeRunRecord } from "@sixb/core/storage"
 import { type AgentExecutionMode, renderAgentSkillCatalog } from "./agent-skills"
@@ -135,7 +135,7 @@ interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
 function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvironment {
   const { mode, context, agent, runId, threadId, apiBaseUrl, attachmentContext, skills } = input
 
-  const logSession = resolveLogsRuntime(context.id, context.logs).startExecution({
+  const logSession = resolveLoggingService(context.id, context.logging).startExecution({
     kind: "agent",
     id: runId,
   })

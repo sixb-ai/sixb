@@ -1,4 +1,4 @@
-import type { SixbHostRuntime } from "@sixb/core"
+import type { SixbHostView } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
@@ -6,7 +6,7 @@ import {
   ReadinessResponseSchema,
   StatusResponseSchema,
 } from "../schemas/status"
-export function registerStatusRoutes(app: Elysia, host: SixbHostRuntime) {
+export function registerStatusRoutes(app: Elysia, host: SixbHostView) {
   app.get("/health", () => ({ status: "ok" as const }), {
     response: { 200: HealthResponseSchema },
     detail: {
@@ -39,7 +39,7 @@ export function registerStatusRoutes(app: Elysia, host: SixbHostRuntime) {
     "/api/status",
     async () => ({
       ...host.getOntologyOperationalStatus(),
-      objectTypes: host.objects.listTypes().length,
+      objectTypes: host.definitions.ontology.listObjectTypes().length,
     }),
     {
       response: { 200: StatusResponseSchema },

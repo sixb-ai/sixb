@@ -1,65 +1,78 @@
-import { assertPrivileged } from "../authorization"
+import { assertProviderAccess } from "../authorization"
+import type { ExecutionContext } from "../execution"
 import type { SixbRuntimeContext } from "../runtime/types"
-import type { BlobsRuntime } from "./runtime"
+import type {
+  AbortBlobUploadInput,
+  BlobByteRange,
+  BlobInfo,
+  BlobStorage,
+  BlobUploadSession,
+  CompleteBlobUploadInput,
+  CreateBlobUploadInput,
+  FileRef,
+  PutBlobInput,
+  SignBlobUploadPartInput,
+  SignedBlobUploadPart,
+} from "./types"
+import { supportsDirectUpload, supportsRangeRead } from "./validation"
 
-/** Blob operations available only to trusted or explicitly auth-disabled executions. */
-export type ExecutionBlobsRuntime = Omit<BlobsRuntime, "close">
+/** Blob operations bound to one execution. Provider lifecycle is deliberately host-only. */
+export interface BlobsRuntime {
+  put(input: PutBlobInput): Promise<FileRef>
+  open(blobId: string): Promise<ReadableStream<Uint8Array>>
+  stat(blobId: string): Promise<BlobInfo | null>
+  openRange?(blobId: string, range: BlobByteRange): Promise<ReadableStream<Uint8Array>>
+  createUpload?(input: CreateBlobUploadInput): Promise<BlobUploadSession>
+  signUploadPart?(input: SignBlobUploadPartInput): Promise<SignedBlobUploadPart>
+  completeUpload?(input: CompleteBlobUploadInput): Promise<FileRef>
+  abortUpload?(input: AbortBlobUploadInput): Promise<void>
+}
 
-export function createExecutionBlobsRuntime(
+export function createBlobsRuntime(
   runtime: SixbRuntimeContext,
-  blobs: BlobsRuntime
-): ExecutionBlobsRuntime {
-  const assertAccess = () => assertPrivileged(runtime, "blobs.access")
-  const executionBlobs: ExecutionBlobsRuntime = {
+  execution: ExecutionContext,
+  blobStorage: BlobStorage
+): BlobsRuntime {
+  const assertAccess = () => assertProviderAccess(runtime, execution, "blobs.access")
+  const executionBlobs: BlobsRuntime = {
     put: (input) => {
       assertAccess()
-      return blobs.put(input)
+      return blobStorage.put(input)
     },
     open: (blobId) => {
       assertAccess()
-      return blobs.open(blobId)
+      return blobStorage.open(blobId)
     },
     stat: (blobId) => {
       assertAccess()
-      return blobs.stat(blobId)
+      return blobStorage.stat(blobId)
     },
   }
 
-  const openRange = blobs.openRange?.bind(blobs)
-  if (openRange) {
+  if (supportsRangeRead(blobStorage)) {
     executionBlobs.openRange = (blobId, range) => {
       assertAccess()
-      return openRange(blobId, range)
+      return blobStorage.openRange(blobId, range)
     }
   }
-  const createUpload = blobs.createUpload?.bind(blobs)
-  if (createUpload) {
+  if (supportsDirectUpload(blobStorage)) {
     executionBlobs.createUpload = (input) => {
       assertAccess()
-      return createUpload(input)
+      return blobStorage.createUpload(input)
     }
-  }
-  const signUploadPart = blobs.signUploadPart?.bind(blobs)
-  if (signUploadPart) {
     executionBlobs.signUploadPart = (input) => {
       assertAccess()
-      return signUploadPart(input)
+      return blobStorage.signUploadPart(input)
     }
-  }
-  const completeUpload = blobs.completeUpload?.bind(blobs)
-  if (completeUpload) {
     executionBlobs.completeUpload = (input) => {
       assertAccess()
-      return completeUpload(input)
+      return blobStorage.completeUpload(input)
     }
-  }
-  const abortUpload = blobs.abortUpload?.bind(blobs)
-  if (abortUpload) {
     executionBlobs.abortUpload = (input) => {
       assertAccess()
-      return abortUpload(input)
+      return blobStorage.abortUpload(input)
     }
   }
 
-  return executionBlobs
+  return Object.freeze(executionBlobs)
 }

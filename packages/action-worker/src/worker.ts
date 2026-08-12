@@ -1,5 +1,5 @@
-import type { ActionsRuntime, DomainEventLog, Queues, Storage } from "@sixb/core"
-import type { LogsRuntime } from "@sixb/core/internal/logging"
+import type { DomainEventLog, Queues, SixbDefinitions, Storage } from "@sixb/core"
+import type { LoggingService } from "@sixb/core/internal/logging"
 import {
   bindPrimitiveExecution,
   type PrimitiveExecutionHost,
@@ -15,8 +15,8 @@ export interface ActionWorkerHost extends PrimitiveExecutionHost {
   readonly events: DomainEventLog
   readonly storage: Storage
   readonly queues: Queues
-  readonly logs?: LogsRuntime
-  readonly actions: Pick<ActionsRuntime, "list" | "getById" | "listForType">
+  readonly logging?: LoggingService
+  readonly definitions: Pick<SixbDefinitions, "actions">
 }
 
 export interface ActionWorkerOptions {
@@ -38,7 +38,7 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
       idlePollMs: options.idlePollMs,
     })
 
-    const actions = host.actions.list()
+    const actions = host.definitions.actions.list()
     if (actions.length === 0) {
       console.log("[SixbActionWorker] No action definitions registered; worker will idle.")
     } else if (!host.storage.actionRuns) {
@@ -179,11 +179,11 @@ function buildActionContext(
     id: host.id,
     errorReporterHost: host,
     events: host.events,
-    logs: host.logs,
+    logging: host.logging,
     storage: host.storage,
     actionRunsStorage,
     ontologyMutations: execution.ontologyMutations,
     sixb,
-    actions: host.actions,
+    actions: host.definitions.actions,
   }
 }

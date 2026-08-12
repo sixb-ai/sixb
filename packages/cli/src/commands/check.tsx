@@ -15,7 +15,7 @@ export async function runCheck(options: CheckOptions = {}) {
   const sixb = await loadSixbFromEntry(entry)
 
   try {
-    const objectTypes = sixb.objects.listTypes()
+    const objectTypes = sixb.definitions.ontology.listObjectTypes()
     const health = await checkRuntimeHealth(sixb)
 
     const projectValidation =

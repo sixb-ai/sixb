@@ -28,6 +28,7 @@ import {
   type StoredDomainEvent,
   type WorkflowDefinition,
 } from "../src"
+import { createAgentScope } from "../src/execution/scopes"
 import { createTestSixb, type TestExecutionHost } from "../src/testing"
 import { createTestRuntimeDeps, waitFor } from "./test-runtime-deps"
 
@@ -222,6 +223,7 @@ function createRuntime() {
     ontology: [Contract, SignedContract, Invoice],
     datasets: [ContractsDataset, InvoicesDataset],
     actions: [sendContract, archiveInvoice],
+    connectors: [sourceConnector],
     syncs: [syncContracts, syncInvoices],
     pipelines: [contractPipeline, invoicePipeline],
     workflows: [renewContract, agentReviewContract],
@@ -258,11 +260,14 @@ function bindPrincipal(host: TestExecutionHost, authorization: AuthorizationCont
   return createTestSixb(host, { authorization })
 }
 
-function contextFor(host: { security: SecurityRegistry }, groupIds: readonly string[]) {
+function contextFor(
+  host: { definitions: { security: SecurityRegistry } },
+  groupIds: readonly string[]
+) {
   return resolveAuthorizationContext({
     principal,
     groupIds,
-    roles: host.security.listResolvedRoles(),
+    roles: host.definitions.security.listResolvedRoles(),
   })
 }
 
@@ -877,7 +882,7 @@ describe("direct writes are attributable", () => {
     const serviceContext = resolveAuthorizationContext({
       principal: { type: "serviceAccount", id: "svc_ingest" },
       groupIds: ["editors"],
-      roles: host.security.listResolvedRoles(),
+      roles: host.definitions.security.listResolvedRoles(),
     })
 
     await bindPrincipal(host, serviceContext)
@@ -914,6 +919,51 @@ describe("bound Sixb fails closed on ungranted surfaces", () => {
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
     expect((await sixb.objects.list({})).objects).toHaveLength(1)
   })
+
+  test("ordinary principal authority cannot reach process providers", () => {
+    const host = createRuntime()
+    const scoped = bindPrincipal(host, contextFor(host, ["commercial"]))
+
+    expect(() => scoped.blobs.stat("blob_missing")).toThrow(AuthorizationError)
+    expect(() => scoped.connector(sourceConnector)).toThrow(AuthorizationError)
+  })
+
+  test("agent provider access is bound to the exact registered run", async () => {
+    const host = createRuntime()
+    const authorization = resolveAuthorizationContext({
+      principal: { type: "serviceAccount", id: "agent-service-account" },
+      groupIds: [],
+      roles: host.definitions.security.listResolvedRoles(),
+    })
+    const scope = createAgentScope({
+      projectId: host.id,
+      agentId: "contract-agent",
+      runId: "agent-run-1",
+      context: authorization,
+      source: { type: "queue", queue: "agents", jobId: "job-1" },
+    })
+    const agentSixb = host.withScope(scope)
+
+    const file = await agentSixb.blobs.put({ body: new Uint8Array([1, 2, 3]) })
+    expect(await agentSixb.blobs.stat(file.blobId)).not.toBeNull()
+    expect(await agentSixb.connector(sourceConnector)).toEqual({})
+
+    const mismatchedRun = host.withScope({
+      authorization: scope.authorization,
+      execution: {
+        ...scope.execution,
+        executor: { type: "agent", agentId: "contract-agent", runId: "agent-run-2" },
+      },
+    })
+    expect(() => mismatchedRun.blobs.stat(file.blobId)).toThrow(AuthorizationError)
+    expect(() => mismatchedRun.connector(sourceConnector)).toThrow(AuthorizationError)
+
+    const forgedProvenance = host.withScope({
+      authorization: scope.authorization,
+      execution: { ...scope.execution, id: "exec_forged" },
+    })
+    expect(() => forgedProvenance.blobs.stat(file.blobId)).toThrow(AuthorizationError)
+  })
 })
 
 describe("bound Sixb surface", () => {
@@ -929,7 +979,6 @@ describe("bound Sixb surface", () => {
         "agents",
         "blobs",
         "connector",
-        "connectors",
         "datasets",
         "events",
         "execution",

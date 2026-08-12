@@ -1,15 +1,15 @@
 import type {
   ActionSubject,
   ActionsRuntime,
+  BlobsRuntime,
+  ConnectorRuntime,
   DomainEventLog,
-  ExecutionActionsRuntime,
-  ExecutionBlobsRuntime,
-  ExecutionConnectorRuntime,
-  ExecutionObjectsRuntime,
+  ObjectsRuntime,
   OntologySource,
+  SixbDefinitions,
   Storage,
 } from "@sixb/core"
-import type { LogsRuntime } from "@sixb/core/internal/logging"
+import type { LoggingService } from "@sixb/core/internal/logging"
 import type { OntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import type {
   ActionRunFailure,
@@ -20,22 +20,22 @@ import type {
 
 /** Execution-bound primitives exposed to Action phase handlers. */
 export interface ActionExecutionFacade {
-  readonly objects: ExecutionObjectsRuntime<readonly OntologySource[]>
-  readonly actions: ExecutionActionsRuntime
-  readonly connector: ExecutionConnectorRuntime
-  readonly blobs: ExecutionBlobsRuntime
+  readonly objects: ObjectsRuntime<readonly OntologySource[]>
+  readonly actions: ActionsRuntime
+  readonly connector: ConnectorRuntime
+  readonly blobs: BlobsRuntime
 }
 
 export interface ActionWorkerContext {
   readonly id: string
   readonly errorReporterHost: object
   readonly events: DomainEventLog
-  readonly logs?: LogsRuntime
+  readonly logging?: LoggingService
   readonly storage: Storage
   readonly actionRunsStorage: ActionRunStorage
   readonly ontologyMutations: OntologyMutationRuntime
   readonly sixb: ActionExecutionFacade
-  readonly actions: Pick<ActionsRuntime, "getById">
+  readonly actions: Pick<SixbDefinitions["actions"], "getById">
 }
 
 export interface ActionJob {

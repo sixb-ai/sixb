@@ -1,4 +1,4 @@
-import type { SixbHostRuntime } from "@sixb/core"
+import type { SixbHostView } from "@sixb/core"
 import type { TimeseriesPoint } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
@@ -27,7 +27,7 @@ function serializeTelemetryPoint(point: TimeseriesPoint) {
   }
 }
 
-export function registerTelemetryRoutes(app: Elysia, _host: SixbHostRuntime) {
+export function registerTelemetryRoutes(app: Elysia, _host: SixbHostView) {
   return app
     .post(
       "/api/objects/:objectTypeId/:objectId/telemetry/:propertyId",

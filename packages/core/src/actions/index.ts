@@ -9,6 +9,7 @@ export { commitActionEdits, findActionEditCommit } from "./commit-edits"
 export { ActionDefinitionError, ActionEditCommitError } from "./errors"
 export type { ActionReadFacadeOptions, ActionReadObjectSetSource } from "./read-facade"
 export { ActionReadRecorder, createActionReadFacade } from "./read-facade"
+export type { ActionDefinitionCatalog } from "./registry"
 export { ActionRegistry } from "./registry"
 export type {
   RequestActionAndWaitInput,
@@ -19,8 +20,6 @@ export type {
   WaitForActionRunInput,
 } from "./request"
 export { requestAction, requestActionAndWait, waitForActionRun } from "./request"
-export type { ActionsRuntime } from "./runtime"
-export { createActionsRuntime } from "./runtime"
 export type {
   ActionBinding,
   ActionBlobContext,

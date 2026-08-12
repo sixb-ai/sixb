@@ -1,4 +1,4 @@
-import type { ActionDefinition, SixbHostRuntime } from "@sixb/core"
+import type { ActionDefinition, SixbHostView } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
@@ -38,7 +38,7 @@ function serializeAction(
   })
 }
 
-export function registerActionRoutes(app: Elysia, _host: SixbHostRuntime) {
+export function registerActionRoutes(app: Elysia, _host: SixbHostView) {
   return app
     .get(
       "/api/actions",

@@ -4,7 +4,7 @@ import {
   type FileRef,
   type OntologySource,
   type Principal,
-  type SixbHostRuntime,
+  type SixbHostView,
   SYSTEM_PRINCIPAL,
 } from "@sixb/core"
 import { agentRunStreamId } from "@sixb/core/agents/streams"
@@ -172,7 +172,7 @@ function principalForExecution(sixb: Sixb<readonly OntologySource[]>): Principal
 
 /** Publish the terminal record core owns; stream delivery stays best-effort at this boundary. */
 async function publishQueuedRunCancellation(
-  host: SixbHostRuntime,
+  host: SixbHostView,
   run: AgentRunRecord
 ): Promise<void> {
   try {
@@ -223,7 +223,7 @@ function missingAgentStorageResponse(set: { status?: number | string }): { error
 }
 
 async function agentMessageFileContentResponse(
-  host: SixbHostRuntime,
+  host: SixbHostView,
   context: {
     readonly params: { readonly threadId: string; readonly messageId: string }
     readonly query: unknown
@@ -268,7 +268,7 @@ async function agentMessageFileContentResponse(
     }
 
     const response = await createFileContentResponse({
-      blobStorage: host.blobs,
+      blobStorage: host.blobStorage,
       fileRef,
       disposition: parsed.disposition,
       head: options.head,
@@ -290,7 +290,7 @@ async function agentMessageFileContentResponse(
   }
 }
 
-export function registerAgentRoutes(app: Elysia, host: SixbHostRuntime) {
+export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
   return app
     .get(
       "/api/agents",

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryBroker } from "../src"
-import { EventsRuntime, toStoredEvent } from "../src/events"
+import { DomainEventService, toStoredEvent } from "../src/events"
 
 describe("worker run lifecycle events", () => {
   test("stores sync run lifecycle events with sync topic and run partition", () => {
@@ -48,7 +48,7 @@ describe("worker run lifecycle events", () => {
   })
 
   test("appends and reads pipeline run lifecycle events in order", async () => {
-    const eventsRuntime = new EventsRuntime({
+    const eventsRuntime = new DomainEventService({
       projectId: "project-a",
       broker: new InMemoryBroker(),
     })

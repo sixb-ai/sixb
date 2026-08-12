@@ -19,6 +19,8 @@ export type ResolvedRuntimeAuthorization =
       readonly projectId: string
       readonly context: AuthorizationContext
       readonly ref: Extract<AuthorizationRef, { readonly type: "principal" }>
+      /** Process-local binding used by provider façades that explicitly support agent runs. */
+      readonly executionBinding?: AgentExecutionBinding
     }
   | {
       readonly type: "unrestricted"
@@ -36,6 +38,13 @@ type PrincipalAuthorizationContext = Omit<AuthorizationContext, "principal"> & {
   readonly principal: AuthorizablePrincipal
 }
 
+interface AgentExecutionBinding {
+  readonly type: "agent"
+  readonly executionId: string
+  readonly agentId: string
+  readonly runId: string
+}
+
 const registeredAuthorizations = new WeakMap<RuntimeAuthorization, RegisteredRuntimeAuthorization>()
 
 export function createPrincipalRuntimeAuthorization(input: {
@@ -43,6 +52,39 @@ export function createPrincipalRuntimeAuthorization(input: {
   readonly context: AuthorizationContext
   readonly credential?: Extract<AuthorizationRef, { readonly type: "principal" }>["credential"]
 }): RuntimeAuthorization {
+  return createRegisteredPrincipalAuthorization(input)
+}
+
+/** Register service-account authority bound to one exact agent run. */
+export function createAgentRuntimeAuthorization(input: {
+  readonly projectId: string
+  readonly context: AuthorizationContext
+  readonly executionId: string
+  readonly agentId: string
+  readonly runId: string
+}): RuntimeAuthorization {
+  if (input.context.principal.type !== "serviceAccount") {
+    throw new Error("[Sixb] Agent execution authority must belong to a service account.")
+  }
+  assertNonEmpty(input.executionId, "Execution id")
+  assertNonEmpty(input.agentId, "Agent id")
+  assertNonEmpty(input.runId, "Agent run id")
+  return createRegisteredPrincipalAuthorization(input, {
+    type: "agent",
+    executionId: input.executionId,
+    agentId: input.agentId,
+    runId: input.runId,
+  })
+}
+
+function createRegisteredPrincipalAuthorization(
+  input: {
+    readonly projectId: string
+    readonly context: AuthorizationContext
+    readonly credential?: Extract<AuthorizationRef, { readonly type: "principal" }>["credential"]
+  },
+  executionBinding?: AgentExecutionBinding
+): RuntimeAuthorization {
   const context = snapshotAuthorizationContext(input.context)
   const credential = input.credential ? snapshotCredential(input.credential) : undefined
   assertCredentialMatchesContext(context, credential)
@@ -51,7 +93,15 @@ export function createPrincipalRuntimeAuthorization(input: {
     principal: context.principal,
     ...(credential === undefined ? {} : { credential }),
   })
-  return register({ type: "principal", projectId: input.projectId, context, ref })
+  return register({
+    type: "principal",
+    projectId: input.projectId,
+    context,
+    ref,
+    ...(executionBinding === undefined
+      ? {}
+      : { executionBinding: Object.freeze({ ...executionBinding }) }),
+  })
 }
 
 export function createDisabledRuntimeAuthorization(projectId: string): RuntimeAuthorization {

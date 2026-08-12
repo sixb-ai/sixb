@@ -1,25 +1,25 @@
 import { isAllowed } from "../authorization"
+import type { DefinitionCatalog } from "../runtime/definitions"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { ListActiveRuleStatesInput, ListActiveRuleStatesResult } from "../storage/rules"
-import type { RulesRuntime } from "./runtime"
 import type { RuleDefinition } from "./types"
 
-export interface ExecutionRuleStatesRuntime {
+export interface RuleStatesRuntime {
   list(
     input?: Omit<ListActiveRuleStatesInput, "projectId" | "objectTypeIds">
   ): Promise<ListActiveRuleStatesResult>
 }
 
-export interface ExecutionRulesRuntime {
+export interface RulesRuntime {
   list(): readonly RuleDefinition[]
   getById(ruleId: string): RuleDefinition | null
-  readonly states: ExecutionRuleStatesRuntime
+  readonly states: RuleStatesRuntime
 }
 
-export function createExecutionRulesRuntime(
+export function createRulesRuntime(
   runtime: SixbRuntimeContext,
-  source: RulesRuntime
-): ExecutionRulesRuntime {
+  source: DefinitionCatalog<RuleDefinition>
+): RulesRuntime {
   const visible = (rule: RuleDefinition) =>
     isAllowed(runtime.authorization, {
       kind: "object.view",

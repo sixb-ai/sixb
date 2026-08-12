@@ -4,26 +4,26 @@ import type {
   InferActionParams,
   ObjectActionDefinition,
 } from "../actions"
-import type { ExecutionActionsRuntime } from "../actions/execution"
-import type { ExecutionAgentsRuntime } from "../agents/execution"
+import type { ActionsRuntime } from "../actions/execution"
+import type { AgentsRuntime } from "../agents/execution"
 import type { AgentDefinition } from "../agents/types"
 import type { Principal } from "../auth"
-import type { ExecutionBlobsRuntime } from "../blob-storage/execution"
-import type { ExecutionConnectorRuntime, ExecutionConnectorsRuntime } from "../connectors/execution"
-import type { ExecutionDatasetsRuntime } from "../datasets/execution"
-import type { ExecutionEventsRuntime } from "../events/execution"
+import type { BlobsRuntime } from "../blob-storage/execution"
+import type { ConnectorRuntime } from "../connectors/execution"
+import type { DatasetsRuntime } from "../datasets/execution"
+import type { EventsRuntime } from "../events/execution"
 import type { JsonValue } from "../json"
 import type { Logger } from "../logging"
-import type { ExecutionLogsRuntime } from "../logging/execution"
-import type { ExecutionObjectsRuntime } from "../objects/execution"
+import type { LogsRuntime } from "../logging/execution"
+import type { ObjectsRuntime } from "../objects/execution"
 import type { InferSchemaOrRef, ObjectRef, OntologySource, SchemaOrRef } from "../ontology"
-import type { ExecutionPipelinesRuntime } from "../pipelines/execution"
-import type { ExecutionProjectionsRuntime } from "../projections/execution"
-import type { ExecutionRulesRuntime } from "../rules/execution"
+import type { PipelinesRuntime } from "../pipelines/execution"
+import type { ProjectionsRuntime } from "../projections/execution"
+import type { RulesRuntime } from "../rules/execution"
 import type { ScheduleDefinition, ScheduleDefinitionForEvent } from "../schedules"
-import type { ExecutionSchedulesRuntime } from "../schedules/execution"
-import type { ExecutionSyncsRuntime } from "../syncs/execution"
-import type { ExecutionWorkflowsRuntime } from "./execution"
+import type { SchedulesRuntime } from "../schedules/execution"
+import type { SyncsRuntime } from "../syncs/execution"
+import type { WorkflowsRuntime } from "./execution"
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {}
 type Append<TValues extends readonly unknown[], TValue> = [...TValues, TValue]
@@ -58,21 +58,20 @@ export interface StepRunContext<TInput extends Record<string, unknown>> {
  * It is a type-level cycle break, not a separate runtime or compatibility surface.
  */
 export interface WorkflowRuntimeFacade {
-  readonly objects: ExecutionObjectsRuntime<readonly OntologySource[]>
-  readonly actions: ExecutionActionsRuntime
-  readonly agents: ExecutionAgentsRuntime
-  readonly datasets: ExecutionDatasetsRuntime
-  readonly workflows: ExecutionWorkflowsRuntime
-  readonly syncs: ExecutionSyncsRuntime
-  readonly pipelines: ExecutionPipelinesRuntime
-  readonly projections: ExecutionProjectionsRuntime
-  readonly rules: ExecutionRulesRuntime
-  readonly events: ExecutionEventsRuntime
-  readonly logs: ExecutionLogsRuntime
-  readonly schedules: ExecutionSchedulesRuntime
-  readonly connector: ExecutionConnectorRuntime
-  readonly connectors: ExecutionConnectorsRuntime
-  readonly blobs: ExecutionBlobsRuntime
+  readonly objects: ObjectsRuntime<readonly OntologySource[]>
+  readonly actions: ActionsRuntime
+  readonly agents: AgentsRuntime
+  readonly datasets: DatasetsRuntime
+  readonly workflows: WorkflowsRuntime
+  readonly syncs: SyncsRuntime
+  readonly pipelines: PipelinesRuntime
+  readonly projections: ProjectionsRuntime
+  readonly rules: RulesRuntime
+  readonly events: EventsRuntime
+  readonly logs: LogsRuntime
+  readonly schedules: SchedulesRuntime
+  readonly connector: ConnectorRuntime
+  readonly blobs: BlobsRuntime
 }
 
 export type StepHandler<

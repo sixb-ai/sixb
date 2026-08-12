@@ -14,7 +14,7 @@ import {
   RuleValidationError,
   SixbHost,
 } from "../src"
-import { EventsRuntime } from "../src/events"
+import { DomainEventService } from "../src/events"
 import { deriveRuleEventDependencies } from "../src/rules"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -209,8 +209,10 @@ export const transactionRequiresDocument = defineRule("transaction.requires-docu
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.rules.list().map((rule) => rule.id)).toEqual(["transaction.requires-document"])
-    expect(sixb.rules.getById("transaction.requires-document")?.predicate).toEqual({
+    expect(sixb.definitions.rules.list().map((rule) => rule.id)).toEqual([
+      "transaction.requires-document",
+    ])
+    expect(sixb.definitions.rules.getById("transaction.requires-document")?.predicate).toEqual({
       kind: "link",
       linkId: "document",
       op: "isMissing",
@@ -264,7 +266,7 @@ export const transactionRequiresDocument = defineRule("transaction.requires-docu
   })
 
   test("rule transition events use the rules topic and stable partition key", async () => {
-    const events = new EventsRuntime({ projectId: "test", broker: new InMemoryBroker() })
+    const events = new DomainEventService({ projectId: "test", broker: new InMemoryBroker() })
     const [stored] = await events.append({
       events: [
         {

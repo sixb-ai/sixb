@@ -12,7 +12,7 @@ import {
   prop,
   ScheduleValidationError,
 } from "../src"
-import { EventsRuntime } from "../src/events"
+import { DomainEventService } from "../src/events"
 import type { OntologyMaterializationEvent } from "../src/materialization/events"
 import { evaluateEventSchedule, validateSchedulesAtStartup } from "../src/schedules"
 
@@ -48,7 +48,7 @@ describe("evaluateEventSchedule", () => {
     const schedule = defineSchedule("invoice.high-value")
       .on(events.object(Invoice).updated())
       .where((event) => event.object.p.amount.gt(500))
-    const runtime = new EventsRuntime({ projectId: "test", broker: new InMemoryBroker() })
+    const runtime = new DomainEventService({ projectId: "test", broker: new InMemoryBroker() })
     const [crossed] = await runtime.publishEnvelopes([
       objectUpdatedFact("event-crossed", {
         objectTypeId: Invoice.id,
@@ -79,7 +79,7 @@ describe("evaluateEventSchedule", () => {
   test("builds dataset occurrence context from the selected event", async () => {
     const invoices = { kind: "dataset", id: "raw.invoices" } as const
     const schedule = defineSchedule("invoices-updated").on(events.dataset(invoices).updated())
-    const runtime = new EventsRuntime({ projectId: "test", broker: new InMemoryBroker() })
+    const runtime = new DomainEventService({ projectId: "test", broker: new InMemoryBroker() })
     const [event] = await runtime.append({
       events: [
         {

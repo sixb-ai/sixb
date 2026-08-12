@@ -1,17 +1,17 @@
 import { assertAuthorized } from "../authorization"
 import type { SixbRuntimeContext } from "../runtime/types"
-import type { LogsPage, LogsReadInput, LogsRuntime, LogsTailInput } from "./runtime"
+import type { LoggingService, LogsPage, LogsReadInput, LogsTailInput } from "./service"
 
-export interface ExecutionLogsRuntime {
+export interface LogsRuntime {
   assertObservable(): void
   read(input?: LogsReadInput): Promise<LogsPage>
   tail(input?: LogsTailInput): Promise<LogsPage>
 }
 
-export function createExecutionLogsRuntime(
+export function createLogsRuntime(
   runtime: SixbRuntimeContext,
-  source: LogsRuntime
-): ExecutionLogsRuntime {
+  source: LoggingService
+): LogsRuntime {
   const assertObservable = () => assertAuthorized(runtime, { kind: "logs.observe" })
 
   return {

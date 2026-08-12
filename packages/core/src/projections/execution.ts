@@ -6,7 +6,7 @@ import type {
   ListProjectionRunsResult,
   ProjectionRunRecord,
 } from "../storage/projection-runs"
-import type { ProjectionsRuntime } from "./runtime"
+import type { ProjectionDefinitionCatalog } from "./registry"
 import type {
   LinkProjectionDefinition,
   ObjectProjectionDefinition,
@@ -14,7 +14,7 @@ import type {
   TelemetryProjectionDefinition,
 } from "./types"
 
-export interface ExecutionProjectionRunsRuntime {
+export interface ProjectionRunsRuntime {
   getById(runId: string): Promise<ProjectionRunRecord | null>
   list(
     input?: Omit<ListProjectionRunsInput, "projectId" | "objectTypeIds">
@@ -22,19 +22,19 @@ export interface ExecutionProjectionRunsRuntime {
   listLatest(projectionIds: readonly string[]): Promise<ListLatestProjectionRunsResult>
 }
 
-export interface ExecutionProjectionsRuntime {
+export interface ProjectionsRuntime {
   list(): readonly ProjectionDefinition[]
   listObjects(): readonly ObjectProjectionDefinition[]
   listLinks(): readonly LinkProjectionDefinition[]
   listTelemetry(): readonly TelemetryProjectionDefinition[]
   getById(projectionId: string): ProjectionDefinition | null
-  readonly runs: ExecutionProjectionRunsRuntime
+  readonly runs: ProjectionRunsRuntime
 }
 
-export function createExecutionProjectionsRuntime(
+export function createProjectionsRuntime(
   runtime: SixbRuntimeContext,
-  source: ProjectionsRuntime
-): ExecutionProjectionsRuntime {
+  source: ProjectionDefinitionCatalog
+): ProjectionsRuntime {
   const visible = (projection: ProjectionDefinition) =>
     canViewProjection(runtime.authorization, projection)
   const visibleIds = (projectionIds: readonly string[]) =>

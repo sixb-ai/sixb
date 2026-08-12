@@ -185,7 +185,7 @@ function asUser(
   return resolveAuthorizationContext({
     principal: { type: "user", id: userId },
     groupIds,
-    roles: host.security.listResolvedRoles(),
+    roles: host.definitions.security.listResolvedRoles(),
   })
 }
 

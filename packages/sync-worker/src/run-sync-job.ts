@@ -12,7 +12,7 @@ import {
   type MergeChange,
   type SyncDefinition,
 } from "@sixb/core"
-import { resolveLogsRuntime } from "@sixb/core/internal/logging"
+import { resolveLoggingService } from "@sixb/core/internal/logging"
 import { type DatasetVersion, getDatasetMergeChangeValidationError } from "@sixb/core/lake-storage"
 import type { SyncRunFailure, SyncRunRecord } from "@sixb/core/storage"
 import { assertDatasetRow, normalizeReadResult, throwIfAborted } from "./normalize"
@@ -270,7 +270,7 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
   }
   await input.onRunStarted?.(startedRun)
 
-  const logSession = resolveLogsRuntime(runtime.id, runtime.logs).startExecution({
+  const logSession = resolveLoggingService(runtime.id, runtime.logging).startExecution({
     kind: "sync",
     id: job.id,
   })

@@ -264,7 +264,7 @@ describe("agent API gateway", () => {
 
   test("can fetch file attachments from the active run thread", async () => {
     const { app, gatewayBaseUrl, sixb, storage } = await createGatewayRuntime()
-    const fileRef = await sixb.blobs.put({
+    const fileRef = await sixb.blobStorage.put({
       body: new TextEncoder().encode("agent attachment"),
       fileName: "attachment.txt",
       mediaType: "text/plain",
@@ -389,7 +389,7 @@ async function createGatewayRuntime(
     properties: { relationship: "managed" },
   })
 
-  const completedWorkflowOutput = await sixb.blobs.put({
+  const completedWorkflowOutput = await sixb.blobStorage.put({
     body: new TextEncoder().encode("workflow result"),
     fileName: "workflow-result.txt",
     mediaType: "text/plain",

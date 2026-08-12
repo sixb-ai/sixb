@@ -89,7 +89,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
     })
 
     this.host = host
-    this.idleWithoutAgents = host.agents.list().length === 0
+    this.idleWithoutAgents = host.definitions.agents.list().length === 0
     this.context = this.idleWithoutAgents ? null : buildAgentContext(host, options)
   }
 
@@ -106,7 +106,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
       await reconcileAgentExecutionIdentities(
         context.storage,
         this.host.id,
-        this.host.agents.list()
+        this.host.definitions.agents.list()
       )
 
       const stopDispatch = new AbortController()
@@ -163,7 +163,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
       return
     }
     const { agentId, threadId, runId, triggerMessageId } = job.payload
-    const agent = this.host.agents.getById(agentId)
+    const agent = this.host.definitions.agents.getById(agentId)
     if (!agent) {
       const error = new AgentWorkerError(`Unknown agent '${agentId}'.`)
       const run = await context.storage.agents.runs.getById({ projectId: context.id, id: runId })
@@ -604,8 +604,8 @@ function buildAgentContext(host: AgentWorkerHost, options: AgentWorkerOptions): 
     id: host.id,
     storage,
     sandboxes: host.sandboxes,
-    logs: host.logs,
-    valueTypesById: host.ontology.getValueTypesById(),
+    logging: host.logging,
+    valueTypesById: host.definitions.ontology.getValueTypesById(),
     // Normalize the server base URL once here, at the boundary. Everything downstream (the gateway
     // URL builder, the sandbox run context) consumes it verbatim.
     apiBaseUrl: normalizeApiBaseUrl(normalizeRequiredString(options.apiBaseUrl)),

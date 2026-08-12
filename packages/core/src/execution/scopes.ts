@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import type { AuthorizationContext } from "../authorization"
 import {
+  createAgentRuntimeAuthorization,
   createDisabledRuntimeAuthorization,
   createKernelRuntimeAuthorization,
   createPrincipalRuntimeAuthorization,
@@ -106,9 +107,12 @@ export function createAgentScope(input: {
   })
   return Object.freeze({
     execution,
-    authorization: createPrincipalRuntimeAuthorization({
+    authorization: createAgentRuntimeAuthorization({
       projectId: input.projectId,
       context: input.context,
+      executionId: execution.id,
+      agentId: input.agentId,
+      runId: input.runId,
     }),
   })
 }

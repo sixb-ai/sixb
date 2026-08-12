@@ -25,8 +25,8 @@ const runtime: SyncWorkerContext = {
   syncRunsStorage,
   lakeStorage,
   blobs: sixb.blobs,
-  datasets: sixb.datasets,
-  syncs: sixb.syncs,
+  datasets: sixb.definitions.datasets,
+  syncs: sixb.definitions.syncs,
   connector: sixb.connector,
 }
 

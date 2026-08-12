@@ -1,4 +1,4 @@
-import type { SixbHostRuntime, SyncDefinition } from "@sixb/core"
+import type { SixbHostView, SyncDefinition } from "@sixb/core"
 import type { SyncRunRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { requireRequestSixb } from "../auth/scope"
@@ -84,7 +84,7 @@ function serializeSync(
   })
 }
 
-export function registerSyncRoutes(app: Elysia, host: SixbHostRuntime) {
+export function registerSyncRoutes(app: Elysia, host: SixbHostView) {
   return app
     .get(
       "/api/syncs",

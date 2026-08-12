@@ -315,8 +315,8 @@ const host = new SixbHost({
   syncs: [syncOrders, syncOrderEvents, syncInvoices],
 })
 
-host.syncs.list()
-host.syncs.getById("sync-orders")
+host.definitions.syncs.list()
+host.definitions.syncs.getById("sync-orders")
 ```
 
 Call `.checkpoint<T>()` before `.from(...)` to type `context.checkpoint` and
@@ -455,7 +455,7 @@ src/
 | Interface | Description |
 |---|---|
 | `Broker` | Retained stream provider used by runtime services |
-| `EventsRuntime` | Project-scoped domain event API with append, read, latest-cursor, and subscribe |
+| `DomainEventService` | Project-scoped domain event API with append, read, latest-cursor, and subscribe |
 | `ObjectStorage` | Latest-state projection storage for objects and links |
 | `TimeseriesStorage` | Time-series storage for telemetry history |
 | `BlobStorage` | Content-addressed binary storage with streaming `put` and `open` operations |

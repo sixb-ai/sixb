@@ -75,7 +75,7 @@ export interface ObservabilityOptions {
   readonly logs?: LogsObservabilityOptions
 }
 
-export interface LogsRuntimeOptions {
+export interface LoggingServiceOptions {
   readonly projectId: string
   /** Broker backing the `__logs` stream. Absent means output-only logging. */
   readonly broker?: Broker
@@ -86,8 +86,8 @@ export interface LogsRuntimeOptions {
   readonly stream?: BrokerStreamDefinition
 }
 
-/** Project-scoped logger factory and broker capture runtime. */
-export class LogsRuntime {
+/** Project-scoped logger factory and broker capture service. */
+export class LoggingService {
   private readonly projectId: string
   private readonly broker?: Broker
   private readonly provider: LoggerProvider
@@ -99,7 +99,7 @@ export class LogsRuntime {
   private readonly stream: BrokerStreamDefinition
   private ensureStreamPromise?: Promise<void>
 
-  constructor(options: LogsRuntimeOptions) {
+  constructor(options: LoggingServiceOptions) {
     const config = options.observability ?? {}
     this.projectId = options.projectId
     this.broker = options.broker
@@ -271,9 +271,9 @@ export class LogsRuntime {
   }
 }
 
-/** Resolve a worker runtime, falling back to a silent output-only runtime. */
-export function resolveLogsRuntime(projectId: string, logs?: LogsRuntime): LogsRuntime {
-  return logs ?? new LogsRuntime({ projectId, logger: noopLoggerProvider })
+/** Resolve the logging service, falling back to a silent output-only service. */
+export function resolveLoggingService(projectId: string, logging?: LoggingService): LoggingService {
+  return logging ?? new LoggingService({ projectId, logger: noopLoggerProvider })
 }
 
 function normalizeRedactPaths(paths: readonly string[]): readonly string[] {

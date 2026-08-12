@@ -1,4 +1,4 @@
-import { resolveAuthorizationContext, type SixbHostRuntime } from "@sixb/core"
+import { resolveAuthorizationContext, type SixbHostView } from "@sixb/core"
 import {
   AGENT_API_GATEWAY_PREFIX,
   AGENT_API_ROUTES,
@@ -22,7 +22,7 @@ const HOP_BY_HOP_RESPONSE_HEADERS = new Set([
   "upgrade",
 ])
 
-export function registerAgentApiGatewayRoutes(app: Elysia, host: SixbHostRuntime) {
+export function registerAgentApiGatewayRoutes(app: Elysia, host: SixbHostView) {
   for (const route of AGENT_API_ROUTES) {
     const path = `${AGENT_API_GATEWAY_PREFIX}/:agentGatewayRunId/:agentGatewayCapability${route.path}`
     const handler = async (context: AgentApiGatewayRouteContext) =>
@@ -53,7 +53,7 @@ interface AgentApiGatewayRouteContext {
 }
 
 async function handleAgentApiGatewayRequest(input: {
-  readonly host: SixbHostRuntime
+  readonly host: SixbHostView
   readonly app: Elysia
   readonly request: Request
   readonly agentRunId: string
@@ -115,7 +115,7 @@ async function handleAgentApiGatewayRequest(input: {
 }
 
 async function resolveAgentRunAuthState(
-  host: SixbHostRuntime,
+  host: SixbHostView,
   input: { readonly runId: string; readonly capability: string }
 ) {
   const agentStorage = host.storage.agents
@@ -192,7 +192,7 @@ async function resolveAgentRunAuthState(
   const authz = resolveAuthorizationContext({
     principal: run.executionPrincipal,
     groupIds: memberships.map((membership) => membership.groupId),
-    roles: host.security.listResolvedRoles(),
+    roles: host.definitions.security.listResolvedRoles(),
   })
 
   return {

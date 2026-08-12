@@ -1,4 +1,4 @@
-import type { SixbHostRuntime } from "@sixb/core"
+import type { SixbHostView } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { registerActionRunRoutes } from "./routes/action-runs"
 import { registerActionRoutes } from "./routes/actions"
@@ -22,7 +22,7 @@ import { registerTelemetryRoutes } from "./routes/telemetry"
 import { registerWebhookRunRoutes } from "./routes/webhook-runs"
 import { registerWorkflowRoutes } from "./routes/workflows"
 
-export function registerHttpRoutes(app: Elysia, host: SixbHostRuntime) {
+export function registerHttpRoutes(app: Elysia, host: SixbHostView) {
   registerAgentApiGatewayRoutes(app, host)
   registerProjectRoutes(app, host)
   registerStatusRoutes(app, host)

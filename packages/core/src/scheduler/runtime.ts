@@ -12,7 +12,13 @@ export interface SchedulerRuntimeOptions {
   now?: () => Date
 }
 
-export class SchedulerRuntime {
+/** Process lifecycle surface exposed by SixbHost. */
+export interface SchedulerController {
+  start(): Promise<void>
+  stop(): Promise<void>
+}
+
+export class SchedulerRuntime implements SchedulerController {
   private readonly schedules: readonly CronScheduleDefinition[]
   private readonly events: DomainEventLog
   private readonly now: () => Date

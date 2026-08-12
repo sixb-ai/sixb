@@ -1,20 +1,19 @@
 import type {
   DomainEventLog,
-  OntologyRegistry,
   OntologySource,
   Queues,
   Sixb,
+  SixbDefinitions,
   Storage,
 } from "@sixb/core"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
-import type { LogsRuntime } from "@sixb/core/internal/logging"
+import type { LoggingService } from "@sixb/core/internal/logging"
 import {
   bindPrimitiveExecution,
   type PrimitiveExecutionHost,
 } from "@sixb/core/internal/primitive-execution"
 import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
-import type { WorkflowsRuntime } from "@sixb/core/internal/workflows"
 import type { ClaimedQueueJob, WorkflowQueueJob } from "@sixb/core/queues"
 import type {
   WorkflowRunExecution,
@@ -39,7 +38,7 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
   private readonly workflowRuns: WorkflowRunStorage
 
   constructor(host: WorkflowWorkerHost) {
-    if (host.workflows.list().length === 0) {
+    if (host.definitions.workflows.list().length === 0) {
       throw new Error("[SixbWorkflowWorker] No workflow definitions are registered.")
     }
 
@@ -184,7 +183,7 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
 }
 
 function requiresWorkflowInterventionStorage(host: WorkflowWorkerHost): boolean {
-  return host.workflows
+  return host.definitions.workflows
     .list()
     .some((workflow) => workflow.nodes.some((node) => node.type === "intervention"))
 }
@@ -244,20 +243,19 @@ function buildWorkflowContext(
 ): WorkflowWorkerContext {
   return {
     projectId: host.id,
-    ontology: host.ontology,
+    ontology: host.definitions.ontology,
     storage: host.storage,
     queues: host.queues,
     workflowRuns,
-    logs: host.logs,
+    logging: host.logging,
     sixb,
   }
 }
 
 export interface WorkflowWorkerHost extends PrimitiveExecutionHost {
-  readonly ontology: OntologyRegistry
   readonly storage: Storage
   readonly queues: Queues
   readonly events: DomainEventLog
-  readonly logs?: LogsRuntime
-  readonly workflows: Pick<WorkflowsRuntime, "list" | "getById">
+  readonly logging?: LoggingService
+  readonly definitions: Pick<SixbDefinitions, "ontology" | "workflows">
 }

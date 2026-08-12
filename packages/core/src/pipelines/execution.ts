@@ -16,7 +16,7 @@ import {
 } from "./request"
 import type { PipelineDefinition } from "./types"
 
-export interface ExecutionPipelineRunsRuntime {
+export interface PipelineRunsRuntime {
   getById(runId: string): Promise<PipelineRunRecord | null>
   list(
     input?: Omit<ListPipelineRunsInput, "projectId" | "pipelineIds">
@@ -28,17 +28,17 @@ export interface ExecutionPipelineRunsRuntime {
   ): Promise<ListPipelineStepRunsResult | null>
 }
 
-export interface ExecutionPipelinesRuntime {
+export interface PipelinesRuntime {
   list(): readonly PipelineDefinition[]
   getById(pipelineId: string): PipelineDefinition | null
   request(input: RequestPipelineRunInput): Promise<PipelineRunRequestResult>
-  readonly runs: ExecutionPipelineRunsRuntime
+  readonly runs: PipelineRunsRuntime
 }
 
-export function createExecutionPipelinesRuntime(
+export function createPipelinesRuntime(
   runtime: SixbRuntimeContext,
-  source: Pick<ExecutionPipelinesRuntime, "list" | "getById">
-): ExecutionPipelinesRuntime {
+  source: Pick<PipelinesRuntime, "list" | "getById">
+): PipelinesRuntime {
   const allowed = (pipelineId: string) =>
     isAllowed(runtime.authorization, { kind: "pipeline.run", pipelineId })
   const visibleIds = () =>

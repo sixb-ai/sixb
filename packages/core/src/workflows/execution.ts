@@ -20,7 +20,7 @@ import {
 } from "./request"
 import type { WorkflowDefinition } from "./types"
 
-export interface ExecutionWorkflowRunsRuntime {
+export interface WorkflowRunsRuntime {
   getById(runId: string): Promise<WorkflowRunRecord | null>
   list(
     input?: Omit<ListWorkflowRunsInput, "projectId" | "workflowIds">
@@ -28,14 +28,14 @@ export interface ExecutionWorkflowRunsRuntime {
   listLatest(workflowIds: readonly string[]): Promise<ListLatestWorkflowRunsResult>
 }
 
-export interface ExecutionWorkflowInterventionsRuntime {
+export interface WorkflowInterventionsRuntime {
   getById(interventionId: string): Promise<WorkflowInterventionRecord | null>
   list(
     input?: Omit<ListWorkflowInterventionsInput, "projectId" | "workflowIds">
   ): Promise<ListWorkflowInterventionsResult>
 }
 
-export interface ExecutionWorkflowsRuntime {
+export interface WorkflowsRuntime {
   list(): readonly WorkflowDefinition[]
   getById(workflowId: string): WorkflowDefinition | null
   request(
@@ -43,14 +43,14 @@ export interface ExecutionWorkflowsRuntime {
     options?: WorkflowRunRequestOptions
   ): Promise<WorkflowRunRequestResult>
   requestById(input: RequestWorkflowRunInput): Promise<WorkflowRunRequestResult>
-  readonly runs: ExecutionWorkflowRunsRuntime
-  readonly interventions: ExecutionWorkflowInterventionsRuntime
+  readonly runs: WorkflowRunsRuntime
+  readonly interventions: WorkflowInterventionsRuntime
 }
 
-export function createExecutionWorkflowsRuntime(
+export function createWorkflowsRuntime(
   runtime: SixbRuntimeContext,
-  source: Pick<ExecutionWorkflowsRuntime, "list" | "getById">
-): ExecutionWorkflowsRuntime {
+  source: Pick<WorkflowsRuntime, "list" | "getById">
+): WorkflowsRuntime {
   const allowed = (workflowId: string) =>
     isAllowed(runtime.authorization, { kind: "workflow.run", workflowId })
   const canAccessHistory = (workflowId: string) =>

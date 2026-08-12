@@ -234,7 +234,7 @@ function requireWorkflowRunsStorage(input: {
 }
 
 function createRuntime(host: WorkflowWorkerHost): WorkflowWorkerContext {
-  const workflowId = host.workflows.list()[0]?.id ?? "missing-workflow"
+  const workflowId = host.definitions.workflows.list()[0]?.id ?? "missing-workflow"
   // Direct handler tests use one explicit trusted execution. Queue-worker tests exercise the real
   // per-delivery workflow id and run id binding in WorkflowWorker.execute.
   const execution = bindPrimitiveExecution(host, {
@@ -243,11 +243,11 @@ function createRuntime(host: WorkflowWorkerHost): WorkflowWorkerContext {
   })
   return {
     projectId: host.id,
-    ontology: host.ontology,
+    ontology: host.definitions.ontology,
     storage: host.storage,
     queues: host.queues,
     workflowRuns: requireWorkflowRunsStorage(host),
-    logs: host.logs,
+    logging: host.logging,
     sixb: execution.sixb,
   }
 }

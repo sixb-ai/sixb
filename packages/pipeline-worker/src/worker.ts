@@ -24,7 +24,7 @@ export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
   private readonly host: PipelineWorkerHost
 
   constructor(host: PipelineWorkerHost) {
-    if (host.pipelines.list().length === 0) {
+    if (host.definitions.pipelines.list().length === 0) {
       throw new Error("[SixbPipelineWorker] No pipeline definitions are registered.")
     }
 
@@ -146,9 +146,9 @@ function buildPipelineContext(
     id: host.id,
     pipelineRunsStorage,
     lakeStorage: host.lakeStorage,
-    logs: host.logs,
-    pipelines: host.pipelines,
-    datasets: host.datasets,
+    logging: host.logging,
+    pipelines: host.definitions.pipelines,
+    datasets: host.definitions.datasets,
   }
 }
 

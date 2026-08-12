@@ -5,17 +5,17 @@ import {
   type Storage,
   type StorageTransactionOptions,
 } from "../src"
-import { EventsRuntime, OntologyOutboxDispatcher, type StoredDomainEvent } from "../src/events"
+import { DomainEventService, OntologyOutboxDispatcher, type StoredDomainEvent } from "../src/events"
 import type { OntologyMaterializationEvent } from "../src/storage"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import { createMaterializerFixture } from "./materializer-fixture"
 
 const NOW = new Date("2026-01-02T03:04:05.000Z")
 
-describe("EventsRuntime stable envelope publication", () => {
+describe("DomainEventService stable envelope publication", () => {
   test("preserves the persisted envelope and uses its event ID as broker idempotency key", async () => {
     const broker = new RecordingBroker()
-    const events = new EventsRuntime({ projectId: "project", broker })
+    const events = new DomainEventService({ projectId: "project", broker })
     const envelope = objectCreatedEnvelope("event-stable")
 
     const [published] = await events.publishEnvelopes([envelope])
@@ -34,7 +34,7 @@ describe("EventsRuntime stable envelope publication", () => {
   })
 
   test("rejects stable envelopes for another project", async () => {
-    const events = new EventsRuntime({ projectId: "project", broker: new InMemoryBroker() })
+    const events = new DomainEventService({ projectId: "project", broker: new InMemoryBroker() })
     await expect(
       events.publishEnvelopes([{ ...objectCreatedEnvelope("event-1"), projectId: "other" }])
     ).rejects.toThrow("belongs to project 'other'")
@@ -45,7 +45,7 @@ describe("OntologyOutboxDispatcher", () => {
   test("claims in a short transaction, publishes outside it, and acknowledges the lease", async () => {
     const storage = new TransactionTrackingStorage()
     const broker = new OutsideTransactionBroker(storage)
-    const events = new EventsRuntime({ projectId: "project", broker })
+    const events = new DomainEventService({ projectId: "project", broker })
     const { materializer } = createMaterializerFixture({ storage })
     await seedObjectCreated(materializer, "request-1", "one")
     const [outboxRow] = outboxRows(storage)
@@ -73,7 +73,7 @@ describe("OntologyOutboxDispatcher", () => {
   test("publishes and acknowledges each claimed lease as one batch", async () => {
     const storage = new TransactionTrackingStorage()
     const broker = new RecordingBroker()
-    const events = new EventsRuntime({ projectId: "project", broker })
+    const events = new DomainEventService({ projectId: "project", broker })
     const { materializer } = createMaterializerFixture({ storage })
     await seedObjectCreated(materializer, "request-batch-1", "batch-one")
     await seedObjectCreated(materializer, "request-batch-2", "batch-two")
@@ -102,7 +102,7 @@ describe("OntologyOutboxDispatcher", () => {
   test("reschedules publication failures with deterministic bounded exponential jitter", async () => {
     const storage = new InMemoryStorage()
     const broker = new FailingBroker()
-    const events = new EventsRuntime({ projectId: "project", broker })
+    const events = new DomainEventService({ projectId: "project", broker })
     const { materializer } = createMaterializerFixture({ storage })
     await seedObjectCreated(materializer, "request-retry", "retry")
     let nowMs = NOW.getTime()
@@ -158,7 +158,7 @@ describe("OntologyOutboxDispatcher", () => {
   test("keeps retry backoff per attempt group while publishing one claimed batch", async () => {
     const storage = new InMemoryStorage()
     const broker = new FailingBroker()
-    const events = new EventsRuntime({ projectId: "project", broker })
+    const events = new DomainEventService({ projectId: "project", broker })
     const { materializer } = createMaterializerFixture({ storage })
     await seedObjectCreated(materializer, "request-older", "older")
     const olderId = outboxRows(storage)[0]!.envelope.id
@@ -214,7 +214,7 @@ describe("OntologyOutboxDispatcher", () => {
   test("stops a drain pass after a fully failed claim instead of walking the backlog", async () => {
     const storage = new InMemoryStorage()
     const broker = new FailingBroker()
-    const events = new EventsRuntime({ projectId: "project", broker })
+    const events = new DomainEventService({ projectId: "project", broker })
     const { materializer } = createMaterializerFixture({ storage })
     for (let index = 0; index < 5; index += 1) {
       await seedObjectCreated(materializer, `request-${index}`, `device-${index}`)
@@ -243,7 +243,7 @@ describe("OntologyOutboxDispatcher", () => {
   test("rearms healthy catch-up after a bounded drain slice", async () => {
     const storage = new InMemoryStorage()
     const broker = new RecordingBroker()
-    const events = new EventsRuntime({ projectId: "project", broker })
+    const events = new DomainEventService({ projectId: "project", broker })
     const { materializer } = createMaterializerFixture({ storage })
     for (let index = 0; index < 3; index += 1) {
       await seedObjectCreated(materializer, `request-bounded-${index}`, `bounded-${index}`)
@@ -266,7 +266,7 @@ describe("OntologyOutboxDispatcher", () => {
   test("publishes only when explicitly drained and never starts an idle polling loop", async () => {
     const storage = new InMemoryStorage()
     const broker = new RecordingBroker()
-    const events = new EventsRuntime({ projectId: "project", broker })
+    const events = new DomainEventService({ projectId: "project", broker })
     const { materializer } = createMaterializerFixture({ storage })
     const dispatcher = new OntologyOutboxDispatcher({
       projectId: "project",
@@ -296,7 +296,7 @@ describe("OntologyOutboxDispatcher", () => {
       (row) => row.envelope.partitionKey === "Device:poison"
     )!.envelope.id
     const broker = new PoisonEnvelopeBroker(poisonId)
-    const events = new EventsRuntime({ projectId: "project", broker })
+    const events = new DomainEventService({ projectId: "project", broker })
     const failures: { readonly attempts: number; readonly eventIds: readonly string[] }[] = []
     const dispatcher = new OntologyOutboxDispatcher({
       projectId: "project",
@@ -323,7 +323,7 @@ describe("OntologyOutboxDispatcher", () => {
   test("coalesces a drain that arrives during an in-flight publication", async () => {
     const storage = new InMemoryStorage()
     const broker = new FirstHeldBroker()
-    const events = new EventsRuntime({ projectId: "project", broker })
+    const events = new DomainEventService({ projectId: "project", broker })
     const { materializer } = createMaterializerFixture({ storage })
     await seedObjectCreated(materializer, "request-poll", "poll")
 
@@ -349,7 +349,7 @@ describe("OntologyOutboxDispatcher", () => {
   test("coalesces drains that arrive while a pass is running", async () => {
     // A burst of concurrent commits must not each pay for its own sequential claim pass.
     const storage = new TransactionTrackingStorage()
-    const events = new EventsRuntime({ projectId: "project", broker: new RecordingBroker() })
+    const events = new DomainEventService({ projectId: "project", broker: new RecordingBroker() })
     const { materializer } = createMaterializerFixture({ storage })
     await seedObjectCreated(materializer, "request-burst", "burst")
 
@@ -365,7 +365,7 @@ describe("OntologyOutboxDispatcher", () => {
   test("waits for bounded in-flight publication during graceful stop", async () => {
     const storage = new InMemoryStorage()
     const broker = new DelayedBroker()
-    const events = new EventsRuntime({ projectId: "project", broker })
+    const events = new DomainEventService({ projectId: "project", broker })
     const { materializer } = createMaterializerFixture({ storage })
     await seedObjectCreated(materializer, "request-drain", "drain")
     const dispatcher = new OntologyOutboxDispatcher({
@@ -392,7 +392,7 @@ describe("OntologyOutboxDispatcher", () => {
   test("shares one concurrent stop operation", async () => {
     const storage = new InMemoryStorage()
     const broker = new DelayedBroker()
-    const events = new EventsRuntime({ projectId: "project", broker })
+    const events = new DomainEventService({ projectId: "project", broker })
     const { materializer } = createMaterializerFixture({ storage })
     await seedObjectCreated(materializer, "request-concurrent-stop", "concurrent-stop")
     const dispatcher = new OntologyOutboxDispatcher({
@@ -416,7 +416,7 @@ describe("OntologyOutboxDispatcher", () => {
   test("reschedules an unfinished publication when the graceful shutdown bound expires", async () => {
     const storage = new InMemoryStorage()
     const broker = new DelayedBroker()
-    const events = new EventsRuntime({ projectId: "project", broker })
+    const events = new DomainEventService({ projectId: "project", broker })
     const { materializer } = createMaterializerFixture({ storage })
     await seedObjectCreated(materializer, "request-stop", "stop")
     const dispatcher = new OntologyOutboxDispatcher({

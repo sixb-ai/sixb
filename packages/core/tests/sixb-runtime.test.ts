@@ -144,7 +144,6 @@ describe("SixbHost runtime", () => {
     expect(sixb.projections.list()).toEqual([])
     expect(sixb.workflows.list()).toEqual([])
     expect(sixb.agents.list()).toEqual([])
-    expect(sixb.connectors.list()).toEqual([])
 
     for (const removedRootMember of [
       "listObjects",
@@ -159,6 +158,7 @@ describe("SixbHost runtime", () => {
       "startScheduler",
       "listRules",
       "listObjectProjections",
+      "connectors",
       "blobStorage",
     ]) {
       expect(removedRootMember in sixb).toBe(false)
@@ -400,7 +400,7 @@ describe("SixbHost runtime", () => {
     expect(sixb.lakeStorage).toBe(lakeStorage)
   })
 
-  test("exposes the configured blobStorage through the blobs facade", async () => {
+  test("keeps the configured blob provider on the host", async () => {
     const blobStorage = new InMemoryBlobStorage()
     const lakeStorage = new InMemoryLakeStorage()
     const sixb = new SixbHost({
@@ -410,8 +410,8 @@ describe("SixbHost runtime", () => {
       blobStorage,
     })
 
-    expect(sixb.blobs).not.toBe(blobStorage)
-    const file = await sixb.blobs.put({ body: new TextEncoder().encode("facade") })
+    expect(sixb.blobStorage).toBe(blobStorage)
+    const file = await sixb.blobStorage.put({ body: new TextEncoder().encode("provider") })
     expect(await blobStorage.stat(file.blobId)).not.toBeNull()
   })
 

@@ -10,7 +10,7 @@ import {
 } from "@sixb/core"
 import { attachSixbErrorReporter, flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import type { StoredDomainEvent, StoredObjectUpdatedEvent } from "@sixb/core/internal/events"
-import { EventsRuntime } from "@sixb/core/internal/events"
+import { DomainEventService } from "@sixb/core/internal/events"
 import type { ObjectStorage, RulesStorage } from "@sixb/core/storage"
 import { InMemoryRulesStorage } from "@sixb/core/storage"
 import { createMaterializerTestFixture, type MaterializerTestFixture } from "@sixb/core/testing"
@@ -94,7 +94,7 @@ describe("RulesWorker", () => {
   })
 
   test("worker subscribes to object and link event types", async () => {
-    const events = new RecordingEventsRuntime()
+    const events = new RecordingDomainEventService()
     const worker = track(new RulesWorker(createRuntime({ events })))
 
     await worker.start()
@@ -115,7 +115,7 @@ describe("RulesWorker", () => {
 
   test("worker drains pending evaluations on stop", async () => {
     const rules = new DelayedRulesStorage()
-    const events = createEventsRuntime()
+    const events = createDomainEventService()
     const storage = createStorage({ rules })
     await seedCurrentObject(storage, "posted")
     const worker = track(
@@ -146,7 +146,7 @@ describe("RulesWorker", () => {
   })
 
   test("worker does not accept new events after stop", async () => {
-    const events = createEventsRuntime()
+    const events = createDomainEventService()
     const worker = track(new RulesWorker(createRuntime({ events })))
     await worker.start()
     await worker.stop()
@@ -165,7 +165,7 @@ describe("RulesWorker", () => {
     }
 
     try {
-      const events = createEventsRuntime()
+      const events = createDomainEventService()
       const storage = createStorage()
       const objects = new ThrowOnceObjectStorage(storage.objects)
       replaceObjectStorage(storage, objects.storage)
@@ -206,7 +206,7 @@ describe("RulesWorker", () => {
   })
 
   test("startup reconciliation repairs an object event missed while offline", async () => {
-    const events = createEventsRuntime()
+    const events = createDomainEventService()
     const storage = new InMemoryStorage()
     await seedCurrentObject(storage, "posted")
     const worker = track(
@@ -223,7 +223,7 @@ describe("RulesWorker", () => {
   })
 
   test("startup reconciliation resolves active state for a deleted subject", async () => {
-    const events = createEventsRuntime()
+    const events = createDomainEventService()
     const storage = new InMemoryStorage()
     const [triggered] = await events.append({
       events: [
@@ -255,7 +255,7 @@ describe("RulesWorker", () => {
   })
 
   test("reconciliation uses stable pages and evaluates every subject", async () => {
-    const events = createEventsRuntime()
+    const events = createDomainEventService()
     const storage = new InMemoryStorage()
     await seedCurrentObject(storage, "posted", "tx-3")
     await seedCurrentObject(storage, "posted", "tx-1")
@@ -278,7 +278,7 @@ describe("RulesWorker", () => {
   })
 
   test("reconciliation scans one object type once for all of its rules", async () => {
-    const events = createEventsRuntime()
+    const events = createDomainEventService()
     const storage = createStorage()
     const objects = new CountingReconciliationObjectStorage(storage.objects)
     replaceObjectStorage(storage, objects.storage)
@@ -295,7 +295,7 @@ describe("RulesWorker", () => {
   })
 
   test("serializes live evaluation behind reconciliation", async () => {
-    const events = createEventsRuntime()
+    const events = createDomainEventService()
     const storage = createStorage()
     const objects = new BlockingReconciliationObjectStorage(storage.objects)
     replaceObjectStorage(storage, objects.storage)
@@ -333,7 +333,7 @@ describe("RulesWorker", () => {
 
     try {
       const reports: { error: Error; context: SixbErrorContext }[] = []
-      const events = createEventsRuntime()
+      const events = createDomainEventService()
       const storage = createStorage()
       const objects = new FailOneSubjectObjectStorage(storage.objects, "tx-1")
       replaceObjectStorage(storage, objects.storage)
@@ -387,7 +387,7 @@ describe("RulesWorker", () => {
   })
 })
 
-class RecordingEventsRuntime extends EventsRuntime {
+class RecordingDomainEventService extends DomainEventService {
   readonly subscriptions: {
     readonly types?: readonly DomainEvent["type"][]
   }[] = []
@@ -539,16 +539,18 @@ class CountingReconciliationObjectStorage {
 function createRuntime(
   options: {
     readonly rules?: readonly RuleDefinition[]
-    readonly events?: EventsRuntime
+    readonly events?: DomainEventService
     readonly storage?: Storage
   } = {}
 ): RulesWorkerHost {
   const rules = options.rules ?? [postedRule]
   return {
     id: projectId,
-    events: options.events ?? createEventsRuntime(),
+    events: options.events ?? createDomainEventService(),
     storage: options.storage ?? new InMemoryStorage(),
-    rules: { list: () => rules },
+    definitions: {
+      rules: { list: () => rules, getById: (id) => rules.find((rule) => rule.id === id) ?? null },
+    },
   }
 }
 
@@ -630,15 +632,15 @@ function materializerFixture(storage: Storage): MaterializerTestFixture {
   return fixture
 }
 
-async function ruleEventTypes(events: EventsRuntime): Promise<readonly string[]> {
+async function ruleEventTypes(events: DomainEventService): Promise<readonly string[]> {
   const readEvents = await events.read({
     topics: ["rules"],
   })
   return readEvents.map((event) => event.type)
 }
 
-function createEventsRuntime(): EventsRuntime {
-  return new EventsRuntime({ projectId, broker: new InMemoryBroker() })
+function createDomainEventService(): DomainEventService {
+  return new DomainEventService({ projectId, broker: new InMemoryBroker() })
 }
 
 async function waitFor(fn: () => boolean | Promise<boolean>, timeoutMs = 2_000): Promise<void> {

@@ -3,6 +3,7 @@ import type { ValueType } from "../ontology"
 import { assertObjectTypeRegistered } from "../ontology"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type {
+  ListResult,
   ObjectByIdHandle,
   ObjectSet,
   OntologySource,
@@ -13,6 +14,7 @@ import type {
 import type {
   LinkDirection,
   ObjectLinkRow,
+  ObjectRow,
   TimeseriesHistoryBatchInput,
   TimeseriesHistoryBatchResult,
   TimeseriesPoint,
@@ -31,11 +33,51 @@ import {
   existsObjects,
   facetObjects,
 } from "./query"
-import type { ObjectsRuntimeOperations } from "./runtime"
 import { createObjectSet } from "./sdk"
 import type { ListObjectsParams } from "./service"
 import * as objectService from "./service"
 import { getTelemetryHistoryBatch } from "./telemetry"
+
+export interface ExecutionObjectOperations {
+  listTypes(): readonly ObjectTypeWithPropertyTokens[]
+  getTypeById(objectTypeId: string): ObjectTypeWithPropertyTokens | null
+  resolveType(objectTypeId: string): ObjectTypeWithPropertyTokens
+  getValueTypesById(): ReturnType<SixbRuntimeContext["ontology"]["getValueTypesById"]>
+  getPrimaryPropertyId(objectTypeId: string): string
+  listSubTypes(objectTypeId: string): string[]
+  isValidLinkTarget(expected: string | string[], actual: string): boolean
+  get(objectTypeId: string, primaryId: string): Promise<ObjectRow | null>
+  list(params: ListObjectsParams): Promise<ListResult<ObjectRow>>
+  upsert(objectTypeId: string, properties: Record<string, unknown>): Promise<ObjectRow>
+  upsertBatch(
+    objectTypeId: string,
+    items: readonly { properties: Record<string, unknown> }[]
+  ): ReturnType<typeof objectService.upsertObjectBatch>
+  appendTelemetry(
+    objectTypeId: string,
+    items: readonly { id: string; properties: Record<string, unknown>; at?: Date }[]
+  ): Promise<void>
+  upsertLink(
+    objectTypeId: string,
+    sourceId: string,
+    linkId: string,
+    target: { targetTypeId: string; targetId: string; properties?: Record<string, unknown> }
+  ): Promise<void>
+  upsertLinkBatch(
+    items: readonly {
+      objectTypeId: string
+      sourceId: string
+      linkId: string
+      target: { targetTypeId: string; targetId: string; properties?: Record<string, unknown> }
+    }[]
+  ): ReturnType<typeof objectService.upsertLinkBatch>
+  removeLink(
+    objectTypeId: string,
+    sourceId: string,
+    linkId: string,
+    target: { targetTypeId: string; targetId: string }
+  ): Promise<void>
+}
 
 export interface ExecutionObjectByIdHandle<
   TObjectType extends ObjectTypeWithPropertyTokens,
@@ -78,8 +120,8 @@ export interface ExecutionObjectSet<
   byId(id: string): ExecutionObjectByIdHandle<TObjectType, TValueTypes>
 }
 
-export interface ExecutionObjectsRuntime<TOntologySources extends readonly OntologySource[]>
-  extends ObjectsRuntimeOperations {
+export interface ObjectsRuntime<TOntologySources extends readonly OntologySource[]>
+  extends ExecutionObjectOperations {
   <TObjectType extends RegisteredObjectType<TOntologySources>>(
     objectType: TObjectType
   ): ExecutionObjectSet<
@@ -116,9 +158,9 @@ export interface ExecutionObjectsRuntime<TOntologySources extends readonly Ontol
   }): Promise<TimeseriesPoint | null>
 }
 
-export function createExecutionObjectsRuntime<TOntologySources extends readonly OntologySource[]>(
+export function createObjectsRuntime<TOntologySources extends readonly OntologySource[]>(
   runtime: SixbRuntimeContext
-): ExecutionObjectsRuntime<TOntologySources> {
+): ObjectsRuntime<TOntologySources> {
   const objects = Object.assign(
     <TObjectType extends RegisteredObjectType<TOntologySources>>(objectType: TObjectType) => {
       assertObjectTypeRegistered(runtime.ontology.getObjectTypesById(), objectType)
@@ -298,5 +340,5 @@ export function createExecutionObjectsRuntime<TOntologySources extends readonly 
     }
   )
 
-  return objects as ExecutionObjectsRuntime<TOntologySources>
+  return objects as ObjectsRuntime<TOntologySources>
 }

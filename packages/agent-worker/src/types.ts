@@ -1,19 +1,16 @@
 import type {
-  AgentsRuntime,
   AgentToolRunContext,
   BlobStorage,
   Broker,
   DomainEventLog,
-  OntologyRegistry,
   Queues,
   SandboxFactory,
-  SecurityRegistry,
+  SixbDefinitions,
   Storage,
   ValueType,
-  WorkflowsRuntime,
 } from "@sixb/core"
 import type { AgentExecutionHost } from "@sixb/core/internal/agent-execution"
-import type { LogsRuntime } from "@sixb/core/internal/logging"
+import type { LoggingService } from "@sixb/core/internal/logging"
 import type { AgentStorage, AuthStorage } from "@sixb/core/storage"
 import type { ToolSet } from "ai"
 import type { AgentSkill } from "./agent-skills"
@@ -29,21 +26,19 @@ export type AgentWorkerStorage = Storage & {
 
 /**
  * The host surface the agent worker is constructed with. `SixbHost` satisfies it structurally, so
- * cohosting passes the host directly. The worker resolves a run's model
- * via `agents.getById` (the model is a non-serialisable language model, never sent over the wire).
+ * cohosting passes the host directly. The worker resolves a run's model through
+ * `definitions.agents.getById` (the model is a non-serialisable language model, never sent over the
+ * wire).
  */
 export interface AgentWorkerHost extends AgentExecutionHost {
   readonly broker: Broker
   readonly events: DomainEventLog
   readonly storage: Storage
   readonly queues: Queues
-  readonly agents: Pick<AgentsRuntime, "list" | "getById">
-  readonly workflows: Pick<WorkflowsRuntime, "list" | "getById">
-  readonly ontology: OntologyRegistry
-  readonly security: SecurityRegistry
+  readonly definitions: Pick<SixbDefinitions, "agents" | "workflows" | "ontology" | "security">
   readonly sandboxes?: SandboxFactory
   readonly projectRoot?: string
-  readonly logs?: LogsRuntime
+  readonly logging?: LoggingService
 }
 
 /**
@@ -55,7 +50,7 @@ export interface AgentWorkerContext {
   readonly id: string
   readonly storage: AgentWorkerStorage
   readonly sandboxes: SandboxFactory
-  readonly logs?: LogsRuntime
+  readonly logging?: LoggingService
   readonly valueTypesById: ReadonlyMap<string, ValueType>
   readonly apiBaseUrl: string
   readonly streamSink: StreamSink

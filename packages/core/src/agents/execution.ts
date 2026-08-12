@@ -26,13 +26,13 @@ export interface CreateExecutionAgentThreadInput {
   readonly title?: string
 }
 
-export interface ExecutionAgentThreadsRuntime {
+export interface AgentThreadsRuntime {
   create(input: CreateExecutionAgentThreadInput): Promise<AgentThreadRecord>
   getById(threadId: string): Promise<AgentThreadRecord | null>
   list(input?: ListExecutionAgentThreadsInput): Promise<ListAgentThreadsResult>
 }
 
-export interface ExecutionAgentRunsRuntime {
+export interface AgentRunsRuntime {
   request(input: ExecutionAgentRequestInput): Promise<RequestAgentRunResult>
   getById(runId: string): Promise<AgentRunRecord | null>
   listForThread(
@@ -41,17 +41,17 @@ export interface ExecutionAgentRunsRuntime {
   ): Promise<ListAgentRunsResult | null>
 }
 
-export interface ExecutionAgentsRuntime {
+export interface AgentsRuntime {
   list(): readonly AgentDefinition[]
   getById(agentId: string): AgentDefinition | null
-  readonly threads: ExecutionAgentThreadsRuntime
-  readonly runs: ExecutionAgentRunsRuntime
+  readonly threads: AgentThreadsRuntime
+  readonly runs: AgentRunsRuntime
 }
 
-export function createExecutionAgentsRuntime(
+export function createAgentsRuntime(
   runtime: SixbRuntimeContext,
-  source: Pick<ExecutionAgentsRuntime, "list" | "getById">
-): ExecutionAgentsRuntime {
+  source: Pick<AgentsRuntime, "list" | "getById">
+): AgentsRuntime {
   const principal = runtime.authorization?.principal ?? SYSTEM_PRINCIPAL
   const allowed = (agentId: string) =>
     isAllowed(runtime.authorization, { kind: "agent.run", agentId })

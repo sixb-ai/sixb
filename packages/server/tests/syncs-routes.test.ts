@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { SixbHostRuntime } from "@sixb/core"
+import type { SixbHostView } from "@sixb/core"
 import { change, col, defineConnector, defineDataset, defineSync } from "@sixb/core"
 import type { ListLatestSyncRunsInput, SyncRunStorage } from "@sixb/core/storage"
 import { Elysia } from "elysia"
@@ -40,25 +40,27 @@ const syncs = [
     .intoDataset(invoicesDataset),
 ]
 
-function createSixbStub(syncRuns: Partial<SyncRunStorage>): SixbHostRuntime {
+function createSixbStub(syncRuns: Partial<SyncRunStorage>): SixbHostView {
   return {
     id: "my-app",
     storage: {
       syncRuns,
     },
-    syncs: {
-      list: () => syncs,
-      getById: (id: string) => syncs.find((sync) => sync.id === id) ?? null,
+    definitions: {
+      syncs: {
+        list: () => syncs,
+        getById: (id: string) => syncs.find((sync) => sync.id === id) ?? null,
+      },
     },
-  } as unknown as SixbHostRuntime
+  } as unknown as SixbHostView
 }
 
 function createTestApp(syncRuns: Partial<SyncRunStorage>) {
   const sixb = createSixbStub(syncRuns)
   const sixbExecution = {
     syncs: {
-      list: () => sixb.syncs.list(),
-      getById: (syncId: string) => sixb.syncs.getById(syncId),
+      list: () => sixb.definitions.syncs.list(),
+      getById: (syncId: string) => sixb.definitions.syncs.getById(syncId),
       runs: {
         listLatest: (syncIds: readonly string[]) =>
           syncRuns.listLatestBySyncIds?.({ projectId: sixb.id, syncIds }),

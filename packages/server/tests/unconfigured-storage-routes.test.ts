@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { SixbHostRuntime } from "@sixb/core"
+import type { SixbHostView } from "@sixb/core"
 import { Elysia } from "elysia"
 import { registerActionRunRoutes } from "../src/routes/action-runs"
 import { registerAgentRoutes } from "../src/routes/agents"
@@ -11,29 +11,31 @@ import { registerWorkflowRoutes } from "../src/routes/workflows"
 
 // A runtime whose optional run-history roles are all absent — the shape a project
 // gets from `createSixb()` without the matching storage provider.
-function sixbWithoutRunHistory(): SixbHostRuntime {
+function sixbWithoutRunHistory(): SixbHostView {
   return {
     id: "my-app",
     storage: {},
-    rules: { list: () => [], getById: () => null },
-    listPipelines: () => [],
-    getPipelineById: () => null,
-    projections: {
-      listObjects: () => [],
-      listLinks: () => [],
-      listTelemetry: () => [],
-      getById: () => null,
+    definitions: {
+      rules: { list: () => [], getById: () => null },
+      pipelines: { list: () => [], getById: () => null },
+      projections: {
+        list: () => [],
+        listObjects: () => [],
+        listLinks: () => [],
+        listTelemetry: () => [],
+        getById: () => null,
+      },
+      workflows: { list: () => [], getById: () => null },
+      agents: { list: () => [], getById: () => null },
     },
-    workflows: { list: () => [], getById: () => null },
-    agents: { list: () => [], getById: () => null },
-  } as unknown as SixbHostRuntime
+  } as unknown as SixbHostView
 }
 
 interface TestApp {
   handle(request: Request): Promise<Response>
 }
 
-type Register = (app: Elysia, host: SixbHostRuntime) => TestApp
+type Register = (app: Elysia, host: SixbHostView) => TestApp
 
 function appFor(register: Register): TestApp {
   const app = new Elysia()
