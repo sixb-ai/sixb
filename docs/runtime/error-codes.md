@@ -36,6 +36,7 @@ Webhook runs allow `internal.unexpected | webhook.delivery_failed`; only retryab
 failures use the delivery code. The idempotency journal and run reuse the same failure record.
 Expected non-retryable outcomes remain represented by their HTTP status and claim result.
 Workflow completion events reuse the exact failure stored on the run or node.
+Pipeline step completion events reuse the exact failure stored on the step run.
 The ontology outbox declares `event.delivery_failed`; its durable record is retained while publication
 is retried.
 

@@ -479,7 +479,18 @@ describe("PipelineWorker", () => {
       stepIndex: 1,
       totalSteps: 2,
       status: "failed",
-      error: "An unexpected internal error occurred.",
+      error: {
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        retryable: false,
+        at: expect.any(String),
+        details: {
+          pipelineId: "customers",
+          pipelineRunId: "run-fails-late",
+          stepId: "explode",
+          stepRunId: "run-fails-late:step:2:explode",
+        },
+      },
     })
 
     const datasetPayload = events[3]?.payload as {
@@ -618,6 +629,7 @@ describe("PipelineWorker", () => {
       code: "runtime.cancelled",
       retryable: false,
     })
+    expect(events[5]?.payload).toMatchObject({ error: cancelledStep?.error })
     expect(reportCount).toBe(0)
   })
 })

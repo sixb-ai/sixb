@@ -2,6 +2,19 @@ import { describe, expect, test } from "bun:test"
 import { InMemoryBroker } from "../src"
 import { DomainEventService, toStoredEvent } from "../src/events"
 
+const PIPELINE_STEP_FAILURE = {
+  code: "internal.unexpected",
+  retryable: false,
+  message: "Pipeline step failed.",
+  at: "2026-05-08T10:00:02.000Z",
+  details: {
+    pipelineId: "canonical-transactions",
+    pipelineRunId: "run-002",
+    stepId: "clean",
+    stepRunId: "run-002:step:1:clean",
+  },
+} as const
+
 describe("worker run lifecycle events", () => {
   test("stores sync run lifecycle events with sync topic and run partition", () => {
     const started = toStoredEvent({
@@ -121,5 +134,39 @@ describe("worker run lifecycle events", () => {
       "canonical-transactions:run-002",
       "canonical-transactions:run-002",
     ])
+  })
+
+  test("preserves the pipeline step failure record", async () => {
+    const eventsRuntime = new DomainEventService({
+      projectId: "project-a",
+      broker: new InMemoryBroker(),
+    })
+
+    await eventsRuntime.append({
+      events: [
+        {
+          type: "pipeline.run.step.finished",
+          payload: {
+            pipelineId: "canonical-transactions",
+            runId: "run-002",
+            stepRunId: "run-002:step:1:clean",
+            stepId: "clean",
+            stepIndex: 0,
+            totalSteps: 1,
+            datasetId: "canonical.transactions",
+            status: "failed",
+            finishedAt: "2026-05-08T10:00:02.000Z",
+            error: PIPELINE_STEP_FAILURE,
+          },
+        },
+      ],
+    })
+
+    const [event] = await eventsRuntime.read({ types: ["pipeline.run.step.finished"] })
+    expect(event?.type).toBe("pipeline.run.step.finished")
+    if (event?.type !== "pipeline.run.step.finished") {
+      throw new Error("Expected a pipeline step completion event.")
+    }
+    expect(event.payload.error).toEqual(PIPELINE_STEP_FAILURE)
   })
 })
