@@ -1,6 +1,5 @@
 import type { Database } from "bun:sqlite"
 import type {
-  EffectiveChangeCounts,
   ExpectedLinkRevision,
   ExpectedObjectRevision,
 } from "@sixb/core/internal/materialization"
@@ -52,7 +51,6 @@ import {
   type SqliteOntologyTransactionContext,
 } from "./materialization-session"
 import {
-  linkSortExpression,
   SQLITE_MATERIALIZATION_WORK_TABLE,
   SqliteMaterializationStateReader,
 } from "./materialization-state"
@@ -282,18 +280,15 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
     const session = this.sessions.require(input.session)
     const { commit } = session.header
     assertPlanChunkCorrelations(input.chunk, commit)
-    const planCount = session.appliedPlanCount
-    const outboxCount = session.appliedOutboxCount
-    this.sessions.assertChunkSequence(session, input.chunk)
+    const sequence = this.sessions.prepareChunkSequence(session, input.chunk)
     this.db.run("SAVEPOINT sixb_ontology_apply_chunk")
     try {
       this.writer.apply(commit.projectId, commit.id, input.chunk)
       this.db.run("RELEASE SAVEPOINT sixb_ontology_apply_chunk")
+      this.sessions.commitChunkSequence(session, sequence)
     } catch (error) {
       this.db.run("ROLLBACK TO SAVEPOINT sixb_ontology_apply_chunk")
       this.db.run("RELEASE SAVEPOINT sixb_ontology_apply_chunk")
-      session.appliedPlanCount = planCount
-      session.appliedOutboxCount = outboxCount
       throw error
     }
     await yieldSqliteEventLoop()
@@ -514,7 +509,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
     await yieldSqliteEventLoop()
 
     if (commit.intent.kind === "telemetry") {
-      const summary = this.telemetrySummary(session, commit.intent.pointCount)
+      const summary = this.sessions.telemetrySummary(session, commit.intent.pointCount)
       await yieldSqliteEventLoop()
       if (summary.classifiedPoints !== commit.intent.pointCount) {
         invalidCorrelation(
@@ -529,7 +524,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
       if (result.kind !== "projection") return
       this.sessions.assertClassificationCoverage(session)
       await yieldSqliteEventLoop()
-      const counts = this.projectionCounts(session)
+      const counts = this.sessions.projectionCounts(session)
       await yieldSqliteEventLoop()
       if (!sameCounts(result.counts, counts)) {
         invalidCorrelation("Projection result counts do not correlate with finalized work.")
@@ -541,41 +536,41 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
     const violation = this.db
       .query(
         `
-          WITH work AS (
-            SELECT json_extract(payload, '$.scopeSortKey') AS scope_sort_key,
-              json_extract(payload, '$.linkSortKey') AS link_sort_key,
-              json_extract(payload, '$.occupied') AS occupied,
-              json_extract(payload, '$.ref.source.objectTypeId') AS source_type_id,
-              json_extract(payload, '$.ref.source.primaryId') AS source_id,
-              json_extract(payload, '$.ref.linkId') AS link_id
+          WITH scopes AS (
+            SELECT sort_one AS scope_sort_key,
+              cardinality_source_type_id AS source_type_id,
+              cardinality_source_primary_id AS source_id,
+              cardinality_link_id AS link_id,
+              SUM(cardinality_occupied) AS expected_count,
+              MAX(CASE WHEN cardinality_occupied = 1
+                THEN cardinality_target_type_id END) AS expected_target_type_id,
+              MAX(CASE WHEN cardinality_occupied = 1
+                THEN cardinality_target_primary_id END) AS expected_target_id
             FROM ${SQLITE_MATERIALIZATION_WORK_TABLE}
             WHERE session_id = ? AND kind = 'cardinality'
-          ), duplicate AS (
-            SELECT scope_sort_key FROM work WHERE occupied = 1
-            GROUP BY scope_sort_key HAVING COUNT(*) > 1
-          ), scopes AS (
-            SELECT DISTINCT scope_sort_key, source_type_id, source_id, link_id FROM work
-          ), expected AS (
-            SELECT scope_sort_key, link_sort_key FROM work WHERE occupied = 1
-          ), actual AS (
-            SELECT scopes.scope_sort_key,
-              ${linkSortExpression("links")} AS link_sort_key
+            GROUP BY sort_one, cardinality_source_type_id,
+              cardinality_source_primary_id, cardinality_link_id
+          ), validated AS (
+            SELECT scopes.scope_sort_key, scopes.expected_count,
+              COUNT(links.source_id) AS actual_count,
+              COUNT(links.source_id) FILTER (
+                WHERE links.target_type_id = scopes.expected_target_type_id
+                  AND links.target_id = scopes.expected_target_id
+              ) AS matching_count
             FROM scopes
-            -- json-derived temp scopes have no useful cardinality estimate. Fixing them on the
-            -- outer side keeps each lookup on the complete links primary-key prefix.
-            CROSS JOIN links
+            LEFT JOIN links
               ON links.project_id = ?
              AND links.source_type_id = scopes.source_type_id
              AND links.source_id = scopes.source_id
              AND links.link_id = scopes.link_id
-          ), differences AS (
-            SELECT * FROM expected EXCEPT SELECT * FROM actual
-            UNION ALL
-            SELECT * FROM actual EXCEPT SELECT * FROM expected
+            GROUP BY scopes.scope_sort_key, scopes.expected_count,
+              scopes.expected_target_type_id, scopes.expected_target_id
           )
-          SELECT 'duplicate' AS reason FROM duplicate
-          UNION ALL
-          SELECT 'mismatch' AS reason FROM differences
+          SELECT CASE WHEN expected_count > 1 THEN 'duplicate' ELSE 'mismatch' END AS reason
+          FROM validated
+          WHERE expected_count > 1
+            OR actual_count <> expected_count
+            OR matching_count <> expected_count
           LIMIT 1
         `
       )
@@ -589,105 +584,6 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
       invalidCorrelation(
         "Materialization cardinality work does not match the final effective link scope."
       )
-    }
-  }
-
-  private projectionCounts(session: SqliteMaterializationSessionState): EffectiveChangeCounts {
-    const row = this.db
-      .query(
-        `
-          SELECT
-            COUNT(*) FILTER (
-              WHERE kind = 'classification'
-                AND unique_key LIKE 'classification:object:%'
-            ) AS object_classifications,
-            COUNT(*) FILTER (
-              WHERE kind = 'classification'
-                AND unique_key LIKE 'classification:link:%'
-            ) AS link_classifications,
-            COUNT(*) FILTER (
-              WHERE kind = 'plan'
-                AND json_extract(payload, '$.item.kind') = 'object-upsert'
-                AND json_extract(payload, '$.item.value.expected.exists') = 0
-            ) AS objects_created,
-            COUNT(*) FILTER (
-              WHERE kind = 'plan'
-                AND json_extract(payload, '$.item.kind') = 'object-upsert'
-                AND json_extract(payload, '$.item.value.expected.exists') = 1
-            ) AS objects_updated,
-            COUNT(*) FILTER (
-              WHERE kind = 'plan'
-                AND json_extract(payload, '$.item.kind') = 'object-delete'
-            ) AS objects_deleted,
-            COUNT(*) FILTER (
-              WHERE kind = 'plan'
-                AND json_extract(payload, '$.item.kind') = 'link-upsert'
-                AND json_extract(payload, '$.item.value.expected.exists') = 0
-            ) AS links_created,
-            COUNT(*) FILTER (
-              WHERE kind = 'plan'
-                AND json_extract(payload, '$.item.kind') = 'link-upsert'
-                AND json_extract(payload, '$.item.value.expected.exists') = 1
-            ) AS links_updated,
-            COUNT(*) FILTER (
-              WHERE kind = 'plan'
-                AND json_extract(payload, '$.item.kind') = 'link-delete'
-            ) AS links_deleted
-          FROM ${SQLITE_MATERIALIZATION_WORK_TABLE}
-          WHERE session_id = ?
-        `
-      )
-      .get(session.id) as ProjectionCountsRow
-    const objectsChanged = row.objects_created + row.objects_updated + row.objects_deleted
-    const linksChanged = row.links_created + row.links_updated + row.links_deleted
-    return {
-      objectsCreated: row.objects_created,
-      objectsUpdated: row.objects_updated,
-      objectsDeleted: row.objects_deleted,
-      objectsUnchanged: row.object_classifications - objectsChanged,
-      linksCreated: row.links_created,
-      linksUpdated: row.links_updated,
-      linksDeleted: row.links_deleted,
-      linksUnchanged: row.link_classifications - linksChanged,
-    }
-  }
-
-  private telemetrySummary(session: SqliteMaterializationSessionState, pointCount: number) {
-    const row = this.db
-      .query(
-        `
-          SELECT
-            COUNT(*) FILTER (
-              WHERE kind = 'classification'
-                AND unique_key LIKE 'classification:point:%'
-            ) AS classified_points,
-            COUNT(*) FILTER (
-              WHERE kind = 'plan'
-                AND json_extract(payload, '$.item.kind') = 'point-upsert'
-                AND json_extract(payload, '$.item.value.expected.lastCommitId') IS NULL
-            ) AS points_created,
-            COUNT(*) FILTER (
-              WHERE kind = 'plan'
-                AND json_extract(payload, '$.item.kind') = 'point-upsert'
-                AND json_extract(payload, '$.item.value.expected.lastCommitId') IS NOT NULL
-            ) AS points_updated,
-            COUNT(*) FILTER (
-              WHERE kind = 'plan'
-                AND json_extract(payload, '$.item.kind') = 'object-upsert'
-            ) AS latest_objects_changed
-          FROM ${SQLITE_MATERIALIZATION_WORK_TABLE}
-          WHERE session_id = ?
-        `
-      )
-      .get(session.id) as TelemetrySummaryRow
-    return {
-      classifiedPoints: row.classified_points,
-      counts: {
-        pointsCreated: row.points_created,
-        pointsUpdated: row.points_updated,
-        pointsUnchanged: pointCount - row.points_created - row.points_updated,
-        latestObjectsChanged: row.latest_objects_changed,
-      },
     }
   }
 
@@ -863,22 +759,4 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
       )
       .get(projectId, sourceId, materializationId) as SqliteOntologySourceRow | null
   }
-}
-
-interface ProjectionCountsRow {
-  readonly object_classifications: number
-  readonly link_classifications: number
-  readonly objects_created: number
-  readonly objects_updated: number
-  readonly objects_deleted: number
-  readonly links_created: number
-  readonly links_updated: number
-  readonly links_deleted: number
-}
-
-interface TelemetrySummaryRow {
-  readonly classified_points: number
-  readonly points_created: number
-  readonly points_updated: number
-  readonly latest_objects_changed: number
 }

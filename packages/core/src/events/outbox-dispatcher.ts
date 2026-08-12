@@ -2,12 +2,15 @@ import { randomUUID } from "node:crypto"
 import type { ClaimedOntologyOutboxRow, OntologyOutboxStorage, Storage } from "../storage"
 import type { StableEventPublisher } from "./service"
 
-const DEFAULT_BATCH_SIZE = 100
+const DEFAULT_BATCH_SIZE = 1_000
 const DEFAULT_LEASE_DURATION_MS = 30_000
 const DEFAULT_INITIAL_RETRY_DELAY_MS = 1_000
 const DEFAULT_MAX_RETRY_DELAY_MS = 5 * 60_000
 const DEFAULT_RETRY_JITTER_RATIO = 0.2
-const DEFAULT_MAX_ISOLATION_ATTEMPTS = 16
+// Isolating one poison row from a 1,000-row batch needs up to 21 broker calls: one failed call
+// and, at each split depth, one healthy sibling plus the failing half. Keep bounded headroom for
+// uneven splits while rescheduling unresolved groups once this pass reaches the cap.
+const DEFAULT_MAX_ISOLATION_ATTEMPTS = 32
 const DEFAULT_MAX_CLAIMS_PER_DRAIN = 10
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 30_000
 const SHUTDOWN_RESCHEDULE_ERROR = "Outbox dispatcher stopped before publication completed."

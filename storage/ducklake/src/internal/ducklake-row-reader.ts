@@ -2,6 +2,7 @@ import type { DatasetColumnDefinition, DatasetRow } from "@sixb/core"
 import type { DatasetVersion, ReadDatasetRowsInput } from "@sixb/core/lake-storage"
 import { LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
+import { getBigIntLike } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
 import { type DatasetTableRef, resolveDatasetTableRef } from "./ducklake-dataset-table-ref"
@@ -9,6 +10,13 @@ import type { DuckLakeSnapshotReader } from "./ducklake-snapshot-reader"
 import { normalizeReadValue } from "./schema"
 import { qualifiedTableName, quoteIdentifier } from "./sql"
 import { parseVersionId } from "./versions"
+
+// Large reads release the provider's single DuckDB queue slot between bounded pages. Besides
+// bounding converted-row memory, this lets a JavaScript pipeline feed one DuckLake dataset into
+// another: the destination appender can use the runtime after each page instead of waiting forever
+// behind its own still-open source stream.
+const READ_PAGE_ROWS = 5_000
+const PHYSICAL_ROW_ID_ALIAS = "__sixb_physical_row_id"
 
 /**
  * Reads dataset rows from DuckLake snapshots.
@@ -27,50 +35,66 @@ export class DuckLakeRowReader {
   async *readRows(input: ReadDatasetRowsInput): AsyncIterable<DatasetRow> {
     this.connections.assertOpen()
 
+    // Keep the attachment lease across pages so local catalogs do not pay DETACH/ATTACH for every
+    // page. Individual query() calls still release the DuckDB queue before rows are yielded.
     const lease = await this.connections.acquireAttachedRuntime()
     try {
       const runtime = lease.runtime
-
-      // Step 1: resolve the physical table from DuckLake metadata directly. Row
-      // previews must not go through broad catalog introspection.
+      // Resolve latest exactly once so a paged read stays pinned even if another writer commits
+      // between pages. DuckLake snapshots are immutable; every page names this snapshot.
       const tableRef = await resolveDatasetTableRef(this.options, runtime, input.datasetId)
       if (!tableRef) {
         throw new LakeStorageError(`[SixbDuckLake] Unknown dataset '${input.datasetId}'.`)
       }
-
       const version = await this.resolveVersion(runtime, tableRef, input.versionId)
-      const snapshotId = parseVersionId(version.versionId)
       const selectedColumns = this.resolveReadColumns(
         tableRef.datasetId,
         version.schema,
         input.columns
       )
-
-      // Step 2: query DuckLake at the exact snapshot id. Version ids are just
-      // `ducklake:<snapshot_id>`, so reads can use native DuckLake time travel
-      // directly after validation.
+      const snapshotId = parseVersionId(version.versionId)
       const columnsSql = selectedColumns.map((column) => quoteIdentifier(column.name)).join(", ")
       const tableSql = qualifiedTableName(this.options, tableRef.tableName)
       // A user column named `rowid` shadows DuckDB's virtual row id. In that edge case the
       // connection-level invariant still preserves insertion order; otherwise make it explicit.
-      const orderSql = version.schema.columns.some(
-        (column) => column.name.toLowerCase() === "rowid"
-      )
-        ? ""
-        : " ORDER BY rowid"
-      const limitSql =
-        input.limit === undefined ? "" : ` LIMIT ${Math.max(0, Math.trunc(input.limit))}`
-      const offsetSql =
-        input.offset === undefined ? "" : ` OFFSET ${Math.max(0, Math.trunc(input.offset))}`
-      const sql = `SELECT ${columnsSql} FROM ${tableSql} AT (VERSION => ${snapshotId})${orderSql}${limitSql}${offsetSql}`
+      const schemaNames = new Set(version.schema.columns.map((column) => column.name.toLowerCase()))
+      const canUsePhysicalRowId =
+        !schemaNames.has("rowid") && !schemaNames.has(PHYSICAL_ROW_ID_ALIAS.toLowerCase())
+      const orderSql = canUsePhysicalRowId ? " ORDER BY rowid" : ""
+      const baseSql = `SELECT ${columnsSql} FROM ${tableSql} AT (VERSION => ${snapshotId})`
+      const requestedOffset = Math.max(0, Math.trunc(input.offset ?? 0))
+      let remaining = input.limit === undefined ? undefined : Math.max(0, Math.trunc(input.limit))
+      if (remaining === 0) return
 
-      // HTTP previews are bounded, so materialize them eagerly and release the
-      // runtime queue as soon as DuckDB has returned the small page.
-      const rows = input.limit === undefined ? runtime.streamRows(sql) : await runtime.query(sql)
+      // Materialize one bounded page and release its queue operation before yielding it. A
+      // consumer may enqueue another DuckLake operation while processing the yielded rows.
+      // Holding a native stream open here would make that operation wait behind itself.
+      let offset = requestedOffset
+      let physicalCursor: bigint | null = null
+      while (true) {
+        const pageRows =
+          remaining === undefined ? READ_PAGE_ROWS : Math.min(READ_PAGE_ROWS, remaining)
+        const pageSql = canUsePhysicalRowId
+          ? `SELECT rowid AS ${quoteIdentifier(PHYSICAL_ROW_ID_ALIAS)}, ${columnsSql}
+              FROM ${tableSql} AT (VERSION => ${snapshotId})
+              ${physicalCursor === null ? "" : `WHERE rowid > ${physicalCursor}`}
+              ORDER BY rowid LIMIT ${pageRows}
+              ${physicalCursor === null && offset > 0 ? `OFFSET ${offset}` : ""}`
+          : `${baseSql}${orderSql} LIMIT ${pageRows} OFFSET ${offset}`
+        const rows = await runtime.query(pageSql)
+        if (rows.length === 0) return
 
-      // Step 3: DuckDB returns driver-native values. Normalize each projected
-      // column through the schema that was active at the resolved version.
-      yield* this.normalizeRows(rows, selectedColumns)
+        yield* this.normalizeRows(rows, selectedColumns)
+        offset += rows.length
+        if (remaining !== undefined) {
+          remaining -= rows.length
+          if (remaining === 0) return
+        }
+        if (canUsePhysicalRowId) {
+          physicalCursor = getBigIntLike(rows[rows.length - 1]!, PHYSICAL_ROW_ID_ALIAS)
+        }
+        if (rows.length < pageRows) return
+      }
     } finally {
       await lease.release()
     }

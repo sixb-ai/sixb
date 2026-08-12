@@ -106,6 +106,10 @@ class DuckLakeWriteSession implements LakeWriteSession {
         await this.appendBatchToStagingTable(batch, batchPrimaryKeys)
         batch = []
         batchPrimaryKeys = new Set()
+        // Native appender promises can settle through microtasks quickly enough to starve timers
+        // across a large in-memory iterable. Yield once per bounded batch so API traffic remains
+        // responsive without adding per-row scheduling overhead.
+        await Bun.sleep(0)
       }
     }
 

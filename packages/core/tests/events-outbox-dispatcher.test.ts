@@ -320,6 +320,45 @@ describe("OntologyOutboxDispatcher", () => {
     expect((await events.read()).map(objectPrimaryId).sort()).toEqual(["valid-1", "valid-2"])
   })
 
+  test("isolates one poison envelope from the default large publication batch", async () => {
+    const storage = new InMemoryStorage()
+    const { materializer } = createMaterializerFixture({ storage })
+    await materializer.edits.commit({
+      mode: "atomic",
+      source: { kind: "runtime", requestId: "request-large-poison-batch" },
+      operations: Array.from({ length: 1_000 }, (_, index) => ({
+        id: `create-large-${index}`,
+        kind: "object.create" as const,
+        ref: { objectTypeId: "Device", primaryId: `large-${index}` },
+        properties: { name: `large-${index}` },
+      })),
+      expectedObjects: [],
+      expectedLinks: [],
+      expectedLinkScopes: [],
+    })
+    const poisonId = outboxRows(storage)[731]!.envelope.id
+    const broker = new PoisonEnvelopeBroker(poisonId)
+    const events = new DomainEventService({ projectId: "project", broker })
+    const dispatcher = new OntologyOutboxDispatcher({
+      projectId: "project",
+      storage,
+      events,
+      now: () => NOW,
+      retryJitterRatio: 0,
+    })
+
+    await dispatcher.drain()
+
+    const rows = outboxRows(storage)
+    expect(rows.filter((row) => row.publishedAt !== null)).toHaveLength(999)
+    expect(rows.find((row) => row.envelope.id === poisonId)).toMatchObject({
+      publishedAt: null,
+      leaseId: null,
+      lastError: "Error: poison envelope",
+    })
+    expect(await events.read({ limit: 1_000 })).toHaveLength(999)
+  })
+
   test("coalesces a drain that arrives during an in-flight publication", async () => {
     const storage = new InMemoryStorage()
     const broker = new FirstHeldBroker()

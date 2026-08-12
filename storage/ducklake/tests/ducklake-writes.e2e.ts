@@ -12,7 +12,7 @@ import { collectRows, createLocalDuckLakeStorage, localDuckLakeOptions } from ".
 interface DuckLakeStorageInternals {
   readonly connections: {
     attachedRuntime(): Promise<{
-      query(sql: string): Promise<readonly Record<string, unknown>[]>
+      query(sql: string, values?: readonly unknown[]): Promise<readonly Record<string, unknown>[]>
     }>
   }
   readonly snapshotReader: {
@@ -203,8 +203,8 @@ describe("DuckLakeStorage writes and latest reads", () => {
     ).resolves.toHaveLength(2)
   })
 
-  test("writes large row streams through the appender staging path", async () => {
-    const ROW_COUNT = 1001
+  test("bounds large row streams on both the write and read paths", async () => {
+    const ROW_COUNT = 5_001
 
     const rows = Array.from({ length: ROW_COUNT }, (_, index) => ({
       orderId: `ord_${index + 1}`,
@@ -241,7 +241,64 @@ describe("DuckLakeStorage writes and latest reads", () => {
       orderCount: String(ROW_COUNT),
       metadata: null,
     })
+
+    const runtime = await (
+      storage as unknown as DuckLakeStorageInternals
+    ).connections.attachedRuntime()
+    const originalQuery = runtime.query
+    const rowPageQueries: string[] = []
+    runtime.query = (sql, values) => {
+      if (sql.includes(" AT (VERSION => ")) rowPageQueries.push(sql)
+      return originalQuery.call(runtime, sql, values)
+    }
+    try {
+      await expect(
+        collectRows(
+          storage.readRows({
+            datasetId: ordersDataset.id,
+            columns: ["orderId"],
+            limit: ROW_COUNT,
+          })
+        )
+      ).resolves.toHaveLength(ROW_COUNT)
+    } finally {
+      runtime.query = originalQuery
+    }
+
+    // Regression proof: restoring the one-shot explicit-limit query produces one LIMIT 5001
+    // statement here. The bounded path must release the runtime queue after each page.
+    expect(rowPageQueries).toHaveLength(2)
+    expect(rowPageQueries[0]).toContain("LIMIT 5000")
+    expect(rowPageQueries[1]).toContain("WHERE rowid >")
+    expect(rowPageQueries[1]).toContain("LIMIT 1")
   })
+
+  test("streams one DuckLake dataset into another without deadlocking the shared runtime", async () => {
+    // Regression proof: restore DuckLakeRowReader's unbounded runtime.streamRows() path and this
+    // child reaches the destination appender's first flush, then times out. Keep it isolated in a
+    // child because a native stream waiting on its own runtime queue cannot be cancelled safely.
+    const childRoot = await mkdtemp(join(tmpdir(), "sixb-ducklake-stream-copy-"))
+    const child = Bun.spawn(
+      ["bun", join(import.meta.dir, "fixtures", "stream-copy.ts"), childRoot],
+      { stdout: "pipe", stderr: "pipe" }
+    )
+    try {
+      const result = await Promise.race([
+        child.exited.then((exitCode) => ({ kind: "exit" as const, exitCode })),
+        Bun.sleep(20_000).then(() => ({ kind: "timeout" as const })),
+      ])
+      if (result.kind === "timeout") {
+        child.kill()
+        await child.exited
+        throw new Error("DuckLake stream-to-write child timed out after 20 seconds.")
+      }
+      const stderr = await new Response(child.stderr).text()
+      expect(result.exitCode, stderr).toBe(0)
+    } finally {
+      child.kill()
+      await rm(childRoot, { recursive: true, force: true })
+    }
+  }, 30_000)
 
   test("appends streamed rows before reusable row objects mutate again", async () => {
     function* reusedOrderRows(): Iterable<DatasetRow> {

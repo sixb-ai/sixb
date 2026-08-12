@@ -9,7 +9,10 @@ export interface MaterializationBatching {
 }
 
 export const DEFAULT_MATERIALIZATION_BATCHING: MaterializationBatching = Object.freeze({
-  sourceStageRows: 1_000,
+  // Source staging pays execution fencing, manifest locking, conflict reconciliation, and one
+  // provider transaction per chunk. Two thousand rows cuts that fixed cost without the large RSS
+  // increase observed when every materialization boundary was raised to five thousand.
+  sourceStageRows: 2_000,
   sourceStageBytes: 4 * 1024 * 1024,
   statePageRows: 1_000,
   planChunkRows: 1_000,

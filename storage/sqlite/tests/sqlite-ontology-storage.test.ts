@@ -1,8 +1,10 @@
 import { Database } from "bun:sqlite"
+import { expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { migrateStorage } from "@sixb/core"
+import type { MaterializationPlanHeader, MaterializationWorkRecord } from "@sixb/core/storage"
 import {
   runMaterializationFailureContractSuite,
   runOntologyStorageContractSuite,
@@ -17,6 +19,45 @@ runOntologyStorageContractSuite("SQLite ontology storage contract", {
   cleanup(storage) {
     storage.close()
   },
+})
+
+test("SQLite work staging rolls back a partial batch after a later record conflicts", async () => {
+  const storage = new SqliteStorage()
+  const header = atomicStageHeader()
+  const first = classificationWork("first")
+  const pending = classificationWork("pending")
+  try {
+    await storage.transaction(async (tx) => {
+      const materializations = tx.ontology.materializations
+      const session = await materializations.begin(header)
+      await materializations.stageWork({ session, records: [first] })
+      await expect(
+        materializations.stageWork({ session, records: [pending, first] })
+      ).rejects.toThrow("Duplicate materialization work key 'classification:first'.")
+
+      // The valid first row from the rejected batch must not remain staged.
+      await expect(
+        materializations.stageWork({ session, records: [pending] })
+      ).resolves.toBeUndefined()
+      await materializations.finalize({
+        session,
+        finalization: {
+          sourceActivations: [],
+          result: {
+            kind: "edit",
+            commitId: header.commit.id,
+            created: true,
+            eventCount: 0,
+            committedAt: header.commit.committedAt,
+            outcomes: [],
+            changes: { objects: [], links: [] },
+          },
+        },
+      })
+    })
+  } finally {
+    storage.close()
+  }
 })
 
 runProjectionRunStorageContractSuite("SQLite projection-run storage contract", {
@@ -78,6 +119,31 @@ runMaterializationFailureContractSuite("SQLite materialization failure contract"
     })
   },
 })
+
+function atomicStageHeader(): MaterializationPlanHeader {
+  return {
+    commit: {
+      projectId: "contract-project",
+      id: "atomic-work-stage",
+      idempotencyKey: "runtime:atomic-work-stage",
+      requestHash: "hash:atomic-work-stage",
+      origin: { kind: "runtime", requestId: "atomic-work-stage" },
+      ontologyRevision: "ontology-contract-revision",
+      intent: { kind: "edit", mode: "atomic", operationCount: 0 },
+      committedAt: "2026-01-02T00:00:00.000Z",
+    },
+    expected: { sources: [], objects: [], links: [], linkScopes: [], points: [] },
+  }
+}
+
+function classificationWork(id: string): MaterializationWorkRecord {
+  return {
+    kind: "classification",
+    recordKey: `classification:${id}`,
+    entityKind: "object",
+    identityKey: `["ContractDevice","${id}"]`,
+  }
+}
 
 function withDatabase<T>(path: string, run: (db: Database) => T): T {
   const db = new Database(path)
