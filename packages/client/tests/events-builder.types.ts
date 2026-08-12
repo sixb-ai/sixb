@@ -299,6 +299,19 @@ events
   })
 
 events
+  .syncs()
+  .run("run-1")
+  .subscribe((event) => {
+    if (event.type === "sync.run.finished" && event.payload.error) {
+      const code: "internal.unexpected" | "runtime.cancelled" = event.payload.error.code
+      const message: string = event.payload.error.message
+      // @ts-expect-error — sync lifecycle failures expose only their primitive's code union.
+      const datasetCode: "dataset.not_found" = event.payload.error.code
+      void [code, message, datasetCode]
+    }
+  })
+
+events
   .actions()
   .run("act-1")
   .action("approveQuote")

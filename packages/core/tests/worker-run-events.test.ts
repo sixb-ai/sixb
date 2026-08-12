@@ -26,6 +26,17 @@ const PIPELINE_RUN_FAILURE = {
   },
 } as const
 
+const SYNC_RUN_FAILURE = {
+  code: "internal.unexpected",
+  retryable: false,
+  message: "Sync run failed.",
+  at: "2026-05-08T10:00:03.000Z",
+  details: {
+    syncId: "sync-transactions",
+    runId: "run-001",
+  },
+} as const
+
 describe("worker run lifecycle events", () => {
   test("stores sync run lifecycle events with sync topic and run partition", () => {
     const started = toStoredEvent({
@@ -69,6 +80,35 @@ describe("worker run lifecycle events", () => {
         }),
       ])
     )
+  })
+
+  test("preserves the sync run failure record", async () => {
+    const eventsRuntime = new DomainEventService({
+      projectId: "project-a",
+      broker: new InMemoryBroker(),
+    })
+
+    await eventsRuntime.append({
+      events: [
+        {
+          type: "sync.run.finished",
+          payload: {
+            syncId: "sync-transactions",
+            runId: "run-001",
+            status: "failed",
+            datasetId: "raw.transactions",
+            error: SYNC_RUN_FAILURE,
+          },
+        },
+      ],
+    })
+
+    const [event] = await eventsRuntime.read({ types: ["sync.run.finished"] })
+    expect(event?.type).toBe("sync.run.finished")
+    if (event?.type !== "sync.run.finished") {
+      throw new Error("Expected a sync run completion event.")
+    }
+    expect(event.payload.error).toEqual(SYNC_RUN_FAILURE)
   })
 
   test("appends and reads pipeline run lifecycle events in order", async () => {

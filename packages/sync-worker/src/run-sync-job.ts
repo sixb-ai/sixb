@@ -17,7 +17,12 @@ import { resolveLoggingService } from "@sixb/core/internal/logging"
 import { type DatasetVersion, getDatasetMergeChangeValidationError } from "@sixb/core/lake-storage"
 import { SYNC_RUN_FAILURE_CODES, type SyncRunRecord } from "@sixb/core/storage"
 import { assertDatasetRow, normalizeReadResult, throwIfAborted } from "./normalize"
-import type { RunSyncJobInput, SyncRunResult, SyncWorkerContext } from "./types"
+import type {
+  RunSyncJobInput,
+  SyncRunFinishedHandler,
+  SyncRunResult,
+  SyncWorkerContext,
+} from "./types"
 
 export class SyncRunAlreadyStartedError extends Error {
   override readonly name = "SyncRunAlreadyStartedError"
@@ -371,6 +376,8 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
               : {}),
             checkpoint: nextCheckpoint,
           })
+          const finishedAt = requireFinishedAt(job.id, finishedRun.finishedAt)
+          await notifyRunFinished(input.onRunFinished, finishedRun)
 
           return {
             id: job.id,
@@ -378,7 +385,7 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
             datasetId: dataset.id,
             mode: sync.config.mode,
             startedAt: startedRun.startedAt,
-            finishedAt: requireFinishedAt(job.id, finishedRun.finishedAt),
+            finishedAt,
             rowsRead,
             ...(version ? { version } : {}),
             versionCreated: false,
@@ -426,13 +433,15 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
       throw error
     }
 
+    const finishedAt = requireFinishedAt(job.id, finishedRun.finishedAt)
+    await notifyRunFinished(input.onRunFinished, finishedRun, committedVersion)
     const result = {
       id: job.id,
       syncId: sync.id,
       datasetId: dataset.id,
       mode: sync.config.mode,
       startedAt: startedRun.startedAt,
-      finishedAt: requireFinishedAt(job.id, finishedRun.finishedAt),
+      finishedAt,
       rowsRead,
     }
     return version
@@ -456,6 +465,7 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
             details: { syncId: sync.id, runId: job.id },
           }),
         })
+        await notifyRunFinished(input.onRunFinished, run)
         if (status === "failed" && run.status === "failed") input.onRunFailed?.(error, run)
       } catch {
         // The run did not transition to the requested terminal status.
@@ -465,5 +475,19 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
     throw error
   } finally {
     await logSession.flush()
+  }
+}
+
+async function notifyRunFinished(
+  handler: SyncRunFinishedHandler | undefined,
+  run: SyncRunRecord,
+  createdVersion?: DatasetVersion
+): Promise<void> {
+  try {
+    await handler?.(run, createdVersion)
+  } catch (error) {
+    // The built-in event log reports lost batches itself. Anything reaching here is a broken
+    // invariant in a custom lifecycle handler and must not change an already durable outcome.
+    console.error("[SixbSyncWorker] Sync run lifecycle handler failed:", error)
   }
 }
