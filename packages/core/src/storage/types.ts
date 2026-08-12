@@ -1,6 +1,7 @@
 import type { ActionRunStorage } from "./action-runs"
 import type { AgentStorage } from "./agents"
 import type { AuthStorage } from "./auth"
+import type { ExecutionStorage } from "./executions"
 import type { FileUploadSessionStore } from "./file-upload-sessions"
 import type { ObjectStorage } from "./objects/types"
 import type { OntologyStorage } from "./ontology"
@@ -264,6 +265,7 @@ export interface Storage {
   objects: ObjectStorage
   timeseries: TimeseriesStorage
   ontology: OntologyStorage
+  executions: ExecutionStorage
   auth?: AuthStorage
   agents?: AgentStorage
   actionRuns?: ActionRunStorage

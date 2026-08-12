@@ -3,6 +3,8 @@ import { InMemoryActionRunStorage } from "../action-runs"
 import { type AgentStorage, InMemoryAgentStorage } from "../agents"
 import { type AuthStorage, InMemoryAuthStorage } from "../auth"
 import { StorageTransactionError } from "../errors"
+import { InMemoryExecutionStorage } from "../executions/in-memory"
+import type { ExecutionStorage } from "../executions/types"
 import { type FileUploadSessionStore, InMemoryFileUploadSessions } from "../file-upload-sessions"
 import type { ObjectStorage } from "../objects"
 import { InMemoryObjectStorage } from "../objects/in-memory"
@@ -51,6 +53,7 @@ export class InMemoryStorage implements Storage {
   private readonly timeseriesStorage = new InMemoryTimeseriesStorage()
   private readonly ontologyStorage: InMemoryOntologyStorage
   private readonly authStorage = new InMemoryAuthStorage()
+  private readonly executionStorage = new InMemoryExecutionStorage(this.authStorage)
   private readonly agentStorage = new InMemoryAgentStorage()
   private readonly actionRunStorage = new InMemoryActionRunStorage()
   private readonly syncRunStorage = new InMemorySyncRunStorage()
@@ -63,6 +66,7 @@ export class InMemoryStorage implements Storage {
   private readonly rulesStorage = new InMemoryRulesStorage()
   private readonly fileUploadSessionStorage = new InMemoryFileUploadSessions()
   readonly auth: AuthStorage
+  readonly executions: ExecutionStorage
   readonly agents: AgentStorage
   readonly actionRuns: InMemoryActionRunStorage
   readonly syncRuns: SyncRunStorage
@@ -83,6 +87,7 @@ export class InMemoryStorage implements Storage {
     this.objects = createOperationScopedFacade(this.objectStorage, scope)
     this.timeseries = createOperationScopedFacade(this.timeseriesStorage, scope)
     this.auth = createAuthOperationScope(this.authStorage, scope)
+    this.executions = createOperationScopedFacade(this.executionStorage, scope)
     this.agents = createAgentOperationScope(this.agentStorage, scope)
     this.actionRuns = createOperationScopedFacade(this.actionRunStorage, scope)
     this.syncRuns = createOperationScopedFacade(this.syncRunStorage, scope)
@@ -221,6 +226,7 @@ export class InMemoryStorage implements Storage {
       timeseries: this.timeseriesStorage,
       ontology: this.ontologyStorage,
       auth: this.authStorage,
+      executions: this.executionStorage,
       agents: this.agentStorage,
       actionRuns: this.actionRunStorage,
       syncRuns: this.syncRunStorage,
@@ -245,6 +251,7 @@ export class InMemoryStorage implements Storage {
       timeseries: this.timeseriesStorage.snapshot(),
       ontology: this.ontologyStorage.snapshot(),
       auth: this.authStorage.snapshot(),
+      executions: this.executionStorage.snapshot(),
       agents: this.agentStorage.snapshot(),
       actionRuns: this.actionRunStorage.snapshot(),
       syncRuns: this.syncRunStorage.snapshot(),
@@ -264,6 +271,7 @@ export class InMemoryStorage implements Storage {
     this.timeseriesStorage.restore(snapshot.timeseries)
     this.ontologyStorage.restore(snapshot.ontology)
     this.authStorage.restore(snapshot.auth)
+    this.executionStorage.restore(snapshot.executions)
     this.agentStorage.restore(snapshot.agents)
     this.actionRunStorage.restore(snapshot.actionRuns)
     this.syncRunStorage.restore(snapshot.syncRuns)
@@ -283,6 +291,7 @@ export interface InMemoryStorageSnapshot {
   readonly timeseries: ReturnType<InMemoryTimeseriesStorage["snapshot"]>
   readonly ontology: ReturnType<InMemoryOntologyStorage["snapshot"]>
   readonly auth: ReturnType<InMemoryAuthStorage["snapshot"]>
+  readonly executions: ReturnType<InMemoryExecutionStorage["snapshot"]>
   readonly agents: ReturnType<InMemoryAgentStorage["snapshot"]>
   readonly actionRuns: ReturnType<InMemoryActionRunStorage["snapshot"]>
   readonly syncRuns: ReturnType<InMemorySyncRunStorage["snapshot"]>

@@ -3,8 +3,9 @@
 PostgreSQL storage provider for Sixb.
 
 One shared connection pool (porsager `postgres`) backs every Sixb store: objects, ontology commits,
-auth, agents, timeseries, and the run history for actions, syncs, pipelines, projections, workflows,
-and webhooks. This is the provider to use for anything you intend to operate.
+auth, agents, the immutable execution ledger, timeseries, and the run history for actions, syncs,
+pipelines, projections, workflows, and webhooks. This is the provider to use for anything you intend
+to operate.
 
 ## Install
 
@@ -33,10 +34,10 @@ other applications; it is pinned through `search_path` on every pooled connectio
 `PostgresStorage` exposes core's `StorageMigrator` contract. The CLI runs it at startup and
 `sixb db migrate` runs it on demand — you do not write migrations, they ship inside this package.
 
-Before 1.0 the schema is a single migration whose checksum is verified at boot. A schema change
-**replaces** that migration instead of adding another, so moving between 0.x versions can require
-recreating the database. `dropSchema()` exists for exactly that, and for test teardown — it deletes
-every Sixb table and the schema itself.
+Applied migrations are checksummed. Schema changes ship as new ordered steps; changing an already
+applied step fails startup instead of silently rewriting migration history. Before 1.0, an explicitly
+breaking migration may still require recreating the database. `dropSchema()` exists for exactly
+that, and for test teardown — it deletes every Sixb table and the schema itself.
 
 ## Pooling and timeouts
 

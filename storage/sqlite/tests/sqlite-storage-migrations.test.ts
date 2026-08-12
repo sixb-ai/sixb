@@ -36,6 +36,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 3,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "004-executions",
+    status: "applied",
+    version: 4,
+  },
 ]
 
 afterEach(async () => {
@@ -526,7 +533,7 @@ describe("SQLite migration status is read-only", () => {
     expect(await migrator?.status()).toMatchObject({
       adapterId: SQLITE_STORAGE_ADAPTER_ID,
       state: "current",
-      appliedVersion: 3,
+      appliedVersion: 4,
     })
 
     expect(statSync(path).mtimeMs).toBe(before)

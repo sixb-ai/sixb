@@ -131,6 +131,12 @@
       "import": "./dist/events/index.js",
       "default": "./dist/events/index.js"
     },
+    "./internal/execution-storage": {
+      "types": "./dist/storage/executions/provider.d.ts",
+      "bun": "./src/storage/executions/provider.ts",
+      "import": "./dist/storage/executions/provider.js",
+      "default": "./dist/storage/executions/provider.js"
+    },
     "./internal/http": {
       "types": "./dist/http/index.d.ts",
       "bun": "./src/http/index.ts",
