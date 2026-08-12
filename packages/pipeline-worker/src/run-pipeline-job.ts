@@ -10,7 +10,12 @@ import {
   throwIfAborted,
 } from "./errors"
 import { runStep } from "./run-step"
-import type { PipelineRunResult, PipelineStepRunResult, RunPipelineJobInput } from "./types"
+import type {
+  PipelineRunFinishedHandler,
+  PipelineRunResult,
+  PipelineStepRunResult,
+  RunPipelineJobInput,
+} from "./types"
 
 export class PipelineRunAlreadyStartedError extends Error {
   override readonly name = "PipelineRunAlreadyStartedError"
@@ -97,17 +102,19 @@ export async function runPipelineJob(input: RunPipelineJobInput): Promise<Pipeli
       }
       throw error
     }
-    finished = true
+    const finishedRun = {
+      ...run,
+      finishedAt: requireFinishedAt({
+        pipelineId: pipeline.id,
+        runId: job.id,
+        finishedAt: run.finishedAt,
+      }),
+    }
 
+    finished = true
+    await notifyRunFinished(input.onRunFinished, finishedRun)
     return {
-      run: {
-        ...run,
-        finishedAt: requireFinishedAt({
-          pipelineId: pipeline.id,
-          runId: job.id,
-          finishedAt: run.finishedAt,
-        }),
-      },
+      run: finishedRun,
       steps,
       version: finalVersion,
     }
@@ -126,6 +133,7 @@ export async function runPipelineJob(input: RunPipelineJobInput): Promise<Pipeli
           }),
         })
         if (status === "failed" && run.status === "failed") input.onRunFailed?.(error, run)
+        await notifyRunFinished(input.onRunFinished, run)
       } catch {
         // The run did not transition to the requested terminal status.
       }
@@ -134,5 +142,18 @@ export async function runPipelineJob(input: RunPipelineJobInput): Promise<Pipeli
     throw error
   } finally {
     await logSession.flush()
+  }
+}
+
+async function notifyRunFinished(
+  handler: PipelineRunFinishedHandler | undefined,
+  run: PipelineRunRecord
+): Promise<void> {
+  try {
+    await handler?.(run)
+  } catch (error) {
+    // The built-in event log reports lost batches itself. Anything reaching here is a broken
+    // invariant in a custom lifecycle handler and must not change an already durable outcome.
+    console.error("[SixbPipelineWorker] Pipeline run lifecycle handler failed:", error)
   }
 }

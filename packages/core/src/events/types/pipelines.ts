@@ -59,6 +59,7 @@ export interface PipelineRunFinishedEvent extends EventEnvelope {
     status: "succeeded" | "failed" | "cancelled"
     datasetId?: string
     versionId?: string
+    error?: SixbFailure<PipelineRunFailureCode>
   }
 }
 

@@ -12,12 +12,7 @@ import {
   emitPipelineRunStepStarted,
 } from "./events"
 import { PipelineRunAlreadyStartedError, runPipelineJob } from "./run-pipeline-job"
-import type {
-  PipelineJob,
-  PipelineRunResult,
-  PipelineWorkerContext,
-  PipelineWorkerHost,
-} from "./types"
+import type { PipelineJob, PipelineWorkerContext, PipelineWorkerHost } from "./types"
 
 export class PipelineWorker extends QueueWorker<
   PipelineRunRequestedQueueJob,
@@ -62,13 +57,13 @@ export class PipelineWorker extends QueueWorker<
     })
     const context = { ...this.context, id: execution.sixb.execution.projectId }
 
-    let result: PipelineRunResult
     try {
-      result = await runPipelineJob({
+      await runPipelineJob({
         runtime: context,
         job: pipelineJob,
         signal,
         onRunStarted: (run) => emitPipelineRunStarted(this.host.events, run),
+        onRunFinished: (run) => emitPipelineRunFinished(this.host.events, run),
         onRunFailed: (error, run) => {
           reportRunFailure(this.host, error, {
             projectId: this.host.id,
@@ -91,27 +86,12 @@ export class PipelineWorker extends QueueWorker<
       if (error instanceof PipelineRunAlreadyStartedError) return
       throw error
     }
-
-    await emitPipelineRunFinished(this.host.events, {
-      id: pipelineJob.id,
-      pipelineId: pipelineJob.pipelineId,
-      status: "succeeded",
-      datasetId: result.version?.datasetId,
-      versionId: result.version?.versionId,
-    })
   }
 
   protected override async onExecutionError(
-    claimed: ClaimedQueueJob<PipelineRunRequestedQueueJob>,
+    _claimed: ClaimedQueueJob<PipelineRunRequestedQueueJob>,
     _error: unknown
   ): Promise<QueueWorkerFailureDecision> {
-    const { job } = claimed
-    await emitPipelineRunFinished(this.host.events, {
-      id: job.payload.runId ?? `${job.id}:attempt:${job.attempt}`,
-      pipelineId: job.payload.pipelineId,
-      status: "failed",
-    })
-
     // Pipeline runs are not all-or-nothing in V1. A previous step may have committed an append
     // output, so failed pipeline jobs must not be retried automatically.
     return { kind: "fail" }
@@ -132,12 +112,6 @@ export class PipelineWorker extends QueueWorker<
     }
 
     // After a step commit, rerunning the whole pipeline could duplicate append outputs.
-    await emitPipelineRunFinished(this.host.events, {
-      id: pipelineJob.id,
-      pipelineId: pipelineJob.pipelineId,
-      status: "cancelled",
-    })
-
     return { kind: "fail" }
   }
 }

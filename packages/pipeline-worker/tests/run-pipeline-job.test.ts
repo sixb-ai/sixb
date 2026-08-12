@@ -18,7 +18,11 @@ import type {
   ExecuteSqlTransformInput,
   LakeSqlTransformCapabilities,
 } from "@sixb/core/lake-storage"
-import type { PipelineRunStorage } from "@sixb/core/storage"
+import type {
+  FinishPipelineRunInput,
+  PipelineRunRecord,
+  PipelineRunStorage,
+} from "@sixb/core/storage"
 import { InMemoryPipelineRunStorage } from "@sixb/core/storage"
 import { createPipelineBookkeepingError, createStepBookkeepingError } from "../src/errors"
 import { runPipelineJob } from "../src/run-pipeline-job"
@@ -125,6 +129,12 @@ class SqlTransformLakeStorage extends InMemoryLakeStorage implements LakeStorage
         expectedLatestVersionId: input.expectedLatestVersionId,
       })
     },
+  }
+}
+
+class RejectingFinishPipelineRunStorage extends InMemoryPipelineRunStorage {
+  override async finish(_input: FinishPipelineRunInput): Promise<PipelineRunRecord> {
+    throw new Error("pipeline run storage unavailable")
   }
 }
 
@@ -257,6 +267,35 @@ describe("runPipelineJob", () => {
     expect(steps.steps).toHaveLength(0)
   })
 
+  test("does not notify a terminal run when the durable transition fails", async () => {
+    const cleanStep = definePipelineStep("clean-customers")
+      .inputs({ rawCustomers: rawCustomersDataset })
+      .output(customersDataset)
+      .run(async () => {})
+    const pipelineRunsStorage = new RejectingFinishPipelineRunStorage()
+    const runtime = createRuntime({
+      pipelines: [definePipeline("customers").then(cleanStep)],
+      datasets: [rawCustomersDataset, customersDataset],
+      pipelineRunsStorage,
+    })
+    const finishedRuns: PipelineRunRecord[] = []
+
+    await expect(
+      runPipelineJob({
+        runtime,
+        job: { id: "run_finish_rejected", pipelineId: "customers" },
+        onRunFinished(run) {
+          finishedRuns.push(run)
+        },
+      })
+    ).rejects.toThrow("has no committed version")
+
+    expect(finishedRuns).toHaveLength(0)
+    expect(
+      await pipelineRunsStorage.getById({ projectId: runtime.id, id: "run_finish_rejected" })
+    ).toMatchObject({ status: "running" })
+  })
+
   test("runs a JS step with pinned input readers and commits one output version", async () => {
     const lakeStorage = new InMemoryLakeStorage()
     const seededVersion = await seedDatasetVersion(lakeStorage, rawCustomersDataset, [
@@ -290,12 +329,16 @@ describe("runPipelineJob", () => {
       lakeStorage,
       pipelineRunsStorage,
     })
+    const finishedRuns: PipelineRunRecord[] = []
 
     const result = await runPipelineJob({
       runtime,
       job: {
         id: "run_clean",
         pipelineId: "customers",
+      },
+      onRunFinished(run) {
+        finishedRuns.push(run)
       },
     })
 
@@ -339,6 +382,8 @@ describe("runPipelineJob", () => {
         versionId: result.version?.versionId,
       },
     })
+    if (!run) throw new Error("Expected the pipeline run to be persisted.")
+    expect(finishedRuns).toEqual([run])
 
     const stepRuns = await pipelineRunsStorage.listSteps({
       projectId: runtime.id,
@@ -433,6 +478,7 @@ describe("runPipelineJob", () => {
       lakeStorage,
       pipelineRunsStorage,
     })
+    const finishedRuns: PipelineRunRecord[] = []
 
     await expect(
       runPipelineJob({
@@ -440,6 +486,9 @@ describe("runPipelineJob", () => {
         job: {
           id: "run_failure",
           pipelineId: "customers",
+        },
+        onRunFinished(run) {
+          finishedRuns.push(run)
         },
       })
     ).rejects.toThrow("stats exploded")
@@ -450,6 +499,8 @@ describe("runPipelineJob", () => {
     })
     expect(run?.status).toBe("failed")
     expect(run?.output).toBeUndefined()
+    if (!run) throw new Error("Expected the failed pipeline run to be persisted.")
+    expect(finishedRuns).toEqual([run])
 
     const stepRuns = await pipelineRunsStorage.listSteps({
       projectId: runtime.id,
