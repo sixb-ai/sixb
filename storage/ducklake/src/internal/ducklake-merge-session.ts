@@ -108,6 +108,7 @@ class DuckLakeMergeSession implements LakeMergeSession {
       if (batch.length >= MERGE_CHANGE_BATCH_SIZE) {
         await this.appendBatchToStagingTable(batch)
         batch = []
+        await Bun.sleep(0)
       }
     }
 

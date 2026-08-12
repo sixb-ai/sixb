@@ -94,15 +94,22 @@ const report = await lakeStorage.runMaintenance({
 Reads, writes, SQL previews, and SQL transforms use the same DuckDB runtime and
 the same DuckLake PostgreSQL metadata pool. Work is serialized inside one
 `DuckLakeStorage` instance, so a queued DuckDB operation makes later operations
-wait. Only actual DuckDB work holds the runtime: batch appends, commits, SQL
-transforms, and metadata reads. A large streaming read can also make a later
-write wait until the stream is consumed or closed.
+wait. Only actual DuckDB work holds the runtime: bounded read pages, batch
+appends, commits, SQL transforms, and metadata reads.
+
+Large `readRows(...)` calls materialize bounded pages, using a physical-row keyset when available,
+and release the DuckDB queue between pages. This also applies when an explicit limit exceeds one
+page. A JavaScript pipeline can therefore stream one DuckLake dataset directly into another on the
+same provider without buffering the complete input or deadlocking at the destination appender's
+first flush. The read remains pinned to one immutable snapshot and keeps its attachment lease until
+the iterator completes or closes.
 
 A write does not hold the runtime while its source iterable is producing rows.
 `writeRows(...)` validates and stages rows in bounded in-memory batches, then
 takes a queue slot only to flush each batch into the staging table. Slow external
 reads (pagination, APIs, SFTP, retries) run outside the queue, so other reads and
-write batches can interleave between a write's batches.
+write batches can interleave between a write's batches. Large in-memory writes
+also yield to the event loop between batches.
 
 ```txt
 same provider instance:
