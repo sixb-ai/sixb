@@ -1,3 +1,5 @@
+import type { SixbFailure } from "../../errors/types"
+import type { WorkflowRunFailureCode } from "../../storage/workflow-runs/types"
 import type { WorkflowRunSource } from "../../workflows/types"
 import type { EventEnvelope } from "../envelope"
 
@@ -85,7 +87,7 @@ export interface WorkflowRunNodeFinishedEvent extends EventEnvelope {
     nodeKey: string
     status: "succeeded" | "failed" | "cancelled"
     finishedAt: string
-    error?: string
+    error?: SixbFailure<WorkflowRunFailureCode>
   }
 }
 
@@ -98,7 +100,7 @@ export interface WorkflowRunFinishedEvent extends EventEnvelope {
     runId: string
     status: "succeeded" | "failed" | "cancelled"
     finishedAt: string
-    error?: string
+    error?: SixbFailure<WorkflowRunFailureCode>
   }
 }
 

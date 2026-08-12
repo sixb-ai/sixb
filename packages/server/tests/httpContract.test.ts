@@ -1918,6 +1918,12 @@ describe("SixbServer HTTP contract", () => {
           pendingInterventionId: pending.id,
         }),
       })
+      expect(workflowEvents[1]).toMatchObject({
+        payload: expect.objectContaining({ error: cancelledNode?.error }),
+      })
+      expect(workflowEvents[2]).toMatchObject({
+        payload: expect.objectContaining({ error: cancelledRun?.error }),
+      })
     })
   })
 

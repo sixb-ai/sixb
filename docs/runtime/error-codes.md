@@ -35,6 +35,7 @@ Each primitive specializes `TCode` to the codes it can persist. Most migrated ru
 Webhook runs allow `internal.unexpected | webhook.delivery_failed`; only retryable post-claim
 failures use the delivery code. The idempotency journal and run reuse the same failure record.
 Expected non-retryable outcomes remain represented by their HTTP status and claim result.
+Workflow completion events reuse the exact failure stored on the run or node.
 The ontology outbox declares `event.delivery_failed`; its durable record is retained while publication
 is retried.
 
