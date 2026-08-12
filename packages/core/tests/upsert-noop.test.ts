@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from "bun:test"
 import { defineObjectType, link, prop, SixbHost } from "../src"
-import type { EventsRuntime } from "../src/events"
+import type { DomainEventService } from "../src/events"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps, waitFor } from "./test-runtime-deps"
 
@@ -30,7 +30,7 @@ function createRuntime() {
   const host = new SixbHost({ ontology: [Source, Target], ...deps })
   const sixb = createTestSixb(host)
   // Mutations write durable outbox facts, so publication is the observable delivery boundary.
-  const events = host.events as EventsRuntime
+  const events = host.events as DomainEventService
   const publish = events.publishEnvelopes.bind(events)
   const publishSpy = mock(publish)
   events.publishEnvelopes = publishSpy

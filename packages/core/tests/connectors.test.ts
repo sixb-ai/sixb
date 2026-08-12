@@ -68,9 +68,10 @@ describe("connectors", () => {
       connectors: [erpDb],
       ...createTestRuntimeDeps(),
     })
-    const first = await host.connector(erpDb)
-    await host.connectors.disconnectAll()
-    const second = await host.connector(erpDb)
+    const sixb = createTestSixb(host)
+    const first = await sixb.connector(erpDb)
+    await host.closeConnectors()
+    const second = await sixb.connector(erpDb)
 
     expect(disconnectCount).toBe(1)
     expect(connectCount).toBe(2)
@@ -92,15 +93,18 @@ describe("connectors", () => {
       },
     })
 
-    const sixb = createTestSixb({
+    const host = new SixbHost({
       ontology: [Room],
       connectors: [erpDb, hubspot],
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.connectors.list().map((connector) => connector.id)).toEqual(["erpDb", "hubspot"])
-    expect(sixb.connectors.getById("erpDb")).toBe(erpDb)
-    expect(sixb.connectors.getById("missing")).toBeNull()
+    expect(host.definitions.connectors.list().map((connector) => connector.id)).toEqual([
+      "erpDb",
+      "hubspot",
+    ])
+    expect(host.definitions.connectors.getById("erpDb")).toBe(erpDb)
+    expect(host.definitions.connectors.getById("missing")).toBeNull()
   })
 
   test("rejects an unknown connector with ConnectorNotFoundError", async () => {

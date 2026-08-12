@@ -74,13 +74,13 @@ export async function migrateRuntimeStorage(sixb: LoadedSixbHost): Promise<void>
 export async function checkRuntimeLakeDefinitions(sixb: LoadedSixbHost): Promise<void> {
   await assertLakeDatasetDefinitionsCompatible({
     lakeStorage: sixb.lakeStorage,
-    definitions: sixb.datasets.list(),
+    definitions: sixb.definitions.datasets.list(),
   })
 }
 
 export async function stopSixbProviders(sixb: LoadedSixbHost): Promise<void> {
   await stopQuietly(() => flushSixbErrors(sixb))
-  await stopQuietly(() => sixb.connectors.disconnectAll())
+  await stopQuietly(() => sixb.closeConnectors())
   await stopQuietly(() => closeProvider(sixb.queues))
   // Stop tracked outbox publication before closing the storage it claims from.
   await stopQuietly(() => sixb.closeBroker())
@@ -88,14 +88,14 @@ export async function stopSixbProviders(sixb: LoadedSixbHost): Promise<void> {
   await stopQuietly(() => flushSixbErrors(sixb))
   await stopQuietly(() => closeProvider(sixb.storage))
   await stopQuietly(() => closeProvider(sixb.lakeStorage))
-  await stopQuietly(() => closeProvider(sixb.blobs))
+  await stopQuietly(() => sixb.closeBlobs())
   await stopQuietly(() => sixb.closeLogger())
 }
 
 export async function startRulesRuntime(sixb: LoadedSixbHost): Promise<RunningRulesRuntime> {
   let rulesWorker: RulesWorker | null = null
 
-  if (sixb.rules.list().length > 0) {
+  if (sixb.definitions.rules.list().length > 0) {
     rulesWorker = new RulesWorker(sixb)
     await rulesWorker.start()
   }
@@ -111,11 +111,11 @@ export async function startRulesRuntime(sixb: LoadedSixbHost): Promise<RunningRu
 export async function startSchedulerRuntime(
   sixb: LoadedSixbHost
 ): Promise<RunningSchedulerRuntime> {
-  await sixb.schedules.start()
+  await sixb.scheduler.start()
 
   return {
     async stop() {
-      await stopQuietly(() => sixb.schedules.stop())
+      await stopQuietly(() => sixb.scheduler.stop())
     },
   }
 }
@@ -125,11 +125,11 @@ export async function startOrchestratorRuntime(
 ): Promise<RunningOrchestratorRuntime> {
   const projections = getProjectionDispatchDescriptors(sixb)
   const { routes, diagnostics } = compileRoutesWithDiagnostics({
-    schedules: sixb.schedules.list(),
-    syncs: sixb.syncs.list(),
-    pipelines: sixb.pipelines.list(),
+    schedules: sixb.definitions.schedules.list(),
+    syncs: sixb.definitions.syncs.list(),
+    pipelines: sixb.definitions.pipelines.list(),
     projections,
-    workflows: sixb.workflows.list(),
+    workflows: sixb.definitions.workflows.list(),
   })
   const warnings = diagnostics.map(formatRouteDiagnosticWarning)
   let orchestratorWorker: OrchestratorWorker | null = null
@@ -228,35 +228,35 @@ export async function startSixbRuntime(
     rulesWorker = rulesRuntime.rulesWorker
 
     if (options.cohostWorkers) {
-      if (sixb.actions.list().length > 0) {
+      if (sixb.definitions.actions.list().length > 0) {
         actionWorker = new ActionWorker(sixb)
         await actionWorker.start()
       }
 
-      if (sixb.agents.list().length > 0 && sixb.storage.agents) {
+      if (sixb.definitions.agents.list().length > 0 && sixb.storage.agents) {
         agentWorker = new AgentWorker(sixb, {
           apiBaseUrl: requireAgentApiBaseUrl(options.agentApiBaseUrl),
         })
         await agentWorker.start()
       }
 
-      const projectionCount = sixb.projections.list().length
+      const projectionCount = sixb.definitions.projections.list().length
       if (projectionCount > 0) {
         projectionWorker = new ProjectionWorker(sixb)
         await projectionWorker.start()
       }
 
-      if (sixb.pipelines.list().length > 0) {
+      if (sixb.definitions.pipelines.list().length > 0) {
         pipelineWorker = new PipelineWorker(sixb)
         await pipelineWorker.start()
       }
 
-      if (sixb.workflows.list().length > 0) {
+      if (sixb.definitions.workflows.list().length > 0) {
         workflowWorker = new WorkflowWorker(sixb)
         await workflowWorker.start()
       }
 
-      if (sixb.syncs.list().length > 0) {
+      if (sixb.definitions.syncs.list().length > 0) {
         syncWorker = new SyncWorker(sixb)
         await syncWorker.start()
       }

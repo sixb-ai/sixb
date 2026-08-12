@@ -1,3 +1,3 @@
 export { SchedulerError, SchedulerValidationError } from "./errors"
-export type { SchedulerRuntimeOptions } from "./runtime"
+export type { SchedulerController, SchedulerRuntimeOptions } from "./runtime"
 export { SchedulerRuntime } from "./runtime"

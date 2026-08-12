@@ -5,16 +5,16 @@ export {
   noopLoggerProvider,
 } from "./console-logger"
 export {
+  LoggingService,
+  type LoggingServiceOptions,
   type LogsObservabilityOptions,
   type LogsPage,
   type LogsReadInput,
-  LogsRuntime,
-  type LogsRuntimeOptions,
   type LogsSubscribeInput,
   type LogsTailInput,
   type ObservabilityOptions,
-  resolveLogsRuntime,
-} from "./runtime"
+  resolveLoggingService,
+} from "./service"
 export {
   DEFAULT_LOGS_MAX_BYTES,
   DEFAULT_LOGS_RETENTION,

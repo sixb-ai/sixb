@@ -1,5 +1,5 @@
 import type { LanguageModelV4, LanguageModelV4CallOptions } from "@ai-sdk/provider"
-import type { ConnectorAdapter, ConnectorClient, ConnectorDefinition } from "../connectors"
+import type { ConnectorRuntime } from "../connectors"
 import type { JsonPrimitive, JsonValue, ReadonlyJsonValue } from "../json"
 import type { Logger } from "../logging"
 import type { InferSchema } from "../ontology/inference"
@@ -74,9 +74,7 @@ export interface AgentToolRunContext<
   readonly input: TInput
   readonly signal: AbortSignal
   readonly run: AgentToolRunInfo
-  connector<TAdapter extends ConnectorAdapter>(
-    definition: ConnectorDefinition<string, TAdapter>
-  ): Promise<ConnectorClient<TAdapter>>
+  readonly connector: ConnectorRuntime
   readonly logger: Logger
 }
 

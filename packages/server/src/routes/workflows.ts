@@ -1,7 +1,7 @@
 import {
   type OntologySource,
   type Principal,
-  type SixbHostRuntime,
+  type SixbHostView,
   SYSTEM_PRINCIPAL,
   type WorkflowDefinition,
 } from "@sixb/core"
@@ -210,7 +210,7 @@ function serializeWorkflowIntervention(intervention: WorkflowInterventionRecord)
 }
 
 async function workflowRunFileContentResponse(
-  host: SixbHostRuntime,
+  host: SixbHostView,
   context: {
     readonly params: { readonly runId: string }
     readonly query: unknown
@@ -227,7 +227,7 @@ async function workflowRunFileContentResponse(
   }
 
   return createContextualFileContentResponse({
-    blobStorage: host.blobs,
+    blobStorage: host.blobStorage,
     query: context.query,
     querySchema: WorkflowRunFileContentQuerySchema,
     request: context.request,
@@ -241,7 +241,7 @@ async function workflowRunFileContentResponse(
 }
 
 async function workflowNodeFileContentResponse(
-  host: SixbHostRuntime,
+  host: SixbHostView,
   context: {
     readonly params: { readonly runId: string; readonly nodeKey: string }
     readonly query: unknown
@@ -258,7 +258,7 @@ async function workflowNodeFileContentResponse(
   }
 
   return createContextualFileContentResponse({
-    blobStorage: host.blobs,
+    blobStorage: host.blobStorage,
     query: context.query,
     querySchema: WorkflowNodeFileContentQuerySchema,
     request: context.request,
@@ -391,7 +391,7 @@ function assertPendingIntervention(intervention: WorkflowInterventionRecord): vo
 }
 
 async function emitWorkflowInterventionSubmitted(
-  host: SixbHostRuntime,
+  host: SixbHostView,
   intervention: WorkflowInterventionRecord
 ): Promise<void> {
   if (!intervention.submittedAt) {
@@ -416,7 +416,7 @@ async function emitWorkflowInterventionSubmitted(
 }
 
 async function emitWorkflowInterventionCancelled(input: {
-  readonly host: SixbHostRuntime
+  readonly host: SixbHostView
   readonly workflow: WorkflowDefinition
   readonly intervention: WorkflowInterventionRecord
   readonly node: WorkflowNodeRunRecord
@@ -477,7 +477,7 @@ async function emitWorkflowInterventionCancelled(input: {
 }
 
 async function emitWorkflowRunCancelled(input: {
-  readonly host: SixbHostRuntime
+  readonly host: SixbHostView
   readonly workflow: WorkflowDefinition
   readonly run: WorkflowRunRecord
   readonly node?: WorkflowNodeRunRecord
@@ -522,7 +522,7 @@ async function emitWorkflowRunCancelled(input: {
   })
 }
 
-export function registerWorkflowRoutes(app: Elysia, host: SixbHostRuntime) {
+export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
   return app
     .get(
       "/api/workflows",
@@ -693,7 +693,7 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostRuntime) {
             workflowId: workflow.id,
             intervention: node.intervention,
             value: parsedBody.response,
-            valueTypesById: host.ontology.getValueTypesById(),
+            valueTypesById: host.definitions.ontology.getValueTypesById(),
           })
 
           const submitted = await storage.submit({

@@ -3,7 +3,7 @@ import type {
   RuleDefinition,
   RuleEventSubject,
   RulePredicate,
-  RulesRuntime,
+  SixbDefinitions,
   Storage,
 } from "@sixb/core"
 import type {
@@ -40,7 +40,7 @@ export interface RulesWorkerHost {
   readonly id: string
   readonly events: DomainEventLog
   readonly storage: Storage
-  readonly rules: Pick<RulesRuntime, "list">
+  readonly definitions: Pick<SixbDefinitions, "rules">
 }
 
 export interface RulesWorkerOptions {

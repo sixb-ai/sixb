@@ -1,4 +1,4 @@
-import { logLevelsAtOrAbove, type SixbHostRuntime } from "@sixb/core"
+import { logLevelsAtOrAbove, type SixbHostView } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
@@ -7,7 +7,7 @@ import { ErrorResponseSchema } from "../schemas/common"
 import { DEFAULT_LOGS_PAGE_LIMIT, LogsQuerySchema, LogsResponseSchema } from "../schemas/logs"
 import { handleRouteError } from "../utils/http"
 
-export function registerLogRoutes(app: Elysia, _host: SixbHostRuntime) {
+export function registerLogRoutes(app: Elysia, _host: SixbHostView) {
   return app.get(
     "/api/logs",
     async (context) => {

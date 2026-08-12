@@ -12,8 +12,7 @@ export {
 } from "./builders"
 // ── Errors ──────────────────────────────────────────────────
 export { ProjectionValidationError } from "./errors"
-export type { ProjectionsRuntime } from "./runtime"
-export { createProjectionsRuntime } from "./runtime"
+export type { ProjectionDefinitionCatalog } from "./registry"
 // ── Types ────────────────────────────────────────────────────
 export type {
   ForeignKeyDescriptor,

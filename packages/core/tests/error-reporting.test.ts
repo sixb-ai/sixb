@@ -9,7 +9,7 @@ import {
   reportRuleEvaluationFailure,
   reportRunFailure,
 } from "../src/error-reporting/internal"
-import { EventsRuntime } from "../src/events"
+import { DomainEventService } from "../src/events"
 
 const PROJECT_ID = "error-reporting-tests"
 const OCCURRED_AT = "2026-07-29T12:00:00.000Z"
@@ -291,7 +291,7 @@ describe("Sixb error reporting", () => {
         reports.push({ error, context })
       })
       const appendFailure = new Error("broker unavailable")
-      const events = eventsRuntimeFor(host)
+      const events = eventServiceFor(host)
       spyOn(events, "append").mockImplementation(() => Promise.reject(appendFailure))
 
       await events.emit(
@@ -332,7 +332,7 @@ describe("Sixb error reporting", () => {
     })
     try {
       const host = {}
-      const events = eventsRuntimeFor(host)
+      const events = eventServiceFor(host)
       spyOn(events, "append").mockImplementation(() =>
         Promise.reject(new Error("broker unavailable"))
       )
@@ -361,7 +361,7 @@ describe("Sixb error reporting", () => {
     attachSixbErrorReporter(host, (_error, context) => {
       reports.push(context)
     })
-    const events = eventsRuntimeFor(host)
+    const events = eventServiceFor(host)
     spyOn(events, "append").mockImplementation(() => Promise.resolve([]))
 
     await events.emit(
@@ -382,6 +382,6 @@ describe("Sixb error reporting", () => {
 })
 
 // The broker is never reached: every test here spies on `append`, which is the seam `emit` wraps.
-function eventsRuntimeFor(host: object): EventsRuntime {
-  return new EventsRuntime({ projectId: PROJECT_ID, broker: {} as Broker, host })
+function eventServiceFor(host: object): DomainEventService {
+  return new DomainEventService({ projectId: PROJECT_ID, broker: {} as Broker, host })
 }

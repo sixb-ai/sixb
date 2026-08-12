@@ -1,4 +1,4 @@
-import { AuthorizationError, type SixbHostRuntime } from "@sixb/core"
+import { AuthorizationError, type SixbHostView } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
@@ -6,7 +6,7 @@ import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import { EventsQuerySchema, EventsResponseSchema } from "../schemas/events"
 import { parseOptionalInt } from "../utils/http"
-export function registerEventRoutes(app: Elysia, _host: SixbHostRuntime) {
+export function registerEventRoutes(app: Elysia, _host: SixbHostView) {
   return app.get(
     "/api/events",
     async (context) => {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryBroker } from "../src"
-import { EventsRuntime, toStoredEvent } from "../src/events"
+import { DomainEventService, toStoredEvent } from "../src/events"
 
 describe("workflow runtime events", () => {
   test("stores workflow lifecycle events with workflow topic and run partition", () => {
@@ -168,7 +168,7 @@ describe("workflow runtime events", () => {
   })
 
   test("appends and reads workflow lifecycle events through the events runtime", async () => {
-    const eventsRuntime = new EventsRuntime({
+    const eventsRuntime = new DomainEventService({
       projectId: "project-a",
       broker: new InMemoryBroker(),
     })

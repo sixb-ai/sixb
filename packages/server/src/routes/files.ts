@@ -3,7 +3,7 @@ import {
   DEFAULT_SIMPLE_FILE_UPLOAD_BYTES,
   type FileRef,
   InMemoryFileUploadSessions,
-  type SixbHostRuntime,
+  type SixbHostView,
   SYSTEM_PRINCIPAL,
 } from "@sixb/core"
 import { computeBlobDigest, supportsDirectUpload } from "@sixb/core/blob-storage/server"
@@ -36,7 +36,7 @@ import { RequestBodyTooLargeError, readRequestBodyWithLimit } from "../utils/req
 // form route (it is unrelated to the removed multipart upload strategy).
 export const DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES = DEFAULT_SIMPLE_FILE_UPLOAD_BYTES + 1024 * 1024
 
-export function registerFileRoutes(app: Elysia, host: SixbHostRuntime) {
+export function registerFileRoutes(app: Elysia, host: SixbHostView) {
   // Staged/direct-put upload sessions default to an in-memory store: they are NOT
   // durable across restart and NOT shared across instances. A durable Pg/Sqlite
   // store is a follow-up; deployments needing durability supply their own via
@@ -78,7 +78,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostRuntime) {
             }
           }
 
-          const fileRef = await host.blobs.put({
+          const fileRef = await host.blobStorage.put({
             body: file,
             fileName: file.name || undefined,
             mediaType: file.type || undefined,
@@ -135,10 +135,10 @@ export function registerFileRoutes(app: Elysia, host: SixbHostRuntime) {
           const expiresAt = createUploadExpiresAt()
           const expectedDigest = parsed.digest as BlobDigest | undefined
           const providerUpload =
-            supportsDirectUpload(host.blobs) &&
+            supportsDirectUpload(host.blobStorage) &&
             expectedDigest !== undefined &&
             parsed.sizeBytes !== undefined
-              ? await host.blobs.createUpload({
+              ? await host.blobStorage.createUpload({
                   uploadId,
                   expiresAt,
                   ...(parsed.fileName === undefined ? {} : { fileName: parsed.fileName }),
@@ -224,7 +224,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostRuntime) {
             return { error: digestError }
           }
 
-          const fileRef = await host.blobs.put({
+          const fileRef = await host.blobStorage.put({
             body: uploadBytes,
             ...(session.fileName === undefined ? {} : { fileName: session.fileName }),
             ...(session.mediaType === undefined ? {} : { mediaType: session.mediaType }),
@@ -290,12 +290,12 @@ export function registerFileRoutes(app: Elysia, host: SixbHostRuntime) {
             return { error: "Upload session does not use multipart strategy." }
           }
 
-          if (!supportsDirectUpload(host.blobs)) {
+          if (!supportsDirectUpload(host.blobStorage)) {
             set.status = 400
             return { error: "Blob storage does not support direct uploads." }
           }
 
-          const signedPart = await host.blobs.signUploadPart({
+          const signedPart = await host.blobStorage.signUploadPart({
             uploadId: session.id,
             stagingKey: session.providerUpload.stagingKey,
             providerUploadId: session.providerUpload.providerUploadId,
@@ -366,7 +366,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostRuntime) {
                   expectedDigest: expected.digest,
                   expectedSizeBytes: expected.sizeBytes,
                   parts: parsed.parts,
-                  blobStorage: host.blobs,
+                  blobStorage: host.blobStorage,
                 })
 
           const identityError = expectedFileRefError(expected, fileRef)
@@ -414,12 +414,12 @@ export function registerFileRoutes(app: Elysia, host: SixbHostRuntime) {
           }
 
           if (session.status === "pending" && session.providerUpload) {
-            if (!supportsDirectUpload(host.blobs)) {
+            if (!supportsDirectUpload(host.blobStorage)) {
               set.status = 400
               return { error: "Blob storage does not support direct uploads." }
             }
 
-            await host.blobs.abortUpload({
+            await host.blobStorage.abortUpload({
               uploadId: session.id,
               stagingKey: session.providerUpload.stagingKey,
               providerUploadId: session.providerUpload.providerUploadId,
@@ -539,7 +539,7 @@ async function completeProviderUpload(input: {
   readonly expectedDigest?: BlobDigest
   readonly expectedSizeBytes?: number
   readonly parts: readonly { readonly partNumber: number; readonly etag: string }[] | undefined
-  readonly blobStorage: SixbHostRuntime["blobs"]
+  readonly blobStorage: SixbHostView["blobStorage"]
 }): Promise<FileRef> {
   const { blobStorage, session } = input
   if (!session.providerUpload) {

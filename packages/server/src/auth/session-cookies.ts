@@ -1,4 +1,4 @@
-import type { SixbHostRuntime } from "@sixb/core"
+import type { SixbHostView } from "@sixb/core"
 import {
   type AuthenticatedAuthSession,
   createCsrfCookieHeader,
@@ -8,7 +8,7 @@ import {
 } from "@sixb/core/internal/auth"
 
 export function createSessionRenewalCookieHeaders(input: {
-  readonly host: SixbHostRuntime
+  readonly host: SixbHostView
   readonly request: Request
   readonly session: AuthenticatedAuthSession
   readonly csrfToken?: string

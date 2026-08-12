@@ -5,7 +5,7 @@ import type {
   ConnectorDefinition,
   Logger,
   RegisteredWebhook,
-  SixbHostRuntime,
+  SixbHostView,
   WebhookDefinition,
   WebhookMetadata,
   WebhookResponse,
@@ -28,7 +28,7 @@ interface ElysiaSet {
 }
 
 interface DispatchWebhookOptions {
-  readonly host: SixbHostRuntime
+  readonly host: SixbHostView
   readonly registered: RegisteredWebhook
   readonly request: Request
   readonly set: ElysiaSet
@@ -36,7 +36,7 @@ interface DispatchWebhookOptions {
 }
 
 interface WebhookRunFinishInput {
-  readonly host: SixbHostRuntime
+  readonly host: SixbHostView
   readonly runId: string
   readonly status: FinishWebhookRunStatus
   readonly requestBodyBytes?: number
@@ -59,7 +59,7 @@ type DeliveryClaimResult =
       readonly claimResult: WebhookDeliveryClaimResult
     }
 
-export function registerWebhookRoutes(app: Elysia, host: SixbHostRuntime) {
+export function registerWebhookRoutes(app: Elysia, host: SixbHostView) {
   return app.all(
     "/api/webhooks/:connectorId/:webhookId",
     async ({ params, request, set }) => {
@@ -91,7 +91,7 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
     },
     source: { type: "webhook", deliveryId: runId },
   })
-  const logSession = host.logs.startExecution({ kind: "webhook", id: runId })
+  const logSession = host.logging.startExecution({ kind: "webhook", id: runId })
   let failureReported = false
   const reportFailure = (error: unknown) => {
     if (failureReported) return
@@ -353,7 +353,7 @@ async function dispatchWebhookRun(
 }
 
 async function startWebhookRun(
-  host: SixbHostRuntime,
+  host: SixbHostView,
   registered: RegisteredWebhook,
   request: Request,
   runId: string
@@ -418,7 +418,7 @@ function parseWebhookBody(webhook: WebhookDefinition, rawBody: Uint8Array): unkn
 }
 
 async function claimDeliveryKey(
-  host: SixbHostRuntime,
+  host: SixbHostView,
   webhook: WebhookDefinition,
   context: Parameters<NonNullable<WebhookDefinition["idempotencyKey"]>>[0]
 ): Promise<DeliveryClaimResult> {

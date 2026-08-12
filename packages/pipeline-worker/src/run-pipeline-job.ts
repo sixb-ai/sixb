@@ -1,4 +1,4 @@
-import { resolveLogsRuntime } from "@sixb/core/internal/logging"
+import { resolveLoggingService } from "@sixb/core/internal/logging"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type { PipelineRunRecord } from "@sixb/core/storage"
 import {
@@ -24,7 +24,7 @@ export async function runPipelineJob(input: RunPipelineJobInput): Promise<Pipeli
   const { runtime, job } = input
   const signal = input.signal ?? new AbortController().signal
   const pipeline = requirePipeline(runtime.pipelines.getById(job.pipelineId), job)
-  const logSession = resolveLogsRuntime(runtime.id, runtime.logs).startExecution({
+  const logSession = resolveLoggingService(runtime.id, runtime.logging).startExecution({
     kind: "pipeline",
     id: job.id,
   })

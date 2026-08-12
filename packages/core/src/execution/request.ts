@@ -5,39 +5,39 @@ import { isBoundSixb, type Sixb } from "../runtime/sixb"
 import { createDisabledRequestScope, createPrincipalRequestScope } from "./scopes"
 import type { AuthorizationRef, ExecutionScope } from "./types"
 
-export type { ExecutionActionRunsRuntime, ExecutionActionsRuntime } from "../actions/execution"
+export type { ActionRunsRuntime, ActionsRuntime } from "../actions/execution"
 export type {
+  AgentRunsRuntime,
+  AgentsRuntime,
+  AgentThreadsRuntime,
   CreateExecutionAgentThreadInput,
   ExecutionAgentRequestInput,
-  ExecutionAgentRunsRuntime,
-  ExecutionAgentsRuntime,
-  ExecutionAgentThreadsRuntime,
   ListExecutionAgentThreadsInput,
 } from "../agents/execution"
 export type { AuthorizationContext } from "../authorization"
-export type { ExecutionDatasetsRuntime } from "../datasets/execution"
-export type { ExecutionEventsRuntime } from "../events/execution"
-export type { ExecutionLogsRuntime } from "../logging/execution"
+export type { DatasetsRuntime } from "../datasets/execution"
+export type { EventsRuntime } from "../events/execution"
+export type { LogsRuntime } from "../logging/execution"
 export type {
   ExecutionObjectByIdHandle,
   ExecutionObjectSet,
-  ExecutionObjectsRuntime,
+  ObjectsRuntime,
 } from "../objects/execution"
 export type {
-  ExecutionPipelineRunsRuntime,
-  ExecutionPipelinesRuntime,
+  PipelineRunsRuntime,
+  PipelinesRuntime,
 } from "../pipelines/execution"
 export type {
-  ExecutionProjectionRunsRuntime,
-  ExecutionProjectionsRuntime,
+  ProjectionRunsRuntime,
+  ProjectionsRuntime,
 } from "../projections/execution"
-export type { ExecutionRuleStatesRuntime, ExecutionRulesRuntime } from "../rules/execution"
+export type { RuleStatesRuntime, RulesRuntime } from "../rules/execution"
 export type { Sixb } from "../runtime/sixb"
-export type { ExecutionSyncRunsRuntime, ExecutionSyncsRuntime } from "../syncs/execution"
+export type { SyncRunsRuntime, SyncsRuntime } from "../syncs/execution"
 export type {
-  ExecutionWorkflowInterventionsRuntime,
-  ExecutionWorkflowRunsRuntime,
-  ExecutionWorkflowsRuntime,
+  WorkflowInterventionsRuntime,
+  WorkflowRunsRuntime,
+  WorkflowsRuntime,
 } from "../workflows/execution"
 export type { AuthorizationRef, ExecutionContext } from "./types"
 

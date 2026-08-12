@@ -4,7 +4,7 @@ import {
   findActionEditCommit,
   runActionValidators,
 } from "@sixb/core/internal/actions"
-import { resolveLogsRuntime } from "@sixb/core/internal/logging"
+import { resolveLoggingService } from "@sixb/core/internal/logging"
 import type { ActionRunRecord } from "@sixb/core/storage"
 import { throwIfAborted } from "../normalize"
 import { createBasePhaseContext, loadObjectTarget } from "./context"
@@ -21,7 +21,7 @@ export async function executeActionPhases(
 ): Promise<ActionRunRecord> {
   const { runtime, action, signal } = input
   let run = input.run
-  const logSession = resolveLogsRuntime(runtime.id, runtime.logs).startExecution({
+  const logSession = resolveLoggingService(runtime.id, runtime.logging).startExecution({
     kind: "action",
     id: input.run.id,
   })
@@ -96,7 +96,7 @@ async function executePreCommitPhases(
     readonly objectTarget: Awaited<ReturnType<typeof loadObjectTarget>>
     readonly phaseContext: ReturnType<typeof createBasePhaseContext>
     readonly reads: ActionReadRecorder
-    readonly logSession: ReturnType<ReturnType<typeof resolveLogsRuntime>["startExecution"]>
+    readonly logSession: ReturnType<ReturnType<typeof resolveLoggingService>["startExecution"]>
   }
 ) {
   const { runtime, action, signal, objectTarget, phaseContext, reads, logSession } = input

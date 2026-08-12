@@ -75,7 +75,7 @@ function createContext(host: ActionWorkerHost): ActionWorkerContext {
   const execution = bindPrimitiveExecution(host, {
     primitive: {
       kind: "action",
-      id: host.actions.list()[0]?.id ?? "test-action",
+      id: host.definitions.actions.list()[0]?.id ?? "test-action",
       runId: "direct-action-job-test",
     },
     source: { type: "queue", queue: "actions", jobId: "direct-action-job-test" },
@@ -93,7 +93,7 @@ function createContext(host: ActionWorkerHost): ActionWorkerContext {
       connector: execution.sixb.connector,
       blobs: execution.sixb.blobs,
     },
-    actions: host.actions,
+    actions: host.definitions.actions,
   }
 }
 

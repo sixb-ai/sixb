@@ -10,12 +10,12 @@ import {
   LOGS_STREAM,
   type LogEntry,
   type LoggerProvider,
+  LoggingService,
   type LogLevel,
   type LogRecord,
-  LogsRuntime,
   logLevelsAtOrAbove,
   noopLoggerProvider,
-  resolveLogsRuntime,
+  resolveLoggingService,
   SIXB_RUN_KINDS,
 } from "../src/logging"
 import { type RunLogCaptureOptions, RunLogSession } from "../src/logging/run-logger"
@@ -43,10 +43,10 @@ function recordingProvider(): { provider: LoggerProvider; entries: LogEntry[] } 
   }
 }
 
-describe("LogsRuntime broker capture", () => {
+describe("LoggingService broker capture", () => {
   test("publishes a routed, run-tagged record", async () => {
     const broker = new InMemoryBroker()
-    const logs = new LogsRuntime({ projectId: PROJECT, broker })
+    const logs = new LoggingService({ projectId: PROJECT, broker })
     const session = logs.startExecution({ kind: "sync", id: "run-1" })
 
     session.logger.info("Reviewing invoice", { invoice: "INV-1" })
@@ -68,7 +68,7 @@ describe("LogsRuntime broker capture", () => {
     const infoSpy = spyOn(console, "info").mockImplementation(() => undefined)
     try {
       const broker = new InMemoryBroker()
-      const logs = new LogsRuntime({ projectId: PROJECT, broker })
+      const logs = new LoggingService({ projectId: PROJECT, broker })
       const session = logs.startExecution({ kind: "sync", id: "broker-only" })
 
       session.logger.info("captured without stdout")
@@ -85,7 +85,7 @@ describe("LogsRuntime broker capture", () => {
 
   test("rejects malformed retained log records during hydration", async () => {
     const broker = new InMemoryBroker()
-    const logs = new LogsRuntime({ projectId: PROJECT, broker })
+    const logs = new LoggingService({ projectId: PROJECT, broker })
     await broker.ensureStream({ projectId: PROJECT, stream: LOGS_STREAM })
     await broker.append({
       projectId: PROJECT,
@@ -109,7 +109,7 @@ describe("LogsRuntime broker capture", () => {
   test("uses a capture level independent from the output provider", async () => {
     const broker = new InMemoryBroker()
     const { provider, entries } = recordingProvider()
-    const logs = new LogsRuntime({
+    const logs = new LoggingService({
       projectId: PROJECT,
       broker,
       logger: provider,
@@ -127,7 +127,7 @@ describe("LogsRuntime broker capture", () => {
 
   test("caps one complete execution across step loggers", async () => {
     const broker = new InMemoryBroker()
-    const logs = new LogsRuntime({
+    const logs = new LoggingService({
       projectId: PROJECT,
       broker,
       logger: noopLoggerProvider,
@@ -155,7 +155,7 @@ describe("LogsRuntime broker capture", () => {
 
   test("keeps framework context separate from user bindings", async () => {
     const broker = new InMemoryBroker()
-    const logs = new LogsRuntime({ projectId: PROJECT, broker, logger: noopLoggerProvider })
+    const logs = new LoggingService({ projectId: PROJECT, broker, logger: noopLoggerProvider })
     const session = logs.startExecution({ kind: "workflow", id: "run-4" })
 
     session
@@ -174,7 +174,7 @@ describe("LogsRuntime broker capture", () => {
 
   test("normalizes errors and invalid fields without throwing", async () => {
     const broker = new InMemoryBroker()
-    const logs = new LogsRuntime({ projectId: PROJECT, broker, logger: noopLoggerProvider })
+    const logs = new LoggingService({ projectId: PROJECT, broker, logger: noopLoggerProvider })
     const session = logs.startExecution({ kind: "action", id: "run-5" })
 
     session.logger.error(new Error("boom"), { phase: "commit" })
@@ -190,7 +190,7 @@ describe("LogsRuntime broker capture", () => {
   test("redacts and byte-bounds only the broker copy", async () => {
     const broker = new InMemoryBroker()
     const { provider, entries } = recordingProvider()
-    const logs = new LogsRuntime({
+    const logs = new LoggingService({
       projectId: PROJECT,
       broker,
       logger: provider,
@@ -218,7 +218,7 @@ describe("LogsRuntime broker capture", () => {
   test("redacts nested and wildcard field paths only in broker capture", async () => {
     const broker = new InMemoryBroker()
     const { provider, entries } = recordingProvider()
-    const logs = new LogsRuntime({
+    const logs = new LoggingService({
       projectId: PROJECT,
       broker,
       logger: provider,
@@ -297,7 +297,7 @@ describe("LogsRuntime broker capture", () => {
   test("can disable broker forwarding without disabling the provider", async () => {
     const broker = new InMemoryBroker()
     const { provider, entries } = recordingProvider()
-    const logs = new LogsRuntime({
+    const logs = new LoggingService({
       projectId: PROJECT,
       broker,
       logger: provider,
@@ -319,28 +319,28 @@ describe("logging failure isolation and lifecycle", () => {
   test("validates observability limits and redaction config at startup", () => {
     expect(
       () =>
-        new LogsRuntime({
+        new LoggingService({
           projectId: PROJECT,
           observability: { level: "fatal" as LogLevel },
         })
     ).toThrow("observability.logs.level")
     expect(
       () =>
-        new LogsRuntime({
+        new LoggingService({
           projectId: PROJECT,
           observability: { retention: { maxBytes: -1 } },
         })
     ).toThrow("observability.logs.retention.maxBytes")
     expect(
       () =>
-        new LogsRuntime({
+        new LoggingService({
           projectId: PROJECT,
           observability: { maxLinesPerExecution: -1 },
         })
     ).toThrow("observability.logs.maxLinesPerExecution")
     expect(
       () =>
-        new LogsRuntime({
+        new LoggingService({
           projectId: PROJECT,
           observability: {
             redact: { paths: ["secret"], censor: new Date() as unknown as JsonValue },
@@ -353,7 +353,7 @@ describe("logging failure isolation and lifecycle", () => {
     const errorSpy = spyOn(console, "error").mockImplementation(() => undefined)
     try {
       const broker = new InMemoryBroker()
-      const logs = new LogsRuntime({
+      const logs = new LoggingService({
         projectId: PROJECT,
         broker,
         logger: {
@@ -373,9 +373,9 @@ describe("logging failure isolation and lifecycle", () => {
     }
   })
 
-  test("provider flush and close are runtime responsibilities", async () => {
+  test("provider flush and close are logging service responsibilities", async () => {
     const calls: string[] = []
-    const logs = new LogsRuntime({
+    const logs = new LoggingService({
       projectId: PROJECT,
       logger: {
         write() {},
@@ -415,14 +415,14 @@ describe("ConsoleLogger", () => {
   })
 })
 
-describe("resolveLogsRuntime", () => {
-  test("returns the provided runtime unchanged", () => {
-    const existing = new LogsRuntime({ projectId: PROJECT })
-    expect(resolveLogsRuntime(PROJECT, existing)).toBe(existing)
+describe("resolveLoggingService", () => {
+  test("returns the provided service unchanged", () => {
+    const existing = new LoggingService({ projectId: PROJECT })
+    expect(resolveLoggingService(PROJECT, existing)).toBe(existing)
   })
 
-  test("falls back to a usable silent runtime", async () => {
-    const session = resolveLogsRuntime(PROJECT).startExecution({ kind: "sync", id: "run-11" })
+  test("falls back to a usable silent service", async () => {
+    const session = resolveLoggingService(PROJECT).startExecution({ kind: "sync", id: "run-11" })
     session.logger.info("still works")
     await expect(session.flush()).resolves.toBeUndefined()
   })

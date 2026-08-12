@@ -142,27 +142,27 @@ export function assertWorkerInputs(input: WorkerGroupInputs): void {
 export function resolveRegisteredWorkerTypes(sixb: LoadedSixbHost): readonly string[] {
   const workerTypes: string[] = []
 
-  if (sixb.syncs.list().length > 0) {
+  if (sixb.definitions.syncs.list().length > 0) {
     workerTypes.push("sync")
   }
 
-  if (sixb.pipelines.list().length > 0) {
+  if (sixb.definitions.pipelines.list().length > 0) {
     workerTypes.push("pipeline")
   }
 
-  if (sixb.projections.list().length > 0) {
+  if (sixb.definitions.projections.list().length > 0) {
     workerTypes.push("projection")
   }
 
-  if (sixb.actions.list().length > 0) {
+  if (sixb.definitions.actions.list().length > 0) {
     workerTypes.push("action")
   }
 
-  if (sixb.agents.list().length > 0 && sixb.storage.agents) {
+  if (sixb.definitions.agents.list().length > 0 && sixb.storage.agents) {
     workerTypes.push("agent")
   }
 
-  if (sixb.workflows.list().length > 0) {
+  if (sixb.definitions.workflows.list().length > 0) {
     workerTypes.push("workflow")
   }
 

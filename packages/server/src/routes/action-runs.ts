@@ -1,4 +1,4 @@
-import type { SixbHostRuntime } from "@sixb/core"
+import type { SixbHostView } from "@sixb/core"
 import type { ActionRunRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { z } from "zod"
@@ -80,7 +80,7 @@ function serializeActionRunDetail(
 }
 
 async function actionRunFileContentResponse(
-  host: SixbHostRuntime,
+  host: SixbHostView,
   context: {
     readonly params: { readonly runId: string }
     readonly query: unknown
@@ -97,7 +97,7 @@ async function actionRunFileContentResponse(
   }
 
   return createContextualFileContentResponse({
-    blobStorage: host.blobs,
+    blobStorage: host.blobStorage,
     query: context.query,
     querySchema: ActionRunFileContentQuerySchema,
     request: context.request,
@@ -110,7 +110,7 @@ async function actionRunFileContentResponse(
   })
 }
 
-export function registerActionRunRoutes(app: Elysia, host: SixbHostRuntime) {
+export function registerActionRunRoutes(app: Elysia, host: SixbHostView) {
   return app
     .get(
       "/api/action-runs",

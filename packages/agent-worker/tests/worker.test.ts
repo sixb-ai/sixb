@@ -13,7 +13,9 @@ import { exaWebFetch, exaWebSearch } from "@sixb/connector-exa/agent-tools"
 import {
   type AgentReasoningLevel,
   AgentRequestError,
+  type AgentsRuntime,
   type AgentToolDefinition,
+  type BlobStorage,
   type Broker,
   type CommandResult,
   type ConnectorDefinition,
@@ -24,7 +26,6 @@ import {
   defineConnector,
   defineGroup,
   defineWorkflow,
-  type ExecutionAgentsRuntime,
   emptyGrantIndex,
   InMemoryBlobStorage,
   InMemoryBroker,
@@ -539,7 +540,7 @@ const echoAgentTool = defineAgentTool("echo")
   .input({ value: "string" })
   .run(({ input }) => ({ echoed: input.value }))
 
-type TestSixb = AgentWorkerHost
+type TestSixb = AgentWorkerHost & { readonly blobStorage: BlobStorage }
 
 function workerOptions(
   options: Omit<AgentWorkerOptions, "apiBaseUrl"> & { readonly apiBaseUrl?: string } = {}
@@ -866,8 +867,8 @@ function buildAgentWorkerContext(
     id: sixb.id,
     storage: workerStorageOf(sixb.storage),
     sandboxes: sixb.sandboxes,
-    logs: sixb.logs,
-    valueTypesById: sixb.ontology.getValueTypesById(),
+    logging: sixb.logging,
+    valueTypesById: sixb.definitions.ontology.getValueTypesById(),
     // Mirror the production boundary (worker.ts buildAgentContext): normalize the server base once.
     apiBaseUrl: normalizeApiBaseUrl(input.apiBaseUrl ?? TEST_AGENT_API_BASE_URL),
     streamSink: NOOP_STREAM_SINK,
@@ -875,30 +876,27 @@ function buildAgentWorkerContext(
     defaultMaxSteps: 4,
     turnTimeoutMs: 60_000,
   }
-  const execution = bindAgentExecution(sixb, {
+  const agentSixb = bindAgentExecution(sixb, {
     agentId: "assistant",
     runId: "direct-agent-worker-test",
     authorization: resolveAuthorizationContext({
       principal: { type: "serviceAccount", id: "agent:assistant" },
       groupIds: [AGENT_RUNTIME_GROUP.id],
-      roles: sixb.security.listResolvedRoles(),
+      roles: sixb.definitions.security.listResolvedRoles(),
     }),
     source: { type: "queue", queue: "agents", jobId: "direct-agent-worker-test" },
   })
-  return { ...context, blobStorage: execution.blobs, connector: execution.connector }
+  return { ...context, blobStorage: agentSixb.blobs, connector: agentSixb.connector }
 }
 
-function requestAgent(
-  sixb: TestSixb,
-  input: Parameters<ExecutionAgentsRuntime["runs"]["request"]>[0]
-) {
+function requestAgent(sixb: TestSixb, input: Parameters<AgentsRuntime["runs"]["request"]>[0]) {
   return createTestSixb(sixb).agents.runs.request(input)
 }
 
 function requestAgentAs(
   sixb: TestSixb,
   principal: typeof REQUESTER,
-  input: Parameters<ExecutionAgentsRuntime["runs"]["request"]>[0]
+  input: Parameters<AgentsRuntime["runs"]["request"]>[0]
 ) {
   const grants = { ...emptyGrantIndex(), "run:agent": new Set([input.agentId]) }
   return createTestSixb(sixb, {
@@ -1276,7 +1274,7 @@ describe("AgentWorker", () => {
 
   test("attributes a managed service account to the agent worker, not to system at large", async () => {
     const sixb = buildSixb(toolThenAnswerModel())
-    const agent = sixb.agents.getById("assistant")
+    const agent = sixb.definitions.agents.getById("assistant")
     if (!agent) {
       throw new Error("Expected test agent.")
     }
@@ -1293,7 +1291,7 @@ describe("AgentWorker", () => {
   test("creates isolated gateway URLs and sandbox env per concurrent run environment", async () => {
     const sandboxes = new RecordingSandboxFactory()
     const sixb = buildSixb(toolThenAnswerModel(), new InMemoryBroker(), sandboxes)
-    const agent = sixb.agents.getById("assistant")
+    const agent = sixb.definitions.agents.getById("assistant")
     if (!agent) {
       throw new Error("Expected test agent.")
     }
@@ -1373,11 +1371,11 @@ describe("AgentWorker", () => {
   test("materializes message attachments and manifest into the sandbox", async () => {
     const sandboxes = new RecordingSandboxFactory()
     const sixb = buildSixb(toolThenAnswerModel(), new InMemoryBroker(), sandboxes)
-    const agent = sixb.agents.getById("assistant")
+    const agent = sixb.definitions.agents.getById("assistant")
     if (!agent) {
       throw new Error("Expected test agent.")
     }
-    const fileRef = await sixb.blobs.put({
+    const fileRef = await sixb.blobStorage.put({
       body: new TextEncoder().encode("attachment contents"),
       fileName: "note.txt",
       mediaType: "text/plain",
@@ -1437,7 +1435,7 @@ describe("AgentWorker", () => {
       },
     })
     const sixb = buildSixb(model)
-    const fileRef = await sixb.blobs.put({
+    const fileRef = await sixb.blobStorage.put({
       body: new TextEncoder().encode("invoice total: 42"),
       fileName: "invoice.txt",
       mediaType: "text/plain",
@@ -1451,13 +1449,13 @@ describe("AgentWorker", () => {
     const context = buildAgentWorkerContext(sixb)
     const environment = await createConversationAgentEnvironment({
       context,
-      agent: sixb.agents.getById("assistant")!,
+      agent: sixb.definitions.agents.getById("assistant")!,
       run,
     })
     try {
       await runAgentTurn({
         context: environment.turnContext,
-        agent: sixb.agents.getById("assistant")!,
+        agent: sixb.definitions.agents.getById("assistant")!,
         run,
         signal: new AbortController().signal,
       })
@@ -1495,7 +1493,7 @@ describe("AgentWorker", () => {
         "base64"
       )
     )
-    const fileRef = await sixb.blobs.put({
+    const fileRef = await sixb.blobStorage.put({
       body: png,
       fileName: "pixel.png",
       mediaType: "image/png",
@@ -1509,13 +1507,13 @@ describe("AgentWorker", () => {
     const context = buildAgentWorkerContext(sixb)
     const environment = await createConversationAgentEnvironment({
       context,
-      agent: sixb.agents.getById("assistant")!,
+      agent: sixb.definitions.agents.getById("assistant")!,
       run,
     })
     try {
       await runAgentTurn({
         context: environment.turnContext,
-        agent: sixb.agents.getById("assistant")!,
+        agent: sixb.definitions.agents.getById("assistant")!,
         run,
         signal: new AbortController().signal,
       })
@@ -1557,7 +1555,7 @@ describe("AgentWorker", () => {
         "base64"
       )
     )
-    const fileRef = await sixb.blobs.put({
+    const fileRef = await sixb.blobStorage.put({
       body: png,
       fileName: "pixel.png",
       mediaType: "image/png",
@@ -1571,13 +1569,13 @@ describe("AgentWorker", () => {
     const context = buildAgentWorkerContext(sixb)
     const environment = await createConversationAgentEnvironment({
       context,
-      agent: sixb.agents.getById("assistant")!,
+      agent: sixb.definitions.agents.getById("assistant")!,
       run,
     })
     try {
       await runAgentTurn({
         context: environment.turnContext,
-        agent: sixb.agents.getById("assistant")!,
+        agent: sixb.definitions.agents.getById("assistant")!,
         run,
         signal: new AbortController().signal,
       })
@@ -1648,7 +1646,7 @@ describe("AgentWorker", () => {
       },
     }
     const sixb = buildSixb(toolThenAnswerModel(), new InMemoryBroker(), sandboxes)
-    const agent = sixb.agents.getById("assistant")
+    const agent = sixb.definitions.agents.getById("assistant")
     if (!agent) {
       throw new Error("Expected test agent.")
     }
@@ -1691,7 +1689,7 @@ describe("AgentWorker", () => {
       },
     }
     const sixb = buildSixb(toolThenAnswerModel(), new InMemoryBroker(), sandboxes)
-    const agent = sixb.agents.getById("assistant")
+    const agent = sixb.definitions.agents.getById("assistant")
     if (!agent) {
       throw new Error("Expected test agent.")
     }
@@ -1945,7 +1943,7 @@ describe("AgentWorker", () => {
 
       const logs = await waitFor(
         async () => {
-          const page = await sixb.logs.read({
+          const page = await sixb.logging.read({
             run: { kind: "agent", id: selectedRequest.run.id },
           })
           return page.lines.length > 0 ? page.lines : null
@@ -2676,7 +2674,7 @@ describe("AgentWorker", () => {
       if (!filePart || filePart.type !== "file") {
         throw new Error("Expected assistant output file part.")
       }
-      const stored = await sixb.blobs.open(filePart.fileRef.blobId)
+      const stored = await sixb.blobStorage.open(filePart.fileRef.blobId)
       expect(await new Response(stored).text()).toBe("generated report")
       const listCommand = sandboxes.sandboxes[0]?.commands.find((command) =>
         String(command.args.at(-1)).includes("sixb-list-agent-output-files")
@@ -3572,13 +3570,13 @@ describe("AgentWorker", () => {
       context: {
         id: PROJECT_ID,
         storage: workerStorageOf(sixb.storage),
-        blobStorage: sixb.blobs,
+        blobStorage: sixb.blobStorage,
         tools: echoTool,
         streamSink: NOOP_STREAM_SINK,
         defaultMaxSteps: 4,
         turnTimeoutMs: 60_000,
       },
-      agent: sixb.agents.getById("assistant")!,
+      agent: sixb.definitions.agents.getById("assistant")!,
       run: staleRun,
       signal: new AbortController().signal,
     })
@@ -3614,14 +3612,14 @@ describe("AgentWorker", () => {
       context: {
         id: PROJECT_ID,
         storage: workerStorageOf(sixb.storage),
-        blobStorage: sixb.blobs,
+        blobStorage: sixb.blobStorage,
         tools: {},
         systemAddendum: "Extra sandbox context.",
         streamSink: NOOP_STREAM_SINK,
         defaultMaxSteps: 4,
         turnTimeoutMs: 60_000,
       },
-      agent: sixb.agents.getById("assistant")!,
+      agent: sixb.definitions.agents.getById("assistant")!,
       run,
       signal: new AbortController().signal,
     })
@@ -3669,13 +3667,13 @@ describe("AgentWorker", () => {
       context: {
         id: PROJECT_ID,
         storage: workerStorageOf(sixb.storage),
-        blobStorage: sixb.blobs,
+        blobStorage: sixb.blobStorage,
         tools: {},
         streamSink: NOOP_STREAM_SINK,
         defaultMaxSteps: 4,
         turnTimeoutMs: 60_000,
       },
-      agent: sixb.agents.getById("assistant")!,
+      agent: sixb.definitions.agents.getById("assistant")!,
       run,
       signal: new AbortController().signal,
     })
@@ -3903,7 +3901,7 @@ describe("AgentWorker", () => {
         context: {
           id: PROJECT_ID,
           storage: workerStorageOf(failingStorage),
-          blobStorage: sixb.blobs,
+          blobStorage: sixb.blobStorage,
           tools: echoTool,
           streamSink: createBrokerStreamSink({
             broker: sixb.broker,
@@ -3912,7 +3910,7 @@ describe("AgentWorker", () => {
           defaultMaxSteps: 4,
           turnTimeoutMs: 60_000,
         },
-        agent: sixb.agents.getById("assistant")!,
+        agent: sixb.definitions.agents.getById("assistant")!,
         run,
         signal: new AbortController().signal,
       })
@@ -3939,7 +3937,7 @@ describe("AgentWorker", () => {
       context: {
         id: PROJECT_ID,
         storage: workerStorageOf(sixb.storage),
-        blobStorage: sixb.blobs,
+        blobStorage: sixb.blobStorage,
         tools: echoTool,
         streamSink: createBrokerStreamSink({
           broker: sixb.broker,
@@ -3948,7 +3946,7 @@ describe("AgentWorker", () => {
         defaultMaxSteps: 4,
         turnTimeoutMs: 60_000,
       },
-      agent: sixb.agents.getById("assistant")!,
+      agent: sixb.definitions.agents.getById("assistant")!,
       run: reclaimed,
       signal: new AbortController().signal,
     })

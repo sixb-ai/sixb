@@ -449,8 +449,8 @@ describe("agent discovery + registry", () => {
     const projectRoot = await createTempProjectRoot()
     const sixb = await createSixb({ projectRoot, ontologies: [Room], ...createTestRuntimeDeps() })
 
-    expect(sixb.agents.list()).toEqual([])
-    expect(sixb.agents.getById("sales")).toBeNull()
+    expect(sixb.definitions.agents.list()).toEqual([])
+    expect(sixb.definitions.agents.getById("sales")).toBeNull()
   })
 
   test("discovers agents from agents/ (incl. subfolders) and looks them up by id", async () => {
@@ -465,13 +465,13 @@ describe("agent discovery + registry", () => {
     const sixb = await createSixb({ projectRoot, ontologies: [Room], ...createTestRuntimeDeps() })
 
     expect(
-      sixb.agents
+      sixb.definitions.agents
         .list()
         .map((a) => a.id)
         .sort()
     ).toEqual(["sales", "support"])
-    expect(sixb.agents.getById("sales")?.name).toBe("Sales Assistant")
-    expect(sixb.agents.getById("unknown")).toBeNull()
+    expect(sixb.definitions.agents.getById("sales")?.name).toBe("Sales Assistant")
+    expect(sixb.definitions.agents.getById("unknown")).toBeNull()
   })
 
   test("discovers agents with selected tools without discovering tools themselves", async () => {
@@ -480,8 +480,8 @@ describe("agent discovery + registry", () => {
 
     const sixb = await createSixb({ projectRoot, ontologies: [Room], ...createTestRuntimeDeps() })
 
-    expect(sixb.agents.list().map((agent) => agent.id)).toEqual(["research"])
-    expect(sixb.agents.getById("research")?.tools.map((tool) => tool.name)).toEqual([
+    expect(sixb.definitions.agents.list().map((agent) => agent.id)).toEqual(["research"])
+    expect(sixb.definitions.agents.getById("research")?.tools.map((tool) => tool.name)).toEqual([
       "search_knowledge",
     ])
   })
@@ -497,7 +497,7 @@ describe("agent discovery + registry", () => {
 
     const sixb = await createSixb({ projectRoot, ontologies: [Room], ...createTestRuntimeDeps() })
 
-    expect(sixb.agents.list().map((a) => a.id)).toEqual(["sales"])
+    expect(sixb.definitions.agents.list().map((a) => a.id)).toEqual(["sales"])
   })
 
   test("merges explicit agents with discovered ones", async () => {
@@ -513,7 +513,7 @@ describe("agent discovery + registry", () => {
     })
 
     expect(
-      sixb.agents
+      sixb.definitions.agents
         .list()
         .map((a) => a.id)
         .sort()
@@ -630,6 +630,6 @@ describe("agent discovery + registry", () => {
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.agents.getById("ops")?.groupIds).toEqual(["agent-runtime"])
+    expect(sixb.definitions.agents.getById("ops")?.groupIds).toEqual(["agent-runtime"])
   })
 })

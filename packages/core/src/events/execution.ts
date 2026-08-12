@@ -5,10 +5,10 @@ import type {
   EventsEmitOptions,
   EventsReadInput,
   EventsSubscribeInput,
-} from "./runtime"
+} from "./service"
 import type { StoredDomainEvent } from "./types"
 
-export interface ExecutionEventsRuntime {
+export interface EventsRuntime {
   canRead(event: StoredDomainEvent): boolean
   append(input: EventsAppendInput): Promise<readonly StoredDomainEvent[]>
   emit(input: EventsAppendInput, options: EventsEmitOptions): Promise<void>
@@ -20,7 +20,7 @@ export interface ExecutionEventsRuntime {
   ): Promise<() => void>
 }
 
-export function createExecutionEventsRuntime(runtime: SixbRuntimeContext): ExecutionEventsRuntime {
+export function createEventsRuntime(runtime: SixbRuntimeContext): EventsRuntime {
   return {
     canRead: (event) => canViewEvent(runtime.authorization, event),
     append: (input) => {

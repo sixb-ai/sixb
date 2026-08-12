@@ -531,7 +531,9 @@ describe("Action read dependency capture", () => {
     const facade = createActionReadFacade((objectType) => sixb.objects(objectType), {
       recorder: reads,
       resolveLinkIds: (objectTypeId) =>
-        host.ontology.resolveObjectType(objectTypeId).links.map((definition) => definition.id),
+        host.definitions.ontology
+          .resolveObjectType(objectTypeId)
+          .links.map((definition) => definition.id),
     })
     return { facade, reads }
   }

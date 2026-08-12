@@ -15,26 +15,24 @@ import {
 } from "./request"
 import type { ActionDefinition } from "./types"
 
-export interface ExecutionActionRunsRuntime {
+export interface ActionRunsRuntime {
   getById(runId: string): Promise<ActionRunRecord | null>
   list(
     input?: Omit<ListActionRunsInput, "projectId" | "actionIds" | "objectTypeIds">
   ): Promise<ListActionRunsResult>
 }
 
-export interface ExecutionActionsRuntime {
+export interface ActionsRuntime {
   list(): readonly ActionDefinition[]
   getById(actionId: string): ActionDefinition | null
   listGlobal(): readonly ActionDefinition[]
   listForType(objectType: ObjectType): readonly ActionDefinition[]
   request(input: RequestActionInput): Promise<RequestActionResult>
   requestAndWait(input: RequestActionAndWaitInput): Promise<ActionRunRecord>
-  readonly runs: ExecutionActionRunsRuntime
+  readonly runs: ActionRunsRuntime
 }
 
-export function createExecutionActionsRuntime(
-  runtime: SixbRuntimeContext
-): ExecutionActionsRuntime {
+export function createActionsRuntime(runtime: SixbRuntimeContext): ActionsRuntime {
   const canList = (action: ActionDefinition) =>
     isAllowed(runtime.authorization, { kind: "action.apply", actionId: action.id }) &&
     (action.binding.kind === "global" ||
@@ -49,9 +47,8 @@ export function createExecutionActionsRuntime(
       const action = runtime.actionRegistry.getById(actionId)
       return action && canList(action) ? action : null
     },
-    listGlobal: () => runtime.actionRegistry.getGlobalActions().filter(canList),
-    listForType: (objectType) =>
-      runtime.actionRegistry.getActionsForType(objectType).filter(canList),
+    listGlobal: () => runtime.actionRegistry.listGlobal().filter(canList),
+    listForType: (objectType) => runtime.actionRegistry.listForType(objectType).filter(canList),
     request: (input) => requestAction(runtime, input),
     requestAndWait: (input) => requestActionAndWait(runtime, input),
     runs: {

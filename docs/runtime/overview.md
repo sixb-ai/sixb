@@ -61,6 +61,21 @@ retention intervals), and `projectRoot` (discovery root, defaults to `process.cw
 primitives receive a context tailored to their handler. These APIs enforce the permissions of the
 current request or run; protected domain operations are not exposed directly by the host.
 
+The two surfaces use distinct namespaces:
+
+| Surface | Responsibility | Example |
+| --- | --- | --- |
+| `host.definitions` | Validated project definitions, without caller-specific filtering | `host.definitions.workflows.getById(id)` |
+| `host.storage`, `host.blobStorage`, … | Configured process providers | `host.blobStorage.stat(blobId)` |
+| `host.logging` | Process logging, capture, and lifecycle | `host.logging.startExecution(run)` |
+| `host.scheduler`, `host.close*()` | Process lifecycle | `host.scheduler.start()` |
+| `sixb` | Execution-bound domain operations and visible definitions | `sixb.workflows.requestById(input)` |
+
+Definition catalogs consistently expose `list()` and `getById(id)`. The execution SDK may add
+authorized operations and history below the matching primitive; it does not expose process
+lifecycle. Execution code uses `sixb.blobs` and `sixb.connector(definition)`; connector client
+resolution remains private to the host.
+
 ### Typed objects
 
 `sixb.objects(Type)` returns a fully typed `ObjectSet` for one object type, with compile-time
@@ -120,24 +135,24 @@ Constructing the host starts no timers. The server owns ontology maintenance aut
 
 | Method | Effect |
 | --- | --- |
-| `host.schedules.start()` | Start the scheduler for discovered `schedules/` |
-| `host.schedules.stop()` | Stop the scheduler |
+| `host.scheduler.start()` | Start the scheduler for discovered `schedules/` |
+| `host.scheduler.stop()` | Stop the scheduler |
 | `host.startOntologyMaintenance()` | Start outbox recovery and bounded retention; returns a stop handle |
 
 ```ts
 const host = await createSixb({ /* providers */ })
 
-await host.schedules.start()
+await host.scheduler.start()
 const maintenance = await host.startOntologyMaintenance()
 // ... on shutdown
-await host.schedules.stop()
+await host.scheduler.stop()
 await maintenance.stop()
 ```
 
 `OntologyMaintenance` recovers pending event publication and applies the configured retention policy. It runs once at startup, then every 60 seconds by default, and never removes pending work.
 
-Release connector, broker, and logger resources with `host.connectors.disconnectAll()`,
-`host.closeBroker()`, and `host.closeLogger()`.
+Release connector, blob, broker, and logger resources with `host.closeConnectors()`,
+`host.closeBlobs()`, `host.closeBroker()`, and `host.closeLogger()`.
 
 ### Where `Sixb` is available
 

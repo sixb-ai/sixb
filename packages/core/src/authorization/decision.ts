@@ -15,7 +15,7 @@ import {
   type ResolvedRuntimeAuthorization,
   resolveRuntimeAuthorization,
 } from "../execution/authorization"
-import type { RuntimeAuthorization } from "../execution/types"
+import type { ExecutionContext, RuntimeAuthorization } from "../execution/types"
 import { AuthorizationError } from "./errors"
 import type { GrantKind } from "./grant-kinds"
 import type { AuthorizationContext, GrantIndex } from "./types"
@@ -184,6 +184,40 @@ export function assertCanAppendTelemetry(runtime: AuthorizedRuntime, objectTypeI
 export function assertPrivileged(runtime: AuthorizedRuntime, operation: string): void {
   const resolved = assertRuntimeAuthorizationBound(runtime)
   if (resolved.type === "unrestricted") {
+    return
+  }
+
+  throw new AuthorizationError(
+    `privileged:${operation}`,
+    `[Sixb] Operation '${operation}' is not covered by scoped authorization grants.`
+  )
+}
+
+/**
+ * Assert access to process providers that trusted executions and genuine agent runs may use.
+ *
+ * Agent provenance alone is not authority: the registered capability must be bound to the exact
+ * same agent and run before this check succeeds.
+ */
+export function assertProviderAccess(
+  runtime: AuthorizedRuntime,
+  execution: ExecutionContext,
+  operation: string
+): void {
+  const resolved = assertRuntimeAuthorizationBound(runtime)
+  if (resolved.type === "unrestricted") {
+    return
+  }
+
+  const binding = resolved.executionBinding
+  const executor = execution.executor
+  if (
+    binding?.type === "agent" &&
+    executor.type === "agent" &&
+    binding.executionId === execution.id &&
+    binding.agentId === executor.agentId &&
+    binding.runId === executor.runId
+  ) {
     return
   }
 

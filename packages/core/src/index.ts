@@ -60,6 +60,7 @@ export type {
   ActionBlobContext,
   ActionBuilder,
   ActionDefinition,
+  ActionDefinitionCatalog,
   ActionEditsContext,
   ActionEditsHandler,
   ActionEffectsContext,
@@ -74,7 +75,6 @@ export type {
   ActionRunPhaseInfo,
   ActionRuntimeFacade,
   ActionSubject,
-  ActionsRuntime,
   ActionTargetObject,
   ActionTelemetryObjectSet,
   ActionValidationContext,
@@ -143,7 +143,6 @@ export type {
   DatasetDefinition,
   DatasetPrimaryKey,
   DatasetSchema,
-  DatasetsRuntime,
   MergeChange,
 } from "./datasets"
 export {
@@ -333,6 +332,7 @@ export type {
   LogFields,
   Logger,
   LoggerProvider,
+  LoggingService,
   LogLevel,
   LogRecord,
   LogRunRef,
@@ -379,7 +379,6 @@ export type {
   RuleEventDependency,
   RulePredicate,
   RuleSubject,
-  RulesRuntime,
 } from "./rules"
 export {
   defineRule,
@@ -497,7 +496,6 @@ export type {
   BlobDigest,
   BlobInfo,
   BlobStorage,
-  BlobsRuntime,
   FileRef,
 } from "./blob-storage"
 export {
@@ -596,8 +594,6 @@ export type {
   ConnectorClient,
   ConnectorContext,
   ConnectorDefinition,
-  ConnectorRuntime,
-  ConnectorsRuntime,
 } from "./connectors"
 export { defineConnector } from "./connectors"
 
@@ -645,7 +641,6 @@ export type {
   SyncReadResult,
   SyncRunRequestOptions,
   SyncRunRequestResult,
-  SyncsRuntime,
   SyncTargetBuilder,
 } from "./syncs"
 export { defineSync, requestSyncRun } from "./syncs"
@@ -672,7 +667,6 @@ export type {
   ScheduleDefinition,
   ScheduleDefinitionForEvent,
   ScheduleReference,
-  SchedulesRuntime,
   ScheduleTriggerDefinition,
 } from "./schedules"
 export {
@@ -701,7 +695,6 @@ export type {
   PipelineStepOutputOptions,
   PipelineStepRunContext,
   PipelineStepRunHandler,
-  PipelinesRuntime,
   RequestPipelineRunInput,
 } from "./pipelines"
 export {
@@ -763,7 +756,6 @@ export type {
   WorkflowScheduleTriggerDefinition,
   WorkflowStepMapper,
   WorkflowStepOutputs,
-  WorkflowsRuntime,
   WorkflowTriggerDefinition,
 } from "./workflows"
 export {
@@ -798,18 +790,15 @@ export type {
 
 // ── Runtime ─────────────────────────────────────────────────
 
-export type { ExecutionActionRunsRuntime, ExecutionActionsRuntime } from "./actions/execution"
+export type { ActionRunsRuntime, ActionsRuntime } from "./actions/execution"
 export type {
-  ExecutionAgentRunsRuntime,
-  ExecutionAgentsRuntime,
-  ExecutionAgentThreadsRuntime,
+  AgentRunsRuntime,
+  AgentsRuntime,
+  AgentThreadsRuntime,
 } from "./agents/execution"
-export type { ExecutionBlobsRuntime } from "./blob-storage/execution"
-export type {
-  ExecutionConnectorRuntime,
-  ExecutionConnectorsRuntime,
-} from "./connectors/execution"
-export type { ExecutionDatasetsRuntime } from "./datasets/execution"
+export type { BlobsRuntime } from "./blob-storage/execution"
+export type { ConnectorRuntime } from "./connectors/execution"
+export type { DatasetsRuntime } from "./datasets/execution"
 export type {
   SixbErrorContext,
   SixbErrorHandler,
@@ -818,8 +807,8 @@ export type {
   SixbRuleEvaluationFailedContext,
   SixbRunFailedContext,
 } from "./error-reporting/types"
-export type { ExecutionEventsRuntime } from "./events/execution"
-export type { ExecutionLogsRuntime } from "./logging/execution"
+export type { EventsRuntime } from "./events/execution"
+export type { LogsRuntime } from "./logging/execution"
 export type {
   OntologyMaintenanceCleanupSnapshot,
   OntologyMaintenanceHandle,
@@ -828,21 +817,21 @@ export type {
   OntologyOperationalStatus,
   SixbReadiness,
 } from "./maintenance"
-export type { ObjectTypesRuntime } from "./objects"
 export type {
   ExecutionObjectByIdHandle,
   ExecutionObjectSet,
-  ExecutionObjectsRuntime,
+  ObjectsRuntime,
 } from "./objects/execution"
-export type { ExecutionPipelineRunsRuntime, ExecutionPipelinesRuntime } from "./pipelines/execution"
+export type { PipelineRunsRuntime, PipelinesRuntime } from "./pipelines/execution"
 export type {
-  ExecutionProjectionRunsRuntime,
-  ExecutionProjectionsRuntime,
+  ProjectionRunsRuntime,
+  ProjectionsRuntime,
 } from "./projections/execution"
-export type { ExecutionRuleStatesRuntime, ExecutionRulesRuntime } from "./rules/execution"
+export type { RuleStatesRuntime, RulesRuntime } from "./rules/execution"
 export type {
   BatchItemResult,
   CreateSixbOptions,
+  DefinitionCatalog,
   ListResult,
   ListResultWithoutTotal,
   ObjectByIdHandle,
@@ -858,16 +847,17 @@ export type {
   ObjectSet,
   ObjectSetListInput,
   ObjectSetQueryPropertyToken,
-  ObjectsRuntime,
   ObjectWhereBuilder,
   ObjectWhereClause,
   OntologyDocumentInput,
   OntologySource,
   RegisteredObjectType,
   RegisteredValueTypes,
+  SchedulerController,
   Sixb,
+  SixbDefinitions,
   SixbHostOptions,
-  SixbHostRuntime,
+  SixbHostView,
   TelemetryAppendInput,
   TelemetryChannel,
   TelemetryHistoryInput,
@@ -887,12 +877,12 @@ export {
   SixbHost,
   SyncValidationError,
 } from "./runtime"
-export type { ExecutionSchedulesRuntime } from "./schedules/execution"
-export type { ExecutionSyncRunsRuntime, ExecutionSyncsRuntime } from "./syncs/execution"
+export type { SchedulesRuntime } from "./schedules/execution"
+export type { SyncRunsRuntime, SyncsRuntime } from "./syncs/execution"
 export type {
-  ExecutionWorkflowInterventionsRuntime,
-  ExecutionWorkflowRunsRuntime,
-  ExecutionWorkflowsRuntime,
+  WorkflowInterventionsRuntime,
+  WorkflowRunsRuntime,
+  WorkflowsRuntime,
 } from "./workflows/execution"
 
 // ── Agents ──────────────────────────────────────────────────
@@ -925,7 +915,6 @@ export type {
   AgentReasoningPart,
   AgentRequestErrorCode,
   AgentStepStartPart,
-  AgentsRuntime,
   AgentTextPart,
   AgentToolCallPart,
   AgentToolCallState,
@@ -976,7 +965,7 @@ export type {
   ObjectProjectionDefinition,
   ObjectProjectionTarget,
   ProjectionDefinition,
-  ProjectionsRuntime,
+  ProjectionDefinitionCatalog,
   ProjectionTarget,
   ProjectionTargetByKind,
   TelemetryProjectionDefinition,

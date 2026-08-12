@@ -1,4 +1,4 @@
-import type { SixbHostRuntime } from "@sixb/core"
+import type { SixbHostView } from "@sixb/core"
 import {
   type AuthenticatedRequestAuthSession,
   verifyDoubleSubmitCsrf,
@@ -17,7 +17,7 @@ import {
 import { hasForegroundSessionActivity, isSessionTerminationRequest } from "./session-activity"
 
 export interface ServerAuthGuardOptions {
-  readonly host: SixbHostRuntime
+  readonly host: SixbHostView
   readonly resolveAuthContext: ResolveRequestAuthContext
 }
 
@@ -33,7 +33,7 @@ export type ServerAuthGuardDecision =
   | { readonly kind: "allow"; readonly session: AuthenticatedRequestAuthSession | null }
 
 export class ServerAuthGuard {
-  private readonly host: SixbHostRuntime
+  private readonly host: SixbHostView
   private readonly resolveAuthContext: ResolveRequestAuthContext
 
   constructor(options: ServerAuthGuardOptions) {

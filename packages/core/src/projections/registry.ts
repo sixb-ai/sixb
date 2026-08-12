@@ -19,7 +19,16 @@ import { type ValidatedProjectionRecord, validateProjectionsAtStartup } from "./
 
 type SourceProjectionDefinition = ObjectProjectionDefinition | LinkProjectionDefinition
 
-export class ProjectionRegistry {
+/** Public definition catalog backed by the host's validated projection registry. */
+export interface ProjectionDefinitionCatalog {
+  list(): readonly ProjectionDefinition[]
+  listObjects(): readonly ObjectProjectionDefinition[]
+  listLinks(): readonly LinkProjectionDefinition[]
+  listTelemetry(): readonly TelemetryProjectionDefinition[]
+  getById(projectionId: string): ProjectionDefinition | null
+}
+
+export class ProjectionRegistry implements ProjectionDefinitionCatalog {
   readonly ontologyRevision: string
   private readonly objectProjections: readonly ObjectProjectionDefinition[]
   private readonly linkProjections: readonly LinkProjectionDefinition[]
@@ -103,19 +112,23 @@ export class ProjectionRegistry {
     }
   }
 
-  listObjectProjections(): readonly ObjectProjectionDefinition[] {
+  list(): readonly ProjectionDefinition[] {
+    return [...this.objectProjections, ...this.linkProjections, ...this.telemetryProjections]
+  }
+
+  listObjects(): readonly ObjectProjectionDefinition[] {
     return this.objectProjections
   }
 
-  listLinkProjections(): readonly LinkProjectionDefinition[] {
+  listLinks(): readonly LinkProjectionDefinition[] {
     return this.linkProjections
   }
 
-  listTelemetryProjections(): readonly TelemetryProjectionDefinition[] {
+  listTelemetry(): readonly TelemetryProjectionDefinition[] {
     return this.telemetryProjections
   }
 
-  getProjectionById(projectionId: string): ProjectionDefinition | null {
+  getById(projectionId: string): ProjectionDefinition | null {
     return this.projectionsById.get(projectionId) ?? null
   }
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryBroker } from "@sixb/core"
-import { LOGS_STREAM, LogsRuntime } from "@sixb/core/internal/logging"
+import { LOGS_STREAM, LoggingService } from "@sixb/core/internal/logging"
 import { LogSubscriptionHub } from "../src/routes/ws/log-subscription-hub"
 
 const PROJECT_ID = "log-subscription-hub-test"
@@ -85,8 +85,8 @@ describe("LogSubscriptionHub", () => {
 
   test("does not install a client that unsubscribes while hub startup is pending", async () => {
     const broker = new DelayedSubscribeBroker()
-    const logs = new LogsRuntime({ projectId: PROJECT_ID, broker })
-    const hub = new LogSubscriptionHub({ logs })
+    const logging = new LoggingService({ projectId: PROJECT_ID, broker })
+    const hub = new LogSubscriptionHub({ logging })
     const socket = new TestLogSocket()
     const key = {}
     let subscribed = false
@@ -108,8 +108,8 @@ describe("LogSubscriptionHub", () => {
 
   test("only installs the latest subscription when two requests race during startup", async () => {
     const broker = new DelayedSubscribeBroker()
-    const logs = new LogsRuntime({ projectId: PROJECT_ID, broker })
-    const hub = new LogSubscriptionHub({ logs })
+    const logging = new LoggingService({ projectId: PROJECT_ID, broker })
+    const hub = new LogSubscriptionHub({ logging })
     const socket = new TestLogSocket()
     const key = {}
     const subscribed: string[] = []
@@ -133,8 +133,8 @@ describe("LogSubscriptionHub", () => {
 
   test("does not install a pending client after the hub closes", async () => {
     const broker = new DelayedSubscribeBroker()
-    const logs = new LogsRuntime({ projectId: PROJECT_ID, broker })
-    const hub = new LogSubscriptionHub({ logs })
+    const logging = new LoggingService({ projectId: PROJECT_ID, broker })
+    const hub = new LogSubscriptionHub({ logging })
     let subscribed = false
 
     const pendingSubscribe = hub.subscribe({}, new TestLogSocket(), {}, () => {
@@ -154,8 +154,8 @@ async function createReplayHub(): Promise<{
   readonly hub: LogSubscriptionHub
 }> {
   const broker = new InMemoryBroker()
-  const logs = new LogsRuntime({ projectId: PROJECT_ID, broker })
-  const hub = new LogSubscriptionHub({ logs })
+  const logging = new LoggingService({ projectId: PROJECT_ID, broker })
+  const hub = new LogSubscriptionHub({ logging })
 
   await broker.ensureStream({ projectId: PROJECT_ID, stream: LOGS_STREAM })
   const [anchor] = await broker.append({

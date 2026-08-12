@@ -10,7 +10,7 @@ import {
   SixbHost,
   type SixbHostOptions,
 } from "@sixb/core"
-import type { EventsRuntime, StableEventEnvelope } from "@sixb/core/internal/events"
+import type { DomainEventService, StableEventEnvelope } from "@sixb/core/internal/events"
 import { parseSubscriptionMessage } from "../src/routes/ws/events"
 import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
@@ -190,7 +190,7 @@ describe("/ws/events subscriptions", () => {
       try {
         expect(await nextWsMessage(ws)).toEqual({ type: "connected", channel: "events" })
 
-        const [stored] = await (sixb.events as EventsRuntime).publishEnvelopes([
+        const [stored] = await (sixb.events as DomainEventService).publishEnvelopes([
           telemetryEnvelope(sixb.id, "fan-1", 1200, "2026-02-18T10:00:10.000Z"),
         ])
 
@@ -250,10 +250,10 @@ describe("/ws/events subscriptions", () => {
       try {
         expect(await nextWsMessage(ws)).toEqual({ type: "connected", channel: "events" })
 
-        const [matching] = await (sixb.events as EventsRuntime).publishEnvelopes([
+        const [matching] = await (sixb.events as DomainEventService).publishEnvelopes([
           telemetryEnvelope(sixb.id, "fan-1", 1200, "2026-02-18T10:00:10.000Z"),
         ])
-        await (sixb.events as EventsRuntime).publishEnvelopes([
+        await (sixb.events as DomainEventService).publishEnvelopes([
           telemetryEnvelope(sixb.id, "fan-2", 800, "2026-02-18T10:00:11.000Z"),
         ])
 

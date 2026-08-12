@@ -35,7 +35,7 @@ export class RulesWorker extends Worker {
   private readonly reconciliationPageSize: number
 
   constructor(runtime: RulesWorkerHost, options: RulesWorkerOptions = {}) {
-    const rules = runtime.rules.list()
+    const rules = runtime.definitions.rules.list()
     if (rules.length === 0) {
       throw new Error("[SixbRulesWorker] Rules workers require at least one registered rule.")
     }
@@ -109,7 +109,7 @@ export class RulesWorker extends Worker {
   }
 }
 
-// EventsRuntime.subscribe filters by type at runtime, but the public handler type is
+// DomainEventService.subscribe filters by type at runtime, but the public handler type is
 // still StoredDomainEvent[]. This guard gives the evaluator the narrower union.
 function isOntologyRuleEvent(event: StoredDomainEvent): event is OntologyRuleEvent {
   return (

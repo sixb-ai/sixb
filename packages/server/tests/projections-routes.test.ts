@@ -96,13 +96,16 @@ function createSixbStub(
     queues: new InMemoryQueues(),
   })
   const definitions = [roomsProjection, sensorsProjection]
-  Object.defineProperty(sixb, "projections", {
+  Object.defineProperty(sixb, "definitions", {
     value: {
-      list: () => definitions,
-      listObjects: () => definitions,
-      listLinks: () => [],
-      listTelemetry: () => [],
-      getById: (id: string) => definitions.find((projection) => projection.id === id) ?? null,
+      ...sixb.definitions,
+      projections: {
+        list: () => definitions,
+        listObjects: () => definitions,
+        listLinks: () => [],
+        listTelemetry: () => [],
+        getById: (id: string) => definitions.find((projection) => projection.id === id) ?? null,
+      },
     },
   })
   return sixb

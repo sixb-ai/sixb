@@ -1,4 +1,4 @@
-import type { SixbHostRuntime } from "@sixb/core"
+import type { SixbHostView } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
@@ -14,7 +14,7 @@ import {
 } from "../schemas/links"
 import { handleRouteError, toIsoString } from "../utils/http"
 
-export function registerLinkRoutes(app: Elysia, _host: SixbHostRuntime) {
+export function registerLinkRoutes(app: Elysia, _host: SixbHostView) {
   return app
     .get(
       "/api/objects/:objectTypeId/:objectId/links",

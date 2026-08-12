@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { DatasetDefinition, LakeStorage, SixbHostRuntime } from "@sixb/core"
+import type { DatasetDefinition, LakeStorage, SixbHostView } from "@sixb/core"
 import { col, defineDataset } from "@sixb/core"
 import type { DatasetCatalogState } from "@sixb/core/lake-storage"
 import { Elysia } from "elysia"
@@ -46,26 +46,28 @@ function createCatalogOnlyStorage(states: readonly DatasetCatalogState[]) {
 function createSixbStub(
   lakeStorage: LakeStorage,
   definitions: readonly DatasetDefinition[]
-): SixbHostRuntime {
+): SixbHostView {
   return {
     lakeStorage,
-    datasets: {
-      list: () => definitions,
-      getById: (id: string) => definitions.find((definition) => definition.id === id) ?? null,
+    definitions: {
+      datasets: {
+        list: () => definitions,
+        getById: (id: string) => definitions.find((definition) => definition.id === id) ?? null,
+      },
+      syncs: { list: () => [] },
+      pipelines: { list: () => [] },
+      projections: { list: () => [] },
     },
-    syncs: { list: () => [] },
-    pipelines: { list: () => [] },
-    projections: { list: () => [] },
-  } as unknown as SixbHostRuntime
+  } as unknown as SixbHostView
 }
 
 function createTestApp(lakeStorage: LakeStorage, definitions: readonly DatasetDefinition[]) {
   const sixb = createSixbStub(lakeStorage, definitions)
   const sixbExecution = {
-    datasets: sixb.datasets,
-    syncs: sixb.syncs,
-    pipelines: sixb.pipelines,
-    projections: sixb.projections,
+    datasets: sixb.definitions.datasets,
+    syncs: sixb.definitions.syncs,
+    pipelines: sixb.definitions.pipelines,
+    projections: sixb.definitions.projections,
   }
   const app = new Elysia()
   app.derive(() => ({ sixb: sixbExecution }))

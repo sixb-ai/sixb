@@ -1,11 +1,4 @@
-import type {
-  DatasetsRuntime,
-  LakeStorage,
-  OntologyRegistry,
-  ProjectionsRuntime,
-  Queues,
-  Storage,
-} from "@sixb/core"
+import type { LakeStorage, Queues, SixbDefinitions, Storage } from "@sixb/core"
 import { MaterializationCancellationError } from "@sixb/core"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import {
@@ -27,7 +20,7 @@ export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob
   private readonly projectionRunsStorage: ProjectionRunStorage
 
   constructor(host: ProjectionWorkerHost) {
-    const projectionCount = host.projections.list().length
+    const projectionCount = host.definitions.projections.list().length
     if (projectionCount === 0) {
       throw new Error("[SixbProjectionWorker] No projection definitions are registered.")
     }
@@ -130,11 +123,11 @@ function buildProjectionContext(
 ): ProjectionWorkerContext {
   const context: ProjectionWorkerContext = {
     projectId: host.id,
-    ontology: host.ontology,
+    ontology: host.definitions.ontology,
     lakeStorage: host.lakeStorage,
     projectionRunsStorage,
-    datasets: host.datasets,
-    projections: host.projections,
+    datasets: host.definitions.datasets,
+    projections: host.definitions.projections,
   }
   registerOntologyMutationRuntime(context, execution.ontologyMutations)
   shareProjectionRegistry(host, context)
@@ -142,10 +135,8 @@ function buildProjectionContext(
 }
 
 export interface ProjectionWorkerHost extends PrimitiveExecutionHost {
-  readonly ontology: OntologyRegistry
   readonly storage: Storage
   readonly lakeStorage: LakeStorage
   readonly queues: Queues
-  readonly datasets: Pick<DatasetsRuntime, "getById">
-  readonly projections: Pick<ProjectionsRuntime, "list" | "getById">
+  readonly definitions: Pick<SixbDefinitions, "ontology" | "datasets" | "projections">
 }

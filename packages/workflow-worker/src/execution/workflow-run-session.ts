@@ -1,5 +1,5 @@
 import type { ValueType, WorkflowDefinition } from "@sixb/core"
-import { resolveLogsRuntime } from "@sixb/core/internal/logging"
+import { resolveLoggingService } from "@sixb/core/internal/logging"
 import type {
   WorkflowAgentNodeDefinition,
   WorkflowInterventionNodeDefinition,
@@ -88,7 +88,7 @@ export class WorkflowRunSession {
       observer: input.observer ?? noopWorkflowRunObserver,
       execution: job.execution,
     })
-    const logSession = resolveLogsRuntime(runtime.projectId, runtime.logs).startExecution({
+    const logSession = resolveLoggingService(runtime.projectId, runtime.logging).startExecution({
       kind: "workflow",
       id: job.id,
     })
@@ -170,7 +170,7 @@ export class WorkflowRunSession {
       alreadyStarted: true,
       execution: job.execution,
     })
-    const logSession = resolveLogsRuntime(runtime.projectId, runtime.logs).startExecution({
+    const logSession = resolveLoggingService(runtime.projectId, runtime.logging).startExecution({
       kind: "workflow",
       id: run.id,
     })
@@ -288,7 +288,7 @@ export class WorkflowRunSession {
         alreadyStarted: true,
         execution: job.execution,
       })
-      const logSession = resolveLogsRuntime(runtime.projectId, runtime.logs).startExecution({
+      const logSession = resolveLoggingService(runtime.projectId, runtime.logging).startExecution({
         kind: "workflow",
         id: job.id,
       })
@@ -424,7 +424,7 @@ export class WorkflowRunSession {
       alreadyStarted: true,
       execution: job.execution,
     })
-    const logSession = resolveLogsRuntime(runtime.projectId, runtime.logs).startExecution({
+    const logSession = resolveLoggingService(runtime.projectId, runtime.logging).startExecution({
       kind: "workflow",
       id: job.id,
     })

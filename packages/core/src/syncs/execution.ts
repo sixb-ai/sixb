@@ -10,23 +10,23 @@ import { SyncValidationError } from "./errors"
 import { type RequestSyncRunInput, requestSyncRun, type SyncRunRequestResult } from "./request"
 import type { SyncDefinition } from "./types"
 
-export interface ExecutionSyncRunsRuntime {
+export interface SyncRunsRuntime {
   getById(runId: string): Promise<SyncRunRecord | null>
   list(input?: Omit<ListSyncRunsInput, "projectId" | "syncIds">): Promise<ListSyncRunsResult>
   listLatest(syncIds: readonly string[]): Promise<ListLatestSyncRunsResult>
 }
 
-export interface ExecutionSyncsRuntime {
+export interface SyncsRuntime {
   list(): readonly SyncDefinition[]
   getById(syncId: string): SyncDefinition | null
   request(input: RequestSyncRunInput): Promise<SyncRunRequestResult>
-  readonly runs: ExecutionSyncRunsRuntime
+  readonly runs: SyncRunsRuntime
 }
 
-export function createExecutionSyncsRuntime(
+export function createSyncsRuntime(
   runtime: SixbRuntimeContext,
-  source: Pick<ExecutionSyncsRuntime, "list" | "getById">
-): ExecutionSyncsRuntime {
+  source: Pick<SyncsRuntime, "list" | "getById">
+): SyncsRuntime {
   const allowed = (syncId: string) => isAllowed(runtime.authorization, { kind: "sync.run", syncId })
   const visibleIds = () =>
     source

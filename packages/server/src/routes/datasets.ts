@@ -1,4 +1,4 @@
-import type { DatasetDefinition, SixbHostRuntime } from "@sixb/core"
+import type { DatasetDefinition, SixbHostView } from "@sixb/core"
 import type {
   DatasetCatalogState,
   DatasetLatestVersionSummary,
@@ -144,7 +144,7 @@ function serializeDatasetCatalogItem(
 }
 
 async function serializeDatasetCatalogItems(
-  host: SixbHostRuntime,
+  host: SixbHostView,
   definitions: readonly DatasetDefinition[],
   sixb: ReturnType<typeof requireRequestSixb>
 ) {
@@ -203,7 +203,7 @@ async function collectRows(rows: AsyncIterable<Readonly<Record<string, unknown>>
   return collected
 }
 
-export function registerDatasetRoutes(app: Elysia, host: SixbHostRuntime) {
+export function registerDatasetRoutes(app: Elysia, host: SixbHostView) {
   return app
     .get(
       "/api/datasets",

@@ -194,14 +194,14 @@ async function loadWorkflowAgentNodeExecution(
     return null
   }
 
-  const workflow = host.workflows.getById(nodeRun.workflowId)
+  const workflow = host.definitions.workflows.getById(nodeRun.workflowId)
   const node = workflow?.nodes[nodeRun.nodeIndex]
   if (!workflow || !node || node.type !== "agent" || node.id !== nodeRun.nodeId) {
     throw new AgentWorkerError(
       `Workflow definition for agent node '${job.payload.nodeRunId}' is no longer available.`
     )
   }
-  const agent = host.agents.getById(job.payload.agentId)
+  const agent = host.definitions.agents.getById(job.payload.agentId)
   if (!agent || agent.id !== node.agentStep.agent.id) {
     throw new AgentWorkerError(`Unknown agent '${job.payload.agentId}'.`)
   }
@@ -213,7 +213,7 @@ async function loadWorkflowAgentNodeExecution(
     workflow,
     node,
     agent,
-    valueTypesById: host.ontology.getValueTypesById(),
+    valueTypesById: host.definitions.ontology.getValueTypesById(),
     requestedBy: workflowRun.requestedByPrincipal,
   }
 }

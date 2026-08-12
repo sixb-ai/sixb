@@ -1,48 +1,7 @@
-import type { DomainEventLog } from "../events"
 import { buildEventSelectorPredicate, type EventSelectorSpec } from "../events/selectors"
 import type { DomainEvent, PropertyChange, PropertyChangeMap } from "../events/types"
 import { evaluatePredicate } from "../predicates"
-import { SchedulerRuntime } from "../scheduler/runtime"
-import type {
-  EventScheduleConditionScope,
-  EventScheduleTriggerDefinition,
-  ScheduleDefinition,
-} from "./types"
-
-export interface SchedulesRuntime {
-  list(): readonly ScheduleDefinition[]
-  getById(scheduleId: string): ScheduleDefinition | null
-  start(): Promise<void>
-  stop(): Promise<void>
-}
-
-/** Owns the registered schedule catalog and its process-local scheduler lifecycle. */
-export function createSchedulesRuntime(
-  definitions: readonly ScheduleDefinition[],
-  events: DomainEventLog
-): SchedulesRuntime {
-  const definitionsById = new Map(definitions.map((definition) => [definition.id, definition]))
-  let scheduler: SchedulerRuntime | null = null
-
-  return {
-    list: () => [...definitionsById.values()],
-    getById: (scheduleId) => definitionsById.get(scheduleId) ?? null,
-    start: async () => {
-      if (scheduler || definitionsById.size === 0) return
-
-      const next = new SchedulerRuntime({ schedules: [...definitionsById.values()], events })
-      await next.start()
-      scheduler = next
-    },
-    stop: async () => {
-      if (!scheduler) return
-
-      const current = scheduler
-      scheduler = null
-      await current.stop()
-    },
-  }
-}
+import type { EventScheduleConditionScope, EventScheduleTriggerDefinition } from "./types"
 
 export type RuntimeEventScheduleContext = Readonly<Record<string, unknown>>
 

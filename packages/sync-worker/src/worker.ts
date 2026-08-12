@@ -1,13 +1,6 @@
-import type {
-  DatasetsRuntime,
-  DomainEventLog,
-  LakeStorage,
-  Queues,
-  Storage,
-  SyncsRuntime,
-} from "@sixb/core"
+import type { DomainEventLog, LakeStorage, Queues, SixbDefinitions, Storage } from "@sixb/core"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
-import type { LogsRuntime } from "@sixb/core/internal/logging"
+import type { LoggingService } from "@sixb/core/internal/logging"
 import {
   bindPrimitiveExecution,
   type PrimitiveExecutionHost,
@@ -23,19 +16,18 @@ const SOURCE = "SixbSyncWorker"
 
 export interface SyncWorkerHost extends PrimitiveExecutionHost {
   readonly events?: DomainEventLog
-  readonly logs?: LogsRuntime
+  readonly logging?: LoggingService
   readonly lakeStorage: LakeStorage
   readonly queues: Queues
   readonly storage: Storage
-  readonly syncs: Pick<SyncsRuntime, "list" | "getById">
-  readonly datasets: Pick<DatasetsRuntime, "getById">
+  readonly definitions: Pick<SixbDefinitions, "syncs" | "datasets">
 }
 
 export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
   private readonly host: SyncWorkerHost
 
   constructor(host: SyncWorkerHost) {
-    if (host.syncs.list().length === 0) {
+    if (host.definitions.syncs.list().length === 0) {
       throw new Error("[SixbSyncWorker] No sync definitions are registered.")
     }
 
@@ -211,9 +203,9 @@ function buildSyncContext(
     syncRunsStorage,
     lakeStorage: host.lakeStorage,
     blobs: sixb.blobs,
-    logs: host.logs,
-    syncs: host.syncs,
-    datasets: host.datasets,
+    logging: host.logging,
+    syncs: host.definitions.syncs,
+    datasets: host.definitions.datasets,
     connector: sixb.connector,
   }
 }

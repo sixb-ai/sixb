@@ -6,40 +6,16 @@ type ConnectorConnectionState = {
   clientPromise: Promise<unknown>
 }
 
-/** Resolve an inert connector definition to its lazily connected client. */
-export type ConnectorRuntime = <TAdapter extends ConnectorAdapter>(
-  definition: ConnectorDefinition<string, TAdapter>
-) => Promise<ConnectorClient<TAdapter>>
-
-export interface ConnectorsRuntime {
-  list(): readonly ConnectorDefinition[]
-  getById(id: string): ConnectorDefinition | null
-  disconnectAll(): Promise<void>
-}
-
-class ConnectorRegistry implements ConnectorsRuntime {
-  private readonly definitionsById = new Map<string, ConnectorDefinition>()
+/** Process-owned connector clients and their lifecycle. */
+export class ConnectorService {
+  private readonly definitionsById: ReadonlyMap<string, ConnectorDefinition>
   private readonly connectionStates = new Map<ConnectorDefinition, ConnectorConnectionState>()
 
   constructor(
     private readonly projectId: string,
     definitions: readonly ConnectorDefinition[]
   ) {
-    for (const definition of definitions) {
-      if (this.definitionsById.has(definition.id)) {
-        throw new ConnectorError(`Duplicate connector id: ${definition.id}`)
-      }
-
-      this.definitionsById.set(definition.id, definition)
-    }
-  }
-
-  list(): readonly ConnectorDefinition[] {
-    return [...this.definitionsById.values()]
-  }
-
-  getById(id: string): ConnectorDefinition | null {
-    return this.definitionsById.get(id) ?? null
+    this.definitionsById = new Map(definitions.map((definition) => [definition.id, definition]))
   }
 
   async connect<TAdapter extends ConnectorAdapter>(
@@ -82,7 +58,7 @@ class ConnectorRegistry implements ConnectorsRuntime {
     }
   }
 
-  async disconnectAll(): Promise<void> {
+  async close(): Promise<void> {
     const activeConnections = [...this.connectionStates.entries()]
     this.connectionStates.clear()
 
@@ -107,17 +83,5 @@ class ConnectorRegistry implements ConnectorsRuntime {
     if (typeof definition.adapter.disconnect === "function") {
       await definition.adapter.disconnect(client as never)
     }
-  }
-}
-
-export function createConnectorsRuntime(
-  projectId: string,
-  definitions: readonly ConnectorDefinition[]
-): { readonly connector: ConnectorRuntime; readonly connectors: ConnectorsRuntime } {
-  const registry = new ConnectorRegistry(projectId, definitions)
-
-  return {
-    connector: (definition) => registry.connect(definition),
-    connectors: registry,
   }
 }

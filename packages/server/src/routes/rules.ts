@@ -1,4 +1,4 @@
-import type { RuleDefinition, SixbHostRuntime } from "@sixb/core"
+import type { RuleDefinition, SixbHostView } from "@sixb/core"
 import { deriveRuleEventDependencies } from "@sixb/core/internal/rules"
 import type { RuleStateRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
@@ -25,7 +25,7 @@ function serializeRuleState(state: RuleStateRecord): ReturnType<typeof RuleState
   return RuleStateSchema.parse(state)
 }
 
-export function registerRuleRoutes(app: Elysia, host: SixbHostRuntime) {
+export function registerRuleRoutes(app: Elysia, host: SixbHostView) {
   return app
     .get(
       "/api/rules",

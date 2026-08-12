@@ -2,15 +2,15 @@ import { isAllowed } from "../authorization"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { DatasetDefinition } from "./types"
 
-export interface ExecutionDatasetsRuntime {
+export interface DatasetsRuntime {
   list(): readonly DatasetDefinition[]
   getById(datasetId: string): DatasetDefinition | null
 }
 
-export function createExecutionDatasetsRuntime(
+export function createDatasetsRuntime(
   runtime: Pick<SixbRuntimeContext, "authorization">,
-  source: Pick<ExecutionDatasetsRuntime, "list" | "getById">
-): ExecutionDatasetsRuntime {
+  source: Pick<DatasetsRuntime, "list" | "getById">
+): DatasetsRuntime {
   const allowed = (datasetId: string) =>
     isAllowed(runtime.authorization, { kind: "dataset.view", datasetId })
 

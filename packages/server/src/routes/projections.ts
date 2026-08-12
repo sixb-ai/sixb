@@ -2,7 +2,7 @@ import type {
   LinkProjectionDefinition,
   ObjectProjectionDefinition,
   ProjectionDefinition,
-  SixbHostRuntime,
+  SixbHostView,
   TelemetryProjectionDefinition,
 } from "@sixb/core"
 import type { ProjectionRunRecord } from "@sixb/core/storage"
@@ -106,7 +106,7 @@ function serializeProjectionCatalog(
   }
 }
 
-export function registerProjectionRoutes(app: Elysia, host: SixbHostRuntime) {
+export function registerProjectionRoutes(app: Elysia, host: SixbHostView) {
   return app
     .get(
       "/api/projections",

@@ -12,7 +12,6 @@ export type {
   WorkflowRunRequestResult,
 } from "./request"
 export { requestWorkflowRun } from "./request"
-export { createWorkflowsRuntime, WorkflowsRuntime } from "./runtime"
 export {
   snapshotWorkflowActionInput,
   snapshotWorkflowAgentStepInput,

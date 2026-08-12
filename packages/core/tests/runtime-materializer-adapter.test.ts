@@ -10,7 +10,7 @@ import {
   prop,
   SixbHost,
 } from "../src"
-import { EventsRuntime, OntologyOutboxDispatcher } from "../src/events"
+import { DomainEventService, OntologyOutboxDispatcher } from "../src/events"
 import { getOntologyMutationRuntime } from "../src/runtime/internal"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import { createTestSixb } from "../src/testing"
@@ -445,7 +445,7 @@ describe("committed fact delivery", () => {
     await new OntologyOutboxDispatcher({
       projectId: sixb.execution.projectId,
       storage: deps.storage,
-      events: new EventsRuntime({ projectId: host.id, broker: deps.broker }),
+      events: new DomainEventService({ projectId: host.id, broker: deps.broker }),
       now: () => new Date(Date.now() + 60_000),
     }).drain()
 

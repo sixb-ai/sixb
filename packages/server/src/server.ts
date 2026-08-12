@@ -1,6 +1,6 @@
 import { cors } from "@elysiajs/cors"
 import { openapi } from "@elysiajs/openapi"
-import type { OntologyMaintenanceHandle, SixbHostRuntime } from "@sixb/core"
+import type { OntologyMaintenanceHandle, SixbHostView } from "@sixb/core"
 import { CSRF_HEADER_NAME } from "@sixb/core/internal/auth"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { Elysia } from "elysia"
@@ -44,7 +44,7 @@ import { jsonValueOpenApiOverride } from "./schemas/common"
 import { ObjectQueryOpenApiSchemas } from "./schemas/objects"
 
 export interface SixbServerOptions {
-  host: SixbHostRuntime
+  host: SixbHostView
   port?: number
   hostname?: string
   quiet?: boolean
@@ -56,7 +56,7 @@ export function createSixbServer(options: SixbServerOptions): SixbServer {
 }
 
 export class SixbServer {
-  private readonly hostRuntime: SixbHostRuntime
+  private readonly hostRuntime: SixbHostView
   private readonly port: number
   private readonly hostname: string
   private readonly quiet: boolean
@@ -79,7 +79,7 @@ export class SixbServer {
     )
   }
 
-  getHost(): SixbHostRuntime {
+  getHost(): SixbHostView {
     return this.hostRuntime
   }
 

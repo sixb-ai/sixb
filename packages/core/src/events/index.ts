@@ -23,20 +23,6 @@ export {
   OntologyOutboxDispatcher,
   type OntologyOutboxDispatcherOptions,
 } from "./outbox-dispatcher"
-export {
-  createEventsRuntime,
-  DEFAULT_EVENTS_RETENTION_MS,
-  type DomainEventLog,
-  EVENTS_STREAM,
-  type EventsAppendInput,
-  type EventsEmitOptions,
-  type EventsReadInput,
-  EventsRuntime,
-  type EventsRuntimeOptions,
-  type EventsSubscribeInput,
-  type StableEventEnvelope,
-  type StableEventPublisher,
-} from "./runtime"
 export type { EventScopeKeys } from "./scope"
 export { scopeKeysForEvent } from "./scope"
 export {
@@ -80,6 +66,20 @@ export {
   type SyncEventSelectorEvent,
   type SyncEventToken,
 } from "./selectors"
+export {
+  createDomainEventService,
+  DEFAULT_EVENTS_RETENTION_MS,
+  type DomainEventLog,
+  DomainEventService,
+  type DomainEventServiceOptions,
+  EVENTS_STREAM,
+  type EventsAppendInput,
+  type EventsEmitOptions,
+  type EventsReadInput,
+  type EventsSubscribeInput,
+  type StableEventEnvelope,
+  type StableEventPublisher,
+} from "./service"
 export { toStoredEvent } from "./toStoredEvent"
 export type {
   ActionCompletedEvent,

@@ -6,10 +6,8 @@
  */
 
 import { resolve } from "node:path"
-import { type ActionRegistry, type ActionsRuntime, createActionsRuntime } from "../actions"
 import type { ActionDefinition } from "../actions/types"
-import type { AgentDefinition, AgentsRuntime } from "../agents"
-import { createAgentsRuntime } from "../agents"
+import type { AgentDefinition } from "../agents"
 import {
   AuthRuntime,
   AuthRuntimeError,
@@ -17,16 +15,10 @@ import {
   isOidcAuthStrategy,
   type SixbAuthConfig,
 } from "../auth"
-import type { BlobStorage, BlobsRuntime } from "../blob-storage"
-import { createBlobsRuntime } from "../blob-storage/runtime"
+import type { BlobStorage } from "../blob-storage"
 import type { Broker } from "../broker"
-import {
-  type ConnectorRuntime,
-  type ConnectorsRuntime,
-  createConnectorsRuntime,
-} from "../connectors/runtime"
+import { ConnectorService } from "../connectors/service"
 import type { ConnectorDefinition } from "../connectors/types"
-import { createDatasetsRuntime, type DatasetsRuntime } from "../datasets"
 import type { DatasetDefinition } from "../datasets/types"
 import {
   attachSixbErrorReporter,
@@ -35,9 +27,9 @@ import {
 } from "../error-reporting/capability"
 import type { SixbErrorHandler } from "../error-reporting/types"
 import {
-  createEventsRuntime,
+  createDomainEventService,
   type DomainEventLog,
-  type EventsRuntime,
+  type DomainEventService,
   OntologyOutboxDispatcher,
 } from "../events"
 import {
@@ -46,7 +38,7 @@ import {
 } from "../execution/authorization"
 import type { ExecutionScope } from "../execution/types"
 import type { LakeStorage } from "../lake-storage"
-import { type LoggerProvider, LogsRuntime, type ObservabilityOptions } from "../logging"
+import { type LoggerProvider, LoggingService, type ObservabilityOptions } from "../logging"
 import {
   OntologyMaintenance,
   type OntologyMaintenanceHandle,
@@ -55,21 +47,14 @@ import {
   type SixbReadiness,
 } from "../maintenance"
 import { createOntologyMaterializer } from "../materializer"
-import { createObjectTypesRuntime, type ObjectTypesRuntime } from "../objects"
-import type { OntologyRegistry } from "../ontology"
-import { createPipelinesRuntime, type PipelinesRuntime } from "../pipelines"
 import type { PipelineDefinition } from "../pipelines/types"
 import { registerProjectionRegistry } from "../projections/internal"
-import { createProjectionsRuntime, type ProjectionsRuntime } from "../projections/runtime"
 import type { ProjectionDefinition } from "../projections/types"
 import type { Queues } from "../queues"
-import { createRulesRuntime, type RuleDefinition, type RulesRuntime } from "../rules"
+import type { RuleDefinition } from "../rules"
 import type { SandboxFactory } from "../sandboxes"
-import {
-  createSchedulesRuntime,
-  type ScheduleDefinition,
-  type SchedulesRuntime,
-} from "../schedules"
+import { type SchedulerController, SchedulerRuntime } from "../scheduler"
+import type { ScheduleDefinition } from "../schedules"
 import type {
   GroupDefinition,
   MembershipPolicyDefinition,
@@ -78,16 +63,15 @@ import type {
 } from "../security"
 import type { Storage } from "../storage"
 import type { SyncDefinition } from "../syncs"
-import { createSyncsRuntime, type SyncsRuntime } from "../syncs"
 import type { RegisteredWebhook } from "../webhooks"
 import { registerWebhooks, WebhookValidationError, webhookRoute } from "../webhooks"
-import type { WorkflowDefinition, WorkflowsRuntime } from "../workflows"
-import { createWorkflowsRuntime } from "../workflows"
+import type { WorkflowDefinition } from "../workflows"
+import type { SixbDefinitions } from "./definitions"
 import {
   createOntologyMutationRuntime,
   registerOntologyMutationRuntime,
 } from "./ontology-mutations"
-import { resolveRuntimeDefinitions } from "./resolve-definitions"
+import { resolveDefinitions } from "./resolve-definitions"
 import { createBoundSixb, type Sixb, type SixbDependencies } from "./sixb"
 import { StorageReadiness } from "./storage-readiness"
 import type { OntologySource, SixbHostContext, SixbRuntimeContext } from "./types"
@@ -112,7 +96,7 @@ export interface SixbHostOptions<TOntologySources extends readonly OntologySourc
   projectRoot?: string
   actions?: readonly ActionDefinition[]
   datasets?: readonly DatasetDefinition[]
-  /** Connector definitions registered with this runtime. */
+  /** Connector definitions registered with this host. */
   connectors?: readonly ConnectorDefinition[]
   schedules?: readonly ScheduleDefinition[]
   syncs?: readonly SyncDefinition[]
@@ -135,33 +119,21 @@ export class SixbHost<
   private readonly webhooks: readonly RegisteredWebhook[]
   private readonly hostContext: SixbHostContext
   private readonly committedFacts: OntologyOutboxDispatcher
-  private readonly eventsRuntime: EventsRuntime
+  private readonly eventService: DomainEventService
   private readonly ontologyMaintenance: OntologyMaintenance
   private readonly storageReadiness: StorageReadiness
-  readonly ontology: OntologyRegistry
-  readonly actionRegistry: ActionRegistry
-  readonly objects: ObjectTypesRuntime
-  readonly actions: ActionsRuntime
-  readonly workflows: WorkflowsRuntime
-  readonly agents: AgentsRuntime
-  readonly datasets: DatasetsRuntime
-  readonly syncs: SyncsRuntime
-  readonly pipelines: PipelinesRuntime
-  readonly connector: ConnectorRuntime
-  readonly connectors: ConnectorsRuntime
-  readonly blobs: BlobsRuntime
+  private readonly connectorService: ConnectorService
+  readonly definitions: SixbDefinitions
   readonly broker: Broker
   readonly events: DomainEventLog
-  readonly logs: LogsRuntime
+  readonly logging: LoggingService
   readonly storage: Storage
   readonly lakeStorage: LakeStorage
+  readonly blobStorage: BlobStorage
   readonly queues: Queues
   readonly sandboxes?: SandboxFactory
   readonly projectRoot: string
-  readonly schedules: SchedulesRuntime
-  readonly rules: RulesRuntime
-  readonly projections: ProjectionsRuntime
-  readonly security: SecurityRegistry
+  readonly scheduler: SchedulerController
   readonly auth: AuthRuntime
 
   constructor(options: SixbHostOptions<TOntologySources>) {
@@ -169,13 +141,13 @@ export class SixbHost<
     this.projectId = options.id ?? "default"
     this.broker = options.broker
     // `host: this` is how `events.emit()` reaches the reporter attached at the top of this constructor.
-    this.eventsRuntime = createEventsRuntime({
+    this.eventService = createDomainEventService({
       projectId: this.projectId,
       broker: this.broker,
       host: this,
     })
-    this.events = this.eventsRuntime
-    this.logs = new LogsRuntime({
+    this.events = this.eventService
+    this.logging = new LoggingService({
       projectId: this.projectId,
       broker: this.broker,
       logger: options.logger,
@@ -184,30 +156,24 @@ export class SixbHost<
     this.storage = options.storage
     this.storageReadiness = new StorageReadiness(this.storage)
     this.lakeStorage = options.lakeStorage
-    this.blobs = createBlobsRuntime(options.blobStorage)
+    this.blobStorage = options.blobStorage
     this.queues = options.queues
     this.sandboxes = options.sandboxes
     this.projectRoot = resolve(options.projectRoot ?? process.cwd())
 
-    const definitions = resolveRuntimeDefinitions(options)
-    this.ontology = definitions.ontology
-    this.actionRegistry = definitions.actionRegistry
-    this.security = definitions.security
-    this.rules = createRulesRuntime(definitions.rules)
-    this.projections = createProjectionsRuntime(definitions.projectionRegistry)
-    registerProjectionRegistry(this, definitions.projectionRegistry)
+    const definitions = resolveDefinitions(options)
+    this.definitions = definitions
+    registerProjectionRegistry(this, definitions.projections)
 
     this.auth = new AuthRuntime({
       projectId: this.projectId,
       storage: this.storage,
-      security: this.security,
+      security: definitions.security,
       config: options.auth,
     })
-    validateAuthStrategySecurityReferences(this.auth.getStrategy(), this.security)
-    const connectorRuntimes = createConnectorsRuntime(this.projectId, options.connectors ?? [])
-    this.connector = connectorRuntimes.connector
-    this.connectors = connectorRuntimes.connectors
-    const connectors = this.connectors.list()
+    validateAuthStrategySecurityReferences(this.auth.getStrategy(), definitions.security)
+    const connectors = definitions.connectors.list()
+    this.connectorService = new ConnectorService(this.projectId, connectors)
     assertWebhookDeliveryStorage(connectors, this.storage)
     this.webhooks = registerWebhooks(connectors).webhooks
 
@@ -217,14 +183,14 @@ export class SixbHost<
 
     const materializer = createOntologyMaterializer({
       projectId: this.projectId,
-      ontology: this.ontology,
-      projections: definitions.projectionRegistry,
+      ontology: definitions.ontology,
+      projections: definitions.projections,
       storage: this.storage,
     })
     this.committedFacts = new OntologyOutboxDispatcher({
       projectId: this.projectId,
       storage: this.storage,
-      events: this.eventsRuntime,
+      events: this.eventService,
       onDeliveryFailure: (error, failure) =>
         reportEventDeliveryFailure(this, error, {
           projectId: this.projectId,
@@ -240,17 +206,17 @@ export class SixbHost<
 
     this.hostContext = {
       projectId: this.projectId,
-      ontology: this.ontology,
-      actionRegistry: this.actionRegistry,
+      ontology: definitions.ontology,
+      actionRegistry: definitions.actions,
       events: this.events,
       storage: this.storage,
       lakeStorage: this.lakeStorage,
-      blobStorage: this.blobs,
+      blobStorage: this.blobStorage,
       queues: this.queues,
       sandboxes: this.sandboxes,
-      rules: this.rules.list(),
+      rules: definitions.rules.list(),
     }
-    registerProjectionRegistry(this.hostContext, definitions.projectionRegistry)
+    registerProjectionRegistry(this.hostContext, definitions.projections)
     const ontologyMutations = createOntologyMutationRuntime({
       materializer,
       notifyCommittedFacts: () => this.committedFacts.notify(),
@@ -258,14 +224,10 @@ export class SixbHost<
     registerOntologyMutationRuntime(this, ontologyMutations)
     registerOntologyMutationRuntime(this.hostContext, ontologyMutations)
     shareSixbErrorReporter(this, this.hostContext)
-    this.objects = createObjectTypesRuntime(this.hostContext)
-    this.actions = createActionsRuntime(this.actionRegistry)
-    this.schedules = createSchedulesRuntime(definitions.schedules, this.eventsRuntime)
-    this.datasets = createDatasetsRuntime(definitions.datasets)
-    this.syncs = createSyncsRuntime(definitions.syncs)
-    this.pipelines = createPipelinesRuntime(definitions.pipelines)
-    this.workflows = createWorkflowsRuntime(definitions.workflows)
-    this.agents = createAgentsRuntime(definitions.agents)
+    this.scheduler = new SchedulerRuntime({
+      schedules: definitions.schedules.list(),
+      events: this.eventService,
+    })
   }
 
   /** Bind an existing opaque scope. This method never creates or escalates authority. */
@@ -317,7 +279,17 @@ export class SixbHost<
 
   /** Flush and close the configured process logger provider. */
   async closeLogger(): Promise<void> {
-    await this.logs.close()
+    await this.logging.close()
+  }
+
+  /** Disconnect every lazily created connector client. */
+  async closeConnectors(): Promise<void> {
+    await this.connectorService.close()
+  }
+
+  /** Close blob-provider resources owned by this host. */
+  async closeBlobs(): Promise<void> {
+    await this.blobStorage.close?.()
   }
 
   /** Close the runtime broker provider if it owns external resources. */
@@ -329,18 +301,10 @@ export class SixbHost<
 
   private sixbDependencies(): SixbDependencies {
     return {
-      datasets: this.datasets,
-      syncs: this.syncs,
-      pipelines: this.pipelines,
-      projections: this.projections,
-      rules: this.rules,
-      workflows: this.workflows,
-      agents: this.agents,
-      logs: this.logs,
-      schedules: this.schedules,
-      connector: this.connector,
-      connectors: this.connectors,
-      blobs: this.blobs,
+      definitions: this.definitions,
+      logging: this.logging,
+      connectorService: this.connectorService,
+      blobStorage: this.blobStorage,
     }
   }
 }
@@ -350,7 +314,7 @@ export class SixbHost<
  * boundaries. Authoring code should retain {@link SixbHost}'s inferred ontology parameter; CLI,
  * server, and worker infrastructure deliberately do not depend on it.
  */
-export type SixbHostRuntime = Omit<SixbHost, "withScope"> & {
+export type SixbHostView = Omit<SixbHost, "withScope"> & {
   withScope(scope: ExecutionScope): object
 }
 

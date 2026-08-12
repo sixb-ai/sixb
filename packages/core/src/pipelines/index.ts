@@ -6,8 +6,6 @@ export type {
   RequestPipelineRunInput,
 } from "./request"
 export { requestPipelineRun } from "./request"
-export type { PipelinesRuntime } from "./runtime"
-export { createPipelinesRuntime } from "./runtime"
 export type {
   PipelineBuilder,
   PipelineDefinition,

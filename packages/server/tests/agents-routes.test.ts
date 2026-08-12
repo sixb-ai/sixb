@@ -421,7 +421,7 @@ describe("agent routes", () => {
       threads: [{ id: createThreadBody.thread.id, agentId: "assistant", messageCount: 0 }],
     })
 
-    const attachment = await sixb.blobs.put({
+    const attachment = await sixb.blobStorage.put({
       body: new TextEncoder().encode("pipeline log contents"),
       fileName: "pipeline.log",
       mediaType: "text/plain",
@@ -927,7 +927,7 @@ describe("agent routes", () => {
     )
     expect(hiddenThread.status).toBe(404)
 
-    const attachment = await sixb.blobs.put({
+    const attachment = await sixb.blobStorage.put({
       body: new TextEncoder().encode("owner attachment"),
       fileName: "owner.txt",
       mediaType: "text/plain",

@@ -20,7 +20,7 @@ describe("Scheduler integration with SixbHost", () => {
     jest.useRealTimers()
   })
 
-  test("startScheduler() emits events", async () => {
+  test("scheduler.start() emits events", async () => {
     const deps = createTestRuntimeDeps()
     const schedule = defineSchedule("hourly").cron("0 * * * *")
 
@@ -30,7 +30,7 @@ describe("Scheduler integration with SixbHost", () => {
       ...deps,
     })
 
-    await sixb.schedules.start()
+    await sixb.scheduler.start()
 
     // Advance past the next hour mark
     jest.advanceTimersByTime(60 * MINUTE)
@@ -41,10 +41,10 @@ describe("Scheduler integration with SixbHost", () => {
     expect(events.length).toBeGreaterThanOrEqual(1)
     expect((events[0] as StoredScheduleTriggeredEvent).payload.scheduleId).toBe("hourly")
 
-    await sixb.schedules.stop()
+    await sixb.scheduler.stop()
   })
 
-  test("stopScheduler() stops emission", async () => {
+  test("scheduler.stop() stops emission", async () => {
     const deps = createTestRuntimeDeps()
     const schedule = defineSchedule("s1").cron("0 * * * *")
 
@@ -54,8 +54,8 @@ describe("Scheduler integration with SixbHost", () => {
       ...deps,
     })
 
-    await sixb.schedules.start()
-    await sixb.schedules.stop()
+    await sixb.scheduler.start()
+    await sixb.scheduler.stop()
 
     jest.advanceTimersByTime(120 * MINUTE)
 
@@ -73,12 +73,12 @@ describe("Scheduler integration with SixbHost", () => {
       ...deps,
     })
 
-    await sixb.schedules.start()
-    await sixb.schedules.stop()
+    await sixb.scheduler.start()
+    await sixb.scheduler.stop()
     // No errors
   })
 
-  test("startScheduler() is idempotent", async () => {
+  test("scheduler.start() is idempotent", async () => {
     const deps = createTestRuntimeDeps()
     const schedule = defineSchedule("s1").cron("0 * * * *")
 
@@ -88,8 +88,8 @@ describe("Scheduler integration with SixbHost", () => {
       ...deps,
     })
 
-    await sixb.schedules.start()
-    await sixb.schedules.start() // second call is no-op
+    await sixb.scheduler.start()
+    await sixb.scheduler.start() // second call is no-op
 
     jest.advanceTimersByTime(60 * MINUTE)
 
@@ -99,7 +99,7 @@ describe("Scheduler integration with SixbHost", () => {
     // Should not have duplicated timers
     expect(events.length).toBeGreaterThanOrEqual(1)
 
-    await sixb.schedules.stop()
+    await sixb.scheduler.stop()
   })
 
   test("full lifecycle", async () => {
@@ -113,7 +113,7 @@ describe("Scheduler integration with SixbHost", () => {
     })
 
     // Start
-    await sixb.schedules.start()
+    await sixb.scheduler.start()
 
     // Fire
     jest.advanceTimersByTime(60 * MINUTE)
@@ -124,7 +124,7 @@ describe("Scheduler integration with SixbHost", () => {
     expect(events.length).toBeGreaterThanOrEqual(1)
 
     // Stop
-    await sixb.schedules.stop()
+    await sixb.scheduler.stop()
 
     const countBefore = events.length
 

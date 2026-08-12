@@ -126,7 +126,7 @@ describe("GET /api/logs", () => {
 
   test("uses a bounded default page and rejects invalid limits", async () => {
     await withServer(async ({ baseUrl, sixb }) => {
-      const session = sixb.logs.startExecution({ kind: "workflow", id: "bounded-history" })
+      const session = sixb.logging.startExecution({ kind: "workflow", id: "bounded-history" })
       for (let index = 1; index <= 201; index += 1) {
         session.logger.info(`line ${index}`)
       }
@@ -274,7 +274,7 @@ async function seed(
   message: string,
   level: "debug" | "info" | "warn" | "error"
 ): Promise<void> {
-  const session = sixb.logs.startExecution(run)
+  const session = sixb.logging.startExecution(run)
   session.logger[level](message)
   await session.flush()
 }

@@ -92,7 +92,6 @@ export {
   type RequestAgentRunResult,
   requestAgentRun,
 } from "./request"
-export { AgentsRuntime, createAgentsRuntime } from "./runtime"
 export type {
   AgentRunControlStreamId,
   AgentRunFinishedEvent,
