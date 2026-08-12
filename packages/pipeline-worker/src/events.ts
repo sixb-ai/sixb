@@ -93,7 +93,7 @@ export async function emitPipelineRunStepFinished(
             finishedAt: requireFinishedAt(step.id, step.finishedAt).toISOString(),
             ...(step.output ? { versionId: step.output.versionId } : {}),
             ...(step.rowsWritten !== undefined ? { rowsWritten: step.rowsWritten } : {}),
-            ...(step.error ? { error: step.error.message } : {}),
+            ...(step.error ? { error: step.error } : {}),
           },
         },
       ],
