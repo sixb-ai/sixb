@@ -466,6 +466,11 @@ export {
 // The full storage-provider contract lives at `@sixb/core/storage`.
 
 export type {
+  CreateExecutionInput,
+  DurableExecutionExecutor,
+  DurableExecutionSource,
+  ExecutionRecord,
+  ExecutionStorage,
   MigrationCapableStorage,
   MigrationReport,
   // `status()` returns these, so reading a migrator from here needs them; without them

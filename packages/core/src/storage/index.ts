@@ -151,6 +151,20 @@ export {
   StorageTransactionError,
 } from "./errors"
 export type {
+  AuthorizablePrincipal,
+  AuthorizationRef,
+  CreateExecutionInput,
+  DurableExecutionExecutor,
+  DurableExecutionSource,
+  ExecutionRecord,
+  ExecutionStorage,
+  ExecutionStorageErrorCode,
+  KernelOperation,
+  TrustedPrimitiveKind,
+  TrustedPrimitiveRef,
+} from "./executions"
+export { ExecutionStorageError } from "./executions"
+export type {
   CreateFileUploadSessionInput,
   FileUploadSession,
   FileUploadSessionErrorReason,

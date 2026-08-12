@@ -19,6 +19,7 @@ import {
 import initialSchemaSql from "./migrations/001-initial-schema.sql" with { type: "text" }
 import workflowRunOutputSql from "./migrations/002-workflow-run-output.sql" with { type: "text" }
 import mergeSyncRunsSql from "./migrations/003-merge-sync-runs.sql" with { type: "text" }
+import executionsSql from "./migrations/004-executions.sql" with { type: "text" }
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -42,6 +43,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("001-initial-schema", initialSchemaSql),
     sqliteSql("002-workflow-run-output", workflowRunOutputSql),
     sqliteSql("003-merge-sync-runs", mergeSyncRunsSql),
+    sqliteSql("004-executions", executionsSql),
   ],
 })
 

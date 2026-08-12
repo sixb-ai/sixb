@@ -25,6 +25,11 @@ export {
   type TestExecutionOptions,
 } from "./execution"
 export {
+  type ExecutionStorageContractStorage,
+  type ExecutionStorageContractSuiteOptions,
+  runExecutionStorageContractSuite,
+} from "./execution-storage-contract"
+export {
   type LakeMergeStorageContractSuiteOptions,
   runLakeMergeStorageContractSuite,
 } from "./lake-merge-storage-contract"

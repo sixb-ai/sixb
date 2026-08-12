@@ -30,6 +30,7 @@ import { createPostgresStorageMigrators, dropSchema } from "./migrations"
 import { PgOntologyStorage, type PgOntologyTransactionContext } from "./ontology-storage"
 import { PgActionRunStorage } from "./pg-action-run-storage"
 import { createPgClient, type SQL, type SQLClient } from "./pg-client"
+import { PgExecutionStorage } from "./pg-execution-storage"
 import { PgObjectStorage } from "./pg-object-storage"
 import { PgPipelineRunStorage } from "./pg-pipeline-run-storage"
 import { PgProjectionRunStorage } from "./pg-projection-run-storage"
@@ -128,6 +129,7 @@ export class PostgresStorage implements MigrationCapableStorage {
   readonly objects: ObjectStorage
   readonly ontology: PgOntologyStorage
   readonly auth: PgAuthStorage
+  readonly executions: PgExecutionStorage
   readonly agents: PgAgentStorage
   readonly actionRuns: PgActionRunStorage
   readonly pipelineRuns: PgPipelineRunStorage
@@ -199,6 +201,7 @@ export class PostgresStorage implements MigrationCapableStorage {
     this.objects = createOperationScopedFacade(stores.objects, scope)
     this.ontology = createOntologyOperationScope(stores.ontology, scope)
     this.auth = createAuthOperationScope(stores.auth, scope)
+    this.executions = createOperationScopedFacade(stores.executions, scope)
     this.agents = createAgentOperationScope(stores.agents, scope)
     this.actionRuns = createOperationScopedFacade(stores.actionRuns, scope)
     this.pipelineRuns = createOperationScopedFacade(stores.pipelineRuns, scope)
@@ -313,6 +316,7 @@ function createPostgresStores(
     readonly transactionContext: PgOntologyTransactionContext | null
   }
 ): PostgresStoreSet {
+  const auth = new PgAuthStorage({ sql })
   return {
     objects: new PgObjectStorage(sql),
     ontology: new PgOntologyStorage({
@@ -320,7 +324,8 @@ function createPostgresStores(
       runRootOperation: options.runOntologyOperation,
       transactionContext: options.transactionContext,
     }),
-    auth: new PgAuthStorage({ sql }),
+    auth,
+    executions: new PgExecutionStorage(sql, auth),
     agents: new PgAgentStorage({ sql }),
     actionRuns: new PgActionRunStorage(sql),
     pipelineRuns: new PgPipelineRunStorage(sql),
@@ -339,6 +344,7 @@ interface PostgresStoreSet {
   readonly objects: PgObjectStorage
   readonly ontology: PgOntologyStorage
   readonly auth: PgAuthStorage
+  readonly executions: PgExecutionStorage
   readonly agents: PgAgentStorage
   readonly actionRuns: PgActionRunStorage
   readonly pipelineRuns: PgPipelineRunStorage
