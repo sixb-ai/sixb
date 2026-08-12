@@ -208,6 +208,21 @@ describe("SyncWorker", () => {
     } finally {
       await worker.stop()
     }
+
+    const failedRun = await sixb.storage.syncRuns!.getById({
+      projectId: sixb.id,
+      id: "run-failed",
+    })
+    if (!failedRun) throw new Error("Expected the failed sync run to be persisted.")
+    const events = await sixb.events.read({ types: ["sync.run.finished"] })
+    expect(events).toHaveLength(1)
+    expect(events[0]?.payload).toEqual({
+      syncId: failedRun.syncId,
+      runId: failedRun.id,
+      status: "failed",
+      datasetId: failedRun.datasetId,
+      error: failedRun.error,
+    })
   })
 
   test("streams a run-scoped log line to the broker", async () => {
@@ -348,6 +363,16 @@ describe("SyncWorker", () => {
 
     expect(retried?.job.id).toBe(queued?.id)
     expect(retried?.job.attempt).toBe(2)
+    if (!cancelledRun) throw new Error("Expected the cancelled sync run to be persisted.")
+    const events = await sixb.events.read({ types: ["sync.run.finished"] })
+    expect(events).toHaveLength(1)
+    expect(events[0]?.payload).toEqual({
+      syncId: cancelledRun.syncId,
+      runId: cancelledRun.id,
+      status: "cancelled",
+      datasetId: cancelledRun.datasetId,
+      error: cancelledRun.error,
+    })
     expect(reportCount).toBe(0)
   })
 
@@ -413,7 +438,7 @@ describe("SyncWorker", () => {
 
     await worker.start()
 
-    await waitFor(
+    const run = await waitFor(
       () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-emit" }),
       (value) => value?.status === "succeeded"
     )
@@ -459,10 +484,14 @@ describe("SyncWorker", () => {
       datasetId?: string
       versionId?: string
     }
-    expect(payload.syncId).toBe("sync-orders")
-    expect(payload.runId).toBe("run-emit")
-    expect(payload.status).toBe("succeeded")
-    expect(payload.datasetId).toBe("raw.erp.orders")
+    if (!run) throw new Error("Expected the succeeded sync run to be persisted.")
+    expect(payload).toEqual({
+      syncId: run.syncId,
+      runId: run.id,
+      status: "succeeded",
+      datasetId: run.datasetId,
+      versionId: run.output?.versionId,
+    })
     expect(payload.versionId).toBe(datasetPayload.versionId)
   })
 

@@ -24,7 +24,7 @@ import {
   InMemoryStorage,
 } from "@sixb/core"
 import type { BeginDatasetWriteInput, LakeWriteSession } from "@sixb/core/lake-storage"
-import type { SyncRunStorage } from "@sixb/core/storage"
+import type { SyncRunRecord, SyncRunStorage } from "@sixb/core/storage"
 import { InMemorySyncRunStorage } from "@sixb/core/storage"
 import { LocalLakeStorage } from "@sixb/lake-local"
 import { runSyncJob } from "../src/run-sync-job"
@@ -225,12 +225,16 @@ describe("runSyncJob", () => {
       syncRunsStorage,
       lakeStorage: wrappedLakeStorage,
     })
+    const finishedRuns: SyncRunRecord[] = []
 
     const result = await runSyncJob({
       runtime,
       job: {
         id: "run_1",
         syncId: "sync-orders",
+      },
+      onRunFinished(run) {
+        finishedRuns.push(run)
       },
     })
 
@@ -262,6 +266,8 @@ describe("runSyncJob", () => {
         versionId: result.version!.versionId,
       },
     })
+    if (!run) throw new Error("Expected the sync run to be persisted.")
+    expect(finishedRuns).toEqual([run])
 
     const rows = await collectRows(runtime.lakeStorage.readRows({ datasetId: "raw.erp.orders" }))
     expect(rows).toEqual([
@@ -1241,6 +1247,7 @@ describe("runSyncJob", () => {
     }
 
     const lakeStorage = new InMemoryLakeStorage()
+    const finishedRuns: SyncRunRecord[] = []
     const sync = defineSync("sync-orders")
       .from(erpDb)
       .read(() => [{ orderId: "ord_1" }])
@@ -1257,6 +1264,9 @@ describe("runSyncJob", () => {
           id: "run_1",
           syncId: "sync-orders",
         },
+        onRunFinished(run) {
+          finishedRuns.push(run)
+        },
       })
     ).rejects.toThrow("dataset commit may already have succeeded")
 
@@ -1272,6 +1282,7 @@ describe("runSyncJob", () => {
       id: "run_1",
     })
     expect(run?.status).toBe("running")
+    expect(finishedRuns).toHaveLength(0)
   })
 
   test("works against LocalLakeStorage", async () => {

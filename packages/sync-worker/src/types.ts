@@ -33,10 +33,17 @@ export interface RunSyncJobInput {
   readonly job: SyncJob
   readonly signal?: AbortSignal
   readonly onRunStarted?: SyncRunStartedHandler
+  readonly onRunFinished?: SyncRunFinishedHandler
   readonly onRunFailed?: SyncRunFailedHandler
 }
 
 export type SyncRunStartedHandler = (run: SyncRunRecord) => Promise<void> | void
+
+export type SyncRunFinishedHandler = (
+  run: SyncRunRecord,
+  /** Dataset version created by this run, when the durable output is new. */
+  createdVersion?: DatasetVersion
+) => Promise<void> | void
 
 export type SyncRunFailedHandler = (error: unknown, run: SyncRunRecord) => void
 
