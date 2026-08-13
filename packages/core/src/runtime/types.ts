@@ -12,10 +12,8 @@ import type {
   RequestActionResult,
 } from "../actions"
 import type { AuthorizationContext } from "../authorization"
-import type { BlobStorage } from "../blob-storage"
 import type { DomainEventLog } from "../events"
 import type { RuntimeAuthorization } from "../execution"
-import type { LakeStorage } from "../lake-storage"
 import type {
   ObjectQuery,
   ObjectQueryExplanation,
@@ -39,8 +37,6 @@ import type {
 import type { OntologyDocumentInput, OntologyRegistry, OntologySource } from "../ontology/registry"
 import type { LinkToken, ObjectTypeWithPropertyTokens, PropertyToken } from "../ontology/tokens"
 import type { Queues } from "../queues"
-import type { RuleDefinition } from "../rules"
-import type { SandboxFactory } from "../sandboxes"
 import type { ActionRunRecord, ObjectLinkRow, Storage } from "../storage"
 // ── Shared runtime context ──────────────────────────────────
 
@@ -56,11 +52,7 @@ export interface SixbHostContext {
   readonly actionRegistry: ActionRegistry
   readonly events: DomainEventLog
   readonly storage: Storage
-  readonly lakeStorage: LakeStorage
-  readonly blobStorage: BlobStorage
   readonly queues: Queues
-  readonly sandboxes?: SandboxFactory
-  readonly rules?: readonly RuleDefinition[]
 }
 
 /** Host dependencies paired with the process-local authority of one bound execution. */
