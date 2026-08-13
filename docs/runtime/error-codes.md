@@ -38,6 +38,7 @@ Expected non-retryable outcomes remain represented by their HTTP status and clai
 Workflow completion events reuse the exact failure stored on the run or node.
 Pipeline completion events reuse the exact failure stored on the run or step run.
 Sync completion events reuse the exact failure stored on the run.
+`agent.run.finished.error` reuses the exact failure stored on the Agent run.
 The ontology outbox declares `event.delivery_failed`; its durable record is retained while publication
 is retried.
 

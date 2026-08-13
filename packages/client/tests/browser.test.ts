@@ -160,6 +160,53 @@ describe("agent stream websocket helpers", () => {
     expect(parsed?.type === "record" ? parsed.record.cursor : null).toBe("cursor_1")
   })
 
+  test("preserves the durable failure on terminal Agent records", () => {
+    const failure = {
+      code: "internal.unexpected",
+      message: "provider unavailable",
+      retryable: false,
+      at: "2026-06-27T15:59:59.000Z",
+      details: { agentId: "agent_1", runId: "run_1" },
+      causeChain: [{ name: "ProviderError", message: "connection reset" }],
+    } as const
+    const frame = {
+      type: "record",
+      record: {
+        streamId: "agents.runs.run_1",
+        cursor: "cursor_2",
+        name: "agent.run.finished",
+        key: "run_1",
+        publishedAt: "2026-06-27T16:00:00.000Z",
+        payload: {
+          schemaVersion: 1,
+          type: "agent.run.finished",
+          projectId: "project_1",
+          runId: "run_1",
+          threadId: "thread_1",
+          agentId: "agent_1",
+          attempt: 1,
+          occurredAt: "2026-06-27T16:00:00.000Z",
+          status: "failed",
+          finishReason: "error",
+          error: failure,
+        },
+      },
+    }
+
+    const parsed = parseAgentRunStreamServerMessage(JSON.stringify(frame))
+    const payload = parsed?.type === "record" ? parsed.record.payload : null
+    expect(payload?.type === "agent.run.finished" ? payload.error : null).toEqual(failure)
+
+    const flattened = {
+      ...frame,
+      record: {
+        ...frame.record,
+        payload: { ...frame.record.payload, error: "provider unavailable" },
+      },
+    }
+    expect(parseAgentRunStreamServerMessage(JSON.stringify(flattened))).toBeNull()
+  })
+
   test("drops malformed frames without throwing", () => {
     expect(parseAgentRunStreamServerMessage("not json")).toBeNull()
     expect(
