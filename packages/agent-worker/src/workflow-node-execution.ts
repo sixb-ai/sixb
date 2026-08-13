@@ -1,4 +1,4 @@
-import type { AgentDefinition, ValueType, WorkflowDefinition } from "@sixb/core"
+import type { AgentDefinition, SixbFailure, ValueType, WorkflowDefinition } from "@sixb/core"
 import {
   createAgentRunExecutionToken,
   resolveAgentExecutionAuthorization,
@@ -18,6 +18,7 @@ import type {
   WorkflowAgentNodeRunExecution,
   WorkflowAgentNodeRunRecord,
   WorkflowNodeRunRecord,
+  WorkflowRunFailureCode,
   WorkflowRunRecord,
   WorkflowRunStorage,
 } from "@sixb/core/storage"
@@ -202,13 +203,13 @@ export async function executeWorkflowAgentNode(
     if (status === "failed") {
       reportRunFailure(input.host, executionError, {
         projectId: context.id,
-        occurredAt: failed.run.finishedAt,
         attempt: job.attempt,
+        runKind: "workflow",
         run: {
-          kind: "workflow",
           runId: failed.run.id,
           workflowId: failed.run.workflowId,
         },
+        failure: failed.failure,
       })
     }
     await emitNodeAndRunFailed(input.host, failed, workflow.nodes.length, status)
@@ -430,7 +431,11 @@ async function finishWorkflowAgentNodeFailed(input: {
   readonly executionToken: string
   readonly status: "failed" | "cancelled"
   readonly error: unknown
-}): Promise<{ readonly node: WorkflowNodeRunRecord; readonly run: WorkflowRunRecord }> {
+}): Promise<{
+  readonly node: WorkflowNodeRunRecord
+  readonly run: WorkflowRunRecord
+  readonly failure: SixbFailure<WorkflowRunFailureCode>
+}> {
   const at = new Date()
   const failure = captureSixbFailure(input.error, {
     allowedCodes: WORKFLOW_RUN_FAILURE_CODES,
@@ -485,7 +490,7 @@ async function finishWorkflowAgentNodeFailed(input: {
       error: failure,
       finishedAt: at,
     })
-    return { node, run }
+    return { node, run, failure }
   })
 }
 

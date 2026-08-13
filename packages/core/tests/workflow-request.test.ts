@@ -152,7 +152,7 @@ describe("sixb.workflows.request", () => {
     })
     await flushSixbErrors(host)
     expect(reports).toEqual([
-      `project:workflow-enqueue-failure:run:workflow:run_enqueue_failure:failed:${run?.finishedAt?.toISOString()}:workflow queue unavailable`,
+      `project:workflow-enqueue-failure:run:workflow:run_enqueue_failure:failed:${run?.error?.at}:workflow queue unavailable`,
     ])
   })
 

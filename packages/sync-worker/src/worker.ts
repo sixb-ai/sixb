@@ -70,16 +70,16 @@ export class SyncWorker extends QueueWorker<
         onRunStarted: (run) => emitSyncRunStarted(this.host, run),
         onRunFinished: (run, createdVersion) =>
           emitSyncRunFinishedEvents(this.host, run, createdVersion),
-        onRunFailed: (error, run) => {
+        onRunFailed: (error, run, failure) => {
           reportRunFailure(this.host, error, {
             projectId: this.host.id,
-            occurredAt: run.finishedAt,
             attempt: job.attempt,
+            runKind: "sync",
             run: {
-              kind: "sync",
               runId: run.id,
               syncId: run.syncId,
             },
+            failure,
           })
         },
       })

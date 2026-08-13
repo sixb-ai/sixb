@@ -122,17 +122,20 @@ export async function runPipelineJob(input: RunPipelineJobInput): Promise<Pipeli
     if (startedRun && !finished) {
       const status = statusForFailure(signal, error)
       try {
+        const failure = captureSixbFailure(error, {
+          allowedCodes: PIPELINE_RUN_FAILURE_CODES,
+          defaultCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+          details: { pipelineId: pipeline.id, runId: job.id },
+        })
         const run = await runtime.pipelineRunsStorage.finish({
           projectId: runtime.id,
           id: job.id,
           status,
-          error: captureSixbFailure(error, {
-            allowedCodes: PIPELINE_RUN_FAILURE_CODES,
-            defaultCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
-            details: { pipelineId: pipeline.id, runId: job.id },
-          }),
+          error: failure,
         })
-        if (status === "failed" && run.status === "failed") input.onRunFailed?.(error, run)
+        if (status === "failed" && run.status === "failed") {
+          input.onRunFailed?.(error, run, failure)
+        }
         await notifyRunFinished(input.onRunFinished, run)
       } catch {
         // The run did not transition to the requested terminal status.

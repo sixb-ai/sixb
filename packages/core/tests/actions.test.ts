@@ -947,7 +947,7 @@ describe("requestAction", () => {
     })
     await flushSixbErrors(sixb)
     expect(reports).toEqual([
-      `project:action-enqueue-retry-test:run:action:act_enqueue_retry:failed:${failed?.finishedAt?.toISOString()}:queue unavailable`,
+      `project:action-enqueue-retry-test:run:action:act_enqueue_retry:failed:${failed?.error?.at}:queue unavailable`,
     ])
 
     const retry = await sixb.objects(Room).requestAction({

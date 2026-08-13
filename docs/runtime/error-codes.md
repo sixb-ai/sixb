@@ -42,6 +42,9 @@ Sync completion events reuse the exact failure stored on the run.
 The ontology outbox declares `event.delivery_failed`; its durable record is retained while publication
 is retried.
 
+Runtime `onError(error, context)` notifications expose the same record as `context.failure`. Failed runs and persisted outbox attempts reuse the exact object written to storage; failures without durable storage, such as rejected framework emits and rule evaluations, are normalized once at the reporting
+boundary. The native `error` argument remains available for stacks and error-monitoring integrations.
+
 Each storage and wire change remains independently reviewable even though every migrated primitive shares the same portable base record.
 
 | Code | Retryable | What happened | What to do |

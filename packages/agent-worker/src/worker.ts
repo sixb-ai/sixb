@@ -1,5 +1,5 @@
 import { join } from "node:path"
-import type { AgentDefinition } from "@sixb/core"
+import type { AgentDefinition, SixbFailure } from "@sixb/core"
 import {
   createAgentRunExecutionToken,
   dispatchQueuedAgentRuns,
@@ -12,7 +12,7 @@ import { captureSixbFailure, createSixbError, isSixbError } from "@sixb/core/int
 import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { isAbortError, QueueDeliveryLeaseLostError, QueueWorker } from "@sixb/core/internal/workers"
 import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
-import type { AgentRunExecution, AgentRunRecord } from "@sixb/core/storage"
+import type { AgentRunExecution, AgentRunFailureCode, AgentRunRecord } from "@sixb/core/storage"
 import { AGENT_RUN_FAILURE_CODES, AgentStorageError } from "@sixb/core/storage"
 import { loadAgentSkills } from "./agent-skills"
 import { normalizeApiBaseUrl } from "./api-url"
@@ -57,6 +57,8 @@ const MAX_AGENT_DELIVERY_ATTEMPTS = 10
 type Reservation =
   | { readonly kind: "run"; readonly run: AgentRunRecord }
   | { readonly kind: "skip" }
+
+type AgentRunFailure = SixbFailure<AgentRunFailureCode>
 
 /**
  * Cohosted worker that turns durable queued agent runs into executing turns.
@@ -186,21 +188,22 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       )
       if (queuedRun.status === "queued") {
         const completedAt = new Date()
+        const failure = toAgentRunFailure(
+          createSixbError(
+            "internal.unexpected",
+            `[SixbAgentWorker] Agent '${queuedRun.agentId}' is not registered.`,
+            { details: { agentId: queuedRun.agentId, runId } }
+          ),
+          { status: "failed", at: completedAt, run: queuedRun }
+        )
         const failed = await context.storage.agents.runs.finishQueued({
           projectId: context.id,
           id: queuedRun.id,
           status: "failed",
-          error: toAgentRunFailure(
-            createSixbError(
-              "internal.unexpected",
-              `[SixbAgentWorker] Agent '${queuedRun.agentId}' is not registered.`,
-              { details: { agentId: queuedRun.agentId, runId } }
-            ),
-            { status: "failed", at: completedAt, run: queuedRun }
-          ),
+          error: failure,
           completedAt,
         })
-        this.reportFailure(error, failed, job.attempt)
+        this.reportFailure(error, failed, job.attempt, failure)
         await context.streamSink.publishRunFinished(failed)
         return
       }
@@ -329,10 +332,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         error
       )
       if (finalized) {
-        if (finalized.status === "failed") {
-          this.reportFailure(error, finalized, job.attempt)
+        if (finalized.run.status === "failed") {
+          this.reportFailure(error, finalized.run, job.attempt, finalized.failure)
         }
-        await context.streamSink.publishRunFinished(finalized)
+        await context.streamSink.publishRunFinished(finalized.run)
       }
       // Shutdown abort: rethrow so `onAbortError` releases the job for another process. A user cancel
       // or a recorded model/tool failure keeps its fate on the record, so we ack by returning.
@@ -389,14 +392,15 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     })
     if (run?.status === "queued") {
       const completedAt = new Date()
+      const failure = toAgentRunFailure(error, { status: "failed", at: completedAt, run })
       const failed = await this.requireContext().storage.agents.runs.finishQueued({
         projectId: this.host.id,
         id: run.id,
         status: "failed",
-        error: toAgentRunFailure(error, { status: "failed", at: completedAt, run }),
+        error: failure,
         completedAt,
       })
-      this.reportFailure(error, failed, claimed.job.attempt)
+      this.reportFailure(error, failed, claimed.job.attempt, failure)
       await this.requireContext().streamSink.publishRunFinished(failed)
     }
     return { kind: "fail" }
@@ -595,16 +599,21 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     })
   }
 
-  private reportFailure(error: unknown, run: AgentRunRecord, attempt: number): void {
+  private reportFailure(
+    error: unknown,
+    run: AgentRunRecord,
+    attempt: number,
+    failure: AgentRunFailure
+  ): void {
     reportRunFailure(this.host, error, {
       projectId: this.host.id,
-      occurredAt: run.completedAt,
       attempt,
+      runKind: "agent",
       run: {
-        kind: "agent",
         runId: run.id,
         agentId: run.agentId,
       },
+      failure,
     })
   }
 
@@ -614,17 +623,19 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     executionToken: string,
     status: "failed" | "cancelled",
     error: unknown
-  ): Promise<AgentRunRecord | undefined> {
+  ): Promise<{ readonly run: AgentRunRecord; readonly failure: AgentRunFailure } | undefined> {
     try {
       const completedAt = new Date()
-      return await finishRunOrThrow(context.storage.agents, {
+      const failure = toAgentRunFailure(error, { status, at: completedAt, run })
+      const finalized = await finishRunOrThrow(context.storage.agents, {
         projectId: context.id,
         id: run.id,
         executionToken,
         status,
-        error: toAgentRunFailure(error, { status, at: completedAt, run }),
+        error: failure,
         completedAt,
       })
+      return { run: finalized, failure }
     } catch (finalizeError) {
       // Execution already lost / run already terminal — nothing more to record.
       if (finalizeError instanceof AgentExecutionLostError) {

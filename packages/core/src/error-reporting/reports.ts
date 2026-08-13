@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto"
+import { captureSixbFailure } from "../errors/internal"
+import type { SixbFailure } from "../errors/types"
 import type { ActionRunFailure } from "../storage/action-runs"
 import type { ErrorReporter } from "./reporter"
 import type { SixbFailedRun } from "./types"
@@ -8,10 +10,8 @@ function resolveOccurredAt(occurredAt?: Date | string): string {
   return occurredAt ?? new Date().toISOString()
 }
 
-export interface ReportRunFailureInput {
+export type ReportRunFailureInput = SixbFailedRun & {
   readonly projectId: string
-  readonly run: SixbFailedRun
-  readonly occurredAt?: Date | string
   readonly attempt?: number
 }
 
@@ -20,14 +20,12 @@ export function reportRunFailure(
   error: unknown,
   input: ReportRunFailureInput
 ): void {
-  const occurredAt = resolveOccurredAt(input.occurredAt)
+  const occurredAt = input.failure.at
   reporter.report(error, {
+    ...input,
     type: "run.failed",
-    notificationId: `project:${input.projectId}:run:${input.run.kind}:${input.run.runId}:failed:${occurredAt}`,
-    projectId: input.projectId,
+    notificationId: `project:${input.projectId}:run:${input.runKind}:${input.run.runId}:failed:${occurredAt}`,
     occurredAt,
-    ...(input.attempt === undefined ? {} : { attempt: input.attempt }),
-    run: input.run,
   })
 }
 
@@ -58,6 +56,8 @@ export function reportActionPhaseFailure(
 
 export interface ReportEventDeliveryFailureInput {
   readonly projectId: string
+  /** Exact durable failure when this delivery was persisted by the ontology outbox. */
+  readonly failure?: SixbFailure<"event.delivery_failed">
   /** Event types that never reached subscribers. Payloads must not be passed in. */
   readonly eventTypes: readonly string[]
   readonly occurredAt?: Date | string
@@ -92,9 +92,22 @@ export function reportEventDeliveryFailure(
   error: unknown,
   input: ReportEventDeliveryFailureInput
 ): void {
-  const occurredAt = resolveOccurredAt(input.occurredAt)
+  const occurredAt = input.failure?.at ?? resolveOccurredAt(input.occurredAt)
   const attempts = input.attempts ?? 1
   const eventIds = input.eventIds === undefined ? undefined : [...input.eventIds].sort()
+  const eventTypes = [...input.eventTypes]
+  const failure =
+    input.failure ??
+    captureSixbFailure(error, {
+      allowedCodes: ["event.delivery_failed"],
+      defaultCode: "event.delivery_failed",
+      details: {
+        attempts,
+        eventTypes,
+        ...(eventIds === undefined ? {} : { eventIds }),
+      },
+      at: new Date(occurredAt),
+    })
   const firstEventId = eventIds?.[0]
   const occurrence = firstEventId
     ? `events:${firstEventId}:attempt:${attempts}`
@@ -104,8 +117,9 @@ export function reportEventDeliveryFailure(
     notificationId: `project:${input.projectId}:event-delivery:${occurrence}`,
     projectId: input.projectId,
     occurredAt,
+    failure,
     attempts,
-    eventTypes: input.eventTypes,
+    eventTypes,
     ...(eventIds === undefined ? {} : { eventIds }),
   })
 }
@@ -127,6 +141,17 @@ export function reportRuleEvaluationFailure(
 ): void {
   const occurredAt = resolveOccurredAt(input.occurredAt)
   const eventIds = [...(input.eventIds ?? [])].sort()
+  const failure = captureSixbFailure(error, {
+    allowedCodes: ["internal.unexpected"],
+    defaultCode: "internal.unexpected",
+    details: {
+      source: input.source,
+      eventIds,
+      ...(input.ruleId === undefined ? {} : { ruleId: input.ruleId }),
+      ...(input.subject === undefined ? {} : { subject: input.subject }),
+    },
+    at: new Date(occurredAt),
+  })
   // A candidate-level failure keys on the candidate, so two rules failing over the same batch stay
   // two notifications rather than collapsing into one.
   const occurrence =
@@ -138,6 +163,7 @@ export function reportRuleEvaluationFailure(
     notificationId: `project:${input.projectId}:rule-evaluation:${input.source}:${occurrence}:failed:${occurredAt}`,
     projectId: input.projectId,
     occurredAt,
+    failure,
     source: input.source,
     eventIds,
     ...(input.ruleId === undefined ? {} : { ruleId: input.ruleId }),

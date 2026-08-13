@@ -5,6 +5,7 @@ import type {
   ConnectorDefinition,
   Logger,
   RegisteredWebhook,
+  SixbFailure,
   SixbHostView,
   WebhookDefinition,
   WebhookMetadata,
@@ -17,6 +18,7 @@ import type {
   WebhookDeliveryClaimResult,
   WebhookDeliveryFailure,
   WebhookDeliveryKey,
+  WebhookRunFailureCode,
 } from "@sixb/core/storage"
 import { WEBHOOK_DELIVERY_FAILURE_CODES, WEBHOOK_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
@@ -66,6 +68,8 @@ type WebhookRunFinishInput = WebhookRunFinishBaseInput &
       }
   )
 
+type WebhookRunFailure = SixbFailure<WebhookRunFailureCode>
+
 type DeliveryClaimResult =
   | {
       readonly status: "run"
@@ -113,18 +117,19 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
   })
   const logSession = host.logging.startExecution({ kind: "webhook", id: runId })
   let failureReported = false
-  const reportFailure = (error: unknown) => {
+  const reportFailure = (error: unknown, failure: WebhookRunFailure) => {
     if (failureReported) return
 
     failureReported = true
     reportRunFailure(host, error, {
       projectId: host.id,
+      runKind: "webhook",
       run: {
-        kind: "webhook",
         runId,
         connectorId: registered.connector.id,
         webhookId: registered.webhook.id,
       },
+      failure,
     })
   }
 
@@ -139,7 +144,7 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
       reportFailure
     )
   } catch (error) {
-    await finishWebhookRun({
+    const failure = await finishWebhookRun({
       host,
       registered,
       runId,
@@ -147,7 +152,7 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
       responseStatus: 500,
       error,
     })
-    reportFailure(error)
+    reportFailure(error, failure)
     throw error
   } finally {
     await logSession.flush()
@@ -159,7 +164,7 @@ async function dispatchWebhookRun(
   runId: string,
   sixb: ReturnType<typeof bindPrimitiveExecution>["sixb"],
   loggerForPhase: (phase: string) => Logger,
-  reportFailure: (error: unknown) => void
+  reportFailure: (error: unknown, failure: WebhookRunFailure) => void
 ): Promise<unknown> {
   const { host, registered, request, set } = options
   const { connector, webhook, route } = registered
@@ -280,9 +285,8 @@ async function dispatchWebhookRun(
     }
     deliveryKey = claim.key
   } catch (error) {
-    reportFailure(error)
     set.status = 500
-    await finishWebhookRun({
+    const failure = await finishWebhookRun({
       host,
       registered,
       runId,
@@ -291,6 +295,7 @@ async function dispatchWebhookRun(
       responseStatus: 500,
       error: "Webhook delivery claim failed",
     })
+    reportFailure(error, failure)
     return { error: "Webhook delivery claim failed" }
   }
 
@@ -306,7 +311,7 @@ async function dispatchWebhookRun(
       cause: error,
       responseStatus: 500,
     })
-    reportFailure(deliveryFailure.error)
+    reportFailure(deliveryFailure.error, deliveryFailure.failure)
     // Handler failures mark the key failed so the provider's next retry can
     // attempt the delivery again.
     if (deliveryKey) {
@@ -364,9 +369,8 @@ async function dispatchWebhookRun(
       }
     }
   } catch (error) {
-    reportFailure(error)
     set.status = 500
-    await finishWebhookRun({
+    const failure = await finishWebhookRun({
       host,
       registered,
       runId,
@@ -377,11 +381,12 @@ async function dispatchWebhookRun(
       deliveryClaimResult,
       error: "Webhook delivery completion failed",
     })
+    reportFailure(error, failure)
     return { error: "Webhook delivery completion failed" }
   }
 
   if (deliveryFailure) {
-    reportFailure(deliveryFailure.error)
+    reportFailure(deliveryFailure.error, deliveryFailure.failure)
   }
   const terminalMetadata = {
     host,
@@ -392,13 +397,15 @@ async function dispatchWebhookRun(
     idempotencyKey,
     deliveryClaimResult,
   }
-  await finishWebhookRun(
-    runStatus === "failed"
-      ? deliveryFailure
+  if (runStatus === "failed") {
+    await finishWebhookRun(
+      deliveryFailure
         ? { ...terminalMetadata, status: "failed", failure: deliveryFailure.failure }
         : { ...terminalMetadata, status: "failed", error: failureMessage }
-      : { ...terminalMetadata, status: "succeeded" }
-  )
+    )
+  } else {
+    await finishWebhookRun({ ...terminalMetadata, status: "succeeded" })
+  }
 
   return applyWebhookResponse(set, response)
 }
@@ -429,15 +436,31 @@ async function startWebhookRun(
   }
 }
 
-async function finishWebhookRun(input: WebhookRunFinishInput): Promise<void> {
+async function finishWebhookRun(
+  input: Extract<WebhookRunFinishInput, { readonly status: "failed" }>
+): Promise<WebhookRunFailure>
+async function finishWebhookRun(
+  input: Extract<WebhookRunFinishInput, { readonly status: "succeeded" | "skipped" }>
+): Promise<undefined>
+async function finishWebhookRun(
+  input: WebhookRunFinishInput
+): Promise<WebhookRunFailure | undefined> {
   const storage = input.host.storage.webhookRuns
-  if (!storage) {
-    return
-  }
-
-  try {
-    const finishedAt =
-      input.status === "failed" && input.failure ? new Date(input.failure.at) : new Date()
+  if (input.status === "failed") {
+    const finishedAt = input.failure ? new Date(input.failure.at) : new Date()
+    const failure =
+      input.failure ??
+      captureSixbFailure(input.error, {
+        allowedCodes: WEBHOOK_RUN_FAILURE_CODES,
+        defaultCode: "internal.unexpected",
+        details: {
+          connectorId: input.registered.connector.id,
+          webhookId: input.registered.webhook.id,
+          runId: input.runId,
+        },
+        at: finishedAt,
+      })
+    if (!storage) return failure
     const terminalMetadata = {
       id: input.runId,
       projectId: input.host.id,
@@ -447,26 +470,27 @@ async function finishWebhookRun(input: WebhookRunFinishInput): Promise<void> {
       idempotencyKey: input.idempotencyKey,
       deliveryClaimResult: input.deliveryClaimResult,
     }
-    await storage.finish(
-      input.status === "failed"
-        ? {
-            ...terminalMetadata,
-            status: "failed",
-            error:
-              input.failure ??
-              captureSixbFailure(input.error, {
-                allowedCodes: WEBHOOK_RUN_FAILURE_CODES,
-                defaultCode: "internal.unexpected",
-                details: {
-                  connectorId: input.registered.connector.id,
-                  webhookId: input.registered.webhook.id,
-                  runId: input.runId,
-                },
-                at: finishedAt,
-              }),
-          }
-        : { ...terminalMetadata, status: input.status }
-    )
+    try {
+      await storage.finish({ ...terminalMetadata, status: "failed", error: failure })
+    } catch {
+      // Webhook run history is observability-only. Do not change provider responses
+      // when history storage is unavailable or temporarily failing.
+    }
+    return failure
+  }
+
+  if (!storage) return
+  try {
+    await storage.finish({
+      id: input.runId,
+      projectId: input.host.id,
+      finishedAt: new Date(),
+      requestBodyBytes: input.requestBodyBytes,
+      responseStatus: input.responseStatus,
+      idempotencyKey: input.idempotencyKey,
+      deliveryClaimResult: input.deliveryClaimResult,
+      status: input.status,
+    })
   } catch {
     // Webhook run history is observability-only. Do not change provider responses
     // when history storage is unavailable or temporarily failing.

@@ -50,7 +50,7 @@ export async function resolveRedeliveredRunningRun(
   }
 
   if (resolution.kind === "resume") return resolution
-  reportRedeliveryFailure(input, resolution.run)
+  reportRedeliveryFailure(input, resolution.run, resolution.failure)
   return {
     kind: "finished",
     result: failedResult(input.job.id, input.job.actionId, resolution.run, resolution.failure),
@@ -129,7 +129,11 @@ function redeliveryFailure(runId: string, run: ActionRunRecord, failedAt: Date):
   )
 }
 
-function reportRedeliveryFailure(input: RunActionJobInput, run: ActionRunRecord): void {
+function reportRedeliveryFailure(
+  input: RunActionJobInput,
+  run: ActionRunRecord,
+  failure: ActionRunFailure
+): void {
   const error = createSixbError(
     "internal.unexpected",
     `[SixbActionWorker] ${run.error?.message ?? `Action run '${run.id}' lost its lease.`}`,
@@ -137,13 +141,13 @@ function reportRedeliveryFailure(input: RunActionJobInput, run: ActionRunRecord)
   )
   reportRunFailure(input.runtime.errorReporterHost, error, {
     projectId: input.runtime.id,
-    occurredAt: run.finishedAt,
     attempt: input.attempt,
+    runKind: "action",
     run: {
-      kind: "action",
       runId: input.job.id,
       actionId: input.job.actionId,
     },
+    failure,
   })
 }
 

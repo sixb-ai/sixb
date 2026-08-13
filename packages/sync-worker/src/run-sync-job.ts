@@ -454,19 +454,22 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
 
       const status = signal.aborted ? "cancelled" : "failed"
       try {
+        const failure = captureSixbFailure(error, {
+          allowedCodes: SYNC_RUN_FAILURE_CODES,
+          defaultCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+          details: { syncId: sync.id, runId: job.id },
+        })
         const run = await syncRunsStorage.finish({
           projectId: runtime.id,
           id: job.id,
           status,
           rowsRead,
-          error: captureSixbFailure(error, {
-            allowedCodes: SYNC_RUN_FAILURE_CODES,
-            defaultCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
-            details: { syncId: sync.id, runId: job.id },
-          }),
+          error: failure,
         })
         await notifyRunFinished(input.onRunFinished, run)
-        if (status === "failed" && run.status === "failed") input.onRunFailed?.(error, run)
+        if (status === "failed" && run.status === "failed") {
+          input.onRunFailed?.(error, run, failure)
+        }
       } catch {
         // The run did not transition to the requested terminal status.
       }

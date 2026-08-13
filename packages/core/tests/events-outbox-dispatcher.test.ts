@@ -105,7 +105,6 @@ describe("OntologyOutboxDispatcher", () => {
     const events = new DomainEventService({ projectId: "project", broker })
     const { materializer } = createMaterializerFixture({ storage })
     await seedObjectCreated(materializer, "request-retry", "retry")
-    const eventId = outboxRows(storage)[0]!.envelope.id
     let nowMs = NOW.getTime()
     const randomValues = [1, 0.5, 1]
 
@@ -141,8 +140,6 @@ describe("OntologyOutboxDispatcher", () => {
         at: "2026-01-02T03:04:05.325Z",
         details: {
           attempts: 3,
-          eventIds: [eventId],
-          eventTypes: ["object.created"],
         },
       },
     })
@@ -189,7 +186,11 @@ describe("OntologyOutboxDispatcher", () => {
     })
     await seedObjectCreated(materializer, "request-newer", "newer")
     const newerId = outboxRows(storage).find((row) => row.envelope.id !== olderId)!.envelope.id
-    const failures: { readonly attempts: number; readonly eventIds: readonly string[] }[] = []
+    const failures: {
+      readonly failure: OntologyOutboxFailure
+      readonly attempts: number
+      readonly eventIds: readonly string[]
+    }[] = []
 
     const dispatcher = new OntologyOutboxDispatcher({
       projectId: "project",
@@ -230,7 +231,11 @@ describe("OntologyOutboxDispatcher", () => {
     for (let index = 0; index < 5; index += 1) {
       await seedObjectCreated(materializer, `request-${index}`, `device-${index}`)
     }
-    const failures: { readonly attempts: number; readonly eventIds: readonly string[] }[] = []
+    const failures: {
+      readonly failure: OntologyOutboxFailure
+      readonly attempts: number
+      readonly eventIds: readonly string[]
+    }[] = []
     const dispatcher = new OntologyOutboxDispatcher({
       projectId: "project",
       storage,
@@ -248,6 +253,10 @@ describe("OntologyOutboxDispatcher", () => {
     expect(outboxRows(storage).filter((row) => row.attempts === 0)).toHaveLength(3)
     expect(failures).toHaveLength(1)
     expect(failures[0]?.eventIds).toHaveLength(2)
+    const persistedFailures = outboxRows(storage)
+      .filter((row) => row.attempts === 1)
+      .map((row) => row.lastFailure)
+    expect(persistedFailures).toEqual([failures[0]?.failure, failures[0]?.failure])
     await dispatcher.stop()
   })
 
@@ -332,8 +341,6 @@ describe("OntologyOutboxDispatcher", () => {
         at: NOW.toISOString(),
         details: {
           attempts: 1,
-          eventIds: [poisonId],
-          eventTypes: ["object.created"],
         },
       },
     })
@@ -382,8 +389,6 @@ describe("OntologyOutboxDispatcher", () => {
         at: NOW.toISOString(),
         details: {
           attempts: 1,
-          eventIds: [poisonId],
-          eventTypes: ["object.created"],
         },
       },
     })

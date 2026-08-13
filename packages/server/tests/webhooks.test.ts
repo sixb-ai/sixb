@@ -455,12 +455,13 @@ describe("webhook routes", () => {
       type: "run.failed",
       notificationId: `project:test-project:run:webhook:${failedRun?.id}:failed:${reports[0]?.context.occurredAt}`,
       projectId: "test-project",
+      runKind: "webhook",
       run: {
-        kind: "webhook",
         runId: failedRun?.id,
         connectorId: "github",
         webhookId: "failing",
       },
+      failure: failedRun?.error,
     })
   })
 
@@ -590,31 +591,34 @@ describe("webhook routes", () => {
       }
       return report.context
     })
+    expect(runContexts.every((context) => context.runKind === "webhook")).toBe(true)
     expect(runContexts.map((context) => context.run)).toEqual([
       {
-        kind: "webhook",
         runId: expect.stringMatching(/^webhookrun_/),
         connectorId: "github",
         webhookId: "claim-failure",
       },
       {
-        kind: "webhook",
         runId: expect.stringMatching(/^webhookrun_/),
         connectorId: "github",
         webhookId: "completion-failure",
       },
       {
-        kind: "webhook",
         runId: expect.stringMatching(/^webhookrun_/),
         connectorId: "github",
         webhookId: "unavailable",
       },
       {
-        kind: "webhook",
         runId: expect.stringMatching(/^webhookrun_/),
         connectorId: "github",
         webhookId: "redirected",
       },
+    ])
+    expect(runContexts.map((context) => context.failure.code)).toEqual([
+      "internal.unexpected",
+      "internal.unexpected",
+      "webhook.delivery_failed",
+      "webhook.delivery_failed",
     ])
     expect(reports.every((report) => report.context.projectId === "test-project")).toBe(true)
     expect(new Set(runContexts.map((context) => context.run.runId)).size).toBe(4)

@@ -657,7 +657,7 @@ export class WorkflowRunSession {
       error: failure,
     })
 
-    await this.finishWorkflowRunAfterError({ error, failure, status })
+    await this.finishWorkflowRunAfterError({ reportedError: error, failure, status })
   }
 
   flushLogs(): Promise<void> {
@@ -686,7 +686,7 @@ export class WorkflowRunSession {
   }
 
   private async finishWorkflowRunAfterError(input: {
-    readonly error: unknown
+    readonly reportedError: unknown
     readonly failure: SixbFailure<WorkflowRunFailureCode>
     readonly status: "failed" | "cancelled"
   }): Promise<void> {
@@ -696,7 +696,7 @@ export class WorkflowRunSession {
         error: input.failure,
         onTransition:
           input.status === "failed"
-            ? (run) => this.dependencies.onRunFailed?.(input.error, run)
+            ? (run) => this.dependencies.onRunFailed?.(input.reportedError, run, input.failure)
             : undefined,
       })
       .then(() => null)

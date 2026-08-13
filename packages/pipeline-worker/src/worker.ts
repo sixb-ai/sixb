@@ -64,16 +64,16 @@ export class PipelineWorker extends QueueWorker<
         signal,
         onRunStarted: (run) => emitPipelineRunStarted(this.host.events, run),
         onRunFinished: (run) => emitPipelineRunFinished(this.host.events, run),
-        onRunFailed: (error, run) => {
+        onRunFailed: (error, run, failure) => {
           reportRunFailure(this.host, error, {
             projectId: this.host.id,
-            occurredAt: run.finishedAt,
             attempt: job.attempt,
+            runKind: "pipeline",
             run: {
-              kind: "pipeline",
               runId: run.id,
               pipelineId: run.pipelineId,
             },
+            failure,
           })
         },
         onStepStarted: (step, context) =>
