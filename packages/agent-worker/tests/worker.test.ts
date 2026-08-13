@@ -4911,6 +4911,7 @@ describe("AgentWorker", () => {
         status: "failed",
         runId: run.id,
         attempt: 1,
+        error: run.error,
       })
 
       // Thread released so a later message can run.

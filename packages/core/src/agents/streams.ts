@@ -1,6 +1,12 @@
 import type { Broker, BrokerStreamDefinition } from "../broker"
-import type { JsonValue } from "../json"
-import type { AgentRunRecord } from "../storage/agents/types"
+import { parseSixbFailure } from "../errors/internal"
+import type { SixbFailure } from "../errors/types"
+import { isJsonValue, isPlainRecord, type JsonValue } from "../json"
+import {
+  AGENT_RUN_FAILURE_CODES,
+  type AgentRunFailureCode,
+  type AgentRunRecord,
+} from "../storage/agents/types"
 
 export const AGENT_RUN_STREAM_SCHEMA_VERSION = 1 as const
 export const DEFAULT_AGENT_RUN_STREAM_RETENTION = {
@@ -100,6 +106,9 @@ export async function subscribeAgentRunCancel(
   )
 }
 
+/** Exact portable failure exposed by a terminal Agent run stream event. */
+export type AgentRunFailure = SixbFailure<AgentRunFailureCode>
+
 export type AgentRunStreamEvent =
   | (AgentRunStreamEventBase & {
       readonly type: "agent.run.started"
@@ -118,7 +127,7 @@ export type AgentRunStreamEvent =
       readonly type: "agent.run.finished"
       readonly status: "succeeded" | "failed" | "cancelled"
       readonly finishReason?: string
-      readonly error?: string
+      readonly error?: AgentRunFailure
     })
 
 export type AgentRunFinishedEvent = Extract<AgentRunStreamEvent, { type: "agent.run.finished" }>
@@ -149,8 +158,61 @@ export function agentRunFinishedEvent(
     attempt: run.attempt,
     status: run.status,
     ...(run.finishReason === undefined ? {} : { finishReason: run.finishReason }),
-    ...(run.error === undefined ? {} : { error: run.error.message }),
+    ...(run.error === undefined ? {} : { error: run.error }),
     occurredAt: occurredAt.toISOString(),
+  }
+}
+
+/** Validate an Agent stream payload using the same contract its producers use. */
+export function isAgentRunStreamEvent(value: unknown): value is AgentRunStreamEvent {
+  if (
+    !isPlainRecord(value) ||
+    value.schemaVersion !== AGENT_RUN_STREAM_SCHEMA_VERSION ||
+    typeof value.projectId !== "string" ||
+    typeof value.runId !== "string" ||
+    typeof value.threadId !== "string" ||
+    typeof value.agentId !== "string" ||
+    typeof value.attempt !== "number" ||
+    !Number.isFinite(value.attempt) ||
+    typeof value.occurredAt !== "string" ||
+    typeof value.type !== "string"
+  ) {
+    return false
+  }
+
+  switch (value.type) {
+    case "agent.run.started":
+      return value.modelId === undefined || typeof value.modelId === "string"
+    case "agent.ui.chunk":
+      return (
+        Number.isInteger(value.chunkIndex) &&
+        Object.hasOwn(value, "chunk") &&
+        isJsonValue(value.chunk)
+      )
+    case "agent.message.finalized":
+      return typeof value.messageId === "string"
+    case "agent.run.finished":
+      return (
+        isTerminalAgentRunStatus(value.status) &&
+        (value.finishReason === undefined || typeof value.finishReason === "string") &&
+        (value.error === undefined || isAgentRunFailure(value.error))
+      )
+    default:
+      return false
+  }
+}
+
+function isTerminalAgentRunStatus(value: unknown): value is "succeeded" | "failed" | "cancelled" {
+  return value === "succeeded" || value === "failed" || value === "cancelled"
+}
+
+function isAgentRunFailure(value: unknown): value is AgentRunFailure {
+  if (!isPlainRecord(value)) return false
+  try {
+    parseSixbFailure(value, AGENT_RUN_FAILURE_CODES)
+    return true
+  } catch {
+    return false
   }
 }
 
