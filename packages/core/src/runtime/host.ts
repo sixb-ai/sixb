@@ -210,11 +210,7 @@ export class SixbHost<
       actionRegistry: definitions.actions,
       events: this.events,
       storage: this.storage,
-      lakeStorage: this.lakeStorage,
-      blobStorage: this.blobStorage,
       queues: this.queues,
-      sandboxes: this.sandboxes,
-      rules: definitions.rules.list(),
     }
     registerProjectionRegistry(this.hostContext, definitions.projections)
     const ontologyMutations = createOntologyMutationRuntime({
