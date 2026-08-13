@@ -189,15 +189,16 @@ describe("SyncWorker", () => {
       expect(reports[0]?.error).toBe(originalError)
       expect(reports[0]?.context).toEqual({
         type: "run.failed",
-        notificationId: `project:${sixb.id}:run:sync:run-failed:failed:${run!.finishedAt!.toISOString()}`,
+        notificationId: `project:${sixb.id}:run:sync:run-failed:failed:${run!.error!.at}`,
         projectId: sixb.id,
-        occurredAt: run!.finishedAt!.toISOString(),
+        occurredAt: run!.error!.at,
         attempt: 1,
+        runKind: "sync",
         run: {
-          kind: "sync",
           runId: "run-failed",
           syncId: sync.id,
         },
+        failure: run!.error!,
       })
 
       const claimed = await sixb.queues.syncRuns.claim({

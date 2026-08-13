@@ -1,9 +1,9 @@
+import type { SixbFailure } from "@sixb/core"
 import {
   isMaterializationConflictError,
   MaterializationCancellationError,
   MaterializationValidationError,
   type ProjectionDefinition,
-  type SixbFailure,
 } from "@sixb/core"
 import { captureSixbFailure, createSixbError, isSixbError } from "@sixb/core/internal/errors"
 import {
@@ -55,9 +55,10 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
       throw error
     }
     if ((await isPermanentFailure(input, execution, error)) && !signal.aborted) {
-      await finishProjection(input, execution, projectionFailure(input, error, "failed"))
+      const decision = projectionFailure(input, error, "failed")
+      await finishProjection(input, execution, decision)
       const run = await requireRun(input)
-      input.onRunFailed?.(error, run)
+      input.onRunFailed?.(error, run, decision.error)
     }
     // Transient errors, delivery loss, shutdown, and stale executions deliberately leave the run
     // running so the next QueueDelivery can reclaim it with a fresh token.

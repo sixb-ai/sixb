@@ -1,4 +1,4 @@
-import type { SixbErrorContext, SixbFailedRun, SixbRunKind } from "../src"
+import type { SixbErrorContext, SixbFailedRun, SixbRunFailureByKind, SixbRunKind } from "../src"
 
 type Expect<T extends true> = T
 type Equal<A, B> =
@@ -9,7 +9,8 @@ type Equal<A, B> =
  * variant per kind. Adding a kind without a failure shape — or the reverse — fails here rather than
  * silently leaving a primitive unable to report why it broke.
  */
-type _everyRunKindCanFail = Expect<Equal<SixbFailedRun["kind"], SixbRunKind>>
+type _everyRunKindCanFail = Expect<Equal<SixbFailedRun["runKind"], SixbRunKind>>
+type _everyRunKindHasFailureContract = Expect<Equal<keyof SixbRunFailureByKind, SixbRunKind>>
 
 /**
  * Every variant carries a `runId`, which is what makes the invariant above meaningful: a kind that
@@ -17,7 +18,16 @@ type _everyRunKindCanFail = Expect<Equal<SixbFailedRun["kind"], SixbRunKind>>
  * per subject with no run record, so they are not a run kind and report through
  * `rule.evaluation.failed` instead.
  */
-type _everyFailedRunIsIdentifiable = Expect<Equal<SixbFailedRun["runId"], string>>
+type _everyFailedRunIsIdentifiable = Expect<Equal<SixbFailedRun["run"]["runId"], string>>
+
+/** The top-level run discriminant narrows both the correlation and its exact failure shape. */
+type ActionRunFailureContext = Extract<
+  SixbErrorContext,
+  { readonly type: "run.failed"; readonly runKind: "action" }
+>
+type _actionFailureKeepsItsPhase = Expect<
+  Equal<ActionRunFailureContext["failure"], SixbRunFailureByKind["action"]>
+>
 
 /** The error context is discriminated on `type`, and every member carries a dedup key. */
 type _errorContextIsDiscriminated = Expect<

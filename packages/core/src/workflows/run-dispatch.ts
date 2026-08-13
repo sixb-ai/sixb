@@ -270,20 +270,22 @@ async function failWorkflowRunPublication(
   if (!workflowRuns) {
     throw new WorkflowValidationError("[Sixb] Workflow run storage is not configured.")
   }
-  const failed = await workflowRuns.finish({
+  const failure = captureSixbFailure(error, {
+    allowedCodes: WORKFLOW_RUN_FAILURE_CODES,
+    defaultCode: "internal.unexpected",
+    details: { workflowId: run.workflowId, runId: run.id },
+  })
+  await workflowRuns.finish({
     projectId: input.projectId,
     id: run.id,
     status: "failed",
-    error: captureSixbFailure(error, {
-      allowedCodes: WORKFLOW_RUN_FAILURE_CODES,
-      defaultCode: "internal.unexpected",
-      details: { workflowId: run.workflowId, runId: run.id },
-    }),
+    error: failure,
   })
   reportRunFailure(input.errorReporterHost, error, {
     projectId: input.projectId,
-    occurredAt: failed.finishedAt,
-    run: { kind: "workflow", runId: run.id, workflowId: run.workflowId },
+    runKind: "workflow",
+    run: { runId: run.id, workflowId: run.workflowId },
+    failure,
   })
 }
 

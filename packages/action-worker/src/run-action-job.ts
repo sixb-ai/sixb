@@ -1,6 +1,6 @@
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import { createSixbError } from "@sixb/core/internal/errors"
-import type { ActionRunRecord } from "@sixb/core/storage"
+import type { ActionRunFailure, ActionRunRecord } from "@sixb/core/storage"
 import { isTerminalActionRun } from "@sixb/core/storage"
 import { executeActionPhases } from "./action-execution/phases"
 import {
@@ -68,7 +68,7 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
       finishedAt: failedAt,
       error: failure,
     })
-    reportActionFailure(input, error, finishedRun)
+    reportActionFailure(input, error, failure)
 
     return failedResult(job.id, job.actionId, finishedRun, failure)
   }
@@ -158,7 +158,7 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
       throw error
     }
     if (status === "failed" && finishedRun.status === "failed") {
-      reportActionFailure(input, error, finishedRun)
+      reportActionFailure(input, error, failure)
     }
 
     const startedAt = startedRun?.startedAt ?? finishedRun.startedAt ?? finishedRun.queuedAt
@@ -179,15 +179,19 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
   }
 }
 
-function reportActionFailure(input: RunActionJobInput, error: unknown, run: ActionRunRecord): void {
+function reportActionFailure(
+  input: RunActionJobInput,
+  error: unknown,
+  failure: ActionRunFailure
+): void {
   reportRunFailure(input.runtime.errorReporterHost, error, {
     projectId: input.runtime.id,
-    occurredAt: run.finishedAt,
     attempt: input.attempt,
+    runKind: "action",
     run: {
-      kind: "action",
       runId: input.job.id,
       actionId: input.job.actionId,
     },
+    failure,
   })
 }

@@ -61,17 +61,17 @@ export class ProjectionWorker extends QueueWorker<
       runtime: context,
       job: { id: job.id, ...job.payload },
       signal,
-      onRunFailed: (error, run) => {
+      onRunFailed: (error, run, failure) => {
         reportRunFailure(this.host, error, {
           projectId: this.host.id,
-          occurredAt: run.finishedAt,
           attempt: job.attempt,
+          runKind: "projection",
           run: {
-            kind: "projection",
             runId: run.id,
             projectionId: run.identity.projectionId,
             projectionKind: run.identity.projectionKind,
           },
+          failure,
         })
       },
     })

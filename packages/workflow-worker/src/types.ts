@@ -3,6 +3,7 @@ import type {
   OntologySource,
   Queues,
   Sixb,
+  SixbFailure,
   Storage,
   WorkflowStepOutputs,
 } from "@sixb/core"
@@ -12,6 +13,7 @@ import type {
   WorkflowInterventionRecord,
   WorkflowNodeRunRecord,
   WorkflowRunExecution,
+  WorkflowRunFailureCode,
   WorkflowRunRecord,
   WorkflowRunStorage,
 } from "@sixb/core/storage"
@@ -42,7 +44,11 @@ export interface WorkflowResumeJob {
   readonly execution?: WorkflowRunExecution
 }
 
-export type WorkflowRunFailureReporter = (error: unknown, run: WorkflowRunRecord) => void
+export type WorkflowRunFailureReporter = (
+  error: unknown,
+  run: WorkflowRunRecord,
+  failure: SixbFailure<WorkflowRunFailureCode>
+) => void
 
 export interface RunWorkflowJobInput {
   readonly runtime: WorkflowWorkerContext

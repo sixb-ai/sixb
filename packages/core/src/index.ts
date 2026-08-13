@@ -816,6 +816,8 @@ export type {
   SixbFailedRun,
   SixbRuleEvaluationFailedContext,
   SixbRunFailedContext,
+  SixbRunFailureByKind,
+  SixbRunIdentityByKind,
 } from "./error-reporting/types"
 export type { SixbErrorCode, SixbFailure } from "./errors/types"
 export type { EventsRuntime } from "./events/execution"
@@ -889,6 +891,17 @@ export {
   SyncValidationError,
 } from "./runtime"
 export type { SchedulesRuntime } from "./schedules/execution"
+export type {
+  ActionRunFailure,
+  ActionRunFailureCode,
+  ActionRunPhase,
+  AgentRunFailureCode,
+  PipelineRunFailureCode,
+  ProjectionRunFailureCode,
+  SyncRunFailureCode,
+  WebhookRunFailureCode,
+  WorkflowRunFailureCode,
+} from "./storage"
 export type { SyncRunsRuntime, SyncsRuntime } from "./syncs/execution"
 export type {
   WorkflowInterventionsRuntime,

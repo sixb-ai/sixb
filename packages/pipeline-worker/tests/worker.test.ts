@@ -431,15 +431,16 @@ describe("PipelineWorker", () => {
       expect(reports[0]?.error).toBe(originalError)
       expect(reports[0]?.context).toEqual({
         type: "run.failed",
-        notificationId: `project:${sixb.id}:run:pipeline:run-fails-late:failed:${run!.finishedAt!.toISOString()}`,
+        notificationId: `project:${sixb.id}:run:pipeline:run-fails-late:failed:${run!.error!.at}`,
         projectId: sixb.id,
-        occurredAt: run!.finishedAt!.toISOString(),
+        occurredAt: run!.error!.at,
         attempt: 1,
+        runKind: "pipeline",
         run: {
-          kind: "pipeline",
           runId: "run-fails-late",
           pipelineId: pipeline.id,
         },
+        failure: run!.error!,
       })
 
       const claimed = await sixb.queues.pipelines.claim({

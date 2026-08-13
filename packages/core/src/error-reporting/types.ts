@@ -1,51 +1,74 @@
+import type { SixbFailure } from "../errors/types"
 import type { ActionRunFailure } from "../storage/action-runs"
+import type { AgentRunFailureCode } from "../storage/agents"
+import type { PipelineRunFailureCode } from "../storage/pipeline-runs"
+import type { ProjectionRunFailureCode } from "../storage/projection-runs"
+import type { SyncRunFailureCode } from "../storage/sync-runs"
+import type { WebhookRunFailureCode } from "../storage/webhook-runs"
+import type { WorkflowRunFailureCode } from "../storage/workflow-runs"
+
+/** Correlation fields exposed by `run.failed`, indexed by run primitive. */
+export interface SixbRunIdentityByKind {
+  readonly action: {
+    readonly runId: string
+    readonly actionId: string
+  }
+  readonly agent: {
+    readonly runId: string
+    readonly agentId: string
+  }
+  readonly pipeline: {
+    readonly runId: string
+    readonly pipelineId: string
+  }
+  readonly projection: {
+    readonly runId: string
+    readonly projectionId: string
+    readonly projectionKind: "object" | "link" | "telemetry"
+  }
+  readonly sync: {
+    readonly runId: string
+    readonly syncId: string
+  }
+  readonly workflow: {
+    readonly runId: string
+    readonly workflowId: string
+  }
+  readonly webhook: {
+    readonly runId: string
+    readonly connectorId: string
+    readonly webhookId: string
+  }
+}
+
+/** Canonical failure record exposed by `run.failed`, indexed by run primitive. */
+export interface SixbRunFailureByKind {
+  readonly action: ActionRunFailure
+  readonly agent: SixbFailure<AgentRunFailureCode>
+  readonly pipeline: SixbFailure<PipelineRunFailureCode>
+  readonly projection: SixbFailure<ProjectionRunFailureCode>
+  readonly sync: SixbFailure<SyncRunFailureCode>
+  readonly workflow: SixbFailure<WorkflowRunFailureCode>
+  readonly webhook: SixbFailure<WebhookRunFailureCode>
+}
 
 /**
  * The failed unit of work, discriminated by primitive. Each variant carries the correlation its
- * primitive actually has, and there is exactly one variant per `SixbRunKind`.
+ * primitive actually has and the exact failure persisted by that run. There is exactly one variant
+ * per `SixbRunKind`.
  *
  * Rules are deliberately absent: they are evaluated live, per subject, with no run record, so they
  * report through `SixbRuleEvaluationFailedContext` instead of being handed a `runId` that would name
  * an entity nothing can resolve.
  */
-export type SixbFailedRun =
-  | {
-      readonly kind: "action"
-      readonly runId: string
-      readonly actionId: string
-    }
-  | {
-      readonly kind: "agent"
-      readonly runId: string
-      readonly agentId: string
-    }
-  | {
-      readonly kind: "pipeline"
-      readonly runId: string
-      readonly pipelineId: string
-    }
-  | {
-      readonly kind: "projection"
-      readonly runId: string
-      readonly projectionId: string
-      readonly projectionKind: "object" | "link" | "telemetry"
-    }
-  | {
-      readonly kind: "sync"
-      readonly runId: string
-      readonly syncId: string
-    }
-  | {
-      readonly kind: "workflow"
-      readonly runId: string
-      readonly workflowId: string
-    }
-  | {
-      readonly kind: "webhook"
-      readonly runId: string
-      readonly connectorId: string
-      readonly webhookId: string
-    }
+export type SixbFailedRun = {
+  readonly [TKind in keyof SixbRunIdentityByKind]: {
+    /** Top-level discriminant so TypeScript narrows both `run` and `failure` without casts. */
+    readonly runKind: TKind
+    readonly run: SixbRunIdentityByKind[TKind]
+    readonly failure: SixbRunFailureByKind[TKind]
+  }
+}[keyof SixbRunIdentityByKind]
 
 interface SixbFailureContext<TType extends string> {
   readonly type: TType
@@ -61,11 +84,11 @@ interface SixbFailureContext<TType extends string> {
   readonly occurredAt: string
 }
 
-export interface SixbRunFailedContext extends SixbFailureContext<"run.failed"> {
-  /** Queue delivery attempt, when the run was executed through a queue. */
-  readonly attempt?: number
-  readonly run: SixbFailedRun
-}
+export type SixbRunFailedContext = SixbFailureContext<"run.failed"> &
+  SixbFailedRun & {
+    /** Queue delivery attempt, when the run was executed through a queue. */
+    readonly attempt?: number
+  }
 
 /** A post-commit Action effects phase failed without changing the committed Action outcome. */
 export interface SixbActionPhaseFailedContext extends SixbFailureContext<"action.phase.failed"> {
@@ -89,6 +112,8 @@ export interface SixbActionPhaseFailedContext extends SixbFailureContext<"action
  */
 export interface SixbEventDeliveryFailedContext
   extends SixbFailureContext<"event.delivery.failed"> {
+  /** Canonical delivery failure, also persisted when the outbox owns the delivery. */
+  readonly failure: SixbFailure<"event.delivery_failed">
   /** Delivery attempts so far. A rejected emit is terminal, so it reports 1. */
   readonly attempts: number
   /** Which event types never reached subscribers. Payloads are never included. */
@@ -114,6 +139,11 @@ export interface SixbEventDeliveryFailedContext
  */
 export interface SixbRuleEvaluationFailedContext
   extends SixbFailureContext<"rule.evaluation.failed"> {
+  /**
+   * Canonical snapshot of the thrown value. Rule failures remain `internal.unexpected` until the
+   * evaluator can distinguish deterministic rule failures from retryable dependency failures.
+   */
+  readonly failure: SixbFailure<"internal.unexpected">
   readonly source: "live" | "reconciliation"
   /** Envelope IDs involved in a live evaluation; empty for reconciliation. */
   readonly eventIds: readonly string[]

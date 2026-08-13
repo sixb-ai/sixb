@@ -231,16 +231,17 @@ describe("ProjectionWorker", () => {
       expect(reports[0]?.error.message).toContain("room_id")
       expect(reports[0]?.context).toEqual({
         type: "run.failed",
-        notificationId: `project:${sixb.id}:run:projection:${runId}:failed:${run!.finishedAt!.toISOString()}`,
+        notificationId: `project:${sixb.id}:run:projection:${runId}:failed:${run!.error!.at}`,
         projectId: sixb.id,
-        occurredAt: run!.finishedAt!.toISOString(),
+        occurredAt: run!.error!.at,
         attempt: 1,
+        runKind: "projection",
         run: {
-          kind: "projection",
           runId,
           projectionId: roomProjection.id,
           projectionKind: "object",
         },
+        failure: run!.error!,
       })
 
       const claimed = await sixb.queues.projections.claim({

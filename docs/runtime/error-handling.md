@@ -12,13 +12,13 @@ export const sixb = await createSixb({
   async onError(error, context) {
     const subject =
       context.type === "run.failed"
-        ? `${context.run.kind} run ${context.run.runId}`
+        ? `${context.runKind} run ${context.run.runId}`
         : context.type === "event.delivery.failed"
           ? `delivery of ${context.eventTypes.join(", ")}`
           : `${context.source} rule evaluation`
     await sendToSlack({
       deduplicationKey: context.notificationId,
-      message: `${subject} failed: ${error.message}`,
+      message: `${subject} failed with ${context.failure.code}: ${error.message}`,
     })
   },
 })
@@ -37,20 +37,25 @@ pipeline steps separately, or routine webhook 4xx rejections.
 The second argument is a discriminated `SixbErrorContext`:
 
 ```ts
-interface SixbRunFailedContext {
-  readonly type: "run.failed"
-  readonly notificationId: string
-  readonly projectId: string
-  readonly occurredAt: string
-  readonly attempt?: number
-  readonly run: SixbFailedRun
-}
+type SixbRunFailedContext = {
+  [TKind in SixbRunKind]: {
+    readonly type: "run.failed"
+    readonly notificationId: string
+    readonly projectId: string
+    readonly occurredAt: string
+    readonly attempt?: number
+    readonly runKind: TKind
+    readonly run: SixbRunIdentityByKind[TKind]
+    readonly failure: SixbRunFailureByKind[TKind]
+  }
+}[SixbRunKind]
 
 interface SixbEventDeliveryFailedContext {
   readonly type: "event.delivery.failed"
   readonly notificationId: string
   readonly projectId: string
   readonly occurredAt: string
+  readonly failure: SixbFailure<"event.delivery_failed">
   readonly attempts: number
   readonly eventTypes: readonly string[]
   readonly eventIds?: readonly string[]
@@ -61,6 +66,7 @@ interface SixbRuleEvaluationFailedContext {
   readonly notificationId: string
   readonly projectId: string
   readonly occurredAt: string
+  readonly failure: SixbFailure<"internal.unexpected">
   readonly source: "live" | "reconciliation"
   readonly eventIds: readonly string[]
   readonly ruleId?: string
@@ -68,10 +74,17 @@ interface SixbRuleEvaluationFailedContext {
 }
 ```
 
-`SixbFailedRun` has one variant per run kind — action, agent, pipeline, projection, sync, workflow,
-webhook — and every one carries a `runId`. Rules are the exception and are absent from it: they are
-evaluated live, per subject, with no run record, so they report as `rule.evaluation.failed` rather
-than being handed an id nothing can resolve.
+`runKind` is the top-level discriminant for action, agent, pipeline, projection, sync, workflow, and
+webhook failures. Narrowing it narrows both `run` and `failure`: action failures retain their lifecycle
+`phase`, while every other primitive exposes its exact allowed code union without a cast. Every `run`
+carries a `runId`. Rules are the exception: they are evaluated live, per subject, with no run record,
+so they report as `rule.evaluation.failed` rather than being handed an id nothing can resolve.
+
+`failure` is the machine-readable contract. For run failures and persisted outbox attempts it is the
+same object sent to durable storage, not a second normalization. The first `error` argument remains the
+native exception when one exists, preserving its stack and identity for diagnostics.
+For every context variant, `occurredAt` equals `failure.at`; notification identity and the portable
+record therefore share one canonical failure timestamp.
 
 ### Lost events
 
@@ -87,6 +100,8 @@ Two paths report it, which is why `eventIds` is optional:
 | A rejected framework emit | absent — nothing was persisted | always `1`; the failure is terminal |
 
 `eventTypes` is filled on both paths, so it is the field to read first. Payloads are never included.
+For persisted outbox attempts, `failure` is the exact record stored with the envelopes. A rejected
+framework emit has no storage record, so Sixb normalizes it once when reporting the terminal loss.
 
 ### Rule evaluations
 
@@ -99,12 +114,20 @@ keeps failing, rule state stops converging.
 absent when a whole batch or pass died before any one rule could be blamed, which is the more serious
 case rather than the vaguer one.
 
-Narrow `context.run.kind` to access the definition identifier for that run:
+Rule evaluation failures currently use `internal.unexpected`. The context deliberately does not claim
+a retry policy until the evaluator can distinguish a deterministic rule defect from a transient
+dependency failure.
+
+Narrow `context.runKind` to access the definition identifier and exact failure for that run:
 
 ```ts
 onError(error, context) {
   if (context.type === "event.delivery.failed") {
-    console.error(`Delivery attempt ${context.attempts} failed`, context.eventTypes, error)
+    console.error(
+      `Delivery attempt ${context.attempts} failed with ${context.failure.code}`,
+      context.eventTypes,
+      error,
+    )
     return
   }
 
@@ -113,12 +136,12 @@ onError(error, context) {
     return
   }
 
-  if (context.run.kind === "projection") {
-    console.error(`Projection ${context.run.projectionId} failed`, error)
+  if (context.runKind === "projection") {
+    console.error(`Projection ${context.run.projectionId} failed`, context.failure, error)
   }
 
-  if (context.run.kind === "workflow") {
-    console.error(`Workflow ${context.run.workflowId} failed`, error)
+  if (context.runKind === "action") {
+    console.error(`Action ${context.run.actionId} failed in ${context.failure.phase}`, error)
   }
 }
 ```
@@ -139,6 +162,5 @@ graceful CLI shutdown. A process crash can still happen between persisting a fai
 delivering its notification, so this API does not provide exactly-once delivery. Integrations
 should use `notificationId` to tolerate possible duplicate delivery.
 
-The original `Error` is preserved when one exists. Sixb safely wraps non-`Error` thrown values. The
-context contains identifiers only; delivery failures expose stable envelope IDs, never payloads or
-lease IDs.
+The original `Error` is preserved when one exists. Sixb safely wraps non-`Error` thrown values.
+Delivery contexts expose stable envelope IDs, never payloads or lease IDs; serialized failure details remain JSON-safe and scoped to the failure contract.

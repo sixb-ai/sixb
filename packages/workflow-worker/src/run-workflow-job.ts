@@ -120,19 +120,20 @@ async function failQueuedRun(input: RunWorkflowJobInput, error: unknown): Promis
   }
 
   const status = statusForFailure(input.signal ?? new AbortController().signal, error)
+  const failure = captureSixbFailure(error, {
+    allowedCodes: WORKFLOW_RUN_FAILURE_CODES,
+    defaultCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+    details: { workflowId: input.job.workflowId, runId: input.job.id },
+  })
   const failed = await input.runtime.workflowRuns.finish({
     projectId: input.runtime.projectId,
     id: input.job.id,
     status,
-    error: captureSixbFailure(error, {
-      allowedCodes: WORKFLOW_RUN_FAILURE_CODES,
-      defaultCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
-      details: { workflowId: input.job.workflowId, runId: input.job.id },
-    }),
+    error: failure,
   })
 
   if (failed.status === "failed") {
-    input.onRunFailed?.(error, failed)
+    input.onRunFailed?.(error, failed, failure)
   }
 
   try {

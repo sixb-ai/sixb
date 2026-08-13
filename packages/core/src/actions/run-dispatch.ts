@@ -202,7 +202,7 @@ async function failActionRunPublication(
 ): Promise<void> {
   const failedAt = new Date()
   const failure = toActionRunFailure(error, run, failedAt)
-  const failed = await requireActionRunStorage(input.storage).finish({
+  await requireActionRunStorage(input.storage).finish({
     projectId: input.projectId,
     id: run.id,
     status: "failed",
@@ -211,8 +211,9 @@ async function failActionRunPublication(
   })
   reportRunFailure(input.errorReporterHost, error, {
     projectId: input.projectId,
-    occurredAt: failed.finishedAt,
-    run: { kind: "action", runId: run.id, actionId: run.actionId },
+    runKind: "action",
+    run: { runId: run.id, actionId: run.actionId },
+    failure,
   })
 }
 

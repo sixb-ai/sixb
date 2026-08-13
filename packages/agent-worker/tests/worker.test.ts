@@ -4896,12 +4896,14 @@ describe("AgentWorker", () => {
       expect(reports[0]?.error).toBe(originalError)
       expect(reports[0]?.context).toMatchObject({
         type: "run.failed",
-        notificationId: `project:${PROJECT_ID}:run:agent:${run.id}:failed:${run.completedAt?.toISOString()}`,
+        notificationId: `project:${PROJECT_ID}:run:agent:${run.id}:failed:${run.error?.at}`,
         projectId: PROJECT_ID,
         attempt: 1,
-        run: { kind: "agent", runId: run.id, agentId: "assistant" },
+        runKind: "agent",
+        run: { runId: run.id, agentId: "assistant" },
+        failure: run.error,
       })
-      expect(reports[0]?.context.occurredAt).toBe(run.completedAt?.toISOString() ?? "")
+      expect(reports[0]?.context.occurredAt).toBe(run.error?.at ?? "")
       expect(
         (await listRunStreamRecords(sixb.broker, run.id)).find(
           (record) => record.name === "agent.run.finished"
@@ -5276,7 +5278,9 @@ describe("AgentWorker", () => {
       expect(reports[0]?.context).toMatchObject({
         projectId: PROJECT_ID,
         attempt: 1,
-        run: { kind: "agent", runId, agentId: "removed-agent" },
+        runKind: "agent",
+        run: { runId, agentId: "removed-agent" },
+        failure: failed.error,
       })
       await expect(
         storage.threads.getById({ projectId: PROJECT_ID, id: threadId })

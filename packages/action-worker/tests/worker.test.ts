@@ -275,16 +275,17 @@ describe("ActionWorker", () => {
     expect(reports[0]?.error).toBe(originalError)
     expect(reports[0]?.context).toMatchObject({
       type: "run.failed",
-      notificationId: `project:${host.id}:run:action:${failed.id}:failed:${failed.finishedAt?.toISOString()}`,
+      notificationId: `project:${host.id}:run:action:${failed.id}:failed:${failed.error?.at}`,
       projectId: host.id,
       attempt: 1,
+      runKind: "action",
       run: {
-        kind: "action",
         runId: failed.id,
         actionId: "fail",
       },
+      failure: failed.error,
     })
-    expect(reports[0]?.context.occurredAt).toBe(failed.finishedAt?.toISOString() ?? "")
+    expect(reports[0]?.context.occurredAt).toBe(failed.error?.at ?? "")
   })
 
   test("requestActionAndWait resolves with the terminal action run", async () => {
