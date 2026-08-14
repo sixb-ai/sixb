@@ -20,6 +20,8 @@ const latestCancelled: LatestFailureCode = "runtime.cancelled"
 const listedUnexpected: ListedFailureCode = "internal.unexpected"
 const nodeCancelled: NodeFailureCode = "runtime.cancelled"
 const agentExecutionCancelled: AgentExecutionFailureCode = "runtime.cancelled"
+const latestNodeFailed: LatestFailureCode = "workflow.node_failed"
+const nodeFailed: NodeFailureCode = "workflow.node_failed"
 
 // Dataset lookup codes belong to HTTP route failures, not persisted workflow failures.
 // @ts-expect-error the generated latest-run failure contract must stay scoped to its producer
@@ -37,6 +39,8 @@ void [
   listedUnexpected,
   nodeCancelled,
   agentExecutionCancelled,
+  latestNodeFailed,
+  nodeFailed,
   unrelatedLatest,
   unrelatedListed,
   unrelatedNode,

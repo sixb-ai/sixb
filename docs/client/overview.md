@@ -230,7 +230,15 @@ const { data } = await executeAction({
   path: { objectId: id, actionId: "markPaid" },
   body: { params: {} },
 })
+
+if (!data.success) {
+  console.error(data.error.message, data.error.code, data.error.status)
+}
 ```
+
+The result is discriminated by `success`: successful requests always contain `runId`; rejected
+requests contain a serializable `{ message, code?, status? }` error. This is a request error, not a
+durable `SixbFailure` record.
 
 Object ids are encoded as `encodeURIComponent(typeId)~encodeURIComponent(primaryId)`,
 so they are safe to pass through URLs and route params.

@@ -1,5 +1,6 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import {
+  client,
   createAuthPersonalAccessToken,
   createSixbClient,
   isSixbApiError,
@@ -8,6 +9,15 @@ import {
   requestSyncRun,
   SixbApiError,
 } from "../src"
+
+afterEach(() => {
+  client.setConfig({
+    auth: undefined,
+    baseUrl: undefined,
+    credentials: undefined,
+    fetch: undefined,
+  })
+})
 
 function createObservedFetch(responseBody: unknown = {}) {
   const requests: Request[] = []
@@ -115,6 +125,27 @@ function createRespondingFetch(response: () => Response) {
 }
 
 describe("SixbApiError", () => {
+  test("normalizes errors from the documented shared-client setup", async () => {
+    client.setConfig({
+      baseUrl: "http://localhost:3002",
+      fetch: createRespondingFetch(
+        () =>
+          new Response(JSON.stringify({ error: "Dataset not found", code: "dataset.not_found" }), {
+            status: 404,
+            headers: { "Content-Type": "application/json" },
+          })
+      ),
+    })
+
+    const error = (await listAuthAccessTokens({ throwOnError: true }).catch(
+      (caught) => caught
+    )) as SixbApiError
+
+    expect(error).toBeInstanceOf(SixbApiError)
+    expect(error.status).toBe(404)
+    expect(error.code).toBe("dataset.not_found")
+  })
+
   test("wraps a plain-text error response with status and body", async () => {
     const client = createSixbClient({
       baseUrl: "http://localhost:3002",
