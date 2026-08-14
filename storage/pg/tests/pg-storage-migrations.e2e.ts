@@ -10,6 +10,7 @@ import {
   postgresStorageMigrations,
   quoteIdent,
 } from "../src/migrations"
+import { jsonParameter } from "../src/ontology-storage/shared"
 import { createPgClient } from "../src/pg-client"
 import { createTestStorage } from "./helpers"
 
@@ -207,7 +208,7 @@ describe("Postgres storage migrations", () => {
               entityKey,
               input.sourceId,
               input.targetId,
-              JSON.stringify(input.value),
+              jsonParameter(sql, input.value),
               `commit:${input.sourceId}:${input.targetId}`,
               input.updatedAt,
             ]
@@ -238,7 +239,8 @@ describe("Postgres storage migrations", () => {
           updatedAt: "2026-01-02T00:00:00.000Z",
         })
 
-        await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
+        const migration = await migrateStorage(storage)
+        expect(migration).toMatchObject({ status: "migrated" })
         const rows = await sql.unsafe<{ source_primary_id: string; value: unknown }[]>(
           `SELECT source_primary_id, value
            FROM ${quoteIdent(schemaName)}.ontology_link_overrides
