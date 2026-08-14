@@ -20,7 +20,7 @@ import {
  * name here, a base URL in `google.ts`, its typed resources, and one wiring
  * line in `client.ts` — the auth and HTTP core below never change.
  */
-export type GoogleSurface = "drive" | "calendar" | "gmail"
+export type GoogleSurface = "drive" | "calendar" | "gmail" | "analyticsAdmin" | "analyticsData"
 
 export interface GoogleHttpClients {
   /** JSON API clients, keyed by surface. */
@@ -35,6 +35,8 @@ export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
 export interface GoogleRequestOptions {
   readonly query?: QueryParams
   readonly body?: unknown
+  /** Override whether the connector retry policy may replay this request. */
+  readonly retryable?: boolean
 }
 
 export interface GoogleUploadOptions {
@@ -86,14 +88,26 @@ export function createGoogleHttp(clients: GoogleHttpClients): GoogleHttp {
   ): Promise<T> => {
     const client = clients.api[surface]
     const url = withQuery(path, options?.query)
+    // Existing Workspace surfaces preserve their historical replay behavior.
+    // Analytics is stricter: GET is safe by default, and read-only POST methods
+    // opt in explicitly while mutations stay single-attempt.
+    const retryable =
+      options?.retryable ??
+      (method === "GET" || (surface !== "analyticsAdmin" && surface !== "analyticsData"))
     // `post` serializes a JSON body and sets content-type under any verb;
     // `request` covers the bodiless verbs (GET/DELETE) without one.
     const response =
       method === "GET"
-        ? await client.get(url)
+        ? await client.get(url, { retry: retryable })
         : method === "DELETE"
-          ? await client.request(url, { method: "DELETE" })
-          : await client.post(url, options?.body, { method })
+          ? await client.request(url, {
+              method: "DELETE",
+              retry: retryable,
+            })
+          : await client.post(url, options?.body, {
+              method,
+              retry: retryable,
+            })
     return readJson<T>(response)
   }
 

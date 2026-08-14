@@ -1,4 +1,6 @@
 import type { GoogleHttp } from "./http"
+import { type AnalyticsAdminSurface, analyticsAdminSurface } from "./surfaces/analytics/admin"
+import { type AnalyticsDataSurface, analyticsDataSurface } from "./surfaces/analytics/data"
 import { type AclResource, aclResource } from "./surfaces/calendar/acl"
 import { type CalendarListResource, calendarListResource } from "./surfaces/calendar/calendarList"
 import { type CalendarsResource, calendarsResource } from "./surfaces/calendar/calendars"
@@ -43,10 +45,16 @@ export interface GmailSurface {
   readonly settings: GmailSettingsResource
 }
 
+export interface AnalyticsSurface {
+  readonly admin: AnalyticsAdminSurface
+  readonly data: AnalyticsDataSurface
+}
+
 export interface GoogleClient {
   readonly drive: DriveSurface
   readonly calendar: CalendarSurface
   readonly gmail: GmailSurface
+  readonly analytics: AnalyticsSurface
 }
 
 export function createGoogleClient(http: GoogleHttp): GoogleClient {
@@ -73,6 +81,10 @@ export function createGoogleClient(http: GoogleHttp): GoogleClient {
       labels: gmailLabelsResource(http),
       threads: gmailThreadsResource(http),
       settings: gmailSettingsResource(http),
+    },
+    analytics: {
+      admin: analyticsAdminSurface(http),
+      data: analyticsDataSurface(http),
     },
   }
 }

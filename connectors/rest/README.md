@@ -43,3 +43,7 @@ how to read the body.
 
 `headers` being a resolver rather than a value is the part worth remembering: it is what lets a
 connector hold a short-lived credential without reconstructing the connector.
+
+Retry is enabled per request by default when the connector has a retry policy. Pass
+`{ retry: false }` in `request`, `get`, or `post` options for non-idempotent mutations that must not
+be replayed. This local option is stripped before the native `fetch` call.

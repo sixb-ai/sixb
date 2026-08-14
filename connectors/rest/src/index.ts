@@ -5,6 +5,7 @@ export type {
   RestConnectorOptions,
   RestHeadersResolver,
   RestRequestContext,
+  RestRequestInit,
   RestRetryContext,
   RestRetryPolicy,
 } from "./types"

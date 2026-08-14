@@ -33,10 +33,15 @@ export interface RestConnectorOptions {
   readonly webhooks?: readonly WebhookDefinition<unknown, RestClient>[]
 }
 
+/** Native fetch options plus a local retry gate that is never sent over the wire. */
+export interface RestRequestInit extends RequestInit {
+  readonly retry?: boolean
+}
+
 export interface RestClient {
-  request(path: string, init?: RequestInit): Promise<Response>
-  get(path: string, init?: RequestInit): Promise<Response>
-  post(path: string, body?: unknown, init?: RequestInit): Promise<Response>
+  request(path: string, init?: RestRequestInit): Promise<Response>
+  get(path: string, init?: RestRequestInit): Promise<Response>
+  post(path: string, body?: unknown, init?: RestRequestInit): Promise<Response>
 }
 
 export type RestConnector = ConnectorAdapter<"rest", RestClient>

@@ -8,7 +8,8 @@ One package spans Google's many APIs: auth and HTTP conventions live in a shared
 API is a **surface** of declarative typed resources. Adding a surface (e.g. `meet`, `calendar`)
 costs a base-URL entry, its resources, and one wiring line — the auth/HTTP core never changes.
 
-Surfaces implemented: **`drive`** (v3), **`calendar`** (v3), **`gmail`** (v1).
+Surfaces implemented: **`drive`** (v3), **`calendar`** (v3), **`gmail`** (v1), and
+**`analytics`** with **Admin** (v1beta) plus **Data** (v1beta).
 
 ## Usage
 
@@ -202,6 +203,52 @@ permanently delete mail and should only be used when narrower scopes cannot cove
 when the final response carries state you need to retain, notably `history.historyId`. Repeated
 query parameters such as `labelIds`, `metadataHeaders`, and `historyTypes` accept arrays and are
 encoded as repeated keys, matching the Gmail API contract.
+
+### Google Analytics (Admin v1beta + Data v1beta)
+
+Analytics is grouped under one evolvable façade: `client.analytics.admin.*` for account/property
+discovery and configuration, and `client.analytics.data.*` for reports and audience exports.
+
+For the common read path, `accountSummaries` returns every Analytics account visible to the
+authenticated principal together with its property summaries. You can then fetch complete property
+records or query each property:
+
+```ts
+for await (const summary of client.analytics.admin.accountSummaries.listAll()) {
+  console.log(summary.account, summary.displayName)
+
+  for (const property of summary.propertySummaries ?? []) {
+    const details = await client.analytics.admin.properties.get(property.property!)
+    console.log(details.name, details.timeZone, details.currencyCode)
+  }
+}
+
+const rows = client.analytics.data.properties.runReportAll("properties/123456789", {
+  dateRanges: [{ startDate: "30daysAgo", endDate: "today" }],
+  dimensions: [{ name: "date" }, { name: "country" }],
+  metrics: [{ name: "sessions" }, { name: "activeUsers" }],
+  orderBys: [{ dimension: { dimensionName: "date" } }],
+})
+
+for await (const row of rows) {
+  console.log(row.dimensionValues, row.metricValues)
+}
+```
+
+The Admin surface covers all non-deprecated stable v1beta resources: accounts, properties, custom
+dimensions and metrics, data streams and measurement protocol secrets, Firebase links, Google Ads
+links, key events, access reports, and change history. Deprecated `conversionEvents` and alpha-only
+resources are intentionally excluded.
+
+The Data surface includes standard, pivot, batch, realtime, metadata and compatibility reports,
+plus audience export creation, discovery and querying. `runReportPages` / `runReportAll` and audience
+export `queryPages` / `queryAll` use Google’s `offset` pagination; `limit` is their per-request page
+size and may not exceed 250,000. Data API `int64` fields remain strings so values are not truncated.
+
+Use `https://www.googleapis.com/auth/analytics.readonly` for account/property discovery and report
+reads. Admin mutations require `https://www.googleapis.com/auth/analytics.edit`. A service account
+must also be granted access inside Google Analytics (directly or through a group); assigning Google
+Cloud IAM roles alone does not make Analytics accounts visible to it.
 
 ## Auth
 
