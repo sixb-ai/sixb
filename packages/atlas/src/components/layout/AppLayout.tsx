@@ -3,6 +3,7 @@ import { Toaster } from "@sixb/ui/components"
 import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 import { Outlet, useLocation, useNavigate } from "react-router-dom"
+import { preloadWorkspaceView } from "../../pages/workspaceRoutes"
 import { AppShell } from "./AppShell"
 import { Sidebar, type ViewMode } from "./Sidebar"
 import { type ProjectSidebarData, SidebarDataContext } from "./sidebarData"
@@ -38,6 +39,7 @@ export function AppLayout() {
       selectedProject={selectedProject}
       viewMode={viewMode}
       onViewChange={handleViewChange}
+      onViewIntent={preloadWorkspaceView}
       objectCount={sidebarData?.objectCount}
       connectorCount={sidebarData?.connectorCount}
       datasetCount={sidebarData?.datasetCount}

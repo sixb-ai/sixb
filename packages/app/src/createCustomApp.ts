@@ -214,6 +214,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
 
   async function prepareGeneratedApp(): Promise<{
     htmlPath: string
+    mainPath: string
     manifestPath: string
     routes: PageRoute[]
   }> {
@@ -225,7 +226,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     const builtInRoutes = agentRoutesEnabled ? builtInAgentRoutesFor(routes) : []
     const stylesheets = await prepareStylesheets(builtInRoutes)
     await generateRouteManifest(routes, generatedDir, { builtInRoutes })
-    const { htmlPath, manifestPath } = await generateAppEntry(rootDir, generatedDir, {
+    const { htmlPath, mainPath, manifestPath } = await generateAppEntry(rootDir, generatedDir, {
       apiBaseUrl,
       audience,
       authEnabled,
@@ -234,7 +235,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
       frameworkStylesheetPaths: stylesheets.frameworkStylesheetPaths,
       stylesheetPath: stylesheets.stylesheetPath,
     })
-    return { htmlPath, manifestPath, routes }
+    return { htmlPath, mainPath, manifestPath, routes }
   }
 
   return {
@@ -338,9 +339,10 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
 
     async build(buildOptions: CustomAppBuildOptions = {}) {
       const outdir = resolve(rootDir, buildOptions.outdir ?? join(".sixb", "dist", "app"))
-      const { htmlPath, manifestPath } = await prepareGeneratedApp()
+      const { htmlPath, mainPath, manifestPath } = await prepareGeneratedApp()
       const result = await buildApp({
         entryPath: htmlPath,
+        scriptEntryPath: mainPath,
         manifestPath,
         outdir,
       })
@@ -396,7 +398,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
 
           const directFile = Bun.file(resolvedPath)
           if (await directFile.exists()) {
-            return fileResponse(req, directFile, staticAssetHeaders(url.pathname))
+            return staticFileResponse(req, resolvedPath, staticAssetHeaders(url.pathname))
           }
 
           if (isAssetRequest(url.pathname)) {
@@ -633,11 +635,11 @@ function htmlResponse(request: Request, html: string): Response {
   })
 }
 
-// Bun.build emits content-hashed bundles named `chunk-<hash>.<ext>` (see buildApp).
-// Their contents can never change under the same URL, so they are safe to cache
-// forever — matching how Atlas serves its hashed assets. Files copied
-// from `public/` keep their names across deploys and stay uncached.
-const IMMUTABLE_ASSET_PATTERN = /^chunk-[a-z0-9]+\.(js|css|js\.map|css\.map)$/
+// buildApp emits content-hashed entry, chunk, and asset names. Their contents can never change
+// under the same URL, so they are safe to cache forever. Files copied from `public/` keep their
+// names across deploys and stay uncached.
+const IMMUTABLE_ASSET_PATTERN =
+  /^(?:(?:app|chunk)-[a-z0-9]+|(?:chunk|asset)-.+-[a-z0-9]+)\.[a-z0-9]+(?:\.map)?$/
 
 function staticAssetHeaders(pathname: string): Record<string, string> {
   if (pathname === customAppManifestRoute) {
@@ -653,6 +655,67 @@ function staticAssetHeaders(pathname: string): Record<string, string> {
   }
 
   return { "cache-control": "public, max-age=31536000, immutable" }
+}
+
+async function staticFileResponse(
+  request: Request,
+  path: string,
+  headers: Record<string, string>
+): Promise<Response> {
+  const responseHeaders = new Headers(headers)
+  const originalFile = Bun.file(path)
+  let responseFile = originalFile
+
+  if (isPrecompressedAsset(path)) {
+    responseHeaders.append("vary", "Accept-Encoding")
+    if (!request.headers.has("range")) {
+      for (const encoding of acceptedPrecompressedEncodings(request)) {
+        const candidate = Bun.file(`${path}.${encoding === "br" ? "br" : "gz"}`)
+        if (!(await candidate.exists())) continue
+
+        responseFile = candidate
+        responseHeaders.set("content-encoding", encoding)
+        responseHeaders.set("content-type", originalFile.type)
+        break
+      }
+    }
+  }
+
+  return new Response(request.method === "HEAD" ? null : responseFile, {
+    headers: responseHeaders,
+  })
+}
+
+function isPrecompressedAsset(path: string): boolean {
+  return path.endsWith(".js") || path.endsWith(".css")
+}
+
+function acceptedPrecompressedEncodings(request: Request): ("br" | "gzip")[] {
+  const header = request.headers.get("accept-encoding")
+  if (!header) return []
+
+  const qualities = new Map<string, number>()
+  for (const item of header.split(",")) {
+    const [rawName, ...parameters] = item.trim().split(";")
+    const name = rawName.toLowerCase()
+    let quality = 1
+    for (const parameter of parameters) {
+      const match = parameter.trim().match(/^q=(0(?:\.\d+)?|1(?:\.0+)?)$/)
+      if (match) quality = Number(match[1])
+    }
+    qualities.set(name, quality)
+  }
+
+  const wildcard = qualities.get("*") ?? 0
+  return (["br", "gzip"] as const)
+    .map((encoding, preference) => ({
+      encoding,
+      preference,
+      quality: qualities.get(encoding) ?? wildcard,
+    }))
+    .filter((candidate) => candidate.quality > 0)
+    .sort((left, right) => right.quality - left.quality || left.preference - right.preference)
+    .map((candidate) => candidate.encoding)
 }
 
 function fileResponse(
