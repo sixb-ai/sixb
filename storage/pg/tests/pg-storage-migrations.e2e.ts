@@ -464,7 +464,13 @@ describe("Postgres storage migrations", () => {
           )
         `)
 
-        await expect(postgresStorageMigrations.steps[6]?.up(context)).rejects.toThrow()
+        const actionExecutionsMigration = postgresStorageMigrations.steps.find(
+          (migration) => migration.id === "008-action-executions"
+        )
+        if (!actionExecutionsMigration) {
+          throw new Error("PostgreSQL action-executions migration is missing.")
+        }
+        await expect(actionExecutionsMigration.up(context)).rejects.toThrow()
         expect(await readTableColumns(schemaName, "action_runs")).not.toContain("execution_id")
       } finally {
         await sql.unsafe("RESET search_path")
@@ -593,11 +599,13 @@ describe("Postgres storage migrations", () => {
   test("status() reports current after a migration", async () => {
     await withStorage(true, async (storage) => {
       const [migrator] = storage.migrators
+      const expectedVersion = postgresStorageMigrations.latestVersion
 
       expect(await migrator?.status()).toMatchObject({
         adapterId: POSTGRES_STORAGE_ADAPTER_ID,
         state: "current",
-        appliedVersion: 7,
+        latestVersion: expectedVersion,
+        appliedVersion: expectedVersion,
       })
     })
   })
