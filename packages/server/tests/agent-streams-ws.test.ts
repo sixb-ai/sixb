@@ -22,6 +22,7 @@ import {
 } from "@sixb/core/agents/streams"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import type { AgentStorage } from "@sixb/core/storage"
+import { createTestAgentExecution } from "@sixb/core/testing"
 import { canAccessAgentRunStream, parseAgentStreamMessage } from "../src/routes/ws/agents"
 import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
@@ -114,13 +115,18 @@ describe("/ws/agents", () => {
         agentId,
         ownerPrincipal: { type: "system", id: "system" },
       })
+      const executionId = await createTestAgentExecution(sixb.storage, {
+        projectId,
+        agentId,
+        runId,
+      })
       await agents.runs.create({
         id: runId,
         projectId,
+        executionId,
         threadId,
         agentId,
         triggerMessageId: "msg_queued",
-        requestedByPrincipal: { type: "system", id: "system" },
       })
       const ws = new WebSocket(`${baseUrl.replace("http://", "ws://")}/ws/agents`)
 
@@ -249,13 +255,18 @@ describe("canAccessAgentRunStream", () => {
       agentId,
       ownerPrincipal: owner,
     })
+    const executionId = await createTestAgentExecution(sixb.storage, {
+      projectId,
+      agentId,
+      runId,
+    })
     await agents.runs.create({
       id: runId,
       projectId,
+      executionId,
       threadId,
       agentId,
       triggerMessageId: "msg_ws_1",
-      requestedByPrincipal: owner,
     })
 
     await expect(
@@ -416,13 +427,18 @@ async function advanceDurableRun(
   let run = await agents.runs.getById({ projectId, id: input.runId })
   const executionToken = `exec_${input.runId}`
   if (!run) {
+    const executionId = await createTestAgentExecution(sixb.storage, {
+      projectId,
+      agentId,
+      runId: input.runId,
+    })
     run = await agents.runs.create({
       id: input.runId,
       projectId,
+      executionId,
       threadId,
       agentId,
       triggerMessageId: `msg_${input.runId}`,
-      requestedByPrincipal: { type: "system", id: "system" },
     })
   }
   if (run.status === "queued") {

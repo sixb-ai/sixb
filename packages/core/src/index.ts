@@ -798,9 +798,12 @@ export type {
 
 export type { ActionRunsRuntime, ActionsRuntime } from "./actions/execution"
 export type {
+  AgentRunListResult,
   AgentRunsRuntime,
+  AgentRunView,
   AgentsRuntime,
   AgentThreadsRuntime,
+  ExecutionAgentRunResult,
 } from "./agents/execution"
 export type { BlobsRuntime } from "./blob-storage/execution"
 export type { ConnectorRuntime } from "./connectors/execution"

@@ -52,6 +52,9 @@
       "@sixb/core/events/selectors": ["./packages/core/src/events/selectors/index.ts"],
       "@sixb/core/internal/actions": ["./packages/core/src/actions/index.ts"],
       "@sixb/core/internal/agents": ["./packages/core/src/agents/index.ts"],
+      "@sixb/core/internal/agent-run-storage-provider": [
+        "./packages/core/src/storage/agents/provider.ts"
+      ],
       "@sixb/core/internal/auth": ["./packages/core/src/auth/index.ts"],
       "@sixb/core/internal/authorization": ["./packages/core/src/authorization/index.ts"],
       "@sixb/core/internal/bootstrap": ["./packages/core/src/bootstrap/index.ts"],

@@ -173,10 +173,7 @@ export interface AgentRunRequestedQueueJob
   extends QueueJob<
     "agent.run.requested",
     {
-      readonly agentId: string
-      readonly threadId: string
       readonly runId: string
-      readonly triggerMessageId: string
     }
   > {}
 
@@ -184,7 +181,6 @@ export interface AgentWorkflowNodeRequestedQueueJob
   extends QueueJob<
     "agent.workflow-node.requested",
     {
-      readonly agentId: string
       readonly nodeRunId: string
     }
   > {}

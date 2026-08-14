@@ -1,5 +1,4 @@
 import type { AgentMessagePart } from "../../agents/message"
-import type { Principal } from "../../auth"
 import type { JsonValue } from "../../json"
 import type { WorkflowIOSnapshot } from "../../workflows/types"
 import type { AgentExecutionStatus, AgentRunFinishReason, AgentRunUsage } from "../agents"
@@ -32,10 +31,10 @@ export interface WorkflowAgentNodeRunExecution {
 export interface WorkflowAgentNodeRunRecord {
   readonly projectId: string
   readonly nodeRunId: string
+  readonly executionId: string
   readonly agentId: string
   readonly status: WorkflowAgentNodeRunStatus
   readonly prompt: string
-  readonly executionPrincipal?: Extract<Principal, { readonly type: "serviceAccount" }>
   readonly modelId?: string
   readonly finishReason?: AgentRunFinishReason
   readonly usage?: AgentRunUsage
@@ -52,6 +51,7 @@ export interface WorkflowAgentNodeRunRecord {
 export interface CreateWorkflowAgentNodeRunInput {
   readonly projectId: string
   readonly nodeRunId: string
+  readonly executionId: string
   readonly agentId: string
   readonly prompt: string
   readonly createdAt?: Date
@@ -60,7 +60,6 @@ export interface CreateWorkflowAgentNodeRunInput {
 export interface StartWorkflowAgentNodeRunInput {
   readonly projectId: string
   readonly nodeRunId: string
-  readonly executionPrincipal?: Extract<Principal, { readonly type: "serviceAccount" }>
   readonly modelId?: string
   readonly execution: WorkflowAgentNodeRunExecution
   readonly startedAt?: Date

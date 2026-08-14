@@ -1,8 +1,9 @@
 import { join } from "node:path"
-import type { AgentDefinition, Principal } from "@sixb/core"
+import type { AgentDefinition } from "@sixb/core"
 import {
   createAgentRunExecutionToken,
   dispatchQueuedAgentRuns,
+  resolveAgentExecutionAuthorization,
   subscribeAgentRunCancel,
   workflowAgentNodeQueueJobId,
 } from "@sixb/core/internal/agents"
@@ -17,7 +18,6 @@ import { normalizeApiBaseUrl } from "./api-url"
 import { AgentExecutionLostError, AgentFinalizationError, AgentWorkerError } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
 import { finishRunOrThrow } from "./finalize"
-import { reconcileAgentExecutionIdentities, reconcileAgentExecutionIdentity } from "./identity"
 import { DEFAULT_MAX_STEPS, runAgentTurn } from "./run-agent-turn"
 import {
   type AgentExecutionEnvironment,
@@ -49,13 +49,6 @@ const MAX_AGENT_DELIVERY_ATTEMPTS = 10
 type Reservation =
   | { readonly kind: "run"; readonly run: AgentRunRecord }
   | { readonly kind: "skip" }
-
-type QueuedRun = {
-  readonly agent: AgentDefinition
-  readonly threadId: string
-  readonly runId: string
-  readonly triggerMessageId: string
-}
 
 /**
  * Cohosted worker that turns durable queued agent runs into executing turns.
@@ -103,12 +96,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
   protected override async run(signal: AbortSignal): Promise<void> {
     if (!this.idleWithoutAgents) {
       const context = this.requireContext()
-      await reconcileAgentExecutionIdentities(
-        context.storage,
-        this.host.id,
-        this.host.definitions.agents.list()
-      )
-
       const stopDispatch = new AbortController()
       const workerSignal = AbortSignal.any([signal, stopDispatch.signal])
       const dispatchLoop = this.runDispatchLoop(context, workerSignal)
@@ -162,22 +149,26 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
       })
       return
     }
-    const { agentId, threadId, runId, triggerMessageId } = job.payload
-    const agent = this.host.definitions.agents.getById(agentId)
+    const { runId } = job.payload
+    const queuedRun = await context.storage.agents.runs.getById({
+      projectId: context.id,
+      id: runId,
+    })
+    if (!queuedRun) {
+      throw new AgentWorkerError(`Queued agent run '${runId}' was not found.`)
+    }
+    if (queuedRun.status !== "queued" && queuedRun.status !== "running") {
+      return
+    }
+    const agent = this.host.definitions.agents.getById(queuedRun.agentId)
     if (!agent) {
-      const error = new AgentWorkerError(`Unknown agent '${agentId}'.`)
-      const run = await context.storage.agents.runs.getById({ projectId: context.id, id: runId })
-      if (
-        run?.status === "queued" &&
-        run.agentId === agentId &&
-        run.threadId === threadId &&
-        run.triggerMessageId === triggerMessageId
-      ) {
+      const error = new AgentWorkerError(`Unknown agent '${queuedRun.agentId}'.`)
+      if (queuedRun.status === "queued") {
         const failed = await context.storage.agents.runs.finishQueued({
           projectId: context.id,
-          id: run.id,
+          id: queuedRun.id,
           status: "failed",
-          error: `Agent '${agentId}' is not registered.`,
+          error: `Agent '${queuedRun.agentId}' is not registered.`,
         })
         this.reportFailure(error, failed, job.attempt)
         await context.streamSink.publishRunFinished(failed)
@@ -185,14 +176,36 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
       }
       throw error
     }
-    const identity = await reconcileAgentExecutionIdentity(context.storage, context.id, agent)
+
+    const durableExecution = await context.storage.executions.getById({
+      projectId: context.id,
+      id: queuedRun.executionId,
+    })
+    if (!durableExecution) {
+      throw new AgentWorkerError(
+        `Agent run '${runId}' references missing execution '${queuedRun.executionId}'.`
+      )
+    }
+    const resolved = await resolveAgentExecutionAuthorization({
+      auth: context.storage.auth,
+      projectId: context.id,
+      agentId: agent.id,
+      authorizationRef: durableExecution.authorizationRef,
+      security: this.host.definitions.security,
+    })
+    const executionContext = createAgentExecutionContext({
+      context,
+      host: this.host,
+      execution: durableExecution,
+      agentId: agent.id,
+      runId: queuedRun.id,
+      authorization: resolved.context,
+      agentPrincipal: resolved.identity.principal,
+    })
 
     const reservation = await this.startOrReclaim(context, {
+      run: queuedRun,
       agent,
-      threadId,
-      runId,
-      triggerMessageId,
-      executionPrincipal: identity.principal,
       execution: freshExecution(delivery.leaseExpiresAt),
     })
     if (reservation.kind === "skip") {
@@ -203,16 +216,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
     if (!executionToken) {
       throw new AgentWorkerError(`Agent run '${run.id}' has no execution token.`)
     }
-    const executionContext = createAgentExecutionContext({
-      context,
-      host: this.host,
-      identity,
-      agentId: agent.id,
-      runId: run.id,
-      queueJobId: job.id,
-      requestedBy: run.requestedByPrincipal,
-    })
-
     let environment: AgentExecutionEnvironment | null = null
     let stopOwnershipProjection: (() => void) | undefined
     // Watch for a user cancel (an out-of-band `/cancel` publishes to the run's control stream). Its
@@ -325,17 +328,12 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
         ? { kind: "retry", availableAt: backoff(PRESTART_RETRY_BACKOFF_MS) }
         : { kind: "fail" }
     }
-    const { agentId, threadId, runId, triggerMessageId } = claimed.job.payload
+    const { runId } = claimed.job.payload
     const run = await this.requireContext().storage.agents.runs.getById({
       projectId: this.host.id,
       id: runId,
     })
-    if (
-      run?.status === "queued" &&
-      run.agentId === agentId &&
-      run.threadId === threadId &&
-      run.triggerMessageId === triggerMessageId
-    ) {
+    if (run?.status === "queued") {
       const failed = await this.requireContext().storage.agents.runs.finishQueued({
         projectId: this.host.id,
         id: run.id,
@@ -420,7 +418,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
       jobs: queued.runs.map((run) => ({
         id: workflowAgentNodeQueueJobId(run.nodeRunId),
         type: "agent.workflow-node.requested" as const,
-        payload: { agentId: run.agentId, nodeRunId: run.nodeRunId },
+        payload: { nodeRunId: run.nodeRunId },
       })),
     })
     return queued.runs.length
@@ -459,32 +457,19 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
 
   private async startOrReclaim(
     context: AgentWorkerContext,
-    input: QueuedRun & {
-      executionPrincipal: Extract<Principal, { readonly type: "serviceAccount" }>
-      execution: AgentRunExecution
+    input: {
+      readonly run: AgentRunRecord
+      readonly agent: AgentDefinition
+      readonly execution: AgentRunExecution
     }
   ): Promise<Reservation> {
-    const run = await context.storage.agents.runs.getById({
-      projectId: context.id,
-      id: input.runId,
-    })
-    if (!run) {
-      throw new AgentWorkerError(`Queued agent run '${input.runId}' was not found.`)
-    }
-    if (
-      run.threadId !== input.threadId ||
-      run.agentId !== input.agent.id ||
-      run.triggerMessageId !== input.triggerMessageId
-    ) {
-      throw new AgentWorkerError(`Agent run '${input.runId}' does not match its queued request.`)
-    }
+    const { run } = input
     if (run.status === "queued") {
       return {
         kind: "run",
         run: await context.storage.agents.runs.start({
           projectId: context.id,
-          id: input.runId,
-          executionPrincipal: input.executionPrincipal,
+          id: run.id,
           modelId: input.agent.model.modelId,
           execution: input.execution,
         }),
@@ -496,7 +481,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
     try {
       const reclaimed = await context.storage.agents.runs.reclaim({
         projectId: context.id,
-        id: input.runId,
+        id: run.id,
         execution: input.execution,
       })
       return { kind: "run", run: reclaimed }

@@ -34,7 +34,12 @@ import {
   type Storage,
   type WorkflowDefinition,
 } from "@sixb/core"
-import { createTestSixb, createTestWorkflowExecution, queueTestActionRun } from "@sixb/core/testing"
+import {
+  createTestAgentExecution,
+  createTestSixb,
+  createTestWorkflowExecution,
+  queueTestActionRun,
+} from "@sixb/core/testing"
 import { SqliteStorage } from "@sixb/sqlite"
 import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
@@ -1916,9 +1921,16 @@ describe("SixbServer HTTP contract", () => {
         nodeKey: "resolveDevice",
         input: { deviceId: "fan-1" },
       })
+      const agentExecutionId = await createTestAgentExecution(sixb.storage, {
+        projectId: sixb.id,
+        agentId: "device-resolver",
+        runId: nodeRunId,
+        parentExecutionId: workflowExecutionId,
+      })
       await runs.agentNodes.create({
         projectId: sixb.id,
         nodeRunId,
+        executionId: agentExecutionId,
         agentId: "device-resolver",
         prompt: "Resolve fan-1.",
       })

@@ -1,4 +1,7 @@
-import { assertWorkflowRunExecution } from "@sixb/core/internal/workflow-run-storage-provider"
+import {
+  assertWorkflowAgentNodeRunExecution,
+  assertWorkflowRunExecution,
+} from "@sixb/core/internal/workflow-run-storage-provider"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type {
   CancelWorkflowAgentNodeRunInput,
@@ -49,7 +52,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
     private readonly executions: ExecutionStorage
   ) {
     this.nodes = new PgWorkflowNodeRunStorage(sql)
-    this.agentNodes = new PgWorkflowAgentNodeRunStorage(sql)
+    this.agentNodes = new PgWorkflowAgentNodeRunStorage(sql, executions)
   }
 
   async queue(input: QueueWorkflowRunInput): Promise<WorkflowRunRecord> {
@@ -369,16 +372,43 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
 }
 
 export class PgWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunStorage {
-  constructor(private readonly sql: PgStoreClient) {}
+  constructor(
+    private readonly sql: PgStoreClient,
+    private readonly executions: ExecutionStorage
+  ) {}
 
   async create(input: CreateWorkflowAgentNodeRunInput): Promise<WorkflowAgentNodeRunRecord> {
+    const [parent] = await this.sql<{ execution_id: string }[]>`
+      SELECT workflow_runs.execution_id
+      FROM workflow_node_runs
+      JOIN workflow_runs
+        ON workflow_runs.project_id = workflow_node_runs.project_id
+        AND workflow_runs.id = workflow_node_runs.workflow_run_id
+      WHERE workflow_node_runs.project_id = ${input.projectId}
+        AND workflow_node_runs.id = ${input.nodeRunId}
+        AND workflow_node_runs.node_type = ${"agent"}
+    `
+    if (!parent) {
+      throw new WorkflowRunError(
+        `[SixbPg] Agent workflow node run '${input.nodeRunId}' was not found.`
+      )
+    }
+    await assertWorkflowAgentNodeRunExecution({
+      executions: this.executions,
+      projectId: input.projectId,
+      executionId: input.executionId,
+      nodeRunId: input.nodeRunId,
+      agentId: input.agentId,
+      parentExecutionId: parent.execution_id,
+    })
+
     try {
       const [row] = await this.sql<WorkflowAgentNodeRunDatabaseRow[]>`
         INSERT INTO workflow_agent_node_runs (
-          project_id, node_run_id, agent_id, status, prompt, attempt, created_at
+          project_id, node_run_id, execution_id, agent_id, status, prompt, attempt, created_at
         ) VALUES (
-          ${input.projectId}, ${input.nodeRunId}, ${input.agentId}, ${"queued"},
-          ${input.prompt}, ${0}, ${input.createdAt ?? new Date()}
+          ${input.projectId}, ${input.nodeRunId}, ${input.executionId}, ${input.agentId},
+          ${"queued"}, ${input.prompt}, ${0}, ${input.createdAt ?? new Date()}
         ) RETURNING *
       `
       return rowToWorkflowAgentNodeRunRecord(row)
@@ -398,8 +428,6 @@ export class PgWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunStorag
       const [updated] = await tx<WorkflowAgentNodeRunDatabaseRow[]>`
         UPDATE workflow_agent_node_runs SET
           status = ${"running"},
-          execution_principal_type = ${input.executionPrincipal?.type ?? null},
-          execution_principal_id = ${input.executionPrincipal?.id ?? null},
           model_id = ${input.modelId ?? null},
           attempt = ${1},
           execution_token = ${input.execution.token},
@@ -871,11 +899,10 @@ interface WorkflowNodeRunDatabaseRow {
 interface WorkflowAgentNodeRunDatabaseRow {
   project_id: string
   node_run_id: string
+  execution_id: string
   agent_id: string
   status: WorkflowAgentNodeRunRecord["status"]
   prompt: string
-  execution_principal_type: "serviceAccount" | null
-  execution_principal_id: string | null
   model_id: string | null
   finish_reason: WorkflowAgentNodeRunRecord["finishReason"] | null
   usage: WorkflowAgentNodeRunRecord["usage"] | string | null
@@ -931,17 +958,10 @@ function rowToWorkflowAgentNodeRunRecord(
   return {
     projectId: row.project_id,
     nodeRunId: row.node_run_id,
+    executionId: row.execution_id,
     agentId: row.agent_id,
     status: row.status,
     prompt: row.prompt,
-    ...(row.execution_principal_type && row.execution_principal_id
-      ? {
-          executionPrincipal: {
-            type: row.execution_principal_type,
-            id: row.execution_principal_id,
-          },
-        }
-      : {}),
     ...(row.model_id ? { modelId: row.model_id } : {}),
     ...(row.finish_reason ? { finishReason: row.finish_reason } : {}),
     ...(row.usage ? { usage: parseJson(row.usage) } : {}),

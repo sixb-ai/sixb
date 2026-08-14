@@ -143,11 +143,10 @@ export interface AgentRunExecution {
 export interface AgentRunRecord {
   readonly id: string
   readonly projectId: string
+  readonly executionId: string
   readonly threadId: string
   readonly agentId: string
   readonly triggerMessageId: string
-  readonly requestedByPrincipal: Principal
-  readonly executionPrincipal?: Extract<Principal, { readonly type: "serviceAccount" }>
   readonly status: AgentRunStatus
   readonly modelId?: string
   /** Why the run ended (our own SDK-independent enum). */
@@ -168,17 +167,16 @@ export interface AgentRunRecord {
 export interface CreateAgentRunInput {
   readonly id: string
   readonly projectId: string
+  readonly executionId: string
   readonly threadId: string
   readonly agentId: string
   readonly triggerMessageId: string
-  readonly requestedByPrincipal: Principal
   readonly createdAt?: Date
 }
 
 export interface StartAgentRunInput {
   readonly id: string
   readonly projectId: string
-  readonly executionPrincipal?: Extract<Principal, { readonly type: "serviceAccount" }>
   readonly modelId?: string
   readonly execution: AgentRunExecution
   readonly startedAt?: Date

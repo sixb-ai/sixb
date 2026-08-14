@@ -437,6 +437,7 @@ export interface AuthServiceAccountStore {
     readonly projectId: string
     readonly id: string
   }): Promise<ServiceAccountRecord | null>
+  /** Update only the provided fields; omitted fields must remain unchanged atomically. */
   update(input: UpdateAuthServiceAccountInput): Promise<ServiceAccountRecord>
   list(input: ListAuthServiceAccountsInput): Promise<ListAuthServiceAccountsResult>
 }

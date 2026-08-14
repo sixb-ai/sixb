@@ -327,7 +327,7 @@ function createPostgresStores(
     }),
     auth,
     executions,
-    agents: new PgAgentStorage({ sql }),
+    agents: new PgAgentStorage({ sql, executions }),
     actionRuns: new PgActionRunStorage(sql, executions),
     pipelineRuns: new PgPipelineRunStorage(sql),
     workflowRuns: new PgWorkflowRunStorage(sql, executions),

@@ -2,6 +2,7 @@ export {
   createTestActionExecution,
   queueTestActionRun,
 } from "./action-execution"
+export { createTestAgentExecution } from "./agent-execution"
 export {
   type AgentStorageContractSuiteOptions,
   runAgentStorageContractSuite,

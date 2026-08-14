@@ -197,9 +197,10 @@ function isAgentRunSnapshot(value: unknown): value is AgentRunSnapshot {
     typeof value.threadId === "string" &&
     typeof value.agentId === "string" &&
     typeof value.triggerMessageId === "string" &&
-    isRecord(value.requestedByPrincipal) &&
-    typeof value.requestedByPrincipal.type === "string" &&
-    typeof value.requestedByPrincipal.id === "string" &&
+    (value.requestedBy === undefined ||
+      (isRecord(value.requestedBy) &&
+        typeof value.requestedBy.type === "string" &&
+        typeof value.requestedBy.id === "string")) &&
     isDurableAgentRunStatus(value.status) &&
     isFiniteNumber(value.attempt) &&
     typeof value.streamId === "string" &&

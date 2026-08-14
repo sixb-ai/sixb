@@ -22,7 +22,11 @@ import {
   createAgentApiGatewayCapability,
   createAgentRunExecutionToken,
 } from "@sixb/core/internal/agents"
-import { createTestSixb, createTestWorkflowExecution } from "@sixb/core/testing"
+import {
+  createTestAgentExecution,
+  createTestSixb,
+  createTestWorkflowExecution,
+} from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -493,9 +497,16 @@ async function createGatewayRuntime(
       input: {},
       startedAt: NOW,
     })
+    const executionId = await createTestAgentExecution(storage, {
+      projectId: PROJECT_ID,
+      agentId: "assistant",
+      runId,
+      parentExecutionId: parentWorkflowExecutionId,
+    })
     await storage.workflowRuns.agentNodes.create({
       projectId: PROJECT_ID,
       nodeRunId: runId,
+      executionId,
       agentId: "assistant",
       prompt: "Inspect devices.",
       createdAt: NOW,
@@ -503,7 +514,6 @@ async function createGatewayRuntime(
     await storage.workflowRuns.agentNodes.start({
       projectId: PROJECT_ID,
       nodeRunId: runId,
-      executionPrincipal: { type: "serviceAccount", id: serviceAccountId },
       execution,
       startedAt: NOW,
     })
@@ -516,19 +526,23 @@ async function createGatewayRuntime(
       createdAt: NOW,
       updatedAt: NOW,
     })
+    const executionId = await createTestAgentExecution(storage, {
+      projectId: PROJECT_ID,
+      agentId: "assistant",
+      runId,
+    })
     await storage.agents.runs.create({
       id: runId,
       projectId: PROJECT_ID,
+      executionId,
       threadId,
       agentId: "assistant",
       triggerMessageId: "msg-1",
-      requestedByPrincipal: { type: "user", id: "usr_requester" },
       createdAt: NOW,
     })
     await storage.agents.runs.start({
       id: runId,
       projectId: PROJECT_ID,
-      executionPrincipal: { type: "serviceAccount", id: serviceAccountId },
       execution,
       startedAt: NOW,
     })

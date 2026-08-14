@@ -42,7 +42,7 @@ returns the canonical durable run:
     "threadId": "thr_...",
     "agentId": "accounts",
     "triggerMessageId": "msg_...",
-    "requestedByPrincipal": { "type": "user", "id": "usr_..." },
+    "requestedBy": { "type": "user", "id": "usr_..." },
     "status": "queued",
     "attempt": 0,
     "streamId": "agents.runs.run_...",
@@ -53,6 +53,7 @@ returns the canonical durable run:
 
 The run and user message are durable before this response returns, so you can immediately read the
 run or subscribe to its stream even when queue publication is temporarily unavailable.
+`requestedBy` is resolved from the run's immutable execution record; it is omitted for automatic executions that have no requesting principal.
 A thread runs **one turn at a time** — posting while a run is active returns `409`; wait for it to
 finish first.
 

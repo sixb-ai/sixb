@@ -258,15 +258,18 @@ function createRuntime(host: WorkflowWorkerHost): WorkflowWorkerContext {
     },
     primitive,
   })
-  return {
-    projectId: host.id,
-    ontology: host.definitions.ontology,
-    storage: host.storage,
-    queues: host.queues,
-    workflowRuns: requireWorkflowRunsStorage(host),
-    logging: host.logging,
-    sixb: execution.sixb,
-  }
+  return Object.assign(
+    {
+      projectId: host.id,
+      ontology: host.definitions.ontology,
+      storage: host.storage,
+      queues: host.queues,
+      workflowRuns: requireWorkflowRunsStorage(host),
+      logging: host.logging,
+      sixb: execution.sixb,
+    },
+    { host }
+  )
 }
 
 async function queueWorkflowRunFixture(
@@ -282,7 +285,7 @@ async function queueWorkflowRunFixture(
 }
 
 async function runWorkflowJob(input: RunWorkflowJobInput) {
-  const existing = await input.runtime.workflowRuns.getById({
+  let existing = await input.runtime.workflowRuns.getById({
     projectId: input.runtime.projectId,
     id: input.job.id,
   })
@@ -302,8 +305,26 @@ async function runWorkflowJob(input: RunWorkflowJobInput) {
       workflowId: input.job.workflowId,
       input: snapshot,
     })
+    existing = await input.runtime.workflowRuns.getById({
+      projectId: input.runtime.projectId,
+      id: input.job.id,
+    })
   }
-  return executeWorkflowJob(input)
+  if (!existing) throw new Error("Expected durable workflow run.")
+  const durableExecution = await input.runtime.storage.executions.getById({
+    projectId: input.runtime.projectId,
+    id: existing.executionId,
+  })
+  if (!durableExecution) throw new Error("Expected durable workflow execution.")
+  const host = (input.runtime as WorkflowWorkerContext & { host: WorkflowWorkerHost }).host
+  const bound = bindDurablePrimitiveExecution(host, {
+    execution: durableExecution,
+    primitive: { kind: "workflow", id: existing.workflowId, runId: existing.id },
+  })
+  return executeWorkflowJob({
+    ...input,
+    runtime: { ...input.runtime, sixb: bound.sixb },
+  })
 }
 
 async function completeRequestedActions(
@@ -809,7 +830,7 @@ describe("runWorkflowJob", () => {
     })
     expect(queuedAgentJob?.job).toMatchObject({
       type: "agent.workflow-node.requested",
-      payload: { agentId: invoiceResolverAgent.id, nodeRunId: node!.id },
+      payload: { nodeRunId: node!.id },
     })
 
     const token = "agent_execution_1"
@@ -1304,11 +1325,16 @@ describe("runWorkflowJob", () => {
             id: actionRun.executionId,
           })
         : null
+      const workflowExecution = await sixb.storage.executions.getById({
+        projectId: sixb.id,
+        id: result.run.executionId,
+      })
+      expect(workflowExecution).not.toBeNull()
       expect(actionExecution).toMatchObject({
         executor: { type: "primitive", kind: "action", runId: "wfrun_action:action:1" },
-        source: { type: "execution", executionId: "direct-workflow-execution-test" },
-        parentExecutionId: "direct-workflow-execution-test",
-        correlationId: "direct-workflow-correlation-test",
+        source: { type: "execution", executionId: result.run.executionId },
+        parentExecutionId: result.run.executionId,
+        correlationId: workflowExecution?.correlationId,
         authorizationRef: {
           type: "trustedPrimitive",
           primitive: {

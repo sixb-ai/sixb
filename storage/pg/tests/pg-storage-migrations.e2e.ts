@@ -44,6 +44,7 @@ describe("Postgres storage migrations", () => {
             "006-narrow-ontology-source-root-index",
             "007-split-overrides",
             "008-action-executions",
+            "009-agent-executions",
           ],
         },
       ])
@@ -103,6 +104,13 @@ describe("Postgres storage migrations", () => {
           id: "008-action-executions",
           status: "applied",
           version: 8,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "009-agent-executions",
+          status: "applied",
+          version: 9,
         },
       ])
     })
@@ -479,6 +487,43 @@ describe("Postgres storage migrations", () => {
     })
   })
 
+  test("rejects legacy Agent runs instead of inventing their execution authority", async () => {
+    const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    await withSql(async (sql) => {
+      const schema = quoteIdent(schemaName)
+      const context = { exec: (sqlText: string) => sql.unsafe(sqlText).then(() => undefined) }
+
+      try {
+        await sql.unsafe(`CREATE SCHEMA ${schema}`)
+        await sql.unsafe(`SET search_path TO ${schema}`)
+        const agentExecutionsIndex = postgresStorageMigrations.steps.findIndex(
+          (migration) => migration.id === "009-agent-executions"
+        )
+        const agentExecutionsMigration = postgresStorageMigrations.steps[agentExecutionsIndex]
+        if (!agentExecutionsMigration) {
+          throw new Error("PostgreSQL agent-executions migration is missing.")
+        }
+        for (const migration of postgresStorageMigrations.steps.slice(0, agentExecutionsIndex)) {
+          await migration.up(context)
+        }
+        await sql.unsafe(`
+          INSERT INTO agent_runs (
+            project_id, id, thread_id, agent_id, trigger_message_id, status, created_at
+          ) VALUES (
+            'project-a', 'legacy-agent-run', 'legacy-thread', 'legacy-agent',
+            'legacy-message', 'queued', '2026-01-01T00:00:00.000Z'
+          )
+        `)
+
+        await expect(agentExecutionsMigration.up(context)).rejects.toThrow()
+        expect(await readTableColumns(schemaName, "agent_runs")).not.toContain("execution_id")
+      } finally {
+        await sql.unsafe("RESET search_path")
+        await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
+      }
+    })
+  })
+
   test("untracked existing schema collides and rolls back without conversion", async () => {
     await withStorage(false, async (storage, schemaName) => {
       await migrateStorage(storage)
@@ -683,6 +728,13 @@ describe("Postgres storage migrations", () => {
           id: "008-action-executions",
           status: "applied",
           version: 8,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "009-agent-executions",
+          status: "applied",
+          version: 9,
         },
       ])
     } finally {

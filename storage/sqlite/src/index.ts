@@ -288,7 +288,7 @@ function createSqliteStores(
     }),
     auth,
     executions,
-    agents: new SqliteAgentStorage({ connection }),
+    agents: new SqliteAgentStorage({ connection, executions }),
     actionRuns: new SqliteActionRunStorage({ connection, executions }),
     pipelineRuns: new SqlitePipelineRunStorage({ connection }),
     timeseries: new SqliteTimeseriesStorage({ connection }),

@@ -1,6 +1,8 @@
 import { AGENT_MESSAGE_CONTENT_VERSION } from "../../agents/message"
 import { principalsEqual } from "../../auth"
+import type { ExecutionStorage } from "../executions"
 import { AgentStorageError } from "./errors"
+import { assertAgentRunExecution } from "./provider"
 import type {
   AgentMessageRecord,
   AgentMessageStore,
@@ -149,9 +151,19 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
 // ── runs ──────────────────────────────────────────────────────────────────────────────────────
 
 class InMemoryAgentRunStore implements AgentRunStore {
-  constructor(private readonly state: AgentStoreState) {}
+  constructor(
+    private readonly state: AgentStoreState,
+    private readonly executions: ExecutionStorage
+  ) {}
 
   async create(input: CreateAgentRunInput): Promise<AgentRunRecord> {
+    await assertAgentRunExecution({
+      executions: this.executions,
+      projectId: input.projectId,
+      executionId: input.executionId,
+      runId: input.id,
+      agentId: input.agentId,
+    })
     // No `await` between read and write: the in-memory critical section is atomic, so two concurrent
     // queued runs on the same thread cannot both win — the second observes `activeRunId` set.
     const threadKey = key(input.projectId, input.threadId)
@@ -176,15 +188,25 @@ class InMemoryAgentRunStore implements AgentRunStore {
         `[Sixb] Agent run '${input.id}' already exists for project '${input.projectId}'.`
       )
     }
+    if (
+      [...this.state.runs.values()].some(
+        (run) => run.projectId === input.projectId && run.executionId === input.executionId
+      )
+    ) {
+      throw new AgentStorageError(
+        "duplicate_id",
+        `[Sixb] Execution '${input.executionId}' already belongs to another Agent run.`
+      )
+    }
 
     const createdAt = new Date(input.createdAt ?? new Date())
     const run: AgentRunRecord = {
       id: input.id,
       projectId: input.projectId,
+      executionId: input.executionId,
       threadId: input.threadId,
       agentId: input.agentId,
       triggerMessageId: input.triggerMessageId,
-      requestedByPrincipal: clone(input.requestedByPrincipal),
       status: "queued",
       attempt: 0,
       createdAt,
@@ -207,9 +229,6 @@ class InMemoryAgentRunStore implements AgentRunStore {
     const next: AgentRunRecord = {
       ...run,
       status: "running",
-      ...(input.executionPrincipal === undefined
-        ? {}
-        : { executionPrincipal: clone(input.executionPrincipal) }),
       ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
       attempt: 1,
       execution: clone(input.execution),
@@ -471,9 +490,15 @@ export class InMemoryAgentStorage implements AgentStorage {
     messages: new Map(),
   }
 
-  readonly threads = new InMemoryAgentThreadStore(this.state)
-  readonly runs = new InMemoryAgentRunStore(this.state)
-  readonly messages = new InMemoryAgentMessageStore(this.state)
+  readonly threads: InMemoryAgentThreadStore
+  readonly runs: InMemoryAgentRunStore
+  readonly messages: InMemoryAgentMessageStore
+
+  constructor(executions: ExecutionStorage) {
+    this.threads = new InMemoryAgentThreadStore(this.state)
+    this.runs = new InMemoryAgentRunStore(this.state, executions)
+    this.messages = new InMemoryAgentMessageStore(this.state)
+  }
 
   snapshot(): InMemoryAgentStorageSnapshot {
     return {

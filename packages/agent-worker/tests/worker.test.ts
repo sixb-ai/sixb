@@ -33,7 +33,6 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   type RunCommandOptions,
-  resolveAuthorizationContext,
   type Sandbox,
   type SandboxFactory,
   type SandboxFileRecord,
@@ -42,11 +41,13 @@ import {
   type Storage,
 } from "@sixb/core"
 import { type AgentRunStreamEvent, agentRunStreamId } from "@sixb/core/agents/streams"
-import { bindAgentExecution } from "@sixb/core/internal/agent-execution"
+import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
 import {
   createAgentRunExecutionToken,
   createAgentRunId,
+  ensureAgentExecutionIdentity,
   publishAgentRunCancel,
+  resolveAgentExecutionAuthorization,
 } from "@sixb/core/internal/agents"
 import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import {
@@ -54,7 +55,11 @@ import {
   AgentStorageError,
   type AppendAgentMessageInput,
 } from "@sixb/core/storage"
-import { createTestSixb, createTestWorkflowExecution } from "@sixb/core/testing"
+import {
+  createTestAgentExecution,
+  createTestSixb,
+  createTestWorkflowExecution,
+} from "@sixb/core/testing"
 import { jsonSchema, type ToolSet, tool } from "ai"
 import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test"
 import { AgentWorker, type AgentWorkerOptions } from "../src"
@@ -63,7 +68,6 @@ import { normalizeApiBaseUrl } from "../src/api-url"
 import { prepareAgentAttachments } from "../src/attachments"
 import { AgentExecutionLostError, AgentFinalizationError, AgentWorkerError } from "../src/errors"
 import { finishRunOrThrow } from "../src/finalize"
-import { reconcileAgentExecutionIdentity } from "../src/identity"
 import { runAgentTurn } from "../src/run-agent-turn"
 import { createConversationAgentEnvironment } from "../src/run-environment"
 import { createBrokerStreamSink, NOOP_STREAM_SINK } from "../src/stream-sink"
@@ -78,6 +82,7 @@ import { waitFor, writeProjectSkill } from "./helpers"
 const PROJECT_ID = "agent-worker-tests"
 const TEST_AGENT_API_BASE_URL = "http://localhost:3002/api/"
 const REQUESTER = { type: "user", id: "usr_requester" } as const
+const AGENT_PRINCIPAL = { type: "serviceAccount", id: "svc_agent_assistant" } as const
 const AGENT_RUNTIME_GROUP = defineGroup("agent-runtime", { label: "Agent runtime" })
 
 const USAGE: LanguageModelV4Usage = {
@@ -856,10 +861,10 @@ function workerStorageOf(storage: Storage): AgentWorkerStorage {
   return storage as AgentWorkerStorage
 }
 
-function buildAgentWorkerContext(
+async function buildAgentWorkerContext(
   sixb: TestSixb,
   input: { readonly apiBaseUrl?: string } = {}
-): AgentExecutionContext {
+): Promise<AgentExecutionContext> {
   if (!sixb.sandboxes) {
     throw new Error("expected sandbox factory")
   }
@@ -876,28 +881,60 @@ function buildAgentWorkerContext(
     defaultMaxSteps: 4,
     turnTimeoutMs: 60_000,
   }
-  const agentSixb = bindAgentExecution(sixb, {
-    agentId: "assistant",
-    runId: "direct-agent-worker-test",
-    authorization: resolveAuthorizationContext({
-      principal: { type: "serviceAccount", id: "agent:assistant" },
-      groupIds: [AGENT_RUNTIME_GROUP.id],
-      roles: sixb.definitions.security.listResolvedRoles(),
-    }),
-    source: { type: "queue", queue: "agents", jobId: "direct-agent-worker-test" },
+  const agent = sixb.definitions.agents.getById("assistant")
+  if (!agent) throw new Error("Expected test agent.")
+  await ensureAgentExecutionIdentity({ auth: context.storage.auth, projectId: PROJECT_ID, agent })
+  const runId = "direct-agent-worker-test"
+  const executionId = await createTestAgentExecution(context.storage, {
+    projectId: PROJECT_ID,
+    agentId: agent.id,
+    runId,
   })
-  return { ...context, blobStorage: agentSixb.blobs, connector: agentSixb.connector }
+  const execution = await context.storage.executions.getById({
+    projectId: PROJECT_ID,
+    id: executionId,
+  })
+  if (!execution) throw new Error("Expected test Agent execution.")
+  const resolved = await resolveAgentExecutionAuthorization({
+    auth: context.storage.auth,
+    projectId: PROJECT_ID,
+    agentId: agent.id,
+    authorizationRef: execution.authorizationRef,
+    security: sixb.definitions.security,
+  })
+  const agentSixb = bindDurableAgentExecution(sixb, {
+    execution,
+    agentId: agent.id,
+    runId,
+    authorization: resolved.context,
+  })
+  return {
+    ...context,
+    agentPrincipal: resolved.identity.principal,
+    blobStorage: agentSixb.blobs,
+    connector: agentSixb.connector,
+  }
 }
 
 function requestAgent(sixb: TestSixb, input: Parameters<AgentsRuntime["runs"]["request"]>[0]) {
   return createTestSixb(sixb).agents.runs.request(input)
 }
 
-function requestAgentAs(
+async function requestAgentAs(
   sixb: TestSixb,
   principal: typeof REQUESTER,
   input: Parameters<AgentsRuntime["runs"]["request"]>[0]
 ) {
+  const auth = sixb.storage.auth
+  if (!auth) throw new Error("Expected auth storage.")
+  const existing = await auth.users.getById({ projectId: PROJECT_ID, id: principal.id })
+  if (!existing) {
+    await auth.users.create({
+      id: principal.id,
+      projectId: PROJECT_ID,
+      email: `${principal.id}@example.com`,
+    })
+  }
   const grants = { ...emptyGrantIndex(), "run:agent": new Set([input.agentId]) }
   return createTestSixb(sixb, {
     authorization: { principal, groupIds: [], roleIds: [], grants },
@@ -1112,6 +1149,26 @@ describe("AgentWorker", () => {
     )
   })
 
+  test("does not provision Agent identities when the worker starts", async () => {
+    const sixb = buildSixb(toolThenAnswerModel())
+    const auth = authStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+
+    // Regression proof: restoring the former startup ensure loop creates this identity and fails.
+    await worker.start()
+    try {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      await expect(
+        auth.serviceAccounts.getById({
+          projectId: PROJECT_ID,
+          id: "svc_agent_assistant",
+        })
+      ).resolves.toBeNull()
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("executes a headless workflow agent node and publishes its resume", async () => {
     let capturedSystem: string | undefined
     const model = structuredToolThenAnswerModel((system) => {
@@ -1182,9 +1239,16 @@ describe("AgentWorker", () => {
       nodeKey: "resolveProject",
       input: { query: "alpha" },
     })
+    const agentExecutionId = await createTestAgentExecution(sixb.storage, {
+      projectId: PROJECT_ID,
+      agentId: agent.id,
+      runId: nodeRunId,
+      parentExecutionId: executionId,
+    })
     await runs.agentNodes.create({
       projectId: PROJECT_ID,
       nodeRunId,
+      executionId: agentExecutionId,
       agentId: agent.id,
       prompt: "Resolve 'alpha'.",
     })
@@ -1196,7 +1260,7 @@ describe("AgentWorker", () => {
         {
           id: `wfa_job_${nodeRunId}`,
           type: "agent.workflow-node.requested",
-          payload: { agentId: agent.id, nodeRunId },
+          payload: { nodeRunId },
         },
       ],
     })
@@ -1281,19 +1345,25 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("attributes a managed service account to the agent worker, not to system at large", async () => {
+  test("attributes managed identity creation to the framework", async () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const agent = sixb.definitions.agents.getById("assistant")
     if (!agent) {
       throw new Error("Expected test agent.")
     }
-    const context = buildAgentWorkerContext(sixb, { apiBaseUrl: "http://sixb-api.local/api/" })
-    const identity = await reconcileAgentExecutionIdentity(context.storage, PROJECT_ID, agent)
-    // Audit attribution must stay the worker's own identity, distinct from the generic core
-    // SYSTEM_PRINCIPAL ({ id: "system" }) — a shared-literal refactor once silently flattened it.
+    const context = await buildAgentWorkerContext(sixb, {
+      apiBaseUrl: "http://sixb-api.local/api/",
+    })
+    const identity = await ensureAgentExecutionIdentity({
+      auth: context.storage.auth,
+      projectId: PROJECT_ID,
+      agent,
+    })
+    // Admission may run in an HTTP or workflow process; it must not claim that the worker created
+    // the identity merely because the worker will eventually execute under it.
     expect(identity.serviceAccount.createdByPrincipal).toEqual({
       type: "system",
-      id: "agent-worker",
+      id: "system",
     })
   })
 
@@ -1313,10 +1383,9 @@ describe("AgentWorker", () => {
       reserveRequestedRun(sixb, secondRequest),
     ])
 
-    const context = buildAgentWorkerContext(sixb, {
+    const context = await buildAgentWorkerContext(sixb, {
       apiBaseUrl: "http://sixb-api.local/api/",
     })
-    await reconcileAgentExecutionIdentity(context.storage, PROJECT_ID, agent)
     const [firstEnvironment, secondEnvironment] = await Promise.all([
       createConversationAgentEnvironment({ context, agent, run: firstRun }),
       createConversationAgentEnvironment({ context, agent, run: secondRun }),
@@ -1395,7 +1464,9 @@ describe("AgentWorker", () => {
       attachments: [fileRef],
     })
     const run = await reserveRequestedRun(sixb, request)
-    const context = buildAgentWorkerContext(sixb, { apiBaseUrl: "http://sixb-api.local/api/" })
+    const context = await buildAgentWorkerContext(sixb, {
+      apiBaseUrl: "http://sixb-api.local/api/",
+    })
 
     const environment = await createConversationAgentEnvironment({ context, agent, run })
     try {
@@ -1455,7 +1526,7 @@ describe("AgentWorker", () => {
       attachments: [fileRef],
     })
     const run = await reserveRequestedRun(sixb, request)
-    const context = buildAgentWorkerContext(sixb)
+    const context = await buildAgentWorkerContext(sixb)
     const environment = await createConversationAgentEnvironment({
       context,
       agent: sixb.definitions.agents.getById("assistant")!,
@@ -1513,7 +1584,7 @@ describe("AgentWorker", () => {
       attachments: [fileRef],
     })
     const run = await reserveRequestedRun(sixb, request)
-    const context = buildAgentWorkerContext(sixb)
+    const context = await buildAgentWorkerContext(sixb)
     const environment = await createConversationAgentEnvironment({
       context,
       agent: sixb.definitions.agents.getById("assistant")!,
@@ -1575,7 +1646,7 @@ describe("AgentWorker", () => {
       attachments: [fileRef],
     })
     const run = await reserveRequestedRun(sixb, request)
-    const context = buildAgentWorkerContext(sixb)
+    const context = await buildAgentWorkerContext(sixb)
     const environment = await createConversationAgentEnvironment({
       context,
       agent: sixb.definitions.agents.getById("assistant")!,
@@ -1661,8 +1732,9 @@ describe("AgentWorker", () => {
     }
     const request = await requestAgent(sixb, { agentId: "assistant", text: "hi" })
     const run = await reserveRequestedRun(sixb, request)
-    const context = buildAgentWorkerContext(sixb, { apiBaseUrl: "http://sixb-api.local/api/" })
-    await reconcileAgentExecutionIdentity(context.storage, PROJECT_ID, agent)
+    const context = await buildAgentWorkerContext(sixb, {
+      apiBaseUrl: "http://sixb-api.local/api/",
+    })
 
     // Resolves while create() is still gated: the system prompt is ready and the
     // sandbox has not been built yet.
@@ -1704,8 +1776,7 @@ describe("AgentWorker", () => {
     }
     const request = await requestAgent(sixb, { agentId: "assistant", text: "hi" })
     const run = await reserveRequestedRun(sixb, request)
-    const context = buildAgentWorkerContext(sixb)
-    await reconcileAgentExecutionIdentity(context.storage, PROJECT_ID, agent)
+    const context = await buildAgentWorkerContext(sixb)
 
     let detached: Promise<void> | null = null
     const environment = await createConversationAgentEnvironment({
@@ -2316,9 +2387,13 @@ describe("AgentWorker", () => {
       expect(run.modelId).toBe("mock-model")
       expect(run.usage?.outputTokens).toBeGreaterThan(0)
       expect(run.usage?.inputTokens).toBeGreaterThan(0)
-      expect(run.executionPrincipal).toEqual({
-        type: "serviceAccount",
-        id: "svc_agent_assistant",
+      const durableExecution = await sixb.storage.executions.getById({
+        projectId: PROJECT_ID,
+        id: run.executionId,
+      })
+      expect(durableExecution?.authorizationRef).toEqual({
+        type: "principal",
+        principal: { type: "serviceAccount", id: "svc_agent_assistant" },
       })
 
       // Thread released after finalization (single-flight pointer cleared).
@@ -3578,6 +3653,7 @@ describe("AgentWorker", () => {
     const promise = runAgentTurn({
       context: {
         id: PROJECT_ID,
+        agentPrincipal: AGENT_PRINCIPAL,
         storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
         tools: echoTool,
@@ -3620,6 +3696,7 @@ describe("AgentWorker", () => {
     await runAgentTurn({
       context: {
         id: PROJECT_ID,
+        agentPrincipal: AGENT_PRINCIPAL,
         storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
         tools: {},
@@ -3675,6 +3752,7 @@ describe("AgentWorker", () => {
     await runAgentTurn({
       context: {
         id: PROJECT_ID,
+        agentPrincipal: AGENT_PRINCIPAL,
         storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
         tools: {},
@@ -3909,6 +3987,7 @@ describe("AgentWorker", () => {
       runAgentTurn({
         context: {
           id: PROJECT_ID,
+          agentPrincipal: AGENT_PRINCIPAL,
           storage: workerStorageOf(failingStorage),
           blobStorage: sixb.blobStorage,
           tools: echoTool,
@@ -3945,6 +4024,7 @@ describe("AgentWorker", () => {
     await runAgentTurn({
       context: {
         id: PROJECT_ID,
+        agentPrincipal: AGENT_PRINCIPAL,
         storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
         tools: echoTool,
@@ -4052,20 +4132,25 @@ describe("AgentWorker", () => {
       role: "user",
       parts: [{ type: "text", text: "hello" }],
     })
+    const executionId = await createTestAgentExecution(sixb.storage, {
+      projectId: PROJECT_ID,
+      agentId: "removed-agent",
+      runId,
+    })
     await storage.runs.create({
       id: runId,
       projectId: PROJECT_ID,
+      executionId,
       threadId,
       agentId: "removed-agent",
       triggerMessageId,
-      requestedByPrincipal: REQUESTER,
     })
     await sixb.queues.agents.enqueue({
       projectId: PROJECT_ID,
       jobs: [
         {
           type: "agent.run.requested",
-          payload: { agentId: "removed-agent", threadId, runId, triggerMessageId },
+          payload: { runId },
         },
       ],
     })
@@ -4139,12 +4224,7 @@ describe("AgentWorker", () => {
       jobs: [
         {
           type: "agent.run.requested",
-          payload: {
-            agentId: "assistant",
-            threadId,
-            runId: createAgentRunId(),
-            triggerMessageId: "trigger-B",
-          },
+          payload: { runId: createAgentRunId() },
         },
       ],
     })

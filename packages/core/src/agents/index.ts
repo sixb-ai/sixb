@@ -25,6 +25,12 @@ export {
   isAllowedAgentApiRequest,
   isValidAgentApiGatewayCapability,
 } from "./api-gateway"
+export type { AgentExecutionIdentity } from "./authority"
+export {
+  agentServiceAccountId,
+  ensureAgentExecutionIdentity,
+  resolveAgentExecutionAuthorization,
+} from "./authority"
 export { defineAgent, defineAgentTool } from "./builders"
 export type {
   AgentContextEntryInput,
@@ -91,6 +97,7 @@ export {
   type RequestAgentRunInput,
   type RequestAgentRunResult,
   requestAgentRun,
+  retryAgentRun,
 } from "./request"
 export type {
   AgentRunControlStreamId,

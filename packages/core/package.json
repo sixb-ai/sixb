@@ -101,6 +101,12 @@
       "import": "./dist/agents/index.js",
       "default": "./dist/agents/index.js"
     },
+    "./internal/agent-run-storage-provider": {
+      "types": "./dist/storage/agents/provider.d.ts",
+      "bun": "./src/storage/agents/provider.ts",
+      "import": "./dist/storage/agents/provider.js",
+      "default": "./dist/storage/agents/provider.js"
+    },
     "./internal/auth": {
       "types": "./dist/auth/index.d.ts",
       "bun": "./src/auth/index.ts",

@@ -17,7 +17,7 @@ function run(input: Partial<AgentRun> & Pick<AgentRun, "id" | "status">): AgentR
     threadId: "thread",
     agentId: "assistant",
     triggerMessageId: "message-user",
-    requestedByPrincipal: { type: "system", id: "system" },
+    requestedBy: { type: "user", id: "user" },
     attempt: 0,
     streamId: `agents.runs.${id}`,
     createdAt: "2026-07-12T10:00:00.000Z",

@@ -745,7 +745,23 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           status: "suspended",
           updatedAt: at("2026-05-14T10:03:00.000Z"),
         })
-        expect(updated).toMatchObject({ name: "Ingest worker v2", status: "suspended" })
+        expect(updated).toMatchObject({
+          name: "Ingest worker v2",
+          description: "Reads source data into Sixb.",
+          status: "suspended",
+        })
+        await expect(
+          storage.serviceAccounts.update({
+            projectId,
+            id: "svc_ingest",
+            description: "Imports source data into Sixb.",
+            updatedAt: at("2026-05-14T10:04:00.000Z"),
+          })
+        ).resolves.toMatchObject({
+          name: "Ingest worker v2",
+          description: "Imports source data into Sixb.",
+          status: "suspended",
+        })
         await expect(
           storage.serviceAccounts.list({ projectId, statuses: ["suspended"] })
         ).resolves.toMatchObject({

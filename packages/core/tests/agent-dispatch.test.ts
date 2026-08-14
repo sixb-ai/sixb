@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryQueues, InMemoryStorage } from "../src"
 import { agentRunQueueJobId, dispatchQueuedAgentRuns } from "../src/agents"
+import { createTestAgentExecution } from "../src/testing"
 
 const PROJECT_ID = "agent-dispatch-tests"
 
@@ -11,13 +12,18 @@ async function createQueuedRun(storage: InMemoryStorage, id = "run-1") {
     agentId: "assistant",
     ownerPrincipal: { type: "system", id: "system" },
   })
+  const executionId = await createTestAgentExecution(storage, {
+    projectId: PROJECT_ID,
+    agentId: "assistant",
+    runId: id,
+  })
   return storage.agents.runs.create({
     id,
     projectId: PROJECT_ID,
+    executionId,
     threadId: `thread-${id}`,
     agentId: "assistant",
     triggerMessageId: `message-${id}`,
-    requestedByPrincipal: { type: "system", id: "system" },
   })
 }
 
@@ -46,12 +52,7 @@ describe("dispatchQueuedAgentRuns", () => {
       limit: 2,
     })
     expect(claimed).toHaveLength(1)
-    expect(claimed[0]?.job.payload).toEqual({
-      agentId: run.agentId,
-      threadId: run.threadId,
-      runId: run.id,
-      triggerMessageId: run.triggerMessageId,
-    })
+    expect(claimed[0]?.job.payload).toEqual({ runId: run.id })
   })
 
   test("skips runs that are no longer queued", async () => {

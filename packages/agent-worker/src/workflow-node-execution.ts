@@ -1,16 +1,15 @@
-import type {
-  AgentDefinition,
-  AuthorizablePrincipal,
-  ValueType,
-  WorkflowDefinition,
-} from "@sixb/core"
-import { createAgentRunExecutionToken } from "@sixb/core/internal/agents"
+import type { AgentDefinition, ValueType, WorkflowDefinition } from "@sixb/core"
+import {
+  createAgentRunExecutionToken,
+  resolveAgentExecutionAuthorization,
+} from "@sixb/core/internal/agents"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { QueueDelivery } from "@sixb/core/internal/workers"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { WorkflowAgentNodeDefinition } from "@sixb/core/internal/workflows"
 import type { AgentQueueJob, AgentWorkflowNodeRequestedQueueJob } from "@sixb/core/queues"
 import type {
+  ExecutionRecord,
   WorkflowAgentNodeRunExecution,
   WorkflowAgentNodeRunRecord,
   WorkflowNodeRunRecord,
@@ -19,7 +18,6 @@ import type {
 } from "@sixb/core/storage"
 import { AgentWorkerError } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
-import { reconcileAgentExecutionIdentity } from "./identity"
 import {
   type AgentExecutionEnvironment,
   createWorkflowAgentNodeEnvironment,
@@ -47,8 +45,8 @@ interface WorkflowAgentNodeExecutionContext {
   readonly workflow: WorkflowDefinition
   readonly node: WorkflowAgentNodeDefinition
   readonly agent: AgentDefinition
+  readonly durableExecution: ExecutionRecord
   readonly valueTypesById: ReadonlyMap<string, ValueType>
-  readonly requestedBy?: AuthorizablePrincipal
 }
 
 export async function executeWorkflowAgentNode(
@@ -58,30 +56,43 @@ export async function executeWorkflowAgentNode(
   if (!loaded) return
 
   const { context, job, signal, delivery } = input
-  const { runs, executionRecord, nodeRun, workflow, node, agent, valueTypesById } = loaded
-  const identity = await reconcileAgentExecutionIdentity(context.storage, context.id, agent)
+  const {
+    runs,
+    executionRecord,
+    nodeRun,
+    workflow,
+    node,
+    agent,
+    durableExecution,
+    valueTypesById,
+  } = loaded
+  const resolved = await resolveAgentExecutionAuthorization({
+    auth: context.storage.auth,
+    projectId: context.id,
+    agentId: agent.id,
+    authorizationRef: durableExecution.authorizationRef,
+    security: input.host.definitions.security,
+  })
+  const executionContext = createAgentExecutionContext({
+    context,
+    host: input.host,
+    execution: durableExecution,
+    agentId: agent.id,
+    runId: nodeRun.id,
+    authorization: resolved.context,
+    agentPrincipal: resolved.identity.principal,
+  })
   const reserved = await reserveWorkflowAgentNode({
     runs,
     executionRecord,
     nodeRun,
     agent,
-    executionPrincipal: identity.principal,
     execution: freshWorkflowExecution(delivery.leaseExpiresAt),
   })
   const executionToken = reserved.execution?.token
   if (!executionToken) {
     throw new AgentWorkerError(`Agent workflow node '${nodeRun.id}' has no execution token.`)
   }
-  const executionContext = createAgentExecutionContext({
-    context,
-    host: input.host,
-    identity,
-    agentId: agent.id,
-    runId: nodeRun.id,
-    queueJobId: job.id,
-    requestedBy: loaded.requestedBy,
-  })
-
   let environment: AgentExecutionEnvironment | null = null
   const cancel = await input.watchForCancel(nodeRun.id)
   const stopOwnershipProjection = projectQueueOwnership({
@@ -180,11 +191,6 @@ async function loadWorkflowAgentNodeExecution(
   if (!executionRecord || !nodeRun || nodeRun.nodeType !== "agent") {
     throw new AgentWorkerError(`Agent workflow node '${job.payload.nodeRunId}' was not found.`)
   }
-  if (executionRecord.agentId !== job.payload.agentId) {
-    throw new AgentWorkerError(
-      `Agent workflow node '${job.payload.nodeRunId}' does not match its queued request.`
-    )
-  }
   if (executionRecord.status !== "queued" && executionRecord.status !== "running") return null
 
   const workflowRun = await runs.getById({ projectId: context.id, id: nodeRun.workflowRunId })
@@ -199,13 +205,18 @@ async function loadWorkflowAgentNodeExecution(
     return null
   }
 
-  const workflowExecution = await context.storage.executions.getById({
+  const durableExecution = await context.storage.executions.getById({
     projectId: context.id,
-    id: workflowRun.executionId,
+    id: executionRecord.executionId,
   })
-  if (!workflowExecution) {
+  if (!durableExecution) {
     throw new AgentWorkerError(
-      `Workflow run '${workflowRun.id}' references missing execution '${workflowRun.executionId}'.`
+      `Agent workflow node '${nodeRun.id}' references missing execution '${executionRecord.executionId}'.`
+    )
+  }
+  if (durableExecution.parentExecutionId !== workflowRun.executionId) {
+    throw new AgentWorkerError(
+      `Agent workflow node '${nodeRun.id}' execution is not linked to workflow run '${workflowRun.id}'.`
     )
   }
 
@@ -216,9 +227,9 @@ async function loadWorkflowAgentNodeExecution(
       `Workflow definition for agent node '${job.payload.nodeRunId}' is no longer available.`
     )
   }
-  const agent = host.definitions.agents.getById(job.payload.agentId)
+  const agent = host.definitions.agents.getById(executionRecord.agentId)
   if (!agent || agent.id !== node.agentStep.agent.id) {
-    throw new AgentWorkerError(`Unknown agent '${job.payload.agentId}'.`)
+    throw new AgentWorkerError(`Unknown agent '${executionRecord.agentId}'.`)
   }
 
   return {
@@ -228,8 +239,8 @@ async function loadWorkflowAgentNodeExecution(
     workflow,
     node,
     agent,
+    durableExecution,
     valueTypesById: host.definitions.ontology.getValueTypesById(),
-    requestedBy: workflowExecution.requestedBy,
   }
 }
 
@@ -238,14 +249,12 @@ async function reserveWorkflowAgentNode(input: {
   readonly executionRecord: WorkflowAgentNodeRunRecord
   readonly nodeRun: WorkflowNodeRunRecord
   readonly agent: AgentDefinition
-  readonly executionPrincipal: NonNullable<WorkflowAgentNodeRunRecord["executionPrincipal"]>
   readonly execution: WorkflowAgentNodeRunExecution
 }): Promise<WorkflowAgentNodeRunRecord> {
   if (input.executionRecord.status === "queued") {
     return input.runs.agentNodes.start({
       projectId: input.executionRecord.projectId,
       nodeRunId: input.nodeRun.id,
-      executionPrincipal: input.executionPrincipal,
       modelId: input.agent.model.modelId,
       execution: input.execution,
     })

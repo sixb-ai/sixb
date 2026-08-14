@@ -236,6 +236,7 @@ export function createWorkflowRunOperationScope<T extends WorkflowRunStorage>(
 ): T {
   return createOperationScopedFacade<WorkflowRunStorage>(target, scope, {
     nodes: createOperationScopedFacade(target.nodes, scope),
+    agentNodes: createOperationScopedFacade(target.agentNodes, scope),
   }) as T
 }
 

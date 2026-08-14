@@ -40,6 +40,8 @@ export class AgentToolResultValidationError extends Error {
 
 export type AgentRequestErrorCode =
   | "agent_not_found"
+  | "run_not_found"
+  | "run_not_retryable"
   | "thread_not_found"
   | "thread_agent_mismatch"
   | "active_run_exists"

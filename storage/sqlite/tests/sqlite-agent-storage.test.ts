@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { runAgentStorageContractSuite } from "@sixb/core/testing"
+import { createTestAgentExecution, runAgentStorageContractSuite } from "@sixb/core/testing"
 import { SqliteStorage } from "../src"
 import { SqliteAgentStorage } from "../src/agents"
 
 runAgentStorageContractSuite("SqliteAgentStorage", {
-  createStorage: () => new SqliteAgentStorage(),
+  createStorage: () => new SqliteStorage(),
   teardown: (storage) => {
     storage.close()
   },
@@ -46,13 +46,18 @@ describe("SqliteStorage agents", () => {
 
       await expect(
         storage.transaction(async (tx) => {
+          if (!tx.auth) throw new Error("expected auth storage")
+          const executionId = await createTestAgentExecution(
+            { auth: tx.auth, executions: tx.executions },
+            { projectId: "p", agentId: "sales", runId: "run_1" }
+          )
           await tx.agents?.runs.create({
             id: "run_1",
             projectId: "p",
+            executionId,
             threadId: "thr_1",
             agentId: "sales",
             triggerMessageId: "msg_1",
-            requestedByPrincipal: { type: "user", id: "usr_1" },
             createdAt: new Date("2026-06-23T10:00:10.000Z"),
           })
           await tx.agents?.messages.append({
@@ -67,7 +72,10 @@ describe("SqliteStorage agents", () => {
         })
       ).rejects.toThrow("boom")
 
-      // Nothing partial survived: no run, no message, thread anchor + stats untouched.
+      // Nothing partial survived: no execution, run, message, or thread mutation.
+      expect(
+        await storage.executions.getById({ projectId: "p", id: "test_agent_execution:run_1" })
+      ).toBeNull()
       expect(await storage.agents.runs.getById({ projectId: "p", id: "run_1" })).toBeNull()
       expect(await storage.agents.messages.getById({ projectId: "p", id: "msg_asst_1" })).toBeNull()
       await expect(

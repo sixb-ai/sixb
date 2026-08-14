@@ -72,12 +72,7 @@ export async function dispatchQueuedAgentRuns(
       jobs: queued.map((run) => ({
         id: agentRunQueueJobId(run.id),
         type: "agent.run.requested" as const,
-        payload: {
-          agentId: run.agentId,
-          threadId: run.threadId,
-          runId: run.id,
-          triggerMessageId: run.triggerMessageId,
-        },
+        payload: { runId: run.id },
       })),
     })
     const jobsById = new Map(jobs.map((job) => [job.id, job]))

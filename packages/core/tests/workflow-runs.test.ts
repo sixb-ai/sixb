@@ -6,7 +6,11 @@ import {
   type StartWorkflowRunInput,
   WorkflowRunError,
 } from "../src/storage"
-import { createTestAutomaticWorkflowExecution, createTestWorkflowExecution } from "../src/testing"
+import {
+  createTestAgentExecution,
+  createTestAutomaticWorkflowExecution,
+  createTestWorkflowExecution,
+} from "../src/testing"
 
 type TestQueueWorkflowRunInput = Omit<QueueWorkflowRunInput, "executionId"> & {
   readonly executionId?: string
@@ -33,6 +37,7 @@ function createWorkflowRunStorage() {
   }
 
   return Object.assign(storage, {
+    root,
     queue: queueFixture,
     start: async (input: TestStartWorkflowRunInput) => {
       const existing = await storage.getById({ projectId: input.projectId, id: input.id })
@@ -797,9 +802,34 @@ describe("InMemoryWorkflowRunStorage", () => {
       nodeKey: "resolveAgent",
       input: { transactionId: "txn_1" },
     })
+    const workflowRun = await storage.getById({ projectId: "my-app", id: "wf-run-agent" })
+    if (!workflowRun) throw new Error("Expected workflow run.")
+    const wrongExecutionId = await createTestAgentExecution(storage.root, {
+      projectId: "my-app",
+      agentId: "resolver",
+      runId: "wf-run-agent:node:0",
+      executionId: "test_agent_execution:wrong-parent",
+      parentExecutionId: "unrelated-workflow-execution",
+    })
+    await expect(
+      storage.agentNodes.create({
+        projectId: "my-app",
+        nodeRunId: "wf-run-agent:node:0",
+        executionId: wrongExecutionId,
+        agentId: "resolver",
+        prompt: "Resolve txn_1.",
+      })
+    ).rejects.toBeInstanceOf(WorkflowRunError)
+    const executionId = await createTestAgentExecution(storage.root, {
+      projectId: "my-app",
+      agentId: "resolver",
+      runId: "wf-run-agent:node:0",
+      parentExecutionId: workflowRun.executionId,
+    })
     const execution = await storage.agentNodes.create({
       projectId: "my-app",
       nodeRunId: "wf-run-agent:node:0",
+      executionId,
       agentId: "resolver",
       prompt: "Resolve txn_1.",
     })

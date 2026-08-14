@@ -1,5 +1,6 @@
 import type {
   AgentToolRunContext,
+  AuthorizablePrincipal,
   BlobStorage,
   Broker,
   DomainEventLog,
@@ -59,14 +60,18 @@ export interface AgentWorkerContext {
   readonly turnTimeoutMs: number
 }
 
+export type AgentPrincipal = Extract<AuthorizablePrincipal, { readonly type: "serviceAccount" }>
+
 /** Provider ports activated only after an agent service-account scope is bound. */
 export interface AgentExecutionContext extends AgentWorkerContext {
+  readonly agentPrincipal: AgentPrincipal
   readonly blobStorage: BlobStorage
   readonly connector: AgentToolRunContext["connector"]
 }
 
 export interface AgentTurnContext {
   readonly id: string
+  readonly agentPrincipal: AgentPrincipal
   readonly storage: AgentWorkerStorage
   readonly blobStorage: BlobStorage
   /** Run-scoped agent API gateway base URL, when this turn was created through a run environment. */

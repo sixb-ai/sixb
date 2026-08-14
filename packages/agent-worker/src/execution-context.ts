@@ -1,41 +1,33 @@
-import type { Principal } from "@sixb/core"
-import { resolveAuthorizationContext } from "@sixb/core"
-import { bindAgentExecution } from "@sixb/core/internal/agent-execution"
-import type { AgentExecutionIdentity } from "./identity"
-import type { AgentExecutionContext, AgentWorkerContext, AgentWorkerHost } from "./types"
+import type { AuthorizationContext } from "@sixb/core"
+import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
+import type { ExecutionRecord } from "@sixb/core/storage"
+import type {
+  AgentExecutionContext,
+  AgentPrincipal,
+  AgentWorkerContext,
+  AgentWorkerHost,
+} from "./types"
 
 export function createAgentExecutionContext(input: {
   readonly context: AgentWorkerContext
   readonly host: AgentWorkerHost
-  readonly identity: AgentExecutionIdentity
+  readonly execution: ExecutionRecord
   readonly agentId: string
   readonly runId: string
-  readonly queueJobId: string
-  readonly requestedBy?: Principal
+  readonly authorization: AuthorizationContext
+  readonly agentPrincipal: AgentPrincipal
 }): AgentExecutionContext {
-  const authorization = resolveAuthorizationContext({
-    principal: input.identity.principal,
-    groupIds: input.identity.groupMemberships.map((membership) => membership.groupId),
-    roles: input.host.definitions.security.listResolvedRoles(),
-  })
-  const requestedBy = authorizablePrincipal(input.requestedBy)
-  const sixb = bindAgentExecution(input.host, {
+  const sixb = bindDurableAgentExecution(input.host, {
+    execution: input.execution,
     agentId: input.agentId,
     runId: input.runId,
-    authorization,
-    source: { type: "queue", queue: "agents", jobId: input.queueJobId },
-    ...(requestedBy === undefined ? {} : { requestedBy }),
+    authorization: input.authorization,
   })
 
   return {
     ...input.context,
+    agentPrincipal: input.agentPrincipal,
     blobStorage: sixb.blobs,
     connector: sixb.connector,
   }
-}
-
-function authorizablePrincipal(
-  principal: Principal | undefined
-): Extract<Principal, { readonly type: "user" | "serviceAccount" }> | undefined {
-  return principal?.type === "user" || principal?.type === "serviceAccount" ? principal : undefined
 }

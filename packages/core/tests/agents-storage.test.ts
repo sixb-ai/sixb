@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryStorage } from "../src"
 import { AgentStorageError, InMemoryAgentStorage } from "../src/storage"
-import { runAgentStorageContractSuite } from "../src/testing"
+import { createTestAgentExecution, runAgentStorageContractSuite } from "../src/testing"
 
 runAgentStorageContractSuite("InMemoryAgentStorage", {
-  createStorage: () => new InMemoryAgentStorage(),
+  createStorage: () => new InMemoryStorage(),
 })
 
 describe("InMemoryStorage agents", () => {
@@ -25,13 +25,18 @@ describe("InMemoryStorage agents", () => {
 
     await expect(
       storage.transaction(async (tx) => {
+        if (!tx.auth) throw new Error("expected auth storage")
+        const executionId = await createTestAgentExecution(
+          { auth: tx.auth, executions: tx.executions },
+          { projectId: "p", agentId: "sales", runId: "run_1" }
+        )
         await tx.agents?.runs.create({
           id: "run_1",
           projectId: "p",
+          executionId,
           threadId: "thr_1",
           agentId: "sales",
           triggerMessageId: "msg_1",
-          requestedByPrincipal: { type: "user", id: "usr_1" },
           createdAt: new Date("2026-06-23T10:00:10.000Z"),
         })
         await tx.agents?.messages.append({
@@ -46,7 +51,10 @@ describe("InMemoryStorage agents", () => {
       })
     ).rejects.toThrow("boom")
 
-    // Nothing partial survived: no run, no message, thread untouched.
+    // Nothing partial survived: no execution, run, message, or thread mutation.
+    expect(
+      await storage.executions.getById({ projectId: "p", id: "test_agent_execution:run_1" })
+    ).toBeNull()
     expect(await storage.agents.runs.getById({ projectId: "p", id: "run_1" })).toBeNull()
     expect(await storage.agents.messages.getById({ projectId: "p", id: "msg_asst_1" })).toBeNull()
     const thread = await storage.agents.threads.getById({ projectId: "p", id: "thr_1" })
@@ -62,13 +70,18 @@ describe("InMemoryStorage agents", () => {
       ownerPrincipal: { type: "user", id: "usr_1" },
       createdAt: new Date("2026-06-23T10:00:00.000Z"),
     })
+    const executionId = await createTestAgentExecution(storage, {
+      projectId: "p",
+      agentId: "sales",
+      runId: "run_1",
+    })
     await storage.agents.runs.create({
       id: "run_1",
       projectId: "p",
+      executionId,
       threadId: "thr_1",
       agentId: "sales",
       triggerMessageId: "msg_1",
-      requestedByPrincipal: { type: "user", id: "usr_1" },
       createdAt: new Date("2026-06-23T10:00:10.000Z"),
     })
     await storage.agents.runs.start({
@@ -114,7 +127,7 @@ describe("InMemoryStorage agents", () => {
   })
 
   test("snapshot/restore round-trips the agent store", () => {
-    const store = new InMemoryAgentStorage()
+    const store = new InMemoryAgentStorage(new InMemoryStorage().executions)
     return (async () => {
       await store.threads.create({
         id: "thr_1",

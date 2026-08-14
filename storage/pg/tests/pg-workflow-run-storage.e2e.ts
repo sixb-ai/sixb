@@ -5,6 +5,7 @@ import {
   WorkflowRunError,
 } from "@sixb/core/storage"
 import {
+  createTestAgentExecution,
   createTestAutomaticWorkflowExecution,
   createTestWorkflowExecution,
 } from "@sixb/core/testing"
@@ -617,9 +618,37 @@ describe("PgWorkflowRunStorage", () => {
       nodeKey: "resolver",
       input: { transcriptId: "tr_1" },
     })
+    const workflowRun = await storage.workflowRuns.getById({
+      projectId: "my-app",
+      id: "wf-run-agent",
+    })
+    if (!workflowRun) throw new Error("Expected workflow run.")
+    const wrongExecutionId = await createTestAgentExecution(root, {
+      projectId: "my-app",
+      agentId: "resolver-agent",
+      runId: "wf-run-agent:node:0",
+      executionId: "test_agent_execution:wrong-parent",
+      parentExecutionId: "unrelated-workflow-execution",
+    })
+    await expect(
+      storage.workflowRuns.agentNodes.create({
+        projectId: "my-app",
+        nodeRunId: "wf-run-agent:node:0",
+        executionId: wrongExecutionId,
+        agentId: "resolver-agent",
+        prompt: "Resolve tr_1.",
+      })
+    ).rejects.toBeInstanceOf(WorkflowRunError)
+    const executionId = await createTestAgentExecution(root, {
+      projectId: "my-app",
+      agentId: "resolver-agent",
+      runId: "wf-run-agent:node:0",
+      parentExecutionId: workflowRun.executionId,
+    })
     await storage.workflowRuns.agentNodes.create({
       projectId: "my-app",
       nodeRunId: "wf-run-agent:node:0",
+      executionId,
       agentId: "resolver-agent",
       prompt: "Resolve tr_1.",
     })
