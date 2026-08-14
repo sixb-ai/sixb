@@ -22,12 +22,7 @@ import type {
 } from "@sixb/core/storage"
 import { EventsRuntimeWorkflowRunObserver } from "./events"
 import { runWorkflowJob, runWorkflowResumeJob } from "./run-workflow-job"
-import type {
-  WorkflowJob,
-  WorkflowResumeJob,
-  WorkflowRunObserver,
-  WorkflowWorkerContext,
-} from "./types"
+import type { WorkflowRunObserver, WorkflowWorkerContext } from "./types"
 
 const MAX_WORKFLOW_DELIVERY_ATTEMPTS = 5
 const WORKFLOW_RETRY_BACKOFF_MS = 1_000
@@ -70,8 +65,8 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
     delivery: QueueDelivery<WorkflowQueueJob>
   ): Promise<void> {
     const execution = freshWorkflowExecution(delivery.leaseExpiresAt)
-    const runId = workflowRunIdFromClaimed(claimed)
-    const run = await this.requireWorkflowRun(claimed, runId)
+    const runId = claimed.job.payload.runId
+    const run = await this.requireWorkflowRun(runId)
     const durableExecution = await this.host.storage.executions.getById({
       projectId: this.host.id,
       id: run.executionId,
@@ -94,7 +89,12 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
       if (claimed.job.type === "workflow.run.resume.requested") {
         await runWorkflowResumeJob({
           runtime: context,
-          job: workflowResumeJobFromClaimed(claimed, run, execution),
+          job: {
+            id: run.id,
+            workflowId: run.workflowId,
+            resume: claimed.job.payload.resume,
+            execution,
+          },
           signal,
           observer: this.observer,
           onRunFailed: (error, run) => this.reportFailedRun(claimed, error, run),
@@ -102,11 +102,14 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
         return
       }
 
-      const workflowJob = workflowJobFromClaimed(claimed, run, execution)
-
       await runWorkflowJob({
         runtime: context,
-        job: workflowJob,
+        job: {
+          id: run.id,
+          workflowId: run.workflowId,
+          input: run.input,
+          execution,
+        },
         signal,
         observer: this.observer,
         onRunFailed: (error, run) => this.reportFailedRun(claimed, error, run),
@@ -116,18 +119,10 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
     }
   }
 
-  private async requireWorkflowRun(
-    claimed: ClaimedQueueJob<WorkflowQueueJob>,
-    runId: string
-  ): Promise<WorkflowRunRecord> {
+  private async requireWorkflowRun(runId: string): Promise<WorkflowRunRecord> {
     const run = await this.workflowRuns.getById({ projectId: this.host.id, id: runId })
     if (!run) {
       throw new Error(`[SixbWorkflowWorker] Workflow run '${runId}' was not found.`)
-    }
-    if (run.workflowId !== claimed.job.payload.workflowId) {
-      throw new Error(
-        `[SixbWorkflowWorker] Workflow run '${runId}' belongs to workflow '${run.workflowId}', not '${claimed.job.payload.workflowId}'.`
-      )
     }
     return run
   }
@@ -181,7 +176,7 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
     const run = await this.workflowRuns
       .getById({
         projectId: this.host.id,
-        id: workflowRunIdFromClaimed(claimed),
+        id: claimed.job.payload.runId,
       })
       .catch(() => null)
     if (
@@ -211,48 +206,6 @@ function requiresWorkflowInterventionStorage(host: WorkflowWorkerHost): boolean 
   return host.definitions.workflows
     .list()
     .some((workflow) => workflow.nodes.some((node) => node.type === "intervention"))
-}
-
-function workflowJobFromClaimed(
-  claimed: ClaimedQueueJob<WorkflowQueueJob>,
-  run: WorkflowRunRecord,
-  execution: WorkflowRunExecution
-): WorkflowJob {
-  const { job } = claimed
-  if (job.type !== "workflow.run.requested") {
-    throw new Error(`[SixbWorkflowWorker] Unsupported workflow job type '${job.type}'.`)
-  }
-
-  return {
-    id: run.id,
-    workflowId: run.workflowId,
-    input: run.input,
-    execution,
-  }
-}
-
-function workflowResumeJobFromClaimed(
-  claimed: ClaimedQueueJob<WorkflowQueueJob>,
-  run: WorkflowRunRecord,
-  execution: WorkflowRunExecution
-): WorkflowResumeJob {
-  const { job } = claimed
-  if (job.type !== "workflow.run.resume.requested") {
-    throw new Error(`[SixbWorkflowWorker] Unsupported workflow job type '${job.type}'.`)
-  }
-
-  return {
-    id: run.id,
-    workflowId: run.workflowId,
-    resume: job.payload.resume,
-    execution,
-  }
-}
-
-function workflowRunIdFromClaimed(claimed: ClaimedQueueJob<WorkflowQueueJob>): string {
-  return claimed.job.type === "workflow.run.resume.requested"
-    ? claimed.job.payload.runId
-    : (claimed.job.payload.runId ?? `${claimed.job.id}:attempt:${claimed.job.attempt}`)
 }
 
 function freshWorkflowExecution(queueLeaseExpiresAt: string): WorkflowRunExecution {

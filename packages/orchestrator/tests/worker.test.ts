@@ -195,11 +195,7 @@ function createTestWorkflowRunDispatcher(
           {
             id: input.runId,
             type: "workflow.run.requested",
-            payload: {
-              workflowId: input.workflowId,
-              runId: input.runId,
-              input: input.input,
-            },
+            payload: { runId: input.runId },
             metadata: input.metadata,
           },
         ],
@@ -284,13 +280,12 @@ describe("OrchestratorWorker", () => {
         `sync:${sync.id}:schedule:${daily.id}:event:${sourceEvent!.id}`
       )
       expect(workflowJobs[0]!.job.payload).toEqual({
-        workflowId: workflow.id,
         runId: `workflow:${workflow.id}:schedule:${daily.id}:event:${sourceEvent!.id}`,
-        input: {},
       })
       expect(dispatches).toEqual([
         expect.objectContaining({
           workflowId: workflow.id,
+          input: {},
           scheduleId: daily.id,
           source: { type: "schedule", eventId: sourceEvent!.id },
           correlationId: sourceEvent!.id,
@@ -325,13 +320,12 @@ describe("OrchestratorWorker", () => {
       const claimed = await queues.workflows.claim({ projectId: PROJECT_ID, workerId: "edge" })
       if (claimed.length === 0) return false
       expect(claimed[0]!.job.payload).toEqual({
-        workflowId: highValueInvoiceWorkflow.id,
         runId: `workflow:${highValueInvoiceWorkflow.id}:schedule:${highValueInvoice.id}:event:${sourceEvent!.id}`,
-        input: { invoiceId: "inv-1", amount: 700 },
       })
       expect(dispatches).toEqual([
         expect.objectContaining({
           workflowId: highValueInvoiceWorkflow.id,
+          input: { invoiceId: "inv-1", amount: 700 },
           scheduleId: highValueInvoice.id,
           source: { type: "event", eventId: sourceEvent!.id },
           correlationId: sourceEvent!.id,

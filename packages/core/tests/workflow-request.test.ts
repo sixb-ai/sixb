@@ -99,11 +99,7 @@ describe("sixb.workflows.request", () => {
 
     const jobs = await claimAll(host)
     expect(jobs).toHaveLength(1)
-    expect(jobs[0]?.job.payload).toMatchObject({
-      workflowId: "draft-invoice",
-      runId: result.runId,
-      input: { transaction: { objectTypeId: "Transaction", primaryId: "txn_1" } },
-    })
+    expect(jobs[0]?.job.payload).toEqual({ runId: result.runId })
 
     const events = await sixb.events.read({ types: ["workflow.run.queued"] })
     expect(events).toHaveLength(1)
@@ -350,7 +346,7 @@ describe("automatic workflow dispatch", () => {
     const [claimed] = await claimAll(host)
     expect(claimed?.job).toMatchObject({
       id: result.runId,
-      payload: { workflowId: draftInvoice.id, runId: result.runId, input: validInput() },
+      payload: { runId: result.runId },
       metadata: { sourceEventId: "event-1" },
     })
     const [queuedEvent] = await host.events.read({ types: ["workflow.run.queued"] })

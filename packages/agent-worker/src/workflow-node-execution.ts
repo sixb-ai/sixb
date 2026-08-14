@@ -431,7 +431,7 @@ async function emitNodeAndRunFailed(
 
 export async function enqueueWorkflowAgentNodeResume(
   host: AgentWorkerHost,
-  node: Pick<WorkflowNodeRunRecord, "id" | "workflowId" | "workflowRunId">
+  node: Pick<WorkflowNodeRunRecord, "id" | "workflowRunId">
 ): Promise<void> {
   await host.queues.workflows.enqueue({
     projectId: host.id,
@@ -440,7 +440,6 @@ export async function enqueueWorkflowAgentNodeResume(
         id: workflowAgentResumeQueueJobId(node.id),
         type: "workflow.run.resume.requested",
         payload: {
-          workflowId: node.workflowId,
           runId: node.workflowRunId,
           resume: { kind: "agentNode", nodeRunId: node.id },
         },

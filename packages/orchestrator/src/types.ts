@@ -22,7 +22,6 @@ import type {
   PipelineRunRequestedQueueJob,
   ProjectionRunRequestedQueueJob,
   SyncRunRequestedQueueJob,
-  WorkflowRunRequestedQueueJob,
 } from "@sixb/core/queues"
 import type { ProjectionRunStorage } from "@sixb/core/storage"
 
@@ -45,11 +44,19 @@ export interface ProjectionRunRequestedJobTemplate {
   readonly payload: ProjectionDispatchDescriptor
 }
 
+export interface WorkflowRunDispatchJobTemplate {
+  readonly type: "workflow.run.requested"
+  readonly payload: {
+    readonly workflowId: string
+    readonly input?: Readonly<Record<string, unknown>>
+  }
+}
+
 export type OrchestratorJob =
   | { readonly queue: "syncRuns"; readonly job: NewQueueJob<SyncRunRequestedQueueJob> }
   | { readonly queue: "pipelines"; readonly job: NewQueueJob<PipelineRunRequestedQueueJob> }
   | { readonly queue: "projections"; readonly job: ProjectionRunRequestedJobTemplate }
-  | { readonly queue: "workflows"; readonly job: NewQueueJob<WorkflowRunRequestedQueueJob> }
+  | { readonly queue: "workflows"; readonly job: WorkflowRunDispatchJobTemplate }
 
 export type OrchestratorEventScheduleTarget =
   | { readonly queue: "syncRuns"; readonly syncId: string }

@@ -117,7 +117,9 @@ export class WorkflowRunDispatcher implements WorkflowRunDispatchPort {
           },
         }),
     })
-    await assertAutomaticExecutionIdentity(this.dependencies, input, result.runId)
+    if (!result.created) {
+      await assertAutomaticExecutionIdentity(this.dependencies, input, result.runId)
+    }
     return result
   }
 }
@@ -216,11 +218,7 @@ async function publishWorkflowRun(
         {
           ...(input.queueJobId === undefined ? {} : { id: input.queueJobId }),
           type: "workflow.run.requested",
-          payload: {
-            workflowId: persisted.run.workflowId,
-            runId: persisted.run.id,
-            input: persisted.run.input,
-          },
+          payload: { runId: persisted.run.id },
           ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
         },
       ],

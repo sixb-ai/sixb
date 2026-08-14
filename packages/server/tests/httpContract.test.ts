@@ -1780,7 +1780,6 @@ describe("SixbServer HTTP contract", () => {
         metadata: undefined,
         type: "workflow.run.resume.requested",
         payload: {
-          workflowId: "review-device-health-workflow",
           runId: pending.workflowRunId,
           resume: { kind: "intervention", interventionId: pending.id },
         },
@@ -2272,11 +2271,7 @@ describe("SixbServer HTTP contract", () => {
         projectId: sixb.id,
         workerId: "contract-test",
       })
-      expect(queuedWorkflowRun?.job.payload).toEqual({
-        workflowId: "inspect-device-workflow",
-        runId: requestWorkflowRunBody.runId,
-        input: { deviceId: "fan-2" },
-      })
+      expect(queuedWorkflowRun?.job.payload).toEqual({ runId: requestWorkflowRunBody.runId })
 
       const workflowEvents = await events.read({
         topics: ["workflows"],
