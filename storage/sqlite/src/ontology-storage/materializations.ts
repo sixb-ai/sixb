@@ -548,6 +548,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
                 THEN cardinality_target_primary_id END) AS expected_target_id
             FROM ${SQLITE_MATERIALIZATION_WORK_TABLE}
             WHERE session_id = ? AND kind = 'cardinality'
+              AND cardinality_view = 'effective'
             GROUP BY sort_one, cardinality_source_type_id,
               cardinality_source_primary_id, cardinality_link_id
           ), validated AS (

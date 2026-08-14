@@ -7,8 +7,10 @@ import type {
   ExpectedLinkScopeRevision,
   ExpectedObjectRevision,
   LinkOverride,
+  LinkSlotOverride,
   ObjectOverride,
   OntologyLinkRef,
+  OntologyLinkScopeRef,
   OntologyObjectRef,
   PinnedDatasetVersion,
   ProjectionCommitResult,
@@ -31,6 +33,14 @@ export interface StoredObjectOverride {
 export interface StoredLinkOverride {
   readonly ref: OntologyLinkRef
   readonly value: LinkOverride
+  readonly lastCommitId: string
+  readonly updatedAt: string
+}
+
+export interface StoredLinkSlotOverride {
+  readonly ref: OntologyLinkScopeRef
+  /** `legacy-conflict` is migration state and is rejected only when read as cardinality-one. */
+  readonly value: LinkSlotOverride | { readonly kind: "legacy-conflict" }
   readonly lastCommitId: string
   readonly updatedAt: string
 }
@@ -61,12 +71,19 @@ export interface MaterializationLinkState {
   readonly ref: OntologyLinkRef
   readonly source: StoredSourceLinkAssertion | null
   readonly override: StoredLinkOverride | null
+  readonly slotOverride: StoredLinkSlotOverride | null
   readonly effective: EffectiveLinkSnapshot | null
 }
 
 export interface MaterializationLinkScopeState {
   readonly source: OntologyObjectRef
   readonly linkId: string
+  /** Complete active source value for the link slot. */
+  readonly sourceAssertion: StoredSourceLinkAssertion | null
+  /** Managed slot authority; absence delegates to source authority. */
+  readonly override: StoredLinkSlotOverride | null
+  /** The single effective edge, if its endpoints are effective. */
+  readonly effective: EffectiveLinkSnapshot | null
   readonly effectiveCount: number
   readonly fingerprint: string
 }
@@ -166,11 +183,34 @@ export interface ExactLinkOverrideDelete {
   readonly expectedLastCommitId: string
 }
 
+export interface ExactLinkSlotOverrideWrite {
+  readonly ref: OntologyLinkScopeRef
+  readonly value: LinkSlotOverride
+  readonly expectedLastCommitId: string | null
+  readonly lastCommitId: string
+  readonly updatedAt: string
+}
+
+export interface ExactLinkSlotOverrideDelete {
+  readonly ref: OntologyLinkScopeRef
+  readonly expectedLastCommitId: string
+}
+
 export interface ExactOverrideWrites {
-  readonly objectUpserts: readonly ExactObjectOverrideWrite[]
-  readonly objectDeletes: readonly ExactObjectOverrideDelete[]
-  readonly linkUpserts: readonly ExactLinkOverrideWrite[]
-  readonly linkDeletes: readonly ExactLinkOverrideDelete[]
+  readonly objects: {
+    readonly upserts: readonly ExactObjectOverrideWrite[]
+    readonly deletes: readonly ExactObjectOverrideDelete[]
+  }
+  readonly links: {
+    readonly edges: {
+      readonly upserts: readonly ExactLinkOverrideWrite[]
+      readonly deletes: readonly ExactLinkOverrideDelete[]
+    }
+    readonly slots: {
+      readonly upserts: readonly ExactLinkSlotOverrideWrite[]
+      readonly deletes: readonly ExactLinkSlotOverrideDelete[]
+    }
+  }
 }
 
 export interface ExactEffectiveObjectWrite {
@@ -289,6 +329,8 @@ export interface MaterializationIncidentObjectWorkRecord {
 export interface MaterializationCardinalityOccupantWorkRecord {
   readonly kind: "cardinality"
   readonly recordKey: string
+  /** Projection candidates are validated independently from the final effective scope. */
+  readonly view: "candidate" | "effective"
   readonly scopeSortKey: string
   readonly linkSortKey: string
   readonly ref: OntologyLinkRef
@@ -300,6 +342,8 @@ export type MaterializationPlanWorkItem =
   | { readonly kind: "object-override-delete"; readonly value: ExactObjectOverrideDelete }
   | { readonly kind: "link-override-upsert"; readonly value: ExactLinkOverrideWrite }
   | { readonly kind: "link-override-delete"; readonly value: ExactLinkOverrideDelete }
+  | { readonly kind: "link-slot-override-upsert"; readonly value: ExactLinkSlotOverrideWrite }
+  | { readonly kind: "link-slot-override-delete"; readonly value: ExactLinkSlotOverrideDelete }
   | { readonly kind: "object-upsert"; readonly value: ExactEffectiveObjectWrite }
   | { readonly kind: "object-delete"; readonly value: ExactEffectiveObjectDelete }
   | { readonly kind: "link-upsert"; readonly value: ExactEffectiveLinkWrite }
@@ -333,6 +377,8 @@ export function materializationApplyPhase(
     case "object-override-delete":
     case "link-override-upsert":
     case "link-override-delete":
+    case "link-slot-override-upsert":
+    case "link-slot-override-delete":
       return 0
     case "point-upsert":
       return 1

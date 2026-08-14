@@ -85,8 +85,7 @@ export interface PgOntologySourceAssertionRow {
   readonly assertion: unknown
 }
 
-export interface PgOntologyOverrideRow {
-  readonly entity_kind: "object" | "link"
+export interface PgStoredOverrideRow {
   readonly value: unknown
   readonly last_commit_id: string
   readonly updated_at: Date | string

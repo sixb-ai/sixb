@@ -4,11 +4,7 @@ import {
   objectRefKey,
   telemetryPointKey,
 } from "@sixb/core/internal/materialization"
-import {
-  effectiveConflict,
-  type OverrideEntity,
-  overrideEntityColumns as overrideColumns,
-} from "@sixb/core/internal/ontology-storage-provider"
+import { effectiveConflict } from "@sixb/core/internal/ontology-storage-provider"
 import type { MaterializationPlanChunk } from "@sixb/core/storage"
 import type { SQLClient } from "../pg-client"
 import { assertTimestamp, jsonParameter } from "./shared"
@@ -25,82 +21,171 @@ export class PgMaterializationWriter {
   }
 
   private async applyOverrides(projectId: string, chunk: MaterializationPlanChunk): Promise<void> {
-    const upserts = [
-      ...chunk.overrides.objectUpserts.map((item) =>
-        overrideWrite({ kind: "object", ref: item.ref }, item)
-      ),
-      ...chunk.overrides.linkUpserts.map((item) =>
-        overrideWrite({ kind: "link", ref: item.ref }, item)
-      ),
-    ]
-    const inserts = upserts.filter((item) => item.expectedLastCommitId === null)
-    if (inserts.length > 0) {
-      const rows = await this.sql<{ readonly entity_kind: "object" | "link" }[]>`
+    const objectUpserts = chunk.overrides.objects.upserts.map((item) => ({
+      objectTypeId: item.ref.objectTypeId,
+      primaryId: item.ref.primaryId,
+      value: item.value,
+      lastCommitId: item.lastCommitId,
+      updatedAt: item.updatedAt,
+      expectedLastCommitId: item.expectedLastCommitId,
+    }))
+    const objectInserts = objectUpserts.filter((item) => item.expectedLastCommitId === null)
+    if (objectInserts.length > 0) {
+      const rows = await this.sql<{ readonly object_type_id: string }[]>`
         WITH staged AS (
-          SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, inserts)}::jsonb)
+          SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, objectInserts)}::jsonb)
         )
-        INSERT INTO ontology_overrides (
-          project_id, entity_kind, entity_key, entity_sort_key,
-          object_type_id, primary_id, source_type_id, source_primary_id,
-          link_id, target_type_id, target_primary_id,
-          value, last_commit_id, updated_at
+        INSERT INTO ontology_object_overrides (
+          project_id, object_type_id, primary_id, value, last_commit_id, updated_at
         )
-        SELECT ${projectId}, value->>'kind', value->'entityKey', value->>'sortKey',
-          value->>'objectTypeId', value->>'primaryId', value->>'sourceTypeId',
-          value->>'sourcePrimaryId', value->>'linkId', value->>'targetTypeId',
-          value->>'targetPrimaryId', value->'value', value->>'lastCommitId',
+        SELECT ${projectId}, value->>'objectTypeId', value->>'primaryId', value->'value',
+          value->>'lastCommitId',
           (value->>'updatedAt')::timestamptz
         FROM staged
         ON CONFLICT DO NOTHING
-        RETURNING entity_kind
+        RETURNING object_type_id
       `
-      if (rows.length !== inserts.length) throw overrideConflict(inserts[0]!.kind)
+      if (rows.length !== objectInserts.length) throw objectOverrideConflict()
     }
 
-    const updates = upserts.filter((item) => item.expectedLastCommitId !== null)
-    if (updates.length > 0) {
-      const rows = await this.sql<{ readonly entity_kind: "object" | "link" }[]>`
+    const objectUpdates = objectUpserts.filter((item) => item.expectedLastCommitId !== null)
+    if (objectUpdates.length > 0) {
+      const rows = await this.sql<{ readonly object_type_id: string }[]>`
         WITH staged AS (
-          SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, updates)}::jsonb)
+          SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, objectUpdates)}::jsonb)
         )
-        UPDATE ontology_overrides AS overrides
+        UPDATE ontology_object_overrides AS overrides
         SET value = staged.value->'value', last_commit_id = staged.value->>'lastCommitId',
           updated_at = (staged.value->>'updatedAt')::timestamptz
         FROM staged
         WHERE overrides.project_id = ${projectId}
-          AND overrides.entity_kind = staged.value->>'kind'
-          AND overrides.entity_key = staged.value->'entityKey'
+          AND overrides.object_type_id = staged.value->>'objectTypeId'
+          AND overrides.primary_id = staged.value->>'primaryId'
           AND overrides.last_commit_id = staged.value->>'expectedLastCommitId'
-        RETURNING overrides.entity_kind
+        RETURNING overrides.object_type_id
       `
-      if (rows.length !== updates.length) throw overrideConflict(updates[0]!.kind)
+      if (rows.length !== objectUpdates.length) throw objectOverrideConflict()
     }
 
-    const deletes = [
-      ...chunk.overrides.objectDeletes.map((item) => ({
-        kind: "object" as const,
-        entityKey: JSON.parse(objectRefKey(item.ref)) as unknown,
+    const objectDeletes = chunk.overrides.objects.deletes.map((item) => ({
+      objectTypeId: item.ref.objectTypeId,
+      primaryId: item.ref.primaryId,
+      expectedLastCommitId: item.expectedLastCommitId,
+    }))
+    if (objectDeletes.length > 0) {
+      const rows = await this.sql<{ readonly object_type_id: string }[]>`
+        WITH staged AS (
+          SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, objectDeletes)}::jsonb)
+        )
+        DELETE FROM ontology_object_overrides AS overrides USING staged
+        WHERE overrides.project_id = ${projectId}
+          AND overrides.object_type_id = staged.value->>'objectTypeId'
+          AND overrides.primary_id = staged.value->>'primaryId'
+          AND overrides.last_commit_id = staged.value->>'expectedLastCommitId'
+        RETURNING overrides.object_type_id
+      `
+      if (rows.length !== objectDeletes.length) throw objectOverrideConflict()
+    }
+
+    const linkUpserts = [
+      ...chunk.overrides.links.edges.upserts.map((item) => ({
+        identityKind: "edge" as const,
+        identityKey: JSON.parse(linkRefKey(item.ref)) as unknown,
+        sourceTypeId: item.ref.source.objectTypeId,
+        sourcePrimaryId: item.ref.source.primaryId,
+        linkId: item.ref.linkId,
+        targetTypeId: item.ref.target.objectTypeId,
+        targetPrimaryId: item.ref.target.primaryId,
+        value: item.value,
+        lastCommitId: item.lastCommitId,
+        updatedAt: item.updatedAt,
         expectedLastCommitId: item.expectedLastCommitId,
       })),
-      ...chunk.overrides.linkDeletes.map((item) => ({
-        kind: "link" as const,
-        entityKey: JSON.parse(linkRefKey(item.ref)) as unknown,
+      ...chunk.overrides.links.slots.upserts.map((item) => ({
+        identityKind: "slot" as const,
+        identityKey: [item.ref.source.objectTypeId, item.ref.source.primaryId, item.ref.linkId],
+        sourceTypeId: item.ref.source.objectTypeId,
+        sourcePrimaryId: item.ref.source.primaryId,
+        linkId: item.ref.linkId,
+        targetTypeId: item.value.target.objectTypeId,
+        targetPrimaryId: item.value.target.primaryId,
+        value: item.value,
+        lastCommitId: item.lastCommitId,
+        updatedAt: item.updatedAt,
         expectedLastCommitId: item.expectedLastCommitId,
       })),
     ]
-    if (deletes.length > 0) {
-      const rows = await this.sql<{ readonly entity_kind: "object" | "link" }[]>`
+    const linkInserts = linkUpserts.filter((item) => item.expectedLastCommitId === null)
+    if (linkInserts.length > 0) {
+      const rows = await this.sql<{ readonly identity_kind: "edge" | "slot" }[]>`
         WITH staged AS (
-          SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, deletes)}::jsonb)
+          SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, linkInserts)}::jsonb)
         )
-        DELETE FROM ontology_overrides AS overrides USING staged
-        WHERE overrides.project_id = ${projectId}
-          AND overrides.entity_kind = staged.value->>'kind'
-          AND overrides.entity_key = staged.value->'entityKey'
-          AND overrides.last_commit_id = staged.value->>'expectedLastCommitId'
-        RETURNING overrides.entity_kind
+        INSERT INTO ontology_link_overrides (
+          project_id, identity_kind, identity_key, source_type_id, source_primary_id, link_id,
+          target_type_id, target_primary_id, value, last_commit_id, updated_at
+        )
+        SELECT ${projectId}, value->>'identityKind', value->'identityKey',
+          value->>'sourceTypeId', value->>'sourcePrimaryId', value->>'linkId',
+          value->>'targetTypeId', value->>'targetPrimaryId', value->'value',
+          value->>'lastCommitId', (value->>'updatedAt')::timestamptz
+        FROM staged
+        ON CONFLICT DO NOTHING
+        RETURNING identity_kind
       `
-      if (rows.length !== deletes.length) throw overrideConflict(deletes[0]!.kind)
+      if (rows.length !== linkInserts.length)
+        throw linkOverrideConflict(linkInserts[0]!.identityKind)
+    }
+
+    const linkUpdates = linkUpserts.filter((item) => item.expectedLastCommitId !== null)
+    if (linkUpdates.length > 0) {
+      const rows = await this.sql<{ readonly identity_kind: "edge" | "slot" }[]>`
+        WITH staged AS (
+          SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, linkUpdates)}::jsonb)
+        )
+        UPDATE ontology_link_overrides AS overrides
+        SET target_type_id = staged.value->>'targetTypeId',
+          target_primary_id = staged.value->>'targetPrimaryId',
+          value = staged.value->'value',
+          last_commit_id = staged.value->>'lastCommitId',
+          updated_at = (staged.value->>'updatedAt')::timestamptz
+        FROM staged
+        WHERE overrides.project_id = ${projectId}
+          AND overrides.identity_kind = staged.value->>'identityKind'
+          AND overrides.identity_key = staged.value->'identityKey'
+          AND overrides.last_commit_id = staged.value->>'expectedLastCommitId'
+        RETURNING overrides.identity_kind
+      `
+      if (rows.length !== linkUpdates.length)
+        throw linkOverrideConflict(linkUpdates[0]!.identityKind)
+    }
+
+    const linkDeletes = [
+      ...chunk.overrides.links.edges.deletes.map((item) => ({
+        identityKind: "edge" as const,
+        identityKey: JSON.parse(linkRefKey(item.ref)) as unknown,
+        expectedLastCommitId: item.expectedLastCommitId,
+      })),
+      ...chunk.overrides.links.slots.deletes.map((item) => ({
+        identityKind: "slot" as const,
+        identityKey: [item.ref.source.objectTypeId, item.ref.source.primaryId, item.ref.linkId],
+        expectedLastCommitId: item.expectedLastCommitId,
+      })),
+    ]
+    if (linkDeletes.length > 0) {
+      const rows = await this.sql<{ readonly identity_kind: "edge" | "slot" }[]>`
+        WITH staged AS (
+          SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, linkDeletes)}::jsonb)
+        )
+        DELETE FROM ontology_link_overrides AS overrides USING staged
+        WHERE overrides.project_id = ${projectId}
+          AND overrides.identity_kind = staged.value->>'identityKind'
+          AND overrides.identity_key = staged.value->'identityKey'
+          AND overrides.last_commit_id = staged.value->>'expectedLastCommitId'
+        RETURNING overrides.identity_kind
+      `
+      if (rows.length !== linkDeletes.length)
+        throw linkOverrideConflict(linkDeletes[0]!.identityKind)
     }
   }
 
@@ -426,30 +511,16 @@ export class PgMaterializationWriter {
   }
 }
 
-function overrideWrite(
-  entity: OverrideEntity,
-  item: {
-    readonly value: unknown
-    readonly lastCommitId: string
-    readonly updatedAt: string
-    readonly expectedLastCommitId: string | null
-  }
-) {
-  const key = entity.kind === "object" ? objectRefKey(entity.ref) : linkRefKey(entity.ref)
-  const columns = overrideColumns(entity)
-  return {
-    kind: entity.kind,
-    entityKey: JSON.parse(key) as unknown,
-    ...columns,
-    value: item.value,
-    lastCommitId: item.lastCommitId,
-    updatedAt: item.updatedAt,
-    expectedLastCommitId: item.expectedLastCommitId,
-  }
+function objectOverrideConflict(): MaterializationConflictError {
+  return effectiveConflict("Expected object override changed.")
 }
 
-function overrideConflict(kind: "object" | "link"): MaterializationConflictError {
-  return effectiveConflict(`Expected ${kind} override changed.`)
+function linkOverrideConflict(identityKind: "edge" | "slot"): MaterializationConflictError {
+  return effectiveConflict(
+    identityKind === "edge"
+      ? "Expected link edge override changed."
+      : "Expected link slot override changed."
+  )
 }
 
 function objectIdentityKey(item: {

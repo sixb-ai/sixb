@@ -149,10 +149,10 @@ export class SqliteMaterializationSessions {
           session_id, record_key, unique_key, kind, lane,
           major_order, minor_order, sort_one, sort_two,
           classification_entity_kind, classification_identity_key,
-          cardinality_occupied, cardinality_source_type_id,
+          cardinality_view, cardinality_occupied, cardinality_source_type_id,
           cardinality_source_primary_id, cardinality_link_id,
           cardinality_target_type_id, cardinality_target_primary_id, payload
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, json(?))
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, json(?))
       `
     )
     this.db.run("SAVEPOINT sixb_ontology_stage_work")
@@ -174,6 +174,7 @@ export class SqliteMaterializationSessions {
           columns.sortTwo,
           classification?.entityKind ?? null,
           classification?.identityKey ?? null,
+          cardinality?.view ?? null,
           cardinality ? Number(cardinality.occupied) : null,
           cardinality?.ref.source.objectTypeId ?? null,
           cardinality?.ref.source.primaryId ?? null,
@@ -445,6 +446,7 @@ export class SqliteMaterializationSessions {
         sort_two TEXT NOT NULL,
         classification_entity_kind TEXT,
         classification_identity_key TEXT,
+        cardinality_view TEXT,
         cardinality_occupied INTEGER,
         cardinality_source_type_id TEXT,
         cardinality_source_primary_id TEXT,

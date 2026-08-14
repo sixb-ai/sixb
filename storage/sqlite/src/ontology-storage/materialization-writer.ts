@@ -5,17 +5,23 @@ import {
   objectRefKey,
   telemetryPointKey,
 } from "@sixb/core/internal/materialization"
-import {
-  effectiveConflict,
-  type OverrideEntity,
-  overrideEntityColumns as overrideColumns,
-} from "@sixb/core/internal/ontology-storage-provider"
+import { effectiveConflict } from "@sixb/core/internal/ontology-storage-provider"
 import type {
   ExactEffectiveLinkWrite,
   ExactEffectiveObjectWrite,
   MaterializationPlanChunk,
 } from "@sixb/core/storage"
 import { assertTimestamp, canonicalJson, isSqliteConstraintError, requireChanges } from "./shared"
+
+function linkOverrideConflictMessage(identityKind: "edge" | "slot"): string {
+  return identityKind === "edge"
+    ? "Expected link edge override changed."
+    : "Expected link slot override changed."
+}
+
+function linkOverrideConflict(identityKind: "edge" | "slot"): MaterializationConflictError {
+  return effectiveConflict(linkOverrideConflictMessage(identityKind))
+}
 
 /** Applies one already-validated exact plan chunk to SQLite authority tables. */
 export class SqliteMaterializationWriter {
@@ -29,103 +35,172 @@ export class SqliteMaterializationWriter {
   }
 
   private applyOverrides(projectId: string, chunk: MaterializationPlanChunk): void {
-    const upsert = (
-      entity: OverrideEntity,
-      item:
-        | (typeof chunk.overrides.objectUpserts)[number]
-        | (typeof chunk.overrides.linkUpserts)[number]
-    ): void => {
-      const kind = entity.kind
-      const key = kind === "object" ? objectRefKey(entity.ref) : linkRefKey(entity.ref)
-      const columns = overrideColumns(entity)
+    for (const item of chunk.overrides.objects.upserts) {
       if (item.expectedLastCommitId === null) {
         try {
           this.db
             .query(
-              `
-                INSERT INTO ontology_overrides (
-                  project_id, entity_kind, entity_key, entity_sort_key,
-                  object_type_id, primary_id, source_type_id, source_primary_id,
-                  link_id, target_type_id, target_primary_id,
-                  value, last_commit_id, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, json(?), ?, ?)
-              `
+              `INSERT INTO ontology_object_overrides (
+                 project_id, object_type_id, primary_id, value, last_commit_id, updated_at
+               ) VALUES (?, ?, ?, json(?), ?, ?)`
             )
             .run(
               projectId,
-              kind,
-              key,
-              columns.sortKey,
-              columns.objectTypeId,
-              columns.primaryId,
-              columns.sourceTypeId,
-              columns.sourcePrimaryId,
-              columns.linkId,
-              columns.targetTypeId,
-              columns.targetPrimaryId,
+              item.ref.objectTypeId,
+              item.ref.primaryId,
               canonicalJson(item.value),
               item.lastCommitId,
               item.updatedAt
             )
         } catch (error) {
           if (isSqliteConstraintError(error)) {
-            throw effectiveConflict(`Expected ${kind} override changed.`)
+            throw effectiveConflict("Expected object override changed.")
           }
           throw error
         }
-      } else {
-        requireChanges(
-          this.db
-            .query(
-              `
-                UPDATE ontology_overrides
-                SET value = json(?), last_commit_id = ?, updated_at = ?
-                WHERE project_id = ? AND entity_kind = ? AND entity_key = ?
-                  AND last_commit_id = ?
-              `
-            )
-            .run(
-              canonicalJson(item.value),
-              item.lastCommitId,
-              item.updatedAt,
-              projectId,
-              kind,
-              key,
-              item.expectedLastCommitId
-            ).changes,
-          "effective-state",
-          `Expected ${kind} override changed.`
-        )
+        continue
       }
-    }
-    for (const item of chunk.overrides.objectUpserts) {
-      upsert({ kind: "object", ref: item.ref }, item)
-    }
-    for (const item of chunk.overrides.objectDeletes) {
       requireChanges(
         this.db
           .query(
-            `DELETE FROM ontology_overrides
-             WHERE project_id = ? AND entity_kind = 'object' AND entity_key = ? AND last_commit_id = ?`
+            `UPDATE ontology_object_overrides
+             SET value = json(?), last_commit_id = ?, updated_at = ?
+             WHERE project_id = ? AND object_type_id = ? AND primary_id = ?
+               AND last_commit_id = ?`
           )
-          .run(projectId, objectRefKey(item.ref), item.expectedLastCommitId).changes,
+          .run(
+            canonicalJson(item.value),
+            item.lastCommitId,
+            item.updatedAt,
+            projectId,
+            item.ref.objectTypeId,
+            item.ref.primaryId,
+            item.expectedLastCommitId
+          ).changes,
         "effective-state",
         "Expected object override changed."
       )
     }
-    for (const item of chunk.overrides.linkUpserts) {
-      upsert({ kind: "link", ref: item.ref }, item)
-    }
-    for (const item of chunk.overrides.linkDeletes) {
+    for (const item of chunk.overrides.objects.deletes) {
       requireChanges(
         this.db
           .query(
-            `DELETE FROM ontology_overrides
-             WHERE project_id = ? AND entity_kind = 'link' AND entity_key = ? AND last_commit_id = ?`
+            `DELETE FROM ontology_object_overrides
+             WHERE project_id = ? AND object_type_id = ? AND primary_id = ?
+               AND last_commit_id = ?`
           )
-          .run(projectId, linkRefKey(item.ref), item.expectedLastCommitId).changes,
+          .run(projectId, item.ref.objectTypeId, item.ref.primaryId, item.expectedLastCommitId)
+          .changes,
         "effective-state",
-        "Expected link override changed."
+        "Expected object override changed."
+      )
+    }
+
+    const upsertLink = (
+      identityKind: "edge" | "slot",
+      identityKey: string,
+      ref: {
+        readonly source: { readonly objectTypeId: string; readonly primaryId: string }
+        readonly linkId: string
+        readonly target: { readonly objectTypeId: string; readonly primaryId: string }
+      },
+      item:
+        | (typeof chunk.overrides.links.edges.upserts)[number]
+        | (typeof chunk.overrides.links.slots.upserts)[number]
+    ): void => {
+      if (item.expectedLastCommitId === null) {
+        try {
+          this.db
+            .query(
+              `INSERT INTO ontology_link_overrides (
+                 project_id, identity_kind, identity_key,
+                 source_type_id, source_primary_id, link_id,
+                 target_type_id, target_primary_id, value, last_commit_id, updated_at
+               ) VALUES (?, ?, json(?), ?, ?, ?, ?, ?, json(?), ?, ?)`
+            )
+            .run(
+              projectId,
+              identityKind,
+              identityKey,
+              ref.source.objectTypeId,
+              ref.source.primaryId,
+              ref.linkId,
+              ref.target.objectTypeId,
+              ref.target.primaryId,
+              canonicalJson(item.value),
+              item.lastCommitId,
+              item.updatedAt
+            )
+        } catch (error) {
+          if (isSqliteConstraintError(error)) {
+            throw linkOverrideConflict(identityKind)
+          }
+          throw error
+        }
+        return
+      }
+      requireChanges(
+        this.db
+          .query(
+            `UPDATE ontology_link_overrides
+             SET target_type_id = ?, target_primary_id = ?, value = json(?),
+               last_commit_id = ?, updated_at = ?
+             WHERE project_id = ? AND identity_kind = ? AND identity_key = json(?)
+               AND last_commit_id = ?`
+          )
+          .run(
+            ref.target.objectTypeId,
+            ref.target.primaryId,
+            canonicalJson(item.value),
+            item.lastCommitId,
+            item.updatedAt,
+            projectId,
+            identityKind,
+            identityKey,
+            item.expectedLastCommitId
+          ).changes,
+        "effective-state",
+        linkOverrideConflictMessage(identityKind)
+      )
+    }
+
+    for (const item of chunk.overrides.links.edges.upserts) {
+      upsertLink("edge", linkRefKey(item.ref), item.ref, item)
+    }
+    for (const item of chunk.overrides.links.slots.upserts) {
+      upsertLink(
+        "slot",
+        JSON.stringify([item.ref.source.objectTypeId, item.ref.source.primaryId, item.ref.linkId]),
+        { source: item.ref.source, linkId: item.ref.linkId, target: item.value.target },
+        item
+      )
+    }
+
+    const deleteLink = (
+      identityKind: "edge" | "slot",
+      identityKey: string,
+      expectedLastCommitId: string
+    ): void => {
+      requireChanges(
+        this.db
+          .query(
+            `DELETE FROM ontology_link_overrides
+             WHERE project_id = ? AND identity_kind = ? AND identity_key = json(?)
+               AND last_commit_id = ?`
+          )
+          .run(projectId, identityKind, identityKey, expectedLastCommitId).changes,
+        "effective-state",
+        linkOverrideConflictMessage(identityKind)
+      )
+    }
+    for (const item of chunk.overrides.links.edges.deletes) {
+      deleteLink("edge", linkRefKey(item.ref), item.expectedLastCommitId)
+    }
+    for (const item of chunk.overrides.links.slots.deletes) {
+      deleteLink(
+        "slot",
+        JSON.stringify([item.ref.source.objectTypeId, item.ref.source.primaryId, item.ref.linkId]),
+        item.expectedLastCommitId
       )
     }
   }

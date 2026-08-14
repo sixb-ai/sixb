@@ -82,6 +82,7 @@ export async function validateStagedCardinality(
   session: MaterializationSession,
   signal?: AbortSignal
 ): Promise<void> {
+  let currentView: "candidate" | "effective" | null = null
   let currentScope: string | null = null
   let occupant: string | null = null
   for await (const page of storage.streamWork({
@@ -96,14 +97,17 @@ export async function validateStagedCardinality(
           "Provider returned non-cardinality cardinality work."
         )
       }
-      if (record.scopeSortKey !== currentScope) {
+      if (record.view !== currentView || record.scopeSortKey !== currentScope) {
+        currentView = record.view
         currentScope = record.scopeSortKey
         occupant = null
       }
       if (!record.occupied) continue
       if (occupant && occupant !== record.linkSortKey) {
         throw new MaterializationValidationError(
-          `Link scope '${record.ref.source.objectTypeId}.${record.ref.linkId}' has cardinality one.`
+          record.view === "candidate"
+            ? `Projection source scope '${record.ref.source.objectTypeId}.${record.ref.linkId}' has cardinality one.`
+            : `Link scope '${record.ref.source.objectTypeId}.${record.ref.linkId}' has cardinality one.`
         )
       }
       occupant = record.linkSortKey

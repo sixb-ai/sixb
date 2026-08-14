@@ -834,8 +834,8 @@ describe("ontology materializer projection replacement", () => {
     ).toEqual([])
     await materializer.projections.replace(
       replacement("v3", "2026-01-03T00:00:00Z", [
-        sourceEntryWithParent("one", "one", "three"),
-        sourceEntry("three", "three"),
+        sourceEntryWithParent("one", "one", "four"),
+        sourceEntry("four", "four"),
       ])
     )
     expect(
@@ -856,7 +856,7 @@ describe("ontology materializer projection replacement", () => {
           objectId: "one",
         })
       ).map((link) => link.targetId)
-    ).toEqual(["three"])
+    ).toEqual(["four"])
   })
 
   test("rejects multiple replacement links in one cardinality-one scope for tiny and default pages", async () => {
@@ -890,8 +890,8 @@ describe("ontology materializer projection replacement", () => {
     }
   })
 
-  test("validates a page-split replacement scope against an unchanged edit-created competitor", async () => {
-    const { materializer } = createMaterializerFixture({
+  test("keeps a scope override authoritative when the projected cardinality-one target changes", async () => {
+    const { materializer, storage } = createMaterializerFixture({
       dependencies: { batching: { statePageRows: 1 } },
     })
     await materializer.projections.replace(
@@ -910,15 +910,59 @@ describe("ontology materializer projection replacement", () => {
         },
       ])
     )
+    await materializer.projections.replace(
+      replacement("competitor-v2", "2026-01-02T00:00:00Z", [
+        sourceEntryWithParent("one", "one", "three"),
+        sourceEntry("two", "two"),
+        sourceEntry("three", "three"),
+      ])
+    )
+    expect(
+      (
+        await storage.objects.listLinks({
+          projectId: "project",
+          objectTypeId: "Device",
+          objectId: "one",
+        })
+      ).map((link) => link.targetId)
+    ).toEqual(["two"])
+
     await expect(
       materializer.projections.replace(
-        replacement("competitor-v2", "2026-01-02T00:00:00Z", [
-          sourceEntryWithParent("one", "one", "three"),
+        replacement("competitor-v3", "2026-01-03T00:00:00Z", [
+          {
+            ...sourceEntry("one", "one"),
+            assertions: [
+              ...sourceEntry("one", "one").assertions,
+              { kind: "link", ref: { source: ref("one"), linkId: "parent", target: ref("three") } },
+              { kind: "link", ref: { source: ref("one"), linkId: "parent", target: ref("four") } },
+            ],
+          },
           sourceEntry("two", "two"),
           sourceEntry("three", "three"),
+          sourceEntry("four", "four"),
         ])
       )
-    ).rejects.toThrow("cardinality one")
+    ).rejects.toThrow("Projection source scope")
+
+    await materializer.edits.commit(
+      atomic("competitor-reset", [
+        {
+          id: "reset",
+          kind: "link.reset",
+          ref: { source: ref("one"), linkId: "parent", target: ref("two") },
+        },
+      ])
+    )
+    expect(
+      (
+        await storage.objects.listLinks({
+          projectId: "project",
+          objectTypeId: "Device",
+          objectId: "one",
+        })
+      ).map((link) => link.targetId)
+    ).toEqual(["three"])
   })
 
   test("keeps replacement events and cardinality correct when a provider shuffles emitted links", async () => {

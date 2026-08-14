@@ -3,6 +3,7 @@ import { MaterializationConflictError } from "../../../materialization/errors"
 import type {
   MaterializationPlanChunk,
   StoredLinkOverride,
+  StoredLinkSlotOverride,
   StoredObjectOverride,
 } from "../materializations"
 import { invalidCorrelation, materializationPlanItems } from "../provider-work"
@@ -52,7 +53,7 @@ export function assertChunkSequence(session: SessionState, chunk: Materializatio
 }
 
 export function assertLastCommit(
-  value: StoredObjectOverride | StoredLinkOverride | undefined,
+  value: StoredObjectOverride | StoredLinkOverride | StoredLinkSlotOverride | undefined,
   expected: string | null,
   label: string
 ): void {

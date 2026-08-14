@@ -298,7 +298,13 @@ function objectUpsertChunk(
   records: readonly MaterializationPlanWorkRecord[]
 ): MaterializationPlanChunk {
   return {
-    overrides: { objectUpserts: [], objectDeletes: [], linkUpserts: [], linkDeletes: [] },
+    overrides: {
+      objects: { upserts: [], deletes: [] },
+      links: {
+        edges: { upserts: [], deletes: [] },
+        slots: { upserts: [], deletes: [] },
+      },
+    },
     effective: {
       objectUpserts: records.map((record) => {
         if (record.item.kind !== "object-upsert") throw new Error("Expected object upsert")
@@ -672,6 +678,7 @@ describe("in-memory ontology materialization finalization", () => {
         return {
           kind: "cardinality",
           recordKey: `cardinality:${primaryId}`,
+          view: "effective",
           scopeSortKey: linkScopeSortKey(sourceRef, "parent"),
           linkSortKey: linkRefSortKey(ref),
           ref,
@@ -742,6 +749,7 @@ describe("in-memory ontology materialization finalization", () => {
             {
               kind: "cardinality",
               recordKey: "cardinality:dishonest-empty-scope",
+              view: "effective",
               scopeSortKey: linkScopeSortKey(ref.source, ref.linkId),
               linkSortKey: linkRefSortKey(ref),
               ref,

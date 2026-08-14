@@ -421,7 +421,13 @@ describe("materializer canonical contracts", () => {
     expect(Object.keys(session)).toEqual(["providerToken"])
 
     const emptyChunk = {
-      overrides: { objectUpserts: [], objectDeletes: [], linkUpserts: [], linkDeletes: [] },
+      overrides: {
+        objects: { upserts: [], deletes: [] },
+        links: {
+          edges: { upserts: [], deletes: [] },
+          slots: { upserts: [], deletes: [] },
+        },
+      },
       effective: { objectUpserts: [], objectDeletes: [], linkUpserts: [], linkDeletes: [] },
       timeseries: { pointUpserts: [] },
       outbox: [],
@@ -595,7 +601,7 @@ describe("materializer canonical contracts", () => {
       chunks.push(chunk)
     }
     expect(chunks).toHaveLength(2)
-    expect(chunks.map((chunk) => chunk.overrides.objectDeletes.length)).toEqual([1, 1])
+    expect(chunks.map((chunk) => chunk.overrides.objects.deletes.length)).toEqual([1, 1])
   })
 
   test("does not expose materializer values or tuning from the package root", () => {

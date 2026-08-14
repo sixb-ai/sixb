@@ -20,13 +20,9 @@ import {
 import { normalizeOntologyEditCommit } from "../shared/normalize"
 import { compileEditExecutionUnits, type EditExecutionUnit } from "./execution-units"
 import { loadEditWorkingState } from "./load-state"
-import {
-  applyEditOperation,
-  type EditUndoJournal,
-  type EditWorkingState,
-  undoEditJournal,
-} from "./operations"
+import { applyEditOperation, type EditUndoJournal, undoEditJournal } from "./operations"
 import { stageEditPlan } from "./plan"
+import type { EditWorkingState } from "./working-state"
 
 type NormalizedEditCommit = ReturnType<typeof normalizeOntologyEditCommit>
 

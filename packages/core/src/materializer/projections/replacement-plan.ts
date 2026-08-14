@@ -29,12 +29,17 @@ import {
 } from "../effective/build-events"
 import { diffEffectiveLink, diffEffectiveObject } from "../effective/diff"
 import { oneStateRequest } from "../effective/load-state"
-import { resolveEffectiveLink, resolveEffectiveObject } from "../effective/resolve"
+import {
+  resolveEffectiveLink,
+  resolveEffectiveLinkSlotMember,
+  resolveEffectiveObject,
+  usableLinkSlotOverride,
+} from "../effective/resolve"
 import { validateEffectiveObject } from "../effective/validate"
 import { stageWorkBounded, validateStagedCardinality } from "../execution/work-executor"
 import {
-  appendLinkEffectivePlan,
-  appendObjectEffectivePlan,
+  appendEffectiveLinkWork,
+  appendEffectiveObjectWork,
   classificationWork,
   eventWork,
   planWork,
@@ -146,7 +151,7 @@ function appendObjectChangeWork(
   change: EffectiveObjectChange
 ): void {
   const items: MaterializationPlanWorkItem[] = []
-  appendObjectEffectivePlan(items, change)
+  appendEffectiveObjectWork(items, change)
   for (const item of items) work.push(planWork(item, sortKey))
   work.push(
     eventWork(
@@ -252,7 +257,7 @@ function planReplacementLink(
   endpointExistence: ReadonlyMap<string, boolean>,
   counts: MutableCounts
 ): MaterializationWorkRecord[] {
-  const resolved = resolveReplacementLink(state, endpointExistence)
+  const resolved = resolveReplacementLink(context, state, endpointExistence)
   const work = cardinalityWork(context, state, resolved !== null)
   if (!state.diffRequired) return work
 
@@ -275,10 +280,22 @@ function planReplacementLink(
 }
 
 function resolveReplacementLink(
+  context: Pick<MaterializerContext, "ontology">,
   state: SourceReplacementLinkState,
   endpointExistence: ReadonlyMap<string, boolean>
 ) {
   if (!state.diffRequired) return state.effective
+  const definition = context.ontology
+    .resolveObjectType(state.ref.source.objectTypeId)
+    .links.find((candidate) => candidate.id === state.ref.linkId)
+  if (definition?.cardinality === "one") {
+    return resolveEffectiveLinkSlotMember({
+      ref: state.ref,
+      source: state.candidateSource,
+      override: usableLinkSlotOverride(state.slotOverride),
+      endpointExists: (ref) => endpointExistence.get(objectRefKey(ref)) ?? false,
+    })
+  }
   return resolveEffectiveLink({
     ref: state.ref,
     source: state.candidateSource,
@@ -303,7 +320,17 @@ function cardinalityWork(
   return [
     {
       kind: "cardinality",
-      recordKey: `cardinality:${scopeSortKey}:${linkSortKey}`,
+      recordKey: `cardinality:candidate:${scopeSortKey}:${linkSortKey}`,
+      view: "candidate",
+      scopeSortKey,
+      linkSortKey,
+      ref: state.ref,
+      occupied: state.candidateSource !== null,
+    },
+    {
+      kind: "cardinality",
+      recordKey: `cardinality:effective:${scopeSortKey}:${linkSortKey}`,
+      view: "effective",
       scopeSortKey,
       linkSortKey,
       ref: state.ref,
@@ -320,7 +347,7 @@ function appendLinkChangeWork(
   change: EffectiveLinkChange
 ): void {
   const items: MaterializationPlanWorkItem[] = []
-  appendLinkEffectivePlan(items, change)
+  appendEffectiveLinkWork(items, change)
   for (const item of items) work.push(planWork(item, sortKey))
   work.push(
     eventWork(

@@ -18,6 +18,7 @@ import {
 import {
   appendScopeSnapshot,
   finishScopeAccumulator,
+  linkSlotOverrideValue,
   startScopeAccumulator,
 } from "@sixb/core/internal/ontology-storage-provider"
 import type {
@@ -27,6 +28,7 @@ import type {
   SourceReplacementLinkState,
   SourceReplacementObjectState,
   StoredLinkOverride,
+  StoredLinkSlotOverride,
   StoredObjectOverride,
   StoredSourceAssertion,
   StoredSourceLinkAssertion,
@@ -38,8 +40,8 @@ import {
   linkRefFromColumns,
   objectRefFromColumns,
   parseJson,
-  type SqliteOntologyOverrideRow,
   type SqliteOntologySourceAssertionRow,
+  type SqliteStoredOverrideRow,
 } from "./shared"
 
 export const SQLITE_MATERIALIZATION_WORK_TABLE = "ontology_materialization_work"
@@ -81,17 +83,28 @@ interface LinkScopeRow extends EffectiveLinkRow {
   readonly scope_sort_key: string
 }
 
-interface ObjectOverrideRow extends SqliteOntologyOverrideRow {
+interface ObjectOverrideRow extends SqliteStoredOverrideRow {
   readonly object_type_id: string
   readonly primary_id: string
 }
 
-interface LinkOverrideRow extends SqliteOntologyOverrideRow {
+interface LinkOverrideRow extends SqliteStoredOverrideRow {
   readonly source_type_id: string
   readonly source_primary_id: string
   readonly link_id: string
   readonly target_type_id: string
   readonly target_primary_id: string
+}
+
+interface LinkSlotOverrideRow {
+  readonly source_type_id: string
+  readonly source_primary_id: string
+  readonly link_id: string
+  readonly target_type_id: string
+  readonly target_primary_id: string
+  readonly value: string
+  readonly last_commit_id: string
+  readonly updated_at: string
 }
 
 interface ReplacementSources {
@@ -187,9 +200,8 @@ export class SqliteMaterializationStateReader {
       .query(
         `WITH requested AS (${requestedObjects})
          SELECT overrides.* FROM requested
-         CROSS JOIN ontology_overrides AS overrides
+         CROSS JOIN ontology_object_overrides AS overrides
            ON overrides.project_id = ?
-          AND overrides.entity_kind = 'object'
           AND overrides.object_type_id = requested.object_type_id
           AND overrides.primary_id = requested.primary_id`
       )
@@ -317,9 +329,9 @@ export class SqliteMaterializationStateReader {
       .query(
         `WITH requested AS (${sourceRequest})
          SELECT overrides.* FROM requested
-         CROSS JOIN ontology_overrides AS overrides
+         CROSS JOIN ontology_link_overrides AS overrides
            ON overrides.project_id = ?
-          AND overrides.entity_kind = 'link'
+          AND overrides.identity_kind = 'edge'
           AND overrides.source_type_id = requested.source_type_id
           AND overrides.source_primary_id = requested.source_primary_id
           AND overrides.link_id = requested.link_id
@@ -327,6 +339,18 @@ export class SqliteMaterializationStateReader {
           AND overrides.target_primary_id = requested.target_primary_id`
       )
       .all(requested, this.projectId) as LinkOverrideRow[]
+    const slotOverrideRows = this.db
+      .query(
+        `WITH requested AS (${sourceRequest})
+         SELECT overrides.* FROM requested
+         CROSS JOIN ontology_link_overrides AS overrides
+           ON overrides.project_id = ?
+          AND overrides.identity_kind = 'slot'
+          AND overrides.source_type_id = requested.source_type_id
+          AND overrides.source_primary_id = requested.source_primary_id
+          AND overrides.link_id = requested.link_id`
+      )
+      .all(requested, this.projectId) as LinkSlotOverrideRow[]
     const effective = new Map(
       effectiveRows.map((row) => [linkRefKey(linkRefFromColumns(row)), row] as const)
     )
@@ -336,6 +360,12 @@ export class SqliteMaterializationStateReader {
         (row) => [linkRefKey(linkRefFromOverrideColumns(row)), storedLinkOverride(row)] as const
       )
     )
+    const slotOverrides = new Map(
+      slotOverrideRows.map((row) => {
+        const stored = storedLinkSlotOverride(row)
+        return [linkScopeSortKey(stored.ref.source, stored.ref.linkId), stored] as const
+      })
+    )
     return refs.map((ref) => {
       const key = linkRefKey(ref)
       const effectiveRow = effective.get(key)
@@ -343,6 +373,7 @@ export class SqliteMaterializationStateReader {
         ref: structuredClone(ref),
         source: sourceLink(sources.get(projectionEntityKey({ kind: "link", ref }))),
         override: overrides.get(key) ?? null,
+        slotOverride: slotOverrides.get(linkScopeSortKey(ref.source, ref.linkId)) ?? null,
         effective: effectiveRow ? effectiveLinkSnapshot(effectiveRow) : null,
       }
     })
@@ -410,6 +441,56 @@ export class SqliteMaterializationStateReader {
         return [key, startScopeAccumulator(source, linkId, key)] as const
       })
     )
+    const requestedJson = canonicalJson(requested)
+    const sourceRows = this.db
+      .query(
+        `WITH requested AS (
+           SELECT DISTINCT
+             json_extract(value, '$.sourceTypeId') AS source_type_id,
+             json_extract(value, '$.sourceId') AS source_primary_id,
+             json_extract(value, '$.linkId') AS link_id
+           FROM json_each(?)
+         )
+         SELECT rows.* FROM requested
+         CROSS JOIN ontology_source_rows AS rows
+           ON rows.project_id = ?
+          AND rows.entity_kind = 'link'
+          AND rows.source_type_id = requested.source_type_id
+          AND rows.source_primary_id = requested.source_primary_id
+          AND rows.link_id = requested.link_id
+         JOIN ontology_sources AS sources
+           ON sources.project_id = rows.project_id
+          AND sources.source_id = rows.source_id
+          AND sources.materialization_id = rows.materialization_id
+         WHERE sources.status = 'active'`
+      )
+      .all(requestedJson, this.projectId) as SqliteOntologySourceAssertionRow[]
+    const slotOverrideRows = this.db
+      .query(
+        `WITH requested AS (
+           SELECT DISTINCT
+             json_extract(value, '$.sourceTypeId') AS source_type_id,
+             json_extract(value, '$.sourceId') AS source_primary_id,
+             json_extract(value, '$.linkId') AS link_id
+           FROM json_each(?)
+         )
+         SELECT overrides.* FROM requested
+         CROSS JOIN ontology_link_overrides AS overrides
+           ON overrides.project_id = ?
+          AND overrides.identity_kind = 'slot'
+          AND overrides.source_type_id = requested.source_type_id
+          AND overrides.source_primary_id = requested.source_primary_id
+          AND overrides.link_id = requested.link_id`
+      )
+      .all(requestedJson, this.projectId) as LinkSlotOverrideRow[]
+    const sources = activeScopeSourceMap(sourceRows)
+    const overrides = new Map(
+      slotOverrideRows.map((row) => {
+        const stored = storedLinkSlotOverride(row)
+        return [linkScopeSortKey(stored.ref.source, stored.ref.linkId), stored] as const
+      })
+    )
+    const effective = new Map<string, EffectiveLinkSnapshot | null>()
     const rows = this.db
       .query(
         `
@@ -431,7 +512,7 @@ export class SqliteMaterializationStateReader {
           ORDER BY requested.scope_sort_key, ${linkSortExpression("links")}
         `
       )
-      .iterate(canonicalJson(requested), this.projectId) as Iterable<LinkScopeRow>
+      .iterate(requestedJson, this.projectId) as Iterable<LinkScopeRow>
     for (const row of rows) {
       const accumulator = accumulators.get(row.scope_sort_key)
       if (!accumulator) {
@@ -440,11 +521,19 @@ export class SqliteMaterializationStateReader {
           `Unexpected link scope '${row.scope_sort_key}' returned by storage.`
         )
       }
-      appendScopeSnapshot(accumulator, effectiveLinkSnapshot(row))
+      const snapshot = effectiveLinkSnapshot(row)
+      appendScopeSnapshot(accumulator, snapshot)
+      effective.set(row.scope_sort_key, accumulator.effectiveCount === 1 ? snapshot : null)
     }
-    return scopes.map(({ source, linkId }) =>
-      finishScopeAccumulator(accumulators.get(linkScopeSortKey(source, linkId))!)
-    )
+    return scopes.map(({ source, linkId }) => {
+      const key = linkScopeSortKey(source, linkId)
+      return {
+        ...finishScopeAccumulator(accumulators.get(key)!),
+        sourceAssertion: sources.get(key) ?? null,
+        override: overrides.get(key) ?? null,
+        effective: effective.get(key) ?? null,
+      }
+    })
   }
 
   linkScope(source: OntologyObjectRef, linkId: string): MaterializationLinkScopeState {
@@ -476,8 +565,8 @@ export class SqliteMaterializationStateReader {
               FROM links WHERE project_id = ?
               UNION
               SELECT source_type_id, source_primary_id, link_id, target_type_id, target_primary_id
-              FROM ontology_overrides
-              WHERE project_id = ? AND entity_kind = 'link'
+              FROM ontology_link_overrides
+              WHERE project_id = ?
               UNION
               SELECT rows.source_type_id, rows.source_primary_id, rows.link_id,
                 rows.target_type_id, rows.target_primary_id
@@ -579,6 +668,7 @@ export class SqliteMaterializationStateReader {
           ? sourceLink(candidate?.get(key))
           : state.source,
         override: state.override,
+        slotOverride: state.slotOverride,
         effective: state.effective,
         diffRequired: identities[index]!.diffRequired,
       }
@@ -622,12 +712,24 @@ export class SqliteMaterializationStateReader {
   }
 
   overrideLastCommit(kind: "object" | "link", entityKey: string): string | null {
-    const row = this.db
-      .query(
-        `SELECT last_commit_id FROM ontology_overrides
-         WHERE project_id = ? AND entity_kind = ? AND entity_key = ?`
-      )
-      .get(this.projectId, kind, entityKey) as { readonly last_commit_id: string } | null
+    const row =
+      kind === "object"
+        ? (this.db
+            .query(
+              `SELECT last_commit_id FROM ontology_object_overrides
+               WHERE project_id = ?
+                 AND object_type_id = json_extract(?, '$[0]')
+                 AND primary_id = json_extract(?, '$[1]')`
+            )
+            .get(this.projectId, entityKey, entityKey) as {
+            readonly last_commit_id: string
+          } | null)
+        : (this.db
+            .query(
+              `SELECT last_commit_id FROM ontology_link_overrides
+               WHERE project_id = ? AND identity_kind = 'edge' AND identity_key = json(?)`
+            )
+            .get(this.projectId, entityKey) as { readonly last_commit_id: string } | null)
     return row?.last_commit_id ?? null
   }
 
@@ -749,21 +851,21 @@ export class SqliteMaterializationStateReader {
               overrides.source_primary_id AS source_id,
               overrides.link_id, overrides.target_type_id,
               overrides.target_primary_id AS target_id
-            FROM ontology_overrides AS overrides
+            FROM ontology_link_overrides AS overrides
             JOIN incident_objects
               ON incident_objects.object_type_id = overrides.source_type_id
              AND incident_objects.primary_id = overrides.source_primary_id
-            WHERE overrides.project_id = ? AND overrides.entity_kind = 'link'
+            WHERE overrides.project_id = ?
             UNION
             SELECT overrides.source_type_id,
               overrides.source_primary_id AS source_id,
               overrides.link_id, overrides.target_type_id,
               overrides.target_primary_id AS target_id
-            FROM ontology_overrides AS overrides
+            FROM ontology_link_overrides AS overrides
             JOIN incident_objects
               ON incident_objects.object_type_id = overrides.target_type_id
              AND incident_objects.primary_id = overrides.target_primary_id
-            WHERE overrides.project_id = ? AND overrides.entity_kind = 'link'
+            WHERE overrides.project_id = ?
             UNION
             SELECT rows.source_type_id, rows.source_primary_id AS source_id,
               rows.link_id, rows.target_type_id, rows.target_primary_id AS target_id
@@ -803,6 +905,16 @@ export class SqliteMaterializationStateReader {
             FROM links
             JOIN affected_scopes USING (source_type_id, source_id, link_id)
             WHERE links.project_id = ?
+            UNION ALL
+            SELECT overrides.source_type_id, overrides.source_primary_id AS source_id,
+              overrides.link_id, overrides.target_type_id,
+              overrides.target_primary_id AS target_id, 0 AS diff_required
+            FROM ontology_link_overrides AS overrides
+            JOIN affected_scopes
+              ON affected_scopes.source_type_id = overrides.source_type_id
+             AND affected_scopes.source_id = overrides.source_primary_id
+             AND affected_scopes.link_id = overrides.link_id
+            WHERE overrides.project_id = ? AND overrides.identity_kind = 'slot'
           ), selected AS (
             SELECT source_type_id, source_id, link_id, target_type_id, target_id,
               ${linkSortExpression("all_links")} AS sort_key,
@@ -825,6 +937,7 @@ export class SqliteMaterializationStateReader {
         input.sourceId,
         input.candidateMaterializationId,
         input.previousMaterializationId,
+        this.projectId,
         this.projectId,
         this.projectId,
         this.projectId,
@@ -902,6 +1015,26 @@ function activeSourceMap(
   return result
 }
 
+function activeScopeSourceMap(
+  rows: readonly SqliteOntologySourceAssertionRow[]
+): ReadonlyMap<string, StoredSourceLinkAssertion> {
+  const result = new Map<string, StoredSourceLinkAssertion>()
+  for (const row of rows) {
+    const source = sourceLink(storedSource(row))
+    if (!source) continue
+    const ref = source.assertion.ref
+    const key = linkScopeSortKey(ref.source, ref.linkId)
+    if (result.has(key)) {
+      throw new MaterializationConflictError(
+        "source-materialization",
+        `Multiple active sources assert cardinality-one link slot ${key}.`
+      )
+    }
+    result.set(key, source)
+  }
+  return result
+}
+
 function sourceObject(
   source: StoredSourceAssertion | undefined
 ): StoredSourceObjectAssertion | null {
@@ -932,12 +1065,32 @@ function storedLinkOverride(row: LinkOverrideRow): StoredLinkOverride {
   }
 }
 
+function storedLinkSlotOverride(row: LinkSlotOverrideRow): StoredLinkSlotOverride {
+  const ref = {
+    source: { objectTypeId: row.source_type_id, primaryId: row.source_primary_id },
+    linkId: row.link_id,
+  }
+  return {
+    ref,
+    value: linkSlotOverrideValue(parseJson<unknown>(row.value), linkScopeLabel(ref)),
+    lastCommitId: row.last_commit_id,
+    updatedAt: row.updated_at,
+  }
+}
+
 function linkRefFromOverrideColumns(row: LinkOverrideRow): OntologyLinkRef {
   return {
     source: { objectTypeId: row.source_type_id, primaryId: row.source_primary_id },
     linkId: row.link_id,
     target: { objectTypeId: row.target_type_id, primaryId: row.target_primary_id },
   }
+}
+
+function linkScopeLabel(scope: {
+  readonly source: OntologyObjectRef
+  readonly linkId: string
+}): string {
+  return JSON.stringify([scope.source.objectTypeId, scope.source.primaryId, scope.linkId])
 }
 
 function storedSource(row: SqliteOntologySourceAssertionRow): StoredSourceAssertion {

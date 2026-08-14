@@ -1,11 +1,16 @@
 import type { JsonValue } from "../../json"
+import { MaterializationConflictError } from "../../materialization/errors"
 import type {
   LinkOverride,
+  LinkSlotOverride,
   ObjectOverride,
   OntologyLinkRef,
+  OntologyLinkScopeRef,
   OntologyObjectRef,
 } from "../../materialization/model"
+import { linkRefKey } from "../../materialization/refs"
 import type {
+  StoredLinkSlotOverride,
   StoredSourceLinkAssertion,
   StoredSourceObjectAssertion,
   StoredTelemetryPoint,
@@ -19,6 +24,21 @@ export interface ResolvedObjectValue {
 export interface ResolvedLinkValue {
   readonly ref: OntologyLinkRef
   readonly properties?: Readonly<Record<string, JsonValue>>
+}
+
+export function usableLinkSlotOverride(
+  stored: StoredLinkSlotOverride | null
+): LinkSlotOverride | null {
+  if (!stored) return null
+  if (stored.value.kind !== "legacy-conflict") return stored.value
+  const { source, linkId } = stored.ref
+  const scopeLabel = JSON.stringify([source.objectTypeId, source.primaryId, linkId])
+  throw new MaterializationConflictError(
+    "effective-state",
+    `Cardinality-one link slot ${scopeLabel} could not be migrated automatically because it ` +
+      "contains multiple legacy upsert overrides. Consolidate the stored overrides and clear " +
+      "the migration conflict marker before materializing this scope."
+  )
 }
 
 export function resolveEffectiveObject(input: {
@@ -85,6 +105,48 @@ export function resolveEffectiveLink(input: {
   }
   if (!input.source) return null
   return resolvedLink(input.ref, input.source.assertion.properties)
+}
+
+/** Resolves the effective edge selected by a cardinality-one link slot. */
+export function resolveEffectiveLinkSlot(input: {
+  readonly scope: OntologyLinkScopeRef
+  readonly source: StoredSourceLinkAssertion | null
+  readonly override: LinkSlotOverride | null
+  readonly endpointExists: (ref: OntologyObjectRef) => boolean
+}): ResolvedLinkValue | null {
+  if (!input.endpointExists(input.scope.source)) return null
+  if (input.override?.kind === "clear") return null
+
+  if (input.override?.kind === "set") {
+    if (!input.endpointExists(input.override.target)) return null
+    return resolvedLink(
+      {
+        source: input.scope.source,
+        linkId: input.scope.linkId,
+        target: input.override.target,
+      },
+      input.override.properties
+    )
+  }
+
+  if (!input.source || !input.endpointExists(input.source.assertion.ref.target)) return null
+  return resolvedLink(input.source.assertion.ref, input.source.assertion.properties)
+}
+
+/** Resolves one exact edge as a member of its cardinality-one link slot. */
+export function resolveEffectiveLinkSlotMember(input: {
+  readonly ref: OntologyLinkRef
+  readonly source: StoredSourceLinkAssertion | null
+  readonly override: LinkSlotOverride | null
+  readonly endpointExists: (ref: OntologyObjectRef) => boolean
+}): ResolvedLinkValue | null {
+  const resolved = resolveEffectiveLinkSlot({
+    scope: { source: input.ref.source, linkId: input.ref.linkId },
+    source: input.source,
+    override: input.override,
+    endpointExists: input.endpointExists,
+  })
+  return resolved && linkRefKey(resolved.ref) === linkRefKey(input.ref) ? resolved : null
 }
 
 function resolvedLink(

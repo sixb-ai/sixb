@@ -232,6 +232,8 @@ describe("in-memory ontology storage", () => {
       "override.object.delete",
       "override.link.upsert",
       "override.link.delete",
+      "override.link-slot.upsert",
+      "override.link-slot.delete",
       "effective.object.upsert",
       "effective.object.delete",
       "effective.link.upsert",
@@ -287,7 +289,7 @@ describe("in-memory ontology storage", () => {
               kind: "link.upsert",
               ref: {
                 source: object("one"),
-                linkId: "parent",
+                linkId: boundary.startsWith("override.link.") ? "peers" : "parent",
                 target: object("two"),
               },
             },
@@ -344,10 +346,15 @@ describe("in-memory ontology storage", () => {
               ? commit(`fail-${boundary}`, [
                   {
                     id: "link",
-                    kind: boundary.includes("delete") ? "link.delete" : "link.upsert",
+                    kind:
+                      boundary === "override.link-slot.delete"
+                        ? "link.reset"
+                        : boundary.includes("delete")
+                          ? "link.delete"
+                          : "link.upsert",
                     ref: {
                       source: object("one"),
-                      linkId: "parent",
+                      linkId: boundary.startsWith("override.link.") ? "peers" : "parent",
                       target: object("two"),
                     },
                   },
@@ -429,10 +436,11 @@ describe("in-memory ontology storage", () => {
           session,
           chunk: {
             overrides: {
-              objectUpserts: [],
-              objectDeletes: [],
-              linkUpserts: [],
-              linkDeletes: [],
+              objects: { upserts: [], deletes: [] },
+              links: {
+                edges: { upserts: [], deletes: [] },
+                slots: { upserts: [], deletes: [] },
+              },
             },
             effective: {
               objectUpserts: [],
@@ -798,10 +806,11 @@ describe("in-memory ontology storage", () => {
         session,
         chunk: {
           overrides: {
-            objectUpserts: [],
-            objectDeletes: [],
-            linkUpserts: [],
-            linkDeletes: [],
+            objects: { upserts: [], deletes: [] },
+            links: {
+              edges: { upserts: [], deletes: [] },
+              slots: { upserts: [], deletes: [] },
+            },
           },
           effective: {
             objectUpserts,
@@ -826,10 +835,11 @@ describe("in-memory ontology storage", () => {
         session,
         chunk: {
           overrides: {
-            objectUpserts: [],
-            objectDeletes: [],
-            linkUpserts: [],
-            linkDeletes: [],
+            objects: { upserts: [], deletes: [] },
+            links: {
+              edges: { upserts: [], deletes: [] },
+              slots: { upserts: [], deletes: [] },
+            },
           },
           effective: {
             objectUpserts: [],
@@ -936,10 +946,11 @@ describe("in-memory ontology storage", () => {
         session: leakedSession!,
         chunk: {
           overrides: {
-            objectUpserts: [],
-            objectDeletes: [],
-            linkUpserts: [],
-            linkDeletes: [],
+            objects: { upserts: [], deletes: [] },
+            links: {
+              edges: { upserts: [], deletes: [] },
+              slots: { upserts: [], deletes: [] },
+            },
           },
           effective: {
             objectUpserts: [],
@@ -1550,7 +1561,13 @@ describe("in-memory ontology storage", () => {
     const linkB = { source: objectA, linkId: "parent", target: objectA }
     const committedAt = "2026-01-01T00:00:00.000Z"
     const chunk = (): DeepMutable<MaterializationPlanChunk> => ({
-      overrides: { objectUpserts: [], objectDeletes: [], linkUpserts: [], linkDeletes: [] },
+      overrides: {
+        objects: { upserts: [], deletes: [] },
+        links: {
+          edges: { upserts: [], deletes: [] },
+          slots: { upserts: [], deletes: [] },
+        },
+      },
       effective: { objectUpserts: [], objectDeletes: [], linkUpserts: [], linkDeletes: [] },
       timeseries: { pointUpserts: [] },
       outbox: [],
@@ -1558,14 +1575,14 @@ describe("in-memory ontology storage", () => {
     const stagedPlanItem = (
       value: ReturnType<typeof chunk>
     ): MaterializationPlanWorkItem | null => {
-      if (value.overrides.objectUpserts[0])
-        return { kind: "object-override-upsert", value: value.overrides.objectUpserts[0] }
-      if (value.overrides.objectDeletes[0])
-        return { kind: "object-override-delete", value: value.overrides.objectDeletes[0] }
-      if (value.overrides.linkUpserts[0])
-        return { kind: "link-override-upsert", value: value.overrides.linkUpserts[0] }
-      if (value.overrides.linkDeletes[0])
-        return { kind: "link-override-delete", value: value.overrides.linkDeletes[0] }
+      if (value.overrides.objects.upserts[0])
+        return { kind: "object-override-upsert", value: value.overrides.objects.upserts[0] }
+      if (value.overrides.objects.deletes[0])
+        return { kind: "object-override-delete", value: value.overrides.objects.deletes[0] }
+      if (value.overrides.links.edges.upserts[0])
+        return { kind: "link-override-upsert", value: value.overrides.links.edges.upserts[0] }
+      if (value.overrides.links.edges.deletes[0])
+        return { kind: "link-override-delete", value: value.overrides.links.edges.deletes[0] }
       if (value.effective.objectUpserts[0])
         return { kind: "object-upsert", value: value.effective.objectUpserts[0] }
       if (value.effective.objectDeletes[0])
@@ -1653,7 +1670,7 @@ describe("in-memory ontology storage", () => {
       {
         name: "override provenance",
         mutate(value: ReturnType<typeof chunk>) {
-          value.overrides.objectUpserts.push({
+          value.overrides.objects.upserts.push({
             ref: objectA,
             value: { kind: "create", properties: { name: "a" } },
             expectedLastCommitId: null,
@@ -1666,7 +1683,7 @@ describe("in-memory ontology storage", () => {
       {
         name: "object override CAS",
         mutate(value: ReturnType<typeof chunk>, commitId: string) {
-          value.overrides.objectUpserts.push({
+          value.overrides.objects.upserts.push({
             ref: objectA,
             value: { kind: "create", properties: { name: "a" } },
             expectedLastCommitId: "stale",
@@ -1679,14 +1696,14 @@ describe("in-memory ontology storage", () => {
       {
         name: "object override delete CAS",
         mutate(value: ReturnType<typeof chunk>) {
-          value.overrides.objectDeletes.push({ ref: objectA, expectedLastCommitId: "stale" })
+          value.overrides.objects.deletes.push({ ref: objectA, expectedLastCommitId: "stale" })
         },
         message: "Expected object override changed",
       },
       {
         name: "link override provenance",
         mutate(value: ReturnType<typeof chunk>) {
-          value.overrides.linkUpserts.push({
+          value.overrides.links.edges.upserts.push({
             ref: linkA,
             value: { kind: "upsert" },
             expectedLastCommitId: null,
@@ -1699,7 +1716,7 @@ describe("in-memory ontology storage", () => {
       {
         name: "link override CAS",
         mutate(value: ReturnType<typeof chunk>, commitId: string) {
-          value.overrides.linkUpserts.push({
+          value.overrides.links.edges.upserts.push({
             ref: linkA,
             value: { kind: "upsert" },
             expectedLastCommitId: "stale",
@@ -1707,14 +1724,14 @@ describe("in-memory ontology storage", () => {
             updatedAt: committedAt,
           })
         },
-        message: "Expected link override changed",
+        message: "Expected link edge override changed",
       },
       {
         name: "link override delete CAS",
         mutate(value: ReturnType<typeof chunk>) {
-          value.overrides.linkDeletes.push({ ref: linkA, expectedLastCommitId: "stale" })
+          value.overrides.links.edges.deletes.push({ ref: linkA, expectedLastCommitId: "stale" })
         },
-        message: "Expected link override changed",
+        message: "Expected link edge override changed",
       },
       {
         name: "effective object provenance",
@@ -1937,10 +1954,11 @@ describe("in-memory ontology storage", () => {
           session,
           chunk: {
             overrides: {
-              objectUpserts: [],
-              objectDeletes: [],
-              linkUpserts: [],
-              linkDeletes: [],
+              objects: { upserts: [], deletes: [] },
+              links: {
+                edges: { upserts: [], deletes: [] },
+                slots: { upserts: [], deletes: [] },
+              },
             },
             effective: {
               objectUpserts: [],

@@ -10,12 +10,12 @@ import type {
   OntologyOutboxWrite,
 } from "../../storage/ontology"
 import { materializationApplyPhase } from "../../storage/ontology/materializations"
-import type { WorkingLink, WorkingObject } from "../edits/working-state"
+import type { WorkingLinkEdge, WorkingLinkSlot, WorkingObject } from "../edits/working-state"
 import type { OrderedMaterializationEventDraft } from "../effective/build-events"
 import type { TimedCommitIdentity } from "../shared/identity"
 import type { MaterializationPlanItem } from "./plan-stream"
 
-export function appendObjectOverridePlan(
+export function appendObjectOverrideWork(
   items: MaterializationPlanWorkItem[],
   working: WorkingObject,
   identity: TimedCommitIdentity
@@ -45,9 +45,9 @@ export function appendObjectOverridePlan(
   }
 }
 
-export function appendLinkOverridePlan(
+export function appendLinkEdgeOverrideWork(
   items: MaterializationPlanWorkItem[],
-  working: WorkingLink,
+  working: WorkingLinkEdge,
   identity: TimedCommitIdentity
 ): void {
   if (
@@ -75,7 +75,40 @@ export function appendLinkOverridePlan(
   }
 }
 
-export function appendObjectEffectivePlan(
+export function appendLinkSlotOverrideWork(
+  items: MaterializationPlanWorkItem[],
+  working: WorkingLinkSlot,
+  identity: TimedCommitIdentity
+): void {
+  if (
+    stableJsonStringify(working.originalOverride?.value ?? null) ===
+    stableJsonStringify(working.override)
+  ) {
+    return
+  }
+  if (working.override) {
+    items.push({
+      kind: "link-slot-override-upsert",
+      value: {
+        ref: working.ref,
+        value: working.override,
+        expectedLastCommitId: working.originalOverride?.lastCommitId ?? null,
+        lastCommitId: identity.commitId,
+        updatedAt: identity.committedAt,
+      },
+    })
+  } else if (working.originalOverride) {
+    items.push({
+      kind: "link-slot-override-delete",
+      value: {
+        ref: working.ref,
+        expectedLastCommitId: working.originalOverride.lastCommitId,
+      },
+    })
+  }
+}
+
+export function appendEffectiveObjectWork(
   items: MaterializationPlanWorkItem[],
   change: EffectiveObjectChange
 ): void {
@@ -100,7 +133,7 @@ export function appendObjectEffectivePlan(
   }
 }
 
-export function appendLinkEffectivePlan(
+export function appendEffectiveLinkWork(
   items: MaterializationPlanWorkItem[],
   change: EffectiveLinkChange
 ): void {

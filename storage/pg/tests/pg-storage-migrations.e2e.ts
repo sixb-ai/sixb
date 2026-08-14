@@ -41,6 +41,7 @@ describe("Postgres storage migrations", () => {
             "004-executions",
             "005-workflow-executions",
             "006-narrow-ontology-source-root-index",
+            "007-split-overrides",
           ],
         },
       ])
@@ -86,6 +87,13 @@ describe("Postgres storage migrations", () => {
           id: "006-narrow-ontology-source-root-index",
           status: "applied",
           version: 6,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "007-split-overrides",
+          status: "applied",
+          version: 7,
         },
       ])
     })
@@ -153,6 +161,107 @@ describe("Postgres storage migrations", () => {
     })
   })
 
+  test("splits legacy overrides and derives unambiguous link slot authority", async () => {
+    await withStorage(false, async (storage, schemaName) => {
+      const connectionString = process.env.DATABASE_URL
+      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
+      const sql = createPgClient({ connectionString, schemaName, max: 1 })
+      try {
+        const splitOverridesMigration = postgresStorageMigrations.steps.at(-1)
+        if (splitOverridesMigration?.id !== "007-split-overrides") {
+          throw new Error("PostgreSQL split-overrides migration is missing.")
+        }
+        const beforeScopeAuthority = defineMigrations({
+          adapterId: POSTGRES_STORAGE_ADAPTER_ID,
+          steps: postgresStorageMigrations.steps.slice(0, -1),
+        })
+        await createPostgresMigrator({
+          sql,
+          schemaName,
+          migrations: beforeScopeAuthority,
+        }).migrate()
+        const insertLegacyLinkOverride = async (input: {
+          readonly sourceId: string
+          readonly targetId: string
+          readonly value: unknown
+          readonly updatedAt: string
+        }) => {
+          const entityKey = JSON.stringify([
+            "Device",
+            input.sourceId,
+            "parent",
+            "Device",
+            input.targetId,
+          ])
+          await sql.unsafe(
+            `INSERT INTO ${quoteIdent(schemaName)}.ontology_overrides (
+               project_id, entity_kind, entity_key, entity_sort_key,
+               source_type_id, source_primary_id, link_id, target_type_id, target_primary_id,
+               value, last_commit_id, updated_at
+             ) VALUES (
+               'project', 'link', $1::jsonb, $1::text,
+               'Device', $2, 'parent', 'Device', $3,
+               $4::jsonb, $5, $6::timestamptz
+             )`,
+            [
+              entityKey,
+              input.sourceId,
+              input.targetId,
+              JSON.stringify(input.value),
+              `commit:${input.sourceId}:${input.targetId}`,
+              input.updatedAt,
+            ]
+          )
+        }
+        await insertLegacyLinkOverride({
+          sourceId: "document",
+          targetId: "rockland",
+          value: { kind: "upsert", properties: { rank: 1 } },
+          updatedAt: "2026-01-02T00:00:00.000Z",
+        })
+        await insertLegacyLinkOverride({
+          sourceId: "document",
+          targetId: "haverstraw",
+          value: { kind: "delete" },
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        })
+        await insertLegacyLinkOverride({
+          sourceId: "ambiguous",
+          targetId: "first",
+          value: { kind: "upsert" },
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        })
+        await insertLegacyLinkOverride({
+          sourceId: "ambiguous",
+          targetId: "second",
+          value: { kind: "upsert" },
+          updatedAt: "2026-01-02T00:00:00.000Z",
+        })
+
+        await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
+        const rows = await sql.unsafe<{ source_primary_id: string; value: unknown }[]>(
+          `SELECT source_primary_id, value
+           FROM ${quoteIdent(schemaName)}.ontology_link_overrides
+           WHERE identity_kind = 'slot'
+           ORDER BY source_primary_id`
+        )
+        expect([...rows]).toEqual([
+          { source_primary_id: "ambiguous", value: { kind: "legacy-conflict" } },
+          {
+            source_primary_id: "document",
+            value: {
+              kind: "set",
+              target: { objectTypeId: "Device", primaryId: "rockland" },
+              properties: { rank: 1 },
+            },
+          },
+        ])
+      } finally {
+        await sql.end()
+      }
+    })
+  })
+
   test("recorded old checksums are rejected before schema mutation", async () => {
     await withStorage(false, async (storage, schemaName) => {
       await migrateStorage(storage)
@@ -178,8 +287,9 @@ describe("Postgres storage migrations", () => {
         (await readTableNames(schemaName)).filter((name) => name.startsWith("ontology_"))
       ).toEqual([
         "ontology_commits",
+        "ontology_link_overrides",
+        "ontology_object_overrides",
         "ontology_outbox",
-        "ontology_overrides",
         "ontology_source_rows",
         "ontology_sources",
       ])
@@ -439,7 +549,7 @@ describe("Postgres storage migrations", () => {
       expect(await migrator?.status()).toMatchObject({
         adapterId: POSTGRES_STORAGE_ADAPTER_ID,
         state: "current",
-        appliedVersion: 6,
+        appliedVersion: 7,
       })
     })
   })
@@ -503,6 +613,13 @@ describe("Postgres storage migrations", () => {
           id: "006-narrow-ontology-source-root-index",
           status: "applied",
           version: 6,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "007-split-overrides",
+          status: "applied",
+          version: 7,
         },
       ])
     } finally {

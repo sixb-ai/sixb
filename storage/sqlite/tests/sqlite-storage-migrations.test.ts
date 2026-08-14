@@ -12,6 +12,7 @@ import {
   sqliteStorageMigrations,
   sqliteStoragePath,
 } from "../src/migrations"
+import { SqliteMaterializationStateReader } from "../src/ontology-storage/materialization-state"
 
 const tempDirs: string[] = []
 const expectedStorageMigrationRows = [
@@ -56,6 +57,13 @@ const expectedStorageMigrationRows = [
     id: "006-narrow-ontology-source-root-index",
     status: "applied",
     version: 6,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "007-split-overrides",
+    status: "applied",
+    version: 7,
   },
 ]
 
@@ -157,6 +165,190 @@ describe("SQLite storage migrations", () => {
     }
   })
 
+  test("splits legacy overrides and derives unambiguous link slot authority", () => {
+    const db = new Database(":memory:")
+    try {
+      const splitOverridesMigration = sqliteStorageMigrations.steps.at(-1)
+      if (splitOverridesMigration?.id !== "007-split-overrides") {
+        throw new Error("SQLite split-overrides migration is missing.")
+      }
+      for (const migration of sqliteStorageMigrations.steps.slice(0, -1)) migration.up(db)
+
+      db.query(
+        `INSERT INTO ontology_overrides (
+           project_id, entity_kind, entity_key, entity_sort_key,
+           object_type_id, primary_id, value, last_commit_id, updated_at
+         ) VALUES ('project', 'object', json(?), ?, 'Device', 'document', json(?),
+           'commit:object', '2026-01-01T00:00:00.000Z')`
+      ).run(
+        JSON.stringify(["Device", "document"]),
+        JSON.stringify(["Device", "document"]),
+        JSON.stringify({ kind: "create", properties: { name: "Document" } })
+      )
+
+      insertLegacyLinkOverride(db, {
+        sourceId: "document",
+        linkId: "parent",
+        targetId: "rockland",
+        value: { kind: "upsert", properties: { rank: 1 } },
+        updatedAt: "2026-01-02T00:00:00.000Z",
+      })
+      insertLegacyLinkOverride(db, {
+        sourceId: "document",
+        linkId: "parent",
+        targetId: "haverstraw",
+        value: { kind: "delete" },
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      })
+      insertLegacyLinkOverride(db, {
+        sourceId: "cleared",
+        linkId: "parent",
+        targetId: "old-parent",
+        value: { kind: "delete" },
+        updatedAt: "2026-01-03T00:00:00.000Z",
+      })
+      insertLegacyLinkOverride(db, {
+        sourceId: "ambiguous",
+        linkId: "parent",
+        targetId: "first",
+        value: { kind: "upsert" },
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      })
+      insertLegacyLinkOverride(db, {
+        sourceId: "ambiguous",
+        linkId: "parent",
+        targetId: "second",
+        value: { kind: "upsert" },
+        updatedAt: "2026-01-02T00:00:00.000Z",
+      })
+
+      splitOverridesMigration.up(db)
+
+      const rows = db
+        .query(
+          `SELECT source_primary_id, value FROM ontology_link_overrides
+           WHERE identity_kind = 'slot'
+           ORDER BY source_primary_id`
+        )
+        .all() as { readonly source_primary_id: string; readonly value: string }[]
+      expect(rows.map((row) => [row.source_primary_id, JSON.parse(row.value)])).toEqual([
+        ["ambiguous", { kind: "legacy-conflict" }],
+        ["cleared", { kind: "clear", target: { objectTypeId: "Device", primaryId: "old-parent" } }],
+        [
+          "document",
+          {
+            kind: "set",
+            target: { objectTypeId: "Device", primaryId: "rockland" },
+            properties: { rank: 1 },
+          },
+        ],
+      ])
+      expect(
+        db
+          .query(
+            `SELECT value FROM ontology_object_overrides
+             WHERE project_id = 'project' AND object_type_id = 'Device' AND primary_id = 'document'`
+          )
+          .get()
+      ).toEqual({ value: JSON.stringify({ kind: "create", properties: { name: "Document" } }) })
+      expect(
+        db
+          .query(
+            `SELECT COUNT(*) AS count FROM ontology_link_overrides
+             WHERE identity_kind = 'edge'`
+          )
+          .get()
+      ).toEqual({ count: 5 })
+      expect(readMemoryTableNames(db)).not.toContain("ontology_overrides")
+      expect(
+        new SqliteMaterializationStateReader(db, "project").linkState({
+          source: { objectTypeId: "Device", primaryId: "ambiguous" },
+          linkId: "parent",
+          target: { objectTypeId: "Device", primaryId: "first" },
+        }).slotOverride?.value
+      ).toEqual({ kind: "legacy-conflict" })
+    } finally {
+      db.close()
+    }
+  })
+
+  test("enforces edge and slot identity independently of the selected target", () => {
+    const db = new Database(":memory:")
+    try {
+      for (const migration of sqliteStorageMigrations.steps) migration.up(db)
+      const insert = db.query(
+        `INSERT INTO ontology_link_overrides (
+           project_id, identity_kind, identity_key,
+           source_type_id, source_primary_id, link_id, target_type_id, target_primary_id,
+           value, last_commit_id, updated_at
+         ) VALUES ('project', ?, json(?), 'Device', ?, 'parent', 'Device', ?,
+           json(?), 'commit', '2026-01-01T00:00:00.000Z')`
+      )
+
+      expect(() =>
+        insert.run(
+          "edge",
+          JSON.stringify(["Device", "document", "parent", "Device", "rockland"]),
+          "document",
+          "rockland",
+          JSON.stringify({ kind: "upsert" })
+        )
+      ).not.toThrow()
+      expect(() =>
+        insert.run(
+          "slot",
+          JSON.stringify(["Device", "document", "parent"]),
+          "document",
+          "rockland",
+          JSON.stringify({
+            kind: "set",
+            target: { objectTypeId: "Device", primaryId: "rockland" },
+          })
+        )
+      ).not.toThrow()
+
+      // A slot key excludes the target, so selecting another target conflicts with the same row.
+      expect(() =>
+        insert.run(
+          "slot",
+          JSON.stringify(["Device", "document", "parent"]),
+          "document",
+          "haverstraw",
+          JSON.stringify({
+            kind: "set",
+            target: { objectTypeId: "Device", primaryId: "haverstraw" },
+          })
+        )
+      ).toThrow()
+      expect(() =>
+        insert.run(
+          "slot",
+          JSON.stringify(["Device", "document", "parent", "Device", "rockland"]),
+          "document",
+          "rockland",
+          JSON.stringify({
+            kind: "set",
+            target: { objectTypeId: "Device", primaryId: "rockland" },
+          })
+        )
+      ).toThrow()
+      expect(() =>
+        insert.run(
+          "slot",
+          JSON.stringify(["Device", "another-document", "parent"]),
+          "another-document",
+          "rockland",
+          JSON.stringify({
+            kind: "set",
+            target: { objectTypeId: "Device", primaryId: "haverstraw" },
+          })
+        )
+      ).toThrow()
+    } finally {
+      db.close()
+    }
+  })
+
   test("recorded old checksums are rejected before schema mutation", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-checksum-"))
     tempDirs.push(tempDir)
@@ -183,12 +375,13 @@ describe("SQLite storage migrations", () => {
   test("fresh schema installs the exact ontology table set and provenance columns", () => {
     const db = new Database(":memory:")
     try {
-      sqliteStorageMigrations.steps[0]?.up(db)
+      for (const migration of sqliteStorageMigrations.steps) migration.up(db)
       const ontologyTables = readMemoryTableNames(db).filter((name) => name.startsWith("ontology_"))
       expect(ontologyTables).toEqual([
         "ontology_commits",
+        "ontology_link_overrides",
+        "ontology_object_overrides",
         "ontology_outbox",
-        "ontology_overrides",
         "ontology_source_rows",
         "ontology_sources",
       ])
@@ -622,6 +815,41 @@ function closeStorage(storage: SqliteStorage): void {
   storage.close()
 }
 
+function insertLegacyLinkOverride(
+  db: Database,
+  input: {
+    readonly sourceId: string
+    readonly linkId: string
+    readonly targetId: string
+    readonly value: unknown
+    readonly updatedAt: string
+  }
+): void {
+  const entityKey = JSON.stringify([
+    "Device",
+    input.sourceId,
+    input.linkId,
+    "Device",
+    input.targetId,
+  ])
+  db.query(
+    `INSERT INTO ontology_overrides (
+       project_id, entity_kind, entity_key, entity_sort_key,
+       source_type_id, source_primary_id, link_id, target_type_id, target_primary_id,
+       value, last_commit_id, updated_at
+     ) VALUES ('project', 'link', json(?), ?, 'Device', ?, ?, 'Device', ?, json(?), ?, ?)`
+  ).run(
+    entityKey,
+    entityKey,
+    input.sourceId,
+    input.linkId,
+    input.targetId,
+    JSON.stringify(input.value),
+    `commit:${input.sourceId}:${input.targetId}`,
+    input.updatedAt
+  )
+}
+
 describe("SQLite migration status is read-only", () => {
   // The teeth of C1.6. `plan()` cannot be used as a probe on SQLite: withSqliteDatabase
   // mkdirs the parent and `new Database(path)` creates the file, so asking "is the schema
@@ -658,7 +886,7 @@ describe("SQLite migration status is read-only", () => {
     expect(await migrator?.status()).toMatchObject({
       adapterId: SQLITE_STORAGE_ADAPTER_ID,
       state: "current",
-      appliedVersion: 6,
+      appliedVersion: 7,
     })
 
     expect(statSync(path).mtimeMs).toBe(before)
