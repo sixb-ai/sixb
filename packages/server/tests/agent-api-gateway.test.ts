@@ -22,7 +22,7 @@ import {
   createAgentApiGatewayCapability,
   createAgentRunExecutionToken,
 } from "@sixb/core/internal/agents"
-import { createTestSixb } from "@sixb/core/testing"
+import { createTestSixb, createTestWorkflowExecution } from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -394,11 +394,22 @@ async function createGatewayRuntime(
     fileName: "workflow-result.txt",
     mediaType: "text/plain",
   })
+  const completedWorkflowExecutionId = await createTestWorkflowExecution(storage.executions, {
+    projectId: PROJECT_ID,
+    workflowId: inspectDevices.id,
+    runId: "completed-workflow-run",
+  })
+  await storage.workflowRuns.queue({
+    id: "completed-workflow-run",
+    projectId: PROJECT_ID,
+    executionId: completedWorkflowExecutionId,
+    workflowId: inspectDevices.id,
+    input: { document: fileRefJson(completedWorkflowOutput) },
+    queuedAt: NOW,
+  })
   await storage.workflowRuns.start({
     id: "completed-workflow-run",
     projectId: PROJECT_ID,
-    workflowId: inspectDevices.id,
-    input: { document: fileRefJson(completedWorkflowOutput) },
     startedAt: NOW,
   })
   await storage.workflowRuns.nodes.start({
@@ -452,11 +463,22 @@ async function createGatewayRuntime(
     queueLeaseExpiresAt: options.queueLeaseExpiresAt ?? new Date(Date.now() + 60_000),
   }
   if (options.executionKind === "workflow") {
+    const parentWorkflowExecutionId = await createTestWorkflowExecution(storage.executions, {
+      projectId: PROJECT_ID,
+      workflowId: inspectDevices.id,
+      runId: "parent-workflow-run",
+    })
+    await storage.workflowRuns.queue({
+      id: "parent-workflow-run",
+      projectId: PROJECT_ID,
+      executionId: parentWorkflowExecutionId,
+      workflowId: inspectDevices.id,
+      input: {},
+      queuedAt: NOW,
+    })
     await storage.workflowRuns.start({
       id: "parent-workflow-run",
       projectId: PROJECT_ID,
-      workflowId: inspectDevices.id,
-      input: {},
       startedAt: NOW,
     })
     await storage.workflowRuns.nodes.start({

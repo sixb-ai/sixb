@@ -477,10 +477,7 @@ export class WorkflowRunSession {
     if (this.dependencies.recorder.hasStarted) {
       return
     }
-    await this.dependencies.recorder.startRun({
-      input: this.dependencies.workflowInputSnapshot,
-      source: this.dependencies.job.source,
-    })
+    await this.dependencies.recorder.startRun()
   }
 
   async runAllNodes(): Promise<WorkflowRunRecord | null> {

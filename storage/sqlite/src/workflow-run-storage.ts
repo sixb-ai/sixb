@@ -1,11 +1,12 @@
 import type { Database } from "bun:sqlite"
-import type { Principal, WorkflowRunSource } from "@sixb/core"
+import { assertWorkflowRunExecution } from "@sixb/core/internal/workflow-run-storage-provider"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type {
   CancelWorkflowAgentNodeRunInput,
   ConfirmWorkflowAgentNodeRunExecutionOwnershipInput,
   ConfirmWorkflowRunExecutionOwnershipInput,
   CreateWorkflowAgentNodeRunInput,
+  ExecutionStorage,
   FinishWorkflowAgentNodeRunInput,
   FinishWorkflowNodeRunInput,
   FinishWorkflowRunInput,
@@ -50,6 +51,8 @@ import {
 } from "./transactions"
 
 export interface SqliteWorkflowRunStorageOptions {
+  /** Execution lookup sharing the same provider transaction. */
+  executions: ExecutionStorage
   /** Path to SQLite database file. Defaults to ':memory:' for in-memory database. */
   path?: string
   /** Internal shared connection used by bundled SqliteStorage. */
@@ -62,10 +65,12 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
 
   private readonly connection: SqliteStoreConnection
   private readonly db: Database
+  private readonly executions: ExecutionStorage
 
-  constructor(options: SqliteWorkflowRunStorageOptions = {}) {
+  constructor(options: SqliteWorkflowRunStorageOptions) {
     this.connection = openSqliteStoreConnection(options)
     this.db = this.connection.db
+    this.executions = options.executions
 
     if (this.connection.installFreshSchema) {
       installFreshSqliteSchema(this.db)
@@ -77,6 +82,13 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
 
   async queue(input: QueueWorkflowRunInput): Promise<WorkflowRunRecord> {
     const queuedAt = input.queuedAt ?? new Date()
+    await assertWorkflowRunExecution({
+      executions: this.executions,
+      projectId: input.projectId,
+      executionId: input.executionId,
+      runId: input.id,
+      workflowId: input.workflowId,
+    })
 
     try {
       this.db
@@ -85,35 +97,31 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
           INSERT INTO workflow_runs (
             project_id,
             id,
+            execution_id,
             workflow_id,
             status,
             input,
             queued_at,
             started_at,
-            source,
-            requested_by_principal_type,
-            requested_by_principal_id,
             attempt
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `
         )
         .run(
           input.projectId,
           input.id,
+          input.executionId,
           input.workflowId,
           "queued",
           serializeRecord(input.input),
           queuedAt.toISOString(),
           queuedAt.toISOString(),
-          input.source ? JSON.stringify(input.source) : null,
-          input.requestedByPrincipal?.type ?? "system",
-          input.requestedByPrincipal?.id ?? "system",
           0
         )
     } catch (error) {
       if (isUniqueConstraintError(error)) {
         throw new WorkflowRunError(
-          `[SixbSqlite] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
+          `[SixbSqlite] Workflow run '${input.id}' or execution '${input.executionId}' is already linked for project '${input.projectId}'.`
         )
       }
 
@@ -131,92 +139,36 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
         .query("SELECT * FROM workflow_runs WHERE project_id = ? AND id = ?")
         .get(input.projectId, input.id) as WorkflowRunDatabaseRow | null
 
-      if (existing) {
-        if (existing.status !== "queued") {
-          throw new WorkflowRunError(
-            `[SixbSqlite] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
-          )
-        }
-
-        if (existing.workflow_id !== input.workflowId) {
-          throw new WorkflowRunError(
-            `[SixbSqlite] Workflow run '${input.id}' workflow '${input.workflowId}' does not match existing workflow '${existing.workflow_id}'.`
-          )
-        }
-
-        this.db
-          .query(
-            `
-            UPDATE workflow_runs
-            SET
-              status = ?,
-              input = ?,
-              started_at = ?,
-              finished_at = NULL,
-              error = NULL,
-              source = COALESCE(source, ?)
-              , attempt = attempt + 1,
-              execution_token = ?, execution_queue_lease_expires_at = ?
-            WHERE project_id = ? AND id = ?
-          `
-          )
-          .run(
-            "running",
-            serializeRecord(input.input),
-            startedAt.toISOString(),
-            input.source ? JSON.stringify(input.source) : null,
-            input.execution?.token ?? null,
-            input.execution?.queueLeaseExpiresAt.toISOString() ?? null,
-            input.projectId,
-            input.id
-          )
-
-        return this.requireWorkflowRun(input.projectId, input.id)
+      if (!existing || existing.status !== "queued") {
+        throw new WorkflowRunError(
+          existing
+            ? `[SixbSqlite] Workflow run '${input.id}' cannot start from status '${existing.status}'.`
+            : `[SixbSqlite] Workflow run '${input.id}' not found for project '${input.projectId}'.`
+        )
       }
 
-      try {
-        this.db
-          .query(
-            `
-            INSERT INTO workflow_runs (
-              project_id,
-              id,
-              workflow_id,
-              status,
-              input,
-              started_at,
-              source,
-              requested_by_principal_type,
-              requested_by_principal_id,
-              attempt,
-              execution_token,
-              execution_queue_lease_expires_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      this.db
+        .query(
           `
-          )
-          .run(
-            input.projectId,
-            input.id,
-            input.workflowId,
-            "running",
-            serializeRecord(input.input),
-            startedAt.toISOString(),
-            input.source ? JSON.stringify(input.source) : null,
-            input.requestedByPrincipal?.type ?? "system",
-            input.requestedByPrincipal?.id ?? "system",
-            1,
-            input.execution?.token ?? null,
-            input.execution?.queueLeaseExpiresAt.toISOString() ?? null
-          )
-      } catch (error) {
-        if (isUniqueConstraintError(error)) {
-          throw new WorkflowRunError(
-            `[SixbSqlite] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
-          )
-        }
-
-        throw error
-      }
+          UPDATE workflow_runs
+          SET
+            status = ?,
+            started_at = ?,
+            finished_at = NULL,
+            error = NULL,
+            attempt = attempt + 1,
+            execution_token = ?, execution_queue_lease_expires_at = ?
+          WHERE project_id = ? AND id = ?
+        `
+        )
+        .run(
+          "running",
+          startedAt.toISOString(),
+          input.execution?.token ?? null,
+          input.execution?.queueLeaseExpiresAt.toISOString() ?? null,
+          input.projectId,
+          input.id
+        )
 
       return this.requireWorkflowRun(input.projectId, input.id)
     })()
@@ -974,6 +926,7 @@ function rowToWorkflowRunRecord(row: WorkflowRunDatabaseRow): WorkflowRunRecord 
   return {
     id: row.id,
     projectId: row.project_id,
+    executionId: row.execution_id,
     workflowId: row.workflow_id,
     status: row.status,
     input: parseRecord(row.input),
@@ -982,11 +935,6 @@ function rowToWorkflowRunRecord(row: WorkflowRunDatabaseRow): WorkflowRunRecord 
     startedAt: new Date(row.started_at),
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     error: row.error ?? undefined,
-    source: row.source ? (JSON.parse(row.source) as WorkflowRunSource) : undefined,
-    requestedByPrincipal: {
-      type: row.requested_by_principal_type,
-      id: row.requested_by_principal_id,
-    },
     attempt: row.attempt,
     ...(row.execution_token && row.execution_queue_lease_expires_at
       ? {
@@ -1040,6 +988,7 @@ function canFinishWorkflowRun(
 interface WorkflowRunDatabaseRow {
   project_id: string
   id: string
+  execution_id: string
   workflow_id: string
   status: WorkflowRunRecord["status"]
   input: string
@@ -1048,9 +997,6 @@ interface WorkflowRunDatabaseRow {
   started_at: string
   finished_at: string | null
   error: string | null
-  source: string | null
-  requested_by_principal_type: Principal["type"]
-  requested_by_principal_id: string
   attempt: number
   execution_token: string | null
   execution_queue_lease_expires_at: string | null

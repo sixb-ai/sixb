@@ -9,7 +9,7 @@ import type {
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { LoggingService } from "@sixb/core/internal/logging"
 import {
-  bindPrimitiveExecution,
+  bindDurablePrimitiveExecution,
   type PrimitiveExecutionHost,
 } from "@sixb/core/internal/primitive-execution"
 import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
@@ -71,10 +71,19 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
   ): Promise<void> {
     const execution = freshWorkflowExecution(delivery.leaseExpiresAt)
     const runId = workflowRunIdFromClaimed(claimed)
-    const workflowId = claimed.job.payload.workflowId
-    const executionScope = bindPrimitiveExecution(this.host, {
-      primitive: { kind: "workflow", id: workflowId, runId },
-      source: { type: "queue", queue: "workflows", jobId: claimed.job.id },
+    const run = await this.requireWorkflowRun(claimed, runId)
+    const durableExecution = await this.host.storage.executions.getById({
+      projectId: this.host.id,
+      id: run.executionId,
+    })
+    if (!durableExecution) {
+      throw new Error(
+        `[SixbWorkflowWorker] Workflow run '${run.id}' references missing execution '${run.executionId}'.`
+      )
+    }
+    const executionScope = bindDurablePrimitiveExecution(this.host, {
+      execution: durableExecution,
+      primitive: { kind: "workflow", id: run.workflowId, runId: run.id },
     })
     const context = buildWorkflowContext(this.host, this.workflowRuns, executionScope.sixb)
     const stopOwnershipProjection = delivery.onLeaseRenewed((renewed) => {
@@ -85,7 +94,7 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
       if (claimed.job.type === "workflow.run.resume.requested") {
         await runWorkflowResumeJob({
           runtime: context,
-          job: workflowResumeJobFromClaimed(claimed, execution),
+          job: workflowResumeJobFromClaimed(claimed, run, execution),
           signal,
           observer: this.observer,
           onRunFailed: (error, run) => this.reportFailedRun(claimed, error, run),
@@ -93,7 +102,7 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
         return
       }
 
-      const workflowJob = workflowJobFromClaimed(claimed, execution)
+      const workflowJob = workflowJobFromClaimed(claimed, run, execution)
 
       await runWorkflowJob({
         runtime: context,
@@ -105,6 +114,22 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
     } finally {
       stopOwnershipProjection()
     }
+  }
+
+  private async requireWorkflowRun(
+    claimed: ClaimedQueueJob<WorkflowQueueJob>,
+    runId: string
+  ): Promise<WorkflowRunRecord> {
+    const run = await this.workflowRuns.getById({ projectId: this.host.id, id: runId })
+    if (!run) {
+      throw new Error(`[SixbWorkflowWorker] Workflow run '${runId}' was not found.`)
+    }
+    if (run.workflowId !== claimed.job.payload.workflowId) {
+      throw new Error(
+        `[SixbWorkflowWorker] Workflow run '${runId}' belongs to workflow '${run.workflowId}', not '${claimed.job.payload.workflowId}'.`
+      )
+    }
+    return run
   }
 
   private async projectExecutionOwnership(
@@ -190,6 +215,7 @@ function requiresWorkflowInterventionStorage(host: WorkflowWorkerHost): boolean 
 
 function workflowJobFromClaimed(
   claimed: ClaimedQueueJob<WorkflowQueueJob>,
+  run: WorkflowRunRecord,
   execution: WorkflowRunExecution
 ): WorkflowJob {
   const { job } = claimed
@@ -198,16 +224,16 @@ function workflowJobFromClaimed(
   }
 
   return {
-    id: job.payload.runId ?? `${job.id}:attempt:${job.attempt}`,
-    workflowId: job.payload.workflowId,
-    input: job.payload.input,
-    source: job.payload.source,
+    id: run.id,
+    workflowId: run.workflowId,
+    input: run.input,
     execution,
   }
 }
 
 function workflowResumeJobFromClaimed(
   claimed: ClaimedQueueJob<WorkflowQueueJob>,
+  run: WorkflowRunRecord,
   execution: WorkflowRunExecution
 ): WorkflowResumeJob {
   const { job } = claimed
@@ -216,8 +242,8 @@ function workflowResumeJobFromClaimed(
   }
 
   return {
-    id: job.payload.runId,
-    workflowId: job.payload.workflowId,
+    id: run.id,
+    workflowId: run.workflowId,
     resume: job.payload.resume,
     execution,
   }

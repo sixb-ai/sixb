@@ -1,10 +1,62 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryStorage } from "../src"
-import { InMemoryWorkflowRunStorage, WorkflowRunError } from "../src/storage"
+import {
+  InMemoryWorkflowRunStorage,
+  type QueueWorkflowRunInput,
+  type StartWorkflowRunInput,
+  WorkflowRunError,
+} from "../src/storage"
+import { createTestAutomaticWorkflowExecution, createTestWorkflowExecution } from "../src/testing"
+
+type TestQueueWorkflowRunInput = Omit<QueueWorkflowRunInput, "executionId"> & {
+  readonly executionId?: string
+}
+
+type TestStartWorkflowRunInput = StartWorkflowRunInput & {
+  readonly workflowId?: string
+  readonly input?: QueueWorkflowRunInput["input"]
+}
+
+function createWorkflowRunStorage() {
+  const root = new InMemoryStorage()
+  const storage = root.workflowRuns!
+  const queue = storage.queue.bind(storage)
+  const start = storage.start.bind(storage)
+  const queueFixture = async (input: TestQueueWorkflowRunInput) => {
+    const executionId = await createTestWorkflowExecution(root.executions, {
+      projectId: input.projectId,
+      workflowId: input.workflowId,
+      runId: input.id,
+      ...(input.executionId === undefined ? {} : { executionId: input.executionId }),
+    })
+    return queue({ ...input, executionId })
+  }
+
+  return Object.assign(storage, {
+    queue: queueFixture,
+    start: async (input: TestStartWorkflowRunInput) => {
+      const existing = await storage.getById({ projectId: input.projectId, id: input.id })
+      if (!existing && input.workflowId && input.input) {
+        await queueFixture({
+          id: input.id,
+          projectId: input.projectId,
+          workflowId: input.workflowId,
+          input: input.input,
+        })
+      }
+      return start({
+        id: input.id,
+        projectId: input.projectId,
+        ...(input.startedAt === undefined ? {} : { startedAt: input.startedAt }),
+        ...(input.execution === undefined ? {} : { execution: input.execution }),
+      })
+    },
+  })
+}
 
 describe("InMemoryWorkflowRunStorage", () => {
   test("starts and finishes a successful workflow run", async () => {
-    const storage = new InMemoryWorkflowRunStorage()
+    const storage = createWorkflowRunStorage()
     const startedAt = new Date("2026-05-08T10:00:00.000Z")
     const finishedAt = new Date("2026-05-08T10:00:04.500Z")
 
@@ -43,69 +95,73 @@ describe("InMemoryWorkflowRunStorage", () => {
     expect(stored?.finishedAt?.toISOString()).toBe(finishedAt.toISOString())
   })
 
-  test("persists workflow run source when starting directly or from a queued run", async () => {
-    const storage = new InMemoryWorkflowRunStorage()
-    const scheduleSource = {
-      type: "schedule",
-      scheduleId: "invoice-payment-linked",
-      eventId: "evt_1",
-      principal: { type: "system", id: "sixb-orchestrator" },
-    } as const
+  test("requires a queued run linked to its matching workflow execution", async () => {
+    const root = new InMemoryStorage()
+    const storage = root.workflowRuns!
 
-    const started = await storage.start({
-      id: "wf-run-triggered",
+    await expect(
+      storage.start({ id: "wf-run-missing", projectId: "my-app" })
+    ).rejects.toBeInstanceOf(WorkflowRunError)
+
+    await root.executions.create({
+      id: "orphan-workflow-execution",
       projectId: "my-app",
-      workflowId: "reconcile-transaction",
-      input: { transactionId: "txn_123" },
-      source: scheduleSource,
+      executor: { type: "primitive", kind: "workflow", runId: "wf-run-orphan" },
+      source: { type: "http", requestId: "request-without-parent" },
+      correlationId: "orphan-correlation",
+      authorizationRef: {
+        type: "trustedPrimitive",
+        primitive: {
+          kind: "workflow",
+          id: "reconcile-transaction",
+          runId: "wf-run-orphan",
+        },
+      },
     })
-
-    expect(started.source).toEqual(scheduleSource)
-    expect(
-      await storage.getById({
+    await expect(
+      storage.queue({
+        id: "wf-run-orphan",
         projectId: "my-app",
-        id: "wf-run-triggered",
+        executionId: "orphan-workflow-execution",
+        workflowId: "reconcile-transaction",
+        input: {},
       })
-    ).toMatchObject({ source: scheduleSource })
+    ).rejects.toBeInstanceOf(WorkflowRunError)
 
-    await storage.queue({
-      id: "wf-run-queued-without-source",
+    const executionId = await createTestWorkflowExecution(root.executions, {
+      projectId: "my-app",
+      workflowId: "other-workflow",
+      runId: "wf-run-mismatched",
+    })
+    await expect(
+      storage.queue({
+        id: "wf-run-mismatched",
+        projectId: "my-app",
+        executionId,
+        workflowId: "reconcile-transaction",
+        input: {},
+      })
+    ).rejects.toBeInstanceOf(WorkflowRunError)
+
+    const automaticExecutionId = await createTestAutomaticWorkflowExecution(root.executions, {
       projectId: "my-app",
       workflowId: "reconcile-transaction",
-      input: { transactionId: "txn_456" },
+      runId: "wf-run-automatic",
+      source: { type: "schedule", eventId: "schedule-event-1" },
     })
-
-    const running = await storage.start({
-      id: "wf-run-queued-without-source",
-      projectId: "my-app",
-      workflowId: "reconcile-transaction",
-      input: { transactionId: "txn_456" },
-      source: scheduleSource,
-    })
-
-    expect(running.source).toEqual(scheduleSource)
-
-    await storage.queue({
-      id: "wf-run-queued-with-source",
-      projectId: "my-app",
-      workflowId: "reconcile-transaction",
-      input: { transactionId: "txn_789" },
-      source: { type: "manual" },
-    })
-
-    const alreadySourced = await storage.start({
-      id: "wf-run-queued-with-source",
-      projectId: "my-app",
-      workflowId: "reconcile-transaction",
-      input: { transactionId: "txn_789" },
-      source: scheduleSource,
-    })
-
-    expect(alreadySourced.source).toEqual({ type: "manual" })
+    await expect(
+      storage.queue({
+        id: "wf-run-automatic",
+        projectId: "my-app",
+        executionId: automaticExecutionId,
+        workflowId: "reconcile-transaction",
+        input: {},
+      })
+    ).resolves.toMatchObject({ id: "wf-run-automatic", executionId: automaticExecutionId })
   })
 
   test("allows exactly one concurrent claim of a queued workflow run", async () => {
-    const storage = new InMemoryWorkflowRunStorage()
+    const storage = createWorkflowRunStorage()
     await storage.queue({
       id: "wf-run-claim",
       projectId: "my-app",
@@ -133,7 +189,7 @@ describe("InMemoryWorkflowRunStorage", () => {
   })
 
   test("queues workflow runs before transitioning them to running", async () => {
-    const storage = new InMemoryWorkflowRunStorage()
+    const storage = createWorkflowRunStorage()
     const queuedAt = new Date("2026-05-08T09:59:00.000Z")
     const startedAt = new Date("2026-05-08T10:00:00.000Z")
 
@@ -179,7 +235,7 @@ describe("InMemoryWorkflowRunStorage", () => {
   })
 
   test("waits and resumes workflow and node runs", async () => {
-    const storage = new InMemoryWorkflowRunStorage()
+    const storage = createWorkflowRunStorage()
 
     await storage.start({
       id: "wf-run-waiting",
@@ -261,7 +317,7 @@ describe("InMemoryWorkflowRunStorage", () => {
   })
 
   test("stores failed workflow runs and lists with filters, ordering, and paging", async () => {
-    const storage = new InMemoryWorkflowRunStorage()
+    const storage = createWorkflowRunStorage()
 
     await storage.start({
       id: "run-1",
@@ -331,7 +387,7 @@ describe("InMemoryWorkflowRunStorage", () => {
   })
 
   test("lists the latest run for multiple workflow ids", async () => {
-    const storage = new InMemoryWorkflowRunStorage()
+    const storage = createWorkflowRunStorage()
 
     await storage.start({
       id: "run-reconcile-a",
@@ -371,7 +427,7 @@ describe("InMemoryWorkflowRunStorage", () => {
   })
 
   test("starts and finishes node runs with pinned input and output", async () => {
-    const storage = new InMemoryWorkflowRunStorage()
+    const storage = createWorkflowRunStorage()
 
     await storage.start({
       id: "wf-run-1",
@@ -426,7 +482,7 @@ describe("InMemoryWorkflowRunStorage", () => {
   })
 
   test("stores failed node runs and lists with filters, ordering, and paging", async () => {
-    const storage = new InMemoryWorkflowRunStorage()
+    const storage = createWorkflowRunStorage()
 
     await storage.start({
       id: "wf-run-1",
@@ -508,7 +564,7 @@ describe("InMemoryWorkflowRunStorage", () => {
   })
 
   test("rejects invalid workflow and node run lifecycle transitions", async () => {
-    const storage = new InMemoryWorkflowRunStorage()
+    const storage = createWorkflowRunStorage()
 
     await storage.start({
       id: "wf-run-1",
@@ -656,7 +712,7 @@ describe("InMemoryWorkflowRunStorage", () => {
   })
 
   test("fences stale workflow deliveries after reclaim", async () => {
-    const storage = new InMemoryWorkflowRunStorage()
+    const storage = createWorkflowRunStorage()
     await storage.start({
       id: "wf-run-unowned",
       projectId: "my-app",
@@ -723,7 +779,7 @@ describe("InMemoryWorkflowRunStorage", () => {
   })
 
   test("persists and cancels agent node execution metadata independently from node IO", async () => {
-    const storage = new InMemoryWorkflowRunStorage()
+    const storage = createWorkflowRunStorage()
     await storage.start({
       id: "wf-run-agent",
       projectId: "my-app",

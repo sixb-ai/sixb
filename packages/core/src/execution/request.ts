@@ -35,8 +35,11 @@ export type { RuleStatesRuntime, RulesRuntime } from "../rules/execution"
 export type { Sixb } from "../runtime/sixb"
 export type { SyncRunsRuntime, SyncsRuntime } from "../syncs/execution"
 export type {
+  LatestWorkflowRunListResult,
   WorkflowInterventionsRuntime,
+  WorkflowRunListResult,
   WorkflowRunsRuntime,
+  WorkflowRunView,
   WorkflowsRuntime,
 } from "../workflows/execution"
 export type { AuthorizationRef, ExecutionContext } from "./types"

@@ -18,6 +18,11 @@ import {
   type WorkflowDefinition,
 } from "@sixb/core"
 import { LOGS_STREAM } from "@sixb/core/internal/logging"
+import {
+  createTestSixb,
+  createTestWorkflowExecution,
+  type TestExecutionHost,
+} from "@sixb/core/testing"
 import { WorkflowWorker } from "../src"
 
 const Transaction = defineObjectType({
@@ -110,6 +115,15 @@ function createSixb(options: {
   })
 }
 
+async function requestWorkflowRun(
+  sixb: TestExecutionHost,
+  workflow: WorkflowDefinition,
+  runId: string,
+  input: Readonly<Record<string, unknown>>
+): Promise<void> {
+  await createTestSixb(sixb).workflows.requestById({ workflowId: workflow.id, runId, input })
+}
+
 async function waitFor<T>(
   fn: () => Promise<T>,
   predicate: (value: T) => boolean,
@@ -186,18 +200,8 @@ describe("WorkflowWorker", () => {
       .input({ transaction: ref(Transaction) })
       .then(loggedStep)
     const sixb = createSixb({ workflows: [workflow] })
-    await sixb.queues.workflows.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          type: "workflow.run.requested",
-          payload: {
-            workflowId: workflow.id,
-            runId: "wfrun_log",
-            input: { transaction: { objectTypeId: "Transaction", primaryId: "txn_1" } },
-          },
-        },
-      ],
+    await requestWorkflowRun(sixb, workflow, "wfrun_log", {
+      transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
     })
 
     const worker = new WorkflowWorker(sixb)
@@ -236,20 +240,8 @@ describe("WorkflowWorker", () => {
       })
       .then(findBestInvoice)
     const sixb = createSixb({ workflows: [workflow] })
-    await sixb.queues.workflows.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          type: "workflow.run.requested",
-          payload: {
-            workflowId: workflow.id,
-            runId: "wfrun_worker_success",
-            input: {
-              transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
-            },
-          },
-        },
-      ],
+    await requestWorkflowRun(sixb, workflow, "wfrun_worker_success", {
+      transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
     })
 
     const worker = new WorkflowWorker(sixb)
@@ -314,6 +306,59 @@ describe("WorkflowWorker", () => {
     expect(claimed).toHaveLength(0)
   })
 
+  test("uses the persisted run instead of untrusted queue payload data", async () => {
+    const echoTransaction = defineWorkflowStep("echo-transaction")
+      .input({ transaction: ref(Transaction) })
+      .output({ transaction: ref(Transaction) })
+      .run(({ input }) => input)
+    const workflow = defineWorkflow("persisted-workflow-input")
+      .input({ transaction: ref(Transaction) })
+      .then(echoTransaction)
+    const sixb = createSixb({ workflows: [workflow] })
+    const runId = "wfrun_persisted_input"
+    await requestWorkflowRun(sixb, workflow, runId, {
+      transaction: { objectTypeId: "Transaction", primaryId: "txn_persisted" },
+    })
+
+    const [original] = await sixb.queues.workflows.claim({
+      projectId: sixb.id,
+      workerId: "discard-original",
+    })
+    if (!original) throw new Error("Expected the original workflow delivery.")
+    await sixb.queues.workflows.complete({
+      projectId: sixb.id,
+      jobId: original.job.id,
+      leaseId: original.leaseId,
+    })
+    await sixb.queues.workflows.enqueue({
+      projectId: sixb.id,
+      jobs: [
+        {
+          type: "workflow.run.requested",
+          payload: {
+            workflowId: workflow.id,
+            runId,
+            input: {
+              transaction: { objectTypeId: "Transaction", primaryId: "txn_forged" },
+            },
+          },
+        },
+      ],
+    })
+
+    const worker = new WorkflowWorker(sixb)
+    workers.push(worker)
+    await worker.start()
+
+    const run = await waitFor(
+      () => sixb.storage.workflowRuns!.getById({ projectId: sixb.id, id: runId }),
+      (value) => value?.status === "succeeded"
+    )
+    expect(run?.output).toEqual({
+      transaction: { objectTypeId: "Transaction", primaryId: "txn_persisted" },
+    })
+  })
+
   test("reports a terminal failed workflow once with the original error", async () => {
     const reports: Array<{ error: Error; context: SixbErrorContext }> = []
     const workflow = defineWorkflow("failing-workflow")
@@ -327,19 +372,12 @@ describe("WorkflowWorker", () => {
         reports.push({ error, context })
       },
     })
+    await requestWorkflowRun(sixb, workflow, "wfrun_worker_failed", {
+      transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+    })
     await sixb.queues.workflows.enqueue({
       projectId: sixb.id,
       jobs: [
-        {
-          type: "workflow.run.requested",
-          payload: {
-            workflowId: workflow.id,
-            runId: "wfrun_worker_failed",
-            input: {
-              transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
-            },
-          },
-        },
         {
           type: "workflow.run.requested",
           payload: {
@@ -442,9 +480,15 @@ describe("WorkflowWorker", () => {
       },
     })
 
+    const executionId = await createTestWorkflowExecution(sixb.storage.executions, {
+      projectId: sixb.id,
+      workflowId: workflow.id,
+      runId: "wfrun_queued_invalid",
+    })
     await sixb.storage.workflowRuns!.queue({
       projectId: sixb.id,
       id: "wfrun_queued_invalid",
+      executionId,
       workflowId: workflow.id,
       input: {},
     })
@@ -503,20 +547,8 @@ describe("WorkflowWorker", () => {
         invoice: steps.findBestInvoice.invoice,
       }))
     const sixb = createSixb({ workflows: [workflow] })
-    await sixb.queues.workflows.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          type: "workflow.run.requested",
-          payload: {
-            workflowId: workflow.id,
-            runId: "wfrun_worker_waiting",
-            input: {
-              transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
-            },
-          },
-        },
-      ],
+    await requestWorkflowRun(sixb, workflow, "wfrun_worker_waiting", {
+      transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
     })
 
     const worker = new WorkflowWorker(sixb)
@@ -594,20 +626,8 @@ describe("WorkflowWorker", () => {
       }))
     const sixb = createSixb({ workflows: [workflow] })
 
-    await sixb.queues.workflows.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          type: "workflow.run.requested",
-          payload: {
-            workflowId: workflow.id,
-            runId: "wfrun_worker_resume",
-            input: {
-              transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
-            },
-          },
-        },
-      ],
+    await requestWorkflowRun(sixb, workflow, "wfrun_worker_resume", {
+      transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
     })
 
     const worker = new WorkflowWorker(sixb)
@@ -713,20 +733,8 @@ describe("WorkflowWorker", () => {
       },
     })
 
-    await sixb.queues.workflows.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          type: "workflow.run.requested",
-          payload: {
-            workflowId: workflow.id,
-            runId: "wfrun_worker_resume_failed",
-            input: {
-              transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
-            },
-          },
-        },
-      ],
+    await requestWorkflowRun(sixb, workflow, "wfrun_worker_resume_failed", {
+      transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
     })
 
     const worker = new WorkflowWorker(sixb)
@@ -799,19 +807,7 @@ describe("WorkflowWorker", () => {
         reports.push({ error, context })
       },
     })
-    await sixb.queues.workflows.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          type: "workflow.run.requested",
-          payload: {
-            workflowId: workflow.id,
-            runId: "wfrun_worker_cancelled",
-            input: {},
-          },
-        },
-      ],
-    })
+    await requestWorkflowRun(sixb, workflow, "wfrun_worker_cancelled", {})
 
     const worker = new WorkflowWorker(sixb)
     workers.push(worker)

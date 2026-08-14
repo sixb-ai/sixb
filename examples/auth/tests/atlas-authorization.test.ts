@@ -47,6 +47,13 @@ describe("auth example Atlas authorization", () => {
   test("team members only see and do what their roles grant", async () => {
     const host = await createAuthExampleRuntime()
     await seedAuthExampleObjects(createTestSixb(host))
+    const auth = host.storage.auth
+    if (!auth) throw new Error("Auth example test requires auth storage.")
+    await auth.users.create({
+      projectId: host.id,
+      id: "atlas-user",
+      email: "atlas-user@example.com",
+    })
 
     const roles = host.definitions.security.listResolvedRoles()
     const teamMemberContext = atlasContext(host, [teamMembers.id])

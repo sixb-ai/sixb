@@ -217,10 +217,8 @@ export type WorkflowTriggerDefinition = WorkflowScheduleTriggerDefinition
 /**
  * Origin of a workflow run request.
  *
- * Captured on the queued run record and emitted with `workflow.run.queued`
- * so downstream consumers can trace why a run started. Intentionally minimal
- * for now — additional sources (schedule, sync, pipeline, ...) can be added
- * when the triggers that produce them land.
+ * Emitted with `workflow.run.queued` for downstream consumers. The immutable execution record is
+ * the authoritative durable provenance; this event detail is descriptive only.
  */
 export type WorkflowRunSource =
   | { readonly type: "manual" }

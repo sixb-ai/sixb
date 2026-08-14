@@ -1,4 +1,9 @@
-import type { AgentDefinition, Principal, ValueType, WorkflowDefinition } from "@sixb/core"
+import type {
+  AgentDefinition,
+  AuthorizablePrincipal,
+  ValueType,
+  WorkflowDefinition,
+} from "@sixb/core"
 import { createAgentRunExecutionToken } from "@sixb/core/internal/agents"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { QueueDelivery } from "@sixb/core/internal/workers"
@@ -43,7 +48,7 @@ interface WorkflowAgentNodeExecutionContext {
   readonly node: WorkflowAgentNodeDefinition
   readonly agent: AgentDefinition
   readonly valueTypesById: ReadonlyMap<string, ValueType>
-  readonly requestedBy: Principal
+  readonly requestedBy?: AuthorizablePrincipal
 }
 
 export async function executeWorkflowAgentNode(
@@ -194,6 +199,16 @@ async function loadWorkflowAgentNodeExecution(
     return null
   }
 
+  const workflowExecution = await context.storage.executions.getById({
+    projectId: context.id,
+    id: workflowRun.executionId,
+  })
+  if (!workflowExecution) {
+    throw new AgentWorkerError(
+      `Workflow run '${workflowRun.id}' references missing execution '${workflowRun.executionId}'.`
+    )
+  }
+
   const workflow = host.definitions.workflows.getById(nodeRun.workflowId)
   const node = workflow?.nodes[nodeRun.nodeIndex]
   if (!workflow || !node || node.type !== "agent" || node.id !== nodeRun.nodeId) {
@@ -214,7 +229,7 @@ async function loadWorkflowAgentNodeExecution(
     node,
     agent,
     valueTypesById: host.definitions.ontology.getValueTypesById(),
-    requestedBy: workflowRun.requestedByPrincipal,
+    requestedBy: workflowExecution.requestedBy,
   }
 }
 

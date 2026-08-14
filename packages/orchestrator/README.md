@@ -7,7 +7,7 @@ Bridges runtime events to queue lanes and durably reconciles projection dispatch
 Schedule, sync, pipeline, and workflow routes consume runtime events. Their delivery guarantee follows
 the event source and route-specific retry policy.
 
-Projection dispatch has two paths:
+Workflow routes use a Core-owned dispatch port that persists the workflow execution and run before publishing the queue job. Projection dispatch has two paths:
 
 ```text
 dataset.version.committed -> immediate deterministic job
@@ -22,10 +22,11 @@ completion; queue-level IDs deduplicate concurrent dispatches.
 When `cohostWorkers` is enabled, `sixb dev` automatically compiles routes from registered syncs,
 pipelines, and projections, starts the orchestrator, co-hosts available workers, and starts the scheduler. No manual wiring is needed.
 
-Custom framework hosts with projection routes must also provide the narrow reconciliation ports:
+Custom framework hosts must provide the narrow durable ports used by their compiled routes:
 
 ```ts
 import { getProjectionDispatchDescriptors } from "@sixb/core/internal/projections"
+import { WorkflowRunDispatcher } from "@sixb/core/internal/workflows"
 import { compileRoutesWithDiagnostics, OrchestratorWorker } from "@sixb/orchestrator"
 
 const projectionDispatchDescriptors = getProjectionDispatchDescriptors(sixb)
@@ -34,6 +35,7 @@ const { routes } = compileRoutesWithDiagnostics({
   syncs: sixb.definitions.syncs.list(),
   pipelines: sixb.definitions.pipelines.list(),
   projections: projectionDispatchDescriptors,
+  workflows: sixb.definitions.workflows.list(),
 })
 
 const worker = new OrchestratorWorker({
@@ -41,6 +43,9 @@ const worker = new OrchestratorWorker({
   events: sixb.events,
   queues: sixb.queues,
   routes,
+  dispatchers: {
+    workflows: new WorkflowRunDispatcher(sixb),
+  },
   projectionDispatch: {
     lakeStorage: sixb.lakeStorage,
     projectionRuns: sixb.storage.projectionRuns,

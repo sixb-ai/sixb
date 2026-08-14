@@ -4,7 +4,6 @@ import type {
   Queues,
   Sixb,
   Storage,
-  WorkflowRunSource,
   WorkflowStepOutputs,
 } from "@sixb/core"
 import type { LoggingService } from "@sixb/core/internal/logging"
@@ -33,7 +32,6 @@ export interface WorkflowJob {
   readonly id: string
   readonly workflowId: string
   readonly input?: Readonly<Record<string, unknown>>
-  readonly source?: WorkflowRunSource
   readonly execution?: WorkflowRunExecution
 }
 

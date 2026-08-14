@@ -11,7 +11,9 @@ import {
   WorkflowValidationError,
 } from "../src"
 import { flushSixbErrors } from "../src/error-reporting/internal"
+import { WorkflowRunError } from "../src/storage"
 import { createTestSixb } from "../src/testing"
+import { WorkflowRunDispatcher } from "../src/workflows/run-dispatch"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Transaction = defineObjectType({
@@ -76,9 +78,23 @@ describe("sixb.workflows.request", () => {
     })
     expect(run?.status).toBe("queued")
     expect(run?.workflowId).toBe("draft-invoice")
-    expect(run?.requestedByPrincipal).toEqual({ type: "system", id: "system" })
     expect(run?.input).toEqual({
       transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+    })
+    const execution = run
+      ? await host.storage.executions.getById({
+          projectId: sixb.execution.projectId,
+          id: run.executionId,
+        })
+      : null
+    expect(execution).toMatchObject({
+      executor: { type: "primitive", kind: "workflow", runId: result.runId },
+      source: { type: "execution", executionId: sixb.execution.id },
+      parentExecutionId: sixb.execution.id,
+      authorizationRef: {
+        type: "trustedPrimitive",
+        primitive: { kind: "workflow", id: "draft-invoice", runId: result.runId },
+      },
     })
 
     const jobs = await claimAll(host)
@@ -132,6 +148,51 @@ describe("sixb.workflows.request", () => {
     expect(reports).toEqual([
       `project:workflow-enqueue-failure:run:workflow:run_enqueue_failure:failed:${run?.finishedAt?.toISOString()}:workflow queue unavailable`,
     ])
+  })
+
+  test("rolls back the workflow execution when run persistence fails", async () => {
+    const { host, sixb } = createSixb()
+    const executions = host.storage.executions
+    const workflowRuns = host.storage.workflowRuns!
+    const transaction = host.storage.transaction.bind(host.storage)
+    let childExecutionId: string | undefined
+    host.storage.transaction = (run, options) => {
+      return transaction(async (tx) => {
+        await run(tx)
+        const queued = await tx.workflowRuns?.getById({
+          projectId: sixb.execution.projectId,
+          id: "run_storage_failure",
+        })
+        childExecutionId = queued?.executionId
+        throw new WorkflowRunError("workflow storage unavailable")
+      }, options)
+    }
+
+    await expect(
+      sixb.workflows.request(draftInvoice, {
+        runId: "run_storage_failure",
+        input: validInput(),
+      })
+    ).rejects.toThrow("workflow storage unavailable")
+
+    expect(childExecutionId).toBeDefined()
+    expect(
+      await executions.getById({ projectId: sixb.execution.projectId, id: sixb.execution.id })
+    ).not.toBeNull()
+    expect(
+      childExecutionId
+        ? await executions.getById({
+            projectId: sixb.execution.projectId,
+            id: childExecutionId,
+          })
+        : null
+    ).toBeNull()
+    expect(
+      await workflowRuns.getById({
+        projectId: sixb.execution.projectId,
+        id: "run_storage_failure",
+      })
+    ).toBeNull()
   })
 
   test("requestById rejects unknown input fields at runtime", async () => {
@@ -199,11 +260,11 @@ describe("sixb.workflows.request", () => {
         runId: "run_shared",
         input: validInput(),
       })
-    ).rejects.toThrow("already exists for a different workflow")
+    ).rejects.toThrow("already exists with a different request payload")
   })
 
-  test("persists and emits the run source", async () => {
-    const { host, sixb } = createSixb()
+  test("emits the request source without duplicating it on the run", async () => {
+    const { sixb } = createSixb()
     const source = {
       type: "webhook" as const,
       connectorId: "companycam",
@@ -211,13 +272,7 @@ describe("sixb.workflows.request", () => {
       deliveryId: "delivery-1",
     }
 
-    const result = await sixb.workflows.request(draftInvoice, { input: validInput(), source })
-
-    const run = await host.storage.workflowRuns?.getById({
-      projectId: sixb.execution.projectId,
-      id: result.runId,
-    })
-    expect(run?.source).toEqual(source)
+    await sixb.workflows.request(draftInvoice, { input: validInput(), source })
 
     const events = await sixb.events.read({ types: ["workflow.run.queued"] })
     expect(events[0]?.payload).toMatchObject({ source })
@@ -254,5 +309,84 @@ describe("sixb.workflows.request", () => {
     await expect(sixb.workflows.request(draftInvoice, { input: validInput() })).rejects.toThrow(
       "[Sixb] Workflow run storage is not configured."
     )
+  })
+})
+
+describe("automatic workflow dispatch", () => {
+  test("persists an honest root execution before publishing the queue job", async () => {
+    const { host } = createSixb()
+    const dispatcher = new WorkflowRunDispatcher(host)
+
+    const result = await dispatcher.dispatch({
+      workflowId: draftInvoice.id,
+      runId: "workflow:draft-invoice:schedule:daily:event:event-1",
+      input: validInput(),
+      scheduleId: "daily",
+      source: { type: "schedule", eventId: "event-1" },
+      correlationId: "correlation-1",
+      metadata: { sourceEventId: "event-1" },
+    })
+
+    const run = await host.storage.workflowRuns?.getById({
+      projectId: host.id,
+      id: result.runId,
+    })
+    const execution = run
+      ? await host.storage.executions.getById({ projectId: host.id, id: run.executionId })
+      : null
+    expect(execution).toMatchObject({
+      projectId: host.id,
+      executor: { type: "primitive", kind: "workflow", runId: result.runId },
+      source: { type: "schedule", eventId: "event-1" },
+      correlationId: "correlation-1",
+      authorizationRef: {
+        type: "trustedPrimitive",
+        primitive: { kind: "workflow", id: draftInvoice.id, runId: result.runId },
+      },
+    })
+    expect(execution?.parentExecutionId).toBeUndefined()
+    expect(execution?.requestedBy).toBeUndefined()
+
+    const [claimed] = await claimAll(host)
+    expect(claimed?.job).toMatchObject({
+      id: result.runId,
+      payload: { workflowId: draftInvoice.id, runId: result.runId, input: validInput() },
+      metadata: { sourceEventId: "event-1" },
+    })
+    const [queuedEvent] = await host.events.read({ types: ["workflow.run.queued"] })
+    expect(
+      queuedEvent && "correlationId" in queuedEvent ? queuedEvent.correlationId : undefined
+    ).toBe("correlation-1")
+  })
+
+  test("uses event provenance for event-based schedules and deduplicates replay", async () => {
+    const { host } = createSixb()
+    const dispatcher = new WorkflowRunDispatcher(host)
+    const input = {
+      workflowId: draftInvoice.id,
+      runId: "workflow:draft-invoice:schedule:on-update:event:event-2",
+      input: validInput(),
+      scheduleId: "on-update",
+      source: { type: "event" as const, eventId: "event-2" },
+      correlationId: "upstream-correlation",
+    }
+
+    const first = await dispatcher.dispatch(input)
+    const second = await dispatcher.dispatch(input)
+
+    expect(first.created).toBe(true)
+    expect(second.created).toBe(false)
+    const run = await host.storage.workflowRuns?.getById({ projectId: host.id, id: input.runId })
+    const execution = run
+      ? await host.storage.executions.getById({ projectId: host.id, id: run.executionId })
+      : null
+    expect(execution).toMatchObject({
+      source: { type: "event", eventId: "event-2" },
+      correlationId: "upstream-correlation",
+    })
+    expect(await claimAll(host)).toHaveLength(1)
+    await expect(
+      dispatcher.dispatch({ ...input, correlationId: "different-correlation" })
+    ).rejects.toThrow("already exists with different automatic provenance")
   })
 })

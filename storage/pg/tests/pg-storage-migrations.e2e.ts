@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { defineObjectType, migrateStorage, OntologyRegistry, prop } from "@sixb/core"
 import { defineMigrations } from "@sixb/core/storage"
-import { createMaterializerTestFixture } from "@sixb/core/testing"
+import { createMaterializerTestFixture, createTestWorkflowExecution } from "@sixb/core/testing"
 import { SQL } from "bun"
 import { PostgresStorage, type PostgresStorage as PostgresStorageType } from "../src"
 import {
@@ -39,6 +39,7 @@ describe("Postgres storage migrations", () => {
             "002-workflow-run-output",
             "003-merge-sync-runs",
             "004-executions",
+            "005-workflow-executions",
           ],
         },
       ])
@@ -70,6 +71,13 @@ describe("Postgres storage migrations", () => {
           id: "004-executions",
           status: "applied",
           version: 4,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "005-workflow-executions",
+          status: "applied",
+          version: 5,
         },
       ])
     })
@@ -200,6 +208,19 @@ describe("Postgres storage migrations", () => {
           "input_exhausted",
         ])
       )
+      expect(await readTableColumns(schemaName, "workflow_runs")).toEqual(
+        expect.arrayContaining(["execution_id"])
+      )
+      expect(await readTableColumns(schemaName, "workflow_runs")).not.toEqual(
+        expect.arrayContaining([
+          "source",
+          "requested_by_principal_type",
+          "requested_by_principal_id",
+        ])
+      )
+      await expect(readColumnNullable(schemaName, "workflow_runs", "execution_id")).resolves.toBe(
+        "NO"
+      )
     })
   })
 
@@ -249,6 +270,36 @@ describe("Postgres storage migrations", () => {
           { id: "data-run", output: { winner: 10 } },
           { id: "failed-run", output: null },
         ])
+      } finally {
+        await sql.unsafe("RESET search_path")
+        await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
+      }
+    })
+  })
+
+  test("requires explicit project handling for legacy workflow runs", async () => {
+    const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    await withSql(async (sql) => {
+      const schema = quoteIdent(schemaName)
+      const context = { exec: (sqlText: string) => sql.unsafe(sqlText).then(() => undefined) }
+
+      try {
+        await sql.unsafe(`CREATE SCHEMA ${schema}`)
+        await sql.unsafe(`SET search_path TO ${schema}`)
+        for (const migration of postgresStorageMigrations.steps.slice(0, 4)) {
+          await migration.up(context)
+        }
+        await sql.unsafe(`
+          INSERT INTO workflow_runs (
+            project_id, id, workflow_id, status, input, started_at
+          ) VALUES (
+            'project-a', 'legacy-run', 'legacy-workflow', 'queued', '{}',
+            '2026-01-01T00:00:00.000Z'
+          )
+        `)
+
+        await expect(postgresStorageMigrations.steps[4]?.up(context)).rejects.toThrow()
+        expect(await readTableColumns(schemaName, "workflow_runs")).not.toContain("execution_id")
       } finally {
         await sql.unsafe("RESET search_path")
         await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
@@ -380,7 +431,7 @@ describe("Postgres storage migrations", () => {
       expect(await migrator?.status()).toMatchObject({
         adapterId: POSTGRES_STORAGE_ADAPTER_ID,
         state: "current",
-        appliedVersion: 4,
+        appliedVersion: 5,
       })
     })
   })
@@ -430,6 +481,13 @@ describe("Postgres storage migrations", () => {
           id: "004-executions",
           status: "applied",
           version: 4,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "005-workflow-executions",
+          status: "applied",
+          version: 5,
         },
       ])
     } finally {
@@ -521,13 +579,24 @@ async function seedExistingStoreRows(storage: PostgresStorage): Promise<void> {
     finishedAt: new Date("2026-04-19T12:00:01.000Z"),
     progress: { sourceRowsRead: 4 },
   })
-  await storage.workflowRuns.start({
+  const workflowExecutionId = await createTestWorkflowExecution(storage.executions, {
+    projectId: "project-a",
+    workflowId: "reconcile-transaction",
+    runId: "workflow-run-1",
+  })
+  await storage.workflowRuns.queue({
     id: "workflow-run-1",
     projectId: "project-a",
+    executionId: workflowExecutionId,
     workflowId: "reconcile-transaction",
     input: {
       transactionId: "txn-1",
     },
+    queuedAt: new Date("2026-04-19T11:59:59.000Z"),
+  })
+  await storage.workflowRuns.start({
+    id: "workflow-run-1",
+    projectId: "project-a",
     startedAt: new Date("2026-04-19T12:00:00.000Z"),
   })
   await storage.workflowRuns.finish({

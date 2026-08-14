@@ -16,7 +16,6 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   prop,
-  SYSTEM_PRINCIPAL,
 } from "@sixb/core"
 import {
   DomainEventService,
@@ -31,7 +30,12 @@ import type { DatasetVersion } from "@sixb/core/lake-storage"
 import { InMemoryProjectionRunStorage } from "@sixb/core/storage"
 import { compileRoutes } from "../src/compile-routes"
 import { reconcileProjectionDispatch } from "../src/projection-dispatch-reconciler"
-import type { OrchestratorRoutes, OrchestratorRuntimeOptions } from "../src/types"
+import type {
+  OrchestratorRoutes,
+  OrchestratorRuntimeOptions,
+  WorkflowDispatcherPort,
+  WorkflowDispatchInput,
+} from "../src/types"
 import { OrchestratorWorker } from "../src/worker"
 
 const PROJECT_ID = "test-project"
@@ -161,18 +165,54 @@ async function startWorker(
   queues: InMemoryQueues,
   routes: OrchestratorRoutes,
   projectId = PROJECT_ID,
-  projectionDispatch?: OrchestratorRuntimeOptions["projectionDispatch"]
+  projectionDispatch?: OrchestratorRuntimeOptions["projectionDispatch"],
+  workflowDispatcher = createTestWorkflowRunDispatcher(queues, undefined, projectId)
 ): Promise<OrchestratorWorker> {
   const worker = new OrchestratorWorker({
     projectId,
     events: eventRuntime,
     queues,
     routes,
+    dispatchers: { workflows: workflowDispatcher },
     ...(projectionDispatch === undefined ? {} : { projectionDispatch }),
   })
   workers.push(worker)
   await worker.start()
   return worker
+}
+
+function createTestWorkflowRunDispatcher(
+  queues: InMemoryQueues,
+  calls?: WorkflowDispatchInput[],
+  projectId = PROJECT_ID
+): WorkflowDispatcherPort {
+  return {
+    async dispatch(input) {
+      calls?.push(structuredClone(input))
+      const [job] = await queues.workflows.enqueue({
+        projectId,
+        jobs: [
+          {
+            id: input.runId,
+            type: "workflow.run.requested",
+            payload: {
+              workflowId: input.workflowId,
+              runId: input.runId,
+              input: input.input,
+            },
+            metadata: input.metadata,
+          },
+        ],
+      })
+      return {
+        workflowId: input.workflowId,
+        runId: input.runId,
+        queuedAt: job!.createdAt,
+        jobId: job!.id,
+        created: true,
+      }
+    },
+  }
 }
 
 function invoiceProjectionDescriptor(
@@ -218,7 +258,15 @@ describe("OrchestratorWorker", () => {
     })
     const eventRuntime = createEvents()
     const queues = new InMemoryQueues()
-    await startWorker(eventRuntime, queues, routes)
+    const dispatches: WorkflowDispatchInput[] = []
+    await startWorker(
+      eventRuntime,
+      queues,
+      routes,
+      PROJECT_ID,
+      undefined,
+      createTestWorkflowRunDispatcher(queues, dispatches)
+    )
 
     const [sourceEvent] = await eventRuntime.append({
       events: [makeScheduleTriggeredEvent(daily.id)],
@@ -239,13 +287,15 @@ describe("OrchestratorWorker", () => {
         workflowId: workflow.id,
         runId: `workflow:${workflow.id}:schedule:${daily.id}:event:${sourceEvent!.id}`,
         input: {},
-        source: {
-          type: "schedule",
-          scheduleId: daily.id,
-          eventId: sourceEvent!.id,
-          principal: SYSTEM_PRINCIPAL,
-        },
       })
+      expect(dispatches).toEqual([
+        expect.objectContaining({
+          workflowId: workflow.id,
+          scheduleId: daily.id,
+          source: { type: "schedule", eventId: sourceEvent!.id },
+          correlationId: sourceEvent!.id,
+        }),
+      ])
       return true
     })
   })
@@ -253,7 +303,15 @@ describe("OrchestratorWorker", () => {
   test("event schedule fires only on a false-to-true transition and maps { event }", async () => {
     const eventRuntime = createEvents()
     const queues = new InMemoryQueues()
-    await startWorker(eventRuntime, queues, eventWorkflowRoutes())
+    const dispatches: WorkflowDispatchInput[] = []
+    await startWorker(
+      eventRuntime,
+      queues,
+      eventWorkflowRoutes(),
+      PROJECT_ID,
+      undefined,
+      createTestWorkflowRunDispatcher(queues, dispatches)
+    )
 
     await eventRuntime.publishEnvelopes([makeInvoiceUpdatedEvent(600, 700)])
     await Bun.sleep(50)
@@ -270,13 +328,15 @@ describe("OrchestratorWorker", () => {
         workflowId: highValueInvoiceWorkflow.id,
         runId: `workflow:${highValueInvoiceWorkflow.id}:schedule:${highValueInvoice.id}:event:${sourceEvent!.id}`,
         input: { invoiceId: "inv-1", amount: 700 },
-        source: {
-          type: "schedule",
-          scheduleId: highValueInvoice.id,
-          eventId: sourceEvent!.id,
-          principal: SYSTEM_PRINCIPAL,
-        },
       })
+      expect(dispatches).toEqual([
+        expect.objectContaining({
+          workflowId: highValueInvoiceWorkflow.id,
+          scheduleId: highValueInvoice.id,
+          source: { type: "event", eventId: sourceEvent!.id },
+          correlationId: sourceEvent!.id,
+        }),
+      ])
       return true
     })
   })
@@ -397,7 +457,15 @@ describe("OrchestratorWorker", () => {
     })
     const eventRuntime = createEvents()
     const queues = new InMemoryQueues()
-    await startWorker(eventRuntime, queues, routes)
+    const dispatches: WorkflowDispatchInput[] = []
+    await startWorker(
+      eventRuntime,
+      queues,
+      routes,
+      PROJECT_ID,
+      undefined,
+      createTestWorkflowRunDispatcher(queues, dispatches)
+    )
 
     await eventRuntime.append({
       events: [
@@ -413,6 +481,7 @@ describe("OrchestratorWorker", () => {
     ).toHaveLength(0)
 
     await eventRuntime.append({
+      correlationId: "upstream-correlation",
       events: [
         {
           type: "sync.run.finished",
@@ -424,6 +493,8 @@ describe("OrchestratorWorker", () => {
       const claimed = await queues.workflows.claim({ projectId: PROJECT_ID, workerId: "ok" })
       return claimed.length === 1
     })
+    expect(dispatches).toHaveLength(1)
+    expect(dispatches[0]?.correlationId).toBe("upstream-correlation")
   })
 
   test("dataset commits inject the version into direct projection jobs", async () => {
@@ -732,7 +803,21 @@ describe("OrchestratorWorker", () => {
           events: createEvents(),
           queues: new InMemoryQueues(),
           routes: new Map(),
+          dispatchers: {},
         })
     ).toThrow("[SixbOrchestrator] projectId is required.")
+  })
+
+  test("requires durable Core dispatch for workflow routes", () => {
+    expect(
+      () =>
+        new OrchestratorWorker({
+          projectId: PROJECT_ID,
+          events: createEvents(),
+          queues: new InMemoryQueues(),
+          routes: eventWorkflowRoutes(),
+          dispatchers: {},
+        })
+    ).toThrow("[SixbOrchestrator] Routes require the 'workflows' dispatcher.")
   })
 })
