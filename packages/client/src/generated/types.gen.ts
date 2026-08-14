@@ -3730,10 +3730,6 @@ export type GetWorkflowAgentNodeExecutionResponses = {
     completedAt?: string
     nodeRunId: string
     prompt: string
-    executionPrincipal?: {
-      principalType: "user" | "serviceAccount" | "system"
-      principalId: string
-    }
     trace?: Array<unknown>
     diagnostics?: Array<unknown>
     error?: string
@@ -6422,12 +6418,8 @@ export type PostAgentThreadMessageResponses = {
       threadId: string
       agentId: string
       triggerMessageId: string
-      requestedByPrincipal: {
-        type: "user" | "serviceAccount" | "system"
-        id: string
-      }
-      executionPrincipal?: {
-        type: "user" | "serviceAccount" | "system"
+      requestedBy?: {
+        type: "user" | "serviceAccount"
         id: string
       }
       status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
@@ -6619,12 +6611,8 @@ export type CancelAgentRunResponses = {
       threadId: string
       agentId: string
       triggerMessageId: string
-      requestedByPrincipal: {
-        type: "user" | "serviceAccount" | "system"
-        id: string
-      }
-      executionPrincipal?: {
-        type: "user" | "serviceAccount" | "system"
+      requestedBy?: {
+        type: "user" | "serviceAccount"
         id: string
       }
       status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
@@ -6719,12 +6707,8 @@ export type RetryAgentRunResponses = {
       threadId: string
       agentId: string
       triggerMessageId: string
-      requestedByPrincipal: {
-        type: "user" | "serviceAccount" | "system"
-        id: string
-      }
-      executionPrincipal?: {
-        type: "user" | "serviceAccount" | "system"
+      requestedBy?: {
+        type: "user" | "serviceAccount"
         id: string
       }
       status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
@@ -6817,12 +6801,8 @@ export type ListAgentThreadRunsResponses = {
       threadId: string
       agentId: string
       triggerMessageId: string
-      requestedByPrincipal: {
-        type: "user" | "serviceAccount" | "system"
-        id: string
-      }
-      executionPrincipal?: {
-        type: "user" | "serviceAccount" | "system"
+      requestedBy?: {
+        type: "user" | "serviceAccount"
         id: string
       }
       status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
@@ -6912,12 +6892,8 @@ export type GetAgentRunResponses = {
     threadId: string
     agentId: string
     triggerMessageId: string
-    requestedByPrincipal: {
-      type: "user" | "serviceAccount" | "system"
-      id: string
-    }
-    executionPrincipal?: {
-      type: "user" | "serviceAccount" | "system"
+    requestedBy?: {
+      type: "user" | "serviceAccount"
       id: string
     }
     status: "queued" | "running" | "succeeded" | "failed" | "cancelled"

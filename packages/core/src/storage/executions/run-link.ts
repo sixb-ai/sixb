@@ -34,3 +34,31 @@ export async function findPrimitiveRunExecution(input: {
   }
   return execution
 }
+
+/** Find the immutable execution and service-account authority owned by one Agent run. */
+export async function findAgentRunExecution(input: {
+  readonly executions: ExecutionStorage
+  readonly projectId: string
+  readonly executionId: string
+  readonly runId: string
+  readonly serviceAccountId: string
+}): Promise<ExecutionRecord | null> {
+  const execution = await input.executions.getById({
+    projectId: input.projectId,
+    id: input.executionId,
+  })
+  const authority = execution?.authorizationRef
+  if (
+    !execution ||
+    execution.source.type !== "execution" ||
+    execution.executor.type !== "agent" ||
+    execution.executor.runId !== input.runId ||
+    authority?.type !== "principal" ||
+    authority.principal.type !== "serviceAccount" ||
+    authority.principal.id !== input.serviceAccountId ||
+    authority.credential !== undefined
+  ) {
+    return null
+  }
+  return execution
+}

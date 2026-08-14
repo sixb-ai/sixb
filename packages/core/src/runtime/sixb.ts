@@ -83,7 +83,12 @@ function createExecutionFacades<TOntologySources extends readonly OntologySource
     pipelines: createPipelinesRuntime(runtime, dependencies.definitions.pipelines),
     projections: createProjectionsRuntime(runtime, dependencies.definitions.projections),
     rules: createRulesRuntime(runtime, dependencies.definitions.rules),
-    agents: createAgentsRuntime(runtime, dependencies.definitions.agents),
+    agents: createAgentsRuntime(
+      runtime,
+      execution,
+      dependencies.definitions.agents,
+      dependencies.definitions.security
+    ),
     events: createEventsRuntime(runtime),
     logs: createLogsRuntime(runtime, dependencies.logging),
     schedules: createSchedulesRuntime(dependencies.definitions.schedules),

@@ -37,8 +37,7 @@ Every referenced group must exist in your security registry (`security/groups/` 
 A thread records the principal that created it. Reading it, posting to it, and subscribing to its
 stream all require that owner (plus the `run:agent` grant). Anyone else sees it as not-found.
 
-Each run records both principals: `requestedByPrincipal` (who triggered it) and `executionPrincipal`
-(the identity it ran as).
+The run API exposes `requestedBy`, resolved from its immutable execution record. The Agent's managed service account is the execution authority; it is stored once in that execution record rather than copied onto the run.
 
 ## Related
 

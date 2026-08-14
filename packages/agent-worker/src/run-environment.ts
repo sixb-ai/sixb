@@ -180,6 +180,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
   return {
     turnContext: {
       id: context.id,
+      agentPrincipal: context.agentPrincipal,
       storage: context.storage,
       blobStorage: context.blobStorage,
       apiBaseUrl,

@@ -156,9 +156,6 @@ function serializeWorkflowAgentExecution(execution: WorkflowAgentNodeRunRecord) 
     ...serializeWorkflowAgentExecutionSummary(execution),
     nodeRunId: execution.nodeRunId,
     prompt: execution.prompt,
-    executionPrincipal: execution.executionPrincipal
-      ? serializePrincipal(execution.executionPrincipal)
-      : undefined,
     trace: execution.trace,
     diagnostics: execution.diagnostics,
     error: execution.error,

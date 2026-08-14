@@ -1,9 +1,9 @@
+import { agentServiceAccountId } from "../../agents/authority"
 import type { ExecutionStorage } from "../executions"
-import { findPrimitiveRunExecution } from "../executions/run-link"
+import { findAgentRunExecution, findPrimitiveRunExecution } from "../executions/run-link"
 import { WorkflowRunError } from "./errors"
 
 /** Validate the semantic link between a durable workflow run and its immutable execution. */
-
 export async function assertWorkflowRunExecution(input: {
   readonly executions: ExecutionStorage
   readonly projectId: string
@@ -33,6 +33,29 @@ export async function assertWorkflowRunExecution(input: {
   // requested-by propagation. This boundary only owns the workflow-specific source restriction.
   if (execution.source.type !== "execution") {
     invalidExecution(input.executionId, input.runId)
+  }
+}
+
+/** Validate the semantic link between a Workflow Agent-node run and its child execution. */
+export async function assertWorkflowAgentNodeRunExecution(input: {
+  readonly executions: ExecutionStorage
+  readonly projectId: string
+  readonly executionId: string
+  readonly nodeRunId: string
+  readonly agentId: string
+  readonly parentExecutionId: string
+}): Promise<void> {
+  const execution = await findAgentRunExecution({
+    executions: input.executions,
+    projectId: input.projectId,
+    executionId: input.executionId,
+    runId: input.nodeRunId,
+    serviceAccountId: agentServiceAccountId(input.agentId),
+  })
+  if (!execution || execution.parentExecutionId !== input.parentExecutionId) {
+    throw new WorkflowRunError(
+      `[Sixb] Execution '${input.executionId}' does not authorize Workflow Agent-node run '${input.nodeRunId}'.`
+    )
   }
 }
 

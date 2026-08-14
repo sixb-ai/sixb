@@ -252,9 +252,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         role: assistant.role,
         parts: assistantParts,
         ...(assistant.metadata === undefined ? {} : { metadata: assistant.metadata }),
-        ...(run.executionPrincipal === undefined
-          ? {}
-          : { authorPrincipal: run.executionPrincipal }),
+        authorPrincipal: context.agentPrincipal,
       },
       finish: {
         projectId,
@@ -364,7 +362,7 @@ async function finalizeCancelledTurn(input: {
       role: assistant.role,
       parts: assistant.parts,
       ...(assistant.metadata === undefined ? {} : { metadata: assistant.metadata }),
-      ...(run.executionPrincipal === undefined ? {} : { authorPrincipal: run.executionPrincipal }),
+      authorPrincipal: context.agentPrincipal,
     },
     finish: {
       projectId,

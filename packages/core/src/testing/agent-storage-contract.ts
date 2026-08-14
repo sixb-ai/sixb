@@ -10,9 +10,20 @@ import {
   type CreateAgentThreadInput,
   type StartAgentRunInput,
 } from "../storage/agents"
+import type { AuthStorage } from "../storage/auth"
+import type { ExecutionStorage } from "../storage/executions"
+import { createTestAgentExecution } from "./agent-execution"
 
-export interface AgentStorageContractSuiteOptions<TStorage extends AgentStorage = AgentStorage> {
-  /** Factory that produces a fresh `AgentStorage` instance for each test case. */
+export interface AgentStorageContractStorage {
+  readonly agents: AgentStorage
+  readonly auth: AuthStorage
+  readonly executions: ExecutionStorage
+}
+
+export interface AgentStorageContractSuiteOptions<
+  TStorage extends AgentStorageContractStorage = AgentStorageContractStorage,
+> {
+  /** Factory that produces a fresh storage bundle for each test case. */
   readonly createStorage: () => TStorage | Promise<TStorage>
   /** Optional cleanup invoked after every test case. */
   readonly teardown?: (storage: TStorage) => void | Promise<void>
@@ -63,32 +74,50 @@ type TestRunInput = CreateAgentRunInput &
   }
 
 function runInput(overrides: Partial<TestRunInput> = {}): TestRunInput {
-  return {
+  const input = {
     id: "run_1",
     projectId,
     threadId: "thr_1",
     agentId: "sales",
     triggerMessageId: "msg_user_1",
-    requestedByPrincipal: owner,
+    executionId: "test_agent_execution:run_1",
     execution: execution("exec_1"),
     createdAt: at("2026-06-23T10:00:10.000Z"),
     ...overrides,
+  }
+  return {
+    ...input,
+    executionId: overrides.executionId ?? `test_agent_execution:${input.id}`,
   }
 }
 
 async function createAndStartRun(
   storage: AgentStorage,
+  fixture: AgentStorageContractStorage,
   input: TestRunInput
 ): Promise<Awaited<ReturnType<AgentStorage["runs"]["start"]>>> {
-  await storage.runs.create(input)
+  await createRun(storage, fixture, input)
   return storage.runs.start({
     id: input.id,
     projectId: input.projectId,
-    executionPrincipal: input.executionPrincipal,
     modelId: input.modelId,
     execution: input.execution,
     startedAt: input.startedAt,
   })
+}
+
+async function createRun(
+  storage: AgentStorage,
+  fixture: AgentStorageContractStorage,
+  input: CreateAgentRunInput
+) {
+  await createTestAgentExecution(fixture, {
+    projectId: input.projectId,
+    agentId: input.agentId,
+    runId: input.id,
+    executionId: input.executionId,
+  })
+  return storage.runs.create(input)
 }
 
 /**
@@ -98,16 +127,18 @@ async function createAndStartRun(
  * project isolation, single-flight run reservation, execution reclaim, run finalization with
  * execution metadata, and message append with thread-stats bookkeeping.
  */
-export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
+export function runAgentStorageContractSuite<TStorage extends AgentStorageContractStorage>(
   label: string,
   options: AgentStorageContractSuiteOptions<TStorage>
 ): void {
-  const withStorage = async (body: (storage: TStorage) => Promise<void>): Promise<void> => {
-    const storage = await options.createStorage()
+  const withStorage = async (
+    body: (storage: AgentStorage, fixture: TStorage) => Promise<void>
+  ): Promise<void> => {
+    const fixture = await options.createStorage()
     try {
-      await body(storage)
+      await body(fixture.agents, fixture)
     } finally {
-      await options.teardown?.(storage)
+      await options.teardown?.(fixture)
     }
   }
 
@@ -210,10 +241,10 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
     // ── durable queued runs ────────────────────────────────────────────────────────────────────
 
     test("creates a queued run before execution and claims the thread", async () => {
-      await withStorage(async (storage) => {
+      await withStorage(async (storage, fixture) => {
         await storage.threads.create(threadInput())
 
-        const queued = await storage.runs.create(runInput({ id: "run_1" }))
+        const queued = await createRun(storage, fixture, runInput({ id: "run_1" }))
         expect(queued).toMatchObject({ status: "queued", attempt: 0, threadId: "thr_1" })
         expect(queued.execution).toBeUndefined()
         expect(queued.startedAt).toBeUndefined()
@@ -230,22 +261,40 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
         const started = await storage.runs.start({
           projectId,
           id: "run_1",
-          executionPrincipal: serviceAccount,
           modelId: "test-model",
           execution: execution("exec_1"),
           startedAt: at("2026-06-23T10:01:00.000Z"),
         })
         expect(started).toMatchObject({ status: "running", attempt: 1, modelId: "test-model" })
         expect(started.execution).toEqual(execution("exec_1"))
-        expect(started.executionPrincipal).toEqual(serviceAccount)
+        expect(started.executionId).toBe("test_agent_execution:run_1")
         expect(started.startedAt?.toISOString()).toBe("2026-06-23T10:01:00.000Z")
       })
     })
 
-    test("finishes a queued run and releases the thread", async () => {
-      await withStorage(async (storage) => {
+    test("rejects a run whose durable execution does not match its Agent authority", async () => {
+      await withStorage(async (storage, fixture) => {
         await storage.threads.create(threadInput())
-        await storage.runs.create(runInput({ id: "run_1" }))
+        const executionId = await createTestAgentExecution(fixture, {
+          projectId,
+          agentId: "support",
+          runId: "run_1",
+        })
+
+        await expectAgentError(
+          storage.runs.create(runInput({ id: "run_1", executionId })),
+          "invalid_input"
+        )
+        await expect(storage.threads.getById({ projectId, id: "thr_1" })).resolves.toMatchObject({
+          activeRunId: null,
+        })
+      })
+    })
+
+    test("finishes a queued run and releases the thread", async () => {
+      await withStorage(async (storage, fixture) => {
+        await storage.threads.create(threadInput())
+        await createRun(storage, fixture, runInput({ id: "run_1" }))
 
         const cancelled = await storage.runs.finishQueued({
           projectId,
@@ -271,7 +320,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
           "invalid_state"
         )
 
-        await storage.runs.create(runInput({ id: "run_2" }))
+        await createRun(storage, fixture, runInput({ id: "run_2" }))
         await expect(
           storage.runs.finishQueued({
             projectId,
@@ -286,37 +335,49 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
     // ── single-flight execution ─────────────────────────────────────────────────────────────────
 
     test("allows a single active run per thread", async () => {
-      await withStorage(async (storage) => {
+      await withStorage(async (storage, fixture) => {
         await storage.threads.create(threadInput())
 
-        const run = await createAndStartRun(storage, runInput({ id: "run_1" }))
+        const run = await createAndStartRun(storage, fixture, runInput({ id: "run_1" }))
         expect(run).toMatchObject({ status: "running", attempt: 1, threadId: "thr_1" })
-        expect(run.requestedByPrincipal).toEqual(owner)
+        expect(run.executionId).toBe("test_agent_execution:run_1")
         expect(run.execution?.token).toBe("exec_1")
         await expect(storage.threads.getById({ projectId, id: "thr_1" })).resolves.toMatchObject({
           activeRunId: "run_1",
         })
 
         await expectAgentError(
-          createAndStartRun(storage, runInput({ id: "run_2", execution: execution("exec_2") })),
+          createAndStartRun(
+            storage,
+            fixture,
+            runInput({ id: "run_2", execution: execution("exec_2") })
+          ),
           "active_run_exists"
         )
 
         // Reservation against an unknown thread / duplicate run id.
         await expectAgentError(
-          createAndStartRun(storage, runInput({ id: "run_x", threadId: "ghost" })),
+          createAndStartRun(storage, fixture, runInput({ id: "run_x", threadId: "ghost" })),
           "thread_not_found"
         )
       })
     })
 
     test("never lets two concurrent queued runs both claim one thread", async () => {
-      await withStorage(async (storage) => {
+      await withStorage(async (storage, fixture) => {
         await storage.threads.create(threadInput())
 
         const results = await Promise.allSettled([
-          createAndStartRun(storage, runInput({ id: "run_a", execution: execution("exec_a") })),
-          createAndStartRun(storage, runInput({ id: "run_b", execution: execution("exec_b") })),
+          createAndStartRun(
+            storage,
+            fixture,
+            runInput({ id: "run_a", execution: execution("exec_a") })
+          ),
+          createAndStartRun(
+            storage,
+            fixture,
+            runInput({ id: "run_b", execution: execution("exec_b") })
+          ),
         ])
         const fulfilled = results.filter((result) => result.status === "fulfilled")
         const rejected = results.filter(
@@ -332,9 +393,9 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
     // ── execution reclaim ───────────────────────────────────────────────────────────────────────
 
     test("reclaim rotates the execution token and bumps the attempt", async () => {
-      await withStorage(async (storage) => {
+      await withStorage(async (storage, fixture) => {
         await storage.threads.create(threadInput())
-        await createAndStartRun(storage, runInput({ id: "run_1" }))
+        await createAndStartRun(storage, fixture, runInput({ id: "run_1" }))
 
         const reclaimed = await storage.runs.reclaim({
           projectId,
@@ -357,10 +418,11 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
     })
 
     test("projects confirmed queue ownership monotonically and fences stale executions", async () => {
-      await withStorage(async (storage) => {
+      await withStorage(async (storage, fixture) => {
         await storage.threads.create(threadInput())
         await createAndStartRun(
           storage,
+          fixture,
           runInput({
             id: "run_1",
             execution: execution("exec_1", at("2026-06-23T10:02:00.000Z")),
@@ -403,9 +465,9 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
     })
 
     test("does not alias stored run records to callers", async () => {
-      await withStorage(async (storage) => {
+      await withStorage(async (storage, fixture) => {
         await storage.threads.create(threadInput())
-        const run = await createAndStartRun(storage, runInput({ id: "run_1" }))
+        const run = await createAndStartRun(storage, fixture, runInput({ id: "run_1" }))
 
         const mutableExecution = run.execution as
           | { token: string; queueLeaseExpiresAt: Date }
@@ -422,12 +484,13 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
     // ── finalization ────────────────────────────────────────────────────────────────────────────
 
     test("releasing a run only clears its own thread's active pointer", async () => {
-      await withStorage(async (storage) => {
+      await withStorage(async (storage, fixture) => {
         await storage.threads.create(threadInput({ id: "thr_1" }))
         await storage.threads.create(threadInput({ id: "thr_2" }))
-        await createAndStartRun(storage, runInput({ id: "run_1", threadId: "thr_1" }))
+        await createAndStartRun(storage, fixture, runInput({ id: "run_1", threadId: "thr_1" }))
         await createAndStartRun(
           storage,
+          fixture,
           runInput({
             id: "run_2",
             threadId: "thr_2",
@@ -453,9 +516,9 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
     })
 
     test("finishes a run, records execution metadata, and releases the thread", async () => {
-      await withStorage(async (storage) => {
+      await withStorage(async (storage, fixture) => {
         await storage.threads.create(threadInput())
-        await createAndStartRun(storage, runInput({ id: "run_1" }))
+        await createAndStartRun(storage, fixture, runInput({ id: "run_1" }))
 
         const finished = await storage.runs.finish({
           projectId,
@@ -502,15 +565,19 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
           activeRunId: null,
         })
         await expect(
-          createAndStartRun(storage, runInput({ id: "run_2", execution: execution("exec_2") }))
+          createAndStartRun(
+            storage,
+            fixture,
+            runInput({ id: "run_2", execution: execution("exec_2") })
+          )
         ).resolves.toMatchObject({ status: "running" })
       })
     })
 
     test("records failure detail and rejects a non-running run or stale execution", async () => {
-      await withStorage(async (storage) => {
+      await withStorage(async (storage, fixture) => {
         await storage.threads.create(threadInput())
-        await createAndStartRun(storage, runInput({ id: "run_1" }))
+        await createAndStartRun(storage, fixture, runInput({ id: "run_1" }))
 
         await expectAgentError(
           storage.runs.finish({
@@ -548,12 +615,13 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
     })
 
     test("lists runs with thread, status, and ordering filters", async () => {
-      await withStorage(async (storage) => {
+      await withStorage(async (storage, fixture) => {
         await storage.threads.create(threadInput({ id: "thr_1" }))
         await storage.threads.create(threadInput({ id: "thr_2" }))
 
         await createAndStartRun(
           storage,
+          fixture,
           runInput({
             id: "run_1",
             threadId: "thr_1",
@@ -568,6 +636,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
         })
         await createAndStartRun(
           storage,
+          fixture,
           runInput({
             id: "run_2",
             threadId: "thr_1",
@@ -577,6 +646,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
         )
         await createAndStartRun(
           storage,
+          fixture,
           runInput({
             id: "run_3",
             threadId: "thr_2",
@@ -597,26 +667,32 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
     })
 
     test("filters queued runs by their effective created timestamp", async () => {
-      await withStorage(async (storage) => {
+      await withStorage(async (storage, fixture) => {
         await storage.threads.create(threadInput({ id: "thr_before" }))
         await storage.threads.create(threadInput({ id: "thr_inside" }))
         await storage.threads.create(threadInput({ id: "thr_after" }))
 
-        await storage.runs.create(
+        await createRun(
+          storage,
+          fixture,
           runInput({
             id: "run_before",
             threadId: "thr_before",
             createdAt: at("2026-06-23T10:00:00.000Z"),
           })
         )
-        await storage.runs.create(
+        await createRun(
+          storage,
+          fixture,
           runInput({
             id: "run_inside",
             threadId: "thr_inside",
             createdAt: at("2026-06-23T11:00:00.000Z"),
           })
         )
-        await storage.runs.create(
+        await createRun(
+          storage,
+          fixture,
           runInput({
             id: "run_after",
             threadId: "thr_after",
@@ -640,7 +716,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
     // ── messages ──────────────────────────────────────────────────────────────────────────────
 
     test("appends messages, assigns seq, and bumps thread stats", async () => {
-      await withStorage(async (storage) => {
+      await withStorage(async (storage, fixture) => {
         await storage.threads.create(threadInput())
 
         const userMessage = await storage.messages.append({
@@ -661,14 +737,8 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
         })
         expect(userMessage.authorPrincipal).toEqual(owner)
 
-        const run = await createAndStartRun(
-          storage,
-          runInput({
-            id: "run_1",
-            executionPrincipal: serviceAccount,
-          })
-        )
-        expect(run.executionPrincipal).toEqual(serviceAccount)
+        const run = await createAndStartRun(storage, fixture, runInput({ id: "run_1" }))
+        expect(run.executionId).toBe("test_agent_execution:run_1")
         const assistantMessage = await storage.messages.append({
           id: "msg_asst_1",
           projectId,
@@ -716,7 +786,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
     })
 
     test("lists messages with role filter, ordering, and pagination", async () => {
-      await withStorage(async (storage) => {
+      await withStorage(async (storage, fixture) => {
         await storage.threads.create(threadInput())
         await storage.messages.append({
           id: "m1",
@@ -727,7 +797,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
           parts: [{ type: "text", text: "one" }],
           createdAt: at("2026-06-23T10:00:00.000Z"),
         })
-        await createAndStartRun(storage, runInput({ id: "run_1" }))
+        await createAndStartRun(storage, fixture, runInput({ id: "run_1" }))
         await storage.messages.append({
           id: "m2",
           projectId,

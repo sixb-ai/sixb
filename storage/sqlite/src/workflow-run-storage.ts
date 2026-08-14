@@ -1,5 +1,8 @@
 import type { Database } from "bun:sqlite"
-import { assertWorkflowRunExecution } from "@sixb/core/internal/workflow-run-storage-provider"
+import {
+  assertWorkflowAgentNodeRunExecution,
+  assertWorkflowRunExecution,
+} from "@sixb/core/internal/workflow-run-storage-provider"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type {
   CancelWorkflowAgentNodeRunInput,
@@ -77,7 +80,7 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
     }
 
     this.nodes = new SqliteWorkflowNodeRunStorage(this.db)
-    this.agentNodes = new SqliteWorkflowAgentNodeRunStorage(this.db)
+    this.agentNodes = new SqliteWorkflowAgentNodeRunStorage(this.db, this.executions)
   }
 
   async queue(input: QueueWorkflowRunInput): Promise<WorkflowRunRecord> {
@@ -448,19 +451,51 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
 }
 
 export class SqliteWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunStorage {
-  constructor(private readonly db: Database) {}
+  constructor(
+    private readonly db: Database,
+    private readonly executions: ExecutionStorage
+  ) {}
 
   async create(input: CreateWorkflowAgentNodeRunInput): Promise<WorkflowAgentNodeRunRecord> {
+    const parent = this.db
+      .query(
+        `
+        SELECT workflow_runs.execution_id
+        FROM workflow_node_runs
+        JOIN workflow_runs
+          ON workflow_runs.project_id = workflow_node_runs.project_id
+          AND workflow_runs.id = workflow_node_runs.workflow_run_id
+        WHERE workflow_node_runs.project_id = ?
+          AND workflow_node_runs.id = ?
+          AND workflow_node_runs.node_type = 'agent'
+      `
+      )
+      .get(input.projectId, input.nodeRunId) as { execution_id: string } | null
+    if (!parent) {
+      throw new WorkflowRunError(
+        `[SixbSqlite] Agent workflow node run '${input.nodeRunId}' was not found.`
+      )
+    }
+    await assertWorkflowAgentNodeRunExecution({
+      executions: this.executions,
+      projectId: input.projectId,
+      executionId: input.executionId,
+      nodeRunId: input.nodeRunId,
+      agentId: input.agentId,
+      parentExecutionId: parent.execution_id,
+    })
+
     try {
       this.db
         .query(`
           INSERT INTO workflow_agent_node_runs (
-            project_id, node_run_id, agent_id, status, prompt, attempt, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            project_id, node_run_id, execution_id, agent_id, status, prompt, attempt, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `)
         .run(
           input.projectId,
           input.nodeRunId,
+          input.executionId,
           input.agentId,
           "queued",
           input.prompt,
@@ -484,14 +519,12 @@ export class SqliteWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunSt
       this.db
         .query(`
         UPDATE workflow_agent_node_runs SET
-          status = ?, execution_principal_type = ?, execution_principal_id = ?, model_id = ?,
-          attempt = 1, execution_token = ?, execution_queue_lease_expires_at = ?, started_at = ?
+          status = ?, model_id = ?, attempt = 1, execution_token = ?,
+          execution_queue_lease_expires_at = ?, started_at = ?
         WHERE project_id = ? AND node_run_id = ?
       `)
         .run(
           "running",
-          input.executionPrincipal?.type ?? null,
-          input.executionPrincipal?.id ?? null,
           input.modelId ?? null,
           input.execution.token,
           input.execution.queueLeaseExpiresAt.toISOString(),
@@ -1022,11 +1055,10 @@ interface WorkflowNodeRunDatabaseRow {
 interface WorkflowAgentNodeRunDatabaseRow {
   project_id: string
   node_run_id: string
+  execution_id: string
   agent_id: string
   status: WorkflowAgentNodeRunRecord["status"]
   prompt: string
-  execution_principal_type: "serviceAccount" | null
-  execution_principal_id: string | null
   model_id: string | null
   finish_reason: WorkflowAgentNodeRunRecord["finishReason"] | null
   usage: string | null
@@ -1058,17 +1090,10 @@ function rowToWorkflowAgentNodeRunRecord(
   return {
     projectId: row.project_id,
     nodeRunId: row.node_run_id,
+    executionId: row.execution_id,
     agentId: row.agent_id,
     status: row.status,
     prompt: row.prompt,
-    ...(row.execution_principal_type && row.execution_principal_id
-      ? {
-          executionPrincipal: {
-            type: row.execution_principal_type,
-            id: row.execution_principal_id,
-          },
-        }
-      : {}),
     ...(row.model_id ? { modelId: row.model_id } : {}),
     ...(row.finish_reason ? { finishReason: row.finish_reason } : {}),
     ...(row.usage ? { usage: JSON.parse(row.usage) } : {}),

@@ -85,28 +85,27 @@ export class PgAuthServiceAccountStore implements AuthServiceAccountStore {
   }
 
   async update(input: UpdateAuthServiceAccountInput): Promise<ServiceAccountRecord> {
-    const existing = await this.getById(input)
-    if (!existing) {
-      throw new AuthStorageError(
-        "missing_service_account",
-        `[Sixb] Service account '${input.id}' not found for project '${input.projectId}'.`
-      )
-    }
-
+    const id = assertNonEmpty(input.id, "Service account id")
+    const projectId = assertNonEmpty(input.projectId, "Project id")
     const updatedAt = dateOrNow(input.updatedAt)
     const name =
-      input.name === undefined ? existing.name : assertNonEmpty(input.name, "Service account name")
-    const description = input.description === undefined ? existing.description : input.description
+      input.name === undefined ? null : assertNonEmpty(input.name, "Service account name")
     const [row] = await this.sql<PgAuthServiceAccountRow[]>`
       UPDATE auth_service_accounts
-      SET name = ${name},
-          description = ${description ?? null},
-          status = ${input.status ?? existing.status},
+      SET name = COALESCE(${name}, name),
+          description = COALESCE(${input.description ?? null}, description),
+          status = COALESCE(${input.status ?? null}, status),
           updated_at = ${updatedAt}
-      WHERE project_id = ${input.projectId}
-        AND id = ${input.id}
+      WHERE project_id = ${projectId}
+        AND id = ${id}
       RETURNING *
     `
+    if (!row) {
+      throw new AuthStorageError(
+        "missing_service_account",
+        `[Sixb] Service account '${id}' not found for project '${projectId}'.`
+      )
+    }
 
     return rowToServiceAccountRecord(row)
   }

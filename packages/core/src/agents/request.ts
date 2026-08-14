@@ -1,14 +1,21 @@
+import { randomUUID } from "node:crypto"
 import type { Principal } from "../auth"
 import { SYSTEM_PRINCIPAL } from "../auth"
 import { assertAuthorized } from "../authorization"
 import type { FileRef } from "../blob-storage"
+import { createAgentExecutionRecord } from "../execution/agent"
+import { ensureExecutionRecord, executionRecordInputFromRuntime } from "../execution/durable"
+import type { ExecutionContext } from "../execution/types"
 import type { SixbRuntimeContext } from "../runtime/types"
+import type { SecurityDefinitionCatalog } from "../security"
 import {
   type AgentRunRecord,
   type AgentStorage,
   AgentStorageError,
   type AgentThreadRecord,
 } from "../storage/agents"
+import type { CreateExecutionInput } from "../storage/executions"
+import { ensureAgentExecutionIdentity, resolveAgentExecutionAuthorization } from "./authority"
 import type { AgentContextEntryInput } from "./context"
 import { resolveAgentContextParts } from "./context-resolution"
 import { dispatchQueuedAgentRuns } from "./dispatch"
@@ -31,7 +38,7 @@ export interface RequestAgentRunInput {
   readonly title?: string
   /** Explicit id for the trigger (user) message. Defaults to a generated id. */
   readonly messageId?: string
-  /** Owner principal for a newly created thread. Defaults to the system principal until auth lands. */
+  /** Owner principal for a new thread. Defaults to system for an auth-disabled execution. */
   readonly principal?: Principal
 }
 
@@ -54,6 +61,8 @@ export interface RequestAgentRunResult {
  */
 export async function requestAgentRun(
   runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
+  security: SecurityDefinitionCatalog,
   agent: AgentDefinition,
   input: RequestAgentRunInput
 ): Promise<RequestAgentRunResult> {
@@ -84,6 +93,13 @@ export async function requestAgentRun(
   }
 
   const runId = createAgentRunId()
+  const durableExecution = await prepareDurableAgentExecution(
+    runtime,
+    execution,
+    security,
+    agent,
+    runId
+  )
   const triggerMessageId = input.messageId ?? createAgentMessageId()
   let run: AgentRunRecord
   try {
@@ -95,6 +111,7 @@ export async function requestAgentRun(
           "[Sixb] Agent storage is not configured."
         )
       }
+      await tx.executions.create(durableExecution)
       await agents.messages.append({
         id: triggerMessageId,
         projectId,
@@ -111,10 +128,10 @@ export async function requestAgentRun(
       return agents.runs.create({
         id: runId,
         projectId,
+        executionId: durableExecution.id,
         threadId: thread.id,
         agentId: agent.id,
         triggerMessageId,
-        requestedByPrincipal: principal,
       })
     })
   } catch (error) {
@@ -124,17 +141,114 @@ export async function requestAgentRun(
     throw error
   }
 
-  // The queued run is also the durable dispatch intent. Publication is best-effort here; an agent
-  // worker scans queued runs and retries with the same deterministic queue job id.
-  let jobId: string | undefined
+  const jobId = await dispatchAgentRun(runtime, agents, runId)
+
+  return {
+    run,
+    ...(jobId ? { jobId } : {}),
+    createdThread,
+  }
+}
+
+/** Retry a failed turn as a new child execution while reusing its immutable trigger message. */
+export async function retryAgentRun(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
+  security: SecurityDefinitionCatalog,
+  agent: AgentDefinition,
+  failedRun: AgentRunRecord
+): Promise<RequestAgentRunResult> {
+  assertAuthorized(runtime, { kind: "agent.run", agentId: agent.id })
+  if (failedRun.agentId !== agent.id) {
+    throw new AgentRequestError(
+      "agent_not_found",
+      `[Sixb] Agent run '${failedRun.id}' does not belong to agent '${agent.id}'.`
+    )
+  }
+  if (failedRun.status !== "failed") {
+    throw new AgentRequestError(
+      "run_not_retryable",
+      `[Sixb] Only failed Agent runs can be retried.`
+    )
+  }
+
+  const agents = requireAgentStorage(runtime)
+  const runId = createAgentRunId()
+  const durableExecution = await prepareDurableAgentExecution(
+    runtime,
+    execution,
+    security,
+    agent,
+    runId
+  )
+  const run = await runtime.storage.transaction(async (tx) => {
+    const agents = tx.agents
+    if (!agents) {
+      throw new AgentRequestError("storage_unavailable", "[Sixb] Agent storage is not configured.")
+    }
+    await tx.executions.create(durableExecution)
+    return agents.runs.create({
+      id: runId,
+      projectId: runtime.projectId,
+      executionId: durableExecution.id,
+      threadId: failedRun.threadId,
+      agentId: agent.id,
+      triggerMessageId: failedRun.triggerMessageId,
+    })
+  })
+  const jobId = await dispatchAgentRun(runtime, agents, runId)
+  return { run, ...(jobId ? { jobId } : {}), createdThread: false }
+}
+
+async function prepareDurableAgentExecution(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
+  security: SecurityDefinitionCatalog,
+  agent: AgentDefinition,
+  runId: string
+): Promise<CreateExecutionInput> {
+  const identity = await ensureAgentExecutionIdentity({
+    auth: runtime.storage.auth,
+    projectId: runtime.projectId,
+    agent,
+  })
+  const resolved = await resolveAgentExecutionAuthorization({
+    auth: runtime.storage.auth,
+    projectId: runtime.projectId,
+    agentId: agent.id,
+    authorizationRef: { type: "principal", principal: identity.principal },
+    security,
+  })
+  const parent = await ensureExecutionRecord(
+    runtime.storage.executions,
+    executionRecordInputFromRuntime({
+      execution,
+      runtimeAuthorization: runtime.runtimeAuthorization,
+    })
+  )
+  return createAgentExecutionRecord({
+    id: `exec_${randomUUID()}`,
+    parent,
+    agentId: agent.id,
+    runId,
+    principal: resolved.identity.principal,
+  })
+}
+
+async function dispatchAgentRun(
+  runtime: SixbRuntimeContext,
+  agents: AgentStorage,
+  runId: string
+): Promise<string | undefined> {
+  // The queued run is the durable dispatch intent. Publication is best-effort; workers reconcile
+  // it with the same deterministic queue job id if the queue is temporarily unavailable.
   try {
     const dispatch = await dispatchQueuedAgentRuns({
-      projectId,
+      projectId: runtime.projectId,
       storage: agents,
       queue: runtime.queues.agents,
       runIds: [runId],
     })
-    jobId = dispatch.dispatched[0]?.jobId
     const failure = dispatch.failures[0]
     if (failure) {
       console.error(
@@ -142,14 +256,10 @@ export async function requestAgentRun(
         failure.error
       )
     }
+    return dispatch.dispatched[0]?.jobId
   } catch (error) {
     console.error(`[Sixb] Could not dispatch queued agent run '${runId}'; retrying later.`, error)
-  }
-
-  return {
-    run,
-    ...(jobId ? { jobId } : {}),
-    createdThread,
+    return undefined
   }
 }
 

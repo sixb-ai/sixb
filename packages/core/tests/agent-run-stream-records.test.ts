@@ -14,10 +14,10 @@ function runRecord(overrides: Partial<AgentRunRecord> = {}): AgentRunRecord {
   return {
     id: "agt_run_1",
     projectId: "stream-records-tests",
+    executionId: "exec_agt_run_1",
     threadId: "agt_thr_1",
     agentId: "assistant",
     triggerMessageId: "agt_msg_1",
-    requestedByPrincipal: { type: "user", id: "user-1" },
     status: "cancelled",
     attempt: 0,
     createdAt: new Date("2026-01-02T03:00:00.000Z"),

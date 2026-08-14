@@ -1,9 +1,11 @@
-import { resolveAuthorizationContext, type SixbHostView } from "@sixb/core"
+import type { AuthorizationContext, SixbHostView } from "@sixb/core"
+import { assertAgentExecutionRecord } from "@sixb/core/internal/agent-execution"
 import {
   AGENT_API_GATEWAY_PREFIX,
   AGENT_API_ROUTES,
   isAllowedAgentApiRequest,
   isValidAgentApiGatewayCapability,
+  resolveAgentExecutionAuthorization,
 } from "@sixb/core/internal/agents"
 import { normalizeRoutePath, pathSegmentsFor } from "@sixb/core/internal/http"
 import type { Elysia } from "elysia"
@@ -158,42 +160,37 @@ async function resolveAgentRunAuthState(
     return jsonError(403, "Agent API gateway capability is not valid for this run.")
   }
 
-  if (!host.auth.isEnabled()) {
-    return {
-      authorization: { type: "disabled" as const },
-      agentExecution,
-      ...(conversationalRun ? { agentRun: conversationalRun } : {}),
-    }
-  }
-
-  // Two different failures shared one status. Missing auth storage is a runtime the
-  // operator did not configure; a run without an execution principal is a run that
-  // cannot prove an identity. Only the first is a 501.
   const auth = host.storage.auth
   if (!auth) {
     return jsonError(501, "Agent API gateway is not configured for authenticated agent access.")
   }
-  if (!run.executionPrincipal) {
-    return jsonError(403, "Agent run has no execution identity.")
+  const execution = await host.storage.executions.getById({
+    projectId: host.id,
+    id: run.executionId,
+  })
+  if (!execution) {
+    return jsonError(403, "Agent run execution is not available.")
   }
 
-  const serviceAccount = await auth.serviceAccounts.getById({
-    projectId: host.id,
-    id: run.executionPrincipal.id,
-  })
-  if (!serviceAccount || serviceAccount.status !== "active") {
-    return jsonError(403, "Agent execution identity is not active.")
+  let authz: AuthorizationContext
+  try {
+    const resolved = await resolveAgentExecutionAuthorization({
+      auth,
+      projectId: host.id,
+      agentId: run.agentId,
+      authorizationRef: execution.authorizationRef,
+      security: host.definitions.security,
+    })
+    assertAgentExecutionRecord({
+      execution,
+      agentId: run.agentId,
+      runId: input.runId,
+      authorization: resolved.context,
+    })
+    authz = resolved.context
+  } catch {
+    return jsonError(403, "Agent run execution authority is not valid.")
   }
-
-  const memberships = await auth.serviceAccountGroupMemberships.listForServiceAccount({
-    projectId: host.id,
-    serviceAccountId: serviceAccount.id,
-  })
-  const authz = resolveAuthorizationContext({
-    principal: run.executionPrincipal,
-    groupIds: memberships.map((membership) => membership.groupId),
-    roles: host.definitions.security.listResolvedRoles(),
-  })
 
   return {
     authorization: { type: "principal" as const, context: authz },

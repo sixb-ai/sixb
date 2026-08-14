@@ -144,7 +144,6 @@ export const WorkflowAgentNodeExecutionSummarySchema = z.object({
 export const WorkflowAgentNodeExecutionSchema = WorkflowAgentNodeExecutionSummarySchema.extend({
   nodeRunId: z.string(),
   prompt: z.string(),
-  executionPrincipal: WorkflowInterventionActorSchema.optional(),
   trace: z.array(z.unknown()).optional(),
   diagnostics: z.array(z.unknown()).optional(),
   error: z.string().optional(),

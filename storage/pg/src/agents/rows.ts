@@ -1,4 +1,4 @@
-import { type AgentMessagePart, type Principal, SYSTEM_PRINCIPAL } from "@sixb/core"
+import type { AgentMessagePart, Principal } from "@sixb/core"
 import {
   type AgentMessageRecord,
   type AgentRunDiagnostic,
@@ -30,13 +30,10 @@ export interface AgentThreadRow {
 export interface AgentRunRow {
   project_id: string
   id: string
+  execution_id: string
   thread_id: string
   agent_id: string
   trigger_message_id: string
-  requested_by_principal_type: Principal["type"] | null
-  requested_by_principal_id: string | null
-  execution_principal_type: "serviceAccount" | null
-  execution_principal_id: string | null
   status: AgentRunRecord["status"]
   model_id: string | null
   finish_reason: string | null
@@ -93,16 +90,10 @@ export function rowToRunRecord(row: AgentRunRow): AgentRunRecord {
   return {
     id: row.id,
     projectId: row.project_id,
+    executionId: row.execution_id,
     threadId: row.thread_id,
     agentId: row.agent_id,
     triggerMessageId: row.trigger_message_id,
-    requestedByPrincipal:
-      principalFromColumns(row.requested_by_principal_type, row.requested_by_principal_id) ??
-      SYSTEM_PRINCIPAL,
-    executionPrincipal: serviceAccountPrincipalFromColumns(
-      row.execution_principal_type,
-      row.execution_principal_id
-    ),
     status: row.status,
     modelId: row.model_id ?? undefined,
     finishReason: coerceAgentRunFinishReason(row.finish_reason),
@@ -148,13 +139,6 @@ function principalFromColumns(
   id: string | null | undefined
 ): Principal | undefined {
   return type && id ? { type, id } : undefined
-}
-
-function serviceAccountPrincipalFromColumns(
-  type: "serviceAccount" | null | undefined,
-  id: string | null | undefined
-): Extract<Principal, { readonly type: "serviceAccount" }> | undefined {
-  return type === "serviceAccount" && id ? { type, id } : undefined
 }
 
 function rowToUsage(row: AgentRunRow): AgentRunUsage | undefined {

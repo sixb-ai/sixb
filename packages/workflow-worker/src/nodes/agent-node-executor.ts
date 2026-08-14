@@ -1,4 +1,9 @@
-import { workflowAgentNodeQueueJobId } from "@sixb/core/internal/agents"
+import { randomUUID } from "node:crypto"
+import { createAgentExecutionRecord } from "@sixb/core/internal/agent-execution"
+import {
+  ensureAgentExecutionIdentity,
+  workflowAgentNodeQueueJobId,
+} from "@sixb/core/internal/agents"
 import type { WorkflowAgentNodeDefinition } from "@sixb/core/internal/workflows"
 import {
   snapshotWorkflowAgentStepInput,
@@ -58,6 +63,27 @@ export const agentNodeExecutor: WorkflowNodeExecutor<WorkflowAgentNodeDefinition
       )
     }
     throwIfAborted(context.signal)
+    const identity = await ensureAgentExecutionIdentity({
+      auth: context.runtime.storage.auth,
+      projectId: context.runtime.projectId,
+      agent: node.agentStep.agent,
+    })
+    const parentExecution = await context.runtime.storage.executions.getById({
+      projectId: context.runtime.projectId,
+      id: context.runtime.sixb.execution.id,
+    })
+    if (!parentExecution) {
+      throw new WorkflowWorkerError(
+        `[SixbWorkflowWorker] Workflow run '${context.job.id}' references missing execution '${context.runtime.sixb.execution.id}'.`
+      )
+    }
+    const agentExecution = createAgentExecutionRecord({
+      id: `exec_${randomUUID()}`,
+      parent: parentExecution,
+      agentId: node.agentStep.agent.id,
+      runId: nodeRun.id,
+      principal: identity.principal,
+    })
     const waitingAt = new Date()
     const parked = await context.runtime.storage.transaction(async (tx) => {
       const workflowRuns = tx.workflowRuns
@@ -66,9 +92,11 @@ export const agentNodeExecutor: WorkflowNodeExecutor<WorkflowAgentNodeDefinition
           `[SixbWorkflowWorker] Workflow '${context.workflow.id}' agent node '${node.id}' requires storage.workflowRuns.`
         )
       }
-      const agentExecution = await workflowRuns.agentNodes.create({
+      await tx.executions.create(agentExecution)
+      const agentNodeRun = await workflowRuns.agentNodes.create({
         projectId: context.runtime.projectId,
         nodeRunId: nodeRun.id,
+        executionId: agentExecution.id,
         agentId: node.agentStep.agent.id,
         prompt,
         createdAt: waitingAt,
@@ -85,7 +113,7 @@ export const agentNodeExecutor: WorkflowNodeExecutor<WorkflowAgentNodeDefinition
         waitingAt,
         executionToken: context.job.execution?.token,
       })
-      return { agentExecution, nodeRun: waitingNode, run: waitingRun }
+      return { agentExecution: agentNodeRun, nodeRun: waitingNode, run: waitingRun }
     })
 
     context.markSideEffectBoundaryPassed()
@@ -96,7 +124,7 @@ export const agentNodeExecutor: WorkflowNodeExecutor<WorkflowAgentNodeDefinition
           {
             id: workflowAgentNodeQueueJobId(nodeRun.id),
             type: "agent.workflow-node.requested",
-            payload: { agentId: node.agentStep.agent.id, nodeRunId: nodeRun.id },
+            payload: { nodeRunId: nodeRun.id },
           },
         ],
       })

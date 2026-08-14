@@ -11,7 +11,7 @@ function runSnapshotFrame(): string {
       threadId: "thr-1",
       agentId: "assistant",
       triggerMessageId: "msg-1",
-      requestedByPrincipal: { type: "user", id: "usr-1" },
+      requestedBy: { type: "user", id: "usr-1" },
       status: "queued",
       attempt: 0,
       streamId: "agents.runs.run-1",

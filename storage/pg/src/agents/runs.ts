@@ -1,9 +1,11 @@
+import { assertAgentRunExecution } from "@sixb/core/internal/agent-run-storage-provider"
 import {
   type AgentRunRecord,
   type AgentRunStore,
   AgentStorageError,
   type ConfirmAgentRunExecutionOwnershipInput,
   type CreateAgentRunInput,
+  type ExecutionStorage,
   type FinishAgentRunInput,
   type FinishQueuedAgentRunInput,
   type ListAgentRunsInput,
@@ -20,10 +22,20 @@ import { type AgentRunRow, rowToRunRecord } from "./rows"
 const PG_RUN_ID_BATCH_SIZE = 10_000
 
 export class PgAgentRunStore implements AgentRunStore {
-  constructor(private readonly sql: PgStoreClient) {}
+  constructor(
+    private readonly sql: PgStoreClient,
+    private readonly executions: ExecutionStorage
+  ) {}
 
   async create(input: CreateAgentRunInput): Promise<AgentRunRecord> {
     const createdAt = input.createdAt ?? new Date()
+    await assertAgentRunExecution({
+      executions: this.executions,
+      projectId: input.projectId,
+      executionId: input.executionId,
+      runId: input.id,
+      agentId: input.agentId,
+    })
 
     try {
       return await runPgTransaction(this.sql, async (tx) => {
@@ -51,22 +63,20 @@ export class PgAgentRunStore implements AgentRunStore {
           INSERT INTO agent_runs (
             project_id,
             id,
+            execution_id,
             thread_id,
             agent_id,
             trigger_message_id,
-            requested_by_principal_type,
-            requested_by_principal_id,
             status,
             attempt,
             created_at
           ) VALUES (
             ${input.projectId},
             ${input.id},
+            ${input.executionId},
             ${input.threadId},
             ${input.agentId},
             ${input.triggerMessageId},
-            ${input.requestedByPrincipal.type},
-            ${input.requestedByPrincipal.id},
             ${"queued"},
             ${0},
             ${createdAt}
@@ -101,8 +111,6 @@ export class PgAgentRunStore implements AgentRunStore {
         UPDATE agent_runs
         SET
           status = ${"running"},
-          execution_principal_type = ${input.executionPrincipal?.type ?? null},
-          execution_principal_id = ${input.executionPrincipal?.id ?? null},
           model_id = ${input.modelId ?? null},
           attempt = ${1},
           execution_token = ${input.execution.token},

@@ -19,7 +19,7 @@ import { agentRunControlStreamId, agentRunStreamId } from "@sixb/core/agents/str
 import { createAgentRunExecutionToken } from "@sixb/core/internal/agents"
 import { createSessionCredential } from "@sixb/core/internal/auth"
 import type { AgentStorage } from "@sixb/core/storage"
-import { createTestSixb } from "@sixb/core/testing"
+import { createTestAgentExecution, createTestSixb } from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -31,19 +31,23 @@ const model = {
   modelId: "test-model",
 } as unknown as Parameters<typeof defineAgent>[1]["model"]
 
-type StartedRunInput = Parameters<AgentStorage["runs"]["create"]>[0] &
+type StartedRunInput = Omit<Parameters<AgentStorage["runs"]["create"]>[0], "executionId"> &
   Omit<Parameters<AgentStorage["runs"]["start"]>[0], "id" | "projectId">
 
 function testExecution(token = createAgentRunExecutionToken()) {
   return { token, queueLeaseExpiresAt: new Date(Date.now() + 60_000) }
 }
 
-async function createStartedRun(storage: AgentStorage, input: StartedRunInput) {
-  await storage.runs.create(input)
-  return storage.runs.start({
+async function createStartedRun(storage: InMemoryStorage, input: StartedRunInput) {
+  const executionId = await createTestAgentExecution(storage, {
+    projectId: input.projectId,
+    agentId: input.agentId,
+    runId: input.id,
+  })
+  await storage.agents.runs.create({ ...input, executionId })
+  return storage.agents.runs.start({
     id: input.id,
     projectId: input.projectId,
-    executionPrincipal: input.executionPrincipal,
     modelId: input.modelId,
     execution: input.execution,
     startedAt: input.startedAt,
@@ -472,12 +476,7 @@ describe("agent routes", () => {
       projectId: sixb.id,
       workerId: "agent-route-test",
     })
-    expect(queuedRun?.job.payload).toEqual({
-      agentId: "assistant",
-      threadId: createThreadBody.thread.id,
-      runId: postMessageBody.run.id,
-      triggerMessageId: postMessageBody.run.triggerMessageId,
-    })
+    expect(queuedRun?.job.payload).toEqual({ runId: postMessageBody.run.id })
 
     const messagesResponse = await app.fetch(
       new Request(`http://localhost/api/agent-threads/${createThreadBody.thread.id}/messages`)
@@ -555,13 +554,12 @@ describe("agent routes", () => {
       ownerPrincipal: { type: "system", id: "system" },
     })
     const executionToken = createAgentRunExecutionToken()
-    await createStartedRun(storage.agents, {
+    await createStartedRun(storage, {
       id: "run-diagnostics",
       projectId: sixb.id,
       threadId: thread.id,
       agentId: "assistant",
       triggerMessageId: "trigger-diagnostics",
-      requestedByPrincipal: { type: "system", id: "system" },
       execution: testExecution(executionToken),
     })
     await storage.agents.messages.append({
@@ -616,13 +614,12 @@ describe("agent routes", () => {
       agentId: "assistant",
       ownerPrincipal: { type: "system", id: "system" },
     })
-    await createStartedRun(storage.agents, {
+    await createStartedRun(storage, {
       id: "run-active",
       projectId: sixb.id,
       threadId: thread.id,
       agentId: "assistant",
       triggerMessageId: "msg-existing",
-      requestedByPrincipal: { type: "system", id: "system" },
       execution: testExecution(),
     })
 
@@ -777,13 +774,12 @@ describe("agent routes", () => {
       agentId: "assistant",
       ownerPrincipal: { type: "system", id: "system" },
     })
-    const run = await createStartedRun(storage.agents, {
+    const run = await createStartedRun(storage, {
       id: "run-readable",
       projectId: sixb.id,
       threadId: thread.id,
       agentId: "assistant",
       triggerMessageId: "msg-user",
-      requestedByPrincipal: { type: "system", id: "system" },
       modelId: "test-model",
       execution: testExecution(),
       createdAt: new Date("2026-06-27T10:00:00.000Z"),
@@ -815,13 +811,12 @@ describe("agent routes", () => {
       agentId: "assistant",
       ownerPrincipal: { type: "system", id: "system" },
     })
-    const run = await createStartedRun(storage.agents, {
+    const run = await createStartedRun(storage, {
       id: "run-cancel",
       projectId: sixb.id,
       threadId: thread.id,
       agentId: "assistant",
       triggerMessageId: "msg-user",
-      requestedByPrincipal: { type: "system", id: "system" },
       execution: testExecution(),
     })
 
@@ -856,13 +851,12 @@ describe("agent routes", () => {
       agentId: "assistant",
       ownerPrincipal: { type: "system", id: "system" },
     })
-    const otherRun = await createStartedRun(storage.agents, {
+    const otherRun = await createStartedRun(storage, {
       id: "run-other",
       projectId: sixb.id,
       threadId: otherThread.id,
       agentId: "assistant",
       triggerMessageId: "msg-other",
-      requestedByPrincipal: { type: "system", id: "system" },
       execution: testExecution(),
     })
     const crossThread = await app.fetch(
@@ -949,12 +943,7 @@ describe("agent routes", () => {
       projectId: sixb.id,
       workerId: "agent-route-auth-test",
     })
-    expect(queuedRun?.job.payload).toEqual({
-      agentId: "assistant",
-      threadId: ownerThread.thread.id,
-      runId: postMessageBody.run.id,
-      triggerMessageId: postMessageBody.run.triggerMessageId,
-    })
+    expect(queuedRun?.job.payload).toEqual({ runId: postMessageBody.run.id })
 
     await storage.agents.runs.start({
       id: postMessageBody.run.id,

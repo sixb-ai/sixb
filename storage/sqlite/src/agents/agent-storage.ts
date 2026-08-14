@@ -1,4 +1,4 @@
-import type { AgentStorage } from "@sixb/core/storage"
+import type { AgentStorage, ExecutionStorage } from "@sixb/core/storage"
 import { installFreshSqliteSchema } from "../migrations"
 import {
   closeSqliteStoreConnection,
@@ -14,6 +14,8 @@ export interface SqliteAgentStorageOptions {
   path?: string
   /** Internal shared connection used by bundled SqliteStorage. */
   connection?: SqliteStoreConnection
+  /** Execution ledger used to validate immutable run ownership. */
+  executions: ExecutionStorage
 }
 
 /**
@@ -28,7 +30,7 @@ export class SqliteAgentStorage implements AgentStorage {
 
   private readonly connection: SqliteStoreConnection
 
-  constructor(options: SqliteAgentStorageOptions = {}) {
+  constructor(options: SqliteAgentStorageOptions) {
     this.connection = openSqliteStoreConnection(options)
 
     if (this.connection.installFreshSchema) {
@@ -36,7 +38,7 @@ export class SqliteAgentStorage implements AgentStorage {
     }
 
     this.threads = new SqliteAgentThreadStore(this.connection.db)
-    this.runs = new SqliteAgentRunStore(this.connection.db)
+    this.runs = new SqliteAgentRunStore(this.connection.db, options.executions)
     this.messages = new SqliteAgentMessageStore(this.connection.db)
   }
 

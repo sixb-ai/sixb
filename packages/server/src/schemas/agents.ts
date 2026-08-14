@@ -25,6 +25,11 @@ export const AgentPrincipalSchema = z.object({
   id: z.string().min(1),
 })
 
+export const AgentAuthorizablePrincipalSchema = z.object({
+  type: z.enum(["user", "serviceAccount"]),
+  id: z.string().min(1),
+})
+
 export const AgentObjectContextSchema = z.object({
   kind: z.literal("object"),
   ref: z.object({
@@ -252,8 +257,7 @@ export const AgentRunSchema = z.object({
   threadId: z.string(),
   agentId: z.string(),
   triggerMessageId: z.string(),
-  requestedByPrincipal: AgentPrincipalSchema,
-  executionPrincipal: AgentPrincipalSchema.optional(),
+  requestedBy: AgentAuthorizablePrincipalSchema.optional(),
   status: AgentRunStatusSchema,
   modelId: z.string().optional(),
   finishReason: AgentRunFinishReasonSchema.optional(),

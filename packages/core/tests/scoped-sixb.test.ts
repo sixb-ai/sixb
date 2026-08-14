@@ -29,6 +29,7 @@ import {
   type StoredDomainEvent,
   type WorkflowDefinition,
 } from "../src"
+import { agentServiceAccountId, ensureAgentExecutionIdentity } from "../src/agents/authority"
 import { createAgentScope } from "../src/execution/scopes"
 import { createTestSixb, type TestExecutionHost } from "../src/testing"
 import { createTestRuntimeDeps, waitFor } from "./test-runtime-deps"
@@ -640,6 +641,11 @@ describe("bound Sixb operational access", () => {
   test("agent run requests require can.run", async () => {
     const host = createRuntime()
     const _sixb = createTestSixb(host)
+    await host.storage.auth?.users.create({
+      id: "adam",
+      projectId: host.id,
+      email: "adam@example.com",
+    })
 
     const runner = bindPrincipal(host, contextFor(host, ["operations"]))
     const result = await runner.agents.runs.request({
@@ -655,6 +661,35 @@ describe("bound Sixb operational access", () => {
         text: "Summarize this account.",
       })
     ).rejects.toThrow(AuthorizationError)
+  })
+
+  test("agent run admission never reactivates a suspended managed identity", async () => {
+    const host = createRuntime()
+    const _sixb = createTestSixb(host)
+    const runner = bindPrincipal(host, contextFor(host, ["operations"]))
+    const agent = host.definitions.agents.getById("contract-agent")
+    const auth = host.storage.auth
+    if (!agent || !auth) throw new Error("Expected Agent definition and auth storage.")
+
+    await ensureAgentExecutionIdentity({ auth, projectId: host.id, agent })
+    await auth.serviceAccounts.update({
+      projectId: host.id,
+      id: agentServiceAccountId(agent.id),
+      status: "suspended",
+    })
+    const thread = await runner.agents.threads.create({ agentId: agent.id })
+
+    await expect(
+      runner.agents.runs.request({
+        agentId: agent.id,
+        threadId: thread.id,
+        text: "This must not run.",
+      })
+    ).rejects.toThrow("is suspended")
+    await expect(host.storage.agents?.runs.list({ projectId: host.id })).resolves.toMatchObject({
+      runs: [],
+      total: 0,
+    })
   })
 
   test("agent threads require both the run grant and ownership", async () => {

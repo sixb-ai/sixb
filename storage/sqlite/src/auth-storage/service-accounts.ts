@@ -92,40 +92,33 @@ export class SqliteAuthServiceAccountStore implements AuthServiceAccountStore {
   }
 
   async update(input: UpdateAuthServiceAccountInput): Promise<ServiceAccountRecord> {
-    const existing = await this.getById(input)
-    if (!existing) {
-      throw new AuthStorageError(
-        "missing_service_account",
-        `[Sixb] Service account '${input.id}' not found for project '${input.projectId}'.`
-      )
-    }
-
+    const id = assertNonEmpty(input.id, "Service account id")
+    const projectId = assertNonEmpty(input.projectId, "Project id")
     const updatedAt = dateOrNow(input.updatedAt)
     const name =
-      input.name === undefined ? existing.name : assertNonEmpty(input.name, "Service account name")
-    const description = input.description === undefined ? existing.description : input.description
-    const status = input.status ?? existing.status
+      input.name === undefined ? null : assertNonEmpty(input.name, "Service account name")
     this.db
       .query(
         `
         UPDATE auth_service_accounts
-        SET name = ?,
-            description = ?,
-            status = ?,
+        SET name = COALESCE(?, name),
+            description = COALESCE(?, description),
+            status = COALESCE(?, status),
             updated_at = ?
         WHERE project_id = ?
           AND id = ?
       `
       )
-      .run(name, description ?? null, status, toIso(updatedAt), input.projectId, input.id)
+      .run(name, input.description ?? null, input.status ?? null, toIso(updatedAt), projectId, id)
 
-    return {
-      ...existing,
-      name,
-      description,
-      status,
-      updatedAt,
+    const updated = await this.getById({ projectId, id })
+    if (!updated) {
+      throw new AuthStorageError(
+        "missing_service_account",
+        `[Sixb] Service account '${id}' not found for project '${projectId}'.`
+      )
     }
+    return updated
   }
 
   async list(input: ListAuthServiceAccountsInput): Promise<ListAuthServiceAccountsResult> {

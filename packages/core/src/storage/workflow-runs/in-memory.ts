@@ -10,7 +10,7 @@ import {
   toStatusSet,
 } from "../run-listing"
 import { WorkflowRunError } from "./errors"
-import { assertWorkflowRunExecution } from "./provider"
+import { assertWorkflowAgentNodeRunExecution, assertWorkflowRunExecution } from "./provider"
 import type {
   CancelWorkflowAgentNodeRunInput,
   ConfirmWorkflowAgentNodeRunExecutionOwnershipInput,
@@ -63,9 +63,13 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
       assertExecutionOwnership: (projectId, id, token) =>
         this.assertExecutionOwnership(projectId, id, token),
     })
-    this.agentNodes = new InMemoryWorkflowAgentNodeRunStorage({
-      requireAgentNodeRun: (projectId, id) => this.nodes.requireAgentNodeRun(projectId, id),
-    })
+    this.agentNodes = new InMemoryWorkflowAgentNodeRunStorage(
+      {
+        requireAgentNodeRun: (projectId, id) => this.nodes.requireAgentNodeRun(projectId, id),
+        requireWorkflowRun: (projectId, id) => this.requireExistingWorkflowRun(projectId, id),
+      },
+      this.executions
+    )
   }
 
   snapshot(): InMemoryWorkflowRunStorageSnapshot {
@@ -582,7 +586,9 @@ export class InMemoryWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRun
   constructor(
     private readonly nodes: {
       requireAgentNodeRun(projectId: string, id: string): WorkflowNodeRunRecord
-    }
+      requireWorkflowRun(projectId: string, id: string): WorkflowRunRecord
+    },
+    private readonly executions: ExecutionStorage
   ) {}
 
   snapshot(): InMemoryWorkflowAgentNodeRunStorageSnapshot {
@@ -596,6 +602,15 @@ export class InMemoryWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRun
 
   async create(input: CreateWorkflowAgentNodeRunInput): Promise<WorkflowAgentNodeRunRecord> {
     const node = this.nodes.requireAgentNodeRun(input.projectId, input.nodeRunId)
+    const workflowRun = this.nodes.requireWorkflowRun(input.projectId, node.workflowRunId)
+    await assertWorkflowAgentNodeRunExecution({
+      executions: this.executions,
+      projectId: input.projectId,
+      executionId: input.executionId,
+      nodeRunId: input.nodeRunId,
+      agentId: input.agentId,
+      parentExecutionId: workflowRun.executionId,
+    })
     if (node.status !== "running") {
       throw new WorkflowRunError(
         `[Sixb] Agent workflow node run '${input.nodeRunId}' must be running when queued.`
@@ -607,9 +622,19 @@ export class InMemoryWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRun
         `[Sixb] Agent execution already exists for workflow node run '${input.nodeRunId}'.`
       )
     }
+    if (
+      [...this.runs.values()].some(
+        (run) => run.projectId === input.projectId && run.executionId === input.executionId
+      )
+    ) {
+      throw new WorkflowRunError(
+        `[Sixb] Execution '${input.executionId}' already belongs to another Workflow Agent-node run.`
+      )
+    }
     const record: WorkflowAgentNodeRunRecord = {
       projectId: input.projectId,
       nodeRunId: input.nodeRunId,
+      executionId: input.executionId,
       agentId: input.agentId,
       status: "queued",
       prompt: input.prompt,
@@ -625,9 +650,6 @@ export class InMemoryWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRun
     const next: WorkflowAgentNodeRunRecord = {
       ...run,
       status: "running",
-      ...(input.executionPrincipal
-        ? { executionPrincipal: cloneRecord(input.executionPrincipal) }
-        : {}),
       ...(input.modelId ? { modelId: input.modelId } : {}),
       attempt: 1,
       execution: cloneRecord(input.execution),

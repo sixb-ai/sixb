@@ -1,10 +1,12 @@
 import type { Database } from "bun:sqlite"
+import { assertAgentRunExecution } from "@sixb/core/internal/agent-run-storage-provider"
 import {
   type AgentRunRecord,
   type AgentRunStore,
   AgentStorageError,
   type ConfirmAgentRunExecutionOwnershipInput,
   type CreateAgentRunInput,
+  type ExecutionStorage,
   type FinishAgentRunInput,
   type FinishQueuedAgentRunInput,
   type ListAgentRunsInput,
@@ -24,10 +26,20 @@ import { type AgentRunRow, rowToRunRecord } from "./rows"
 const SQLITE_RUN_ID_BATCH_SIZE = 500
 
 export class SqliteAgentRunStore implements AgentRunStore {
-  constructor(private readonly db: Database) {}
+  constructor(
+    private readonly db: Database,
+    private readonly executions: ExecutionStorage
+  ) {}
 
   async create(input: CreateAgentRunInput): Promise<AgentRunRecord> {
     const createdAt = input.createdAt ?? new Date()
+    await assertAgentRunExecution({
+      executions: this.executions,
+      projectId: input.projectId,
+      executionId: input.executionId,
+      runId: input.id,
+      agentId: input.agentId,
+    })
 
     return this.db.transaction(() => {
       const thread = this.db
@@ -55,25 +67,23 @@ export class SqliteAgentRunStore implements AgentRunStore {
             INSERT INTO agent_runs (
               project_id,
               id,
+              execution_id,
               thread_id,
               agent_id,
               trigger_message_id,
-              requested_by_principal_type,
-              requested_by_principal_id,
               status,
               attempt,
               created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, 'queued', 0, ?)
           `
           )
           .run(
             input.projectId,
             input.id,
+            input.executionId,
             input.threadId,
             input.agentId,
             input.triggerMessageId,
-            input.requestedByPrincipal.type,
-            input.requestedByPrincipal.id,
             createdAt.toISOString()
           )
       } catch (error) {
@@ -107,8 +117,6 @@ export class SqliteAgentRunStore implements AgentRunStore {
           UPDATE agent_runs
           SET
             status = 'running',
-            execution_principal_type = ?,
-            execution_principal_id = ?,
             model_id = ?,
             attempt = 1,
             execution_token = ?,
@@ -118,8 +126,6 @@ export class SqliteAgentRunStore implements AgentRunStore {
         `
         )
         .run(
-          input.executionPrincipal?.type ?? null,
-          input.executionPrincipal?.id ?? null,
           input.modelId ?? null,
           input.execution.token,
           input.execution.queueLeaseExpiresAt.toISOString(),

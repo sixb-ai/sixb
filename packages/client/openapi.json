@@ -10602,21 +10602,6 @@
                     "prompt": {
                       "type": "string"
                     },
-                    "executionPrincipal": {
-                      "type": "object",
-                      "properties": {
-                        "principalType": {
-                          "type": "string",
-                          "enum": ["user", "serviceAccount", "system"]
-                        },
-                        "principalId": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": ["principalType", "principalId"],
-                      "additionalProperties": false
-                    },
                     "trace": {
                       "type": "array",
                       "items": {}
@@ -18423,27 +18408,12 @@
                         "triggerMessageId": {
                           "type": "string"
                         },
-                        "requestedByPrincipal": {
+                        "requestedBy": {
                           "type": "object",
                           "properties": {
                             "type": {
                               "type": "string",
-                              "enum": ["user", "serviceAccount", "system"]
-                            },
-                            "id": {
-                              "type": "string",
-                              "minLength": 1
-                            }
-                          },
-                          "required": ["type", "id"],
-                          "additionalProperties": false
-                        },
-                        "executionPrincipal": {
-                          "type": "object",
-                          "properties": {
-                            "type": {
-                              "type": "string",
-                              "enum": ["user", "serviceAccount", "system"]
+                              "enum": ["user", "serviceAccount"]
                             },
                             "id": {
                               "type": "string",
@@ -18553,7 +18523,6 @@
                         "threadId",
                         "agentId",
                         "triggerMessageId",
-                        "requestedByPrincipal",
                         "status",
                         "attempt",
                         "streamId",
@@ -18943,27 +18912,12 @@
                         "triggerMessageId": {
                           "type": "string"
                         },
-                        "requestedByPrincipal": {
+                        "requestedBy": {
                           "type": "object",
                           "properties": {
                             "type": {
                               "type": "string",
-                              "enum": ["user", "serviceAccount", "system"]
-                            },
-                            "id": {
-                              "type": "string",
-                              "minLength": 1
-                            }
-                          },
-                          "required": ["type", "id"],
-                          "additionalProperties": false
-                        },
-                        "executionPrincipal": {
-                          "type": "object",
-                          "properties": {
-                            "type": {
-                              "type": "string",
-                              "enum": ["user", "serviceAccount", "system"]
+                              "enum": ["user", "serviceAccount"]
                             },
                             "id": {
                               "type": "string",
@@ -19073,7 +19027,6 @@
                         "threadId",
                         "agentId",
                         "triggerMessageId",
-                        "requestedByPrincipal",
                         "status",
                         "attempt",
                         "streamId",
@@ -19215,27 +19168,12 @@
                         "triggerMessageId": {
                           "type": "string"
                         },
-                        "requestedByPrincipal": {
+                        "requestedBy": {
                           "type": "object",
                           "properties": {
                             "type": {
                               "type": "string",
-                              "enum": ["user", "serviceAccount", "system"]
-                            },
-                            "id": {
-                              "type": "string",
-                              "minLength": 1
-                            }
-                          },
-                          "required": ["type", "id"],
-                          "additionalProperties": false
-                        },
-                        "executionPrincipal": {
-                          "type": "object",
-                          "properties": {
-                            "type": {
-                              "type": "string",
-                              "enum": ["user", "serviceAccount", "system"]
+                              "enum": ["user", "serviceAccount"]
                             },
                             "id": {
                               "type": "string",
@@ -19345,7 +19283,6 @@
                         "threadId",
                         "agentId",
                         "triggerMessageId",
-                        "requestedByPrincipal",
                         "status",
                         "attempt",
                         "streamId",
@@ -19509,27 +19446,12 @@
                           "triggerMessageId": {
                             "type": "string"
                           },
-                          "requestedByPrincipal": {
+                          "requestedBy": {
                             "type": "object",
                             "properties": {
                               "type": {
                                 "type": "string",
-                                "enum": ["user", "serviceAccount", "system"]
-                              },
-                              "id": {
-                                "type": "string",
-                                "minLength": 1
-                              }
-                            },
-                            "required": ["type", "id"],
-                            "additionalProperties": false
-                          },
-                          "executionPrincipal": {
-                            "type": "object",
-                            "properties": {
-                              "type": {
-                                "type": "string",
-                                "enum": ["user", "serviceAccount", "system"]
+                                "enum": ["user", "serviceAccount"]
                               },
                               "id": {
                                 "type": "string",
@@ -19639,7 +19561,6 @@
                           "threadId",
                           "agentId",
                           "triggerMessageId",
-                          "requestedByPrincipal",
                           "status",
                           "attempt",
                           "streamId",
@@ -19754,27 +19675,12 @@
                     "triggerMessageId": {
                       "type": "string"
                     },
-                    "requestedByPrincipal": {
+                    "requestedBy": {
                       "type": "object",
                       "properties": {
                         "type": {
                           "type": "string",
-                          "enum": ["user", "serviceAccount", "system"]
-                        },
-                        "id": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": ["type", "id"],
-                      "additionalProperties": false
-                    },
-                    "executionPrincipal": {
-                      "type": "object",
-                      "properties": {
-                        "type": {
-                          "type": "string",
-                          "enum": ["user", "serviceAccount", "system"]
+                          "enum": ["user", "serviceAccount"]
                         },
                         "id": {
                           "type": "string",
@@ -19884,7 +19790,6 @@
                     "threadId",
                     "agentId",
                     "triggerMessageId",
-                    "requestedByPrincipal",
                     "status",
                     "attempt",
                     "streamId",

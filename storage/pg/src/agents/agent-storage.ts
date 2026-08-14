@@ -1,4 +1,4 @@
-import type { AgentStorage } from "@sixb/core/storage"
+import type { AgentStorage, ExecutionStorage } from "@sixb/core/storage"
 import type { PgStoreClient } from "../transactions"
 import { PgAgentMessageStore } from "./messages"
 import { PgAgentRunStore } from "./runs"
@@ -6,6 +6,7 @@ import { PgAgentThreadStore } from "./threads"
 
 export interface PgAgentStorageOptions {
   readonly sql: PgStoreClient
+  readonly executions: ExecutionStorage
 }
 
 /**
@@ -20,7 +21,7 @@ export class PgAgentStorage implements AgentStorage {
 
   constructor(options: PgAgentStorageOptions) {
     this.threads = new PgAgentThreadStore(options.sql)
-    this.runs = new PgAgentRunStore(options.sql)
+    this.runs = new PgAgentRunStore(options.sql, options.executions)
     this.messages = new PgAgentMessageStore(options.sql)
   }
 }

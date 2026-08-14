@@ -1,20 +1,12 @@
 import {
   type AgentDefinition,
   AgentRequestError,
+  type AgentRunView,
   type FileRef,
-  type OntologySource,
-  type Principal,
   type SixbHostView,
-  SYSTEM_PRINCIPAL,
 } from "@sixb/core"
 import { agentRunStreamId } from "@sixb/core/agents/streams"
-import {
-  createAgentRunId,
-  dispatchQueuedAgentRuns,
-  publishAgentRunCancel,
-  publishAgentRunFinished,
-} from "@sixb/core/internal/agents"
-import type { Sixb } from "@sixb/core/internal/request-execution"
+import { publishAgentRunCancel, publishAgentRunFinished } from "@sixb/core/internal/agents"
 import {
   type AgentMessageRecord,
   type AgentRunDiagnostic,
@@ -123,15 +115,14 @@ function serializeMessage(
   })
 }
 
-export function serializeAgentRun(run: AgentRunRecord): ReturnType<typeof AgentRunSchema.parse> {
+export function serializeAgentRun(run: AgentRunView): ReturnType<typeof AgentRunSchema.parse> {
   return AgentRunSchema.parse({
     id: run.id,
     projectId: run.projectId,
     threadId: run.threadId,
     agentId: run.agentId,
     triggerMessageId: run.triggerMessageId,
-    requestedByPrincipal: run.requestedByPrincipal,
-    executionPrincipal: run.executionPrincipal,
+    requestedBy: run.requestedBy,
     status: run.status,
     modelId: run.modelId,
     finishReason: run.finishReason,
@@ -166,10 +157,6 @@ async function getAgentMessageFileContentThread(params: {
   return params.authState.sixb.agents.threads.getById(params.threadId)
 }
 
-function principalForExecution(sixb: Sixb<readonly OntologySource[]>): Principal {
-  return sixb.execution.requestedBy ?? SYSTEM_PRINCIPAL
-}
-
 /** Publish the terminal record core owns; stream delivery stays best-effort at this boundary. */
 async function publishQueuedRunCancellation(
   host: SixbHostView,
@@ -200,10 +187,12 @@ function handleAgentRouteError(
   if (error instanceof AgentRequestError) {
     switch (error.code) {
       case "agent_not_found":
+      case "run_not_found":
       case "thread_not_found":
         set.status = 404
         break
       case "active_run_exists":
+      case "run_not_retryable":
         set.status = 409
         break
       case "storage_unavailable":
@@ -669,7 +658,12 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           }
 
           set.status = 202
-          return CancelAgentRunResponseSchema.parse({ run: serializeAgentRun(current) })
+          const currentView = await sixb.agents.runs.getById(current.id)
+          if (!currentView) {
+            set.status = 404
+            return { error: "Agent run not found" }
+          }
+          return CancelAgentRunResponseSchema.parse({ run: serializeAgentRun(currentView) })
         } catch (error) {
           return handleAgentRouteError(error, set)
         }
@@ -719,37 +713,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             return { error: "Only failed agent runs can be retried" }
           }
 
-          const run = await storage.runs.create({
-            id: createAgentRunId(),
-            projectId: host.id,
-            threadId: thread.id,
-            agentId: failedRun.agentId,
-            triggerMessageId: failedRun.triggerMessageId,
-            requestedByPrincipal: principalForExecution(sixb),
-          })
-
-          // As with a new message, the durable queued run is the dispatch intent. A worker will
-          // reconcile it if this best-effort publication cannot reach the queue right now.
-          try {
-            const dispatch = await dispatchQueuedAgentRuns({
-              projectId: host.id,
-              storage,
-              queue: host.queues.agents,
-              runIds: [run.id],
-            })
-            const failure = dispatch.failures[0]
-            if (failure) {
-              console.error(
-                `[SixbServer] Could not dispatch retried agent run '${run.id}'; retrying later.`,
-                failure.error
-              )
-            }
-          } catch (error) {
-            console.error(
-              `[SixbServer] Could not dispatch retried agent run '${run.id}'; retrying later.`,
-              error
-            )
-          }
+          const { run } = await sixb.agents.runs.retry(failedRun.id)
 
           set.status = 202
           return RetryAgentRunResponseSchema.parse({ run: serializeAgentRun(run) })

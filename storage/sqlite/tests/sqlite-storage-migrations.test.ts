@@ -72,6 +72,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 8,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "009-agent-executions",
+    status: "applied",
+    version: 9,
+  },
 ]
 
 afterEach(async () => {
@@ -635,6 +642,64 @@ describe("SQLite storage migrations", () => {
     }
   })
 
+  test("rejects legacy Agent runs instead of inventing their execution authority", () => {
+    const db = new Database(":memory:")
+    try {
+      const agentExecutionsIndex = sqliteStorageMigrations.steps.findIndex(
+        (migration) => migration.id === "009-agent-executions"
+      )
+      const agentExecutionsMigration = sqliteStorageMigrations.steps[agentExecutionsIndex]
+      if (!agentExecutionsMigration) {
+        throw new Error("SQLite agent-executions migration is missing.")
+      }
+      for (const migration of sqliteStorageMigrations.steps.slice(0, agentExecutionsIndex)) {
+        migration.up(db)
+      }
+      db.query(`
+        INSERT INTO agent_runs (
+          project_id, id, thread_id, agent_id, trigger_message_id, status, created_at
+        ) VALUES (?, ?, ?, ?, ?, 'queued', ?)
+      `).run(
+        "project-a",
+        "legacy-agent-run",
+        "legacy-thread",
+        "legacy-agent",
+        "legacy-message",
+        "2026-01-01T00:00:00.000Z"
+      )
+
+      expect(() => agentExecutionsMigration.up(db)).toThrow()
+      expect(readMemoryTableColumns(db, "agent_runs")).not.toContain("execution_id")
+    } finally {
+      db.close()
+    }
+  })
+
+  test("makes Agent execution links required and unique on an empty schema", () => {
+    const db = new Database(":memory:")
+    try {
+      for (const migration of sqliteStorageMigrations.steps) migration.up(db)
+
+      expect(readMemoryColumn(db, "agent_runs", "execution_id")?.notnull).toBe(1)
+      expect(readMemoryColumn(db, "workflow_agent_node_runs", "execution_id")?.notnull).toBe(1)
+      expect(readMemoryTableColumns(db, "agent_runs")).not.toContain("requested_by_principal_type")
+      expect(readMemoryTableColumns(db, "agent_runs")).not.toContain("execution_principal_type")
+      expect(readMemoryTableColumns(db, "workflow_agent_node_runs")).not.toContain(
+        "execution_principal_type"
+      )
+      expect(readMemoryUniqueIndexes(db, "agent_runs")).toContainEqual([
+        "project_id",
+        "execution_id",
+      ])
+      expect(readMemoryUniqueIndexes(db, "workflow_agent_node_runs")).toContainEqual([
+        "project_id",
+        "execution_id",
+      ])
+    } finally {
+      db.close()
+    }
+  })
+
   test("migrations install auth storage tables", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-auth-migrations-"))
     tempDirs.push(tempDir)
@@ -869,6 +934,16 @@ function readMemoryIndexColumns(db: Database, indexName: string): string[] {
   return (db.query(`PRAGMA index_info(${indexName})`).all() as { readonly name: string }[]).map(
     (row) => row.name
   )
+}
+
+function readMemoryUniqueIndexes(db: Database, tableName: string): string[][] {
+  const indexes = db.query(`PRAGMA index_list(${tableName})`).all() as Array<{
+    readonly name: string
+    readonly unique: number
+  }>
+  return indexes
+    .filter((index) => index.unique === 1)
+    .map((index) => readMemoryIndexColumns(db, index.name))
 }
 
 function readMemoryColumn(
