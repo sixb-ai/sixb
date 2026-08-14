@@ -5,6 +5,8 @@ import ts from "typescript"
 
 const workspaceRoot = join(import.meta.dir, "../../..")
 const coreSource = join(workspaceRoot, "packages/core/src")
+const materializerAuthorityWrite =
+  /(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:ontology_(?:overrides|object_overrides|link_overrides)|objects|links|timeseries|timeseries_latest)\b/i
 
 async function typescriptFiles(directory: string): Promise<string[]> {
   const files: string[] = []
@@ -182,6 +184,17 @@ describe("ontology clean-break architecture", () => {
     ).toEqual(["object.created", "telemetry.appended"])
   })
 
+  test("recognizes writes to every materializer-owned override table", () => {
+    // Remove a table alternative from materializerAuthorityWrite to verify this guard fails.
+    for (const statement of [
+      "INSERT INTO ontology_overrides",
+      "UPDATE ontology_object_overrides",
+      "DELETE FROM ontology_link_overrides",
+    ]) {
+      expect(statement).toMatch(materializerAuthorityWrite)
+    }
+  })
+
   test("keeps ontology writes behind the materialization capability", async () => {
     const providerFiles = (
       await Promise.all(
@@ -195,11 +208,9 @@ describe("ontology clean-break architecture", () => {
       "materializations.ts",
       "materialization-writer.ts",
     ])
-    await expectSqlWritesOwnedBy(
-      providerFiles,
-      /(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:ontology_overrides|objects|links|timeseries|timeseries_latest)\b/i,
-      ["materialization-writer.ts"]
-    )
+    await expectSqlWritesOwnedBy(providerFiles, materializerAuthorityWrite, [
+      "materialization-writer.ts",
+    ])
     await expectSqlWritesOwnedBy(providerFiles, /SET\s+status\s*=\s*'active'/i, [
       "materializations.ts",
     ])

@@ -68,7 +68,7 @@ export async function stageEditPlan(
   state: EditWorkingState,
   planContext: EditPlanContext
 ): Promise<EditPlanChanges> {
-  validateWorkingCardinality(context.ontology, state.links.scopeSnapshots)
+  validateWorkingCardinality(state.links.slots)
 
   const objectChanges: EffectiveObjectChange[] = []
   for (const working of sortedObjects(state.objects)) {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createEventId, MaterializationConflictError } from "../src/materializer"
-import { InMemoryStorage, type Storage } from "../src/storage"
+import { InMemoryStorage, type Storage, type StoredLinkSlotOverride } from "../src/storage"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
 import {
@@ -960,6 +960,72 @@ describe("ontology materializer edits", () => {
       kind: "created",
       after: { properties: { name: "third" } },
     })
+  })
+
+  test("rejects a migrated cardinality-one slot conflict before applying edits", async () => {
+    // To prove this guard, make usableLinkSlotOverride accept legacy-conflict; this test must fail.
+    const { materializer, storage } = createMaterializerFixture()
+    await materializer.projections.replace(
+      replacement("legacy-conflict-v1", "2026-01-01T00:00:00Z", [
+        sourceEntryWithParent("one", "one", "two"),
+        sourceEntry("two", "two"),
+      ])
+    )
+    const conflict = {
+      ref: { source: ref("one"), linkId: "parent" },
+      value: { kind: "legacy-conflict" },
+      lastCommitId: "legacy-conflict-commit",
+      updatedAt: "2026-01-02T00:00:00.000Z",
+    } satisfies StoredLinkSlotOverride
+    const matchesScope = (source: { objectTypeId: string; primaryId: string }, linkId: string) =>
+      source.objectTypeId === "Device" && source.primaryId === "one" && linkId === "parent"
+    const restoreStreamState = decorateOperationScopedMethodForTesting(
+      storage.ontology.materializations,
+      "streamState",
+      (streamState) =>
+        async function* (input) {
+          for await (const page of streamState(input)) {
+            yield {
+              ...page,
+              links: page.links.map((link) =>
+                matchesScope(link.ref.source, link.ref.linkId)
+                  ? { ...link, slotOverride: conflict }
+                  : link
+              ),
+              linkScopes: page.linkScopes.map((scope) =>
+                matchesScope(scope.source, scope.linkId) ? { ...scope, override: conflict } : scope
+              ),
+            }
+          }
+        }
+    )
+
+    try {
+      await expect(
+        materializer.edits.commit(
+          atomic("legacy-conflict-edit", [
+            {
+              id: "reset",
+              kind: "link.reset",
+              ref: { source: ref("one"), linkId: "parent", target: ref("two") },
+            },
+          ])
+        )
+      ).rejects.toThrow("could not be migrated automatically")
+    } finally {
+      restoreStreamState()
+    }
+
+    expect(
+      (
+        await storage.objects.listLinks({
+          projectId: "project",
+          objectTypeId: "Device",
+          objectId: "one",
+          linkId: "parent",
+        })
+      ).map((link) => link.targetId)
+    ).toEqual(["two"])
   })
 
   test("restore keeps a cardinality-one scope override authoritative over dormant source", async () => {

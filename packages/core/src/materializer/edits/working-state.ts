@@ -27,7 +27,7 @@ import {
   resolveEffectiveObject,
   usableLinkSlotOverride,
 } from "../effective/resolve"
-import { isKnownLinkRef } from "./read-set"
+import { linkCardinality } from "./read-set"
 export interface WorkingObject {
   ref: OntologyObjectRef
   source: MaterializationObjectState["source"]
@@ -47,10 +47,11 @@ export interface WorkingLinkEdge {
 
 export interface WorkingLinkSlot {
   readonly ref: OntologyLinkScopeRef
-  source: MaterializationLinkScopeState["sourceAssertion"]
+  readonly source: MaterializationLinkScopeState["sourceAssertion"]
   readonly originalOverride: StoredLinkSlotOverride | null
   override: LinkSlotOverride | null
-  before: MaterializationLinkScopeState["effective"]
+  readonly before: MaterializationLinkScopeState["effective"]
+  readonly effectiveCount: number
 }
 
 /**
@@ -70,7 +71,6 @@ export interface EditWorkingState {
   readonly links: {
     readonly edges: Map<string, WorkingLinkEdge>
     readonly slots: Map<string, WorkingLinkSlot>
-    readonly scopeSnapshots: Map<string, MaterializationLinkScopeState>
   }
 }
 
@@ -85,50 +85,30 @@ export function mergeWorkingState(
     }
   }
   for (const link of state.links) {
-    if (linkCardinality(ontology, link.ref) === "one") {
-      mergeLinkSlotState(working.links.slots, linkSlotFromLinkState(link))
-    } else if (!working.links.edges.has(linkRefKey(link.ref))) {
+    if (
+      linkCardinality(ontology, link.ref) !== "one" &&
+      !working.links.edges.has(linkRefKey(link.ref))
+    ) {
       working.links.edges.set(linkRefKey(link.ref), workingLinkEdgeFromState(link))
     }
   }
   for (const scope of state.linkScopes) {
     const key = linkScopeKey(scope.source, scope.linkId)
-    if (!working.links.scopeSnapshots.has(key)) {
-      working.links.scopeSnapshots.set(key, scope)
-      mergeLinkSlotState(working.links.slots, linkSlotFromScopeState(scope))
+    if (!working.links.slots.has(key)) {
+      working.links.slots.set(key, workingLinkSlotFromState(scope))
     }
   }
 }
 
-function linkSlotFromLinkState(link: MaterializationLinkState): WorkingLinkSlot {
-  return {
-    ref: { source: link.ref.source, linkId: link.ref.linkId },
-    source: link.source,
-    originalOverride: link.slotOverride,
-    override: usableLinkSlotOverride(link.slotOverride),
-    before: link.effective,
-  }
-}
-
-function linkSlotFromScopeState(scope: MaterializationLinkScopeState): WorkingLinkSlot {
+function workingLinkSlotFromState(scope: MaterializationLinkScopeState): WorkingLinkSlot {
   return {
     ref: { source: scope.source, linkId: scope.linkId },
     source: scope.sourceAssertion,
     originalOverride: scope.override,
     override: usableLinkSlotOverride(scope.override),
     before: scope.effective,
+    effectiveCount: scope.effectiveCount,
   }
-}
-
-function mergeLinkSlotState(slots: Map<string, WorkingLinkSlot>, incoming: WorkingLinkSlot): void {
-  const key = linkScopeKey(incoming.ref.source, incoming.ref.linkId)
-  const existing = slots.get(key)
-  if (!existing) {
-    slots.set(key, incoming)
-    return
-  }
-  existing.source ??= incoming.source
-  existing.before ??= incoming.before
 }
 
 export function workingObjectFromState(object: MaterializationObjectState): WorkingObject {
@@ -200,44 +180,23 @@ export function resolveLinkSlot(
 export function distinctCardinalityOneScopes(
   ontology: OntologyRegistry,
   links: readonly MaterializationLinkState[],
-  existing: Map<string, MaterializationLinkScopeState>
+  existing: ReadonlyMap<string, WorkingLinkSlot>
 ): { readonly source: OntologyObjectRef; readonly linkId: string }[] {
   const scopes = new Map<string, { readonly source: OntologyObjectRef; readonly linkId: string }>()
   for (const state of links) {
-    const definition = ontology
-      .resolveObjectType(state.ref.source.objectTypeId)
-      .links.find((candidate) => candidate.id === state.ref.linkId)
     const key = linkScopeKey(state.ref.source, state.ref.linkId)
-    if (definition?.cardinality === "one" && !existing.has(key)) {
+    if (linkCardinality(ontology, state.ref) === "one" && !existing.has(key)) {
       scopes.set(key, { source: state.ref.source, linkId: state.ref.linkId })
     }
   }
   return [...scopes.values()]
 }
 
-export function validateWorkingCardinality(
-  ontology: OntologyRegistry,
-  scopes: Map<string, MaterializationLinkScopeState>
-): void {
-  for (const { effectiveCount, source, linkId } of scopes.values()) {
+export function validateWorkingCardinality(slots: ReadonlyMap<string, WorkingLinkSlot>): void {
+  for (const { effectiveCount, ref } of slots.values()) {
     if (effectiveCount <= 1) continue
-    const link = ontology
-      .resolveObjectType(source.objectTypeId)
-      .links.find((candidate) => candidate.id === linkId)
-    if (link?.cardinality === "one") {
-      throw new MaterializationValidationError(
-        `Link scope '${source.objectTypeId}.${linkId}' has cardinality one.`
-      )
-    }
+    throw new MaterializationValidationError(
+      `Link scope '${ref.source.objectTypeId}.${ref.linkId}' has cardinality one.`
+    )
   }
-}
-
-function linkCardinality(
-  ontology: OntologyRegistry,
-  ref: OntologyLinkRef
-): "one" | "many" | undefined {
-  if (!isKnownLinkRef(ontology, ref)) return undefined
-  return ontology
-    .resolveObjectType(ref.source.objectTypeId)
-    .links.find((candidate) => candidate.id === ref.linkId)?.cardinality
 }

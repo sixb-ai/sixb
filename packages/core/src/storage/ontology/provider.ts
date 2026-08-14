@@ -62,7 +62,6 @@ export {
 } from "./provider-work"
 
 export interface LinkScopeAccumulator {
-  readonly scopeSortKey: string
   readonly source: OntologyObjectRef
   readonly linkId: string
   readonly hash: ReturnType<typeof createHash>
@@ -71,13 +70,11 @@ export interface LinkScopeAccumulator {
 
 export function startScopeAccumulator(
   source: OntologyObjectRef,
-  linkId: string,
-  scopeSortKey: string
+  linkId: string
 ): LinkScopeAccumulator {
   const hash = createHash("sha256")
   hash.update("[")
   return {
-    scopeSortKey,
     source: structuredClone(source),
     linkId,
     hash,
@@ -102,14 +99,11 @@ export function appendScopeSnapshot(
 
 export function finishScopeAccumulator(
   accumulator: LinkScopeAccumulator
-): MaterializationLinkScopeState {
+): Pick<MaterializationLinkScopeState, "source" | "linkId" | "effectiveCount" | "fingerprint"> {
   accumulator.hash.update("]")
   return {
     source: accumulator.source,
     linkId: accumulator.linkId,
-    sourceAssertion: null,
-    override: null,
-    effective: null,
     effectiveCount: accumulator.effectiveCount,
     fingerprint: accumulator.hash.digest("hex"),
   }

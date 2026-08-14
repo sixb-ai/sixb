@@ -1,5 +1,5 @@
 import type { OntologyObjectRef } from "../../materialization/model"
-import { linkRefKey, linkScopeKey, objectRefKey } from "../../materialization/refs"
+import { linkRefKey, objectRefKey } from "../../materialization/refs"
 import type {
   MaterializationLinkState,
   MaterializationSession,
@@ -30,21 +30,16 @@ export async function loadEditWorkingState(
     links: {
       edges: new Map(),
       slots: new Map(),
-      scopeSnapshots: new Map(),
     },
   }
   const readSet = buildEditReadSet(context.ontology, operations)
   const explicitLinkKeys = new Set(readSet.links.map(linkRefKey))
-  const explicitLinkSlots = new Set(
-    readSet.linkScopes.map((scope) => linkScopeKey(scope.source, scope.linkId))
-  )
   const incidentLinks = new Map<string, MaterializationLinkState>()
   const loadedState: EditWorkingState = {
     objects: state.objects,
     links: {
       edges: new Map(),
       slots: state.links.slots,
-      scopeSnapshots: state.links.scopeSnapshots,
     },
   }
   const revivingObjects = new Set(
@@ -68,10 +63,6 @@ export async function loadEditWorkingState(
       }
       if (readSet.incidentObjects.length > 0) incidentLinks.set(key, link)
     }
-  }
-
-  for (const key of state.links.slots.keys()) {
-    if (!explicitLinkSlots.has(key)) state.links.slots.delete(key)
   }
 
   await mergeMissingLinkSlotEndpoints(context, storage, session, state)
@@ -154,7 +145,7 @@ async function mergeIncidentState(
   const missingScopes = distinctCardinalityOneScopes(
     context.ontology,
     relevantStates,
-    state.links.scopeSnapshots
+    state.links.slots
   )
   if (missingScopes.length > 0) {
     await mergeLoadedState(context, storage, session, state, {
