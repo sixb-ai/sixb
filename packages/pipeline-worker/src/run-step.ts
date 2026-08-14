@@ -3,6 +3,7 @@ import { captureSixbFailure } from "@sixb/core/internal/errors"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import { PIPELINE_RUN_FAILURE_CODES, type PipelineStepRunRecord } from "@sixb/core/storage"
 import {
+  createPipelineStepFailure,
   createStepBookkeepingError,
   requireRegisteredDataset,
   statusForFailure,
@@ -44,23 +45,37 @@ export async function runStep(input: {
   }
 
   throwIfAborted(signal)
-  const resolvedInputs = await resolveStepInputs({
-    runtime,
-    pipeline,
-    step,
-    pipelineRunId: job.id,
-  })
-  const inputRefs = resolvedInputs.map((resolved) => resolved.ref)
-  const outputDataset = requireRegisteredDataset({
-    dataset: runtime.datasets.getById(step.output.id),
-    pipelineId: pipeline.id,
-    pipelineRunId: job.id,
-    stepId: step.id,
-    role: "output",
-    datasetId: step.output.id,
-  })
+  let resolvedInputs: readonly ResolvedStepInput[]
+  let outputDataset: DatasetDefinition
+  try {
+    resolvedInputs = await resolveStepInputs({
+      runtime,
+      pipeline,
+      step,
+      pipelineRunId: job.id,
+    })
+    outputDataset = requireRegisteredDataset({
+      dataset: runtime.datasets.getById(step.output.id),
+      pipelineId: pipeline.id,
+      pipelineRunId: job.id,
+      stepId: step.id,
+      role: "output",
+      datasetId: step.output.id,
+    })
 
-  await runtime.lakeStorage.createDataset(outputDataset)
+    await runtime.lakeStorage.createDataset(outputDataset)
+  } catch (error) {
+    if (statusForFailure(signal, error) === "failed") {
+      throw createPipelineStepFailure({
+        pipelineId: pipeline.id,
+        pipelineRunId: job.id,
+        stepId: step.id,
+        cause: error,
+      })
+    }
+    throw error
+  }
+  const inputRefs = resolvedInputs.map((resolved) => resolved.ref)
 
   const stepRunId = `${job.id}:step:${stepIndex + 1}:${step.id}`
   const startedStepRun = await runtime.pipelineRunsStorage.startStep({
@@ -124,13 +139,23 @@ export async function runStep(input: {
   } catch (error) {
     if (!committedVersion) {
       const status = statusForFailure(signal, error)
+      const failureError =
+        status === "failed"
+          ? createPipelineStepFailure({
+              pipelineId: pipeline.id,
+              pipelineRunId: job.id,
+              stepId: step.id,
+              stepRunId,
+              cause: error,
+            })
+          : error
       const failedStepRun = await runtime.pipelineRunsStorage
         .finishStep({
           projectId: runtime.id,
           id: stepRunId,
           status,
           rowsWritten,
-          error: captureSixbFailure(error, {
+          error: captureSixbFailure(failureError, {
             allowedCodes: PIPELINE_RUN_FAILURE_CODES,
             defaultCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
             details: {
@@ -146,6 +171,8 @@ export async function runStep(input: {
       if (failedStepRun) {
         await input.onStepFinished?.(failedStepRun, lifecycleContext)
       }
+
+      throw failureError
     }
 
     throw error

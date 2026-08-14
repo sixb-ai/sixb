@@ -10,6 +10,7 @@ import type {
 import {
   snapshotWorkflowInput,
   snapshotWorkflowInterventionResponse,
+  unwrapWorkflowNodeFailure,
   validateWorkflowAgentStepOutput,
   validateWorkflowInput,
   validateWorkflowInterventionResponse,
@@ -642,9 +643,10 @@ export class WorkflowRunSession {
 
     const at = new Date()
     const activeNodeRunId = this.dependencies.recorder.activeNodeId
+    const failureCode = status === "cancelled" ? "runtime.cancelled" : "internal.unexpected"
     const failure = captureSixbFailure(error, {
       allowedCodes: WORKFLOW_RUN_FAILURE_CODES,
-      defaultCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+      defaultCode: failureCode,
       details: {
         workflowId: this.dependencies.workflow.id,
         workflowRunId: this.dependencies.job.id,
@@ -657,7 +659,11 @@ export class WorkflowRunSession {
       error: failure,
     })
 
-    await this.finishWorkflowRunAfterError({ reportedError: error, failure, status })
+    await this.finishWorkflowRunAfterError({
+      reportedError: unwrapWorkflowNodeFailure(error),
+      failure,
+      status,
+    })
   }
 
   flushLogs(): Promise<void> {

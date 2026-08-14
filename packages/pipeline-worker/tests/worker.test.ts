@@ -481,8 +481,8 @@ describe("PipelineWorker", () => {
       totalSteps: 2,
       status: "failed",
       error: {
-        code: "internal.unexpected",
-        message: "An unexpected internal error occurred.",
+        code: "pipeline.step_failed",
+        message: "Pipeline step execution failed.",
         retryable: false,
         at: expect.any(String),
         details: {

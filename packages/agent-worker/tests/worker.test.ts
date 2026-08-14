@@ -2080,6 +2080,157 @@ describe("AgentWorker", () => {
     }
   })
 
+  test("translates a failed agent execution into the parent workflow vocabulary", async () => {
+    const originalError = new Error("workflow agent provider failed")
+    const model = new MockLanguageModelV4({
+      modelId: "mock-model",
+      doGenerate: async () => {
+        throw originalError
+      },
+    })
+    const agent = defineAgent("workflow-failure-agent", {
+      name: "Workflow failure agent",
+      model,
+      instructions: "Fail for this test.",
+      groups: [AGENT_RUNTIME_GROUP],
+    })
+    const agentStep = defineAgentStep("resolve-or-fail", agent)
+      .input({ query: "string" })
+      .output({ answer: "string" })
+      .prompt(({ input }) => `Resolve '${input.query}'.`)
+    const workflow = defineWorkflow("agent-failure-workflow")
+      .input({ query: "string" })
+      .then(agentStep)
+    const sixb = new SixbHost({
+      id: PROJECT_ID,
+      ontology: [],
+      agents: [agent],
+      workflows: [workflow],
+      groups: [AGENT_RUNTIME_GROUP],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage: new InMemoryLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+      sandboxes: new RecordingSandboxFactory(),
+    })
+    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
+    const reporter = attachSixbErrorReporter(sixb, (error, context) => {
+      reports.push({ error, context })
+    })
+    const runs = sixb.storage.workflowRuns!
+    const runId = "workflow-agent-failure-run"
+    const nodeRunId = `${runId}:node:0`
+    const executionId = await createTestWorkflowExecution(sixb.storage.executions, {
+      projectId: PROJECT_ID,
+      workflowId: workflow.id,
+      runId,
+    })
+    await runs.queue({
+      id: runId,
+      projectId: PROJECT_ID,
+      executionId,
+      workflowId: workflow.id,
+      input: { query: "alpha" },
+      requesterGroupIds: [],
+    })
+    await runs.start({ id: runId, projectId: PROJECT_ID })
+    await runs.nodes.start({
+      id: nodeRunId,
+      projectId: PROJECT_ID,
+      workflowRunId: runId,
+      workflowId: workflow.id,
+      nodeIndex: 0,
+      nodeType: "agent",
+      nodeId: agentStep.id,
+      nodeKey: "resolveOrFail",
+      input: { query: "alpha" },
+    })
+    const agentExecutionId = await createTestAgentExecution(sixb.storage, {
+      projectId: PROJECT_ID,
+      agentId: agent.id,
+      runId: nodeRunId,
+      parentExecutionId: executionId,
+    })
+    await runs.agentNodes.create({
+      projectId: PROJECT_ID,
+      nodeRunId,
+      executionId: agentExecutionId,
+      agentId: agent.id,
+      prompt: "Resolve 'alpha'.",
+    })
+    await runs.nodes.wait({ projectId: PROJECT_ID, id: nodeRunId })
+    await runs.wait({ projectId: PROJECT_ID, id: runId })
+    await sixb.queues.agents.enqueue({
+      projectId: PROJECT_ID,
+      jobs: [
+        {
+          id: `wfa_job_${nodeRunId}`,
+          type: "agent.workflow-node.requested",
+          payload: { nodeRunId },
+        },
+      ],
+    })
+
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      const execution = await waitFor(
+        async () => {
+          const record = await runs.agentNodes.getByNodeRunId({
+            projectId: PROJECT_ID,
+            nodeRunId,
+          })
+          return record?.status === "failed" ? record : null
+        },
+        { label: "workflow agent node failed" }
+      )
+      const [nodeRun, run] = await Promise.all([
+        runs.nodes.getById({ projectId: PROJECT_ID, id: nodeRunId }),
+        runs.getById({ projectId: PROJECT_ID, id: runId }),
+      ])
+
+      expect(execution.error).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        retryable: false,
+        details: {
+          agentId: agent.id,
+          workflowId: workflow.id,
+          workflowRunId: runId,
+          nodeId: agentStep.id,
+          nodeRunId,
+        },
+      })
+      expect(run?.status).toBe("failed")
+      expect(run?.error).toMatchObject({
+        code: "workflow.node_failed",
+        message: "Workflow node execution failed.",
+        retryable: false,
+        details: {
+          agentId: agent.id,
+          workflowId: workflow.id,
+          workflowRunId: runId,
+          nodeId: agentStep.id,
+          nodeRunId,
+        },
+      })
+      expect(nodeRun?.error).toEqual(run?.error)
+
+      await reporter.flush()
+      expect(reports).toHaveLength(1)
+      expect(reports[0]?.error).toBe(originalError)
+      expect(reports[0]?.context).toMatchObject({
+        type: "run.failed",
+        runKind: "workflow",
+        run: { runId, workflowId: workflow.id },
+        failure: run?.error,
+      })
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("fails startup when a project Agent Skill is invalid", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "sixb-agent-skills-startup-"))
     try {

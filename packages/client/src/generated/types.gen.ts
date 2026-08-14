@@ -2502,7 +2502,7 @@ export type ListPipelinesResponses = {
         versionId: string
       }
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled"
+        code: "internal.unexpected" | "runtime.cancelled" | "pipeline.step_failed"
         message: string
         retryable: boolean
         at: string
@@ -2633,7 +2633,7 @@ export type GetPipelineResponses = {
         versionId: string
       }
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled"
+        code: "internal.unexpected" | "runtime.cancelled" | "pipeline.step_failed"
         message: string
         retryable: boolean
         at: string
@@ -2706,7 +2706,7 @@ export type ListPipelineRunsResponses = {
         versionId: string
       }
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled"
+        code: "internal.unexpected" | "runtime.cancelled" | "pipeline.step_failed"
         message: string
         retryable: boolean
         at: string
@@ -2781,7 +2781,7 @@ export type GetPipelineRunResponses = {
         versionId: string
       }
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled"
+        code: "internal.unexpected" | "runtime.cancelled" | "pipeline.step_failed"
         message: string
         retryable: boolean
         at: string
@@ -2821,7 +2821,7 @@ export type GetPipelineRunResponses = {
       }
       rowsWritten?: number
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled"
+        code: "internal.unexpected" | "runtime.cancelled" | "pipeline.step_failed"
         message: string
         retryable: boolean
         at: string
@@ -3031,7 +3031,7 @@ export type ListWorkflowsResponses = {
       startedAt: string
       finishedAt?: string
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled"
+        code: "internal.unexpected" | "runtime.cancelled" | "workflow.node_failed"
         message: string
         retryable: boolean
         at: string
@@ -3211,7 +3211,7 @@ export type GetWorkflowResponses = {
       startedAt: string
       finishedAt?: string
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled"
+        code: "internal.unexpected" | "runtime.cancelled" | "workflow.node_failed"
         message: string
         retryable: boolean
         at: string
@@ -3713,7 +3713,7 @@ export type ListWorkflowRunsResponses = {
       startedAt: string
       finishedAt?: string
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled"
+        code: "internal.unexpected" | "runtime.cancelled" | "workflow.node_failed"
         message: string
         retryable: boolean
         at: string
@@ -3789,7 +3789,7 @@ export type GetWorkflowRunResponses = {
       startedAt: string
       finishedAt?: string
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled"
+        code: "internal.unexpected" | "runtime.cancelled" | "workflow.node_failed"
         message: string
         retryable: boolean
         at: string
@@ -3869,7 +3869,7 @@ export type GetWorkflowRunResponses = {
           | null
       }
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled"
+        code: "internal.unexpected" | "runtime.cancelled" | "workflow.node_failed"
         message: string
         retryable: boolean
         at: string
@@ -4032,7 +4032,7 @@ export type CancelWorkflowRunResponses = {
       startedAt: string
       finishedAt?: string
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled"
+        code: "internal.unexpected" | "runtime.cancelled" | "workflow.node_failed"
         message: string
         retryable: boolean
         at: string
@@ -4112,7 +4112,7 @@ export type CancelWorkflowRunResponses = {
           | null
       }
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled"
+        code: "internal.unexpected" | "runtime.cancelled" | "workflow.node_failed"
         message: string
         retryable: boolean
         at: string

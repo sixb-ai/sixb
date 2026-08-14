@@ -8,6 +8,7 @@ import {
   requirePipeline,
   statusForFailure,
   throwIfAborted,
+  unwrapPipelineStepFailure,
 } from "./errors"
 import { runStep } from "./run-step"
 import type {
@@ -119,6 +120,7 @@ export async function runPipelineJob(input: RunPipelineJobInput): Promise<Pipeli
       version: finalVersion,
     }
   } catch (error) {
+    const reportedError = unwrapPipelineStepFailure(error)
     if (startedRun && !finished) {
       const status = statusForFailure(signal, error)
       try {
@@ -134,7 +136,7 @@ export async function runPipelineJob(input: RunPipelineJobInput): Promise<Pipeli
           error: failure,
         })
         if (status === "failed" && run.status === "failed") {
-          input.onRunFailed?.(error, run, failure)
+          input.onRunFailed?.(reportedError, run, failure)
         }
         await notifyRunFinished(input.onRunFinished, run)
       } catch {
@@ -142,7 +144,7 @@ export async function runPipelineJob(input: RunPipelineJobInput): Promise<Pipeli
       }
     }
 
-    throw error
+    throw reportedError
   } finally {
     await logSession.flush()
   }

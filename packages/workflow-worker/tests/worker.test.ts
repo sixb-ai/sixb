@@ -392,13 +392,15 @@ describe("WorkflowWorker", () => {
       (value) => value?.status === "failed"
     )
     expect(run?.error).toMatchObject({
-      code: "internal.unexpected",
-      message: "An unexpected internal error occurred.",
+      code: "workflow.node_failed",
+      message: "Workflow node execution failed.",
       retryable: false,
       details: {
         workflowId: workflow.id,
         workflowRunId: "wfrun_worker_failed",
+        nodeId: "explode",
         nodeRunId: "wfrun_worker_failed:node:0",
+        stepId: "explode",
       },
     })
 
@@ -445,14 +447,16 @@ describe("WorkflowWorker", () => {
       nodeRunId: "wfrun_worker_failed:node:0",
       status: "failed",
       error: {
-        code: "internal.unexpected",
-        message: "An unexpected internal error occurred.",
+        code: "workflow.node_failed",
+        message: "Workflow node execution failed.",
         retryable: false,
         at: expect.any(String),
         details: {
           workflowId: workflow.id,
           workflowRunId: "wfrun_worker_failed",
+          nodeId: "explode",
           nodeRunId: "wfrun_worker_failed:node:0",
+          stepId: "explode",
         },
       },
     })
@@ -462,14 +466,16 @@ describe("WorkflowWorker", () => {
       status: "failed",
       finishedAt: expect.any(String),
       error: {
-        code: "internal.unexpected",
-        message: "An unexpected internal error occurred.",
+        code: "workflow.node_failed",
+        message: "Workflow node execution failed.",
         retryable: false,
         at: expect.any(String),
         details: {
           workflowId: workflow.id,
           workflowRunId: "wfrun_worker_failed",
+          nodeId: "explode",
           nodeRunId: "wfrun_worker_failed:node:0",
+          stepId: "explode",
         },
       },
     })
@@ -801,13 +807,15 @@ describe("WorkflowWorker", () => {
     )
 
     expect(run?.error).toMatchObject({
-      code: "internal.unexpected",
-      message: "An unexpected internal error occurred.",
+      code: "workflow.node_failed",
+      message: "Workflow node execution failed.",
       retryable: false,
       details: {
         workflowId: workflow.id,
         workflowRunId: "wfrun_worker_resume_failed",
+        nodeId: "fail-after-resume",
         nodeRunId: "wfrun_worker_resume_failed:node:2",
+        stepId: "fail-after-resume",
       },
     })
     expect(reported[0]?.error).toBe(resumeError)
