@@ -10,8 +10,13 @@ const WATCHDOG_GRACE_MS = 1_000
 const RETRY_INITIAL_DELAY_MS = 100
 const RETRY_MAX_DELAY_MS = 2_000
 
+type RedisSubscriptionConnectionManager = Pick<
+  RedisConnectionManager,
+  "createSubscriptionClient" | "closeClient"
+>
+
 export interface RedisSubscriptionPumpOptions {
-  readonly connectionManager: RedisConnectionManager
+  readonly connectionManager: RedisSubscriptionConnectionManager
   readonly client: RedisBrokerClient
   readonly stream: EnsuredStream
   readonly names?: ReadonlySet<string>
@@ -99,7 +104,11 @@ export class RedisSubscriptionPump implements ActiveSubscription {
       if (signal.aborted) return undefined
 
       try {
-        const client = await this.options.connectionManager.createSubscriptionClient()
+        const client = await this.options.connectionManager.createSubscriptionClient(signal)
+        if (signal.aborted) {
+          this.options.connectionManager.closeClient(client)
+          return undefined
+        }
         return { client, nextAttempt }
       } catch (error) {
         if (!signal.aborted) {

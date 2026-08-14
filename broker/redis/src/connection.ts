@@ -5,7 +5,21 @@ export interface RedisBrokerConnectionOptions extends RedisOptions {
   readonly url?: string
 }
 
-export type RedisBrokerClient = RedisClient
+export interface RedisBrokerClient {
+  connect(): Promise<void>
+  close(): void
+  exists(key: string): Promise<boolean>
+  hmget(key: string, fields: string[]): Promise<Array<string | null>>
+  send(command: string, args: string[]): Promise<unknown>
+}
+
+type RedisBrokerClientFactory = (
+  url: string | undefined,
+  options: RedisOptions | undefined
+) => RedisBrokerClient
+
+const createRedisBrokerClient: RedisBrokerClientFactory = (url, options) =>
+  new RedisClient(url, options)
 
 /**
  * Lazily manages Redis clients for the broker.
@@ -14,6 +28,7 @@ export type RedisBrokerClient = RedisClient
  * dedicated clients so a blocked subscription cannot starve append/read calls.
  */
 export class RedisConnectionManager {
+  private readonly controller = new AbortController()
   private readonly url: string | undefined
   private readonly options: RedisOptions | undefined
   private connectPromise: Promise<RedisBrokerClient> | undefined
@@ -21,7 +36,10 @@ export class RedisConnectionManager {
   private commandQueue: Promise<void> = Promise.resolve()
   private closed = false
 
-  constructor(options: RedisBrokerConnectionOptions = {}) {
+  constructor(
+    options: RedisBrokerConnectionOptions = {},
+    private readonly clientFactory: RedisBrokerClientFactory = createRedisBrokerClient
+  ) {
     const { url, ...redisOptions } = options
     this.url = url
     this.options = Object.keys(redisOptions).length === 0 ? undefined : redisOptions
@@ -54,16 +72,24 @@ export class RedisConnectionManager {
     }
   }
 
-  async createSubscriptionClient(): Promise<RedisBrokerClient> {
+  async createSubscriptionClient(signal?: AbortSignal): Promise<RedisBrokerClient> {
     this.assertOpen()
     // A blocking command belongs to one connection generation. Reconnecting the same Bun client
     // can leave its in-flight XREAD promise pending, so subscription pumps replace disposable
     // clients themselves and resume from their retained cursor.
-    const client = await this.openClient("Failed to connect Redis subscription client", {
-      ...this.options,
-      autoReconnect: false,
-      enableOfflineQueue: false,
-    })
+    const client = await this.openClient(
+      "Failed to connect Redis subscription client",
+      {
+        ...this.options,
+        autoReconnect: false,
+        enableOfflineQueue: false,
+      },
+      signal
+    )
+    if (signal?.aborted) {
+      this.closeClient(client)
+      throw new RedisBrokerError("subscription client connection was aborted")
+    }
     if (this.closed) {
       this.closeClient(client)
       this.assertOpen()
@@ -103,6 +129,7 @@ export class RedisConnectionManager {
       return
     }
     this.closed = true
+    this.controller.abort()
     await this.commandQueue
 
     const client = this.client
@@ -124,15 +151,45 @@ export class RedisConnectionManager {
 
   private async openClient(
     errorMessage: string,
-    options: RedisOptions | undefined = this.options
+    options: RedisOptions | undefined = this.options,
+    signal?: AbortSignal
   ): Promise<RedisBrokerClient> {
-    const client = new RedisClient(this.url ?? redisUrlFromEnvironment(), options)
+    const client = this.clientFactory(this.url ?? redisUrlFromEnvironment(), options)
+    const signals = signal ? [signal, this.controller.signal] : [this.controller.signal]
+    let candidateClosed = false
+    let onAbort: (() => void) | undefined
+    const closeCandidate = (): void => {
+      if (candidateClosed) return
+      candidateClosed = true
+      this.closeClient(client)
+    }
+
     try {
-      await client.connect()
+      const connecting = client.connect()
+      const aborted = new Promise<never>((_resolve, reject) => {
+        onAbort = () => {
+          closeCandidate()
+          reject(new Error("Redis client connection was aborted"))
+        }
+        for (const activeSignal of signals) {
+          activeSignal.addEventListener("abort", onAbort, { once: true })
+        }
+        if (signals.some((activeSignal) => activeSignal.aborted)) onAbort()
+      })
+      await Promise.race([connecting, aborted])
+      if (signals.some((activeSignal) => activeSignal.aborted)) {
+        throw new Error("Redis client connection was aborted")
+      }
       return client
     } catch (error) {
-      this.closeClient(client)
+      closeCandidate()
       throw new RedisBrokerError(errorMessage, { cause: error })
+    } finally {
+      if (onAbort !== undefined) {
+        for (const activeSignal of signals) {
+          activeSignal.removeEventListener("abort", onAbort)
+        }
+      }
     }
   }
 

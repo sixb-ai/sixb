@@ -159,19 +159,36 @@ describe("RedisBroker", () => {
         subscriptionClientId = [...clientIds].find((id) => !existingXreadClients.has(id))
         return subscriptionClientId !== undefined
       }, 5_000)
+      if (subscriptionClientId === undefined) {
+        throw new Error("Subscription XREAD client was not found")
+      }
+      const activeSubscriptionClientId = subscriptionClientId
+
+      await broker.append({
+        projectId,
+        streamId: stream.id,
+        records: [{ payload: "before-reconnect" }],
+      })
+      await waitUntil(() => received.length === 1, 5_000)
+      await waitUntil(
+        async () => (await xreadClientIds(admin)).has(activeSubscriptionClientId),
+        5_000
+      )
 
       console.error = (...args: unknown[]) => {
         errors.push(args.map(String).join(" "))
       }
-      await admin.send("CLIENT", ["KILL", "ID", subscriptionClientId!])
+      await admin.send("CLIENT", ["KILL", "ID", activeSubscriptionClientId])
       await broker.append({
         projectId,
         streamId: stream.id,
         records: [{ payload: "after-reconnect" }],
       })
 
-      await waitUntil(() => received.length === 1, 5_000)
-      expect(received).toEqual(["after-reconnect"])
+      await waitUntil(() => received.includes("after-reconnect"), 5_000)
+      // Observe another pair of BLOCK cycles so a late replay from the replaced client cannot pass.
+      await Bun.sleep(250)
+      expect(received).toEqual(["before-reconnect", "after-reconnect"])
       expect(errors.some((message) => message.includes("reconnecting"))).toBe(true)
     } finally {
       console.error = originalError
