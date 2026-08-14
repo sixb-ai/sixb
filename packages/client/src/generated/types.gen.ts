@@ -3959,7 +3959,7 @@ export type GetWorkflowAgentNodeExecutionResponses = {
     trace?: Array<unknown>
     diagnostics?: Array<unknown>
     error?: {
-      code: "internal.unexpected" | "runtime.cancelled"
+      code: "internal.unexpected" | "runtime.cancelled" | "agent.execution_failed"
       message: string
       retryable: boolean
       at: string
@@ -6782,7 +6782,7 @@ export type PostAgentThreadMessageResponses = {
         message: string
       }>
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled"
+        code: "internal.unexpected" | "runtime.cancelled" | "agent.execution_failed"
         message: string
         retryable: boolean
         at: string
@@ -6993,7 +6993,7 @@ export type CancelAgentRunResponses = {
         message: string
       }>
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled"
+        code: "internal.unexpected" | "runtime.cancelled" | "agent.execution_failed"
         message: string
         retryable: boolean
         at: string
@@ -7107,7 +7107,7 @@ export type RetryAgentRunResponses = {
         message: string
       }>
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled"
+        code: "internal.unexpected" | "runtime.cancelled" | "agent.execution_failed"
         message: string
         retryable: boolean
         at: string
@@ -7219,7 +7219,7 @@ export type ListAgentThreadRunsResponses = {
         message: string
       }>
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled"
+        code: "internal.unexpected" | "runtime.cancelled" | "agent.execution_failed"
         message: string
         retryable: boolean
         at: string
@@ -7328,7 +7328,7 @@ export type GetAgentRunResponses = {
       message: string
     }>
     error?: {
-      code: "internal.unexpected" | "runtime.cancelled"
+      code: "internal.unexpected" | "runtime.cancelled" | "agent.execution_failed"
       message: string
       retryable: boolean
       at: string
@@ -8802,7 +8802,7 @@ export type ListProjectionsResponses = {
             startedAt: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled"
+              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -8849,7 +8849,7 @@ export type ListProjectionsResponses = {
             startedAt: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled"
+              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -8897,7 +8897,7 @@ export type ListProjectionsResponses = {
             startedAt: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled"
+              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -8956,7 +8956,7 @@ export type ListProjectionsResponses = {
             startedAt: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled"
+              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -9003,7 +9003,7 @@ export type ListProjectionsResponses = {
             startedAt: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled"
+              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -9051,7 +9051,7 @@ export type ListProjectionsResponses = {
             startedAt: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled"
+              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -9111,7 +9111,7 @@ export type ListProjectionsResponses = {
             startedAt: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled"
+              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -9158,7 +9158,7 @@ export type ListProjectionsResponses = {
             startedAt: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled"
+              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -9206,7 +9206,7 @@ export type ListProjectionsResponses = {
             startedAt: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled"
+              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -9302,7 +9302,7 @@ export type GetProjectionResponses = {
               startedAt: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled"
+                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9349,7 +9349,7 @@ export type GetProjectionResponses = {
               startedAt: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled"
+                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9397,7 +9397,7 @@ export type GetProjectionResponses = {
               startedAt: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled"
+                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9456,7 +9456,7 @@ export type GetProjectionResponses = {
               startedAt: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled"
+                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9503,7 +9503,7 @@ export type GetProjectionResponses = {
               startedAt: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled"
+                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9551,7 +9551,7 @@ export type GetProjectionResponses = {
               startedAt: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled"
+                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9611,7 +9611,7 @@ export type GetProjectionResponses = {
               startedAt: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled"
+                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9658,7 +9658,7 @@ export type GetProjectionResponses = {
               startedAt: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled"
+                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9706,7 +9706,7 @@ export type GetProjectionResponses = {
               startedAt: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled"
+                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9800,7 +9800,7 @@ export type ListProjectionRunsResponses = {
           startedAt: string
           finishedAt?: string
           error?: {
-            code: "internal.unexpected" | "runtime.cancelled"
+            code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
             message: string
             retryable: boolean
             at: string
@@ -9847,7 +9847,7 @@ export type ListProjectionRunsResponses = {
           startedAt: string
           finishedAt?: string
           error?: {
-            code: "internal.unexpected" | "runtime.cancelled"
+            code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
             message: string
             retryable: boolean
             at: string
@@ -9895,7 +9895,7 @@ export type ListProjectionRunsResponses = {
           startedAt: string
           finishedAt?: string
           error?: {
-            code: "internal.unexpected" | "runtime.cancelled"
+            code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
             message: string
             retryable: boolean
             at: string
@@ -9988,7 +9988,7 @@ export type GetProjectionRunResponses = {
         startedAt: string
         finishedAt?: string
         error?: {
-          code: "internal.unexpected" | "runtime.cancelled"
+          code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
           message: string
           retryable: boolean
           at: string
@@ -10035,7 +10035,7 @@ export type GetProjectionRunResponses = {
         startedAt: string
         finishedAt?: string
         error?: {
-          code: "internal.unexpected" | "runtime.cancelled"
+          code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
           message: string
           retryable: boolean
           at: string
@@ -10083,7 +10083,7 @@ export type GetProjectionRunResponses = {
         startedAt: string
         finishedAt?: string
         error?: {
-          code: "internal.unexpected" | "runtime.cancelled"
+          code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
           message: string
           retryable: boolean
           at: string

@@ -19,8 +19,11 @@ type DetailedFailureCode = NonNullable<DetailedRun["error"]>["code"]
 
 const latestUnexpected: LatestFailureCode = "internal.unexpected"
 const projectionCancelled: ProjectionFailureCode = "runtime.cancelled"
+const projectionExecutionFailed: ProjectionFailureCode = "projection.execution_failed"
 const listedUnexpected: ListedFailureCode = "internal.unexpected"
+const listedExecutionFailed: ListedFailureCode = "projection.execution_failed"
 const detailedCancelled: DetailedFailureCode = "runtime.cancelled"
+const detailedExecutionFailed: DetailedFailureCode = "projection.execution_failed"
 
 // Dataset lookup codes belong to HTTP route failures, not persisted projection-run failures.
 // @ts-expect-error the generated projection failure contract must stay scoped to its producer
@@ -31,8 +34,11 @@ const unrelatedDetailed: DetailedFailureCode = "dataset.not_found"
 void [
   latestUnexpected,
   projectionCancelled,
+  projectionExecutionFailed,
   listedUnexpected,
+  listedExecutionFailed,
   detailedCancelled,
+  detailedExecutionFailed,
   unrelatedLatest,
   unrelatedDetailed,
 ]

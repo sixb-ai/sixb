@@ -14,6 +14,10 @@ export const SIXB_ERROR_DEFINITIONS = {
     publicMessage: "Action execution failed.",
     retryable: false,
   },
+  "agent.execution_failed": {
+    publicMessage: "Agent execution failed.",
+    retryable: false,
+  },
   "dataset.not_found": {
     publicMessage: "Dataset not found.",
     retryable: false,
@@ -48,6 +52,10 @@ export const SIXB_ERROR_DEFINITIONS = {
   },
   "projection.definition_invalid": {
     publicMessage: "Projection definition is invalid.",
+    retryable: false,
+  },
+  "projection.execution_failed": {
+    publicMessage: "Projection execution failed.",
     retryable: false,
   },
   "projection.not_found": {

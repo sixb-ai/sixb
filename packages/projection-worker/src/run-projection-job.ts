@@ -5,7 +5,12 @@ import {
   MaterializationValidationError,
   type ProjectionDefinition,
 } from "@sixb/core"
-import { captureSixbFailure, createSixbError, isSixbError } from "@sixb/core/internal/errors"
+import {
+  captureSixbFailure,
+  createSixbError,
+  isSixbError,
+  summarizeErrorMessage,
+} from "@sixb/core/internal/errors"
 import {
   MaterializationObjectNotFoundError,
   type ProjectionRunTerminalDecision,
@@ -226,17 +231,41 @@ function projectionFailure(
   readonly error: SixbFailure<ProjectionRunFailureCode>
 } {
   const finishedAt = new Date(input.now?.() ?? Date.now())
+  const failureError = status === "failed" ? translateProjectionExecutionError(input, error) : error
   return {
     protocol: input.job.protocol,
     status,
     finishedAt,
-    error: captureSixbFailure(error, {
+    error: captureSixbFailure(failureError, {
       allowedCodes: PROJECTION_RUN_FAILURE_CODES,
       defaultCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
       details: { projectionId: input.job.projectionId, runId: input.job.id },
       at: finishedAt,
     }),
   }
+}
+
+function translateProjectionExecutionError(input: RunProjectionJobInput, error: unknown): unknown {
+  if (
+    isSixbError(error) &&
+    (error.code === "internal.unexpected" || error.code === "projection.execution_failed")
+  ) {
+    return error
+  }
+
+  return createSixbError(
+    "projection.execution_failed",
+    summarizeErrorMessage(error, "Projection execution failed."),
+    {
+      cause: error,
+      details: {
+        projectionId: input.job.projectionId,
+        runId: input.job.id,
+        datasetId: input.job.datasetVersion.datasetId,
+        versionId: input.job.datasetVersion.versionId,
+      },
+    }
+  )
 }
 
 type ProjectionSuccessfulCompletion =

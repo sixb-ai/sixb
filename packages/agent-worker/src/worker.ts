@@ -1,5 +1,5 @@
 import { join } from "node:path"
-import type { AgentDefinition, SixbFailure } from "@sixb/core"
+import type { AgentDefinition } from "@sixb/core"
 import {
   createAgentRunExecutionToken,
   dispatchQueuedAgentRuns,
@@ -8,16 +8,17 @@ import {
   workflowAgentNodeQueueJobId,
 } from "@sixb/core/internal/agents"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
-import { captureSixbFailure, createSixbError, isSixbError } from "@sixb/core/internal/errors"
+import { createSixbError, isSixbError } from "@sixb/core/internal/errors"
 import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { isAbortError, QueueDeliveryLeaseLostError, QueueWorker } from "@sixb/core/internal/workers"
 import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
-import type { AgentRunExecution, AgentRunFailureCode, AgentRunRecord } from "@sixb/core/storage"
+import type { AgentRunExecution, AgentRunRecord } from "@sixb/core/storage"
 import { AGENT_RUN_FAILURE_CODES, AgentStorageError } from "@sixb/core/storage"
 import { loadAgentSkills } from "./agent-skills"
 import { normalizeApiBaseUrl } from "./api-url"
 import { AgentExecutionLostError, AgentFinalizationError, AgentUsageRecordingError } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
+import { type AgentRunFailure, toAgentExecutionFailure, toAgentRunFailure } from "./failure"
 import { finishRunOrThrow } from "./finalize"
 import {
   enqueueAiModelCallRecovery,
@@ -57,8 +58,6 @@ const MAX_AGENT_DELIVERY_ATTEMPTS = 10
 type Reservation =
   | { readonly kind: "run"; readonly run: AgentRunRecord }
   | { readonly kind: "skip" }
-
-type AgentRunFailure = SixbFailure<AgentRunFailureCode>
 
 /**
  * Cohosted worker that turns durable queued agent runs into executing turns.
@@ -184,7 +183,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       const error = createSixbError(
         "internal.unexpected",
         `[SixbAgentWorker] Unknown agent '${queuedRun.agentId}'.`,
-        { details: { agentId: queuedRun.agentId, runId } }
+        { details: agentRunFailureDetails(queuedRun) }
       )
       if (queuedRun.status === "queued") {
         const completedAt = new Date()
@@ -192,9 +191,13 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
           createSixbError(
             "internal.unexpected",
             `[SixbAgentWorker] Agent '${queuedRun.agentId}' is not registered.`,
-            { details: { agentId: queuedRun.agentId, runId } }
+            { details: agentRunFailureDetails(queuedRun) }
           ),
-          { status: "failed", at: completedAt, run: queuedRun }
+          {
+            status: "failed",
+            at: completedAt,
+            details: agentRunFailureDetails(queuedRun),
+          }
         )
         const failed = await context.storage.agents.runs.finishQueued({
           projectId: context.id,
@@ -392,7 +395,11 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     })
     if (run?.status === "queued") {
       const completedAt = new Date()
-      const failure = toAgentRunFailure(error, { status: "failed", at: completedAt, run })
+      const failure = toAgentRunFailure(error, {
+        status: "failed",
+        at: completedAt,
+        details: agentRunFailureDetails(run),
+      })
       const failed = await this.requireContext().storage.agents.runs.finishQueued({
         projectId: this.host.id,
         id: run.id,
@@ -626,7 +633,11 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
   ): Promise<{ readonly run: AgentRunRecord; readonly failure: AgentRunFailure } | undefined> {
     try {
       const completedAt = new Date()
-      const failure = toAgentRunFailure(error, { status, at: completedAt, run })
+      const failure = toAgentExecutionFailure(error, {
+        status,
+        at: completedAt,
+        details: agentRunFailureDetails(run),
+      })
       const finalized = await finishRunOrThrow(context.storage.agents, {
         projectId: context.id,
         id: run.id,
@@ -734,24 +745,10 @@ function aiUsageRecoveryBackoffMs(attempt: number): number {
   )
 }
 
-function toAgentRunFailure(
-  error: unknown,
-  input: {
-    readonly status: "failed" | "cancelled"
-    readonly at: Date
-    readonly run: Pick<AgentRunRecord, "id" | "agentId" | "threadId">
-  }
-) {
-  return captureSixbFailure(error, {
-    allowedCodes: AGENT_RUN_FAILURE_CODES,
-    defaultCode: input.status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
-    at: input.at,
-    details: {
-      agentId: input.run.agentId,
-      runId: input.run.id,
-      threadId: input.run.threadId,
-    },
-  })
+function agentRunFailureDetails(
+  run: Pick<AgentRunRecord, "id" | "agentId" | "threadId">
+): Readonly<Record<string, string>> {
+  return { agentId: run.agentId, runId: run.id, threadId: run.threadId }
 }
 
 function normalizeRequiredString(value: string | undefined): string {
