@@ -4,12 +4,7 @@ import {
   resolveAgentExecutionAuthorization,
 } from "@sixb/core/internal/agents"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
-import {
-  captureSixbFailure,
-  createSixbError,
-  summarizeErrorMessage,
-  toSixbFailure,
-} from "@sixb/core/internal/errors"
+import { createSixbError, summarizeErrorMessage, toSixbFailure } from "@sixb/core/internal/errors"
 import type { QueueDelivery } from "@sixb/core/internal/workers"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { WorkflowAgentNodeDefinition } from "@sixb/core/internal/workflows"
@@ -31,6 +26,7 @@ import type {
 import { AGENT_RUN_FAILURE_CODES, WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { AgentUsageRecordingError } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
+import { toAgentExecutionFailure } from "./failure"
 import { AiModelCallRecorder } from "./model-call-recorder"
 import {
   type AgentExecutionEnvironment,
@@ -464,12 +460,6 @@ async function finishWorkflowAgentNodeFailed(input: {
     allowedCodes: WORKFLOW_RUN_FAILURE_CODES,
     at,
   })
-  const agentFailure = captureSixbFailure(input.error, {
-    allowedCodes: AGENT_RUN_FAILURE_CODES,
-    defaultCode: input.status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
-    at,
-    details: workflowAgentErrorDetails(input.agent.id, input.nodeRun),
-  })
   return input.context.storage.transaction(async (tx) => {
     const runs = tx.workflowRuns
     if (!runs) {
@@ -485,7 +475,11 @@ async function finishWorkflowAgentNodeFailed(input: {
       executionToken: input.executionToken,
       status: input.status,
       modelId: input.agent.model.modelId,
-      error: agentFailure,
+      error: toAgentExecutionFailure(input.error, {
+        status: input.status,
+        at,
+        details: workflowAgentErrorDetails(input.agent.id, input.nodeRun),
+      }),
       completedAt: at,
     })
     const node = await runs.nodes.finish({

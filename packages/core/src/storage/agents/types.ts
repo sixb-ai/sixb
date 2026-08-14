@@ -63,6 +63,7 @@ export type AgentRunStatus = AgentExecutionStatus
 export const AGENT_RUN_FAILURE_CODES = [
   "internal.unexpected",
   "runtime.cancelled",
+  "agent.execution_failed",
 ] as const satisfies readonly [SixbErrorCode, ...SixbErrorCode[]]
 
 export type AgentRunFailureCode = (typeof AGENT_RUN_FAILURE_CODES)[number]

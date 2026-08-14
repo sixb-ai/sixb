@@ -50,8 +50,8 @@ Each boundary exposes only the codes it can persist.
 | --- | --- |
 | Action run or phase | `action.phase_failed`, `internal.unexpected`, `queue.enqueue_failed`, `runtime.cancelled` |
 | Sync run | `internal.unexpected`, `runtime.cancelled`, `sync.execution_failed` |
-| Agent execution | `internal.unexpected`, `runtime.cancelled` |
-| Projection run | `internal.unexpected`, `runtime.cancelled` |
+| Agent execution | `agent.execution_failed`, `internal.unexpected`, `runtime.cancelled` |
+| Projection run | `internal.unexpected`, `projection.execution_failed`, `runtime.cancelled` |
 | Pipeline run or step | `internal.unexpected`, `runtime.cancelled`, `pipeline.step_failed` |
 | Workflow run or node | `internal.unexpected`, `runtime.cancelled`, `workflow.node_failed` |
 | Webhook run | `internal.unexpected`, `webhook.delivery_failed` |
@@ -76,7 +76,8 @@ Additional rules:
 
 | Code | Retryable | What happened | What to do |
 | --- | --- | --- | --- |
-| `action.phase_failed` | No | An Action phase could not complete successfully. | Inspect `phase` and the cause; retry only when its side-effect boundary makes that safe. |
+| `action.phase_failed` | No | An Action phase could not complete successfully. | Inspect `phase` and the `onError` report; retry only when its side-effect boundary makes that safe. |
+| `agent.execution_failed` | No | An active Agent execution failed. | Inspect the run identity and `onError` report before requesting another run. |
 | `dataset.not_found` | No | Dataset is unavailable to the caller. | Check its ID and access policy. |
 | `dataset.version_incompatible` | No | Version does not match the required dataset or schema. | Materialize a compatible version. |
 | `dataset.version_not_found` | No | Version does not exist or nothing has been committed yet. | Check the ID or materialize the dataset. |
@@ -85,6 +86,7 @@ Additional rules:
 | `internal.unexpected` | No | The exception has no specific code yet. | Inspect its `onError` report and correlation details. |
 | `pipeline.step_failed` | No | A step failed before committing its output. | Fix the cause and request a new pipeline run. |
 | `projection.definition_invalid` | No | Projection definition is invalid for its ontology or dataset. | Fix the definition and request a new run. |
+| `projection.execution_failed` | No | Projection materialization failed permanently. | Inspect the projection, pinned dataset version, and `onError` report. |
 | `projection.not_found` | No | Projection is not registered. | Check its ID and deployment. |
 | `projection.run_already_terminal` | No | Delivery targets a run that is already terminal. | Use a new run ID for new work. |
 | `projection.run_identity_mismatch` | No | Delivery does not match the run's pinned identity. | Discard it and dispatch from the current definition. |

@@ -219,8 +219,15 @@ describe("ProjectionWorker", () => {
         (value) => value?.status === "failed"
       )
       expect(run?.error).toMatchObject({
-        code: "internal.unexpected",
-        message: "An unexpected internal error occurred.",
+        code: "projection.execution_failed",
+        message: "Projection execution failed.",
+        retryable: false,
+        details: {
+          projectionId: roomProjection.id,
+          runId,
+          datasetId: roomsDataset.id,
+          versionId: version.versionId,
+        },
       })
 
       await waitFor(

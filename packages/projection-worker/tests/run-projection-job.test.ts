@@ -2460,11 +2460,14 @@ describe("runProjectionJob", () => {
     expect(run?.progress.sourceRowsRead).toBe(1)
     expect(run?.progress.sourceRowsSkipped).toBe(0)
     expect(run?.error).toMatchObject({
-      code: "internal.unexpected",
-      message: "An unexpected internal error occurred.",
+      code: "projection.execution_failed",
+      message: "Projection execution failed.",
+      retryable: false,
       details: {
         projectionId: "device-proj",
         runId: canonicalRunId("projrun-invalid-property"),
+        datasetId: devicesDataset.id,
+        versionId: version.versionId,
       },
     })
     expect(run?.error?.at).toBe(run?.finishedAt?.toISOString())
@@ -2483,6 +2486,70 @@ describe("runProjectionJob", () => {
         datasetId: devicesDataset.id,
         versionId: version.versionId,
         status: "failed",
+      },
+    })
+  })
+
+  test("preserves coded internal errors raised after the run is claimed", async () => {
+    const deps = createDeps()
+    const sixb = createSixb(
+      {
+        datasets: [roomsDataset],
+        projections: [roomProjection],
+      },
+      deps
+    )
+    const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
+      { room_id: "r1", room_name: "Kitchen", building_ref: null },
+    ])
+    const testRunId = "projrun-coded-invariant"
+    let invariant: unknown
+    deps.lakeStorage.readRows = () => ({
+      [Symbol.asyncIterator]() {
+        return {
+          next: async () => {
+            invariant = createSixbError(
+              "internal.unexpected",
+              "[SixbProjectionWorker] Projection execution state is inconsistent.",
+              {
+                details: {
+                  projectionId: roomProjection.id,
+                  runId: canonicalRunId(testRunId),
+                },
+              }
+            )
+            throw invariant
+          },
+        }
+      },
+    })
+
+    const caught = await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: testRunId,
+        projectionId: roomProjection.id,
+        projectionKind: "object",
+        datasetId: roomsDataset.id,
+        versionId: version.versionId,
+      },
+    }).catch((error: unknown) => error)
+
+    expect(caught).toBe(invariant)
+    const run = await deps.storage.projectionRuns.getById({
+      projectId: sixb.id,
+      id: canonicalRunId(testRunId),
+    })
+    expect(run).toMatchObject({
+      status: "failed",
+      error: {
+        code: "internal.unexpected",
+        retryable: false,
+        message: "An unexpected internal error occurred.",
+        details: {
+          projectionId: roomProjection.id,
+          runId: canonicalRunId(testRunId),
+        },
       },
     })
   })
@@ -2605,8 +2672,15 @@ describe("runProjectionJob", () => {
     expect(run?.progress.sourceRowsRead).toBe(1)
     expect(run?.progress.sourceRowsSkipped).toBe(0)
     expect(run?.error).toMatchObject({
-      code: "internal.unexpected",
-      message: "An unexpected internal error occurred.",
+      code: "projection.execution_failed",
+      message: "Projection execution failed.",
+      retryable: false,
+      details: {
+        projectionId: deviceProjection.id,
+        runId: canonicalRunId("projrun-unsafe-int64-string"),
+        datasetId: devicesDataset.id,
+        versionId: version.versionId,
+      },
     })
   })
 
@@ -3162,8 +3236,15 @@ describe("runProjectionJob", () => {
     expect(run?.status).toBe("failed")
     expect(run?.progress.sourceRowsRead).toBe(0)
     expect(run?.error).toMatchObject({
-      code: "internal.unexpected",
-      message: "An unexpected internal error occurred.",
+      code: "projection.execution_failed",
+      message: "Projection execution failed.",
+      retryable: false,
+      details: {
+        projectionId: roomTargetProjection.id,
+        runId: canonicalRunId("projrun-target-bad-unit"),
+        datasetId: roomTargetsDataset.id,
+        versionId: version.versionId,
+      },
     })
 
     // The fixed physical batch is atomic: no prefix of it is committed.

@@ -1815,13 +1815,14 @@ describe("AgentWorker", () => {
 
       expect(execution.status).toBe("failed")
       expect(execution.error).toMatchObject({
-        code: "internal.unexpected",
-        message: "An unexpected internal error occurred.",
+        code: "agent.execution_failed",
+        message: "Agent execution failed.",
         retryable: false,
         details: {
           agentId: "workflow-usage-agent",
           workflowId: "workflow-usage-test",
           workflowRunId: "workflow-accounting-failure",
+          nodeId: "workflow-usage-step",
           nodeRunId,
         },
       })
@@ -1909,13 +1910,14 @@ describe("AgentWorker", () => {
 
       expect(execution.status).toBe("failed")
       expect(execution.error).toMatchObject({
-        code: "internal.unexpected",
-        message: "An unexpected internal error occurred.",
+        code: "agent.execution_failed",
+        message: "Agent execution failed.",
         retryable: false,
         details: {
           agentId: "workflow-usage-agent",
           workflowId: "workflow-usage-test",
           workflowRunId: "workflow-final-callback-failure",
+          nodeId: "workflow-usage-step",
           nodeRunId,
         },
       })
@@ -1951,13 +1953,14 @@ describe("AgentWorker", () => {
 
       expect(execution.status).toBe("failed")
       expect(execution.error).toMatchObject({
-        code: "internal.unexpected",
-        message: "An unexpected internal error occurred.",
+        code: "agent.execution_failed",
+        message: "Agent execution failed.",
         retryable: false,
         details: {
           agentId: "workflow-usage-agent",
           workflowId: "workflow-usage-test",
           workflowRunId: "workflow-finalization-failure",
+          nodeId: "workflow-usage-step",
           nodeRunId,
         },
       })
@@ -2191,8 +2194,8 @@ describe("AgentWorker", () => {
       ])
 
       expect(execution.error).toMatchObject({
-        code: "internal.unexpected",
-        message: "An unexpected internal error occurred.",
+        code: "agent.execution_failed",
+        message: "Agent execution failed.",
         retryable: false,
         details: {
           agentId: agent.id,
@@ -3514,8 +3517,8 @@ describe("AgentWorker", () => {
 
       expect(run.status).toBe("failed")
       expect(run.error).toMatchObject({
-        code: "internal.unexpected",
-        message: "An unexpected internal error occurred.",
+        code: "agent.execution_failed",
+        message: "Agent execution failed.",
         retryable: false,
         details: {
           agentId: "assistant",
@@ -3660,8 +3663,8 @@ describe("AgentWorker", () => {
 
       expect(run.status).toBe("failed")
       expect(run.error).toMatchObject({
-        code: "internal.unexpected",
-        message: "An unexpected internal error occurred.",
+        code: "agent.execution_failed",
+        message: "Agent execution failed.",
         retryable: false,
         details: {
           agentId: "assistant",
@@ -5037,8 +5040,9 @@ describe("AgentWorker", () => {
       )
       expect(run.status).toBe("failed")
       expect(run.error).toMatchObject({
-        code: "internal.unexpected",
-        message: "An unexpected internal error occurred.",
+        code: "agent.execution_failed",
+        message: "Agent execution failed.",
+        retryable: false,
         details: { agentId: "assistant", runId: run.id, threadId },
       })
       expect(run.error?.at).toBe(run.completedAt?.toISOString())
@@ -5107,7 +5111,12 @@ describe("AgentWorker", () => {
         { label: "run failed" }
       )
       expect(run.status).toBe("failed")
-      expect(run.error?.message).toBe("An unexpected internal error occurred.")
+      expect(run.error).toMatchObject({
+        code: "agent.execution_failed",
+        message: "Agent execution failed.",
+        retryable: false,
+        details: { agentId: "assistant", runId: run.id, threadId },
+      })
 
       // The turn threw before finalizing, so no assistant message was persisted.
       const messages = await listMessages(storage, threadId)
@@ -5329,7 +5338,12 @@ describe("AgentWorker", () => {
       )
 
       expect(run.status).toBe("failed")
-      expect(run.error?.message).toBe("An unexpected internal error occurred.")
+      expect(run.error).toMatchObject({
+        code: "agent.execution_failed",
+        message: "Agent execution failed.",
+        retryable: false,
+        details: { agentId: "assistant", runId: run.id, threadId },
+      })
       expect(
         (await listRunStreamRecords(sixb.broker, run.id)).find(
           (record) => record.name === "agent.run.finished"
@@ -5415,7 +5429,7 @@ describe("AgentWorker", () => {
           code: "internal.unexpected",
           retryable: false,
           message: "An unexpected internal error occurred.",
-          details: { agentId: "removed-agent", runId },
+          details: { agentId: "removed-agent", runId, threadId },
         },
       })
       await reporter.flush()
@@ -5424,7 +5438,7 @@ describe("AgentWorker", () => {
         code: "internal.unexpected",
         retryable: false,
         message: "[SixbAgentWorker] Unknown agent 'removed-agent'.",
-        details: { agentId: "removed-agent", runId },
+        details: { agentId: "removed-agent", runId, threadId },
       })
       expect(reports[0]?.context).toMatchObject({
         projectId: PROJECT_ID,

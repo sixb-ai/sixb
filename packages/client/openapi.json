@@ -11205,7 +11205,11 @@
                       "properties": {
                         "code": {
                           "type": "string",
-                          "enum": ["internal.unexpected", "runtime.cancelled"]
+                          "enum": [
+                            "internal.unexpected",
+                            "runtime.cancelled",
+                            "agent.execution_failed"
+                          ]
                         },
                         "message": {
                           "type": "string",
@@ -19403,7 +19407,11 @@
                           "properties": {
                             "code": {
                               "type": "string",
-                              "enum": ["internal.unexpected", "runtime.cancelled"]
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "agent.execution_failed"
+                              ]
                             },
                             "message": {
                               "type": "string",
@@ -19953,7 +19961,11 @@
                           "properties": {
                             "code": {
                               "type": "string",
-                              "enum": ["internal.unexpected", "runtime.cancelled"]
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "agent.execution_failed"
+                              ]
                             },
                             "message": {
                               "type": "string",
@@ -20255,7 +20267,11 @@
                           "properties": {
                             "code": {
                               "type": "string",
-                              "enum": ["internal.unexpected", "runtime.cancelled"]
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "agent.execution_failed"
+                              ]
                             },
                             "message": {
                               "type": "string",
@@ -20579,7 +20595,11 @@
                             "properties": {
                               "code": {
                                 "type": "string",
-                                "enum": ["internal.unexpected", "runtime.cancelled"]
+                                "enum": [
+                                  "internal.unexpected",
+                                  "runtime.cancelled",
+                                  "agent.execution_failed"
+                                ]
                               },
                               "message": {
                                 "type": "string",
@@ -20854,7 +20874,11 @@
                       "properties": {
                         "code": {
                           "type": "string",
-                          "enum": ["internal.unexpected", "runtime.cancelled"]
+                          "enum": [
+                            "internal.unexpected",
+                            "runtime.cancelled",
+                            "agent.execution_failed"
+                          ]
                         },
                         "message": {
                           "type": "string",
@@ -25299,7 +25323,11 @@
                                     "properties": {
                                       "code": {
                                         "type": "string",
-                                        "enum": ["internal.unexpected", "runtime.cancelled"]
+                                        "enum": [
+                                          "internal.unexpected",
+                                          "runtime.cancelled",
+                                          "projection.execution_failed"
+                                        ]
                                       },
                                       "message": {
                                         "type": "string",
@@ -25457,7 +25485,11 @@
                                     "properties": {
                                       "code": {
                                         "type": "string",
-                                        "enum": ["internal.unexpected", "runtime.cancelled"]
+                                        "enum": [
+                                          "internal.unexpected",
+                                          "runtime.cancelled",
+                                          "projection.execution_failed"
+                                        ]
                                       },
                                       "message": {
                                         "type": "string",
@@ -25618,7 +25650,11 @@
                                     "properties": {
                                       "code": {
                                         "type": "string",
-                                        "enum": ["internal.unexpected", "runtime.cancelled"]
+                                        "enum": [
+                                          "internal.unexpected",
+                                          "runtime.cancelled",
+                                          "projection.execution_failed"
+                                        ]
                                       },
                                       "message": {
                                         "type": "string",
@@ -25824,7 +25860,11 @@
                                     "properties": {
                                       "code": {
                                         "type": "string",
-                                        "enum": ["internal.unexpected", "runtime.cancelled"]
+                                        "enum": [
+                                          "internal.unexpected",
+                                          "runtime.cancelled",
+                                          "projection.execution_failed"
+                                        ]
                                       },
                                       "message": {
                                         "type": "string",
@@ -25982,7 +26022,11 @@
                                     "properties": {
                                       "code": {
                                         "type": "string",
-                                        "enum": ["internal.unexpected", "runtime.cancelled"]
+                                        "enum": [
+                                          "internal.unexpected",
+                                          "runtime.cancelled",
+                                          "projection.execution_failed"
+                                        ]
                                       },
                                       "message": {
                                         "type": "string",
@@ -26143,7 +26187,11 @@
                                     "properties": {
                                       "code": {
                                         "type": "string",
-                                        "enum": ["internal.unexpected", "runtime.cancelled"]
+                                        "enum": [
+                                          "internal.unexpected",
+                                          "runtime.cancelled",
+                                          "projection.execution_failed"
+                                        ]
                                       },
                                       "message": {
                                         "type": "string",
@@ -26354,7 +26402,11 @@
                                     "properties": {
                                       "code": {
                                         "type": "string",
-                                        "enum": ["internal.unexpected", "runtime.cancelled"]
+                                        "enum": [
+                                          "internal.unexpected",
+                                          "runtime.cancelled",
+                                          "projection.execution_failed"
+                                        ]
                                       },
                                       "message": {
                                         "type": "string",
@@ -26512,7 +26564,11 @@
                                     "properties": {
                                       "code": {
                                         "type": "string",
-                                        "enum": ["internal.unexpected", "runtime.cancelled"]
+                                        "enum": [
+                                          "internal.unexpected",
+                                          "runtime.cancelled",
+                                          "projection.execution_failed"
+                                        ]
                                       },
                                       "message": {
                                         "type": "string",
@@ -26673,7 +26729,11 @@
                                     "properties": {
                                       "code": {
                                         "type": "string",
-                                        "enum": ["internal.unexpected", "runtime.cancelled"]
+                                        "enum": [
+                                          "internal.unexpected",
+                                          "runtime.cancelled",
+                                          "projection.execution_failed"
+                                        ]
                                       },
                                       "message": {
                                         "type": "string",
@@ -26928,7 +26988,11 @@
                                   "properties": {
                                     "code": {
                                       "type": "string",
-                                      "enum": ["internal.unexpected", "runtime.cancelled"]
+                                      "enum": [
+                                        "internal.unexpected",
+                                        "runtime.cancelled",
+                                        "projection.execution_failed"
+                                      ]
                                     },
                                     "message": {
                                       "type": "string",
@@ -27086,7 +27150,11 @@
                                   "properties": {
                                     "code": {
                                       "type": "string",
-                                      "enum": ["internal.unexpected", "runtime.cancelled"]
+                                      "enum": [
+                                        "internal.unexpected",
+                                        "runtime.cancelled",
+                                        "projection.execution_failed"
+                                      ]
                                     },
                                     "message": {
                                       "type": "string",
@@ -27247,7 +27315,11 @@
                                   "properties": {
                                     "code": {
                                       "type": "string",
-                                      "enum": ["internal.unexpected", "runtime.cancelled"]
+                                      "enum": [
+                                        "internal.unexpected",
+                                        "runtime.cancelled",
+                                        "projection.execution_failed"
+                                      ]
                                     },
                                     "message": {
                                       "type": "string",
@@ -27450,7 +27522,11 @@
                                   "properties": {
                                     "code": {
                                       "type": "string",
-                                      "enum": ["internal.unexpected", "runtime.cancelled"]
+                                      "enum": [
+                                        "internal.unexpected",
+                                        "runtime.cancelled",
+                                        "projection.execution_failed"
+                                      ]
                                     },
                                     "message": {
                                       "type": "string",
@@ -27608,7 +27684,11 @@
                                   "properties": {
                                     "code": {
                                       "type": "string",
-                                      "enum": ["internal.unexpected", "runtime.cancelled"]
+                                      "enum": [
+                                        "internal.unexpected",
+                                        "runtime.cancelled",
+                                        "projection.execution_failed"
+                                      ]
                                     },
                                     "message": {
                                       "type": "string",
@@ -27769,7 +27849,11 @@
                                   "properties": {
                                     "code": {
                                       "type": "string",
-                                      "enum": ["internal.unexpected", "runtime.cancelled"]
+                                      "enum": [
+                                        "internal.unexpected",
+                                        "runtime.cancelled",
+                                        "projection.execution_failed"
+                                      ]
                                     },
                                     "message": {
                                       "type": "string",
@@ -27977,7 +28061,11 @@
                                   "properties": {
                                     "code": {
                                       "type": "string",
-                                      "enum": ["internal.unexpected", "runtime.cancelled"]
+                                      "enum": [
+                                        "internal.unexpected",
+                                        "runtime.cancelled",
+                                        "projection.execution_failed"
+                                      ]
                                     },
                                     "message": {
                                       "type": "string",
@@ -28135,7 +28223,11 @@
                                   "properties": {
                                     "code": {
                                       "type": "string",
-                                      "enum": ["internal.unexpected", "runtime.cancelled"]
+                                      "enum": [
+                                        "internal.unexpected",
+                                        "runtime.cancelled",
+                                        "projection.execution_failed"
+                                      ]
                                     },
                                     "message": {
                                       "type": "string",
@@ -28296,7 +28388,11 @@
                                   "properties": {
                                     "code": {
                                       "type": "string",
-                                      "enum": ["internal.unexpected", "runtime.cancelled"]
+                                      "enum": [
+                                        "internal.unexpected",
+                                        "runtime.cancelled",
+                                        "projection.execution_failed"
+                                      ]
                                     },
                                     "message": {
                                       "type": "string",
@@ -28598,7 +28694,11 @@
                                 "properties": {
                                   "code": {
                                     "type": "string",
-                                    "enum": ["internal.unexpected", "runtime.cancelled"]
+                                    "enum": [
+                                      "internal.unexpected",
+                                      "runtime.cancelled",
+                                      "projection.execution_failed"
+                                    ]
                                   },
                                   "message": {
                                     "type": "string",
@@ -28756,7 +28856,11 @@
                                 "properties": {
                                   "code": {
                                     "type": "string",
-                                    "enum": ["internal.unexpected", "runtime.cancelled"]
+                                    "enum": [
+                                      "internal.unexpected",
+                                      "runtime.cancelled",
+                                      "projection.execution_failed"
+                                    ]
                                   },
                                   "message": {
                                     "type": "string",
@@ -28917,7 +29021,11 @@
                                 "properties": {
                                   "code": {
                                     "type": "string",
-                                    "enum": ["internal.unexpected", "runtime.cancelled"]
+                                    "enum": [
+                                      "internal.unexpected",
+                                      "runtime.cancelled",
+                                      "projection.execution_failed"
+                                    ]
                                   },
                                   "message": {
                                     "type": "string",
@@ -29151,7 +29259,11 @@
                           "properties": {
                             "code": {
                               "type": "string",
-                              "enum": ["internal.unexpected", "runtime.cancelled"]
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "projection.execution_failed"
+                              ]
                             },
                             "message": {
                               "type": "string",
@@ -29309,7 +29421,11 @@
                           "properties": {
                             "code": {
                               "type": "string",
-                              "enum": ["internal.unexpected", "runtime.cancelled"]
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "projection.execution_failed"
+                              ]
                             },
                             "message": {
                               "type": "string",
@@ -29470,7 +29586,11 @@
                           "properties": {
                             "code": {
                               "type": "string",
-                              "enum": ["internal.unexpected", "runtime.cancelled"]
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "projection.execution_failed"
+                              ]
                             },
                             "message": {
                               "type": "string",
