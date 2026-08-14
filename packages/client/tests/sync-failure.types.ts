@@ -5,9 +5,10 @@ type SyncFailureCode = NonNullable<LatestSyncRun["error"]>["code"]
 
 const unexpected: SyncFailureCode = "internal.unexpected"
 const cancelled: SyncFailureCode = "runtime.cancelled"
+const executionFailed: SyncFailureCode = "sync.execution_failed"
 
 // Dataset lookup codes belong to HTTP route failures, not persisted sync-run failures.
 // @ts-expect-error the generated sync failure contract must stay scoped to its producer
 const unrelated: SyncFailureCode = "dataset.not_found"
 
-void [unexpected, cancelled, unrelated]
+void [unexpected, cancelled, executionFailed, unrelated]

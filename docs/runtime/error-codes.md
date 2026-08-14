@@ -72,6 +72,11 @@ Additional rules:
 - `error` remains the native error for stacks and monitoring integrations.
 - Failures without durable storage are normalized once at the reporting boundary.
 
+## Normalization
+
+- Coded errors receive their `details` where they are created.
+- Fallback details are reserved for native, infrastructure, and cancellation errors at a boundary.
+
 ## Error catalog
 
 | Code | Retryable | What happened | What to do |

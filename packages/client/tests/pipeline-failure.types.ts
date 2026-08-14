@@ -16,6 +16,8 @@ const latestUnexpected: LatestFailureCode = "internal.unexpected"
 const latestCancelled: LatestFailureCode = "runtime.cancelled"
 const listedUnexpected: ListedFailureCode = "internal.unexpected"
 const stepCancelled: StepFailureCode = "runtime.cancelled"
+const latestStepFailed: LatestFailureCode = "pipeline.step_failed"
+const stepFailed: StepFailureCode = "pipeline.step_failed"
 
 // Dataset lookup codes belong to HTTP route failures, not persisted pipeline failures.
 // @ts-expect-error the generated latest-run failure contract must stay scoped to its producer
@@ -30,6 +32,8 @@ void [
   latestCancelled,
   listedUnexpected,
   stepCancelled,
+  latestStepFailed,
+  stepFailed,
   unrelatedLatest,
   unrelatedListed,
   unrelatedStep,

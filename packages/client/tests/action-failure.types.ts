@@ -8,6 +8,7 @@ type DetailFailureCode = NonNullable<ActionRunDetail["error"]>["code"]
 const listedUnexpected: ListedFailureCode = "internal.unexpected"
 const listedCancelled: ListedFailureCode = "runtime.cancelled"
 const detailUnexpected: DetailFailureCode = "internal.unexpected"
+const detailPhaseFailed: DetailFailureCode = "action.phase_failed"
 
 // Dataset lookup codes belong to HTTP route failures, not persisted Action failures.
 // @ts-expect-error the generated Action failure contract must stay scoped to its producer
@@ -28,6 +29,7 @@ void [
   listedUnexpected,
   listedCancelled,
   detailUnexpected,
+  detailPhaseFailed,
   unrelated,
   writebackPhase,
   effectsPhase,

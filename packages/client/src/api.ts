@@ -1,5 +1,6 @@
 import type { SixbErrorCode } from "@sixb/core"
 import { type Auth, type Client, type Config, createClient, createConfig } from "./generated/client"
+import { client as sharedClient } from "./generated/client.gen"
 
 export const SIXB_CSRF_HEADER_NAME = "x-sixb-csrf"
 export const SIXB_CSRF_TOKEN_RESPONSE_HEADER_NAME = "x-sixb-csrf-token"
@@ -246,3 +247,7 @@ function installSixbErrorInterceptor(client: SixbClient): void {
     client.interceptors.error.use(sixbErrorInterceptor)
   }
 }
+
+// Package-level SDK functions use the generated singleton. Initialize it once at the transport
+// boundary so the shared client and `createSixbClient()` expose the same HTTP error contract.
+installSixbErrorInterceptor(sharedClient)
