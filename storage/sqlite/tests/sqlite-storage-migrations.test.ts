@@ -565,7 +565,13 @@ describe("SQLite storage migrations", () => {
         "action:project-a:legacy-action-run"
       )
 
-      expect(() => sqliteStorageMigrations.steps[6]?.up(db)).toThrow()
+      const actionExecutionsMigration = sqliteStorageMigrations.steps.find(
+        (migration) => migration.id === "008-action-executions"
+      )
+      if (!actionExecutionsMigration) {
+        throw new Error("SQLite action-executions migration is missing.")
+      }
+      expect(() => actionExecutionsMigration.up(db)).toThrow()
       expect(readMemoryTableColumns(db, "action_runs")).not.toContain("execution_id")
     } finally {
       db.close()
@@ -976,10 +982,12 @@ describe("SQLite migration status is read-only", () => {
     const before = statSync(path).mtimeMs
 
     const [migrator] = createSqliteStorageMigrators(tempDir)
+    const expectedVersion = sqliteStorageMigrations.latestVersion
     expect(await migrator?.status()).toMatchObject({
       adapterId: SQLITE_STORAGE_ADAPTER_ID,
       state: "current",
-      appliedVersion: 7,
+      latestVersion: expectedVersion,
+      appliedVersion: expectedVersion,
     })
 
     expect(statSync(path).mtimeMs).toBe(before)
