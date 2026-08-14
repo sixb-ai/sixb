@@ -1,7 +1,7 @@
 {
   "name": "@sixb/connector-google",
   "version": "0.1.2",
-  "description": "Typed Google Workspace connector for Sixb (Drive, Calendar, and Gmail)",
+  "description": "Typed Google connector for Sixb (Drive, Calendar, Gmail, and Analytics)",
   "keywords": [
     "sixb",
     "bun",

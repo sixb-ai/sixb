@@ -8,6 +8,8 @@ export interface GoogleConnectorOptions {
   readonly retry?: RestRetryPolicy
 }
 
+export type * from "./analytics-admin"
+export type * from "./analytics-data"
 export type * from "./calendar"
 export type * from "./drive"
 export type * from "./gmail"
