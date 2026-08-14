@@ -1,6 +1,6 @@
 {
   "name": "@sixb/broker-redis",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Redis-backed event broker for Sixb",
   "keywords": [
     "sixb",

@@ -2,6 +2,17 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-08-14
+
+### Redis subscription recovery
+
+- `@sixb/broker-redis` `0.1.2`: recover live subscriptions after a blocked `XREAD`
+  connection fails or stalls by replacing disposable subscription clients and resuming from the
+  last observed cursor.
+- Abort pending subscription client connections and reconnect attempts during unsubscribe or broker
+  shutdown so drains complete promptly.
+
+
 ## 2026-08-07
 
 ### Workspace dependency compatibility
