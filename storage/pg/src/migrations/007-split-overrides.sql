@@ -66,7 +66,9 @@ INSERT INTO ontology_link_overrides (
   source_type_id, source_primary_id, link_id, target_type_id, target_primary_id,
   value, last_commit_id, updated_at
 )
-SELECT project_id, 'edge', entity_key,
+SELECT project_id, 'edge', jsonb_build_array(
+    source_type_id, source_primary_id, link_id, target_type_id, target_primary_id
+  ),
   source_type_id, source_primary_id, link_id, target_type_id, target_primary_id,
   value, last_commit_id, updated_at
 FROM ontology_overrides
