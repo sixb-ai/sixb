@@ -1,4 +1,4 @@
-import type { OntologySource, Sixb } from "@sixb/core"
+import type { SixbHostView } from "@sixb/core"
 import {
   type AuthenticatedAuthSession,
   createCsrfCookieHeader,
@@ -8,12 +8,12 @@ import {
 } from "@sixb/core/internal/auth"
 
 export function createSessionRenewalCookieHeaders(input: {
-  readonly sixb: Sixb<readonly OntologySource[]>
+  readonly host: SixbHostView
   readonly request: Request
   readonly session: AuthenticatedAuthSession
   readonly csrfToken?: string
 }): { readonly csrfToken: string; readonly headers: readonly [string, string] } | null {
-  const cookieOptions = input.sixb.auth.getCookieOptions({
+  const cookieOptions = input.host.auth.getCookieOptions({
     audience: input.session.session.audience,
   })
   const sessionValue = getCookie(input.request, cookieOptions.sessionCookieName)

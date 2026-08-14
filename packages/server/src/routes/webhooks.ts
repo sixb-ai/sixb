@@ -4,14 +4,14 @@ import type {
   ConnectorClient,
   ConnectorDefinition,
   Logger,
-  OntologySource,
   RegisteredWebhook,
-  Sixb,
+  SixbHostView,
   WebhookDefinition,
   WebhookMetadata,
   WebhookResponse,
 } from "@sixb/core"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
+import { bindPrimitiveExecution } from "@sixb/core/internal/primitive-execution"
 import type {
   FinishWebhookRunStatus,
   WebhookDeliveryClaimResult,
@@ -28,7 +28,7 @@ interface ElysiaSet {
 }
 
 interface DispatchWebhookOptions {
-  readonly sixb: Sixb<readonly OntologySource[]>
+  readonly host: SixbHostView
   readonly registered: RegisteredWebhook
   readonly request: Request
   readonly set: ElysiaSet
@@ -36,7 +36,7 @@ interface DispatchWebhookOptions {
 }
 
 interface WebhookRunFinishInput {
-  readonly sixb: Sixb<readonly OntologySource[]>
+  readonly host: SixbHostView
   readonly runId: string
   readonly status: FinishWebhookRunStatus
   readonly requestBodyBytes?: number
@@ -59,18 +59,18 @@ type DeliveryClaimResult =
       readonly claimResult: WebhookDeliveryClaimResult
     }
 
-export function registerWebhookRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
+export function registerWebhookRoutes(app: Elysia, host: SixbHostView) {
   return app.all(
     "/api/webhooks/:connectorId/:webhookId",
     async ({ params, request, set }) => {
-      const registered = sixb.getWebhookById(params.connectorId, params.webhookId)
+      const registered = host.getWebhookById(params.connectorId, params.webhookId)
 
       if (!registered) {
         set.status = 404
         return { error: "Webhook not found" }
       }
 
-      return dispatchWebhook({ sixb, registered, request, set })
+      return dispatchWebhook({ host, registered, request, set })
     },
     {
       detail: {
@@ -82,15 +82,23 @@ export function registerWebhookRoutes(app: Elysia, sixb: Sixb<readonly OntologyS
 
 async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown> {
   const runId = `webhookrun_${randomUUID()}`
-  const { sixb, registered } = options
-  const logSession = sixb.logs.startExecution({ kind: "webhook", id: runId })
+  const { host, registered } = options
+  const execution = bindPrimitiveExecution(host, {
+    primitive: {
+      kind: "webhook",
+      id: registered.route,
+      runId,
+    },
+    source: { type: "webhook", deliveryId: runId },
+  })
+  const logSession = host.logging.startExecution({ kind: "webhook", id: runId })
   let failureReported = false
   const reportFailure = (error: unknown) => {
     if (failureReported) return
 
     failureReported = true
-    reportRunFailure(sixb, error, {
-      projectId: sixb.id,
+    reportRunFailure(host, error, {
+      projectId: host.id,
       run: {
         kind: "webhook",
         runId,
@@ -100,18 +108,19 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
     })
   }
 
-  await startWebhookRun(sixb, registered, options.request, runId)
+  await startWebhookRun(host, registered, options.request, runId)
 
   try {
     return await dispatchWebhookRun(
       options,
       runId,
+      execution.sixb,
       (phase) => logSession.withContext({ phase }),
       reportFailure
     )
   } catch (error) {
     await finishWebhookRun({
-      sixb,
+      host,
       runId,
       status: "failed",
       responseStatus: 500,
@@ -127,10 +136,11 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
 async function dispatchWebhookRun(
   options: DispatchWebhookOptions,
   runId: string,
+  sixb: ReturnType<typeof bindPrimitiveExecution>["sixb"],
   loggerForPhase: (phase: string) => Logger,
   reportFailure: (error: unknown) => void
 ): Promise<unknown> {
-  const { sixb, registered, request, set } = options
+  const { host, registered, request, set } = options
   const { connector, webhook, route } = registered
   const requestMethod = request.method.toUpperCase()
 
@@ -138,7 +148,7 @@ async function dispatchWebhookRun(
     set.status = 405
     setHeader(set, "allow", webhook.method)
     await finishWebhookRun({
-      sixb,
+      host,
       runId,
       status: "failed",
       responseStatus: 405,
@@ -155,7 +165,7 @@ async function dispatchWebhookRun(
     const message = error instanceof Error ? error.message : String(error)
     set.status = responseStatus
     await finishWebhookRun({
-      sixb,
+      host,
       runId,
       status: "failed",
       responseStatus,
@@ -182,7 +192,7 @@ async function dispatchWebhookRun(
   } catch {
     set.status = 401
     await finishWebhookRun({
-      sixb,
+      host,
       runId,
       status: "failed",
       requestBodyBytes: rawBody.byteLength,
@@ -199,7 +209,7 @@ async function dispatchWebhookRun(
     const message = error instanceof Error ? error.message : String(error)
     set.status = 400
     await finishWebhookRun({
-      sixb,
+      host,
       runId,
       status: "failed",
       requestBodyBytes: rawBody.byteLength,
@@ -226,13 +236,13 @@ async function dispatchWebhookRun(
   let idempotencyKey: string | undefined
   let deliveryClaimResult: WebhookDeliveryClaimResult | undefined
   try {
-    const claim = await claimDeliveryKey(sixb, webhook, idempotencyContext)
+    const claim = await claimDeliveryKey(host, webhook, idempotencyContext)
     idempotencyKey = claim.idempotencyKey
     deliveryClaimResult = claim.claimResult
     if (claim.status === "skip") {
       const result = accepted(set)
       await finishWebhookRun({
-        sixb,
+        host,
         runId,
         status: "skipped",
         requestBodyBytes: rawBody.byteLength,
@@ -247,7 +257,7 @@ async function dispatchWebhookRun(
     reportFailure(error)
     set.status = 500
     await finishWebhookRun({
-      sixb,
+      host,
       runId,
       status: "failed",
       requestBodyBytes: rawBody.byteLength,
@@ -259,13 +269,13 @@ async function dispatchWebhookRun(
 
   let response: unknown
   try {
-    response = await webhook.handle(handlerContext as never)
+    response = await webhook.handle(handlerContext)
   } catch (error) {
     reportFailure(error)
     // Handler failures mark the key failed so the provider's next retry can
     // attempt the delivery again.
     if (deliveryKey) {
-      await sixb.storage.webhookDeliveries?.fail({
+      await host.storage.webhookDeliveries?.fail({
         ...deliveryKey,
         failedAt: new Date().toISOString(),
         error: error instanceof Error ? error.message : String(error),
@@ -274,7 +284,7 @@ async function dispatchWebhookRun(
 
     set.status = 500
     await finishWebhookRun({
-      sixb,
+      host,
       runId,
       status: "failed",
       requestBodyBytes: rawBody.byteLength,
@@ -297,13 +307,13 @@ async function dispatchWebhookRun(
     if (deliveryKey) {
       const finalizedAt = new Date().toISOString()
       if (shouldRetryDelivery) {
-        await sixb.storage.webhookDeliveries?.fail({
+        await host.storage.webhookDeliveries?.fail({
           ...deliveryKey,
           failedAt: finalizedAt,
           error: failureMessage,
         })
       } else {
-        await sixb.storage.webhookDeliveries?.complete({
+        await host.storage.webhookDeliveries?.complete({
           ...deliveryKey,
           completedAt: finalizedAt,
         })
@@ -313,7 +323,7 @@ async function dispatchWebhookRun(
     reportFailure(error)
     set.status = 500
     await finishWebhookRun({
-      sixb,
+      host,
       runId,
       status: "failed",
       requestBodyBytes: rawBody.byteLength,
@@ -329,7 +339,7 @@ async function dispatchWebhookRun(
     reportFailure(new Error(failureMessage))
   }
   await finishWebhookRun({
-    sixb,
+    host,
     runId,
     status: runStatus,
     requestBodyBytes: rawBody.byteLength,
@@ -343,12 +353,12 @@ async function dispatchWebhookRun(
 }
 
 async function startWebhookRun(
-  sixb: Sixb<readonly OntologySource[]>,
+  host: SixbHostView,
   registered: RegisteredWebhook,
   request: Request,
   runId: string
 ): Promise<void> {
-  const storage = sixb.storage.webhookRuns
+  const storage = host.storage.webhookRuns
   if (!storage) {
     return
   }
@@ -356,7 +366,7 @@ async function startWebhookRun(
   try {
     await storage.start({
       id: runId,
-      projectId: sixb.id,
+      projectId: host.id,
       connectorId: registered.connector.id,
       webhookId: registered.webhook.id,
       method: request.method.toUpperCase(),
@@ -369,7 +379,7 @@ async function startWebhookRun(
 }
 
 async function finishWebhookRun(input: WebhookRunFinishInput): Promise<void> {
-  const storage = input.sixb.storage.webhookRuns
+  const storage = input.host.storage.webhookRuns
   if (!storage) {
     return
   }
@@ -377,7 +387,7 @@ async function finishWebhookRun(input: WebhookRunFinishInput): Promise<void> {
   try {
     await storage.finish({
       id: input.runId,
-      projectId: input.sixb.id,
+      projectId: input.host.id,
       status: input.status,
       finishedAt: new Date(),
       requestBodyBytes: input.requestBodyBytes,
@@ -408,7 +418,7 @@ function parseWebhookBody(webhook: WebhookDefinition, rawBody: Uint8Array): unkn
 }
 
 async function claimDeliveryKey(
-  sixb: Sixb<readonly OntologySource[]>,
+  host: SixbHostView,
   webhook: WebhookDefinition,
   context: Parameters<NonNullable<WebhookDefinition["idempotencyKey"]>>[0]
 ): Promise<DeliveryClaimResult> {
@@ -421,13 +431,13 @@ async function claimDeliveryKey(
     return { status: "run", key: null }
   }
 
-  const storage = sixb.storage.webhookDeliveries
+  const storage = host.storage.webhookDeliveries
   if (!storage) {
     throw new Error("Webhook delivery storage is not configured.")
   }
 
   const deliveryKey = {
-    projectId: sixb.id,
+    projectId: host.id,
     connectorId: context.connector.id,
     webhookId: webhook.id,
     idempotencyKey,
@@ -450,7 +460,7 @@ async function claimDeliveryKey(
 }
 
 function createClientResolver(
-  sixb: Sixb<readonly OntologySource[]>,
+  sixb: ReturnType<typeof bindPrimitiveExecution>["sixb"],
   connector: ConnectorDefinition
 ): () => Promise<ConnectorClient<ConnectorAdapter>> {
   let clientPromise: Promise<ConnectorClient<ConnectorAdapter>> | null = null

@@ -34,7 +34,12 @@ describe("Postgres storage migrations", () => {
         {
           adapterId: POSTGRES_STORAGE_ADAPTER_ID,
           status: "migrated",
-          applied: ["001-initial-schema", "002-workflow-run-output", "003-merge-sync-runs"],
+          applied: [
+            "001-initial-schema",
+            "002-workflow-run-output",
+            "003-merge-sync-runs",
+            "004-executions",
+          ],
         },
       ])
       expect(await readMigrationRows(schemaName)).toEqual([
@@ -58,6 +63,13 @@ describe("Postgres storage migrations", () => {
           id: "003-merge-sync-runs",
           status: "applied",
           version: 3,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "004-executions",
+          status: "applied",
+          version: 4,
         },
       ])
     })
@@ -368,7 +380,7 @@ describe("Postgres storage migrations", () => {
       expect(await migrator?.status()).toMatchObject({
         adapterId: POSTGRES_STORAGE_ADAPTER_ID,
         state: "current",
-        appliedVersion: 3,
+        appliedVersion: 4,
       })
     })
   })
@@ -411,6 +423,13 @@ describe("Postgres storage migrations", () => {
           id: "003-merge-sync-runs",
           status: "applied",
           version: 3,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "004-executions",
+          status: "applied",
+          version: 4,
         },
       ])
     } finally {

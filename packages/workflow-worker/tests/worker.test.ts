@@ -12,9 +12,9 @@ import {
   InMemoryStorage,
   prop,
   ref,
-  Sixb,
   type SixbErrorContext,
   type SixbErrorHandler,
+  SixbHost,
   type WorkflowDefinition,
 } from "@sixb/core"
 import { LOGS_STREAM } from "@sixb/core/internal/logging"
@@ -96,7 +96,7 @@ function createSixb(options: {
   readonly actions?: readonly ActionDefinition[]
   readonly onError?: SixbErrorHandler
 }) {
-  return new Sixb({
+  return new SixbHost({
     id: "workflow-worker-tests",
     ontology: [Transaction, Invoice],
     broker: new InMemoryBroker(),
@@ -139,21 +139,14 @@ describe("WorkflowWorker", () => {
       })
       .then(findBestInvoice)
     const sixb = createSixb({ workflows: [workflow] })
-    const withoutWorkflowRuns = {
-      id: sixb.id,
-      projectId: sixb.projectId,
-      ontology: sixb.ontology,
-      actionRegistry: sixb.actionRegistry,
-      events: sixb.events,
-      storage: {
-        ...sixb.storage,
-        workflowRuns: undefined,
+    const storageWithoutWorkflowRuns = { ...sixb.storage, workflowRuns: undefined }
+    const withoutWorkflowRuns = new Proxy(sixb, {
+      get(target, property, receiver) {
+        return property === "storage"
+          ? storageWithoutWorkflowRuns
+          : Reflect.get(target, property, receiver)
       },
-      lakeStorage: sixb.lakeStorage,
-      blobStorage: sixb.blobStorage,
-      queues: sixb.queues,
-      workflows: sixb.workflows,
-    }
+    })
 
     expect(() => new WorkflowWorker(withoutWorkflowRuns)).toThrow("storage.workflowRuns")
 
@@ -164,21 +157,17 @@ describe("WorkflowWorker", () => {
       .then(findBestInvoice)
       .then(reviewInvoice)
     const sixbWithIntervention = createSixb({ workflows: [interventionWorkflow] })
-    const withoutWorkflowInterventions = {
-      id: sixbWithIntervention.id,
-      projectId: sixbWithIntervention.projectId,
-      ontology: sixbWithIntervention.ontology,
-      actionRegistry: sixbWithIntervention.actionRegistry,
-      events: sixbWithIntervention.events,
-      storage: {
-        ...sixbWithIntervention.storage,
-        workflowInterventions: undefined,
-      },
-      lakeStorage: sixbWithIntervention.lakeStorage,
-      blobStorage: sixbWithIntervention.blobStorage,
-      queues: sixbWithIntervention.queues,
-      workflows: sixbWithIntervention.workflows,
+    const storageWithoutInterventions = {
+      ...sixbWithIntervention.storage,
+      workflowInterventions: undefined,
     }
+    const withoutWorkflowInterventions = new Proxy(sixbWithIntervention, {
+      get(target, property, receiver) {
+        return property === "storage"
+          ? storageWithoutInterventions
+          : Reflect.get(target, property, receiver)
+      },
+    })
 
     expect(() => new WorkflowWorker(withoutWorkflowInterventions)).toThrow(
       "storage.workflowInterventions"

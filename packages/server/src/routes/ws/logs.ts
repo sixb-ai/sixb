@@ -1,9 +1,9 @@
-import { isAllowed, type LogLevel } from "@sixb/core"
+import type { LogLevel } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { z } from "zod"
 import { LOG_LEVELS, LogRunIdSchema, SIXB_RUN_KINDS } from "../../schemas/logs"
 import type { SixbServer } from "../../server"
-import { decodeWsMessage, safeSend, wsAuthz, wsStateKey } from "../../utils/ws"
+import { decodeWsMessage, safeSend, wsRequestSixb, wsStateKey } from "../../utils/ws"
 import { LogSubscriptionHub } from "./log-subscription-hub"
 
 const SubscribeSchema = z
@@ -49,12 +49,16 @@ export function parseLogSubscriptionMessage(
 }
 
 export function registerLogStreamRoutes(app: Elysia, server: SixbServer) {
-  const hub = new LogSubscriptionHub(server.getSixb())
+  const hub = new LogSubscriptionHub(server.getHost())
 
   app.onStop(() => hub.close())
   return app.ws("/ws/logs", {
     open(ws) {
-      if (!isAllowed(wsAuthz(ws), { kind: "logs.observe" })) {
+      try {
+        const sixb = wsRequestSixb(ws)
+        if (!sixb) throw new Error("Execution scope is not available.")
+        sixb.logs.assertObservable()
+      } catch {
         ws.close(1008, "Missing required capability 'observe:logs'.")
         return
       }
@@ -62,7 +66,11 @@ export function registerLogStreamRoutes(app: Elysia, server: SixbServer) {
     },
 
     async message(ws, message) {
-      if (!isAllowed(wsAuthz(ws), { kind: "logs.observe" })) {
+      try {
+        const sixb = wsRequestSixb(ws)
+        if (!sixb) throw new Error("Execution scope is not available.")
+        sixb.logs.assertObservable()
+      } catch {
         ws.close(1008, "Missing required capability 'observe:logs'.")
         return
       }

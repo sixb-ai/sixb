@@ -1,14 +1,15 @@
-import { type AuthorizationContext, isAllowed, type OntologySource, type Sixb } from "@sixb/core"
+import type { OntologySource, SixbHostView } from "@sixb/core"
+import type { Sixb } from "@sixb/core/internal/request-execution"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
-import { requestAuthState } from "../auth/scope"
+import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import { ObjectTypeParamsSchema, ObjectTypeSchema } from "../schemas/ontology"
 
 function serializeProperty(
   property: ReturnType<
-    Sixb<readonly OntologySource[]>["listObjectTypes"]
+    SixbHostView["definitions"]["ontology"]["listObjectTypes"]
   >[number]["properties"][number]
 ) {
   return {
@@ -26,7 +27,7 @@ function serializeProperty(
 }
 
 function serializeSearch(
-  search: ReturnType<Sixb<readonly OntologySource[]>["listObjectTypes"]>[number]["search"]
+  search: ReturnType<SixbHostView["definitions"]["ontology"]["listObjectTypes"]>[number]["search"]
 ) {
   if (!search) return undefined
   return {
@@ -43,9 +44,8 @@ function serializeSearch(
 }
 
 function serializeObjectType(
-  sixb: Sixb<readonly OntologySource[]>,
-  objectType: ReturnType<Sixb<readonly OntologySource[]>["listObjectTypes"]>[number],
-  authorization: AuthorizationContext | null
+  execution: Sixb<readonly OntologySource[]>,
+  objectType: ReturnType<SixbHostView["definitions"]["ontology"]["listObjectTypes"]>[number]
 ) {
   return {
     id: objectType.id,
@@ -65,38 +65,30 @@ function serializeObjectType(
       cardinality: link.cardinality,
       properties: link.properties?.map(serializeProperty),
     })),
-    actions: sixb
-      .listActionsForType(objectType)
-      .filter((action) => isAllowed(authorization, { kind: "action.apply", actionId: action.id }))
-      .map((action) => ({
-        id: action.id,
-        name: action.id,
-        description: action.description,
-        params: Object.entries(action.params).map(([id, config]) => ({
-          id,
-          name: id,
-          schema: config.schema,
-          required: config.required ?? false,
-          nullable: config.nullable,
-          description: config.description,
-          semanticType: config.semanticType,
-        })),
+    actions: execution.actions.listForType(objectType).map((action) => ({
+      id: action.id,
+      name: action.id,
+      description: action.description,
+      params: Object.entries(action.params).map(([id, config]) => ({
+        id,
+        name: id,
+        schema: config.schema,
+        required: config.required ?? false,
+        nullable: config.nullable,
+        description: config.description,
+        semanticType: config.semanticType,
       })),
+    })),
   }
 }
 
-export function registerOntologyRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
+export function registerOntologyRoutes(app: Elysia, _host: SixbHostView) {
   return app
     .get(
       "/api/object-types",
       async (context) => {
-        const { authz } = requestAuthState(context)
-        return sixb
-          .listObjectTypes()
-          .filter((objectType) =>
-            isAllowed(authz, { kind: "object.view", objectTypeId: objectType.id })
-          )
-          .map((objectType) => serializeObjectType(sixb, objectType, authz))
+        const sixb = requireRequestSixb(context)
+        return sixb.objects.listTypes().map((objectType) => serializeObjectType(sixb, objectType))
       },
       {
         response: { 200: ObjectTypeSchema.array() },
@@ -112,17 +104,14 @@ export function registerOntologyRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       "/api/object-types/:objectTypeId",
       async (context) => {
         const { params, set } = context
-        const { authz } = requestAuthState(context)
-        const objectType = sixb.getObjectTypeById(params.objectTypeId)
-        if (
-          !objectType ||
-          !isAllowed(authz, { kind: "object.view", objectTypeId: objectType.id })
-        ) {
+        const sixb = requireRequestSixb(context)
+        const objectType = sixb.objects.getTypeById(params.objectTypeId)
+        if (!objectType) {
           set.status = 404
           return { error: "Object type not found" }
         }
 
-        return serializeObjectType(sixb, objectType, authz)
+        return serializeObjectType(sixb, objectType)
       },
       {
         params: ObjectTypeParamsSchema,

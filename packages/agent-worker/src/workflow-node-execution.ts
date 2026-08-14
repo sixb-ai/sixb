@@ -1,4 +1,4 @@
-import type { AgentDefinition, ValueType, WorkflowDefinition } from "@sixb/core"
+import type { AgentDefinition, Principal, ValueType, WorkflowDefinition } from "@sixb/core"
 import { createAgentRunExecutionToken } from "@sixb/core/internal/agents"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { QueueDelivery } from "@sixb/core/internal/workers"
@@ -13,17 +13,18 @@ import type {
   WorkflowRunStorage,
 } from "@sixb/core/storage"
 import { AgentWorkerError } from "./errors"
+import { createAgentExecutionContext } from "./execution-context"
 import { reconcileAgentExecutionIdentity } from "./identity"
 import {
   type AgentExecutionEnvironment,
   createWorkflowAgentNodeEnvironment,
 } from "./run-environment"
 import { runWorkflowAgentNode } from "./run-workflow-agent-node"
-import type { AgentWorkerContext, AgentWorkerSixb } from "./types"
+import type { AgentWorkerContext, AgentWorkerHost } from "./types"
 
 export interface ExecuteWorkflowAgentNodeInput {
   readonly context: AgentWorkerContext
-  readonly sixb: AgentWorkerSixb
+  readonly host: AgentWorkerHost
   readonly job: AgentWorkflowNodeRequestedQueueJob
   readonly signal: AbortSignal
   readonly delivery: QueueDelivery<AgentQueueJob>
@@ -42,6 +43,7 @@ interface WorkflowAgentNodeExecutionContext {
   readonly node: WorkflowAgentNodeDefinition
   readonly agent: AgentDefinition
   readonly valueTypesById: ReadonlyMap<string, ValueType>
+  readonly requestedBy: Principal
 }
 
 export async function executeWorkflowAgentNode(
@@ -65,6 +67,15 @@ export async function executeWorkflowAgentNode(
   if (!executionToken) {
     throw new AgentWorkerError(`Agent workflow node '${nodeRun.id}' has no execution token.`)
   }
+  const executionContext = createAgentExecutionContext({
+    context,
+    host: input.host,
+    identity,
+    agentId: agent.id,
+    runId: nodeRun.id,
+    queueJobId: job.id,
+    requestedBy: loaded.requestedBy,
+  })
 
   let environment: AgentExecutionEnvironment | null = null
   const cancel = await input.watchForCancel(nodeRun.id)
@@ -85,7 +96,7 @@ export async function executeWorkflowAgentNode(
       queueLeaseExpiresAt: delivery.leaseExpiresAt,
     })
     environment = await createWorkflowAgentNodeEnvironment({
-      context,
+      context: executionContext,
       agent,
       run: reserved,
       nodeInput: nodeRun.input,
@@ -106,8 +117,8 @@ export async function executeWorkflowAgentNode(
       executionToken,
       result,
     })
-    await emitNodeSucceeded(input.sixb, completedNode, workflow.nodes.length)
-    await enqueueWorkflowAgentNodeResume(input.sixb, nodeRun).catch((error) => {
+    await emitNodeSucceeded(input.host, completedNode, workflow.nodes.length)
+    await enqueueWorkflowAgentNodeResume(input.host, nodeRun).catch((error) => {
       console.error(
         `[SixbAgentWorker] Could not resume workflow after agent node '${nodeRun.id}'; the dispatcher will retry.`,
         error
@@ -128,7 +139,7 @@ export async function executeWorkflowAgentNode(
       error,
     })
     if (status === "failed") {
-      reportRunFailure(input.sixb, error, {
+      reportRunFailure(input.host, error, {
         projectId: context.id,
         occurredAt: failed.run.finishedAt,
         attempt: job.attempt,
@@ -139,7 +150,7 @@ export async function executeWorkflowAgentNode(
         },
       })
     }
-    await emitNodeAndRunFailed(input.sixb, failed, workflow.nodes.length, status)
+    await emitNodeAndRunFailed(input.host, failed, workflow.nodes.length, status)
   } finally {
     stopOwnershipProjection()
     cancel.stop()
@@ -150,7 +161,7 @@ export async function executeWorkflowAgentNode(
 async function loadWorkflowAgentNodeExecution(
   input: ExecuteWorkflowAgentNodeInput
 ): Promise<WorkflowAgentNodeExecutionContext | null> {
-  const { context, job, sixb } = input
+  const { context, host, job } = input
   const runs = context.storage.workflowRuns
   if (!runs) throw new AgentWorkerError("Workflow agent nodes require workflow storage.")
 
@@ -183,17 +194,14 @@ async function loadWorkflowAgentNodeExecution(
     return null
   }
 
-  if (!sixb.workflows || !sixb.ontology) {
-    throw new AgentWorkerError("Workflow agent nodes require registered workflow definitions.")
-  }
-  const workflow = sixb.workflows.getById(nodeRun.workflowId)
+  const workflow = host.definitions.workflows.getById(nodeRun.workflowId)
   const node = workflow?.nodes[nodeRun.nodeIndex]
   if (!workflow || !node || node.type !== "agent" || node.id !== nodeRun.nodeId) {
     throw new AgentWorkerError(
       `Workflow definition for agent node '${job.payload.nodeRunId}' is no longer available.`
     )
   }
-  const agent = sixb.agents.getById(job.payload.agentId)
+  const agent = host.definitions.agents.getById(job.payload.agentId)
   if (!agent || agent.id !== node.agentStep.agent.id) {
     throw new AgentWorkerError(`Unknown agent '${job.payload.agentId}'.`)
   }
@@ -205,7 +213,8 @@ async function loadWorkflowAgentNodeExecution(
     workflow,
     node,
     agent,
-    valueTypesById: sixb.ontology.getValueTypesById(),
+    valueTypesById: host.definitions.ontology.getValueTypesById(),
+    requestedBy: workflowRun.requestedByPrincipal,
   }
 }
 
@@ -328,11 +337,11 @@ async function finishWorkflowAgentNodeFailed(input: {
 }
 
 async function emitNodeSucceeded(
-  sixb: AgentWorkerSixb,
+  host: AgentWorkerHost,
   node: WorkflowNodeRunRecord,
   totalNodes: number
 ): Promise<void> {
-  await sixb.events
+  await host.events
     .append({
       events: [
         {
@@ -361,12 +370,12 @@ async function emitNodeSucceeded(
 }
 
 async function emitNodeAndRunFailed(
-  sixb: AgentWorkerSixb,
+  host: AgentWorkerHost,
   failed: { readonly node: WorkflowNodeRunRecord; readonly run: WorkflowRunRecord },
   totalNodes: number,
   status: "failed" | "cancelled"
 ): Promise<void> {
-  await sixb.events
+  await host.events
     .append({
       events: [
         {
@@ -406,11 +415,11 @@ async function emitNodeAndRunFailed(
 }
 
 export async function enqueueWorkflowAgentNodeResume(
-  sixb: AgentWorkerSixb,
+  host: AgentWorkerHost,
   node: Pick<WorkflowNodeRunRecord, "id" | "workflowId" | "workflowRunId">
 ): Promise<void> {
-  await sixb.queues.workflows.enqueue({
-    projectId: sixb.id,
+  await host.queues.workflows.enqueue({
+    projectId: host.id,
     jobs: [
       {
         id: workflowAgentResumeQueueJobId(node.id),

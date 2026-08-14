@@ -1,4 +1,5 @@
-import type { AuthorizationContext } from "@sixb/core"
+import type { OntologySource } from "@sixb/core"
+import type { Sixb } from "@sixb/core/internal/request-execution"
 
 export function safeSend(target: { send: (message: string) => void }, payload: unknown): void {
   try {
@@ -14,10 +15,14 @@ export function wsStateKey(ws: object): object {
   return raw && typeof raw === "object" ? raw : ws
 }
 
-/** The authorization context attached to a websocket connection; null when unauthenticated/disabled. */
-export function wsAuthz(ws: object): AuthorizationContext | null {
-  const data = (ws as { data?: { authz?: AuthorizationContext | null } }).data
-  return data?.authz ?? null
+/** The execution SDK attached once when the WebSocket request crosses the auth boundary. */
+export function wsRequestSixb(ws: object): Sixb<readonly OntologySource[]> | null {
+  const data = (
+    ws as {
+      data?: { sixb?: Sixb<readonly OntologySource[]> | null }
+    }
+  ).data
+  return data?.sixb ?? null
 }
 
 function parseJson(text: string): unknown {

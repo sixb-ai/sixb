@@ -7,7 +7,7 @@ import {
   type StorageMigrator,
 } from "@sixb/core"
 import { checkRuntimeHealth } from "../src/lib/health"
-import type { LoadedSixb } from "../src/lib/loadSixb"
+import type { LoadedSixbHost } from "../src/lib/loadSixb"
 
 describe("checkRuntimeHealth", () => {
   test("names the provider that answered instead of a bare ok", async () => {
@@ -64,7 +64,7 @@ describe("checkRuntimeHealth", () => {
       },
     })
 
-    const health = await checkRuntimeHealth({ ...runtime(), storage } as unknown as LoadedSixb)
+    const health = await checkRuntimeHealth({ ...runtime(), storage } as unknown as LoadedSixbHost)
 
     expect(health.storage).toEqual({
       ok: false,
@@ -80,9 +80,12 @@ describe("checkRuntimeHealth", () => {
       ping: () => new Promise<void>(() => {}),
     })
 
-    const health = await checkRuntimeHealth({ ...runtime(), storage } as unknown as LoadedSixb, {
-      timeoutMs: 25,
-    })
+    const health = await checkRuntimeHealth(
+      { ...runtime(), storage } as unknown as LoadedSixbHost,
+      {
+        timeoutMs: 25,
+      }
+    )
 
     // An unreachable Postgres waits rather than refusing. Without a bound the command
     // hangs, which in a pipeline is indistinguishable from a slow database.
@@ -135,7 +138,7 @@ describe("checkRuntimeHealth", () => {
 
 function runtime(
   overrides: { migrators?: readonly StorageMigrator[]; broker?: unknown; queues?: unknown } = {}
-): LoadedSixb {
+): LoadedSixbHost {
   const storage = overrides.migrators
     ? Object.assign(new InMemoryStorage(), { migrators: overrides.migrators })
     : new InMemoryStorage()
@@ -146,7 +149,7 @@ function runtime(
     broker: overrides.broker ?? new InMemoryBroker(),
     queues: overrides.queues ?? new InMemoryQueues(),
     events: { latestCursor: async () => undefined },
-  } as unknown as LoadedSixb
+  } as unknown as LoadedSixbHost
 }
 
 /** A broker that declares itself shareable, the way a real one does. */

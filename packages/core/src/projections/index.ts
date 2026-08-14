@@ -12,6 +12,7 @@ export {
 } from "./builders"
 // ── Errors ──────────────────────────────────────────────────
 export { ProjectionValidationError } from "./errors"
+export type { ProjectionDefinitionCatalog } from "./registry"
 // ── Types ────────────────────────────────────────────────────
 export type {
   ForeignKeyDescriptor,

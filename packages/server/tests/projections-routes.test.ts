@@ -1,11 +1,15 @@
 import { describe, expect, test } from "bun:test"
-import type {
-  AuthorizationContext,
-  ObjectProjectionDefinition,
-  OntologySource,
-  Sixb,
+import type { AuthorizationContext, ObjectProjectionDefinition, OntologySource } from "@sixb/core"
+import {
+  emptyGrantIndex,
+  InMemoryBlobStorage,
+  InMemoryBroker,
+  InMemoryLakeStorage,
+  InMemoryQueues,
+  InMemoryStorage,
+  SixbHost,
 } from "@sixb/core"
-import { emptyGrantIndex } from "@sixb/core"
+import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import type {
   ListLatestProjectionRunsInput,
   ListProjectionRunsInput,
@@ -77,23 +81,48 @@ function authzViewing(...objectTypeIds: string[]): AuthorizationContext {
 
 function createSixbStub(
   projectionRuns: Partial<ProjectionRunStorage>
-): Sixb<readonly OntologySource[]> {
-  return {
+): SixbHost<readonly OntologySource[]> {
+  const storage = new InMemoryStorage()
+  if (!storage.projectionRuns) throw new Error("Expected projection run storage")
+  Object.assign(storage.projectionRuns, projectionRuns)
+
+  const sixb = new SixbHost<readonly OntologySource[]>({
     id: "my-app",
-    storage: { projectionRuns },
-    listObjectProjections: () => [roomsProjection, sensorsProjection],
-    listLinkProjections: () => [],
-    listTelemetryProjections: () => [],
-    getProjectionById: (id: string) =>
-      [roomsProjection, sensorsProjection].find((p) => p.id === id) ?? null,
-  } as unknown as Sixb<readonly OntologySource[]>
+    ontology: [],
+    broker: new InMemoryBroker(),
+    storage,
+    lakeStorage: new InMemoryLakeStorage(),
+    blobStorage: new InMemoryBlobStorage(),
+    queues: new InMemoryQueues(),
+  })
+  const definitions = [roomsProjection, sensorsProjection]
+  Object.defineProperty(sixb, "definitions", {
+    value: {
+      ...sixb.definitions,
+      projections: {
+        list: () => definitions,
+        listObjects: () => definitions,
+        listLinks: () => [],
+        listTelemetry: () => [],
+        getById: (id: string) => definitions.find((projection) => projection.id === id) ?? null,
+      },
+    },
+  })
+  return sixb
 }
 
-function appWithAuthz(sixb: Sixb<readonly OntologySource[]>, authz: AuthorizationContext | null) {
-  return registerProjectionRoutes(
-    new Elysia().derive(() => ({ authz, scoped: null })) as unknown as Elysia,
-    sixb
-  )
+function appWithAuthz(
+  sixb: SixbHost<readonly OntologySource[]>,
+  authz: AuthorizationContext | null
+) {
+  const app = new Elysia()
+  app.derive(({ request }) => ({
+    sixb: bindRequestExecution(sixb, {
+      request,
+      authorization: authz ? { type: "principal", context: authz } : { type: "disabled" },
+    }),
+  }))
+  return registerProjectionRoutes(app, sixb)
 }
 
 describe("projection routes", () => {

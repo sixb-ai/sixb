@@ -1,22 +1,20 @@
 import {
   type AgentDefinition,
   AgentRequestError,
-  type AuthorizationContext,
   type FileRef,
   type OntologySource,
   type Principal,
-  type ScopedSixb,
-  type Sixb,
+  type SixbHostView,
   SYSTEM_PRINCIPAL,
 } from "@sixb/core"
 import { agentRunStreamId } from "@sixb/core/agents/streams"
 import {
   createAgentRunId,
-  createAgentThreadId,
   dispatchQueuedAgentRuns,
   publishAgentRunCancel,
   publishAgentRunFinished,
 } from "@sixb/core/internal/agents"
+import type { Sixb } from "@sixb/core/internal/request-execution"
 import {
   type AgentMessageRecord,
   type AgentRunDiagnostic,
@@ -28,7 +26,7 @@ import {
 import type { Elysia } from "elysia"
 import { ZodError, z } from "zod"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
-import { type RequestAuthState, requestAuthState } from "../auth/scope"
+import { type RequestAuthState, requestAuthState, requireRequestSixb } from "../auth/scope"
 import {
   createFileContentResponse,
   fileContentGetResponses,
@@ -148,20 +146,6 @@ export function serializeAgentRun(run: AgentRunRecord): ReturnType<typeof AgentR
   })
 }
 
-async function getAccessibleThread(params: {
-  readonly scoped: ScopedSixb<readonly OntologySource[]> | null
-  readonly storage: AgentStorage
-  readonly projectId: string
-  readonly threadId: string
-}): Promise<AgentThreadRecord | null> {
-  // A scoped principal reads through the core scoped surface, which applies the owner + run:agent
-  // filter. When scoped is null the request is privileged (auth disabled), so nothing is filtered.
-  if (params.scoped) {
-    return params.scoped.getThread(params.threadId)
-  }
-  return params.storage.threads.getById({ projectId: params.projectId, id: params.threadId })
-}
-
 async function getAgentMessageFileContentThread(params: {
   readonly authState: RequestAuthState
   readonly storage: AgentStorage
@@ -176,25 +160,23 @@ async function getAgentMessageFileContentThread(params: {
     return params.storage.threads.getById({ projectId: params.projectId, id: params.threadId })
   }
 
-  return getAccessibleThread({
-    scoped: params.authState.scoped,
-    storage: params.storage,
-    projectId: params.projectId,
-    threadId: params.threadId,
-  })
+  if (!params.authState.sixb) {
+    throw new Error("[SixbServer] Execution scope is not available for this route.")
+  }
+  return params.authState.sixb.agents.threads.getById(params.threadId)
 }
 
-function principalForRequest(authz: AuthorizationContext | null): Principal {
-  return authz?.principal ?? SYSTEM_PRINCIPAL
+function principalForExecution(sixb: Sixb<readonly OntologySource[]>): Principal {
+  return sixb.execution.requestedBy ?? SYSTEM_PRINCIPAL
 }
 
 /** Publish the terminal record core owns; stream delivery stays best-effort at this boundary. */
 async function publishQueuedRunCancellation(
-  sixb: Sixb<readonly OntologySource[]>,
+  host: SixbHostView,
   run: AgentRunRecord
 ): Promise<void> {
   try {
-    await publishAgentRunFinished(sixb.broker, run)
+    await publishAgentRunFinished(host.broker, run)
   } catch (error) {
     console.error(`[SixbServer] Agent run '${run.id}' cancellation stream publish failed:`, error)
   }
@@ -241,7 +223,7 @@ function missingAgentStorageResponse(set: { status?: number | string }): { error
 }
 
 async function agentMessageFileContentResponse(
-  sixb: Sixb<readonly OntologySource[]>,
+  host: SixbHostView,
   context: {
     readonly params: { readonly threadId: string; readonly messageId: string }
     readonly query: unknown
@@ -253,7 +235,7 @@ async function agentMessageFileContentResponse(
   const authState = requestAuthState(context)
 
   try {
-    const storage = sixb.storage.agents
+    const storage = host.storage.agents
     if (!storage) {
       return missingAgentStorageResponse(context.set)
     }
@@ -262,7 +244,7 @@ async function agentMessageFileContentResponse(
     const thread = await getAgentMessageFileContentThread({
       authState,
       storage,
-      projectId: sixb.id,
+      projectId: host.id,
       threadId: context.params.threadId,
     })
     if (!thread) {
@@ -271,7 +253,7 @@ async function agentMessageFileContentResponse(
     }
 
     const message = await storage.messages.getById({
-      projectId: sixb.id,
+      projectId: host.id,
       id: context.params.messageId,
     })
     if (!message || message.threadId !== thread.id) {
@@ -286,7 +268,7 @@ async function agentMessageFileContentResponse(
     }
 
     const response = await createFileContentResponse({
-      blobStorage: sixb.blobStorage,
+      blobStorage: host.blobStorage,
       fileRef,
       disposition: parsed.disposition,
       head: options.head,
@@ -308,14 +290,12 @@ async function agentMessageFileContentResponse(
   }
 }
 
-export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
+export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
   return app
     .get(
       "/api/agents",
       (context) => {
-        const { scoped } = requestAuthState(context)
-        const agents = scoped ? scoped.listAgents() : sixb.agents.list()
-        return agents.map(serializeAgent)
+        return requireRequestSixb(context).agents.list().map(serializeAgent)
       },
       {
         response: { 200: AgentCatalogItemSchema.array() },
@@ -330,10 +310,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
       "/api/agents/:agentId",
       (context) => {
         const { params, set } = context
-        const { scoped } = requestAuthState(context)
-        const agent = scoped
-          ? scoped.getAgentById(params.agentId)
-          : sixb.agents.getById(params.agentId)
+        const agent = requireRequestSixb(context).agents.getById(params.agentId)
         if (!agent) {
           set.status = 404
           return { error: "Agent not found" }
@@ -355,9 +332,9 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
       "/api/agent-threads",
       async (context) => {
         const { query, set } = context
-        const { scoped } = requestAuthState(context)
+        const sixb = requireRequestSixb(context)
         try {
-          const storage = sixb.storage.agents
+          const storage = host.storage.agents
           if (!storage) {
             return missingAgentStorageResponse(set)
           }
@@ -370,11 +347,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
             offset: parseOptionalInt(parsed.offset),
             order: parsed.order,
           }
-          // Scoped principals list through the core scoped surface (owner + run:agent filtered);
-          // a null scope is privileged (auth disabled), so it lists unfiltered.
-          const result = scoped
-            ? await scoped.listThreads(listInput)
-            : await storage.threads.list({ projectId: sixb.id, ...listInput })
+          const result = await sixb.agents.threads.list(listInput)
 
           return AgentThreadListResponseSchema.parse({
             threads: result.threads.map(serializeThread),
@@ -403,29 +376,17 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
       "/api/agent-threads",
       async (context) => {
         const { body, set } = context
-        const { authz, scoped } = requestAuthState(context)
+        const sixb = requireRequestSixb(context)
         try {
           const parsed = CreateAgentThreadBodySchema.parse(body)
-          // scoped.getAgentById returns null for agents the principal cannot run, so an ungranted
-          // agent 404s (not found) instead of 403 — the latter would disclose that the id exists.
-          const agent = scoped
-            ? scoped.getAgentById(parsed.agentId)
-            : sixb.agents.getById(parsed.agentId)
-          if (!agent) {
-            set.status = 404
-            return { error: "Agent not found" }
-          }
-
-          const storage = sixb.storage.agents
+          const storage = host.storage.agents
           if (!storage) {
             return missingAgentStorageResponse(set)
           }
 
-          const thread = await storage.threads.create({
-            id: parsed.threadId ?? createAgentThreadId(),
-            projectId: sixb.id,
-            agentId: agent.id,
-            ownerPrincipal: principalForRequest(authz),
+          const thread = await sixb.agents.threads.create({
+            ...(parsed.threadId === undefined ? {} : { id: parsed.threadId }),
+            agentId: parsed.agentId,
             ...(parsed.title === undefined ? {} : { title: parsed.title }),
           })
 
@@ -458,19 +419,14 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
       "/api/agent-threads/:threadId",
       async (context) => {
         const { params, set } = context
-        const { scoped } = requestAuthState(context)
+        const sixb = requireRequestSixb(context)
         try {
-          const storage = sixb.storage.agents
+          const storage = host.storage.agents
           if (!storage) {
             return missingAgentStorageResponse(set)
           }
 
-          const thread = await getAccessibleThread({
-            scoped,
-            storage,
-            projectId: sixb.id,
-            threadId: params.threadId,
-          })
+          const thread = await sixb.agents.threads.getById(params.threadId)
           if (!thread) {
             set.status = 404
             return { error: "Agent thread not found" }
@@ -500,19 +456,14 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
       "/api/agent-threads/:threadId/messages",
       async (context) => {
         const { params, query, set } = context
-        const { scoped } = requestAuthState(context)
+        const sixb = requireRequestSixb(context)
         try {
-          const storage = sixb.storage.agents
+          const storage = host.storage.agents
           if (!storage) {
             return missingAgentStorageResponse(set)
           }
 
-          const thread = await getAccessibleThread({
-            scoped,
-            storage,
-            projectId: sixb.id,
-            threadId: params.threadId,
-          })
+          const thread = await sixb.agents.threads.getById(params.threadId)
           if (!thread) {
             set.status = 404
             return { error: "Agent thread not found" }
@@ -522,7 +473,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
           const limit = parseOptionalInt(parsed.limit)
           const offset = parseOptionalInt(parsed.offset)
           const result = await storage.messages.list({
-            projectId: sixb.id,
+            projectId: host.id,
             threadId: thread.id,
             roles: parsed.role ? [parsed.role] : undefined,
             limit,
@@ -532,9 +483,11 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
           const runIds = result.messages.flatMap((message) =>
             message.runId === null ? [] : [message.runId]
           )
-          const runs = await storage.runs.getByIds({ projectId: sixb.id, ids: runIds })
+          const runs = await storage.runs.getByIds({ projectId: host.id, ids: runIds })
           const diagnosticsByRunId = new Map(
-            runs.map((run) => [run.id, run.diagnostics ?? []] as const)
+            runs
+              .filter((run) => run.threadId === thread.id)
+              .map((run) => [run.id, run.diagnostics ?? []] as const)
           )
 
           return AgentMessageListResponseSchema.parse({
@@ -569,7 +522,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
     )
     .get(
       "/api/agent-threads/:threadId/messages/:messageId/files/content",
-      async (context) => agentMessageFileContentResponse(sixb, context),
+      async (context) => agentMessageFileContentResponse(host, context),
       {
         params: AgentMessageFileContentParamsSchema,
         // Keep framework validation loose so invalid roots return the compact route-level 400 body.
@@ -585,7 +538,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
     )
     .head(
       "/api/agent-threads/:threadId/messages/:messageId/files/content",
-      async (context) => agentMessageFileContentResponse(sixb, context, { head: true }),
+      async (context) => agentMessageFileContentResponse(host, context, { head: true }),
       {
         params: AgentMessageFileContentParamsSchema,
         query: FileContentQuerySchema,
@@ -602,19 +555,14 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
       "/api/agent-threads/:threadId/messages",
       async (context) => {
         const { params, body, set } = context
-        const { authz, scoped } = requestAuthState(context)
+        const sixb = requireRequestSixb(context)
         try {
-          const storage = sixb.storage.agents
+          const storage = host.storage.agents
           if (!storage) {
             return missingAgentStorageResponse(set)
           }
 
-          const thread = await getAccessibleThread({
-            scoped,
-            storage,
-            projectId: sixb.id,
-            threadId: params.threadId,
-          })
+          const thread = await sixb.agents.threads.getById(params.threadId)
           if (!thread) {
             set.status = 404
             return { error: "Agent thread not found" }
@@ -628,11 +576,8 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
             attachments: parsed.attachments as readonly FileRef[] | undefined,
             context: parsed.context,
             messageId: parsed.messageId,
-            principal: principalForRequest(authz),
           }
-          const result = await (scoped
-            ? scoped.requestAgentRun(requestInput)
-            : sixb.agents.request(requestInput))
+          const result = await sixb.agents.runs.request(requestInput)
 
           set.status = 202
           return PostAgentMessageResponseSchema.parse({ run: serializeAgentRun(result.run) })
@@ -663,26 +608,21 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
       "/api/agent-threads/:threadId/cancel",
       async (context) => {
         const { params, body, set } = context
-        const { scoped } = requestAuthState(context)
+        const sixb = requireRequestSixb(context)
         try {
-          const storage = sixb.storage.agents
+          const storage = host.storage.agents
           if (!storage) {
             return missingAgentStorageResponse(set)
           }
 
-          const thread = await getAccessibleThread({
-            scoped,
-            storage,
-            projectId: sixb.id,
-            threadId: params.threadId,
-          })
+          const thread = await sixb.agents.threads.getById(params.threadId)
           if (!thread) {
             set.status = 404
             return { error: "Agent thread not found" }
           }
 
           const parsed = CancelAgentRunBodySchema.parse(body)
-          const run = await storage.runs.getById({ projectId: sixb.id, id: parsed.runId })
+          const run = await sixb.agents.runs.getById(parsed.runId)
           if (!run || run.threadId !== thread.id) {
             set.status = 404
             return { error: "Agent run not found" }
@@ -692,7 +632,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
           if (current.status === "queued") {
             try {
               current = await storage.runs.finishQueued({
-                projectId: sixb.id,
+                projectId: host.id,
                 id: current.id,
                 status: "cancelled",
               })
@@ -706,8 +646,12 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
               // it. Re-read so that pickup race becomes a running-run cancellation instead of an
               // invalid-state response. A retained control record is safe even if the worker has
               // not attached its cancel subscription yet.
-              const refreshed = await storage.runs.getById({ projectId: sixb.id, id: current.id })
-              if (!refreshed || refreshed.threadId !== thread.id) {
+              const refreshed = await storage.runs.getById({ projectId: host.id, id: current.id })
+              if (
+                !refreshed ||
+                refreshed.threadId !== thread.id ||
+                refreshed.agentId !== thread.agentId
+              ) {
                 set.status = 404
                 return { error: "Agent run not found" }
               }
@@ -716,9 +660,9 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
           }
 
           if (cancelledWhileQueued) {
-            await publishQueuedRunCancellation(sixb, current)
+            await publishQueuedRunCancellation(host, current)
           } else if (current.status === "running") {
-            await publishAgentRunCancel(sixb.broker, { projectId: sixb.id, runId: current.id })
+            await publishAgentRunCancel(host.broker, { projectId: host.id, runId: current.id })
           } else {
             set.status = 409
             return { error: "Agent run is not active" }
@@ -752,25 +696,20 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
       "/api/agent-threads/:threadId/runs/:runId/retry",
       async (context) => {
         const { params, set } = context
-        const { authz, scoped } = requestAuthState(context)
+        const sixb = requireRequestSixb(context)
         try {
-          const storage = sixb.storage.agents
+          const storage = host.storage.agents
           if (!storage) {
             return missingAgentStorageResponse(set)
           }
 
-          const thread = await getAccessibleThread({
-            scoped,
-            storage,
-            projectId: sixb.id,
-            threadId: params.threadId,
-          })
+          const thread = await sixb.agents.threads.getById(params.threadId)
           if (!thread) {
             set.status = 404
             return { error: "Agent thread not found" }
           }
 
-          const failedRun = await storage.runs.getById({ projectId: sixb.id, id: params.runId })
+          const failedRun = await sixb.agents.runs.getById(params.runId)
           if (!failedRun || failedRun.threadId !== thread.id) {
             set.status = 404
             return { error: "Agent run not found" }
@@ -782,20 +721,20 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
 
           const run = await storage.runs.create({
             id: createAgentRunId(),
-            projectId: sixb.id,
+            projectId: host.id,
             threadId: thread.id,
             agentId: failedRun.agentId,
             triggerMessageId: failedRun.triggerMessageId,
-            requestedByPrincipal: principalForRequest(authz),
+            requestedByPrincipal: principalForExecution(sixb),
           })
 
           // As with a new message, the durable queued run is the dispatch intent. A worker will
           // reconcile it if this best-effort publication cannot reach the queue right now.
           try {
             const dispatch = await dispatchQueuedAgentRuns({
-              projectId: sixb.id,
+              projectId: host.id,
               storage,
-              queue: sixb.queues.agents,
+              queue: host.queues.agents,
               runIds: [run.id],
             })
             const failure = dispatch.failures[0]
@@ -839,33 +778,24 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
       "/api/agent-threads/:threadId/runs",
       async (context) => {
         const { params, query, set } = context
-        const { scoped } = requestAuthState(context)
+        const sixb = requireRequestSixb(context)
         try {
-          const storage = sixb.storage.agents
+          const storage = host.storage.agents
           if (!storage) {
             return missingAgentStorageResponse(set)
           }
 
-          const thread = await getAccessibleThread({
-            scoped,
-            storage,
-            projectId: sixb.id,
-            threadId: params.threadId,
-          })
-          if (!thread) {
-            set.status = 404
-            return { error: "Agent thread not found" }
-          }
-
           const parsed = AgentRunListQuerySchema.parse(query)
-          const result = await storage.runs.list({
-            projectId: sixb.id,
-            threadId: thread.id,
+          const result = await sixb.agents.runs.listForThread(params.threadId, {
             statuses: parsed.status ? [parsed.status] : undefined,
             limit: parseOptionalInt(parsed.limit),
             offset: parseOptionalInt(parsed.offset),
             order: parsed.order,
           })
+          if (!result) {
+            set.status = 404
+            return { error: "Agent thread not found" }
+          }
 
           return AgentRunListResponseSchema.parse({
             runs: result.runs.map(serializeAgentRun),
@@ -896,26 +826,15 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
       "/api/agent-runs/:runId",
       async (context) => {
         const { params, set } = context
-        const { scoped } = requestAuthState(context)
+        const sixb = requireRequestSixb(context)
         try {
-          const storage = sixb.storage.agents
+          const storage = host.storage.agents
           if (!storage) {
             return missingAgentStorageResponse(set)
           }
 
-          const run = await storage.runs.getById({ projectId: sixb.id, id: params.runId })
+          const run = await sixb.agents.runs.getById(params.runId)
           if (!run) {
-            set.status = 404
-            return { error: "Agent run not found" }
-          }
-
-          const thread = await getAccessibleThread({
-            scoped,
-            storage,
-            projectId: sixb.id,
-            threadId: run.threadId,
-          })
-          if (!thread) {
             set.status = 404
             return { error: "Agent run not found" }
           }

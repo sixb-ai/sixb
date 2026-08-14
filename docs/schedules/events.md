@@ -218,14 +218,15 @@ import { Payment } from "./ontology/payment"
 import { highValuePaymentLinked } from "./schedules/invoices"
 import { reviewHighValuePayment } from "./workflows/review-high-value-payment"
 
-const sixb = await createSixb({
+const host = await createSixb({
   ontologies: [Invoice, Payment],
   schedules: [highValuePaymentLinked],
   workflows: [reviewHighValuePayment],
 })
 ```
 
-Inspect registered schedules with `sixb.listSchedules()` and `sixb.getScheduleById(id)`.
+Inspect registered schedules with `host.definitions.schedules.list()` and
+`host.definitions.schedules.getById(id)`.
 
 ## Event schedule vs rule
 

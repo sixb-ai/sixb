@@ -1,12 +1,15 @@
 import type {
-  ActionDefinition,
   ActionSubject,
+  ActionsRuntime,
+  BlobsRuntime,
+  ConnectorRuntime,
   DomainEventLog,
+  ObjectsRuntime,
   OntologySource,
-  Sixb,
+  SixbDefinitions,
   Storage,
 } from "@sixb/core"
-import type { LogsRuntime } from "@sixb/core/internal/logging"
+import type { LoggingService } from "@sixb/core/internal/logging"
 import type { OntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import type {
   ActionRunFailure,
@@ -15,29 +18,24 @@ import type {
   ObjectRow,
 } from "@sixb/core/storage"
 
-export interface ActionWorkerSixbFacade
-  extends Pick<
-    Sixb<readonly OntologySource[]>,
-    | "blobStorage"
-    | "connector"
-    | "appendTelemetry"
-    | "listActionsForType"
-    | "getPrimaryPropertyId"
-    | "getValueTypesById"
-    | "isValidLinkTarget"
-    | "objects"
-    | "resolveObjectType"
-  > {}
+/** Execution-bound primitives exposed to Action phase handlers. */
+export interface ActionExecutionFacade {
+  readonly objects: ObjectsRuntime<readonly OntologySource[]>
+  readonly actions: ActionsRuntime
+  readonly connector: ConnectorRuntime
+  readonly blobs: BlobsRuntime
+}
 
 export interface ActionWorkerContext {
   readonly id: string
+  readonly errorReporterHost: object
   readonly events: DomainEventLog
-  readonly logs?: LogsRuntime
+  readonly logging?: LoggingService
   readonly storage: Storage
   readonly actionRunsStorage: ActionRunStorage
   readonly ontologyMutations: OntologyMutationRuntime
-  readonly sixb: ActionWorkerSixbFacade
-  getActionById(actionId: string): ActionDefinition | null
+  readonly sixb: ActionExecutionFacade
+  readonly actions: Pick<SixbDefinitions["actions"], "getById">
 }
 
 export interface ActionJob {

@@ -1,7 +1,7 @@
 # Agents
 
 An agent is a conversational assistant you define alongside your ontology. It calls a language
-model, selected worker tools, sandboxed `bash`, and a scoped Sixb API.
+model, selected worker tools, sandboxed `bash`, and an authorized Sixb API.
 
 You define an agent declaratively and export it from `agents/`; `createSixb()` discovers it. A
 worker runs it, and clients drive it over HTTP and a websocket.

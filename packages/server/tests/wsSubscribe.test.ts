@@ -7,10 +7,10 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   type OntologySource,
-  Sixb,
-  type SixbOptions,
+  SixbHost,
+  type SixbHostOptions,
 } from "@sixb/core"
-import type { EventsRuntime, StableEventEnvelope } from "@sixb/core/internal/events"
+import type { DomainEventService, StableEventEnvelope } from "@sixb/core/internal/events"
 import { parseSubscriptionMessage } from "../src/routes/ws/events"
 import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
@@ -190,7 +190,7 @@ describe("/ws/events subscriptions", () => {
       try {
         expect(await nextWsMessage(ws)).toEqual({ type: "connected", channel: "events" })
 
-        const [stored] = await (sixb.events as EventsRuntime).publishEnvelopes([
+        const [stored] = await (sixb.events as DomainEventService).publishEnvelopes([
           telemetryEnvelope(sixb.id, "fan-1", 1200, "2026-02-18T10:00:10.000Z"),
         ])
 
@@ -250,10 +250,10 @@ describe("/ws/events subscriptions", () => {
       try {
         expect(await nextWsMessage(ws)).toEqual({ type: "connected", channel: "events" })
 
-        const [matching] = await (sixb.events as EventsRuntime).publishEnvelopes([
+        const [matching] = await (sixb.events as DomainEventService).publishEnvelopes([
           telemetryEnvelope(sixb.id, "fan-1", 1200, "2026-02-18T10:00:10.000Z"),
         ])
-        await (sixb.events as EventsRuntime).publishEnvelopes([
+        await (sixb.events as DomainEventService).publishEnvelopes([
           telemetryEnvelope(sixb.id, "fan-2", 800, "2026-02-18T10:00:11.000Z"),
         ])
 
@@ -361,13 +361,9 @@ describe("/ws/events subscriptions", () => {
 })
 
 function createSixbInstance<TOntologySources extends readonly OntologySource[]>(
-  options: SixbOptions<TOntologySources>
-): Sixb<TOntologySources> {
-  const SixbConstructor = Sixb as unknown as new (
-    options: SixbOptions<TOntologySources>
-  ) => Sixb<TOntologySources>
-
-  return new SixbConstructor(options)
+  options: SixbHostOptions<TOntologySources>
+): SixbHost<TOntologySources> {
+  return new SixbHost<TOntologySources>(options)
 }
 
 class SlowLatestCursorBroker extends InMemoryBroker {
@@ -384,7 +380,7 @@ class FailingLatestCursorBroker extends InMemoryBroker {
 }
 
 async function withWsServer(
-  run: (context: { baseUrl: string; sixb: Sixb<readonly OntologySource[]> }) => Promise<void>,
+  run: (context: { baseUrl: string; sixb: SixbHost<readonly OntologySource[]> }) => Promise<void>,
   options: { readonly broker?: InMemoryBroker } = {}
 ): Promise<void> {
   const port = await getFreePort()
@@ -399,8 +395,8 @@ async function withWsServer(
     queues: new InMemoryQueues(),
   })
   const server = new SixbServer({
-    sixb,
-    host: "127.0.0.1",
+    host: sixb,
+    hostname: "127.0.0.1",
     port,
     quiet: true,
     browser: createTestBrowserPolicy({ apiOrigin: baseUrl, atlasOrigin: baseUrl }),

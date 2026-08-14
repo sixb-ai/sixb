@@ -13,8 +13,8 @@ import {
   PipelineError,
   prop,
   RuntimeError,
-  Sixb,
 } from "../src"
+import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Room = defineObjectType({
@@ -216,20 +216,20 @@ describe("isPipelineDefinition", () => {
   })
 })
 
-describe("Sixb pipeline registration", () => {
+describe("SixbHost pipeline registration", () => {
   test("exposes pipeline definitions and lookup by id", () => {
     const pipeline = definePipeline("normalize-orders").then(makeRunStep())
 
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Room],
       datasets: [rawOrdersDataset, canonicalOrdersDataset],
       pipelines: [pipeline],
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.listPipelines().map((d) => d.id)).toEqual(["normalize-orders"])
-    expect(sixb.getPipelineById("normalize-orders")).toBe(pipeline)
-    expect(sixb.getPipelineById("missing-pipeline")).toBeNull()
+    expect(sixb.pipelines.list().map((d) => d.id)).toEqual(["normalize-orders"])
+    expect(sixb.pipelines.getById("normalize-orders")).toBe(pipeline)
+    expect(sixb.pipelines.getById("missing-pipeline")).toBeNull()
   })
 
   test("rejects duplicate pipeline ids", () => {
@@ -243,56 +243,52 @@ describe("Sixb pipeline registration", () => {
     const pipelines: PipelineDefinition[] = [p1, p2]
     const runtimeDeps = createTestRuntimeDeps()
 
-    expect(
-      () =>
-        new Sixb<readonly []>({
-          ontology: [],
-          datasets: [
-            rawOrdersDataset,
-            rawCustomersDataset,
-            canonicalOrdersDataset,
-            canonicalCustomersDataset,
-          ],
-          pipelines,
-          ...runtimeDeps,
-        })
+    expect(() =>
+      createTestSixb<readonly []>({
+        ontology: [],
+        datasets: [
+          rawOrdersDataset,
+          rawCustomersDataset,
+          canonicalOrdersDataset,
+          canonicalCustomersDataset,
+        ],
+        pipelines,
+        ...runtimeDeps,
+      })
     ).toThrow(RuntimeError)
-    expect(
-      () =>
-        new Sixb<readonly []>({
-          ontology: [],
-          datasets: [
-            rawOrdersDataset,
-            rawCustomersDataset,
-            canonicalOrdersDataset,
-            canonicalCustomersDataset,
-          ],
-          pipelines,
-          ...runtimeDeps,
-        })
+    expect(() =>
+      createTestSixb<readonly []>({
+        ontology: [],
+        datasets: [
+          rawOrdersDataset,
+          rawCustomersDataset,
+          canonicalOrdersDataset,
+          canonicalCustomersDataset,
+        ],
+        pipelines,
+        ...runtimeDeps,
+      })
     ).toThrow("Duplicate pipeline id: normalize-orders")
   })
 
   test("rejects empty pipeline graphs", () => {
     const pipeline = definePipeline("empty-pipeline")
 
-    expect(
-      () =>
-        new Sixb<readonly []>({
-          ontology: [],
-          datasets: [rawOrdersDataset, canonicalOrdersDataset],
-          pipelines: [pipeline],
-          ...createTestRuntimeDeps(),
-        })
+    expect(() =>
+      createTestSixb<readonly []>({
+        ontology: [],
+        datasets: [rawOrdersDataset, canonicalOrdersDataset],
+        pipelines: [pipeline],
+        ...createTestRuntimeDeps(),
+      })
     ).toThrow(RuntimeError)
-    expect(
-      () =>
-        new Sixb<readonly []>({
-          ontology: [],
-          datasets: [rawOrdersDataset, canonicalOrdersDataset],
-          pipelines: [pipeline],
-          ...createTestRuntimeDeps(),
-        })
+    expect(() =>
+      createTestSixb<readonly []>({
+        ontology: [],
+        datasets: [rawOrdersDataset, canonicalOrdersDataset],
+        pipelines: [pipeline],
+        ...createTestRuntimeDeps(),
+      })
     ).toThrow("Pipeline 'empty-pipeline' must contain at least one step")
   })
 
@@ -304,23 +300,21 @@ describe("Sixb pipeline registration", () => {
       .run(async () => {})
     const pipeline = definePipeline("orders").then(firstStep).then(secondStep)
 
-    expect(
-      () =>
-        new Sixb<readonly []>({
-          ontology: [],
-          datasets: [rawOrdersDataset, canonicalOrdersDataset, orderInsightsDataset],
-          pipelines: [pipeline],
-          ...createTestRuntimeDeps(),
-        })
+    expect(() =>
+      createTestSixb<readonly []>({
+        ontology: [],
+        datasets: [rawOrdersDataset, canonicalOrdersDataset, orderInsightsDataset],
+        pipelines: [pipeline],
+        ...createTestRuntimeDeps(),
+      })
     ).toThrow(RuntimeError)
-    expect(
-      () =>
-        new Sixb<readonly []>({
-          ontology: [],
-          datasets: [rawOrdersDataset, canonicalOrdersDataset, orderInsightsDataset],
-          pipelines: [pipeline],
-          ...createTestRuntimeDeps(),
-        })
+    expect(() =>
+      createTestSixb<readonly []>({
+        ontology: [],
+        datasets: [rawOrdersDataset, canonicalOrdersDataset, orderInsightsDataset],
+        pipelines: [pipeline],
+        ...createTestRuntimeDeps(),
+      })
     ).toThrow("Pipeline 'orders' contains duplicate step id 'duplicate-step'")
   })
 
@@ -334,23 +328,21 @@ describe("Sixb pipeline registration", () => {
       .run(async () => {})
     const pipeline = definePipeline("orders").then(step)
 
-    expect(
-      () =>
-        new Sixb<readonly []>({
-          ontology: [],
-          datasets: [canonicalOrdersDataset],
-          pipelines: [pipeline],
-          ...createTestRuntimeDeps(),
-        })
+    expect(() =>
+      createTestSixb<readonly []>({
+        ontology: [],
+        datasets: [canonicalOrdersDataset],
+        pipelines: [pipeline],
+        ...createTestRuntimeDeps(),
+      })
     ).toThrow(RuntimeError)
-    expect(
-      () =>
-        new Sixb<readonly []>({
-          ontology: [],
-          datasets: [canonicalOrdersDataset],
-          pipelines: [pipeline],
-          ...createTestRuntimeDeps(),
-        })
+    expect(() =>
+      createTestSixb<readonly []>({
+        ontology: [],
+        datasets: [canonicalOrdersDataset],
+        pipelines: [pipeline],
+        ...createTestRuntimeDeps(),
+      })
     ).toThrow(
       "Pipeline 'orders' step 'normalize-orders' input 'rawOrders' references unknown dataset 'missing.orders'"
     )
@@ -359,23 +351,21 @@ describe("Sixb pipeline registration", () => {
   test("rejects step output datasets not registered with the runtime", () => {
     const pipeline = definePipeline("orders").then(makeRunStep())
 
-    expect(
-      () =>
-        new Sixb<readonly []>({
-          ontology: [],
-          datasets: [rawOrdersDataset],
-          pipelines: [pipeline],
-          ...createTestRuntimeDeps(),
-        })
+    expect(() =>
+      createTestSixb<readonly []>({
+        ontology: [],
+        datasets: [rawOrdersDataset],
+        pipelines: [pipeline],
+        ...createTestRuntimeDeps(),
+      })
     ).toThrow(RuntimeError)
-    expect(
-      () =>
-        new Sixb<readonly []>({
-          ontology: [],
-          datasets: [rawOrdersDataset],
-          pipelines: [pipeline],
-          ...createTestRuntimeDeps(),
-        })
+    expect(() =>
+      createTestSixb<readonly []>({
+        ontology: [],
+        datasets: [rawOrdersDataset],
+        pipelines: [pipeline],
+        ...createTestRuntimeDeps(),
+      })
     ).toThrow(
       "Pipeline 'orders' step 'normalize-orders' outputs unknown dataset 'canonical.orders'"
     )
@@ -385,14 +375,13 @@ describe("Sixb pipeline registration", () => {
     const missing = defineSchedule("missing").cron("0 * * * *")
     const pipeline = definePipeline("orders").when(missing).then(makeRunStep())
 
-    expect(
-      () =>
-        new Sixb<readonly []>({
-          ontology: [],
-          datasets: [rawOrdersDataset, canonicalOrdersDataset],
-          pipelines: [pipeline],
-          ...createTestRuntimeDeps(),
-        })
+    expect(() =>
+      createTestSixb<readonly []>({
+        ontology: [],
+        datasets: [rawOrdersDataset, canonicalOrdersDataset],
+        pipelines: [pipeline],
+        ...createTestRuntimeDeps(),
+      })
     ).toThrow("Pipeline 'orders' references unknown schedule 'missing'")
   })
 })

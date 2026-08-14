@@ -14,7 +14,7 @@ import {
   prop,
   type Queues,
   type RuleDefinition,
-  Sixb,
+  SixbHost,
   type StorageMigrator,
 } from "@sixb/core"
 import { SharedBroker } from "../shared/sharedBroker"
@@ -145,7 +145,7 @@ function loggingStorage() {
   })
 }
 
-export const sixb = new Sixb({
+export const sixb = new SixbHost({
   id: "cli-prod-roles",
   // Explicit disabled auth lets `sixb api` boot in production mode for tests.
   auth: { id: "disabled", kind: "disabled", allowDisabledInProduction: true },

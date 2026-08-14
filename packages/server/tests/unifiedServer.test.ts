@@ -7,21 +7,17 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   type OntologySource,
-  Sixb,
-  type SixbOptions,
+  SixbHost,
+  type SixbHostOptions,
 } from "@sixb/core"
-import type { EventsRuntime } from "@sixb/core/internal/events"
+import type { DomainEventService } from "@sixb/core/internal/events"
 import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
 function createSixbInstance<TOntologySources extends readonly OntologySource[]>(
-  options: SixbOptions<TOntologySources>
-): Sixb<TOntologySources> {
-  const SixbConstructor = Sixb as unknown as new (
-    options: SixbOptions<TOntologySources>
-  ) => Sixb<TOntologySources>
-
-  return new SixbConstructor(options)
+  options: SixbHostOptions<TOntologySources>
+): SixbHost<TOntologySources> {
+  return new SixbHost<TOntologySources>(options)
 }
 
 async function getFreePort(): Promise<number> {
@@ -114,7 +110,7 @@ describe("SixbServer API serving", () => {
       queues: new InMemoryQueues(),
     })
 
-    await (sixb.events as EventsRuntime).publishEnvelopes([
+    await (sixb.events as DomainEventService).publishEnvelopes([
       {
         id: "telemetry-fan-1-rpm",
         schemaVersion: 1,
@@ -137,8 +133,8 @@ describe("SixbServer API serving", () => {
     ])
 
     const server = new SixbServer({
-      sixb,
-      host: "127.0.0.1",
+      host: sixb,
+      hostname: "127.0.0.1",
       port,
       quiet: true,
       browser: createTestBrowserPolicy({ apiOrigin: baseUrl, atlasOrigin: baseUrl }),

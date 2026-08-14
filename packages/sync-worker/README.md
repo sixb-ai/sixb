@@ -24,12 +24,10 @@ const runtime: SyncWorkerContext = {
   id: sixb.id,
   syncRunsStorage,
   lakeStorage,
-  getSyncById(syncId) {
-    return sixb.getSyncById(syncId)
-  },
-  connector(definition) {
-    return sixb.connector(definition)
-  },
+  blobs: sixb.blobs,
+  datasets: sixb.definitions.datasets,
+  syncs: sixb.definitions.syncs,
+  connector: sixb.connector,
 }
 
 const result = await runSyncJob({

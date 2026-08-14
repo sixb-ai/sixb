@@ -29,7 +29,7 @@ import {
   prop,
   type RoleDefinition,
   SecurityValidationError,
-  Sixb,
+  SixbHost,
   type SyncDefinition,
 } from "../src"
 import { canPerformMembershipOperation, resolveMembershipPolicyScope } from "../src/security"
@@ -219,7 +219,7 @@ export const memberAdministration = defineMembershipPolicy("member-administratio
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.security.getMembershipPolicyById("member-administration")).toEqual({
+    expect(sixb.definitions.security.getMembershipPolicyById("member-administration")).toEqual({
       kind: "membershipPolicy",
       id: "member-administration",
       grantedToGroupIds: ["security-admins"],
@@ -247,8 +247,8 @@ export const memberAdministration = defineMembershipPolicy("member-administratio
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.security.listGroups()).toEqual([securityAdmins, commercial])
-    expect(sixb.security.listMembershipPolicies()).toEqual([membershipPolicy])
+    expect(sixb.definitions.security.listGroups()).toEqual([securityAdmins, commercial])
+    expect(sixb.definitions.security.listMembershipPolicies()).toEqual([membershipPolicy])
   })
 
   test("runtime registration rejects duplicate group ids", () => {
@@ -334,9 +334,9 @@ export const memberAdministration = defineMembershipPolicy("member-administratio
   test("empty security definitions remain allowed at the definition layer", () => {
     const sixb = createRuntime()
 
-    expect(sixb.security.listGroups()).toEqual([])
-    expect(sixb.security.listRoles()).toEqual([])
-    expect(sixb.security.listMembershipPolicies()).toEqual([])
+    expect(sixb.definitions.security.listGroups()).toEqual([])
+    expect(sixb.definitions.security.listRoles()).toEqual([])
+    expect(sixb.definitions.security.listMembershipPolicies()).toEqual([])
   })
 })
 
@@ -795,9 +795,9 @@ describe("role definitions", () => {
       actions: [reboot],
     })
 
-    expect(sixb.security.listRoles()).toEqual([role])
-    expect(sixb.security.getRoleById("contract.operator")).toEqual(role)
-    expect(sixb.security.getRoleById("missing")).toBeNull()
+    expect(sixb.definitions.security.listRoles()).toEqual([role])
+    expect(sixb.definitions.security.getRoleById("contract.operator")).toEqual(role)
+    expect(sixb.definitions.security.getRoleById("missing")).toBeNull()
   })
 
   test("createSixb discovers roles from security/roles", async () => {
@@ -856,7 +856,7 @@ export const contractOperator = defineRole("contract.operator", {
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.security.getRoleById("contract.operator")).toEqual({
+    expect(sixb.definitions.security.getRoleById("contract.operator")).toEqual({
       kind: "role",
       id: "contract.operator",
       grantedToGroupIds: ["commercial"],
@@ -890,8 +890,8 @@ function createRuntime(
     pipelines?: readonly PipelineDefinition[]
     agents?: readonly AgentDefinition[]
   } = {}
-): Sixb<readonly [typeof Account]> {
-  return new Sixb<readonly [typeof Account]>({
+): SixbHost<readonly [typeof Account]> {
+  return new SixbHost<readonly [typeof Account]>({
     ontology: [Account],
     ...options,
     ...createTestRuntimeDeps(),

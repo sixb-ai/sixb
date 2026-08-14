@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { ConnectorNotFoundError, defineConnector, defineObjectType, prop, Sixb } from "../src"
+import {
+  ConnectorNotFoundError,
+  defineConnector,
+  defineObjectType,
+  type OntologySource,
+  prop,
+  SixbHost,
+} from "../src"
+import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Room = defineObjectType({
@@ -23,7 +31,7 @@ describe("connectors", () => {
       },
     })
 
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Room],
       connectors: [erpDb],
       ...createTestRuntimeDeps(),
@@ -55,14 +63,14 @@ describe("connectors", () => {
       },
     })
 
-    const sixb = new Sixb({
+    const host = new SixbHost<readonly OntologySource[]>({
       ontology: [Room],
       connectors: [erpDb],
       ...createTestRuntimeDeps(),
     })
-
+    const sixb = createTestSixb(host)
     const first = await sixb.connector(erpDb)
-    await sixb.disconnectConnectors()
+    await host.closeConnectors()
     const second = await sixb.connector(erpDb)
 
     expect(disconnectCount).toBe(1)
@@ -85,15 +93,18 @@ describe("connectors", () => {
       },
     })
 
-    const sixb = new Sixb({
+    const host = new SixbHost({
       ontology: [Room],
       connectors: [erpDb, hubspot],
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.listConnectors().map((connector) => connector.id)).toEqual(["erpDb", "hubspot"])
-    expect(sixb.getConnectorById("erpDb")).toBe(erpDb)
-    expect(sixb.getConnectorById("missing")).toBeNull()
+    expect(host.definitions.connectors.list().map((connector) => connector.id)).toEqual([
+      "erpDb",
+      "hubspot",
+    ])
+    expect(host.definitions.connectors.getById("erpDb")).toBe(erpDb)
+    expect(host.definitions.connectors.getById("missing")).toBeNull()
   })
 
   test("rejects an unknown connector with ConnectorNotFoundError", async () => {
@@ -104,7 +115,7 @@ describe("connectors", () => {
       },
     })
 
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Room],
       connectors: [],
       ...createTestRuntimeDeps(),
@@ -129,7 +140,7 @@ describe("connectors", () => {
       },
     })
 
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Room],
       connectors: [registered],
       ...createTestRuntimeDeps(),

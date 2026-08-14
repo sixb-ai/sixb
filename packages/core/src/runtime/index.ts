@@ -12,6 +12,7 @@ export { OntologyNotFoundError, OntologyValidationError } from "../ontology"
 export type { PipelineDefinition } from "../pipelines"
 export { PipelineError } from "../pipelines"
 export { ProjectionValidationError } from "../projections"
+export type { SchedulerController } from "../scheduler"
 export { SchedulerError, SchedulerValidationError } from "../scheduler"
 export type { ScheduleDefinition } from "../schedules"
 export { CronValidationError, ScheduleValidationError } from "../schedules"
@@ -30,10 +31,11 @@ export type { RegisteredWebhook } from "../webhooks"
 export { WebhookValidationError } from "../webhooks"
 export type { CreateSixbOptions } from "./create"
 export { createSixb } from "./create"
+export type { DefinitionCatalog, SixbDefinitions } from "./definitions"
 export { RuntimeError } from "./errors"
-export type { ScopedObjectByIdHandle, ScopedObjectSet, ScopedSixb } from "./scoped"
-export type { SixbOptions } from "./sixb"
-export { Sixb } from "./sixb"
+export type { SixbHostOptions, SixbHostView } from "./host"
+export { SixbHost } from "./host"
+export type { Sixb } from "./sixb"
 export type {
   BatchItemResult,
   ListResult,
@@ -57,8 +59,6 @@ export type {
   OntologySource,
   RegisteredObjectType,
   RegisteredValueTypes,
-  SixbInstance,
-  SixbRuntimeContext,
   TelemetryAppendInput,
   TelemetryChannel,
   TelemetryHistoryInput,

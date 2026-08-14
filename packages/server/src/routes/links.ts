@@ -1,8 +1,7 @@
-import { isAllowed, type OntologySource, type Sixb } from "@sixb/core"
-import type { ObjectLinkRow } from "@sixb/core/storage"
+import type { SixbHostView } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
-import { requestAuthState } from "../auth/scope"
+import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema, SuccessResponseSchema } from "../schemas/common"
 import {
@@ -15,42 +14,31 @@ import {
 } from "../schemas/links"
 import { handleRouteError, toIsoString } from "../utils/http"
 
-function canViewLink(authz: ReturnType<typeof requestAuthState>["authz"], link: ObjectLinkRow) {
-  return (
-    isAllowed(authz, { kind: "object.view", objectTypeId: link.sourceTypeId }) &&
-    isAllowed(authz, { kind: "object.view", objectTypeId: link.targetTypeId })
-  )
-}
-
-export function registerLinkRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
+export function registerLinkRoutes(app: Elysia, _host: SixbHostView) {
   return app
     .get(
       "/api/objects/:objectTypeId/:objectId/links",
       async (context) => {
         const { params, query, set } = context
-        const { authz } = requestAuthState(context)
         try {
-          const parsedQuery = LinkQuerySchema.parse(query)
-          if (!isAllowed(authz, { kind: "object.view", objectTypeId: params.objectTypeId })) {
+          const sixb = requireRequestSixb(context)
+          if (!sixb.objects.getTypeById(params.objectTypeId)) {
             set.status = 404
             return { error: "Object not found" }
           }
-
-          const links = await sixb.storage.objects.listLinks({
-            projectId: sixb.id,
+          const parsedQuery = LinkQuerySchema.parse(query)
+          const links = await sixb.objects.listLinks({
             objectTypeId: params.objectTypeId,
             objectId: params.objectId,
             linkId: parsedQuery.linkId,
             direction: parsedQuery.direction,
           })
 
-          return links
-            .filter((link) => canViewLink(authz, link))
-            .map((link) => ({
-              ...link,
-              createdAt: toIsoString(link.createdAt),
-              updatedAt: toIsoString(link.updatedAt),
-            }))
+          return links.map((link) => ({
+            ...link,
+            createdAt: toIsoString(link.createdAt),
+            updatedAt: toIsoString(link.updatedAt),
+          }))
         } catch (error) {
           set.status = 400
           return { error: error instanceof Error ? error.message : String(error) }
@@ -76,14 +64,18 @@ export function registerLinkRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
       "/api/objects/:objectTypeId/:objectId/links/:linkId",
       async (context) => {
         const { params, body, set } = context
-        const { scoped } = requestAuthState(context)
         try {
           const parsedBody = UpsertLinkBodySchema.parse(body)
-          await (scoped ?? sixb).upsertLink(params.objectTypeId, params.objectId, params.linkId, {
-            targetTypeId: parsedBody.targetTypeId,
-            targetId: parsedBody.targetId,
-            properties: parsedBody.properties,
-          })
+          await requireRequestSixb(context).objects.upsertLink(
+            params.objectTypeId,
+            params.objectId,
+            params.linkId,
+            {
+              targetTypeId: parsedBody.targetTypeId,
+              targetId: parsedBody.targetId,
+              properties: parsedBody.properties,
+            }
+          )
 
           return { success: true }
         } catch (error) {
@@ -111,13 +103,17 @@ export function registerLinkRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
       "/api/objects/:objectTypeId/:objectId/links/:linkId",
       async (context) => {
         const { params, query, set } = context
-        const { scoped } = requestAuthState(context)
         try {
           const parsedQuery = RemoveLinkQuerySchema.parse(query)
-          await (scoped ?? sixb).removeLink(params.objectTypeId, params.objectId, params.linkId, {
-            targetTypeId: parsedQuery.targetTypeId,
-            targetId: parsedQuery.targetId,
-          })
+          await requireRequestSixb(context).objects.removeLink(
+            params.objectTypeId,
+            params.objectId,
+            params.linkId,
+            {
+              targetTypeId: parsedQuery.targetTypeId,
+              targetId: parsedQuery.targetId,
+            }
+          )
 
           return { success: true }
         } catch (error) {

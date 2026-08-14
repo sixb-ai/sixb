@@ -14,11 +14,12 @@ import {
   type LogRunRef,
   noopLoggerProvider,
   type OntologySource,
-  Sixb,
-  type SixbOptions,
+  SixbHost,
+  type SixbHostOptions,
 } from "@sixb/core"
 import type { BrokerRecord } from "@sixb/core/broker"
 import { createSessionCredential } from "@sixb/core/internal/auth"
+import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { Elysia } from "elysia"
 import { registerLogRoutes } from "../src/routes/logs"
 import { parseLogSubscriptionMessage } from "../src/routes/ws/logs"
@@ -125,7 +126,7 @@ describe("GET /api/logs", () => {
 
   test("uses a bounded default page and rejects invalid limits", async () => {
     await withServer(async ({ baseUrl, sixb }) => {
-      const session = sixb.logs.startExecution({ kind: "workflow", id: "bounded-history" })
+      const session = sixb.logging.startExecution({ kind: "workflow", id: "bounded-history" })
       for (let index = 1; index <= 201; index += 1) {
         session.logger.info(`line ${index}`)
       }
@@ -268,29 +269,26 @@ async function readLogs(
 }
 
 async function seed(
-  sixb: Sixb<readonly OntologySource[]>,
+  sixb: SixbHost<readonly OntologySource[]>,
   run: LogRunRef,
   message: string,
   level: "debug" | "info" | "warn" | "error"
 ): Promise<void> {
-  const session = sixb.logs.startExecution(run)
+  const session = sixb.logging.startExecution(run)
   session.logger[level](message)
   await session.flush()
 }
 
 function createSixbInstance<TOntologySources extends readonly OntologySource[]>(
-  options: SixbOptions<TOntologySources>
-): Sixb<TOntologySources> {
-  const SixbConstructor = Sixb as unknown as new (
-    options: SixbOptions<TOntologySources>
-  ) => Sixb<TOntologySources>
-  return new SixbConstructor(options)
+  options: SixbHostOptions<TOntologySources>
+): SixbHost<TOntologySources> {
+  return new SixbHost<TOntologySources>(options)
 }
 
 async function withServer(
   run: (context: {
     baseUrl: string
-    sixb: Sixb<readonly OntologySource[]>
+    sixb: SixbHost<readonly OntologySource[]>
     server: SixbServer
   }) => Promise<void>,
   options: { readonly broker?: InMemoryBroker } = {}
@@ -299,8 +297,8 @@ async function withServer(
   const baseUrl = `http://127.0.0.1:${port}`
   const sixb = createTestSixb(options.broker)
   const server = new SixbServer({
-    sixb,
-    host: "127.0.0.1",
+    host: sixb,
+    hostname: "127.0.0.1",
     port,
     quiet: true,
     browser: createTestBrowserPolicy({ apiOrigin: baseUrl, atlasOrigin: baseUrl }),
@@ -320,7 +318,7 @@ function createTestSixb(
     readonly storage?: InMemoryStorage
     readonly auth?: boolean
   } = {}
-): Sixb<readonly OntologySource[]> {
+): SixbHost<readonly OntologySource[]> {
   const logsViewers = defineGroup("logs-viewers")
   const logsObserver = defineRole("logs.observer", {
     grantedTo: [logsViewers],
@@ -360,8 +358,8 @@ async function withAuthenticatedServer(
   const allowedHeaders = await seedLogSession(storage, "allowed", ["logs-viewers"])
   const deniedHeaders = await seedLogSession(storage, "denied", [])
   const server = new SixbServer({
-    sixb,
-    host: "127.0.0.1",
+    host: sixb,
+    hostname: "127.0.0.1",
     port,
     quiet: true,
     browser: createTestBrowserPolicy({ apiOrigin: baseUrl, atlasOrigin: baseUrl }),
@@ -436,9 +434,18 @@ function authzWithLogs(): AuthorizationContext {
   }
 }
 
-function logRoutesWithAuthz(sixb: Sixb<readonly OntologySource[]>, authz: AuthorizationContext) {
-  const app = new Elysia().derive(() => ({ authz, scoped: sixb.as(authz) }))
-  return registerLogRoutes(app as unknown as Elysia, sixb)
+function logRoutesWithAuthz(
+  sixb: SixbHost<readonly OntologySource[]>,
+  authz: AuthorizationContext
+) {
+  const app = new Elysia()
+  app.derive(({ request }) => ({
+    sixb: bindRequestExecution(sixb, {
+      request,
+      authorization: { type: "principal", context: authz },
+    }),
+  }))
+  return registerLogRoutes(app, sixb)
 }
 
 function wsUrl(baseUrl: string): string {

@@ -1,5 +1,5 @@
 import type { ValueType, WorkflowDefinition } from "@sixb/core"
-import { resolveLogsRuntime } from "@sixb/core/internal/logging"
+import { resolveLoggingService } from "@sixb/core/internal/logging"
 import type {
   WorkflowAgentNodeDefinition,
   WorkflowInterventionNodeDefinition,
@@ -59,7 +59,7 @@ export class WorkflowRunSession {
   ): WorkflowRunSession {
     const { runtime, job } = input
     const signal = input.signal ?? new AbortController().signal
-    const workflow = requireWorkflow(runtime.getWorkflowById(job.workflowId), job)
+    const workflow = requireWorkflow(runtime.sixb.workflows.getById(job.workflowId), job)
     const valueTypesById = runtime.ontology.getValueTypesById()
 
     throwIfAborted(signal)
@@ -88,7 +88,7 @@ export class WorkflowRunSession {
       observer: input.observer ?? noopWorkflowRunObserver,
       execution: job.execution,
     })
-    const logSession = resolveLogsRuntime(runtime.projectId, runtime.logs).startExecution({
+    const logSession = resolveLoggingService(runtime.projectId, runtime.logging).startExecution({
       kind: "workflow",
       id: job.id,
     })
@@ -124,7 +124,7 @@ export class WorkflowRunSession {
     }
 
     const signal = input.signal ?? new AbortController().signal
-    const workflow = requireWorkflow(runtime.getWorkflowById(job.workflowId), job)
+    const workflow = requireWorkflow(runtime.sixb.workflows.getById(job.workflowId), job)
     const valueTypesById = runtime.ontology.getValueTypesById()
     throwIfAborted(signal)
 
@@ -170,7 +170,7 @@ export class WorkflowRunSession {
       alreadyStarted: true,
       execution: job.execution,
     })
-    const logSession = resolveLogsRuntime(runtime.projectId, runtime.logs).startExecution({
+    const logSession = resolveLoggingService(runtime.projectId, runtime.logging).startExecution({
       kind: "workflow",
       id: run.id,
     })
@@ -198,7 +198,7 @@ export class WorkflowRunSession {
   ): Promise<WorkflowRunSession | WorkflowRunResult> {
     const { runtime, job } = input
     const signal = input.signal ?? new AbortController().signal
-    const workflow = requireWorkflow(runtime.getWorkflowById(job.workflowId), job)
+    const workflow = requireWorkflow(runtime.sixb.workflows.getById(job.workflowId), job)
     const valueTypesById = runtime.ontology.getValueTypesById()
     if (job.resume.kind === "agentNode") {
       throwIfAborted(signal)
@@ -288,7 +288,7 @@ export class WorkflowRunSession {
         alreadyStarted: true,
         execution: job.execution,
       })
-      const logSession = resolveLogsRuntime(runtime.projectId, runtime.logs).startExecution({
+      const logSession = resolveLoggingService(runtime.projectId, runtime.logging).startExecution({
         kind: "workflow",
         id: job.id,
       })
@@ -424,7 +424,7 @@ export class WorkflowRunSession {
       alreadyStarted: true,
       execution: job.execution,
     })
-    const logSession = resolveLogsRuntime(runtime.projectId, runtime.logs).startExecution({
+    const logSession = resolveLoggingService(runtime.projectId, runtime.logging).startExecution({
       kind: "workflow",
       id: job.id,
     })

@@ -3,6 +3,10 @@ export {
   runAgentStorageContractSuite,
 } from "./agent-storage-contract"
 export {
+  type AiUsageStorageContractSuiteOptions,
+  runAiUsageStorageContractSuite,
+} from "./ai-usage-storage-contract"
+export {
   type AuthStorageContractSuiteOptions,
   runAuthStorageContractSuite,
 } from "./auth-storage-contract"
@@ -18,6 +22,17 @@ export {
   type EffectiveStorageContractSuiteOptions,
   runEffectiveStorageContractSuite,
 } from "./effective-storage-contract"
+export {
+  type AuthorizationContext,
+  createTestSixb,
+  type TestExecutionHost,
+  type TestExecutionOptions,
+} from "./execution"
+export {
+  type ExecutionStorageContractStorage,
+  type ExecutionStorageContractSuiteOptions,
+  runExecutionStorageContractSuite,
+} from "./execution-storage-contract"
 export {
   type LakeMergeStorageContractSuiteOptions,
   runLakeMergeStorageContractSuite,

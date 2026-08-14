@@ -26,10 +26,11 @@ import {
   type PipelineDefinition,
   prop,
   ref,
-  Sixb,
+  SixbHost,
   type WorkflowDefinition,
 } from "@sixb/core"
 import { createSessionCredential } from "@sixb/core/internal/auth"
+import { createTestSixb } from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -165,7 +166,7 @@ const contractIngestor = defineRole("contract.ingestor", {
 
 async function createRuntime(options: { readonly auth?: boolean } = {}) {
   const storage = new InMemoryStorage()
-  const sixb = new Sixb<readonly OntologySource[]>({
+  const sixb = new SixbHost<readonly OntologySource[]>({
     id: "test-project",
     ontology: [Contract, Invoice],
     datasets: [OrdersDataset, CustomersDataset],
@@ -188,20 +189,21 @@ async function createRuntime(options: { readonly auth?: boolean } = {}) {
     auth: options.auth === false ? undefined : { id: "test", kind: "dev" as const },
   })
 
-  await sixb.upsertObject("contract", { id: "c1" })
-  await sixb.upsertObject("invoice", { id: "i1" })
-  await sixb.upsertLink("contract", "c1", "invoice", {
+  const setup = createTestSixb(sixb)
+  await setup.objects.upsert("contract", { id: "c1" })
+  await setup.objects.upsert("invoice", { id: "i1" })
+  await setup.objects.upsertLink("contract", "c1", "invoice", {
     targetTypeId: "invoice",
     targetId: "i1",
   })
-  await sixb.appendTelemetry("contract", [
+  await setup.objects.appendTelemetry("contract", [
     {
       id: "c1",
       properties: { temperature: 72.5 },
       at: new Date("2026-05-16T10:30:00.000Z"),
     },
   ])
-  await sixb.appendTelemetry("invoice", [
+  await setup.objects.appendTelemetry("invoice", [
     {
       id: "i1",
       properties: { score: 20 },
@@ -215,7 +217,7 @@ async function createRuntime(options: { readonly auth?: boolean } = {}) {
 async function createApp(options: { readonly auth?: boolean } = {}) {
   const { sixb, storage } = await createRuntime(options)
   const app = createSixbApi(
-    new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+    new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
   )
 
   return { app, storage }
@@ -617,7 +619,7 @@ describe("authorized object routes", () => {
 
     // `listObjectTypes` shows this principal nothing, so the write route must not answer 403 for a
     // type that exists and 404 for one that does not — that difference is the type universe. The
-    // primary-property lookup runs on the scoped runtime for exactly this reason; point it back at
+    // Primary-property lookup runs on the bound SDK for exactly this reason; point it back at
     // the privileged `sixb` in the route and the second status returns to 404.
     expect([registered.status, unregistered.status]).toEqual([403, 403])
 
@@ -734,7 +736,8 @@ describe("authorized object routes", () => {
         syncIds: [],
         sourcePipelineIds: [],
         targetPipelineIds: [],
-        projectionIds: ["orders-contracts", "orders-contract-invoices"],
+        // The link projection also targets invoices, so it stays hidden without invoice view access.
+        projectionIds: ["orders-contracts"],
       })
     )
 
@@ -747,7 +750,7 @@ describe("authorized object routes", () => {
         syncIds: [],
         sourcePipelineIds: [],
         targetPipelineIds: [],
-        projectionIds: ["orders-contracts", "orders-contract-invoices"],
+        projectionIds: ["orders-contracts"],
       })
     )
 
@@ -1480,8 +1483,8 @@ describe("authorized event websocket", () => {
     const runner = await seedSession(storage, ["operations"], "usr_run")
     const operator = await seedSession(storage, ["commercial"], "usr_op")
     const server = new SixbServer({
-      sixb,
-      host: "127.0.0.1",
+      host: sixb,
+      hostname: "127.0.0.1",
       port,
       quiet: true,
       browser: createTestBrowserPolicy({ apiOrigin: baseUrl, atlasOrigin: baseUrl }),

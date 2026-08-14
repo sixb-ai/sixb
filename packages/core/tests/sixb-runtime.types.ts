@@ -1,4 +1,5 @@
-import { defineObjectType, defineOntology, link, prop, Sixb } from "../src"
+import { defineObjectType, defineOntology, link, prop } from "../src"
+import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Room = defineObjectType({
@@ -38,7 +39,7 @@ const Buildings = defineOntology({
   objectTypes: [Room, Thermostat],
 })
 
-const sixb = new Sixb({ ontology: [Buildings], ...createTestRuntimeDeps() })
+const sixb = createTestSixb({ ontology: [Buildings], ...createTestRuntimeDeps() })
 
 async function contract(): Promise<void> {
   await sixb.objects(Room).upsert({

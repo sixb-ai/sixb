@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import type { ClaimedOntologyOutboxRow, OntologyOutboxStorage, Storage } from "../storage"
-import type { StableEventPublisher } from "./runtime"
+import type { StableEventPublisher } from "./service"
 
 const DEFAULT_BATCH_SIZE = 100
 const DEFAULT_LEASE_DURATION_MS = 30_000

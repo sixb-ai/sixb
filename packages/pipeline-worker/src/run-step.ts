@@ -47,7 +47,7 @@ export async function runStep(input: {
   const resolvedInputs = await resolveStepInputs({ runtime, pipeline, step })
   const inputRefs = resolvedInputs.map((resolved) => resolved.ref)
   const outputDataset = requireRegisteredDataset({
-    dataset: runtime.getDatasetById(step.output.id),
+    dataset: runtime.datasets.getById(step.output.id),
     pipelineId: pipeline.id,
     stepId: step.id,
     role: "output",

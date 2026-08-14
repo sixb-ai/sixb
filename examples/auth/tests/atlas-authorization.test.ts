@@ -11,8 +11,9 @@ import {
   isAllowed,
   type OntologySource,
   resolveAuthorizationContext,
-  type Sixb,
+  type SixbHost,
 } from "@sixb/core"
+import { createTestSixb } from "@sixb/core/testing"
 import { adminAuditDataset, teamNotesDataset } from "../datasets/auth-data"
 import { securityAdmins } from "../security/groups/security-admins"
 import { teamMembers } from "../security/groups/team-members"
@@ -31,29 +32,29 @@ async function createAuthExampleRuntime() {
 }
 
 function atlasContext(
-  sixb: Sixb<readonly OntologySource[]>,
+  host: SixbHost<readonly OntologySource[]>,
   groupIds: readonly string[],
   userId = "atlas-user"
 ) {
   return resolveAuthorizationContext({
     principal: { type: "user", id: userId },
     groupIds,
-    roles: sixb.security.listResolvedRoles(),
+    roles: host.definitions.security.listResolvedRoles(),
   })
 }
 
 describe("auth example Atlas authorization", () => {
   test("team members only see and do what their roles grant", async () => {
-    const sixb = await createAuthExampleRuntime()
-    await seedAuthExampleObjects(sixb)
+    const host = await createAuthExampleRuntime()
+    await seedAuthExampleObjects(createTestSixb(host))
 
-    const roles = sixb.security.listResolvedRoles()
-    const teamMemberContext = atlasContext(sixb, [teamMembers.id])
-    const adminContext = atlasContext(sixb, [securityAdmins.id])
-    const noGroupsContext = atlasContext(sixb, [])
-    const teamMember = sixb.as(teamMemberContext)
-    const admin = sixb.as(adminContext)
-    const noGroups = sixb.as(noGroupsContext)
+    const roles = host.definitions.security.listResolvedRoles()
+    const teamMemberContext = atlasContext(host, [teamMembers.id])
+    const adminContext = atlasContext(host, [securityAdmins.id])
+    const noGroupsContext = atlasContext(host, [])
+    const teamMember = createTestSixb(host, { authorization: teamMemberContext })
+    const admin = createTestSixb(host, { authorization: adminContext })
+    const noGroups = createTestSixb(host, { authorization: noGroupsContext })
 
     expect(canAccessApplication(teamMemberContext, roles, "app")).toBe(true)
     expect(canAccessApplication(teamMemberContext, roles, "atlas")).toBe(false)
@@ -62,34 +63,34 @@ describe("auth example Atlas authorization", () => {
     expect(canAccessApplication(noGroupsContext, roles, "app")).toBe(false)
     expect(canAccessApplication(noGroupsContext, roles, "atlas")).toBe(false)
 
-    expect((await teamMember.list({})).objects.map((object) => object.objectTypeId)).toEqual([
-      "note",
-    ])
-    await expect(teamMember.getObject("admin-note", "admin-note")).rejects.toThrow(
+    expect(
+      (await teamMember.objects.list({})).objects.map((object) => object.objectTypeId)
+    ).toEqual(["note"])
+    await expect(teamMember.objects.get("admin-note", "admin-note")).rejects.toThrow(
       "not allowed to view object type 'admin-note'"
     )
-    await expect(teamMember.getObject("access-request", "access-request")).rejects.toThrow(
+    await expect(teamMember.objects.get("access-request", "access-request")).rejects.toThrow(
       "not allowed to view object type 'access-request'"
     )
 
-    expect(teamMember.listActions().map((action) => action.id)).toEqual(["acknowledge-note"])
-    expect(teamMember.listDatasets().map((dataset) => dataset.id)).toEqual([teamNotesDataset.id])
-    expect(teamMember.getDatasetById(teamNotesDataset.id)?.id).toBe(teamNotesDataset.id)
-    expect(teamMember.getDatasetById(adminAuditDataset.id)).toBeNull()
+    expect(teamMember.actions.list().map((action) => action.id)).toEqual(["acknowledge-note"])
+    expect(teamMember.datasets.list().map((dataset) => dataset.id)).toEqual([teamNotesDataset.id])
+    expect(teamMember.datasets.getById(teamNotesDataset.id)?.id).toBe(teamNotesDataset.id)
+    expect(teamMember.datasets.getById(adminAuditDataset.id)).toBeNull()
     await expect(
-      teamMember.requestAction({
+      teamMember.actions.request({
         actionId: "acknowledge-note",
         subject: { kind: "object", objectTypeId: "note", primaryId: "team-note" },
       })
     ).resolves.toMatchObject({ runId: expect.any(String) })
     await expect(
-      teamMember.requestAction({
+      teamMember.actions.request({
         actionId: "resolve-access-request",
         subject: { kind: "object", objectTypeId: "access-request", primaryId: "access-request" },
       })
     ).rejects.toThrow("not allowed to apply action 'resolve-access-request'")
     await expect(
-      teamMember.requestWorkflowRun({
+      teamMember.workflows.requestById({
         workflowId: "run-access-review",
         input: {
           accessRequest: { objectTypeId: "access-request", primaryId: "access-request" },
@@ -98,44 +99,44 @@ describe("auth example Atlas authorization", () => {
     ).rejects.toThrow("not allowed to run workflow 'run-access-review'")
     // Event visibility is derived from grants: team members see events for the
     // objects they can view (Note), but not for AdminNote or AccessRequest.
-    const teamMemberObjectEvents = (await teamMember.readEvents())
+    const teamMemberObjectEvents = (await teamMember.events.read())
       .filter((event) => event.type === "object.created" || event.type === "object.updated")
       .map((event) => event.payload.objectTypeId)
     expect(new Set(teamMemberObjectEvents)).toEqual(new Set(["note"]))
 
-    expect(new Set((await admin.list({})).objects.map((object) => object.objectTypeId))).toEqual(
-      new Set(["note", "admin-note", "access-request"])
-    )
     expect(
-      admin
-        .listActions()
+      new Set((await admin.objects.list({})).objects.map((object) => object.objectTypeId))
+    ).toEqual(new Set(["note", "admin-note", "access-request"]))
+    expect(
+      admin.actions
+        .list()
         .map((action) => action.id)
         .sort()
     ).toEqual(["acknowledge-note", "resolve-access-request"])
-    expect(new Set(admin.listDatasets().map((dataset) => dataset.id))).toEqual(
+    expect(new Set(admin.datasets.list().map((dataset) => dataset.id))).toEqual(
       new Set([teamNotesDataset.id, adminAuditDataset.id])
     )
     await expect(
-      admin.requestAction({
+      admin.actions.request({
         actionId: "resolve-access-request",
         subject: { kind: "object", objectTypeId: "access-request", primaryId: "access-request" },
       })
     ).resolves.toMatchObject({ runId: expect.any(String) })
     await expect(
-      admin.requestWorkflowRun({
+      admin.workflows.requestById({
         workflowId: "run-access-review",
         input: {
           accessRequest: { objectTypeId: "access-request", primaryId: "access-request" },
         },
       })
     ).resolves.toMatchObject({ runId: expect.any(String) })
-    expect((await admin.readEvents()).map((event) => event.type)).toContain("object.created")
-    expect(isAllowed(atlasContext(sixb, [securityAdmins.id]), { kind: "logs.observe" })).toBe(true)
-    expect(isAllowed(atlasContext(sixb, [teamMembers.id]), { kind: "logs.observe" })).toBe(false)
+    expect((await admin.events.read()).map((event) => event.type)).toContain("object.created")
+    expect(isAllowed(atlasContext(host, [securityAdmins.id]), { kind: "logs.observe" })).toBe(true)
+    expect(isAllowed(atlasContext(host, [teamMembers.id]), { kind: "logs.observe" })).toBe(false)
 
-    expect(await noGroups.list({})).toEqual({ objects: [], hasMore: false, total: 0 })
-    expect(noGroups.listActions()).toEqual([])
-    expect(noGroups.listDatasets()).toEqual([])
+    expect(await noGroups.objects.list({})).toEqual({ objects: [], hasMore: false, total: 0 })
+    expect(noGroups.actions.list()).toEqual([])
+    expect(noGroups.datasets.list()).toEqual([])
   })
 
   test("security admins can administer members while team members cannot", async () => {

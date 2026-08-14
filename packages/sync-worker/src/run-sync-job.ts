@@ -12,7 +12,7 @@ import {
   type MergeChange,
   type SyncDefinition,
 } from "@sixb/core"
-import { resolveLogsRuntime } from "@sixb/core/internal/logging"
+import { resolveLoggingService } from "@sixb/core/internal/logging"
 import { type DatasetVersion, getDatasetMergeChangeValidationError } from "@sixb/core/lake-storage"
 import type { SyncRunFailure, SyncRunRecord } from "@sixb/core/storage"
 import { assertDatasetRow, normalizeReadResult, throwIfAborted } from "./normalize"
@@ -234,14 +234,14 @@ interface SyncCommitResult {
 export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult> {
   const { runtime, job } = input
   const signal = input.signal ?? new AbortController().signal
-  const { syncRunsStorage, lakeStorage, blobStorage } = runtime
+  const { syncRunsStorage, lakeStorage, blobs: blobStorage } = runtime
 
-  const sync = runtime.getSyncById(job.syncId)
+  const sync = runtime.syncs.getById(job.syncId)
   if (!sync) {
     throw new Error(`[SixbSyncWorker] Unknown sync '${job.syncId}'.`)
   }
 
-  const dataset = runtime.getDatasetById(sync.target.dataset.id)
+  const dataset = runtime.datasets.getById(sync.target.dataset.id)
   if (!dataset) {
     throw new Error(
       `[SixbSyncWorker] Sync '${sync.id}' targets unknown dataset '${sync.target.dataset.id}'.`
@@ -270,7 +270,7 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
   }
   await input.onRunStarted?.(startedRun)
 
-  const logSession = resolveLogsRuntime(runtime.id, runtime.logs).startExecution({
+  const logSession = resolveLoggingService(runtime.id, runtime.logging).startExecution({
     kind: "sync",
     id: job.id,
   })

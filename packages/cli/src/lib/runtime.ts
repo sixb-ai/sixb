@@ -16,7 +16,7 @@ import { ProjectionWorker } from "@sixb/projection-worker"
 import { RulesWorker } from "@sixb/rules-worker"
 import { SyncWorker } from "@sixb/sync-worker"
 import { WorkflowWorker } from "@sixb/workflow-worker"
-import type { LoadedSixb } from "./loadSixb"
+import type { LoadedSixbHost } from "./loadSixb"
 
 export function waitForWorkerFailure(worker: Worker | null | undefined): Promise<never> {
   return new Promise<never>((_resolve, reject) => {
@@ -67,20 +67,20 @@ export interface RunningOrchestratorRuntime {
   stop(): Promise<void>
 }
 
-export async function migrateRuntimeStorage(sixb: LoadedSixb): Promise<void> {
+export async function migrateRuntimeStorage(sixb: LoadedSixbHost): Promise<void> {
   await migrateStorage(sixb.storage)
 }
 
-export async function checkRuntimeLakeDefinitions(sixb: LoadedSixb): Promise<void> {
+export async function checkRuntimeLakeDefinitions(sixb: LoadedSixbHost): Promise<void> {
   await assertLakeDatasetDefinitionsCompatible({
     lakeStorage: sixb.lakeStorage,
-    definitions: sixb.listDatasets(),
+    definitions: sixb.definitions.datasets.list(),
   })
 }
 
-export async function stopSixbProviders(sixb: LoadedSixb): Promise<void> {
+export async function stopSixbProviders(sixb: LoadedSixbHost): Promise<void> {
   await stopQuietly(() => flushSixbErrors(sixb))
-  await stopQuietly(() => sixb.disconnectConnectors())
+  await stopQuietly(() => sixb.closeConnectors())
   await stopQuietly(() => closeProvider(sixb.queues))
   // Stop tracked outbox publication before closing the storage it claims from.
   await stopQuietly(() => sixb.closeBroker())
@@ -88,14 +88,14 @@ export async function stopSixbProviders(sixb: LoadedSixb): Promise<void> {
   await stopQuietly(() => flushSixbErrors(sixb))
   await stopQuietly(() => closeProvider(sixb.storage))
   await stopQuietly(() => closeProvider(sixb.lakeStorage))
-  await stopQuietly(() => closeProvider(sixb.blobStorage))
+  await stopQuietly(() => sixb.closeBlobs())
   await stopQuietly(() => sixb.closeLogger())
 }
 
-export async function startRulesRuntime(sixb: LoadedSixb): Promise<RunningRulesRuntime> {
+export async function startRulesRuntime(sixb: LoadedSixbHost): Promise<RunningRulesRuntime> {
   let rulesWorker: RulesWorker | null = null
 
-  if (sixb.listRules().length > 0) {
+  if (sixb.definitions.rules.list().length > 0) {
     rulesWorker = new RulesWorker(sixb)
     await rulesWorker.start()
   }
@@ -108,26 +108,28 @@ export async function startRulesRuntime(sixb: LoadedSixb): Promise<RunningRulesR
   }
 }
 
-export async function startSchedulerRuntime(sixb: LoadedSixb): Promise<RunningSchedulerRuntime> {
-  await sixb.startScheduler()
+export async function startSchedulerRuntime(
+  sixb: LoadedSixbHost
+): Promise<RunningSchedulerRuntime> {
+  await sixb.scheduler.start()
 
   return {
     async stop() {
-      await stopQuietly(() => sixb.stopScheduler())
+      await stopQuietly(() => sixb.scheduler.stop())
     },
   }
 }
 
 export async function startOrchestratorRuntime(
-  sixb: LoadedSixb
+  sixb: LoadedSixbHost
 ): Promise<RunningOrchestratorRuntime> {
   const projections = getProjectionDispatchDescriptors(sixb)
   const { routes, diagnostics } = compileRoutesWithDiagnostics({
-    schedules: sixb.listSchedules(),
-    syncs: sixb.listSyncs(),
-    pipelines: sixb.listPipelines(),
+    schedules: sixb.definitions.schedules.list(),
+    syncs: sixb.definitions.syncs.list(),
+    pipelines: sixb.definitions.pipelines.list(),
     projections,
-    workflows: sixb.workflows.list(),
+    workflows: sixb.definitions.workflows.list(),
   })
   const warnings = diagnostics.map(formatRouteDiagnosticWarning)
   let orchestratorWorker: OrchestratorWorker | null = null
@@ -189,7 +191,7 @@ export async function startOrchestratorRuntime(
  *   10. Runtime providers (connectors, broker)
  */
 export async function startSixbRuntime(
-  sixb: LoadedSixb,
+  sixb: LoadedSixbHost,
   options: StartSixbRuntimeOptions = {}
 ): Promise<RunningSixbRuntime> {
   await migrateRuntimeStorage(sixb)
@@ -226,38 +228,35 @@ export async function startSixbRuntime(
     rulesWorker = rulesRuntime.rulesWorker
 
     if (options.cohostWorkers) {
-      if (sixb.listActions().length > 0) {
+      if (sixb.definitions.actions.list().length > 0) {
         actionWorker = new ActionWorker(sixb)
         await actionWorker.start()
       }
 
-      if (sixb.agents.list().length > 0 && sixb.storage.agents) {
+      if (sixb.definitions.agents.list().length > 0 && sixb.storage.agents) {
         agentWorker = new AgentWorker(sixb, {
           apiBaseUrl: requireAgentApiBaseUrl(options.agentApiBaseUrl),
         })
         await agentWorker.start()
       }
 
-      const projectionCount =
-        sixb.listObjectProjections().length +
-        sixb.listLinkProjections().length +
-        sixb.listTelemetryProjections().length
+      const projectionCount = sixb.definitions.projections.list().length
       if (projectionCount > 0) {
         projectionWorker = new ProjectionWorker(sixb)
         await projectionWorker.start()
       }
 
-      if (sixb.listPipelines().length > 0) {
+      if (sixb.definitions.pipelines.list().length > 0) {
         pipelineWorker = new PipelineWorker(sixb)
         await pipelineWorker.start()
       }
 
-      if (sixb.workflows.list().length > 0) {
+      if (sixb.definitions.workflows.list().length > 0) {
         workflowWorker = new WorkflowWorker(sixb)
         await workflowWorker.start()
       }
 
-      if (sixb.listSyncs().length > 0) {
+      if (sixb.definitions.syncs.list().length > 0) {
         syncWorker = new SyncWorker(sixb)
         await syncWorker.start()
       }

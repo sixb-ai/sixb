@@ -11,9 +11,10 @@ import {
   InMemoryStorage,
   type OntologySource,
   prop,
-  Sixb,
+  SixbHost,
 } from "@sixb/core"
 import { createSessionCredential } from "@sixb/core/internal/auth"
+import { createTestSixb } from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -38,7 +39,7 @@ const invoiceViewer = defineRole("invoice.viewer", {
 
 function createApp() {
   const storage = new InMemoryStorage()
-  const sixb = new Sixb<readonly OntologySource[]>({
+  const sixb = new SixbHost<readonly OntologySource[]>({
     id: "object-search-tests",
     ontology: [Invoice],
     broker: new InMemoryBroker(),
@@ -51,7 +52,7 @@ function createApp() {
     auth: { id: "test", kind: "dev" },
   })
   const app = createSixbApi(
-    new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+    new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
   )
   return { app, sixb, storage }
 }
@@ -88,9 +89,11 @@ describe("object search routes", () => {
   test("searches visible objects by text and primary id", async () => {
     const { app, sixb, storage } = createApp()
     const headers = await seedSession(storage, "usr_viewer", [invoiceViewers.id])
-    await sixb.objects(Invoice).upsert({
-      properties: { id: "inv-123", name: "July maintenance" },
-    })
+    await createTestSixb(sixb)
+      .objects(Invoice)
+      .upsert({
+        properties: { id: "inv-123", name: "July maintenance" },
+      })
 
     const textSearch = await app.fetch(
       new Request("http://localhost/api/objects/search?q=maintenance", { headers })
@@ -121,9 +124,11 @@ describe("object search routes", () => {
   test("does not return objects the principal cannot view", async () => {
     const { app, sixb, storage } = createApp()
     const headers = await seedSession(storage, "usr_hidden", [])
-    await sixb.objects(Invoice).upsert({
-      properties: { id: "inv-123", name: "July maintenance" },
-    })
+    await createTestSixb(sixb)
+      .objects(Invoice)
+      .upsert({
+        properties: { id: "inv-123", name: "July maintenance" },
+      })
 
     const response = await app.fetch(
       new Request("http://localhost/api/objects/search?q=inv-1", { headers })

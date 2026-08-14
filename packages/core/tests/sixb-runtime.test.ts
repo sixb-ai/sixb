@@ -16,10 +16,11 @@ import {
   optional,
   param,
   prop,
-  Sixb,
+  SixbHost,
   valueTypeRef,
 } from "../src"
 import type { ObjectStorage, QueryObjectsInput, QueryObjectsResult } from "../src/storage"
+import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Room = defineObjectType({
@@ -128,9 +129,44 @@ function disableObjectQueryPushdown(deps: ReturnType<typeof createTestRuntimeDep
   objectStorage.queryObjects = undefined
 }
 
-describe("Sixb runtime", () => {
+describe("SixbHost runtime", () => {
+  test("groups primitive operations under domain-owned facades", () => {
+    const sixb = createTestSixb({ ontology: [Room], ...createTestRuntimeDeps() })
+
+    expect(typeof sixb.objects).toBe("function")
+    expect(sixb.objects.listTypes().map((objectType) => objectType.id)).toContain("Room")
+    expect(sixb.actions.list()).toEqual([])
+    expect(sixb.datasets.list()).toEqual([])
+    expect(sixb.syncs.list()).toEqual([])
+    expect(sixb.pipelines.list()).toEqual([])
+    expect(sixb.schedules.list()).toEqual([])
+    expect(sixb.rules.list()).toEqual([])
+    expect(sixb.projections.list()).toEqual([])
+    expect(sixb.workflows.list()).toEqual([])
+    expect(sixb.agents.list()).toEqual([])
+
+    for (const removedRootMember of [
+      "listObjects",
+      "listActions",
+      "requestAction",
+      "listDatasets",
+      "listSyncs",
+      "listPipelines",
+      "listWorkflows",
+      "listAgents",
+      "listSchedules",
+      "startScheduler",
+      "listRules",
+      "listObjectProjections",
+      "connectors",
+      "blobStorage",
+    ]) {
+      expect(removedRootMember in sixb).toBe(false)
+    }
+  })
+
   test("upserts an object using object-type tokens", async () => {
-    const sixb = new Sixb({ ontology: [Room], ...createTestRuntimeDeps() })
+    const sixb = createTestSixb({ ontology: [Room], ...createTestRuntimeDeps() })
 
     const room = await sixb.objects(Room).upsert({
       properties: {
@@ -174,7 +210,7 @@ describe("Sixb runtime", () => {
   })
 
   test("builds executable ObjectSet queries", () => {
-    const sixb = new Sixb({ ontology: [SearchCustomer], ...createTestRuntimeDeps() })
+    const sixb = createTestSixb({ ontology: [SearchCustomer], ...createTestRuntimeDeps() })
     const customers = sixb.objects(SearchCustomer)
 
     const query = customers
@@ -238,7 +274,7 @@ describe("Sixb runtime", () => {
   test("executes ObjectSet queries through the query executor", async () => {
     const deps = createTestRuntimeDeps()
     const queryCounter = countObjectQueryCalls(deps)
-    const sixb = new Sixb({ ontology: [Room], ...deps })
+    const sixb = createTestSixb({ ontology: [Room], ...deps })
 
     await sixb.objects(Room).upsert({
       properties: { id: "room:101", externalId: "RM-101", name: "Conference 101" },
@@ -270,7 +306,7 @@ describe("Sixb runtime", () => {
   })
 
   test("executes fluent traversal queries with post-traverse filters", async () => {
-    const sixb = new Sixb({ ontology: [Room, Thermostat], ...createTestRuntimeDeps() })
+    const sixb = createTestSixb({ ontology: [Room, Thermostat], ...createTestRuntimeDeps() })
 
     await sixb.objects(Room).upsert({
       properties: { id: "room:101", externalId: "RM-101", name: "Conference 101" },
@@ -298,7 +334,7 @@ describe("Sixb runtime", () => {
   test("keeps ObjectSet list on the storage-list path", async () => {
     const deps = createTestRuntimeDeps()
     const queryCounter = countObjectQueryCalls(deps)
-    const sixb = new Sixb({ ontology: [Room], ...deps })
+    const sixb = createTestSixb({ ontology: [Room], ...deps })
 
     await sixb.objects(Room).upsert({
       properties: { id: "room:101", externalId: "RM-101", name: "Conference 101" },
@@ -331,7 +367,7 @@ describe("Sixb runtime", () => {
   test("explains how to bound fallback ObjectSet queries before list", async () => {
     const deps = createTestRuntimeDeps()
     disableObjectQueryPushdown(deps)
-    const sixb = new Sixb({ ontology: [Room], ...deps })
+    const sixb = createTestSixb({ ontology: [Room], ...deps })
 
     await sixb.objects(Room).upsert({
       properties: { id: "room:101", externalId: "RM-101", name: "Conference 101" },
@@ -355,7 +391,7 @@ describe("Sixb runtime", () => {
 
   test("exposes configured lakeStorage on the runtime", () => {
     const lakeStorage = new InMemoryLakeStorage()
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       ontology: [Room],
       ...createTestRuntimeDeps(),
       lakeStorage,
@@ -364,10 +400,10 @@ describe("Sixb runtime", () => {
     expect(sixb.lakeStorage).toBe(lakeStorage)
   })
 
-  test("exposes the configured blobStorage on the runtime", () => {
+  test("keeps the configured blob provider on the host", async () => {
     const blobStorage = new InMemoryBlobStorage()
     const lakeStorage = new InMemoryLakeStorage()
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       ontology: [Room],
       ...createTestRuntimeDeps(),
       lakeStorage,
@@ -375,11 +411,13 @@ describe("Sixb runtime", () => {
     })
 
     expect(sixb.blobStorage).toBe(blobStorage)
+    const file = await sixb.blobStorage.put({ body: new TextEncoder().encode("provider") })
+    expect(await blobStorage.stat(file.blobId)).not.toBeNull()
   })
 
   test("upserts objects with fileRef properties", async () => {
-    const sixb = new Sixb({ ontology: [Document], ...createTestRuntimeDeps() })
-    const file = await sixb.blobStorage.put({
+    const sixb = createTestSixb({ ontology: [Document], ...createTestRuntimeDeps() })
+    const file = await sixb.blobs.put({
       body: new TextEncoder().encode("document bytes"),
       fileName: "document.pdf",
       mediaType: "application/pdf",
@@ -414,7 +452,7 @@ describe("Sixb runtime", () => {
 
   test("exposes configured queues on the runtime", () => {
     const queues = new InMemoryQueues()
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       ontology: [Room],
       ...createTestRuntimeDeps(),
       queues,
@@ -424,13 +462,13 @@ describe("Sixb runtime", () => {
   })
 
   test("exposes projection run storage from in-memory storage", () => {
-    const sixb = new Sixb({ ontology: [Room], ...createTestRuntimeDeps() })
+    const sixb = new SixbHost({ ontology: [Room], ...createTestRuntimeDeps() })
 
     expect(sixb.storage.projectionRuns).toBeDefined()
   })
 
   test("appends telemetry with unit validation", async () => {
-    const sixb = new Sixb({ ontology: [Room], ...createTestRuntimeDeps() })
+    const sixb = createTestSixb({ ontology: [Room], ...createTestRuntimeDeps() })
 
     await sixb.objects(Room).upsert({
       properties: {
@@ -494,7 +532,7 @@ describe("Sixb runtime", () => {
   })
 
   test("reads telemetry back through the same typed channel that wrote it", async () => {
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "project-a",
       ontology: [Room, Thermostat],
       ...createTestRuntimeDeps(),
@@ -548,7 +586,7 @@ describe("Sixb runtime", () => {
   test("emits typed events and projects through the runtime dependencies", async () => {
     const runtimeDeps = createTestRuntimeDeps()
 
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "project-a",
       ontology: [Room, Thermostat],
       ...runtimeDeps,
@@ -648,7 +686,7 @@ describe("Sixb runtime", () => {
   })
 
   test("lists objects with pagination and filters", async () => {
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "list-test",
       ontology: [Room, Thermostat],
       ...createTestRuntimeDeps(),
@@ -708,14 +746,14 @@ describe("Sixb runtime", () => {
     expect(nonEqualityRooms.objects).toHaveLength(2)
 
     // Test global list
-    const allObjects = await sixb.list({ limit: 10 })
+    const allObjects = await sixb.objects.list({ limit: 10 })
     expect(allObjects.objects).toHaveLength(4)
 
     // Test global list with type filter
-    const roomObjects = await sixb.list({ objectTypeIds: ["Room"], limit: 10 })
+    const roomObjects = await sixb.objects.list({ objectTypeIds: ["Room"], limit: 10 })
     expect(roomObjects.objects).toHaveLength(3)
 
-    await expect(sixb.list({ objectTypeIds: ["room"] })).rejects.toThrow(
+    await expect(sixb.objects.list({ objectTypeIds: ["room"] })).rejects.toThrow(
       "Unknown object type 'room'. Object type IDs are case-sensitive."
     )
 
@@ -731,7 +769,7 @@ describe("Sixb runtime", () => {
 
   test("appendTelemetryBatch writes multiple objects and properties in one call", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "batch-test",
       ontology: [Room, Thermostat],
       ...runtimeDeps,
@@ -805,7 +843,7 @@ describe("Sixb runtime", () => {
 
   test("canonicalizes exact decimal telemetry before persistence", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const sixb = new Sixb({ id: "decimal-telemetry-test", ontology: [Room], ...runtimeDeps })
+    const sixb = createTestSixb({ id: "decimal-telemetry-test", ontology: [Room], ...runtimeDeps })
     await sixb.objects(Room).upsert({
       properties: { id: "room:101", externalId: "RM-101", name: "Conference 101" },
     })
@@ -828,7 +866,7 @@ describe("Sixb runtime", () => {
 
   test("late-arriving telemetry does not replace the object latest value", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "late-telemetry-test",
       ontology: [Room],
       ...runtimeDeps,
@@ -871,7 +909,7 @@ describe("Sixb runtime", () => {
   })
 
   test("appendTelemetryBatch validates all inputs before writing", async () => {
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "batch-validate-test",
       ontology: [Room],
       ...createTestRuntimeDeps(),
@@ -924,7 +962,7 @@ describe("Sixb runtime", () => {
 
   test("removes a link via unlink", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "unlink-test",
       ontology: [Room, Thermostat],
       ...runtimeDeps,
@@ -959,7 +997,7 @@ describe("Sixb runtime", () => {
   })
 
   test("rejects plain link id objects in listLinks", async () => {
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "list-links-token-test",
       ontology: [Room, Thermostat],
       ...createTestRuntimeDeps(),
@@ -975,7 +1013,7 @@ describe("Sixb runtime", () => {
 
   test("removes a link via ObjectSet.removeLink", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "remove-link-test",
       ontology: [Room, Thermostat],
       ...runtimeDeps,
@@ -1032,7 +1070,7 @@ describe("Sixb runtime", () => {
       .writeback(async () => {})
 
     const runtimeDeps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "bykey-action-test",
       ontology: [ActionType],
       actions: [reboot],
@@ -1064,16 +1102,16 @@ describe("Sixb runtime", () => {
 
   test("supports typed API and direct runtime access for server usage", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "server-api-test",
       ontology: [Room, Thermostat],
       ...runtimeDeps,
     })
 
-    expect(sixb.id).toBe("server-api-test")
+    expect(sixb.execution.projectId).toBe("server-api-test")
     expect(
-      sixb
-        .listObjectTypes()
+      sixb.objects
+        .listTypes()
         .map((objectType) => objectType.id)
         .sort()
     ).toEqual(["Room", "Thermostat"])
@@ -1107,7 +1145,7 @@ describe("Sixb runtime", () => {
     const links = await sixb.objects(Room).byId("room:900").listLinks(Room.l.hasThermostat)
     expect(links).toHaveLength(1)
 
-    const latest = await sixb.storage.timeseries.getLatest({
+    const latest = await runtimeDeps.storage.timeseries.getLatest({
       projectId: "server-api-test",
       objectTypeId: "Room",
       objectId: "room:900",
@@ -1148,9 +1186,9 @@ describe("Sixb runtime", () => {
 
     test("auto-discovers ValueTypes from ObjectType properties", async () => {
       // Pass only the ObjectType — no explicit OntologyDocumentInput
-      const sixb = new Sixb({ ontology: [Sensor], ...createTestRuntimeDeps() })
+      const sixb = createTestSixb({ ontology: [Sensor], ...createTestRuntimeDeps() })
 
-      const sensor = await sixb.upsertObject("Sensor", {
+      const sensor = await sixb.objects.upsert("Sensor", {
         id: "sensor:1",
         name: "Temp-1",
         reading: { value: 22.5, unit: "C" },
@@ -1160,17 +1198,17 @@ describe("Sixb runtime", () => {
     })
 
     test("rejects values that do not conform to the ValueType schema", async () => {
-      const sixb = new Sixb({ ontology: [Sensor], ...createTestRuntimeDeps() })
+      const sixb = createTestSixb({ ontology: [Sensor], ...createTestRuntimeDeps() })
 
       await expect(
-        sixb.upsertObject("Sensor", {
+        sixb.objects.upsert("Sensor", {
           id: "sensor:bad",
           name: "Temp-bad",
           reading: { value: "hot", unit: "C" },
         })
       ).rejects.toBeInstanceOf(OntologyValidationError)
       await expect(
-        sixb.upsertObject("Sensor", {
+        sixb.objects.upsert("Sensor", {
           id: "sensor:bad",
           name: "Temp-bad",
           reading: { value: "hot", unit: "C" },
@@ -1179,17 +1217,17 @@ describe("Sixb runtime", () => {
     })
 
     test("rejects enum values outside the allowed set", async () => {
-      const sixb = new Sixb({ ontology: [Sensor], ...createTestRuntimeDeps() })
+      const sixb = createTestSixb({ ontology: [Sensor], ...createTestRuntimeDeps() })
 
       await expect(
-        sixb.upsertObject("Sensor", {
+        sixb.objects.upsert("Sensor", {
           id: "sensor:bad",
           name: "Temp-bad",
           reading: { value: 22.5, unit: "Rankine" },
         })
       ).rejects.toBeInstanceOf(OntologyValidationError)
       await expect(
-        sixb.upsertObject("Sensor", {
+        sixb.objects.upsert("Sensor", {
           id: "sensor:bad",
           name: "Temp-bad",
           reading: { value: 22.5, unit: "Rankine" },
@@ -1213,8 +1251,8 @@ describe("Sixb runtime", () => {
       })
 
       // Should not throw "Duplicate value type id"
-      const sixb = new Sixb({ ontology: [ontologyDoc], ...createTestRuntimeDeps() })
-      expect(sixb.listObjectTypes()).toHaveLength(1)
+      const sixb = createTestSixb({ ontology: [ontologyDoc], ...createTestRuntimeDeps() })
+      expect(sixb.objects.listTypes()).toHaveLength(1)
     })
 
     test("throws for valueTypeRef without _resolved and no explicit registration", () => {
@@ -1228,17 +1266,17 @@ describe("Sixb runtime", () => {
         ],
       })
 
-      const sixb = new Sixb({ ontology: [Orphan], ...createTestRuntimeDeps() })
+      const sixb = createTestSixb({ ontology: [Orphan], ...createTestRuntimeDeps() })
 
       expect(
-        sixb.upsertObject("Orphan", {
+        sixb.objects.upsert("Orphan", {
           id: "orphan:1",
           name: "test",
           data: { foo: "bar" },
         })
       ).rejects.toBeInstanceOf(OntologyValidationError)
       expect(
-        sixb.upsertObject("Orphan", {
+        sixb.objects.upsert("Orphan", {
           id: "orphan:1",
           name: "test",
           data: { foo: "bar" },
@@ -1249,16 +1287,16 @@ describe("Sixb runtime", () => {
 
   test("supports id-based runtime APIs for server usage", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       id: "server-api-test",
       ontology: [Room, Thermostat],
       ...runtimeDeps,
     })
 
-    expect(sixb.id).toBe("server-api-test")
+    expect(sixb.execution.projectId).toBe("server-api-test")
     expect(
-      sixb
-        .listObjectTypes()
+      sixb.objects
+        .listTypes()
         .map((objectType) => objectType.id)
         .sort()
     ).toEqual(["Room", "Thermostat"])
@@ -1292,7 +1330,7 @@ describe("Sixb runtime", () => {
     const links = await sixb.objects(Room).byId("room:900").listLinks(Room.l.hasThermostat)
     expect(links).toHaveLength(1)
 
-    const latest = await sixb.storage.timeseries.getLatest({
+    const latest = await runtimeDeps.storage.timeseries.getLatest({
       projectId: "server-api-test",
       objectTypeId: "Room",
       objectId: "room:900",

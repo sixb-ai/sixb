@@ -12,7 +12,7 @@ bun add @sixb/core
 
 **Ontology** -- Define your domain as object types with typed properties, links between types, and actions. Everything is expressed in TypeScript with full inference.
 
-**Runtime** -- `Sixb` is the main entry point. It registers your ontology and exposes a typed SDK (`sixb.objects(MyType)`) for reads, writes, telemetry, and links.
+**Runtime** -- `SixbHost` is the configured composition root; `Sixb` is the typed domain SDK bound to one execution and its authority.
 
 **Storage** -- Pluggable backends for persistence and coordination. A Sixb runtime needs a `Broker`, `Storage`, `LakeStorage`, `BlobStorage`, and `Queues`. In-memory defaults are included for development and testing.
 
@@ -34,7 +34,7 @@ bun add @sixb/core
 
 ```ts
 import {
-  Sixb,
+  SixbHost,
   defineAction,
   defineObjectType,
   defineOntology,
@@ -48,6 +48,7 @@ import {
   InMemoryQueues,
   InMemoryStorage,
 } from "@sixb/core"
+import { createTestSixb } from "@sixb/core/testing"
 
 // 1. Define object types
 
@@ -85,9 +86,9 @@ const Buildings = defineOntology({
   objectTypes: [Room, Thermostat],
 })
 
-// 3. Create the runtime
+// 3. Create the host
 
-const sixb = new Sixb({
+const host = new SixbHost({
   id: "building-a",
   ontology: [Buildings],
   broker: new InMemoryBroker(),
@@ -97,7 +98,11 @@ const sixb = new Sixb({
   queues: new InMemoryQueues(),
 })
 
-// 4. Use the typed SDK
+// 4. Bind an explicit test execution for this in-memory example
+
+const sixb = createTestSixb(host)
+
+// 5. Use the typed SDK
 
 const room = await sixb.objects(Room).upsert({
   properties: {
@@ -164,10 +169,12 @@ await sixb.actions.request({
 
 ## Connectors
 
-Connectors are registered definitions. The runtime only creates the client when you resolve one with `sixb.connector(...)`.
+Connectors are registered definitions. An execution-bound SDK creates the client lazily when you
+resolve one with `sixb.connector(...)`.
 
 ```ts
-import { defineConnector } from "@sixb/core"
+import { defineConnector, SixbHost } from "@sixb/core"
+import { createTestSixb } from "@sixb/core/testing"
 
 const erpDb = defineConnector("erpDb", {
   type: "sql",
@@ -180,14 +187,17 @@ const erpDb = defineConnector("erpDb", {
   },
 })
 
-const sixb = new Sixb({
+const host = new SixbHost({
   ontology: [Room],
   broker: myBroker,
   storage: myStorage,
+  lakeStorage: myLakeStorage,
+  blobStorage: myBlobStorage,
   queues: myQueues,
   connectors: [erpDb],
 })
 
+const sixb = createTestSixb(host)
 const db = await sixb.connector(erpDb)
 await db.query("select 1")
 ```
@@ -228,7 +238,7 @@ const edgeGateway = defineConnector(
         .idempotencyKey(({ request }) => request.headers.get("x-delivery-id"))
         .handle(async ({ body, sixb, logger }) => {
           logger.info("Received device telemetry", { deviceId: body.deviceId })
-          await sixb.upsertObject("Device", {
+          await sixb.objects.upsert("Device", {
             id: body.deviceId,
             temperature: body.temperature,
           })
@@ -293,18 +303,20 @@ const syncInvoices = defineSync("sync-invoices", { mode: "merge" })
   })
   .intoDataset(rawInvoicesDataset)
 
-const sixb = new Sixb({
+const host = new SixbHost({
   ontology: [Room],
   broker: myBroker,
   storage: myStorage,
+  lakeStorage: myLakeStorage,
+  blobStorage: myBlobStorage,
   queues: myQueues,
   datasets: [rawOrdersDataset, rawOrderEventsDataset, rawInvoicesDataset],
   connectors: [erpDb],
   syncs: [syncOrders, syncOrderEvents, syncInvoices],
 })
 
-sixb.listSyncs()
-sixb.getSyncById("sync-orders")
+host.definitions.syncs.list()
+host.definitions.syncs.getById("sync-orders")
 ```
 
 Call `.checkpoint<T>()` before `.from(...)` to type `context.checkpoint` and
@@ -368,7 +380,7 @@ src/
   queues/           -- Queues, typed queue lanes, and in-memory implementation
   connectors/       -- defineConnector, connector types, connector runtime
   syncs/            -- defineSync and sync types
-  sixb/            -- Sixb runtime, ObjectSet, ObjectByIdHandle, createSixb
+  runtime/         -- SixbHost composition root, execution-bound Sixb, createSixb
   actions/          -- defineAction, param, optional, ActionRegistry
 ```
 
@@ -403,8 +415,9 @@ src/
 
 | Export | Description |
 |---|---|
-| `Sixb` | Main runtime class |
-| `createSixb(options)` | Convention-based factory with auto-discovery |
+| `SixbHost` | Configured composition root for providers, definitions, and lifecycle |
+| `Sixb` | Execution-bound domain SDK type |
+| `createSixb(options)` | Convention-based `SixbHost` factory with auto-discovery |
 | `InMemoryQueues` | In-memory `Queues` provider with typed sync and pipeline lanes |
 | `InMemoryBlobStorage` | In-memory `BlobStorage` provider for `fileRef` payloads |
 | `migrateStorage(storage)` | Run configured storage migrations when supported |
@@ -442,7 +455,7 @@ src/
 | Interface | Description |
 |---|---|
 | `Broker` | Retained stream provider used by runtime services |
-| `EventsRuntime` | Project-scoped domain event API with append, read, latest-cursor, and subscribe |
+| `DomainEventService` | Project-scoped domain event API with append, read, latest-cursor, and subscribe |
 | `ObjectStorage` | Latest-state projection storage for objects and links |
 | `TimeseriesStorage` | Time-series storage for telemetry history |
 | `BlobStorage` | Content-addressed binary storage with streaming `put` and `open` operations |

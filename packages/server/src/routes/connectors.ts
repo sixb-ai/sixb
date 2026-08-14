@@ -1,21 +1,24 @@
-import type { OntologySource, Sixb } from "@sixb/core"
+import type { OntologySource, SixbHostView } from "@sixb/core"
+import type { Sixb } from "@sixb/core/internal/request-execution"
 import type { Elysia } from "elysia"
+import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import { ConnectorParamsSchema, ConnectorSchema } from "../schemas/connectors"
 
 function serializeConnector(
-  connector: ReturnType<Sixb<readonly OntologySource[]>["listConnectors"]>[number],
-  sixb: Sixb<readonly OntologySource[]>
+  connector: ReturnType<SixbHostView["definitions"]["connectors"]["list"]>[number],
+  host: SixbHostView,
+  execution: Sixb<readonly OntologySource[]>
 ) {
   return {
     id: connector.id,
     type: connector.adapter.type,
-    syncIds: sixb
-      .listSyncs()
+    syncIds: execution.syncs
+      .list()
       .filter((sync) => sync.connector.id === connector.id)
       .map((sync) => sync.id),
-    webhooks: sixb
+    webhooks: host
       .listWebhooks()
       .filter((registered) => registered.connector.id === connector.id)
       .map(({ webhook, route }) => ({
@@ -29,12 +32,15 @@ function serializeConnector(
   }
 }
 
-export function registerConnectorRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
+export function registerConnectorRoutes(app: Elysia, host: SixbHostView) {
   return app
     .get(
       "/api/connectors",
-      () => {
-        return sixb.listConnectors().map((connector) => serializeConnector(connector, sixb))
+      (context) => {
+        const sixb = requireRequestSixb(context)
+        return host.definitions.connectors
+          .list()
+          .map((connector) => serializeConnector(connector, host, sixb))
       },
       {
         response: { 200: ConnectorSchema.array() },
@@ -47,14 +53,16 @@ export function registerConnectorRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
     )
     .get(
       "/api/connectors/:connectorId",
-      ({ params, set }) => {
-        const connector = sixb.getConnectorById(params.connectorId)
+      (context) => {
+        const { params, set } = context
+        const sixb = requireRequestSixb(context)
+        const connector = host.definitions.connectors.getById(params.connectorId)
         if (!connector) {
           set.status = 404
           return { error: "Connector not found" }
         }
 
-        return serializeConnector(connector, sixb)
+        return serializeConnector(connector, host, sixb)
       },
       {
         params: ConnectorParamsSchema,

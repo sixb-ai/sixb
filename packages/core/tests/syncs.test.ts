@@ -13,10 +13,10 @@ import {
   events,
   noopLogger,
   prop,
-  Sixb,
   type SyncDefinition,
   type SyncReadContext,
 } from "../src"
+import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Room = defineObjectType({
@@ -247,23 +247,23 @@ describe("defineSync", () => {
   })
 })
 
-describe("Sixb sync registration", () => {
+describe("SixbHost sync registration", () => {
   test("exposes sync definitions and lookup by id", () => {
     const sync = defineSync("sync-orders")
       .from(erpDb)
       .read(() => [])
       .intoDataset(rawOrdersDataset)
 
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Room],
       datasets: [rawOrdersDataset],
       syncs: [sync],
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.listSyncs().map((definition) => definition.id)).toEqual(["sync-orders"])
-    expect(sixb.getSyncById("sync-orders")).toBe(sync)
-    expect(sixb.getSyncById("missing-sync")).toBeNull()
+    expect(sixb.syncs.list().map((definition) => definition.id)).toEqual(["sync-orders"])
+    expect(sixb.syncs.getById("sync-orders")).toBe(sync)
+    expect(sixb.syncs.getById("missing-sync")).toBeNull()
   })
 
   test("rejects duplicate sync ids", () => {
@@ -278,14 +278,13 @@ describe("Sixb sync registration", () => {
     const syncs: SyncDefinition[] = [sync1, sync2]
     const runtimeDeps = createTestRuntimeDeps()
 
-    expect(
-      () =>
-        new Sixb<readonly []>({
-          ontology: [],
-          datasets: [rawOrdersDataset, rawOrdersCopyDataset],
-          syncs,
-          ...runtimeDeps,
-        })
+    expect(() =>
+      createTestSixb<readonly []>({
+        ontology: [],
+        datasets: [rawOrdersDataset, rawOrdersCopyDataset],
+        syncs,
+        ...runtimeDeps,
+      })
     ).toThrow("Duplicate sync id: sync-orders")
   })
 
@@ -297,14 +296,13 @@ describe("Sixb sync registration", () => {
       .read(() => [])
       .intoDataset(rawOrdersDataset)
 
-    expect(
-      () =>
-        new Sixb<readonly []>({
-          ontology: [],
-          datasets: [rawOrdersDataset],
-          syncs: [sync],
-          ...createTestRuntimeDeps(),
-        })
+    expect(() =>
+      createTestSixb<readonly []>({
+        ontology: [],
+        datasets: [rawOrdersDataset],
+        syncs: [sync],
+        ...createTestRuntimeDeps(),
+      })
     ).toThrow("Sync 'sync-orders' references unknown schedule 'missing'")
   })
 
@@ -318,14 +316,13 @@ describe("Sixb sync registration", () => {
       .read(() => [])
       .intoDataset(keyedOrdersDataset)
 
-    expect(
-      () =>
-        new Sixb<readonly []>({
-          ontology: [],
-          datasets: [keyedOrdersDataset],
-          syncs: [first, second],
-          ...createTestRuntimeDeps(),
-        })
+    expect(() =>
+      createTestSixb<readonly []>({
+        ontology: [],
+        datasets: [keyedOrdersDataset],
+        syncs: [first, second],
+        ...createTestRuntimeDeps(),
+      })
     ).toThrow(
       "Keyed dataset 'raw.erp.keyed-orders' has multiple registered writers: sync 'sync-keyed-orders' and sync 'snapshot-keyed-orders'"
     )
@@ -342,15 +339,14 @@ describe("Sixb sync registration", () => {
       .run(() => {})
     const pipeline = definePipeline("orders-pipeline").then(step)
 
-    expect(
-      () =>
-        new Sixb<readonly []>({
-          ontology: [],
-          datasets: [rawOrdersDataset, keyedOrdersDataset],
-          syncs: [sync],
-          pipelines: [pipeline],
-          ...createTestRuntimeDeps(),
-        })
+    expect(() =>
+      createTestSixb<readonly []>({
+        ontology: [],
+        datasets: [rawOrdersDataset, keyedOrdersDataset],
+        syncs: [sync],
+        pipelines: [pipeline],
+        ...createTestRuntimeDeps(),
+      })
     ).toThrow("sync 'sync-keyed-orders' and pipeline 'orders-pipeline' step 'copy-keyed-orders'")
   })
 
@@ -363,14 +359,13 @@ describe("Sixb sync registration", () => {
       schema: keyedOrdersDataset.schema.columns,
     })
 
-    expect(
-      () =>
-        new Sixb<readonly []>({
-          ontology: [],
-          datasets: [unkeyedRegisteredCopy],
-          syncs: [sync],
-          ...createTestRuntimeDeps(),
-        })
+    expect(() =>
+      createTestSixb<readonly []>({
+        ontology: [],
+        datasets: [unkeyedRegisteredCopy],
+        syncs: [sync],
+        ...createTestRuntimeDeps(),
+      })
     ).toThrow("Merge sync 'sync-keyed-orders' targets dataset 'raw.erp.keyed-orders'")
   })
 
@@ -392,15 +387,14 @@ describe("Sixb sync registration", () => {
       .fromDataset(readings)
       .points({ objectId: "room_id", at: "observed_at", value: "temperature" })
 
-    expect(
-      () =>
-        new Sixb<readonly []>({
-          ontology: [RoomReading] as never,
-          datasets: [readings],
-          syncs: [sync],
-          projections: [projection],
-          ...createTestRuntimeDeps(),
-        })
+    expect(() =>
+      createTestSixb<readonly []>({
+        ontology: [RoomReading] as never,
+        datasets: [readings],
+        syncs: [sync],
+        projections: [projection],
+        ...createTestRuntimeDeps(),
+      })
     ).toThrow("Telemetry projection 'room-temperatures' cannot read merge-written dataset")
   })
 })

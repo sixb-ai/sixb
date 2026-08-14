@@ -19,8 +19,8 @@ import {
   SYSTEM_PRINCIPAL,
 } from "@sixb/core"
 import {
+  DomainEventService,
   type EventDraft,
-  EventsRuntime,
   type StableEventEnvelope,
 } from "@sixb/core/internal/events"
 import {
@@ -73,8 +73,8 @@ const connector = defineConnector("source", {
 const rawInvoices = defineDataset("raw.invoices", { schema: [col("id", "string")] })
 const cleanInvoices = defineDataset("clean.invoices", { schema: [col("id", "string")] })
 
-function createEvents(projectId = PROJECT_ID, broker = new InMemoryBroker()): EventsRuntime {
-  return new EventsRuntime({ projectId, broker })
+function createEvents(projectId = PROJECT_ID, broker = new InMemoryBroker()): DomainEventService {
+  return new DomainEventService({ projectId, broker })
 }
 
 function makeScheduleTriggeredEvent(
@@ -157,7 +157,7 @@ afterEach(async () => {
 })
 
 async function startWorker(
-  eventRuntime: EventsRuntime,
+  eventRuntime: DomainEventService,
   queues: InMemoryQueues,
   routes: OrchestratorRoutes,
   projectId = PROJECT_ID,

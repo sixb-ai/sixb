@@ -47,7 +47,9 @@
     "@sixb/client": "workspace:^",
     "@sixb/core": "workspace:^",
     "@sixb/ui": "workspace:^",
-    "lucide-react": "^0.562.0"
+    "lucide-react": "^0.562.0",
+    "papaparse": "^5.5.4",
+    "parse5": "^8.0.0"
   },
   "peerDependencies": {
     "@tanstack/react-query": "^5.0.0",
@@ -58,6 +60,7 @@
   "devDependencies": {
     "@tanstack/react-query": "^5.0.0",
     "@types/bun": "latest",
+    "@types/papaparse": "^5.5.2",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "react": "^19.0.0",

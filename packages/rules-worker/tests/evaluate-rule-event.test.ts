@@ -13,7 +13,7 @@ import type {
   StoredLinkDeletedEvent,
   StoredObjectUpdatedEvent,
 } from "@sixb/core/internal/events"
-import { EventsRuntime } from "@sixb/core/internal/events"
+import { DomainEventService } from "@sixb/core/internal/events"
 import { createMaterializerTestFixture, type MaterializerTestFixture } from "@sixb/core/testing"
 import {
   buildRuleDependencyIndex,
@@ -485,19 +485,19 @@ function subject(primaryId: string) {
 
 function createRuntime(): {
   readonly projectId: string
-  readonly events: EventsRuntime
+  readonly events: DomainEventService
   readonly storage: Storage
 } {
   return {
     projectId: "project-a",
-    events: new EventsRuntime({ projectId: "project-a", broker: new InMemoryBroker() }),
+    events: new DomainEventService({ projectId: "project-a", broker: new InMemoryBroker() }),
     storage: new InMemoryStorage(),
   }
 }
 
 async function ruleEventTypes(runtime: {
   readonly projectId: string
-  readonly events: EventsRuntime
+  readonly events: DomainEventService
 }): Promise<readonly string[]> {
   const events = await runtime.events.read({
     topics: ["rules"],

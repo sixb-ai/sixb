@@ -73,18 +73,18 @@ describe("projection registry", () => {
     })
 
     const resolved = projectionRegistry.resolveSource("rooms")
-    const objectProjections = projectionRegistry.listObjectProjections()
-    const telemetryProjections = projectionRegistry.listTelemetryProjections()
+    const objectProjections = projectionRegistry.listObjects()
+    const telemetryProjections = projectionRegistry.listTelemetry()
     expect(Object.isFrozen(objectProjections)).toBe(true)
     expect(Object.isFrozen(telemetryProjections)).toBe(true)
-    expect(projectionRegistry.listLinkProjections()).toEqual([])
-    expect(projectionRegistry.getProjectionById("rooms")).toBe(objectProjections[0])
-    expect(projectionRegistry.getProjectionById("temperatures")).toBe(telemetryProjections[0])
+    expect(projectionRegistry.listLinks()).toEqual([])
+    expect(projectionRegistry.getById("rooms")).toBe(objectProjections[0])
+    expect(projectionRegistry.getById("temperatures")).toBe(telemetryProjections[0])
     expect(resolved.definition).toBe(objectProjections[0])
     expect(projectionRegistry.resolveTelemetry("temperatures").definition).toBe(
       telemetryProjections[0]
     )
-    expect(projectionRegistry.getProjectionById("missing")).toBeNull()
+    expect(projectionRegistry.getById("missing")).toBeNull()
     expect(resolved.ownership.objects).toEqual([
       { objectTypeId: "Room", existence: true, propertyIds: ["name"] },
     ])
@@ -322,8 +322,8 @@ describe("projection registry", () => {
 
     const resolvedObject = projectionRegistry.resolveSource("rooms").definition
     if (resolvedObject._tag !== "ObjectProjectionDefinition") throw new Error("unexpected kind")
-    expect(projectionRegistry.listObjectProjections()[0]).toBe(resolvedObject)
-    expect(projectionRegistry.listTelemetryProjections()[0]).toBe(
+    expect(projectionRegistry.listObjects()[0]).toBe(resolvedObject)
+    expect(projectionRegistry.listTelemetry()[0]).toBe(
       projectionRegistry.resolveTelemetry("temperatures").definition
     )
     expect(Object.keys(resolvedObject)).toEqual([

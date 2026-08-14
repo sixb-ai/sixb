@@ -1,11 +1,4 @@
-import type {
-  DatasetDefinition,
-  LinkProjectionDefinition,
-  ObjectProjectionDefinition,
-  ProjectionDefinition,
-  SixbRuntimeContext,
-  TelemetryProjectionDefinition,
-} from "@sixb/core"
+import type { LakeStorage, OntologyRegistry, SixbDefinitions } from "@sixb/core"
 import type { ProjectionMaterializationIdentity } from "@sixb/core/internal/materialization"
 import type {
   ProjectionRunClaim,
@@ -13,19 +6,13 @@ import type {
   ProjectionRunStorage,
 } from "@sixb/core/storage"
 
-export interface ProjectionWorkerContext extends SixbRuntimeContext {
+export interface ProjectionWorkerContext {
+  readonly projectId: string
+  readonly ontology: OntologyRegistry
+  readonly lakeStorage: LakeStorage
   readonly projectionRunsStorage: ProjectionRunStorage
-  getDatasetById(datasetId: string): DatasetDefinition | null
-  getProjectionById(projectionId: string): ProjectionDefinition | null
-}
-
-export interface ProjectionWorkerSixb extends SixbRuntimeContext {
-  readonly id: string
-  listObjectProjections(): readonly ObjectProjectionDefinition[]
-  listLinkProjections(): readonly LinkProjectionDefinition[]
-  listTelemetryProjections(): readonly TelemetryProjectionDefinition[]
-  getDatasetById(datasetId: string): DatasetDefinition | null
-  getProjectionById(projectionId: string): ProjectionDefinition | null
+  readonly datasets: Pick<SixbDefinitions["datasets"], "getById">
+  readonly projections: Pick<SixbDefinitions["projections"], "getById">
 }
 
 export type ProjectionJob = ProjectionMaterializationIdentity & {

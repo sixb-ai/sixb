@@ -2,10 +2,10 @@
 
 SQLite storage provider for Sixb, built on `bun:sqlite`.
 
-Backs every Sixb store — objects, ontology commits, auth, agents, timeseries, and the run history for
-actions, syncs, pipelines, projections, workflows, and webhooks — from a single local database file.
-This is the storage `bun create sixb` scaffolds, and part of what makes a fresh project run with no
-service to install.
+Backs every Sixb store — objects, ontology commits, auth, agents, the immutable execution ledger,
+timeseries, and the run history for actions, syncs, pipelines, projections, workflows, and webhooks
+— from a single local database file. This is the storage `bun create sixb` scaffolds, and part of
+what makes a fresh project run with no service to install.
 
 ## Install
 
@@ -33,9 +33,9 @@ empty.
 With a `path`, `SqliteStorage` exposes core's `StorageMigrator` contract and the CLI runs it at
 startup. You do not write migrations — they ship inside this package.
 
-Before 1.0 the schema is a single migration whose checksum is verified at boot. A schema change
-**replaces** that migration instead of adding another, so moving between 0.x versions can require
-deleting the database file and starting over.
+Applied migrations are checksummed. Schema changes ship as new ordered steps; changing an already
+applied step fails startup instead of silently rewriting migration history. Before 1.0, an explicitly
+breaking migration may still require deleting the database file and starting over.
 
 ## Transactions
 

@@ -1,5 +1,5 @@
 import type { AgentDefinition, Sandbox } from "@sixb/core"
-import { resolveLogsRuntime } from "@sixb/core/internal/logging"
+import { resolveLoggingService } from "@sixb/core/internal/logging"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type { AgentRunRecord, WorkflowAgentNodeRunRecord } from "@sixb/core/storage"
 import { type AgentExecutionMode, renderAgentSkillCatalog } from "./agent-skills"
@@ -12,7 +12,7 @@ import {
 } from "./attachments"
 import { type BashSandboxHandle, createBashTool } from "./bash-tool"
 import { prepareAgentSandboxApiContext } from "./sandbox-api-context"
-import type { AgentTurnContext, AgentWorkerContext } from "./types"
+import type { AgentExecutionContext, AgentTurnContext, AgentWorkerContext } from "./types"
 import { prepareWorkflowInputAttachments } from "./workflow-input-attachments"
 
 export interface AgentExecutionEnvironment {
@@ -21,7 +21,7 @@ export interface AgentExecutionEnvironment {
 }
 
 interface CreateAgentEnvironmentInput {
-  readonly context: AgentWorkerContext
+  readonly context: AgentExecutionContext
   readonly agent: AgentDefinition
   /**
    * Sink for a sandbox teardown that outlives dispose() (the model answered before the boot
@@ -135,7 +135,7 @@ interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
 function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvironment {
   const { mode, context, agent, runId, threadId, apiBaseUrl, attachmentContext, skills } = input
 
-  const logSession = resolveLogsRuntime(context.id, context.logs).startExecution({
+  const logSession = resolveLoggingService(context.id, context.logging).startExecution({
     kind: "agent",
     id: runId,
   })
@@ -202,7 +202,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
 }
 
 interface ProvisionSandboxInput {
-  readonly context: AgentWorkerContext
+  readonly context: AgentExecutionContext
   readonly agent: AgentDefinition
   readonly run: { readonly id: string; readonly threadId?: string }
   readonly apiBaseUrl: string

@@ -1,10 +1,11 @@
-import type { AuthorizationContext, OntologySource, Sixb } from "@sixb/core"
+import type { OntologySource } from "@sixb/core"
 import { agentRunStreamDefinition, agentRunStreamId } from "@sixb/core/agents/streams"
 import type { BrokerRecord } from "@sixb/core/broker"
+import type { Sixb } from "@sixb/core/internal/request-execution"
 import type { Elysia } from "elysia"
 import { z } from "zod"
 import type { SixbServer } from "../../server"
-import { decodeWsMessage, safeSend, wsAuthz, wsStateKey } from "../../utils/ws"
+import { decodeWsMessage, safeSend, wsRequestSixb, wsStateKey } from "../../utils/ws"
 import { serializeAgentRun } from "../agents"
 
 interface AgentStreamSubscriptionState {
@@ -62,33 +63,12 @@ export function parseAgentStreamMessage(payload: unknown):
 
 export async function canAccessAgentRunStream(
   sixb: Sixb<readonly OntologySource[]>,
-  input: {
-    readonly runId: string
-    readonly authz: AuthorizationContext | null
-  }
+  runId: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
-  const storage = sixb.storage.agents
-  if (!storage) {
-    return { ok: false, message: "Agent storage is not configured." }
-  }
-
-  const run = await storage.runs.getById({ projectId: sixb.id, id: input.runId })
+  const run = await sixb.agents.runs.getById(runId)
   if (!run) {
     return { ok: false, message: "Agent run not found." }
   }
-
-  // Auth-disabled development runtimes are privileged, matching the existing HTTP agent routes.
-  if (!input.authz) {
-    return { ok: true }
-  }
-
-  // Reuse the one owner + `run:agent` rule instead of re-implementing it here: the scoped surface
-  // returns null for a thread the caller may not read (absent, not owner, or ungranted).
-  const thread = await sixb.as(input.authz).getThread(run.threadId)
-  if (!thread) {
-    return { ok: false, message: "Agent run not found." }
-  }
-
   return { ok: true }
 }
 
@@ -135,11 +115,13 @@ async function subscribeAgentStream(
   ws: { send: (message: string) => void },
   message: SubscribeMessage
 ): Promise<void> {
-  const sixb = server.getSixb()
-  const access = await canAccessAgentRunStream(sixb, {
-    runId: message.runId,
-    authz: wsAuthz(ws),
-  })
+  const host = server.getHost()
+  const sixb = wsRequestSixb(ws)
+  if (!sixb) {
+    safeSend(ws, { type: "error", message: "Execution scope is not available." })
+    return
+  }
+  const access = await canAccessAgentRunStream(sixb, message.runId)
   if (!access.ok) {
     safeSend(ws, { type: "error", message: access.message })
     return
@@ -147,8 +129,8 @@ async function subscribeAgentStream(
 
   const streamId = agentRunStreamId(message.runId)
   try {
-    await sixb.broker.ensureStream({
-      projectId: sixb.id,
+    await host.broker.ensureStream({
+      projectId: host.id,
       stream: agentRunStreamDefinition(message.runId),
     })
   } catch (error) {
@@ -163,9 +145,9 @@ async function subscribeAgentStream(
   const buffered: BrokerRecord[] = []
   let live = false
   try {
-    state.unsubscribe = await sixb.broker.subscribe(
+    state.unsubscribe = await host.broker.subscribe(
       {
-        projectId: sixb.id,
+        projectId: host.id,
         streamId,
         ...(message.afterCursor === undefined
           ? { from: "earliest" as const }
@@ -206,11 +188,13 @@ async function replayAgentStream(
   ws: { send: (message: string) => void },
   message: ReplayMessage
 ): Promise<void> {
-  const sixb = server.getSixb()
-  const access = await canAccessAgentRunStream(sixb, {
-    runId: message.runId,
-    authz: wsAuthz(ws),
-  })
+  const host = server.getHost()
+  const sixb = wsRequestSixb(ws)
+  if (!sixb) {
+    safeSend(ws, { type: "error", message: "Execution scope is not available." })
+    return
+  }
+  const access = await canAccessAgentRunStream(sixb, message.runId)
   if (!access.ok) {
     safeSend(ws, { type: "error", message: access.message })
     return
@@ -218,12 +202,12 @@ async function replayAgentStream(
 
   const streamId = agentRunStreamId(message.runId)
   try {
-    await sixb.broker.ensureStream({
-      projectId: sixb.id,
+    await host.broker.ensureStream({
+      projectId: host.id,
       stream: agentRunStreamDefinition(message.runId),
     })
-    const page = await sixb.broker.read({
-      projectId: sixb.id,
+    const page = await host.broker.read({
+      projectId: host.id,
       streamId,
       afterCursor: message.afterCursor,
       limit: message.limit,
@@ -274,7 +258,7 @@ async function sendRunSnapshot(
   runId: string
 ): Promise<boolean> {
   try {
-    const run = await sixb.storage.agents?.runs.getById({ projectId: sixb.id, id: runId })
+    const run = await sixb.agents.runs.getById(runId)
     if (!run) {
       safeSend(ws, { type: "error", message: "Agent run not found." })
       return false

@@ -1,9 +1,8 @@
 # Testing
 
-You test a Sixb project with `bun:test` against a real runtime wired from
-in-memory providers. There is no special harness: construct a `Sixb` runtime (or
-a full `SixbServer`), drive it through the same typed APIs your app uses, and
-assert on the results.
+You test a Sixb project with `bun:test` against a real `SixbHost` wired from in-memory providers.
+Bind it with `createTestSixb(...)` to get the same execution-bound domain SDK that handlers receive,
+then drive its typed APIs and assert on the results.
 
 ## Test kinds
 
@@ -58,7 +57,7 @@ import {
   InMemoryStorage,
 } from "@sixb/core"
 
-function createTestRuntime() {
+async function createTestRuntime() {
   return createSixb({
     id: "acme-test",
     projectRoot: resolve(import.meta.dir, ".."),
@@ -71,13 +70,22 @@ function createTestRuntime() {
 }
 ```
 
-`createSixb` is async, so `await` it. To skip folder discovery and register
-ontology and definitions explicitly, construct `Sixb` directly:
+`createSixb` is async, so `await` it, then bind an explicit test execution:
 
 ```ts
-import { Sixb } from "@sixb/core"
+import { createTestSixb } from "@sixb/core/testing"
 
-const sixb = new Sixb({
+const host = await createTestRuntime()
+const sixb = createTestSixb(host)
+```
+
+To skip folder discovery and register ontology and definitions explicitly, pass host options to the
+same helper:
+
+```ts
+import { createTestSixb } from "@sixb/core/testing"
+
+const sixb = createTestSixb({
   id: "acme-progress-test",
   ontology: [Project, Customer, Employee, Department],
   broker: new InMemoryBroker(),
@@ -157,33 +165,33 @@ expect(dueSoon.objects.map((o) => o.primaryId)).toEqual(["proj-002"])
 
 ## Authorization testing
 
-Authorization is enforced at the runtime boundary, so test it by running calls
-through an authorization context. Build one with `resolveAuthorizationContext`
-and scope the runtime to a principal with `sixb.as(...)`. Every call on the
-returned handle is filtered by that principal's grants.
+Authorization is enforced at the execution boundary. Build a context with
+`resolveAuthorizationContext`, then bind a separate test SDK for each principal. Every call on that
+SDK is filtered by the principal's grants.
 
 ```ts
 import {
   resolveAuthorizationContext,
   type OntologySource,
-  type Sixb,
+  type SixbHost,
 } from "@sixb/core"
+import { createTestSixb } from "@sixb/core/testing"
 
 function asUser(
-  sixb: Sixb<readonly OntologySource[]>,
+  host: SixbHost<readonly OntologySource[]>,
   groupIds: readonly string[],
   userId = "user-1"
 ) {
   return resolveAuthorizationContext({
     principal: { type: "user", id: userId },
     groupIds,
-    roles: sixb.security.listResolvedRoles(),
+    roles: host.definitions.security.listResolvedRoles(),
   })
 }
 
-const teamMember = sixb.as(asUser(sixb, ["team-members"]))
-const financeAdmin = sixb.as(asUser(sixb, ["finance-admins"]))
-const anonymous = sixb.as(asUser(sixb, []))
+const teamMember = createTestSixb(host, { authorization: asUser(host, ["team-members"]) })
+const financeAdmin = createTestSixb(host, { authorization: asUser(host, ["finance-admins"]) })
+const anonymous = createTestSixb(host, { authorization: asUser(host, []) })
 ```
 
 Assert both what a principal *can* and *cannot* do. Listings are filtered to
@@ -191,15 +199,15 @@ granted definitions, and denied operations reject with package-prefixed errors:
 
 ```ts
 // team members can view Customer but not Invoice
-expect((await teamMember.list({})).objects.map((o) => o.objectTypeId)).toEqual(["Customer"])
-await expect(teamMember.getObject("Invoice", "inv-001")).rejects.toThrow(
+expect((await teamMember.objects.list({})).objects.map((o) => o.objectTypeId)).toEqual(["Customer"])
+await expect(teamMember.objects.get("Invoice", "inv-001")).rejects.toThrow(
   "not allowed to view object type 'Invoice'"
 )
 
 // action and dataset listings only include granted definitions
-expect(teamMember.listActions().map((a) => a.id)).not.toContain("markPaid")
+expect(teamMember.actions.list().map((a) => a.id)).not.toContain("markPaid")
 await expect(
-  teamMember.requestAction({
+  teamMember.actions.request({
     actionId: "markPaid",
     subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv-001" },
   })
@@ -207,22 +215,23 @@ await expect(
 
 // finance admins can apply invoice actions
 await expect(
-  financeAdmin.requestAction({
+  financeAdmin.actions.request({
     actionId: "markPaid",
     subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv-001" },
   })
 ).resolves.toMatchObject({ runId: expect.any(String) })
 
 // an ungranted principal sees nothing
-expect(await anonymous.list({})).toEqual({ objects: [], hasMore: false, total: 0 })
+expect(await anonymous.objects.list({})).toEqual({ objects: [], hasMore: false, total: 0 })
 ```
 
 There are eleven grant kinds. `access:application` gates browser applications at the server
-boundary, and `observe:logs` gates reading captured [logs](../logging/overview.md). The scoped
-runtime gates the rest: `view:object` (`list`/`getObject`), `view:dataset` (`listDatasets`),
-`edit:object` (`upsertObject`, links, `delete`), `append:telemetry` (`appendTelemetry`),
-`apply:action` (`requestAction`), `run:workflow` (`requestWorkflowRun`), `run:sync`
-(`requestSyncRun`), `run:pipeline` (`requestPipelineRun`), and `run:agent` (`requestAgentRun`). See [authorization](../auth/authorization.md) for how roles,
+boundary, and `observe:logs` gates reading captured [logs](../logging/overview.md). The bound SDK
+gates the rest: `view:object` (`objects.list`/`objects.get`), `view:dataset`
+(`datasets.list`), `edit:object` (`objects.upsert`, links, `delete`), `append:telemetry`
+(`objects.appendTelemetry`), `apply:action` (`actions.request`), `run:workflow`
+(`workflows.requestById`), `run:sync` (`syncs.request`), `run:pipeline` (`pipelines.request`), and
+`run:agent` (`agents.request`). See [authorization](../auth/authorization.md) for how roles,
 grants, groups, and membership policies resolve; the full pattern lives in
 `examples/auth/tests/atlas-authorization.test.ts`.
 
@@ -235,7 +244,7 @@ End-to-end tests start a real `SixbServer` over HTTP and drive it with the typed
 `@sixb/client` builders, proving the client and server agree on the wire format.
 Use this shape for a full typed-client/server contract test:
 
-1. Build a `Sixb` runtime and seed data through `sixb.objects(...)`.
+1. Build a `SixbHost`, bind a test SDK, and seed data through `sixb.objects(...)`.
 2. Allocate a free port and start a `SixbServer` bound to it.
 3. Point the client at the server with `client.setConfig({ baseUrl })`.
 4. Run queries through `objects(...)` from `@sixb/client/query` and assert.
@@ -250,11 +259,11 @@ import { SixbServer } from "@sixb/server"
 let server: SixbServer
 
 beforeAll(async () => {
-  // ...build and seed sixb, then pick a free port...
+  // ...build host, bind and seed a test Sixb, then pick a free port...
   const baseUrl = `http://127.0.0.1:${port}`
   server = new SixbServer({
-    sixb,
-    host: "127.0.0.1",
+    host,
+    hostname: "127.0.0.1",
     port,
     quiet: true,
     browser: {

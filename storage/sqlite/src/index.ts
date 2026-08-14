@@ -26,6 +26,7 @@ import {
 import { SqliteActionRunStorage } from "./action-run-storage"
 import { SqliteAgentStorage } from "./agents"
 import { SqliteAuthStorage } from "./auth-storage"
+import { SqliteExecutionStorage } from "./execution-storage"
 import {
   createSqliteStorageMigrators,
   installFreshSqliteSchema,
@@ -57,8 +58,8 @@ export interface SqliteStorageOptions {
 /**
  * SQLite storage provider for Sixb.
  *
- * Bundles object, timeseries, auth, sync run, pipeline run, projection run, workflow run, webhook
- * run, and webhook delivery storage backed by SQLite.
+ * Bundles object, timeseries, auth, execution, sync run, pipeline run, projection run, workflow
+ * run, webhook run, and webhook delivery storage backed by SQLite.
  *
  * Usage:
  * ```ts
@@ -74,6 +75,7 @@ export class SqliteStorage implements MigrationCapableStorage {
   readonly objects: Storage["objects"]
   readonly ontology: SqliteOntologyStorage
   readonly auth: SqliteAuthStorage
+  readonly executions: SqliteExecutionStorage
   readonly agents: SqliteAgentStorage
   readonly actionRuns: SqliteActionRunStorage
   readonly pipelineRuns: SqlitePipelineRunStorage
@@ -115,6 +117,7 @@ export class SqliteStorage implements MigrationCapableStorage {
     this.objects = createOperationScopedFacade(stores.objects, scope)
     this.ontology = createOntologyOperationScope(stores.ontology, ontologyScope)
     this.auth = createAuthOperationScope(stores.auth, scope)
+    this.executions = createOperationScopedFacade(stores.executions, scope)
     this.agents = createAgentOperationScope(stores.agents, scope)
     this.actionRuns = createOperationScopedFacade(stores.actionRuns, scope)
     this.pipelineRuns = createOperationScopedFacade(stores.pipelineRuns, scope)
@@ -250,6 +253,7 @@ function createSqliteStores(
     readonly transactionContext: SqliteOntologyTransactionContext | null
   }
 ): SqliteStoreSet {
+  const auth = new SqliteAuthStorage({ connection })
   return {
     objects: new SqliteObjectStorage({ connection }),
     ontology: new SqliteOntologyStorage({
@@ -257,7 +261,8 @@ function createSqliteStores(
       runRootOperation: options.runOntologyOperation,
       transactionContext: options.transactionContext,
     }),
-    auth: new SqliteAuthStorage({ connection }),
+    auth,
+    executions: new SqliteExecutionStorage(connection.db, auth),
     agents: new SqliteAgentStorage({ connection }),
     actionRuns: new SqliteActionRunStorage({ connection }),
     pipelineRuns: new SqlitePipelineRunStorage({ connection }),
@@ -276,6 +281,7 @@ interface SqliteStoreSet {
   readonly objects: SqliteObjectStorage
   readonly ontology: SqliteOntologyStorage
   readonly auth: SqliteAuthStorage
+  readonly executions: SqliteExecutionStorage
   readonly agents: SqliteAgentStorage
   readonly actionRuns: SqliteActionRunStorage
   readonly pipelineRuns: SqlitePipelineRunStorage

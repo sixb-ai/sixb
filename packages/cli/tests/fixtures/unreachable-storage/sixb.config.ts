@@ -6,7 +6,7 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   prop,
-  Sixb,
+  SixbHost,
 } from "@sixb/core"
 
 const Room = defineObjectType({
@@ -25,7 +25,7 @@ class UnreachableStorage extends InMemoryStorage {
   }
 }
 
-export const sixb = new Sixb({
+export const sixb = new SixbHost({
   id: "cli-check-unreachable",
   ontology: [Room],
   broker: new InMemoryBroker(),

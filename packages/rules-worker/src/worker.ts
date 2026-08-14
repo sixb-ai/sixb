@@ -7,8 +7,8 @@ import { EvaluationCoordinator } from "./evaluation-coordinator"
 import type {
   OntologyRuleEvent,
   RuleDependencyIndex,
+  RulesWorkerHost,
   RulesWorkerOptions,
-  RulesWorkerSixb,
 } from "./types"
 
 const DEFAULT_RECONCILIATION_INTERVAL_MS = 60_000
@@ -28,14 +28,14 @@ const ontologyEventTypes = [
  * Rules worker backed by live wake-up events and periodic current-state reconciliation.
  */
 export class RulesWorker extends Worker {
-  private readonly runtime: RulesWorkerSixb
+  private readonly runtime: RulesWorkerHost
   private readonly rules: readonly RuleDefinition[]
   private readonly index: RuleDependencyIndex
   private readonly reconciliationIntervalMs: number
   private readonly reconciliationPageSize: number
 
-  constructor(runtime: RulesWorkerSixb, options: RulesWorkerOptions = {}) {
-    const rules = runtime.listRules()
+  constructor(runtime: RulesWorkerHost, options: RulesWorkerOptions = {}) {
+    const rules = runtime.definitions.rules.list()
     if (rules.length === 0) {
       throw new Error("[SixbRulesWorker] Rules workers require at least one registered rule.")
     }
@@ -109,7 +109,7 @@ export class RulesWorker extends Worker {
   }
 }
 
-// EventsRuntime.subscribe filters by type at runtime, but the public handler type is
+// DomainEventService.subscribe filters by type at runtime, but the public handler type is
 // still StoredDomainEvent[]. This guard gives the evaluator the narrower union.
 function isOntologyRuleEvent(event: StoredDomainEvent): event is OntologyRuleEvent {
   return (

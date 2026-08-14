@@ -1,26 +1,22 @@
-import type { ActionDefinition, DomainEventLog, Queues, Storage } from "@sixb/core"
-import type { LogsRuntime } from "@sixb/core/internal/logging"
-import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
+import type { DomainEventLog, Queues, SixbDefinitions, Storage } from "@sixb/core"
+import type { LoggingService } from "@sixb/core/internal/logging"
+import {
+  bindPrimitiveExecution,
+  type PrimitiveExecutionHost,
+} from "@sixb/core/internal/primitive-execution"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { ActionRunRequestedQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
 import { ActionWorkerError } from "./errors"
 import { runActionJob } from "./run-action-job"
-import type {
-  ActionJob,
-  ActionRunResult,
-  ActionWorkerContext,
-  ActionWorkerSixbFacade,
-} from "./types"
+import type { ActionJob, ActionRunResult, ActionWorkerContext } from "./types"
 
-export interface ActionWorkerSixb {
-  readonly id: string
+export interface ActionWorkerHost extends PrimitiveExecutionHost {
   readonly events: DomainEventLog
-  readonly logs?: LogsRuntime
   readonly storage: Storage
   readonly queues: Queues
-  listActions(): readonly ActionDefinition[]
-  getActionById(actionId: string): ActionDefinition | null
+  readonly logging?: LoggingService
+  readonly definitions: Pick<SixbDefinitions, "actions">
 }
 
 export interface ActionWorkerOptions {
@@ -29,27 +25,27 @@ export interface ActionWorkerOptions {
 }
 
 export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
-  private readonly context: ActionWorkerContext | null
-  private readonly sixb: ActionWorkerSixb
+  private readonly host: ActionWorkerHost
   private readonly idleWithoutDefinitions: boolean
 
-  constructor(sixb: ActionWorkerSixb, options: ActionWorkerOptions = {}) {
+  constructor(host: ActionWorkerHost, options: ActionWorkerOptions = {}) {
     super({
-      projectId: sixb.id,
-      queue: sixb.queues.actions,
-      workerId: `action-worker-${sixb.id}`,
+      projectId: host.id,
+      queue: host.queues.actions,
+      workerId: `action-worker-${host.id}`,
       claimLimit: 1,
       leaseMs: options.leaseMs,
       idlePollMs: options.idlePollMs,
     })
 
-    const actions = sixb.listActions()
+    const actions = host.definitions.actions.list()
     if (actions.length === 0) {
       console.log("[SixbActionWorker] No action definitions registered; worker will idle.")
+    } else if (!host.storage.actionRuns) {
+      throw new ActionWorkerError("Action workers require storage.actionRuns support.")
     }
 
-    this.context = actions.length > 0 ? buildActionContext(sixb) : null
-    this.sixb = sixb
+    this.host = host
     this.idleWithoutDefinitions = actions.length === 0
   }
 
@@ -72,8 +68,7 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
     claimed: ClaimedQueueJob<ActionRunRequestedQueueJob>,
     signal: AbortSignal
   ): Promise<void> {
-    const context = this.context
-    if (!context) {
+    if (this.idleWithoutDefinitions) {
       throw new ActionWorkerError("No action definitions are registered.")
     }
 
@@ -87,6 +82,16 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
       actionId: job.payload.actionId,
     }
 
+    const execution = bindPrimitiveExecution(this.host, {
+      primitive: {
+        kind: "action",
+        id: actionJob.actionId,
+        runId: actionJob.id,
+      },
+      source: { type: "queue", queue: "actions", jobId: job.id },
+    })
+    const context = buildActionContext(this.host, execution)
+
     const result = await runActionJob({
       runtime: context,
       job: actionJob,
@@ -98,7 +103,7 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
       return
     }
 
-    await emitActionTerminalEvent(this.sixb, result)
+    await emitActionTerminalEvent(this.host, result)
   }
 
   protected override async onExecutionError(
@@ -117,12 +122,12 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
 }
 
 async function emitActionTerminalEvent(
-  sixb: ActionWorkerSixb,
+  host: ActionWorkerHost,
   result: Exclude<ActionRunResult, { skipped: true }>
 ): Promise<void> {
   const finishedAt = result.finishedAt.toISOString()
 
-  await sixb.events.emit(
+  await host.events.emit(
     {
       events:
         result.status === "succeeded"
@@ -156,54 +161,29 @@ async function emitActionTerminalEvent(
   )
 }
 
-function buildActionContext(sixb: ActionWorkerSixb): ActionWorkerContext {
-  const actionRunsStorage = sixb.storage.actionRuns
+function buildActionContext(
+  host: ActionWorkerHost,
+  execution: ReturnType<typeof bindPrimitiveExecution>
+): ActionWorkerContext {
+  const actionRunsStorage = host.storage.actionRuns
   if (!actionRunsStorage) {
     throw new ActionWorkerError("Action workers require storage.actionRuns support.")
   }
-  assertActionWorkerSixbFacade(sixb)
-
+  const sixb = {
+    objects: execution.sixb.objects,
+    actions: execution.sixb.actions,
+    connector: execution.sixb.connector,
+    blobs: execution.sixb.blobs,
+  }
   return {
-    id: sixb.id,
-    events: sixb.events,
-    logs: sixb.logs,
-    storage: sixb.storage,
+    id: host.id,
+    errorReporterHost: host,
+    events: host.events,
+    logging: host.logging,
+    storage: host.storage,
     actionRunsStorage,
-    ontologyMutations: getOntologyMutationRuntime(sixb),
+    ontologyMutations: execution.ontologyMutations,
     sixb,
-    getActionById(actionId) {
-      return sixb.getActionById(actionId)
-    },
-  }
-}
-
-const requiredFacadeMethods = [
-  "connector",
-  "listActionsForType",
-  "getPrimaryPropertyId",
-  "getValueTypesById",
-  "isValidLinkTarget",
-  "objects",
-  "resolveObjectType",
-] as const satisfies readonly (keyof ActionWorkerSixbFacade)[]
-
-function assertActionWorkerSixbFacade(
-  sixb: ActionWorkerSixb
-): asserts sixb is ActionWorkerSixb & ActionWorkerSixbFacade {
-  const candidate = sixb as Partial<Record<(typeof requiredFacadeMethods)[number], unknown>>
-  for (const method of requiredFacadeMethods) {
-    if (typeof candidate[method] !== "function") {
-      throw new ActionWorkerError(`Action worker runtime is missing sixb.${method}(...).`)
-    }
-  }
-
-  const blobStorage = (sixb as { readonly blobStorage?: Record<string, unknown> }).blobStorage
-  if (
-    !blobStorage ||
-    typeof blobStorage.put !== "function" ||
-    typeof blobStorage.open !== "function" ||
-    typeof blobStorage.stat !== "function"
-  ) {
-    throw new ActionWorkerError("Action worker runtime is missing sixb.blobStorage support.")
+    actions: host.definitions.actions,
   }
 }

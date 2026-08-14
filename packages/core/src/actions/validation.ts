@@ -20,7 +20,7 @@ interface ActionValidationRuntime {
     resolveObjectType(objectTypeId: string): ObjectTypeWithPropertyTokens
   }
   readonly actionRegistry: {
-    getActionsForType(objectType: ObjectTypeWithPropertyTokens): readonly ObjectActionDefinition[]
+    listForType(objectType: ObjectTypeWithPropertyTokens): readonly ObjectActionDefinition[]
   }
 }
 
@@ -164,7 +164,7 @@ function actionAppliesToObjectType(
   objectType: ObjectTypeWithPropertyTokens
 ): boolean {
   return runtime.actionRegistry
-    .getActionsForType(objectType)
+    .listForType(objectType)
     .some((candidate) => candidate.id === action.id)
 }
 

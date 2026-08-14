@@ -13,9 +13,9 @@ import {
   param,
   prop,
   ref,
-  Sixb,
   stringEnum,
 } from "../src"
+import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 type Equal<A, B> =
@@ -328,7 +328,7 @@ defineAction("effectsWithoutEdits")
   // @ts-expect-error effects require edits
   .effects(async () => {})
 
-const sixb = new Sixb({
+const sixb = createTestSixb({
   ontology: [Room],
   actions: [
     actionDefinition(setTemperature),

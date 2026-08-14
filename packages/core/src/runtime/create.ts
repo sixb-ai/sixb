@@ -37,7 +37,7 @@ import type { Storage } from "../storage"
 import type { SyncDefinition } from "../syncs"
 import type { WorkflowDefinition } from "../workflows"
 import { RuntimeError } from "./errors"
-import { Sixb } from "./sixb"
+import { SixbHost } from "./host"
 import type { OntologySource } from "./types"
 
 export interface CreateSixbOptions {
@@ -77,16 +77,16 @@ export interface CreateSixbOptions {
 }
 
 /**
- * Create a Sixb runtime using convention-based discovery.
+ * Create a SixbHost using convention-based discovery.
  *
- * Sixb auto-discovers exported definitions from `ontology/`, `actions/`, `datasets/`,
+ * The host auto-discovers exported definitions from `ontology/`, `actions/`, `datasets/`,
  * `connectors/`, `syncs/`, `schedules/`, `pipelines/`, `projections/`,
  * `rules/`, `workflows/`, `agents/`, and `security/{groups,roles,policies}/`
  * relative to `projectRoot`.
  */
 export async function createSixb(
   options: CreateSixbOptions
-): Promise<Sixb<readonly OntologySource[]>> {
+): Promise<SixbHost<readonly OntologySource[]>> {
   const projectRoot = resolve(options.projectRoot ?? process.cwd())
 
   const discovered = await discoverOntologySources(projectRoot)
@@ -129,9 +129,9 @@ export async function createSixb(
   ])
 
   // Explicit definitions come first so local setup can override ordering while duplicate ids are
-  // still rejected by the Sixb constructor. Every family merges — `actions` and `projections` used to
-  // *replace* discovery instead, silently and undocumented.
-  return new Sixb<readonly OntologySource[]>({
+  // still rejected by the SixbHost constructor. Every family merges — `actions` and `projections`
+  // used to *replace* discovery instead, silently and undocumented.
+  return new SixbHost<readonly OntologySource[]>({
     id: options.id,
     ontology: allSources,
     broker: options.broker,

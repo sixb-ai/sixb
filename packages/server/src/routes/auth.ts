@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto"
-import type { AuthSessionAudience, GroupDefinition, OntologySource, Sixb } from "@sixb/core"
+import type { AuthSessionAudience, GroupDefinition, SixbHostView } from "@sixb/core"
 import {
   type AuthenticatedUserRequestSession,
   type AuthRequestResult,
@@ -117,28 +117,24 @@ export interface AuthRoutesOptions {
   ) => AuthInvitationRedirectContext
 }
 
-export function registerAuthRoutes(
-  app: Elysia,
-  sixb: Sixb<readonly OntologySource[]>,
-  options: AuthRoutesOptions
-) {
+export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: AuthRoutesOptions) {
   return app
     .get(
       "/api/auth/session",
       async ({ request }) => {
         const authOptions = resolveAuthOptions(options, request)
-        let session = await sixb.auth.getSession(request, authOptions)
+        let session = await host.auth.getSession(request, authOptions)
         if (!session.authenticated) {
           return jsonResponse({ authenticated: false as const }, 200)
         }
 
         let applicationAccessAllowed = sessionCanAccessApplication(
-          sixb,
+          host,
           session,
           authOptions.audience
         )
         if (applicationAccessAllowed && hasForegroundSessionActivity(request)) {
-          session = await sixb.auth.getSession(request, {
+          session = await host.auth.getSession(request, {
             ...authOptions,
             sessionActivity: "foreground",
           })
@@ -146,13 +142,13 @@ export function registerAuthRoutes(
             return jsonResponse({ authenticated: false as const }, 200)
           }
           applicationAccessAllowed = sessionCanAccessApplication(
-            sixb,
+            host,
             session,
             authOptions.audience
           )
         }
 
-        const cookieOptions = sixb.auth.getCookieOptions(authOptions)
+        const cookieOptions = host.auth.getCookieOptions(authOptions)
         const csrf = resolveSessionCsrfToken({
           request,
           cookieOptions,
@@ -161,7 +157,7 @@ export function registerAuthRoutes(
         const renewal =
           session.sessionRenewed === true
             ? createSessionRenewalCookieHeaders({
-                sixb,
+                host,
                 request,
                 session,
                 csrfToken: csrf.token,
@@ -203,8 +199,8 @@ export function registerAuthRoutes(
       "/api/auth/sign-out",
       async ({ request }) => {
         const authOptions = resolveAuthOptions(options, request)
-        const session = await sixb.auth.getSession(request, authOptions)
-        const cookieOptions = sixb.auth.getCookieOptions(authOptions)
+        const session = await host.auth.getSession(request, authOptions)
+        const cookieOptions = host.auth.getCookieOptions(authOptions)
         if (
           session.authenticated &&
           !verifyDoubleSubmitCsrf(request, {
@@ -215,13 +211,13 @@ export function registerAuthRoutes(
         }
 
         if (session.authenticated) {
-          await sixb.storage.auth?.sessions.revoke({
-            projectId: sixb.id,
+          await host.storage.auth?.sessions.revoke({
+            projectId: host.id,
             id: session.session.id,
             revokedAt: new Date(),
           })
           // Drop the cached session immediately so it isn't honored for the cache TTL.
-          sixb.auth.invalidateSession(session.session.id)
+          host.auth.invalidateSession(session.session.id)
         }
 
         const headers = new Headers({ "content-type": "application/json; charset=utf-8" })
@@ -250,13 +246,13 @@ export function registerAuthRoutes(
       "/api/auth/sessions",
       async ({ request }) => {
         const authOptions = resolveAuthOptions(options, request)
-        const session = await sixb.auth.getSession(request, authOptions)
+        const session = await host.auth.getSession(request, authOptions)
         if (!session.authenticated) {
           return jsonResponse({ error: "Authentication required" }, 401)
         }
 
-        const sessions = await requireAuthStorage(sixb).sessions.listActiveByUserId({
-          projectId: sixb.id,
+        const sessions = await requireAuthStorage(host).sessions.listActiveByUserId({
+          projectId: host.id,
           userId: session.user.id,
           now: new Date(),
         })
@@ -293,8 +289,8 @@ export function registerAuthRoutes(
       "/api/auth/sessions/:sessionId/revoke",
       async ({ request, params }) => {
         const authOptions = resolveAuthOptions(options, request)
-        const session = await sixb.auth.getSession(request, authOptions)
-        const cookieOptions = sixb.auth.getCookieOptions(authOptions)
+        const session = await host.auth.getSession(request, authOptions)
+        const cookieOptions = host.auth.getCookieOptions(authOptions)
         if (!session.authenticated) {
           return jsonResponse({ error: "Authentication required" }, 401)
         }
@@ -303,16 +299,16 @@ export function registerAuthRoutes(
         }
 
         const { sessionId } = RevokeAuthSessionParamsSchema.parse(params)
-        const storage = requireAuthStorage(sixb)
-        const target = await storage.sessions.getById({ projectId: sixb.id, id: sessionId })
+        const storage = requireAuthStorage(host)
+        const target = await storage.sessions.getById({ projectId: host.id, id: sessionId })
         // Only the caller's own sessions are revocable. A missing or foreign
         // session id returns the same 404 so it cannot probe other accounts.
         if (!target || target.userId !== session.user.id) {
           return jsonResponse({ error: "Session not found" }, 404)
         }
 
-        await storage.sessions.revoke({ projectId: sixb.id, id: sessionId, revokedAt: new Date() })
-        sixb.auth.invalidateSession(sessionId)
+        await storage.sessions.revoke({ projectId: host.id, id: sessionId, revokedAt: new Date() })
+        host.auth.invalidateSession(sessionId)
 
         const headers = new Headers({ "content-type": "application/json; charset=utf-8" })
         // Revoking the session backing this request also clears its cookies.
@@ -346,8 +342,8 @@ export function registerAuthRoutes(
       "/api/auth/sign-out-all",
       async ({ request }) => {
         const authOptions = resolveAuthOptions(options, request)
-        const session = await sixb.auth.getSession(request, authOptions)
-        const cookieOptions = sixb.auth.getCookieOptions(authOptions)
+        const session = await host.auth.getSession(request, authOptions)
+        const cookieOptions = host.auth.getCookieOptions(authOptions)
         if (!session.authenticated) {
           return jsonResponse({ error: "Authentication required" }, 401)
         }
@@ -358,13 +354,13 @@ export function registerAuthRoutes(
         // Global sign-out: revoke every active session for the user across all
         // audiences. Other audiences' cookies remain client-side but their
         // sessions are revoked, so the next request re-authenticates.
-        const revoked = await requireAuthStorage(sixb).sessions.revokeActiveForUser({
-          projectId: sixb.id,
+        const revoked = await requireAuthStorage(host).sessions.revokeActiveForUser({
+          projectId: host.id,
           userId: session.user.id,
           revokedAt: new Date(),
         })
         for (const revokedSession of revoked) {
-          sixb.auth.invalidateSession(revokedSession.id)
+          host.auth.invalidateSession(revokedSession.id)
         }
 
         const headers = new Headers({ "content-type": "application/json; charset=utf-8" })
@@ -396,7 +392,7 @@ export function registerAuthRoutes(
         try {
           const authOptions = resolveAuthOptions(options, request)
           const session = requireAuthenticatedUserSession(
-            await sixb.auth.getSession(request, {
+            await host.auth.getSession(request, {
               ...authOptions,
               credentialSource: "any",
             })
@@ -409,7 +405,7 @@ export function registerAuthRoutes(
 
           return jsonResponse(
             {
-              groups: sixb.security
+              groups: host.definitions.security
                 .listGroups()
                 // V1 avoids privilege escalation by only offering groups the
                 // current session already has. Runtime token auth still
@@ -443,7 +439,7 @@ export function registerAuthRoutes(
         try {
           const authOptions = resolveAuthOptions(options, request)
           const session = requireAuthenticatedUserSession(
-            await sixb.auth.getSession(request, {
+            await host.auth.getSession(request, {
               ...authOptions,
               credentialSource: "any",
             })
@@ -452,7 +448,7 @@ export function registerAuthRoutes(
             return session
           }
 
-          const { accessTokens } = await sixb.auth.listPersonalAccessTokens(request, authOptions)
+          const { accessTokens } = await host.auth.listPersonalAccessTokens(request, authOptions)
 
           return jsonResponse(
             {
@@ -487,7 +483,7 @@ export function registerAuthRoutes(
           const authOptions = resolveAuthOptions(options, request)
           const parsed = CreateAuthPersonalAccessTokenBodySchema.parse(body)
           const session = requireAuthenticatedUserSession(
-            await sixb.auth.getSession(request, {
+            await host.auth.getSession(request, {
               ...authOptions,
               credentialSource: "any",
             })
@@ -497,7 +493,7 @@ export function registerAuthRoutes(
           }
 
           const expiresAt = parseRequiredFutureDate(parsed.expiresAt)
-          const result = await sixb.auth.createPersonalAccessToken(
+          const result = await host.auth.createPersonalAccessToken(
             request,
             { name: parsed.name, expiresAt, groupIds: parsed.groupIds },
             authOptions
@@ -541,7 +537,7 @@ export function registerAuthRoutes(
         try {
           const authOptions = resolveAuthOptions(options, request)
           const session = requireAuthenticatedUserSession(
-            await sixb.auth.getSession(request, {
+            await host.auth.getSession(request, {
               ...authOptions,
               credentialSource: "any",
             })
@@ -551,7 +547,7 @@ export function registerAuthRoutes(
           }
 
           const { tokenId } = RevokeAuthAccessTokenParamsSchema.parse(params)
-          const result = await sixb.auth.revokePersonalAccessToken(
+          const result = await host.auth.revokePersonalAccessToken(
             request,
             { tokenId },
             authOptions
@@ -591,11 +587,11 @@ export function registerAuthRoutes(
         try {
           const authOptions = resolveAuthOptions(options, request)
           const session = requireAuthenticatedUserSession(
-            await sixb.auth.getSession(request, { ...authOptions, credentialSource: "any" })
+            await host.auth.getSession(request, { ...authOptions, credentialSource: "any" })
           )
           if (session instanceof Response) return session
 
-          const { serviceAccounts } = await sixb.auth.listServiceAccounts(request, authOptions)
+          const { serviceAccounts } = await host.auth.listServiceAccounts(request, authOptions)
 
           return jsonResponse(
             {
@@ -631,11 +627,11 @@ export function registerAuthRoutes(
           const authOptions = resolveAuthOptions(options, request)
           const parsed = CreateAuthServiceAccountBodySchema.parse(body)
           const session = requireAuthenticatedUserSession(
-            await sixb.auth.getSession(request, { ...authOptions, credentialSource: "any" })
+            await host.auth.getSession(request, { ...authOptions, credentialSource: "any" })
           )
           if (session instanceof Response) return session
 
-          const result = await sixb.auth.createServiceAccount(
+          const result = await host.auth.createServiceAccount(
             request,
             {
               id: parsed.id,
@@ -682,12 +678,12 @@ export function registerAuthRoutes(
         try {
           const authOptions = resolveAuthOptions(options, request)
           const session = requireAuthenticatedUserSession(
-            await sixb.auth.getSession(request, { ...authOptions, credentialSource: "any" })
+            await host.auth.getSession(request, { ...authOptions, credentialSource: "any" })
           )
           if (session instanceof Response) return session
 
           const { serviceAccountId } = AuthServiceAccountParamsSchema.parse(params)
-          const result = await sixb.auth.disableServiceAccount(
+          const result = await host.auth.disableServiceAccount(
             request,
             { serviceAccountId },
             authOptions
@@ -726,12 +722,12 @@ export function registerAuthRoutes(
         try {
           const authOptions = resolveAuthOptions(options, request)
           const session = requireAuthenticatedUserSession(
-            await sixb.auth.getSession(request, { ...authOptions, credentialSource: "any" })
+            await host.auth.getSession(request, { ...authOptions, credentialSource: "any" })
           )
           if (session instanceof Response) return session
 
           const { serviceAccountId } = AuthServiceAccountParamsSchema.parse(params)
-          const { serviceAccount, accessTokens } = await sixb.auth.listServiceAccountAccessTokens(
+          const { serviceAccount, accessTokens } = await host.auth.listServiceAccountAccessTokens(
             request,
             { serviceAccountId },
             authOptions
@@ -774,12 +770,12 @@ export function registerAuthRoutes(
           const parsedParams = AuthServiceAccountParamsSchema.parse(params)
           const parsed = CreateAuthServiceAccountAccessTokenBodySchema.parse(body)
           const session = requireAuthenticatedUserSession(
-            await sixb.auth.getSession(request, { ...authOptions, credentialSource: "any" })
+            await host.auth.getSession(request, { ...authOptions, credentialSource: "any" })
           )
           if (session instanceof Response) return session
 
           const expiresAt = parseRequiredFutureDate(parsed.expiresAt)
-          const result = await sixb.auth.createServiceAccountAccessToken(
+          const result = await host.auth.createServiceAccountAccessToken(
             request,
             {
               serviceAccountId: parsedParams.serviceAccountId,
@@ -829,11 +825,11 @@ export function registerAuthRoutes(
           const authOptions = resolveAuthOptions(options, request)
           const parsed = RevokeAuthServiceAccountAccessTokenParamsSchema.parse(params)
           const session = requireAuthenticatedUserSession(
-            await sixb.auth.getSession(request, { ...authOptions, credentialSource: "any" })
+            await host.auth.getSession(request, { ...authOptions, credentialSource: "any" })
           )
           if (session instanceof Response) return session
 
-          const result = await sixb.auth.revokeServiceAccountAccessToken(
+          const result = await host.auth.revokeServiceAccountAccessToken(
             request,
             { serviceAccountId: parsed.serviceAccountId, tokenId: parsed.tokenId },
             authOptions
@@ -882,7 +878,7 @@ export function registerAuthRoutes(
             return deliveryContext
           }
 
-          const result = await sixb.auth.invite(
+          const result = await host.auth.invite(
             request,
             {
               email: parsed.email,
@@ -937,7 +933,7 @@ export function registerAuthRoutes(
           const authOptions = resolveAuthOptions(options, request)
           return jsonResponse(
             {
-              ...(await sixb.auth.getInvitationOptions(request, authOptions)),
+              ...(await host.auth.getInvitationOptions(request, authOptions)),
               ...options.getInvitationDestinationOptions(request),
             },
             200
@@ -965,7 +961,7 @@ export function registerAuthRoutes(
         try {
           const authOptions = resolveAuthOptions(options, request)
           const parsed = ListAuthInvitationsQuerySchema.parse(query)
-          const result = await sixb.auth.listInvitations(
+          const result = await host.auth.listInvitations(
             request,
             {
               email: parsed.email,
@@ -1012,7 +1008,7 @@ export function registerAuthRoutes(
         try {
           const authOptions = resolveAuthOptions(options, request)
           const parsed = RevokeAuthInvitationParamsSchema.parse(params)
-          const result = await sixb.auth.revokeInvitation(
+          const result = await host.auth.revokeInvitation(
             request,
             {
               invitationId: parsed.invitationId,
@@ -1053,7 +1049,7 @@ export function registerAuthRoutes(
       async ({ request }) => {
         try {
           const authOptions = resolveAuthOptions(options, request)
-          return jsonResponse(await sixb.auth.getMembershipOptions(request, authOptions), 200)
+          return jsonResponse(await host.auth.getMembershipOptions(request, authOptions), 200)
         } catch (error) {
           return authRouteErrorResponse(error)
         }
@@ -1077,7 +1073,7 @@ export function registerAuthRoutes(
         try {
           const authOptions = resolveAuthOptions(options, request)
           const parsed = ListAuthMembersQuerySchema.parse(query)
-          const result = await sixb.auth.listMembers(
+          const result = await host.auth.listMembers(
             request,
             {
               limit: parseOptionalInt(parsed.limit),
@@ -1121,7 +1117,7 @@ export function registerAuthRoutes(
           const authOptions = resolveAuthOptions(options, request)
           const parsedParams = AuthMemberParamsSchema.parse(params)
           const parsed = UpdateAuthMemberGroupsBodySchema.parse(body)
-          const result = await sixb.auth.updateMemberGroups(
+          const result = await host.auth.updateMemberGroups(
             request,
             { userId: parsedParams.userId, groupIds: parsed.groupIds },
             authOptions
@@ -1157,7 +1153,7 @@ export function registerAuthRoutes(
         try {
           const authOptions = resolveAuthOptions(options, request)
           const parsed = AuthMemberParamsSchema.parse(params)
-          const result = await sixb.auth.suspendMember(
+          const result = await host.auth.suspendMember(
             request,
             { userId: parsed.userId },
             authOptions
@@ -1191,7 +1187,7 @@ export function registerAuthRoutes(
         try {
           const authOptions = resolveAuthOptions(options, request)
           const parsed = AuthMemberParamsSchema.parse(params)
-          const result = await sixb.auth.reactivateMember(
+          const result = await host.auth.reactivateMember(
             request,
             { userId: parsed.userId },
             authOptions
@@ -1222,7 +1218,7 @@ export function registerAuthRoutes(
     .post(
       "/auth/sign-in",
       async ({ body, request }) => {
-        const strategy = sixb.auth.getStrategy()
+        const strategy = host.auth.getStrategy()
         const authRedirect = resolveAuthRedirectContext(options, request, {
           audience: body.audience,
           returnTo: body.returnTo,
@@ -1231,12 +1227,12 @@ export function registerAuthRoutes(
           return authRedirect
         }
 
-        const authStorage = requireAuthStorage(sixb)
+        const authStorage = requireAuthStorage(host)
 
         if (isMagicLinkAuthStrategy(strategy)) {
           const pending = createMagicLinkPendingCredential()
           const result = await strategy.requestMagicLink({
-            projectId: sixb.id,
+            projectId: host.id,
             authStorage,
             email: body.email ?? "",
             audience: authRedirect.audience,
@@ -1263,7 +1259,7 @@ export function registerAuthRoutes(
             "set-cookie",
             magicLinkPendingCookieHeader({
               request,
-              sixb,
+              host,
               value: result.status === "sent" ? pending.secret : existingPending || pending.secret,
               maxAgeSeconds: magicLinkPendingCookieMaxAgeSeconds(strategy),
             })
@@ -1273,7 +1269,7 @@ export function registerAuthRoutes(
 
         if (isOidcAuthStrategy(strategy)) {
           const result = await strategy.startOidcSignIn({
-            projectId: sixb.id,
+            projectId: host.id,
             authStorage,
             audience: authRedirect.audience,
             returnTo: authRedirect.returnTo,
@@ -1297,7 +1293,7 @@ export function registerAuthRoutes(
     .get(
       "/auth/sign-in",
       async ({ request }) => {
-        const strategy = sixb.auth.getStrategy()
+        const strategy = host.auth.getStrategy()
         const url = new URL(request.url)
         const authRedirect = resolveAuthRedirectContext(options, request, {
           audience: url.searchParams.get("audience"),
@@ -1313,8 +1309,8 @@ export function registerAuthRoutes(
 
         if (isOidcAuthStrategy(strategy)) {
           const result = await strategy.startOidcSignIn({
-            projectId: sixb.id,
-            authStorage: requireAuthStorage(sixb),
+            projectId: host.id,
+            authStorage: requireAuthStorage(host),
             audience: authRedirect.audience,
             returnTo: authRedirect.returnTo,
             requestOrigin: authRedirect.requestOrigin,
@@ -1329,7 +1325,7 @@ export function registerAuthRoutes(
     .get(
       "/auth/callback",
       async ({ request }) => {
-        const strategy = sixb.auth.getStrategy()
+        const strategy = host.auth.getStrategy()
 
         if (isMagicLinkAuthStrategy(strategy)) {
           const url = new URL(request.url)
@@ -1351,8 +1347,8 @@ export function registerAuthRoutes(
           if (strategy.peekMagicLink) {
             try {
               const peeked = await strategy.peekMagicLink({
-                projectId: sixb.id,
-                authStorage: requireAuthStorage(sixb),
+                projectId: host.id,
+                authStorage: requireAuthStorage(host),
                 magicLinkId,
                 token,
               })
@@ -1377,7 +1373,7 @@ export function registerAuthRoutes(
             matchesMagicLinkRequester(pendingSecret, requesterHash)
           ) {
             return completeMagicLinkCallback({
-              sixb,
+              host,
               strategy,
               options,
               request,
@@ -1398,8 +1394,8 @@ export function registerAuthRoutes(
           try {
             const authOptions = resolveAuthOptions(options, request)
             const result = await strategy.completeOidcSignIn({
-              projectId: sixb.id,
-              authStorage: requireAuthStorage(sixb),
+              projectId: host.id,
+              authStorage: requireAuthStorage(host),
               requestUrl: request.url,
               requestOrigin: options.resolveAuthRequestOrigin(request),
               session: {
@@ -1407,13 +1403,13 @@ export function registerAuthRoutes(
                 audience: authOptions.audience,
                 tokenHash: sessionCredential.tokenHash,
                 createdAt: now,
-                ...sixb.auth.createSessionDeadlines(now),
+                ...host.auth.createSessionDeadlines(now),
                 ...device,
               },
             })
 
             return sessionCallbackCompletionResponse({
-              sixb,
+              host,
               request,
               apiOrigin: options.resolveAuthRequestOrigin(request),
               sessionCredential,
@@ -1434,7 +1430,7 @@ export function registerAuthRoutes(
     .post(
       "/auth/callback",
       async ({ body, request }) => {
-        const strategy = sixb.auth.getStrategy()
+        const strategy = host.auth.getStrategy()
 
         if (!isMagicLinkAuthStrategy(strategy)) {
           return strategyNotImplementedResponse("Auth callback is not implemented yet.")
@@ -1446,7 +1442,7 @@ export function registerAuthRoutes(
           return htmlMessageResponse("This sign-in link is invalid or expired.", 400)
         }
 
-        return completeMagicLinkCallback({ sixb, strategy, options, request, magicLinkId, token })
+        return completeMagicLinkCallback({ host, strategy, options, request, magicLinkId, token })
       },
       {
         body: t.Object({
@@ -1497,7 +1493,7 @@ function matchesMagicLinkRequester(pendingSecret: string, requesterHash: string)
 // navigation and the cookie must accompany that GET for the fast path to work.
 function magicLinkPendingCookieHeader(params: {
   readonly request: Request
-  readonly sixb: Sixb<readonly OntologySource[]>
+  readonly host: SixbHostView
   readonly value: string
   readonly maxAgeSeconds: number
 }): string {
@@ -1508,7 +1504,7 @@ function magicLinkPendingCookieHeader(params: {
     "HttpOnly",
     `Max-Age=${params.maxAgeSeconds}`,
   ]
-  if (shouldUseSecureCookies(params.request, params.sixb.auth.getCookieOptions())) {
+  if (shouldUseSecureCookies(params.request, params.host.auth.getCookieOptions())) {
     parts.push("Secure")
   }
   return parts.join("; ")
@@ -1517,7 +1513,7 @@ function magicLinkPendingCookieHeader(params: {
 // Shared by POST /auth/callback (confirmation click) and the same-device fast
 // path on GET. Consumes the single-use token and mints the session cookies.
 async function completeMagicLinkCallback(input: {
-  readonly sixb: Sixb<readonly OntologySource[]>
+  readonly host: SixbHostView
   readonly strategy: MagicLinkAuthStrategy
   readonly options: AuthRoutesOptions
   readonly request: Request
@@ -1532,8 +1528,8 @@ async function completeMagicLinkCallback(input: {
 
   try {
     const result = await input.strategy.completeMagicLinkSignIn({
-      projectId: input.sixb.id,
-      authStorage: requireAuthStorage(input.sixb),
+      projectId: input.host.id,
+      authStorage: requireAuthStorage(input.host),
       magicLinkId: input.magicLinkId,
       token: input.token,
       session: {
@@ -1541,13 +1537,13 @@ async function completeMagicLinkCallback(input: {
         audience: authOptions.audience,
         tokenHash: sessionCredential.tokenHash,
         createdAt: now,
-        ...input.sixb.auth.createSessionDeadlines(now),
+        ...input.host.auth.createSessionDeadlines(now),
         ...device,
       },
     })
 
     const response = sessionCallbackCompletionResponse({
-      sixb: input.sixb,
+      host: input.host,
       request: input.request,
       apiOrigin: input.options.resolveAuthRequestOrigin(input.request),
       sessionCredential,
@@ -1560,7 +1556,7 @@ async function completeMagicLinkCallback(input: {
         "set-cookie",
         magicLinkPendingCookieHeader({
           request: input.request,
-          sixb: input.sixb,
+          host: input.host,
           value: "",
           maxAgeSeconds: 0,
         })
@@ -1589,7 +1585,7 @@ function resolveSessionDevice(request: Request): {
 }
 
 function sessionCallbackCompletionResponse(input: {
-  readonly sixb: Sixb<readonly OntologySource[]>
+  readonly host: SixbHostView
   readonly request: Request
   readonly apiOrigin: string
   readonly sessionCredential: ReturnType<typeof createSessionCredential>
@@ -1597,7 +1593,7 @@ function sessionCallbackCompletionResponse(input: {
   readonly expiresAt: Date
   readonly returnTo: string
 }): Response {
-  const cookieOptions = input.sixb.auth.getCookieOptions({ audience: input.audience })
+  const cookieOptions = input.host.auth.getCookieOptions({ audience: input.audience })
   const headers = new Headers({
     "cache-control": "no-store",
   })
@@ -2008,12 +2004,12 @@ function htmlMessageResponse(message: string, status = 200, heading?: string): R
   )
 }
 
-function requireAuthStorage(sixb: Sixb<readonly OntologySource[]>): AuthStorage {
-  if (!sixb.storage.auth) {
+function requireAuthStorage(host: SixbHostView): AuthStorage {
+  if (!host.storage.auth) {
     throw new Error("[SixbServer] Auth storage is required for auth routes.")
   }
 
-  return sixb.storage.auth
+  return host.storage.auth
 }
 
 function serializeGroupOption(group: GroupDefinition) {

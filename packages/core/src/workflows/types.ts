@@ -4,14 +4,26 @@ import type {
   InferActionParams,
   ObjectActionDefinition,
 } from "../actions"
+import type { ActionsRuntime } from "../actions/execution"
+import type { AgentsRuntime } from "../agents/execution"
 import type { AgentDefinition } from "../agents/types"
 import type { Principal } from "../auth"
+import type { BlobsRuntime } from "../blob-storage/execution"
+import type { ConnectorRuntime } from "../connectors/execution"
+import type { DatasetsRuntime } from "../datasets/execution"
+import type { EventsRuntime } from "../events/execution"
 import type { JsonValue } from "../json"
 import type { Logger } from "../logging"
-import type { InferSchemaOrRef, ObjectRef, SchemaOrRef } from "../ontology"
-import type { Sixb } from "../runtime/sixb"
-import type { OntologySource } from "../runtime/types"
+import type { LogsRuntime } from "../logging/execution"
+import type { ObjectsRuntime } from "../objects/execution"
+import type { InferSchemaOrRef, ObjectRef, OntologySource, SchemaOrRef } from "../ontology"
+import type { PipelinesRuntime } from "../pipelines/execution"
+import type { ProjectionsRuntime } from "../projections/execution"
+import type { RulesRuntime } from "../rules/execution"
 import type { ScheduleDefinition, ScheduleDefinitionForEvent } from "../schedules"
+import type { SchedulesRuntime } from "../schedules/execution"
+import type { SyncsRuntime } from "../syncs/execution"
+import type { WorkflowsRuntime } from "./execution"
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {}
 type Append<TValues extends readonly unknown[], TValue> = [...TValues, TValue]
@@ -37,8 +49,29 @@ export type DerivedWorkflowNodeKey<TId extends string> = string extends TId
 
 export interface StepRunContext<TInput extends Record<string, unknown>> {
   readonly input: TInput
-  readonly sixb: Sixb<readonly OntologySource[]>
+  readonly sixb: WorkflowRuntimeFacade
   readonly logger: Logger
+}
+
+/**
+ * Structural view of the public `Sixb` SDK used to close the recursive workflow-definition type.
+ * It is a type-level cycle break, not a separate runtime or compatibility surface.
+ */
+export interface WorkflowRuntimeFacade {
+  readonly objects: ObjectsRuntime<readonly OntologySource[]>
+  readonly actions: ActionsRuntime
+  readonly agents: AgentsRuntime
+  readonly datasets: DatasetsRuntime
+  readonly workflows: WorkflowsRuntime
+  readonly syncs: SyncsRuntime
+  readonly pipelines: PipelinesRuntime
+  readonly projections: ProjectionsRuntime
+  readonly rules: RulesRuntime
+  readonly events: EventsRuntime
+  readonly logs: LogsRuntime
+  readonly schedules: SchedulesRuntime
+  readonly connector: ConnectorRuntime
+  readonly blobs: BlobsRuntime
 }
 
 export type StepHandler<

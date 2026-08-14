@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import { defineObjectType, link, MaterializationConflictError, prop, Sixb } from "../src"
-import type { ActionReadObjectSetSource } from "../src/actions"
+import {
+  defineObjectType,
+  link,
+  MaterializationConflictError,
+  type OntologySource,
+  prop,
+  SixbHost,
+} from "../src"
 import {
   ActionReadRecorder,
   commitActionEdits,
@@ -14,6 +20,7 @@ import { createLinkScopeFingerprint } from "../src/materializer"
 import { getOntologyMutationRuntime } from "../src/runtime/internal"
 import type { ObjectRow, Storage } from "../src/storage"
 import { StorageTransactionError } from "../src/storage"
+import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Customer = defineObjectType({
@@ -54,28 +61,33 @@ const ONTOLOGY = [Invoice, Customer, RecurringInvoice] as const
 
 function createRuntime() {
   const deps = createTestRuntimeDeps()
-  const sixb = new Sixb({ id: "edits-tests", ontology: ONTOLOGY, ...deps })
-  return { deps, sixb }
+  const host = new SixbHost<readonly OntologySource[]>({
+    id: "edits-tests",
+    ontology: ONTOLOGY,
+    ...deps,
+  })
+  return { deps, host, sixb: createTestSixb(host) }
 }
 
 type EditsRuntime = ReturnType<typeof createRuntime>["sixb"]
+type EditsHost = ReturnType<typeof createRuntime>["host"]
 
-async function startActionRun(sixb: EditsRuntime, runId: string, actionId = "markPaid") {
-  const actionRuns = sixb.storage.actionRuns
+async function startActionRun(host: EditsHost, runId: string, actionId = "markPaid") {
+  const actionRuns = host.storage.actionRuns
   if (!actionRuns) throw new Error("Expected action run storage in the test runtime.")
   await actionRuns.queue({
-    projectId: sixb.id,
+    projectId: host.id,
     id: runId,
     actionId,
     subject: { kind: "none" },
     params: {},
-    idempotencyKey: `action:${sixb.id}:${runId}`,
+    idempotencyKey: `action:${host.id}:${runId}`,
   })
-  await actionRuns.start({ projectId: sixb.id, id: runId })
+  await actionRuns.start({ projectId: host.id, id: runId })
 }
 
 function commit(
-  sixb: EditsRuntime,
+  host: EditsHost,
   input: {
     readonly runId: string
     readonly batch: EditBatch
@@ -84,8 +96,8 @@ function commit(
   }
 ) {
   return commitActionEdits({
-    mutations: getOntologyMutationRuntime(sixb),
-    projectId: sixb.id,
+    mutations: getOntologyMutationRuntime(host),
+    projectId: host.id,
     runId: input.runId,
     actionId: input.actionId ?? "markPaid",
     batch: input.batch,
@@ -94,7 +106,7 @@ function commit(
 }
 
 async function seedInvoice(sixb: EditsRuntime, overrides: Record<string, unknown> = {}) {
-  return sixb.upsertObject("Invoice", {
+  return sixb.objects.upsert("Invoice", {
     id: "inv_1",
     amount: 100,
     status: "draft",
@@ -266,29 +278,29 @@ describe("EditBatch lowering", () => {
 
 describe("Action edit commits", () => {
   test("commits action-origin authority, effective state, and outbox facts together", async () => {
-    const { sixb } = createRuntime()
+    const { host, sixb } = createRuntime()
     await seedInvoice(sixb)
-    await startActionRun(sixb, "act_commit")
+    await startActionRun(host, "act_commit")
 
     const batch = await recordEdits({ runId: "act_commit" }, ({ objects }) => {
       objects(Invoice).byId("inv_1").update({ status: "paid" })
     })
-    const result = await commit(sixb, { runId: "act_commit", batch })
+    const result = await commit(host, { runId: "act_commit", batch })
 
     expect(result.created).toBe(true)
     expect(result.outcomes).toMatchObject([{ id: "op:0", ok: true, authority: "changed" }])
     expect(result.changes.objects.map((change) => change.kind)).toEqual(["updated"])
     expect(result.committedAt).toBeInstanceOf(Date)
 
-    const record = await sixb.storage.ontology.commits.getById({
-      projectId: sixb.id,
+    const record = await host.storage.ontology.commits.getById({
+      projectId: sixb.execution.projectId,
       id: result.commitId,
     })
     expect(record?.origin).toEqual({ kind: "action", actionId: "markPaid", runId: "act_commit" })
     expect(record?.intent).toEqual({ kind: "edit", mode: "atomic", operationCount: 1 })
 
-    const stored = await sixb.storage.objects.getByPrimaryId({
-      projectId: sixb.id,
+    const stored = await host.storage.objects.getByPrimaryId({
+      projectId: sixb.execution.projectId,
       objectTypeId: "Invoice",
       primaryId: "inv_1",
     })
@@ -297,15 +309,15 @@ describe("Action edit commits", () => {
   })
 
   test("replays an existing commit for the same run and rejects divergent intent", async () => {
-    const { sixb } = createRuntime()
+    const { host, sixb } = createRuntime()
     await seedInvoice(sixb)
-    await startActionRun(sixb, "act_replay")
+    await startActionRun(host, "act_replay")
 
     const batch = await recordEdits({ runId: "act_replay" }, ({ objects }) => {
       objects(Invoice).byId("inv_1").update({ status: "paid" })
     })
-    const first = await commit(sixb, { runId: "act_replay", batch })
-    const replay = await commit(sixb, { runId: "act_replay", batch })
+    const first = await commit(host, { runId: "act_replay", batch })
+    const replay = await commit(host, { runId: "act_replay", batch })
 
     expect(replay.commitId).toBe(first.commitId)
     expect(replay.created).toBe(false)
@@ -314,24 +326,24 @@ describe("Action edit commits", () => {
     const divergent = await recordEdits({ runId: "act_replay" }, ({ objects }) => {
       objects(Invoice).byId("inv_1").update({ status: "void" })
     })
-    await expect(commit(sixb, { runId: "act_replay", batch: divergent })).rejects.toBeInstanceOf(
+    await expect(commit(host, { runId: "act_replay", batch: divergent })).rejects.toBeInstanceOf(
       MaterializationConflictError
     )
   })
 
   test("resolves a resumed run by its exact origin without rerunning handlers", async () => {
-    const { sixb } = createRuntime()
+    const { host, sixb } = createRuntime()
     await seedInvoice(sixb)
-    await startActionRun(sixb, "act_resume")
+    await startActionRun(host, "act_resume")
 
     const batch = await recordEdits({ runId: "act_resume" }, ({ objects }) => {
       objects(Invoice).byId("inv_1").update({ status: "paid" })
     })
-    const committed = await commit(sixb, { runId: "act_resume", batch })
+    const committed = await commit(host, { runId: "act_resume", batch })
 
     const resumed = await findActionEditCommit({
-      storage: sixb.storage,
-      projectId: sixb.id,
+      storage: host.storage,
+      projectId: sixb.execution.projectId,
       runId: "act_resume",
     })
     expect(resumed?.commitId).toBe(committed.commitId)
@@ -341,45 +353,47 @@ describe("Action edit commits", () => {
 
     expect(
       await findActionEditCommit({
-        storage: sixb.storage,
-        projectId: sixb.id,
+        storage: host.storage,
+        projectId: sixb.execution.projectId,
         runId: "act_unknown",
       })
     ).toBeNull()
   })
 
   test("refuses to mutate anything when the Action run identity does not match", async () => {
-    const { sixb } = createRuntime()
+    const { host, sixb } = createRuntime()
     await seedInvoice(sixb)
-    await startActionRun(sixb, "act_identity", "markPaid")
+    await startActionRun(host, "act_identity", "markPaid")
 
     const batch = await recordEdits({ runId: "act_identity" }, ({ objects }) => {
       objects(Invoice).byId("inv_1").update({ status: "paid" })
     })
     await expect(
-      commit(sixb, { runId: "act_identity", actionId: "otherAction", batch })
+      commit(host, { runId: "act_identity", actionId: "otherAction", batch })
     ).rejects.toThrow()
 
-    const stored = await sixb.storage.objects.getByPrimaryId({
-      projectId: sixb.id,
+    const stored = await host.storage.objects.getByPrimaryId({
+      projectId: sixb.execution.projectId,
       objectTypeId: "Invoice",
       primaryId: "inv_1",
     })
     expect(stored?.properties.status).toBe("draft")
-    const commits = await sixb.storage.ontology.commits.list({ projectId: sixb.id })
+    const commits = await host.storage.ontology.commits.list({
+      projectId: sixb.execution.projectId,
+    })
     expect(commits.commits.filter((record) => record.origin.kind === "action")).toEqual([])
   })
 
   test("fails the commit when an observed object revision is stale", async () => {
-    const { sixb } = createRuntime()
+    const { host, sixb } = createRuntime()
     const seeded = await seedInvoice(sixb)
-    await startActionRun(sixb, "act_stale")
+    await startActionRun(host, "act_stale")
 
     const batch = await recordEdits({ runId: "act_stale" }, ({ objects }) => {
       objects(Invoice).byId("inv_1").update({ status: "paid" })
     })
     await expect(
-      commit(sixb, {
+      commit(host, {
         runId: "act_stale",
         batch,
         dependencies: {
@@ -399,10 +413,10 @@ describe("Action edit commits", () => {
   })
 
   test("fails the commit when an observed link scope changed", async () => {
-    const { sixb } = createRuntime()
+    const { host, sixb } = createRuntime()
     await seedInvoice(sixb)
-    await sixb.upsertObject("Customer", { id: "cus_1", name: "Ada" })
-    await startActionRun(sixb, "act_scope")
+    await sixb.objects.upsert("Customer", { id: "cus_1", name: "Ada" })
+    await startActionRun(host, "act_scope")
 
     const batch = await recordEdits({ runId: "act_scope" }, ({ objects }) => {
       objects(Invoice)
@@ -410,7 +424,7 @@ describe("Action edit commits", () => {
         .link(Invoice.l.customer, { objectTypeId: "Customer", primaryId: "cus_1" })
     })
     await expect(
-      commit(sixb, {
+      commit(host, {
         runId: "act_scope",
         batch,
         dependencies: {
@@ -429,17 +443,17 @@ describe("Action edit commits", () => {
   })
 
   test("accepts a commit whose observed empty scope still matches", async () => {
-    const { sixb } = createRuntime()
+    const { host, sixb } = createRuntime()
     await seedInvoice(sixb)
-    await sixb.upsertObject("Customer", { id: "cus_1", name: "Ada" })
-    await startActionRun(sixb, "act_empty_scope")
+    await sixb.objects.upsert("Customer", { id: "cus_1", name: "Ada" })
+    await startActionRun(host, "act_empty_scope")
 
     const batch = await recordEdits({ runId: "act_empty_scope" }, ({ objects }) => {
       objects(Invoice)
         .byId("inv_1")
         .link(Invoice.l.customer, { objectTypeId: "Customer", primaryId: "cus_1" })
     })
-    const result = await commit(sixb, {
+    const result = await commit(host, {
       runId: "act_empty_scope",
       batch,
       dependencies: {
@@ -477,10 +491,16 @@ describe("Action commit retries", () => {
           }, options as never)
       },
     }) as unknown as Storage
-    const sixb = new Sixb({ id: "edits-tests", ontology: ONTOLOGY, ...deps, storage })
+    const host = new SixbHost<readonly OntologySource[]>({
+      id: "edits-tests",
+      ontology: ONTOLOGY,
+      ...deps,
+      storage,
+    })
+    const sixb = createTestSixb(host)
 
-    await sixb.upsertObject("Invoice", { id: "inv_1", amount: 100, status: "draft" })
-    await startActionRun(sixb, "act_retry")
+    await sixb.objects.upsert("Invoice", { id: "inv_1", amount: 100, status: "draft" })
+    await startActionRun(host, "act_retry")
 
     let handlerRuns = 0
     const batch = await recordEdits({ runId: "act_retry" }, ({ objects }) => {
@@ -489,14 +509,14 @@ describe("Action commit retries", () => {
     })
 
     armed = true
-    const result = await commit(sixb, { runId: "act_retry", batch })
+    const result = await commit(host, { runId: "act_retry", batch })
 
     expect(handlerRuns).toBe(1)
     expect(result.created).toBe(true)
     expect(
       (
         await deps.storage.objects.getByPrimaryId({
-          projectId: sixb.id,
+          projectId: sixb.execution.projectId,
           objectTypeId: "Invoice",
           primaryId: "inv_1",
         })
@@ -506,30 +526,26 @@ describe("Action commit retries", () => {
 })
 
 describe("Action read dependency capture", () => {
-  function createFacade(sixb: EditsRuntime) {
+  function createFacade(host: EditsHost, sixb: EditsRuntime) {
     const reads = new ActionReadRecorder()
-    const facade = createActionReadFacade(
-      (objectType) =>
-        (sixb as unknown as { objects(type: unknown): ActionReadObjectSetSource }).objects(
-          objectType
-        ),
-      {
-        recorder: reads,
-        resolveLinkIds: (objectTypeId) =>
-          sixb.ontology.resolveObjectType(objectTypeId).links.map((definition) => definition.id),
-      }
-    )
+    const facade = createActionReadFacade((objectType) => sixb.objects(objectType), {
+      recorder: reads,
+      resolveLinkIds: (objectTypeId) =>
+        host.definitions.ontology
+          .resolveObjectType(objectTypeId)
+          .links.map((definition) => definition.id),
+    })
     return { facade, reads }
   }
 
   test("records concrete object reads, exact absence, and the first observation", async () => {
-    const { sixb } = createRuntime()
+    const { host, sixb } = createRuntime()
     const seeded = await seedInvoice(sixb)
-    const { facade, reads } = createFacade(sixb)
+    const { facade, reads } = createFacade(host, sixb)
 
     await facade.objects(Invoice).byId("inv_1").get()
     await facade.objects(Invoice).get("inv_missing")
-    await sixb.upsertObject("Invoice", { id: "inv_1", amount: 100, status: "paid" })
+    await sixb.objects.upsert("Invoice", { id: "inv_1", amount: 100, status: "paid" })
     await facade.objects(Invoice).byId("inv_1").get()
 
     expect(reads.dependencies().objects).toMatchObject([
@@ -544,19 +560,19 @@ describe("Action read dependency capture", () => {
   })
 
   test("records complete link scopes, including the ones a listing found empty", async () => {
-    const { sixb, deps } = createRuntime()
+    const { deps, host, sixb } = createRuntime()
     await seedInvoice(sixb)
-    await sixb.upsertObject("Customer", { id: "cus_1", name: "Ada" })
-    await sixb.upsertLink("Invoice", "inv_1", "customer", {
+    await sixb.objects.upsert("Customer", { id: "cus_1", name: "Ada" })
+    await sixb.objects.upsertLink("Invoice", "inv_1", "customer", {
       targetTypeId: "Customer",
       targetId: "cus_1",
     })
-    const { facade, reads } = createFacade(sixb)
+    const { facade, reads } = createFacade(host, sixb)
 
     await facade.objects(Invoice).byId("inv_1").listLinks()
 
     const rows = await deps.storage.objects.listLinks({
-      projectId: sixb.id,
+      projectId: sixb.execution.projectId,
       objectTypeId: "Invoice",
       objectId: "inv_1",
       linkId: "customer",
@@ -599,14 +615,14 @@ describe("Action read dependency capture", () => {
   })
 
   test("records inherited link scopes an untargeted listing covered", async () => {
-    const { sixb } = createRuntime()
-    await sixb.upsertObject("RecurringInvoice", {
+    const { host, sixb } = createRuntime()
+    await sixb.objects.upsert("RecurringInvoice", {
       id: "inv_r1",
       amount: 100,
       status: "draft",
       cadence: "monthly",
     })
-    const { facade, reads } = createFacade(sixb)
+    const { facade, reads } = createFacade(host, sixb)
 
     await facade.objects(RecurringInvoice).byId("inv_r1").listLinks()
 
@@ -620,9 +636,9 @@ describe("Action read dependency capture", () => {
   })
 
   test("scopes a targeted listing to the requested link only", async () => {
-    const { sixb } = createRuntime()
+    const { host, sixb } = createRuntime()
     await seedInvoice(sixb)
-    const { facade, reads } = createFacade(sixb)
+    const { facade, reads } = createFacade(host, sixb)
 
     await facade.objects(Invoice).byId("inv_1").listLinks(Invoice.l.reviewers)
 
@@ -630,22 +646,22 @@ describe("Action read dependency capture", () => {
   })
 
   test("captured dependencies protect the commit that follows them", async () => {
-    const { sixb } = createRuntime()
+    const { host, sixb } = createRuntime()
     await seedInvoice(sixb)
-    await startActionRun(sixb, "act_capture")
-    const { facade, reads } = createFacade(sixb)
+    await startActionRun(host, "act_capture")
+    const { facade, reads } = createFacade(host, sixb)
 
     const observed = (await facade.objects(Invoice).byId("inv_1").get()) as ObjectRow | null
     expect(observed?.properties.status).toBe("draft")
 
     // A concurrent runtime write moves the object past the revision the handler observed.
-    await sixb.upsertObject("Invoice", { id: "inv_1", amount: 100, status: "void" })
+    await sixb.objects.upsert("Invoice", { id: "inv_1", amount: 100, status: "void" })
 
     const batch = await recordEdits({ runId: "act_capture" }, ({ objects }) => {
       objects(Invoice).byId("inv_1").update({ status: "paid" })
     })
     await expect(
-      commit(sixb, { runId: "act_capture", batch, dependencies: reads.dependencies() })
+      commit(host, { runId: "act_capture", batch, dependencies: reads.dependencies() })
     ).rejects.toBeInstanceOf(MaterializationConflictError)
   })
 })

@@ -47,8 +47,8 @@ export async function runWritebackPhase(
       {
         recorder: input.reads,
         resolveLinkIds: (objectTypeId) =>
-          input.runtime.sixb
-            .resolveObjectType(objectTypeId)
+          input.runtime.sixb.objects
+            .resolveType(objectTypeId)
             .links.map((definition) => definition.id),
       }
     )

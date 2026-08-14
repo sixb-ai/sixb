@@ -1,12 +1,6 @@
-import type {
-  DatasetDefinition,
-  DomainEventLog,
-  LakeStorage,
-  PipelineDefinition,
-  Queues,
-  Storage,
-} from "@sixb/core"
-import type { LogsRuntime } from "@sixb/core/internal/logging"
+import type { DomainEventLog, LakeStorage, Queues, SixbDefinitions, Storage } from "@sixb/core"
+import type { LoggingService } from "@sixb/core/internal/logging"
+import type { PrimitiveExecutionHost } from "@sixb/core/internal/primitive-execution"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type {
   PipelineRunRecord,
@@ -14,27 +8,25 @@ import type {
   PipelineStepRunRecord,
 } from "@sixb/core/storage"
 
-export type PipelineLogSession = ReturnType<LogsRuntime["startExecution"]>
+export type PipelineLogSession = ReturnType<LoggingService["startExecution"]>
 
 export interface PipelineWorkerContext {
   readonly id: string
   readonly pipelineRunsStorage: PipelineRunStorage
   readonly lakeStorage: LakeStorage
-  readonly logs?: LogsRuntime
-  getDatasetById(datasetId: string): DatasetDefinition | null
-  getPipelineById(pipelineId: string): PipelineDefinition | null
+  readonly logging?: LoggingService
+  readonly datasets: Pick<SixbDefinitions["datasets"], "getById">
+  readonly pipelines: Pick<SixbDefinitions["pipelines"], "getById">
 }
 
-export interface PipelineWorkerSixb {
+export interface PipelineWorkerHost extends PrimitiveExecutionHost {
   readonly id: string
   readonly events?: DomainEventLog
-  readonly logs?: LogsRuntime
+  readonly logging?: LoggingService
   readonly lakeStorage: LakeStorage
   readonly queues: Queues
   readonly storage: Storage
-  listPipelines(): readonly PipelineDefinition[]
-  getPipelineById(pipelineId: string): PipelineDefinition | null
-  getDatasetById(datasetId: string): DatasetDefinition | null
+  readonly definitions: Pick<SixbDefinitions, "pipelines" | "datasets">
 }
 
 export interface PipelineJob {

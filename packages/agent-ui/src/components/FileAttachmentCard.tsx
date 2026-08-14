@@ -8,18 +8,23 @@ import {
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { File as FileIcon, FileImage, FileText, Table2 } from "lucide-react"
+import { useDocumentPreview } from "../document-preview/DocumentPreviewRoot"
+import { agentDocumentPreviewRenderer } from "../document-preview/rendering"
+import type { AgentDocumentSource } from "../document-preview/types"
 import type { AgentFileRef } from "../types"
 
 export function FileAttachmentCard({
   fileRef,
-  href,
+  document,
   className,
 }: {
   readonly fileRef: AgentFileRef
-  readonly href?: string
+  readonly document?: AgentDocumentSource
   readonly className?: string
 }) {
+  const preview = useDocumentPreview()
   const fileName = fileRef.fileName?.trim() || "File"
+  const previewable = agentDocumentPreviewRenderer(document?.kind ?? null) !== null
   const mediaLabel = fileMediaLabel(fileRef.mediaType, fileName)
   const { Icon, className: iconClassName } = fileIconPresentation(fileRef.mediaType, fileName)
 
@@ -32,9 +37,22 @@ export function FileAttachmentCard({
         className
       )}
     >
-      {href ? (
+      {document && previewable && preview ? (
         <AttachmentTrigger asChild>
-          <a href={href} target="_blank" rel="noreferrer" aria-label={`Open ${fileName}`} />
+          <button
+            type="button"
+            onClick={() => preview.openDocument(document)}
+            aria-label={`Preview ${fileName}`}
+          />
+        </AttachmentTrigger>
+      ) : document ? (
+        <AttachmentTrigger asChild>
+          <a
+            href={document.inlineUrl}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={`Open ${fileName}`}
+          />
         </AttachmentTrigger>
       ) : null}
       <AttachmentMedia className={cn("size-9 rounded-xl bg-muted/80", iconClassName)}>

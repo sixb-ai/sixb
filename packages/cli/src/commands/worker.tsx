@@ -1,6 +1,6 @@
 import type { Worker } from "@sixb/core/internal/workers"
 import { SixbCliError } from "../lib/errors"
-import { type LoadedSixb, loadSixbFromEntry } from "../lib/loadSixb"
+import { type LoadedSixbHost, loadSixbFromEntry } from "../lib/loadSixb"
 import { resolveRuntimeEntry } from "../lib/production"
 import {
   runUntilSignal,
@@ -34,7 +34,7 @@ export async function runWorker(options: WorkerOptions = {}) {
     <LoadingView title="Starting sixb worker" subtitle={entry} status="Loading runtime" />
   )
 
-  let sixb: LoadedSixb | null = null
+  let sixb: LoadedSixbHost | null = null
   let worker: Worker | null = null
 
   try {

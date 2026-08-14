@@ -6,14 +6,12 @@ import {
   prop,
   type Queues,
   ref,
-  requestWorkflowRun,
-  Sixb,
-  type SixbRuntimeContext,
-  type Storage,
+  SixbHost,
   type WorkflowDefinition,
   WorkflowValidationError,
 } from "../src"
 import { flushSixbErrors } from "../src/error-reporting/internal"
+import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Transaction = defineObjectType({
@@ -45,24 +43,25 @@ const reviewTransaction: WorkflowDefinition = defineWorkflow("review-transaction
 
 function createSixb() {
   const workflows: readonly WorkflowDefinition[] = [draftInvoice, reviewTransaction]
-  return new Sixb({
+  const host = new SixbHost({
     ontology: [Transaction, Invoice],
     workflows,
     ...createTestRuntimeDeps(),
   })
+  return { host, sixb: createTestSixb(host) }
 }
 
 function validInput() {
   return { transaction: { objectTypeId: "Transaction" as const, primaryId: "txn_1" } }
 }
 
-async function claimAll(sixb: { queues: Queues; id: string }) {
-  return sixb.queues.workflows.claim({ projectId: sixb.id, workerId: "test", limit: 50 })
+async function claimAll(host: { queues: Queues; id: string }) {
+  return host.queues.workflows.claim({ projectId: host.id, workerId: "test", limit: 50 })
 }
 
 describe("sixb.workflows.request", () => {
   test("queues a run, enqueues a job, and emits workflow.run.queued", async () => {
-    const sixb = createSixb()
+    const { host, sixb } = createSixb()
 
     const result = await sixb.workflows.request(draftInvoice, { input: validInput() })
 
@@ -71,7 +70,10 @@ describe("sixb.workflows.request", () => {
     expect(result.runId).toMatch(/^run_/)
     expect(result.jobId).toBeDefined()
 
-    const run = await sixb.storage.workflowRuns?.getById({ projectId: sixb.id, id: result.runId })
+    const run = await host.storage.workflowRuns?.getById({
+      projectId: sixb.execution.projectId,
+      id: result.runId,
+    })
     expect(run?.status).toBe("queued")
     expect(run?.workflowId).toBe("draft-invoice")
     expect(run?.requestedByPrincipal).toEqual({ type: "system", id: "system" })
@@ -79,7 +81,7 @@ describe("sixb.workflows.request", () => {
       transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
     })
 
-    const jobs = await claimAll(sixb)
+    const jobs = await claimAll(host)
     expect(jobs).toHaveLength(1)
     expect(jobs[0]?.job.payload).toMatchObject({
       workflowId: "draft-invoice",
@@ -103,7 +105,7 @@ describe("sixb.workflows.request", () => {
       throw new Error("workflow queue unavailable")
     }
     const reports: string[] = []
-    const sixb = new Sixb({
+    const host = new SixbHost({
       id: "workflow-enqueue-failure",
       ontology: [Transaction, Invoice],
       workflows: [draftInvoice],
@@ -112,6 +114,7 @@ describe("sixb.workflows.request", () => {
       },
       ...runtimeDeps,
     })
+    const sixb = createTestSixb(host)
 
     await expect(
       sixb.workflows.request(draftInvoice, {
@@ -120,19 +123,19 @@ describe("sixb.workflows.request", () => {
       })
     ).rejects.toThrow("workflow queue unavailable")
 
-    const run = await sixb.storage.workflowRuns?.getById({
-      projectId: sixb.id,
+    const run = await host.storage.workflowRuns?.getById({
+      projectId: sixb.execution.projectId,
       id: "run_enqueue_failure",
     })
     expect(run).toMatchObject({ status: "failed", error: "workflow queue unavailable" })
-    await flushSixbErrors(sixb)
+    await flushSixbErrors(host)
     expect(reports).toEqual([
       `project:workflow-enqueue-failure:run:workflow:run_enqueue_failure:failed:${run?.finishedAt?.toISOString()}:workflow queue unavailable`,
     ])
   })
 
   test("requestById rejects unknown input fields at runtime", async () => {
-    const sixb = createSixb()
+    const { sixb } = createSixb()
 
     await expect(
       sixb.workflows.requestById({ workflowId: "draft-invoice", input: { bogus: true } })
@@ -140,20 +143,23 @@ describe("sixb.workflows.request", () => {
   })
 
   test("rejects invalid input before any storage or queue write", async () => {
-    const sixb = createSixb()
+    const { host, sixb } = createSixb()
 
     await expect(
       sixb.workflows.requestById({ workflowId: "draft-invoice", runId: "run_fixed", input: {} })
     ).rejects.toBeInstanceOf(WorkflowValidationError)
 
-    const run = await sixb.storage.workflowRuns?.getById({ projectId: sixb.id, id: "run_fixed" })
+    const run = await host.storage.workflowRuns?.getById({
+      projectId: sixb.execution.projectId,
+      id: "run_fixed",
+    })
     expect(run).toBeNull()
-    expect(await claimAll(sixb)).toHaveLength(0)
+    expect(await claimAll(host)).toHaveLength(0)
     expect(await sixb.events.read({ types: ["workflow.run.queued"] })).toHaveLength(0)
   })
 
   test("throws for an unknown workflow", async () => {
-    const sixb = createSixb()
+    const { sixb } = createSixb()
 
     await expect(sixb.workflows.requestById({ workflowId: "missing", input: {} })).rejects.toThrow(
       "[Sixb] Unknown workflow 'missing'"
@@ -161,7 +167,7 @@ describe("sixb.workflows.request", () => {
   })
 
   test("deterministic runId returns the existing run without enqueuing twice", async () => {
-    const sixb = createSixb()
+    const { host, sixb } = createSixb()
 
     const first = await sixb.workflows.request(draftInvoice, {
       runId: "run_dedupe",
@@ -178,12 +184,12 @@ describe("sixb.workflows.request", () => {
     expect(second.queuedAt).toBe(first.queuedAt)
     expect(second.jobId).toBeUndefined()
 
-    expect(await claimAll(sixb)).toHaveLength(1)
+    expect(await claimAll(host)).toHaveLength(1)
     expect(await sixb.events.read({ types: ["workflow.run.queued"] })).toHaveLength(1)
   })
 
   test("deterministic runId throws when reused for a different workflow", async () => {
-    const sixb = createSixb()
+    const { sixb } = createSixb()
 
     await sixb.workflows.request(draftInvoice, { runId: "run_shared", input: validInput() })
 
@@ -197,7 +203,7 @@ describe("sixb.workflows.request", () => {
   })
 
   test("persists and emits the run source", async () => {
-    const sixb = createSixb()
+    const { host, sixb } = createSixb()
     const source = {
       type: "webhook" as const,
       connectorId: "companycam",
@@ -207,7 +213,10 @@ describe("sixb.workflows.request", () => {
 
     const result = await sixb.workflows.request(draftInvoice, { input: validInput(), source })
 
-    const run = await sixb.storage.workflowRuns?.getById({ projectId: sixb.id, id: result.runId })
+    const run = await host.storage.workflowRuns?.getById({
+      projectId: sixb.execution.projectId,
+      id: result.runId,
+    })
     expect(run?.source).toEqual(source)
 
     const events = await sixb.events.read({ types: ["workflow.run.queued"] })
@@ -215,7 +224,7 @@ describe("sixb.workflows.request", () => {
   })
 
   test("retried webhook delivery with a deterministic runId enqueues a single run", async () => {
-    const sixb = createSixb()
+    const { host, sixb } = createSixb()
     const source = {
       type: "webhook" as const,
       connectorId: "companycam",
@@ -229,42 +238,21 @@ describe("sixb.workflows.request", () => {
 
     expect(first.created).toBe(true)
     expect(second.created).toBe(false)
-    expect(await claimAll(sixb)).toHaveLength(1)
+    expect(await claimAll(host)).toHaveLength(1)
   })
 
   test("throws a clear error when workflow run storage is not configured", async () => {
-    const sixb = createSixb()
-    const runtime: SixbRuntimeContext = {
-      projectId: sixb.id,
-      ontology: sixb.ontology,
-      actionRegistry: sixb.actionRegistry,
-      events: sixb.events,
-      storage: { ...sixb.storage, workflowRuns: undefined } as Storage,
-      lakeStorage: sixb.lakeStorage,
-      blobStorage: sixb.blobStorage,
-      queues: sixb.queues,
-    }
+    const runtimeDeps = createTestRuntimeDeps()
+    Object.defineProperty(runtimeDeps.storage, "workflowRuns", { value: undefined })
+    const host = new SixbHost({
+      ontology: [Transaction, Invoice],
+      workflows: [draftInvoice],
+      ...runtimeDeps,
+    })
+    const sixb = createTestSixb(host)
 
-    await expect(
-      requestWorkflowRun(runtime, draftInvoice, { input: validInput() })
-    ).rejects.toThrow("[Sixb] Workflow run storage is not configured.")
-  })
-
-  test("throws a clear error when the workflow queue is not configured", async () => {
-    const sixb = createSixb()
-    const runtime: SixbRuntimeContext = {
-      projectId: sixb.id,
-      ontology: sixb.ontology,
-      actionRegistry: sixb.actionRegistry,
-      events: sixb.events,
-      storage: sixb.storage,
-      lakeStorage: sixb.lakeStorage,
-      blobStorage: sixb.blobStorage,
-      queues: { ...sixb.queues, workflows: undefined } as unknown as Queues,
-    }
-
-    await expect(
-      requestWorkflowRun(runtime, draftInvoice, { input: validInput() })
-    ).rejects.toThrow("[Sixb] Workflow run queue is not configured.")
+    await expect(sixb.workflows.request(draftInvoice, { input: validInput() })).rejects.toThrow(
+      "[Sixb] Workflow run storage is not configured."
+    )
   })
 })

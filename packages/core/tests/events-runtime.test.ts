@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryBroker } from "../src"
-import { EVENTS_STREAM, EventsRuntime, type StoredDomainEvent } from "../src/events"
+import { DomainEventService, EVENTS_STREAM, type StoredDomainEvent } from "../src/events"
 
 function actionRequested(runId: string) {
   return {
@@ -26,10 +26,10 @@ function scheduleTriggered(scheduleId: string) {
   }
 }
 
-describe("EventsRuntime", () => {
+describe("DomainEventService", () => {
   test("appends domain events through a project-scoped broker stream", async () => {
     const broker = new RecordingBroker()
-    const events = new EventsRuntime({ projectId: "project-a", broker })
+    const events = new DomainEventService({ projectId: "project-a", broker })
 
     const [event] = await events.append({
       actor: { type: "system", id: "tests" },
@@ -61,7 +61,7 @@ describe("EventsRuntime", () => {
   })
 
   test("reads with Events cursor and filter semantics without a projectId input", async () => {
-    const events = new EventsRuntime({ projectId: "project-a", broker: new InMemoryBroker() })
+    const events = new DomainEventService({ projectId: "project-a", broker: new InMemoryBroker() })
     await events.append({
       events: [actionRequested("run-1"), scheduleTriggered("daily"), actionRequested("run-2")],
     })
@@ -88,7 +88,7 @@ describe("EventsRuntime", () => {
 
   test("returns the latest event cursor without reading retained events", async () => {
     const broker = new LatestCursorRecordingBroker()
-    const events = new EventsRuntime({ projectId: "project-a", broker })
+    const events = new DomainEventService({ projectId: "project-a", broker })
 
     expect(await events.latestCursor()).toBeUndefined()
     const appended = await events.append({
@@ -102,8 +102,8 @@ describe("EventsRuntime", () => {
 
   test("isolates projects on a shared broker", async () => {
     const broker = new InMemoryBroker()
-    const projectAEvents = new EventsRuntime({ projectId: "project-a", broker })
-    const projectBEvents = new EventsRuntime({ projectId: "project-b", broker })
+    const projectAEvents = new DomainEventService({ projectId: "project-a", broker })
+    const projectBEvents = new DomainEventService({ projectId: "project-b", broker })
 
     await projectAEvents.append({ events: [actionRequested("a")] })
     await projectBEvents.append({ events: [actionRequested("b")] })
@@ -113,7 +113,7 @@ describe("EventsRuntime", () => {
   })
 
   test("subscribes to live events with type filters", async () => {
-    const events = new EventsRuntime({ projectId: "project-a", broker: new InMemoryBroker() })
+    const events = new DomainEventService({ projectId: "project-a", broker: new InMemoryBroker() })
     const received: string[] = []
 
     await events.subscribe({ types: ["schedule.triggered"] }, (batch) => {
@@ -128,7 +128,7 @@ describe("EventsRuntime", () => {
   })
 
   test("can subscribe from the earliest retained event", async () => {
-    const events = new EventsRuntime({ projectId: "project-a", broker: new InMemoryBroker() })
+    const events = new DomainEventService({ projectId: "project-a", broker: new InMemoryBroker() })
     await events.append({ events: [actionRequested("run-1")] })
 
     const received: string[] = []
@@ -142,7 +142,7 @@ describe("EventsRuntime", () => {
 
   test("returns empty append batches", async () => {
     const broker = new InMemoryBroker()
-    const events = new EventsRuntime({ projectId: "project-a", broker })
+    const events = new DomainEventService({ projectId: "project-a", broker })
 
     expect(await events.append({ events: [] })).toEqual([])
     await broker.ensureStream({ projectId: "project-a", stream: EVENTS_STREAM })

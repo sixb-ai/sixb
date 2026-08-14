@@ -73,7 +73,7 @@ function TextBlock({ text }: { text: string }) {
 }
 
 function FileBlock({ part }: { part: Extract<NormalizedPart, { kind: "file" }> }) {
-  return <FileAttachmentCard fileRef={part.fileRef} href={part.href} />
+  return <FileAttachmentCard fileRef={part.fileRef} document={part.document} />
 }
 
 /**

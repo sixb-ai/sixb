@@ -1,13 +1,13 @@
 import type {
+  OntologyRegistry,
   OntologySource,
+  Queues,
   Sixb,
-  SixbRuntimeContext,
-  WorkflowDefinition,
+  Storage,
   WorkflowRunSource,
   WorkflowStepOutputs,
 } from "@sixb/core"
-import type { LogsRuntime } from "@sixb/core/internal/logging"
-import type { WorkflowsRuntime } from "@sixb/core/internal/workflows"
+import type { LoggingService } from "@sixb/core/internal/logging"
 import type { WorkflowRunResumeCause } from "@sixb/core/queues"
 import type {
   WorkflowInterventionRecord,
@@ -17,19 +17,16 @@ import type {
   WorkflowRunStorage,
 } from "@sixb/core/storage"
 
-export type WorkflowLogSession = ReturnType<LogsRuntime["startExecution"]>
+export type WorkflowLogSession = ReturnType<LoggingService["startExecution"]>
 
-export interface WorkflowWorkerContext extends SixbRuntimeContext {
+export interface WorkflowWorkerContext {
+  readonly projectId: string
+  readonly ontology: OntologyRegistry
+  readonly storage: Storage
+  readonly queues: Queues
   readonly workflowRuns: WorkflowRunStorage
   readonly sixb: Sixb<readonly OntologySource[]>
-  readonly logs?: LogsRuntime
-  getWorkflowById(workflowId: string): WorkflowDefinition | null
-}
-
-export interface WorkflowWorkerSixb extends SixbRuntimeContext {
-  readonly id: string
-  readonly workflows: WorkflowsRuntime
-  readonly logs?: LogsRuntime
+  readonly logging?: LoggingService
 }
 
 export interface WorkflowJob {

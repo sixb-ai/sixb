@@ -18,7 +18,7 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   prop,
-  Sixb,
+  SixbHost,
 } from "@sixb/core"
 import { LOGS_STREAM } from "@sixb/core/internal/logging"
 import type { BeginDatasetWriteInput, LakeWriteSession } from "@sixb/core/lake-storage"
@@ -63,7 +63,7 @@ function createSixbForPipeline(options: {
   readonly lakeStorage?: InMemoryLakeStorage
   readonly onError?: SixbErrorHandler
 }) {
-  return new Sixb({
+  return new SixbHost({
     id: "pipeline-worker-tests",
     ontology: [Room],
     broker: new InMemoryBroker(),
@@ -115,7 +115,7 @@ async function seedDatasetVersion(
 
 describe("PipelineWorker", () => {
   test("requires registered pipelines and pipeline run storage", () => {
-    const emptySixb = new Sixb({
+    const emptySixb = new SixbHost({
       id: "pipeline-worker-tests",
       ontology: [Room],
       broker: new InMemoryBroker(),
@@ -136,19 +136,12 @@ describe("PipelineWorker", () => {
       pipeline,
       datasets: [rawCustomersDataset, customersDataset],
     })
-    const withoutPipelineRuns = {
-      id: sixb.id,
-      events: sixb.events,
-      lakeStorage: sixb.lakeStorage,
-      queues: sixb.queues,
-      storage: {
-        ...sixb.storage,
-        pipelineRuns: undefined,
+    const storage = { ...sixb.storage, pipelineRuns: undefined }
+    const withoutPipelineRuns = new Proxy(sixb, {
+      get(target, property, receiver) {
+        return property === "storage" ? storage : Reflect.get(target, property, receiver)
       },
-      listPipelines: () => sixb.listPipelines(),
-      getPipelineById: (pipelineId: string) => sixb.getPipelineById(pipelineId),
-      getDatasetById: (datasetId: string) => sixb.getDatasetById(datasetId),
-    }
+    })
 
     expect(() => new PipelineWorker(withoutPipelineRuns)).toThrow("storage.pipelineRuns")
   })

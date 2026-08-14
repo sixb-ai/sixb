@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryStorage, type MigrationReport, type StorageMigrator } from "@sixb/core"
 import { errorRemediation } from "../src/lib/errors"
-import type { LoadedSixb } from "../src/lib/loadSixb"
+import type { LoadedSixbHost } from "../src/lib/loadSixb"
 import { migrateStorageForRole } from "../src/lib/storage-migration"
 
 describe("migrateStorageForRole", () => {
@@ -157,9 +157,9 @@ async function captureError(run: () => Promise<unknown>): Promise<Error> {
   throw new Error("Expected the call to reject.")
 }
 
-function runtimeWithMigrators(migrators: readonly StorageMigrator[]): LoadedSixb {
+function runtimeWithMigrators(migrators: readonly StorageMigrator[]): LoadedSixbHost {
   const storage = Object.assign(new InMemoryStorage(), { migrators })
-  return { storage } as unknown as LoadedSixb
+  return { storage } as unknown as LoadedSixbHost
 }
 
 function report(adapterId: string, applied: readonly string[]): MigrationReport {

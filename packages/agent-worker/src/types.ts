@@ -2,19 +2,15 @@ import type {
   AgentToolRunContext,
   BlobStorage,
   Broker,
-  ConnectorAdapter,
-  ConnectorClient,
-  ConnectorDefinition,
   DomainEventLog,
   Queues,
   SandboxFactory,
-  SixbRuntimeContext,
+  SixbDefinitions,
   Storage,
   ValueType,
 } from "@sixb/core"
-import type { AgentsRuntime } from "@sixb/core/internal/agents"
-import type { LogsRuntime } from "@sixb/core/internal/logging"
-import type { WorkflowsRuntime } from "@sixb/core/internal/workflows"
+import type { AgentExecutionHost } from "@sixb/core/internal/agent-execution"
+import type { LoggingService } from "@sixb/core/internal/logging"
 import type { AgentStorage, AuthStorage } from "@sixb/core/storage"
 import type { ToolSet } from "ai"
 import type { AgentSkill } from "./agent-skills"
@@ -29,46 +25,44 @@ export type AgentWorkerStorage = Storage & {
 }
 
 /**
- * The runtime surface the agent worker is constructed with (mirrors `ActionWorkerSixb`). `Sixb`
- * satisfies it structurally, so cohosting passes `sixb` directly. The worker resolves a run's model
- * via `agents.getById` (the model is a non-serialisable language model, never sent over the wire).
+ * The host surface the agent worker is constructed with. `SixbHost` satisfies it structurally, so
+ * cohosting passes the host directly. The worker resolves a run's model through
+ * `definitions.agents.getById` (the model is a non-serialisable language model, never sent over the
+ * wire).
  */
-export interface AgentWorkerSixb {
-  readonly id: string
+export interface AgentWorkerHost extends AgentExecutionHost {
   readonly broker: Broker
   readonly events: DomainEventLog
   readonly storage: Storage
   readonly queues: Queues
-  readonly agents: AgentsRuntime
-  readonly workflows?: WorkflowsRuntime
-  readonly ontology?: SixbRuntimeContext["ontology"]
-  readonly blobStorage: BlobStorage
+  readonly definitions: Pick<SixbDefinitions, "agents" | "workflows" | "ontology" | "security">
   readonly sandboxes?: SandboxFactory
   readonly projectRoot?: string
-  readonly logs?: LogsRuntime
-  connector<TAdapter extends ConnectorAdapter>(
-    definition: ConnectorDefinition<string, TAdapter>
-  ): Promise<ConnectorClient<TAdapter>>
+  readonly logging?: LoggingService
 }
 
 /**
  * The worker's derived, stable execution context (mirrors `ActionWorkerContext`): built once from
- * {@link AgentWorkerSixb} + options, then handed to each turn alongside the per-turn run. `id` is the
+ * {@link AgentWorkerHost} + options, then handed to each turn alongside the per-turn run. `id` is the
  * project id.
  */
 export interface AgentWorkerContext {
   readonly id: string
   readonly storage: AgentWorkerStorage
-  readonly blobStorage: BlobStorage
   readonly sandboxes: SandboxFactory
-  readonly connector: AgentToolRunContext["connector"]
-  readonly logs?: LogsRuntime
+  readonly logging?: LoggingService
   readonly valueTypesById: ReadonlyMap<string, ValueType>
   readonly apiBaseUrl: string
   readonly streamSink: StreamSink
   readonly agentSkills: Promise<readonly AgentSkill[]>
   readonly defaultMaxSteps: number
   readonly turnTimeoutMs: number
+}
+
+/** Provider ports activated only after an agent service-account scope is bound. */
+export interface AgentExecutionContext extends AgentWorkerContext {
+  readonly blobStorage: BlobStorage
+  readonly connector: AgentToolRunContext["connector"]
 }
 
 export interface AgentTurnContext {

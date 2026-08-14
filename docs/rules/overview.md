@@ -139,14 +139,14 @@ import { Invoice } from "./ontology/invoice"
 import { Project } from "./ontology/project"
 import { overdueInvoices, atRiskProjects } from "./rules/business-health"
 
-const sixb = await createSixb({
+const host = await createSixb({
   ontologies: [Invoice, Project],
   rules: [overdueInvoices, atRiskProjects],
 })
 ```
 
-Inspect registered rules at runtime with `sixb.listRules()` and
-`sixb.getRuleById(ruleId)`.
+Inspect registered rules with `host.definitions.rules.list()` and
+`host.definitions.rules.getById(ruleId)`.
 
 ## Rule vs workflow
 

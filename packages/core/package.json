@@ -131,6 +131,12 @@
       "import": "./dist/events/index.js",
       "default": "./dist/events/index.js"
     },
+    "./internal/execution-storage": {
+      "types": "./dist/storage/executions/provider.d.ts",
+      "bun": "./src/storage/executions/provider.ts",
+      "import": "./dist/storage/executions/provider.js",
+      "default": "./dist/storage/executions/provider.js"
+    },
     "./internal/http": {
       "types": "./dist/http/index.d.ts",
       "bun": "./src/http/index.ts",
@@ -184,6 +190,24 @@
       "bun": "./src/projections/internal.ts",
       "import": "./dist/projections/internal.js",
       "default": "./dist/projections/internal.js"
+    },
+    "./internal/agent-execution": {
+      "types": "./dist/execution/agent.d.ts",
+      "bun": "./src/execution/agent.ts",
+      "import": "./dist/execution/agent.js",
+      "default": "./dist/execution/agent.js"
+    },
+    "./internal/primitive-execution": {
+      "types": "./dist/execution/primitive.d.ts",
+      "bun": "./src/execution/primitive.ts",
+      "import": "./dist/execution/primitive.js",
+      "default": "./dist/execution/primitive.js"
+    },
+    "./internal/request-execution": {
+      "types": "./dist/execution/request.d.ts",
+      "bun": "./src/execution/request.ts",
+      "import": "./dist/execution/request.js",
+      "default": "./dist/execution/request.js"
     },
     "./internal/query": {
       "types": "./dist/objects/query/index.d.ts",

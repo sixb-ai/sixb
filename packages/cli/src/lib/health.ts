@@ -1,5 +1,5 @@
 import { checkStorageSchema } from "@sixb/core"
-import type { LoadedSixb } from "./loadSixb"
+import type { LoadedSixbHost } from "./loadSixb"
 import { findProcessLocalProviders } from "./shareable-providers"
 
 /** An unreachable Postgres waits rather than refusing, so every probe is bounded. */
@@ -27,11 +27,11 @@ export interface RuntimeCheck {
 /**
  * Probes the configured providers with read-only round trips.
  *
- * There is no `events` row because there is no events provider: `EventsRuntime` is built over
+ * There is no `events` row because there is no events provider: `DomainEventService` is built over
  * the broker, so probing both was one round trip reported twice.
  */
 export async function checkRuntimeHealth(
-  sixb: LoadedSixb,
+  sixb: LoadedSixbHost,
   options: RuntimeCheckOptions = {}
 ): Promise<RuntimeCheck> {
   const timeoutMs = options.timeoutMs ?? PROBE_TIMEOUT_MS
@@ -51,7 +51,7 @@ export async function checkRuntimeHealth(
   }
 }
 
-async function probeStorage(sixb: LoadedSixb, timeoutMs: number): Promise<ProviderCheck> {
+async function probeStorage(sixb: LoadedSixbHost, timeoutMs: number): Promise<ProviderCheck> {
   const name = providerName(sixb.storage)
   const reachable = await probe(() => sixb.storage.ping(), name, timeoutMs)
   if (!reachable.ok) return reachable
@@ -75,7 +75,7 @@ async function probeStorage(sixb: LoadedSixb, timeoutMs: number): Promise<Provid
     : schema
 }
 
-async function probeTimeseries(sixb: LoadedSixb): Promise<void> {
+async function probeTimeseries(sixb: LoadedSixbHost): Promise<void> {
   // A read that matches nothing still exercises the telemetry table, which is a
   // different table from the one `ping()` touches.
   await sixb.storage.timeseries.getLatest({
@@ -86,19 +86,19 @@ async function probeTimeseries(sixb: LoadedSixb): Promise<void> {
   })
 }
 
-async function probeBroker(sixb: LoadedSixb): Promise<void> {
+async function probeBroker(sixb: LoadedSixbHost): Promise<void> {
   // `latestCursor` is the only read in the broker contract that neither writes nor
   // requires the stream to exist — it answers `undefined` for a missing one.
   await sixb.events.latestCursor()
 }
 
-function probeQueues(sixb: LoadedSixb, timeoutMs: number): Promise<ProviderCheck> {
+function probeQueues(sixb: LoadedSixbHost, timeoutMs: number): Promise<ProviderCheck> {
   // Bound to the provider: `probe` calls it as a bare function, and a queues provider
   // that reads its own connection off `this` would see `undefined`.
   return probe(sixb.queues.health.bind(sixb.queues), providerName(sixb.queues), timeoutMs)
 }
 
-function processLocalWarnings(sixb: LoadedSixb): readonly string[] {
+function processLocalWarnings(sixb: LoadedSixbHost): readonly string[] {
   return findProcessLocalProviders(sixb).map(
     (offender) =>
       `${offender.slot} is ${offender.configured}, which only works inside one process. ` +

@@ -1,115 +1,33 @@
 import { pathToFileURL } from "node:url"
-import type {
-  ActionDefinition,
-  Broker,
-  ConnectorAdapter,
-  ConnectorClient,
-  ConnectorDefinition,
-  DatasetDefinition,
-  LinkProjectionDefinition,
-  ObjectProjectionDefinition,
-  OntologyMaintenanceHandle,
-  OntologyOperationalStatus,
-  PipelineDefinition,
-  ProjectionDefinition,
-  RuleDefinition,
-  ScheduleDefinition,
-  SixbReadiness,
-  SixbRuntimeContext,
-  SyncDefinition,
-  TelemetryProjectionDefinition,
-} from "@sixb/core"
-import type { AgentsRuntime } from "@sixb/core/internal/agents"
-import type { AuthRuntime } from "@sixb/core/internal/auth"
-import type { WorkflowsRuntime } from "@sixb/core/internal/workflows"
-import type { ObjectRow } from "@sixb/core/storage"
+import type { SixbHostView } from "@sixb/core"
 
-export interface LoadedSixb extends SixbRuntimeContext {
-  readonly id: string
-  readonly broker: Broker
-  readonly auth: AuthRuntime
-  listObjectTypes(): readonly unknown[]
-  listActions(): readonly ActionDefinition[]
-  getActionById(actionId: string): ActionDefinition | null
-  listSyncs(): readonly SyncDefinition[]
-  listPipelines(): readonly PipelineDefinition[]
-  getPipelineById(pipelineId: string): PipelineDefinition | null
-  listSchedules(): readonly ScheduleDefinition[]
-  readonly workflows: WorkflowsRuntime
-  readonly agents: AgentsRuntime
-  listObjectProjections(): readonly ObjectProjectionDefinition[]
-  listLinkProjections(): readonly LinkProjectionDefinition[]
-  listTelemetryProjections(): readonly TelemetryProjectionDefinition[]
-  listDatasets(): readonly DatasetDefinition[]
-  listRules(): readonly RuleDefinition[]
-  getDatasetById(datasetId: string): DatasetDefinition | null
-  getProjectionById(projectionId: string): ProjectionDefinition | null
-  getSyncById(syncId: string): SyncDefinition | null
-  getRuleById(ruleId: string): RuleDefinition | null
-  listSubTypes(objectTypeId: string): string[]
-  connector<TAdapter extends ConnectorAdapter>(
-    definition: ConnectorDefinition<string, TAdapter>
-  ): Promise<ConnectorClient<TAdapter>>
-  startScheduler(): Promise<void>
-  stopScheduler(): Promise<void>
-  startOntologyMaintenance(): Promise<OntologyMaintenanceHandle>
-  getOntologyOperationalStatus(): OntologyOperationalStatus
-  checkReadiness(): Promise<SixbReadiness>
-  disconnectConnectors(): Promise<void>
-  closeLogger(): Promise<void>
-  closeBroker(): Promise<void>
-  list(params: {
-    objectTypeIds?: readonly string[]
-    limit?: number
-    offset?: number
-  }): Promise<{ total: number; hasMore: boolean; objects: ObjectRow[] }>
-}
+export type LoadedSixbHost = SixbHostView
 
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   return !!value && typeof value === "object" && "then" in value
 }
 
-const REQUIRED_RUNTIME_PROPERTIES = [
-  "ontology",
-  "actionRegistry",
+const REQUIRED_HOST_PROPERTIES = [
+  "definitions",
   "events",
+  "logging",
   "broker",
   "storage",
   "lakeStorage",
   "blobStorage",
   "queues",
   "auth",
-  "agents",
-] as const
-
-const REQUIRED_DEFINITION_METHODS = [
-  "listObjectTypes",
-  "listSubTypes",
-  "listActions",
-  "getActionById",
-  "listSyncs",
-  "listPipelines",
-  "getPipelineById",
-  "listSchedules",
-  "listObjectProjections",
-  "listLinkProjections",
-  "listTelemetryProjections",
-  "listDatasets",
-  "listRules",
-  "getDatasetById",
-  "getProjectionById",
-  "getSyncById",
-  "getRuleById",
+  "scheduler",
 ] as const
 
 const REQUIRED_LIFECYCLE_METHODS = [
-  "startScheduler",
-  "stopScheduler",
+  "withScope",
   "startOntologyMaintenance",
   "getOntologyOperationalStatus",
   "checkReadiness",
-  "disconnectConnectors",
   "closeLogger",
+  "closeConnectors",
+  "closeBlobs",
   "closeBroker",
 ] as const
 
@@ -124,52 +42,99 @@ function hasProperties(
   return properties.every((property) => property in value)
 }
 
-function hasMethods(value: Record<PropertyKey, unknown>, methods: readonly PropertyKey[]): boolean {
-  return methods.every((method) => typeof value[method] === "function")
+function hasMethods(value: unknown, methods: readonly PropertyKey[]): boolean {
+  if (!isRecord(value) && typeof value !== "function") return false
+  const candidate = value as Record<PropertyKey, unknown>
+  return methods.every((method) => typeof candidate[method] === "function")
 }
 
-function hasWorkflows(value: Record<PropertyKey, unknown>): boolean {
-  return isRecord(value.workflows) && hasMethods(value.workflows, ["list", "getById"])
+function hasDefinitionCatalogs(value: Record<PropertyKey, unknown>): boolean {
+  if (!isRecord(value.definitions)) return false
+  const definitions = value.definitions
+  return (
+    isRecord(definitions.ontology) &&
+    hasMethods(definitions.ontology, ["listObjectTypes", "getObjectTypeById"]) &&
+    isRecord(definitions.actions) &&
+    hasMethods(definitions.actions, ["list", "getById", "listGlobal", "listForType"]) &&
+    isRecord(definitions.connectors) &&
+    hasMethods(definitions.connectors, ["list", "getById"]) &&
+    isRecord(definitions.datasets) &&
+    hasMethods(definitions.datasets, ["list", "getById"]) &&
+    isRecord(definitions.syncs) &&
+    hasMethods(definitions.syncs, ["list", "getById"]) &&
+    isRecord(definitions.pipelines) &&
+    hasMethods(definitions.pipelines, ["list", "getById"]) &&
+    isRecord(definitions.schedules) &&
+    hasMethods(definitions.schedules, ["list", "getById"]) &&
+    isRecord(definitions.rules) &&
+    hasMethods(definitions.rules, ["list", "getById"]) &&
+    isRecord(definitions.projections) &&
+    hasMethods(definitions.projections, [
+      "list",
+      "listObjects",
+      "listLinks",
+      "listTelemetry",
+      "getById",
+    ]) &&
+    isRecord(definitions.workflows) &&
+    hasMethods(definitions.workflows, ["list", "getById"]) &&
+    isRecord(definitions.agents) &&
+    hasMethods(definitions.agents, ["list", "getById"]) &&
+    isRecord(definitions.security) &&
+    hasMethods(definitions.security, [
+      "listGroups",
+      "getGroupById",
+      "listRoles",
+      "getRoleById",
+      "listResolvedRoles",
+      "listMembershipPolicies",
+      "getMembershipPolicyById",
+    ])
+  )
 }
 
-function isSixbInstance(value: unknown): value is LoadedSixb {
+function isSixbHost(value: unknown): value is LoadedSixbHost {
   if (!isRecord(value)) return false
 
   return (
     typeof value.id === "string" &&
     typeof value.projectId === "string" &&
-    hasProperties(value, REQUIRED_RUNTIME_PROPERTIES) &&
-    hasMethods(value, REQUIRED_DEFINITION_METHODS) &&
+    hasProperties(value, REQUIRED_HOST_PROPERTIES) &&
     hasMethods(value, REQUIRED_LIFECYCLE_METHODS) &&
-    hasMethods(value, ["connector", "list"]) &&
-    hasWorkflows(value)
+    hasDefinitionCatalogs(value) &&
+    isRecord(value.logging) &&
+    hasMethods(value.logging, ["startExecution", "read", "tail"]) &&
+    isRecord(value.blobStorage) &&
+    hasMethods(value.blobStorage, ["put", "open", "stat"]) &&
+    isRecord(value.scheduler) &&
+    hasMethods(value.scheduler, ["start", "stop"])
   )
 }
 
-export async function loadSixbFromEntry(entry: string): Promise<LoadedSixb> {
+export async function loadSixbFromEntry(entry: string): Promise<LoadedSixbHost> {
   const module = (await import(pathToFileURL(entry).href)) as Record<string, unknown>
   const candidate = module.sixb ?? module.default
 
-  if (isSixbInstance(candidate)) {
+  if (isSixbHost(candidate)) {
     return candidate
   }
 
   if (typeof candidate === "function") {
     const created = (candidate as () => unknown)()
     const resolved = isPromiseLike(created) ? await created : created
-    if (isSixbInstance(resolved)) {
+    if (isSixbHost(resolved)) {
       return resolved
     }
   }
 
   if (isPromiseLike(candidate)) {
     const resolved = await candidate
-    if (isSixbInstance(resolved)) {
+    if (isSixbHost(resolved)) {
       return resolved
     }
   }
 
   throw new Error(
-    "Could not load Sixb runtime from entry. Export `sixb` (or default) as a Sixb instance or Promise<Sixb>."
+    "Could not load a Sixb host from entry. Export `sixb` (or default) as a SixbHost or Promise<SixbHost>."
   )
 }

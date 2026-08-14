@@ -27,12 +27,12 @@ export const EVENTS_STREAM: BrokerStreamDefinition = {
   retention: { maxAgeMs: DEFAULT_EVENTS_RETENTION_MS },
 }
 
-export interface EventsRuntimeOptions {
+export interface DomainEventServiceOptions {
   readonly projectId: string
   readonly broker: Broker
   readonly stream?: BrokerStreamDefinition
   /**
-   * The `Sixb` instance — or anything sharing its error reporter — that owns this runtime. Only `emit`
+   * The `Sixb` instance — or anything sharing its error reporter — that owns this service. Only `emit`
    * needs it, to escalate a lost batch. Absent means a lost batch is logged and nothing more.
    */
   readonly host?: object
@@ -90,15 +90,15 @@ export interface StableEventPublisher {
   publishEnvelopes(envelopes: readonly StableEventEnvelope[]): Promise<readonly StoredDomainEvent[]>
 }
 
-/** Project-scoped domain event runtime backed by the shared broker provider. */
-export class EventsRuntime implements DomainEventLog, StableEventPublisher {
+/** Project-scoped domain event service backed by the shared broker provider. */
+export class DomainEventService implements DomainEventLog, StableEventPublisher {
   private readonly projectId: string
   private readonly broker: Broker
   private readonly stream: BrokerStreamDefinition
   private readonly host: object | undefined
   private readonly ensureStreamPromises = new Map<string, Promise<void>>()
 
-  constructor(options: EventsRuntimeOptions) {
+  constructor(options: DomainEventServiceOptions) {
     this.projectId = options.projectId
     this.broker = options.broker
     this.stream = options.stream ?? EVENTS_STREAM
@@ -304,6 +304,10 @@ export class EventsRuntime implements DomainEventLog, StableEventPublisher {
     }
     return promise
   }
+}
+
+export function createDomainEventService(options: DomainEventServiceOptions): DomainEventService {
+  return new DomainEventService(options)
 }
 
 type StoredEventPayload = Omit<StoredAuthorableEvent, "cursor">

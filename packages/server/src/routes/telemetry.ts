@@ -1,9 +1,8 @@
-import { isAllowed, type OntologySource, type Sixb } from "@sixb/core"
-import { getTelemetryHistoryBatch } from "@sixb/core/internal/objects"
+import type { SixbHostView } from "@sixb/core"
 import type { TimeseriesPoint } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
-import { requestAuthState } from "../auth/scope"
+import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema, SuccessResponseSchema } from "../schemas/common"
 import {
@@ -28,16 +27,15 @@ function serializeTelemetryPoint(point: TimeseriesPoint) {
   }
 }
 
-export function registerTelemetryRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
+export function registerTelemetryRoutes(app: Elysia, _host: SixbHostView) {
   return app
     .post(
       "/api/objects/:objectTypeId/:objectId/telemetry/:propertyId",
       async (context) => {
         const { params, body, set } = context
-        const { scoped } = requestAuthState(context)
         try {
           const parsedBody = AppendTelemetryBodySchema.parse(body)
-          await (scoped ?? sixb).appendTelemetry(params.objectTypeId, [
+          await requireRequestSixb(context).objects.appendTelemetry(params.objectTypeId, [
             {
               id: params.objectId,
               properties: {
@@ -75,22 +73,17 @@ export function registerTelemetryRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
       "/api/telemetry/history",
       async (context) => {
         const { body, set } = context
-        const { authz } = requestAuthState(context)
         try {
           const parsedBody = BulkTelemetryHistoryBodySchema.parse(body)
           const from = parseDate(parsedBody.from)
           const to = parseDate(parsedBody.to)
-          const history = await getTelemetryHistoryBatch(
-            {
-              projectId: sixb.id,
-              series: parsedBody.series,
-              from,
-              to,
-              limitPerSeries: parsedBody.limitPerSeries,
-              order: parsedBody.order,
-            },
-            { storage: sixb.storage.timeseries, authorization: authz }
-          )
+          const history = await requireRequestSixb(context).objects.getTelemetryHistoryBatch({
+            series: parsedBody.series,
+            from,
+            to,
+            limitPerSeries: parsedBody.limitPerSeries,
+            order: parsedBody.order,
+          })
 
           return {
             series: history.map((series) => ({
@@ -121,16 +114,14 @@ export function registerTelemetryRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
       "/api/objects/:objectTypeId/:objectId/telemetry/:propertyId/history",
       async (context) => {
         const { params, query, set } = context
-        const { authz } = requestAuthState(context)
         try {
-          const parsedQuery = TelemetryHistoryQuerySchema.parse(query)
-          if (!isAllowed(authz, { kind: "object.view", objectTypeId: params.objectTypeId })) {
+          const sixb = requireRequestSixb(context)
+          if (!sixb.objects.getTypeById(params.objectTypeId)) {
             set.status = 404
             return { error: "Object not found" }
           }
-
-          const history = await sixb.storage.timeseries.getHistory({
-            projectId: sixb.id,
+          const parsedQuery = TelemetryHistoryQuerySchema.parse(query)
+          const history = await sixb.objects.getTelemetryHistory({
             objectTypeId: params.objectTypeId,
             objectId: params.objectId,
             propertyId: params.propertyId,
@@ -165,15 +156,13 @@ export function registerTelemetryRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
       "/api/objects/:objectTypeId/:objectId/telemetry/:propertyId/latest",
       async (context) => {
         const { params, set } = context
-        const { authz } = requestAuthState(context)
         try {
-          if (!isAllowed(authz, { kind: "object.view", objectTypeId: params.objectTypeId })) {
+          const sixb = requireRequestSixb(context)
+          if (!sixb.objects.getTypeById(params.objectTypeId)) {
             set.status = 404
             return { error: "Object not found" }
           }
-
-          const latest = await sixb.storage.timeseries.getLatest({
-            projectId: sixb.id,
+          const latest = await sixb.objects.getLatestTelemetry({
             objectTypeId: params.objectTypeId,
             objectId: params.objectId,
             propertyId: params.propertyId,

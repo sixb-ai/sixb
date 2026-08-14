@@ -1,12 +1,6 @@
-import type {
-  LogLevel,
-  LogRunRef,
-  OntologySource,
-  Sixb,
-  SixbRunKind,
-  StoredLogLine,
-} from "@sixb/core"
+import type { LogLevel, LogRunRef, SixbRunKind, StoredLogLine } from "@sixb/core"
 import { BrokerCursorExpiredError } from "@sixb/core/broker"
+import type { LoggingService } from "@sixb/core/internal/logging"
 
 const MAX_CLIENT_RECORDS = 1_000
 const MAX_CLIENT_BYTES = 1_048_576
@@ -56,7 +50,7 @@ export class LogSubscriptionHub {
   private unsubscribeBroker: (() => void) | null = null
   private closed = false
 
-  constructor(private readonly sixb: Sixb<readonly OntologySource[]>) {}
+  constructor(private readonly host: { readonly logging: LoggingService }) {}
 
   async subscribe(
     key: object,
@@ -133,7 +127,7 @@ export class LogSubscriptionHub {
   private async ensureStarted(): Promise<void> {
     if (this.closed) throw new Error("Log subscription hub is closed")
     if (!this.startPromise) {
-      this.startPromise = this.sixb.logs
+      this.startPromise = this.host.logging
         .subscribe({ from: "latest" }, (lines) => this.deliverLive(lines))
         .then((unsubscribe) => {
           if (this.closed) unsubscribe()
@@ -162,7 +156,7 @@ export class LogSubscriptionHub {
     try {
       let hasMore = true
       while (hasMore) {
-        const page = await this.sixb.logs.read({
+        const page = await this.host.logging.read({
           afterCursor,
           limit: READ_PAGE_SIZE,
           kinds: state.filter.kinds,
@@ -205,7 +199,7 @@ export class LogSubscriptionHub {
 
       if (error instanceof BrokerCursorExpiredError) {
         try {
-          const latest = await this.sixb.logs.tail({ limit: 1 })
+          const latest = await this.host.logging.tail({ limit: 1 })
           this.send(state, {
             type: "reset",
             reason: "cursor_expired",

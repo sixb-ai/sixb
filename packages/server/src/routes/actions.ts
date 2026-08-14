@@ -1,7 +1,7 @@
-import type { ActionDefinition, OntologySource, Sixb } from "@sixb/core"
+import type { ActionDefinition, SixbHostView } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
-import { requestAuthState } from "../auth/scope"
+import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
   ActionCatalogItemSchema,
@@ -38,13 +38,12 @@ function serializeAction(
   })
 }
 
-export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
+export function registerActionRoutes(app: Elysia, _host: SixbHostView) {
   return app
     .get(
       "/api/actions",
       async (context) => {
-        const { scoped } = requestAuthState(context)
-        const actions = scoped ? scoped.listActions() : sixb.listActions()
+        const actions = requireRequestSixb(context).actions.list()
         return actions.map(serializeAction)
       },
       {
@@ -61,10 +60,7 @@ export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
       "/api/actions/:actionId",
       async (context) => {
         const { params, set } = context
-        const { scoped } = requestAuthState(context)
-        const action = scoped
-          ? scoped.getActionById(params.actionId)
-          : sixb.getActionById(params.actionId)
+        const action = requireRequestSixb(context).actions.getById(params.actionId)
         if (!action) {
           set.status = 404
           return { error: "Action not found" }
@@ -87,7 +83,7 @@ export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
       "/api/actions/:actionId",
       async (context) => {
         const { params, body, set } = context
-        const { scoped } = requestAuthState(context)
+        const sixb = requireRequestSixb(context)
         try {
           const parsedBody = RequestActionBodySchema.parse(body)
           const input = {
@@ -96,9 +92,7 @@ export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
             params: parsedBody.params,
             runId: parsedBody.runId,
           }
-          const result = scoped
-            ? await scoped.requestAction(input)
-            : await sixb.actions.request(input)
+          const result = await sixb.actions.request(input)
 
           set.status = 202
           return RequestActionResponseSchema.parse(result)

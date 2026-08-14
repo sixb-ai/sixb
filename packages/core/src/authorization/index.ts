@@ -5,6 +5,7 @@ export {
   assertCanAppendTelemetry,
   assertCanEdit,
   assertPrivileged,
+  assertProviderAccess,
   evaluate,
   isAllowed,
 } from "./decision"

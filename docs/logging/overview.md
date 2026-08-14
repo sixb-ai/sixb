@@ -181,7 +181,7 @@ await sixb.closeLogger()
 ```
 
 `closeLogger()` flushes and closes the output provider; it is a no-op for broker-only logging.
-Call it alongside `sixb.closeBroker()` and `sixb.disconnectConnectors()`.
+Call it alongside `sixb.closeBroker()` and `sixb.closeConnectors()`.
 
 ## Related
 

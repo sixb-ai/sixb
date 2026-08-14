@@ -1,16 +1,16 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryBroker, InMemoryQueues } from "@sixb/core"
 import { SixbCliError } from "../src/lib/errors"
-import type { LoadedSixb } from "../src/lib/loadSixb"
+import type { LoadedSixbHost } from "../src/lib/loadSixb"
 import type { ProductionRole } from "../src/lib/production-roles"
 import { assertShareableProviders } from "../src/lib/shareable-providers"
 
-function sixbWith(providers: { broker?: unknown; queues?: unknown }): LoadedSixb {
+function sixbWith(providers: { broker?: unknown; queues?: unknown }): LoadedSixbHost {
   return {
     id: "test",
     broker: providers.broker ?? new SharedBroker(),
     queues: providers.queues ?? new SharedQueues(),
-  } as unknown as LoadedSixb
+  } as unknown as LoadedSixbHost
 }
 
 // Stand-ins that declare themselves shareable, which is all the guard reads. Same

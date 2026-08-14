@@ -1,11 +1,11 @@
-import type { DatasetDefinition, OntologySource, Sixb } from "@sixb/core"
+import type { DatasetDefinition, SixbHostView } from "@sixb/core"
 import type {
   DatasetCatalogState,
   DatasetLatestVersionSummary,
   DatasetVersion,
 } from "@sixb/core/lake-storage"
 import type { Elysia } from "elysia"
-import { requestAuthState } from "../auth/scope"
+import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
@@ -75,8 +75,7 @@ const EMPTY_DATASET_REFERENCES: DatasetReferences = {
  * syncs, pipelines, and projections once per dataset.
  */
 function buildDatasetReferenceIndex(
-  sixb: Sixb<readonly OntologySource[]>,
-  scoped: ReturnType<typeof requestAuthState>["scoped"] = null
+  sixb: ReturnType<typeof requireRequestSixb>
 ): Map<string, DatasetReferences> {
   const index = new Map<string, DatasetReferences>()
   const referencesFor = (datasetId: string): DatasetReferences => {
@@ -88,11 +87,11 @@ function buildDatasetReferenceIndex(
     return references
   }
 
-  for (const sync of scoped ? scoped.listSyncs() : sixb.listSyncs()) {
+  for (const sync of sixb.syncs.list()) {
     referencesFor(sync.target.dataset.id).syncIds.push(sync.id)
   }
 
-  for (const pipeline of scoped ? scoped.listPipelines() : sixb.listPipelines()) {
+  for (const pipeline of sixb.pipelines.list()) {
     const sourceDatasetIds = new Set<string>()
     const targetDatasetIds = new Set<string>()
     for (const node of pipeline.graph.nodes) {
@@ -109,15 +108,8 @@ function buildDatasetReferenceIndex(
     }
   }
 
-  // Projections inherit dataset visibility: a scoped caller sees a
-  // projection's lineage only when it can view the projection's source
-  // dataset. Privileged callers (no scoped runtime) see them all.
-  for (const projection of [
-    ...sixb.listObjectProjections(),
-    ...sixb.listLinkProjections(),
-    ...sixb.listTelemetryProjections(),
-  ]) {
-    if (!scoped || scoped.getDatasetById(projection.datasetId)) {
+  for (const projection of sixb.projections.list()) {
+    if (sixb.datasets.getById(projection.datasetId)) {
       referencesFor(projection.datasetId).projectionIds.push(projection.id)
     }
   }
@@ -152,12 +144,12 @@ function serializeDatasetCatalogItem(
 }
 
 async function serializeDatasetCatalogItems(
-  sixb: Sixb<readonly OntologySource[]>,
+  host: SixbHostView,
   definitions: readonly DatasetDefinition[],
-  scoped: ReturnType<typeof requestAuthState>["scoped"] = null
+  sixb: ReturnType<typeof requireRequestSixb>
 ) {
-  const references = buildDatasetReferenceIndex(sixb, scoped)
-  const states = await sixb.lakeStorage.listDatasetCatalogState(definitions.map((d) => d.id))
+  const references = buildDatasetReferenceIndex(sixb)
+  const states = await host.lakeStorage.listDatasetCatalogState(definitions.map((d) => d.id))
   const stateByDatasetId = new Map(states.map((state) => [state.datasetId, state]))
 
   return definitions.map((definition) =>
@@ -169,12 +161,8 @@ async function serializeDatasetCatalogItems(
   )
 }
 
-function requireDataset(
-  sixb: Sixb<readonly OntologySource[]>,
-  scoped: ReturnType<typeof requestAuthState>["scoped"],
-  datasetId: string
-) {
-  const dataset = scoped ? scoped.getDatasetById(datasetId) : sixb.getDatasetById(datasetId)
+function requireDataset(sixb: ReturnType<typeof requireRequestSixb>, datasetId: string) {
+  const dataset = sixb.datasets.getById(datasetId)
   if (!dataset) {
     throw new Error("Dataset not found")
   }
@@ -215,16 +203,16 @@ async function collectRows(rows: AsyncIterable<Readonly<Record<string, unknown>>
   return collected
 }
 
-export function registerDatasetRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
+export function registerDatasetRoutes(app: Elysia, host: SixbHostView) {
   return app
     .get(
       "/api/datasets",
       async (context) => {
         const { set } = context
-        const { scoped } = requestAuthState(context)
+        const sixb = requireRequestSixb(context)
         try {
-          const definitions = scoped ? scoped.listDatasets() : sixb.listDatasets()
-          return await serializeDatasetCatalogItems(sixb, definitions, scoped)
+          const definitions = sixb.datasets.list()
+          return await serializeDatasetCatalogItems(host, definitions, sixb)
         } catch (error) {
           set.status = 400
           return { error: error instanceof Error ? error.message : String(error) }
@@ -243,11 +231,11 @@ export function registerDatasetRoutes(app: Elysia, sixb: Sixb<readonly OntologyS
       "/api/datasets/:datasetId",
       async (context) => {
         const { params, set } = context
-        const { scoped } = requestAuthState(context)
+        const sixb = requireRequestSixb(context)
         try {
-          const dataset = requireDataset(sixb, scoped, params.datasetId)
-          const [state] = await sixb.lakeStorage.listDatasetCatalogState([dataset.id])
-          const references = buildDatasetReferenceIndex(sixb, scoped).get(dataset.id)
+          const dataset = requireDataset(sixb, params.datasetId)
+          const [state] = await host.lakeStorage.listDatasetCatalogState([dataset.id])
+          const references = buildDatasetReferenceIndex(sixb).get(dataset.id)
           return serializeDatasetCatalogItem(dataset, state, references ?? EMPTY_DATASET_REFERENCES)
         } catch (error) {
           return handleRouteError(error, set)
@@ -271,12 +259,12 @@ export function registerDatasetRoutes(app: Elysia, sixb: Sixb<readonly OntologyS
       "/api/datasets/:datasetId/versions",
       async (context) => {
         const { params, query, set } = context
-        const { scoped } = requestAuthState(context)
+        const sixb = requireRequestSixb(context)
         try {
-          requireDataset(sixb, scoped, params.datasetId)
+          requireDataset(sixb, params.datasetId)
           const parsed = DatasetVersionsQuerySchema.parse(query)
           const limit = parseLimit(parsed.limit, DEFAULT_VERSION_LIMIT, MAX_VERSION_LIMIT)
-          const versions = await sixb.lakeStorage.listVersions(params.datasetId, limit)
+          const versions = await host.lakeStorage.listVersions(params.datasetId, limit)
 
           return DatasetVersionListResponseSchema.parse({
             versions: versions.map(serializeDatasetVersion),
@@ -305,10 +293,10 @@ export function registerDatasetRoutes(app: Elysia, sixb: Sixb<readonly OntologyS
       "/api/datasets/:datasetId/versions/:versionId",
       async (context) => {
         const { params, set } = context
-        const { scoped } = requestAuthState(context)
+        const sixb = requireRequestSixb(context)
         try {
-          requireDataset(sixb, scoped, params.datasetId)
-          const version = await sixb.lakeStorage.getVersion(params.datasetId, params.versionId)
+          requireDataset(sixb, params.datasetId)
+          const version = await host.lakeStorage.getVersion(params.datasetId, params.versionId)
           if (!version) {
             set.status = 404
             return { error: "Dataset version not found" }
@@ -337,15 +325,15 @@ export function registerDatasetRoutes(app: Elysia, sixb: Sixb<readonly OntologyS
       "/api/datasets/:datasetId/rows",
       async (context) => {
         const { params, query, set } = context
-        const { scoped } = requestAuthState(context)
+        const sixb = requireRequestSixb(context)
         try {
-          requireDataset(sixb, scoped, params.datasetId)
+          requireDataset(sixb, params.datasetId)
           const parsed = DatasetRowsQuerySchema.parse(query)
           const limit = parseLimit(parsed.limit, DEFAULT_ROW_LIMIT, MAX_ROW_LIMIT)
           const offset = parseOffset(parsed.offset)
           const version = parsed.versionId
-            ? await sixb.lakeStorage.getVersion(params.datasetId, parsed.versionId)
-            : await sixb.lakeStorage.getLatestVersion(params.datasetId)
+            ? await host.lakeStorage.getVersion(params.datasetId, parsed.versionId)
+            : await host.lakeStorage.getLatestVersion(params.datasetId)
 
           if (!version) {
             set.status = 404
@@ -355,7 +343,7 @@ export function registerDatasetRoutes(app: Elysia, sixb: Sixb<readonly OntologyS
           const requestedColumns = parseColumns(parsed.columns)
           const columns = resolveColumns(version, requestedColumns)
           const rows = await collectRows(
-            sixb.lakeStorage.readRows({
+            host.lakeStorage.readRows({
               datasetId: params.datasetId,
               versionId: version.versionId,
               columns: requestedColumns,

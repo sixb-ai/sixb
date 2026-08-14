@@ -60,6 +60,7 @@ export type {
   ActionBlobContext,
   ActionBuilder,
   ActionDefinition,
+  ActionDefinitionCatalog,
   ActionEditsContext,
   ActionEditsHandler,
   ActionEffectsContext,
@@ -331,6 +332,7 @@ export type {
   LogFields,
   Logger,
   LoggerProvider,
+  LoggingService,
   LogLevel,
   LogRecord,
   LogRunRef,
@@ -464,6 +466,11 @@ export {
 // The full storage-provider contract lives at `@sixb/core/storage`.
 
 export type {
+  CreateExecutionInput,
+  DurableExecutionExecutor,
+  DurableExecutionSource,
+  ExecutionRecord,
+  ExecutionStorage,
   MigrationCapableStorage,
   MigrationReport,
   // `status()` returns these, so reading a migrator from here needs them; without them
@@ -749,6 +756,7 @@ export type {
   WorkflowRunRequestOptions,
   WorkflowRunRequestResult,
   WorkflowRunSource,
+  WorkflowRuntimeFacade,
   WorkflowScheduleMapper,
   WorkflowScheduleTriggerDefinition,
   WorkflowStepMapper,
@@ -770,8 +778,32 @@ export {
   WorkflowValidationError,
 } from "./workflows"
 
+// ── Execution ───────────────────────────────────────────────
+
+export type {
+  AuthorizablePrincipal,
+  AuthorizationRef,
+  ExecutionContext,
+  ExecutionExecutor,
+  ExecutionScope,
+  ExecutionSource,
+  KernelOperation,
+  RuntimeAuthorization,
+  TrustedPrimitiveKind,
+  TrustedPrimitiveRef,
+} from "./execution"
+
 // ── Runtime ─────────────────────────────────────────────────
 
+export type { ActionRunsRuntime, ActionsRuntime } from "./actions/execution"
+export type {
+  AgentRunsRuntime,
+  AgentsRuntime,
+  AgentThreadsRuntime,
+} from "./agents/execution"
+export type { BlobsRuntime } from "./blob-storage/execution"
+export type { ConnectorRuntime } from "./connectors/execution"
+export type { DatasetsRuntime } from "./datasets/execution"
 export type {
   SixbErrorContext,
   SixbErrorHandler,
@@ -780,6 +812,8 @@ export type {
   SixbRuleEvaluationFailedContext,
   SixbRunFailedContext,
 } from "./error-reporting/types"
+export type { EventsRuntime } from "./events/execution"
+export type { LogsRuntime } from "./logging/execution"
 export type {
   OntologyMaintenanceCleanupSnapshot,
   OntologyMaintenanceHandle,
@@ -789,8 +823,20 @@ export type {
   SixbReadiness,
 } from "./maintenance"
 export type {
+  ExecutionObjectByIdHandle,
+  ExecutionObjectSet,
+  ObjectsRuntime,
+} from "./objects/execution"
+export type { PipelineRunsRuntime, PipelinesRuntime } from "./pipelines/execution"
+export type {
+  ProjectionRunsRuntime,
+  ProjectionsRuntime,
+} from "./projections/execution"
+export type { RuleStatesRuntime, RulesRuntime } from "./rules/execution"
+export type {
   BatchItemResult,
   CreateSixbOptions,
+  DefinitionCatalog,
   ListResult,
   ListResultWithoutTotal,
   ObjectByIdHandle,
@@ -812,12 +858,11 @@ export type {
   OntologySource,
   RegisteredObjectType,
   RegisteredValueTypes,
-  ScopedObjectByIdHandle,
-  ScopedObjectSet,
-  ScopedSixb,
-  SixbInstance,
-  SixbOptions,
-  SixbRuntimeContext,
+  SchedulerController,
+  Sixb,
+  SixbDefinitions,
+  SixbHostOptions,
+  SixbHostView,
   TelemetryAppendInput,
   TelemetryChannel,
   TelemetryHistoryInput,
@@ -834,9 +879,16 @@ export {
   OntologyValidationError,
   ProjectionValidationError,
   RuntimeError,
-  Sixb,
+  SixbHost,
   SyncValidationError,
 } from "./runtime"
+export type { SchedulesRuntime } from "./schedules/execution"
+export type { SyncRunsRuntime, SyncsRuntime } from "./syncs/execution"
+export type {
+  WorkflowInterventionsRuntime,
+  WorkflowRunsRuntime,
+  WorkflowsRuntime,
+} from "./workflows/execution"
 
 // ── Agents ──────────────────────────────────────────────────
 
@@ -918,6 +970,7 @@ export type {
   ObjectProjectionDefinition,
   ObjectProjectionTarget,
   ProjectionDefinition,
+  ProjectionDefinitionCatalog,
   ProjectionTarget,
   ProjectionTargetByKind,
   TelemetryProjectionDefinition,

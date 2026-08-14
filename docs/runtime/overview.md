@@ -1,17 +1,19 @@
 # Runtime
 
-The runtime is the single object that wires your whole project together. Reach for this page when
-you're bootstrapping a project and need to know what `createSixb()` requires and what the instance
-gives you.
+Sixb has two public runtime surfaces:
+
+- `SixbHost` is the configured project host. It owns providers, registered definitions, and process
+  lifecycle.
+- `Sixb` is the typed domain API for a request or run. It exposes objects, telemetry, links,
+  actions, events, and the other domain primitives with the appropriate permissions.
 
 `createSixb()` reads your project's conventions, validates everything against the ontology, and
-returns one typed `Sixb` instance. That instance is your entry point for objects, telemetry, links,
-actions, events, and the scheduler lifecycle.
+returns a `SixbHost`.
 
-## Bootstrap
+## Create the host
 
-`createSixb()` is **async** — it discovers modules from disk, so always `await` it. Most projects
-keep the call in a single config module (`sixb.config.ts`) and export the instance.
+Most projects create the host in `sixb.config.ts`. `createSixb()` returns a promise because it
+discovers modules from disk; the CLI awaits the exported `sixb` value.
 
 ```ts
 import { LocalBlobStorage } from "@sixb/blob-local"
@@ -19,7 +21,7 @@ import { createSixb, InMemoryBroker, InMemoryQueues } from "@sixb/core"
 import { LocalLakeStorage } from "@sixb/lake-local"
 import { SqliteStorage } from "@sixb/sqlite"
 
-export const sixb = await createSixb({
+export const sixb = createSixb({
   id: "northline",
   broker: new InMemoryBroker(),
   storage: new SqliteStorage({ path: ".sixb" }),
@@ -30,13 +32,11 @@ export const sixb = await createSixb({
 ```
 
 That single call discovers your ontology and definition folders, validates every definition against
-the resolved ontology, and builds the typed object surface plus the events, actions, and security
-registries. Misconfiguration fails fast: an unknown link target, a duplicate id, or a rule against a
-missing property throws when you `await createSixb()`, not at runtime.
+the resolved ontology, and builds the host catalogs and providers. An unknown link target, a duplicate id, or a rule against a missing property fails during project startup.
 
 ## Required providers
 
-Five providers are required — the runtime wires each registry against them, so none can be omitted.
+Five providers are required, so the project cannot start when one is missing.
 See [Infrastructure](../infrastructure/overview.md) for the available implementations (in-memory and
 local for dev, hosted backends for production).
 
@@ -55,9 +55,26 @@ Optional: `id` (project id), `auth` (a `SixbAuthConfig`, see
 retention intervals), and `projectRoot` (discovery root, defaults to `process.cwd()`). Logging options are covered in
 [Logging](../logging/overview.md).
 
-## The Sixb instance
+## Host and execution SDK
 
-The instance is the API you use everywhere — in workflow steps, syncs, server routes, and tests.
+`SixbHost` configures and runs the project. Workflows and webhooks receive `sixb`, while other
+primitives receive a context tailored to their handler. These APIs enforce the permissions of the
+current request or run; protected domain operations are not exposed directly by the host.
+
+The two surfaces use distinct namespaces:
+
+| Surface | Responsibility | Example |
+| --- | --- | --- |
+| `host.definitions` | Validated project definitions, without caller-specific filtering | `host.definitions.workflows.getById(id)` |
+| `host.storage`, `host.blobStorage`, … | Configured process providers | `host.blobStorage.stat(blobId)` |
+| `host.logging` | Process logging, capture, and lifecycle | `host.logging.startExecution(run)` |
+| `host.scheduler`, `host.close*()` | Process lifecycle | `host.scheduler.start()` |
+| `sixb` | Execution-bound domain operations and visible definitions | `sixb.workflows.requestById(input)` |
+
+Definition catalogs consistently expose `list()` and `getById(id)`. The execution SDK may add
+authorized operations and history below the matching primitive; it does not expose process
+lifecycle. Execution code uses `sixb.blobs` and `sixb.connector(definition)`; connector client
+resolution remains private to the host.
 
 ### Typed objects
 
@@ -84,13 +101,12 @@ const invoice = await invoices.byId("inv-1001").get()
 ```
 
 For CRUD, querying, telemetry, links, and actions see [Objects](../objects/overview.md). For
-cross-type listing (dashboards, search) the instance also exposes a global `sixb.list({ ... })`.
+cross-type listing (dashboards, search), use `sixb.objects.list({ ... })`.
 
 ### Events
 
-`sixb.events` is the author-facing read, append, and subscribe facade. Object/link/telemetry facts
-are emitted from the durable ontology outbox and cannot be authored or republished through this
-surface.
+`sixb.events` is the domain API for reading, appending, and subscribing to events. Events produced
+by object, link, and telemetry changes are read-only through this surface.
 
 ```ts
 const recent = await sixb.events.read({
@@ -104,7 +120,7 @@ Schedules can react to typed domain events and drive syncs, pipelines, or workfl
 
 ### Logs
 
-`sixb.logs` reads the structured logs your runs produce, captured to a bounded broker stream.
+`sixb.logs` reads the structured logs produced by your runs.
 
 ```ts
 const page = await sixb.logs.read({ kinds: ["action"], levels: ["error"], limit: 50 })
@@ -115,44 +131,36 @@ builder. See [Logging](../logging/overview.md).
 
 ### Lifecycle
 
-Constructing the runtime starts no timers. The server owns ontology maintenance automatically;
-embedded runtimes without a server acquire it explicitly.
+Constructing the host starts no timers. The server owns ontology maintenance automatically; embedded hosts without a server acquire it explicitly.
 
 | Method | Effect |
 | --- | --- |
-| `sixb.startScheduler()` | Start the scheduler for discovered `schedules/` |
-| `sixb.stopScheduler()` | Stop the scheduler |
-| `sixb.startOntologyMaintenance()` | Start outbox recovery and bounded retention; returns a stop handle |
+| `host.scheduler.start()` | Start the scheduler for discovered `schedules/` |
+| `host.scheduler.stop()` | Stop the scheduler |
+| `host.startOntologyMaintenance()` | Start outbox recovery and bounded retention; returns a stop handle |
 
 ```ts
-await sixb.startScheduler()
-const maintenance = await sixb.startOntologyMaintenance()
+const host = await createSixb({ /* providers */ })
+
+await host.scheduler.start()
+const maintenance = await host.startOntologyMaintenance()
 // ... on shutdown
-await sixb.stopScheduler()
+await host.scheduler.stop()
 await maintenance.stop()
 ```
 
-`OntologyMaintenance` runs once at startup, then every 60 seconds by default. It drains due
-`ontology_outbox` rows, purges old published rows, and cleans only source materializations already
-marked `superseded` or `abandoned`. It never age-deletes pending outbox rows, active candidates, or
-the durable `ontology_commits` ledger.
+`OntologyMaintenance` recovers pending event publication and applies the configured retention policy. It runs once at startup, then every 60 seconds by default, and never removes pending work.
 
-Release connector, broker, and logger resources with `sixb.disconnectConnectors()`,
-`sixb.closeBroker()`, and `sixb.closeLogger()`.
+Release connector, blob, broker, and logger resources with `host.closeConnectors()`,
+`host.closeBlobs()`, `host.closeBroker()`, and `host.closeLogger()`.
 
-### Scoped views
+### Where `Sixb` is available
 
-`sixb.as(context)` derives a principal-scoped SDK from the runtime. The scoped surface is
-**default-deny**: an operation runs only when the authorization context's grants cover it. The raw
-`sixb` instance stays privileged and is meant for trusted system code (startup, syncs, projections,
-workers, tests).
+`Sixb` is provided where general domain access is part of the handler contract. Other handlers use
+narrower, purpose-built contexts for their phase. In tests, `createTestSixb(host)` creates an
+execution SDK explicitly.
 
-```ts
-const scoped = sixb.as(authContext)
-const visible = await scoped.objects(Invoice).query().list()
-```
-
-See [Authorization](../auth/authorization.md) for grant kinds and context shape.
+See the documentation for each primitive for its handler context, [Testing](../testing/overview.md) for test setup, and [Authorization](../auth/authorization.md) for the grants enforced by the SDK.
 
 ## Discovery
 
@@ -181,7 +189,7 @@ handy for tests and for fully programmatic setups. Use the plural `ontologies` o
 object types directly. The constructor rejects duplicate ids regardless of source.
 
 ```ts
-export const sixb = await createSixb({
+export const sixb = createSixb({
   broker: new InMemoryBroker(),
   storage: new SqliteStorage({ path: ".sixb" }),
   lakeStorage: new LocalLakeStorage({ path: ".sixb/lake" }),
@@ -199,5 +207,5 @@ export const sixb = await createSixb({
 - [Project structure](../fundamentals/project-structure.md) — folder layout and discovery
 - [Objects](../objects/overview.md) — the typed `sixb.objects(Type)` surface
 - [Events](../events/overview.md) — domain events and `sixb.events`
-- [Authorization](../auth/authorization.md) — `sixb.as(context)` and grant kinds
+- [Authorization](../auth/authorization.md) — grants enforced by the domain API
 - [Infrastructure](../infrastructure/overview.md) — provider implementations

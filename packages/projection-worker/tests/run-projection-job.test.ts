@@ -23,18 +23,19 @@ import {
   type MergeChange,
   type ProjectionDefinition,
   prop,
-  Sixb,
+  SixbHost,
   stringEnum,
   valueTypeRef,
 } from "@sixb/core"
-import type { EventsRuntime } from "@sixb/core/internal/events"
+import type { DomainEventService } from "@sixb/core/internal/events"
+import { bindPrimitiveExecution } from "@sixb/core/internal/primitive-execution"
 import {
   createProjectionRunId,
   getProjectionRegistry,
   type ProjectionDispatchDescriptor,
   shareProjectionRegistry,
 } from "@sixb/core/internal/projections"
-import { shareOntologyMutationRuntime } from "@sixb/core/internal/runtime"
+import { registerOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import { decorateOperationScopedMethodForTesting } from "@sixb/core/internal/storage-operation-scope"
 import type {
   BeginDatasetMergeInput,
@@ -47,6 +48,7 @@ import type {
   ProjectionRunStorage,
   ReclaimSourceMaterializationInput,
 } from "@sixb/core/storage"
+import { createTestSixb } from "@sixb/core/testing"
 import { MISSING_TARGET_GRACE_MS } from "../src/retry-backoff"
 import {
   isPermanentProjectionFailure,
@@ -58,6 +60,7 @@ import type {
   ProjectionWorkerContext,
   RunProjectionJobInput,
 } from "../src/types"
+import type { ProjectionWorkerHost } from "../src/worker"
 
 const Building = defineObjectType({
   id: "Building",
@@ -276,19 +279,6 @@ function createDeps(): TestRuntimeDeps {
   }
 }
 
-interface ProjectionRuntimeSource {
-  readonly projectId: string
-  readonly ontology: ProjectionWorkerContext["ontology"]
-  readonly actionRegistry: ProjectionWorkerContext["actionRegistry"]
-  readonly events: ProjectionWorkerContext["events"]
-  readonly storage: ProjectionWorkerContext["storage"]
-  readonly lakeStorage: ProjectionWorkerContext["lakeStorage"]
-  readonly blobStorage: ProjectionWorkerContext["blobStorage"]
-  readonly queues: ProjectionWorkerContext["queues"]
-  getDatasetById: ProjectionWorkerContext["getDatasetById"]
-  getProjectionById: ProjectionWorkerContext["getProjectionById"]
-}
-
 function requireProjectionRunsStorage(input: {
   readonly storage: { readonly projectionRuns?: ProjectionRunStorage }
 }): ProjectionRunStorage {
@@ -299,26 +289,32 @@ function requireProjectionRunsStorage(input: {
   return projectionRunsStorage
 }
 
-function createRuntime(sixb: ProjectionRuntimeSource) {
+interface TestProjectionWorkerContext extends ProjectionWorkerContext {
+  readonly host: ProjectionWorkerHost
+}
+
+function createRuntime(
+  host: ProjectionWorkerHost,
+  primitive: { readonly id: string; readonly runId: string } = {
+    id: host.definitions.projections.list()[0]?.id ?? "direct-projection-test",
+    runId: "direct-projection-job-test",
+  }
+): TestProjectionWorkerContext {
   const runtime = {
-    projectId: sixb.projectId,
-    ontology: sixb.ontology,
-    actionRegistry: sixb.actionRegistry,
-    events: sixb.events,
-    storage: sixb.storage,
-    lakeStorage: sixb.lakeStorage,
-    blobStorage: sixb.blobStorage,
-    queues: sixb.queues,
-    projectionRunsStorage: requireProjectionRunsStorage(sixb),
-    getDatasetById(datasetId: string) {
-      return sixb.getDatasetById(datasetId)
-    },
-    getProjectionById(projectionId: string) {
-      return sixb.getProjectionById(projectionId)
-    },
-  } satisfies ProjectionWorkerContext
-  shareOntologyMutationRuntime(sixb, runtime)
-  shareProjectionRegistry(sixb, runtime)
+    host,
+    projectId: host.id,
+    ontology: host.definitions.ontology,
+    lakeStorage: host.lakeStorage,
+    projectionRunsStorage: requireProjectionRunsStorage(host),
+    datasets: host.definitions.datasets,
+    projections: host.definitions.projections,
+  } satisfies TestProjectionWorkerContext
+  const execution = bindPrimitiveExecution(host, {
+    primitive: { kind: "projection", ...primitive },
+    source: { type: "queue", queue: "projections", jobId: primitive.runId },
+  })
+  registerOntologyMutationRuntime(runtime, execution.ontologyMutations)
+  shareProjectionRegistry(host, runtime)
   return runtime
 }
 
@@ -333,16 +329,18 @@ interface LegacyTestProjectionJob {
 const canonicalRunIds = new Map<string, string>()
 
 async function runProjectionJob(
-  input: Omit<RunProjectionJobInput, "job"> & {
+  input: Omit<RunProjectionJobInput, "runtime" | "job"> & {
+    readonly runtime: TestProjectionWorkerContext
     readonly job: LegacyTestProjectionJob
     readonly batchSize?: number
   }
 ): Promise<ProjectionJobResult> {
-  const registry = getProjectionRegistry(input.runtime)
-  const version = await input.runtime.lakeStorage.getVersion(
-    input.job.datasetId,
-    input.job.versionId
-  )
+  const runtime = createRuntime(input.runtime.host, {
+    id: input.job.projectionId,
+    runId: input.job.id,
+  })
+  const registry = getProjectionRegistry(runtime)
+  const version = await runtime.lakeStorage.getVersion(input.job.datasetId, input.job.versionId)
   let descriptor: ProjectionDispatchDescriptor
   try {
     descriptor = registry.resolveDispatch(input.job.projectionId)
@@ -358,11 +356,12 @@ async function runProjectionJob(
       createdAt: version?.createdAt.toISOString() ?? "1970-01-01T00:00:00.000Z",
     },
   }
-  const id = createProjectionRunId(input.runtime.projectId, identity)
+  const id = createProjectionRunId(runtime.projectId, identity)
   canonicalRunIds.set(input.job.id, id)
-  const { batchSize, ...canonicalInput } = input
+  const { batchSize, runtime: _inputRuntime, ...canonicalInput } = input
   return runCanonicalProjectionJob({
     ...canonicalInput,
+    runtime,
     job: { id, ...identity },
     ...(batchSize === undefined ? {} : { telemetryBatchSize: batchSize }),
   })
@@ -402,7 +401,7 @@ function createSixb(
   },
   deps: Omit<TestRuntimeDeps, "lakeStorage"> & { readonly lakeStorage: LakeStorage } = createDeps()
 ) {
-  return new Sixb({
+  return new SixbHost({
     id: "projection-worker-tests",
     ontology: [Building, Room, Sensor],
     ...deps,
@@ -627,9 +626,11 @@ describe("runProjectionJob", () => {
       deps
     )
 
-    await sixb.objects(Room).upsert({
-      properties: { id: "r1", name: "Kitchen" },
-    })
+    await createTestSixb(sixb)
+      .objects(Room)
+      .upsert({
+        properties: { id: "r1", name: "Kitchen" },
+      })
     const version1 = await commitDatasetVersion(deps.lakeStorage, roomReadingsDataset, [
       {
         room_id: "r1",
@@ -690,9 +691,11 @@ describe("runProjectionJob", () => {
       },
       { ...deps, lakeStorage }
     )
-    await sixb.objects(Room).upsert({
-      properties: { id: "r1", name: "Kitchen" },
-    })
+    await createTestSixb(sixb)
+      .objects(Room)
+      .upsert({
+        properties: { id: "r1", name: "Kitchen" },
+      })
     const version = await commitDatasetVersion(lakeStorage, roomReadingsDataset, [
       {
         room_id: "r1",
@@ -727,9 +730,11 @@ describe("runProjectionJob", () => {
       },
       deps
     )
-    await sixb.objects(Room).upsert({
-      properties: { id: "r1", name: "Kitchen" },
-    })
+    await createTestSixb(sixb)
+      .objects(Room)
+      .upsert({
+        properties: { id: "r1", name: "Kitchen" },
+      })
     const version = await commitDatasetVersion(deps.lakeStorage, roomReadingsDataset, [
       {
         room_id: "r1",
@@ -783,9 +788,11 @@ describe("runProjectionJob", () => {
       },
       deps
     )
-    await sixb.objects(Room).upsert({
-      properties: { id: "r1", name: "Kitchen" },
-    })
+    await createTestSixb(sixb)
+      .objects(Room)
+      .upsert({
+        properties: { id: "r1", name: "Kitchen" },
+      })
     const version = await commitDatasetVersion(deps.lakeStorage, roomReadingsDataset, [
       {
         room_id: "r1",
@@ -865,8 +872,8 @@ describe("runProjectionJob", () => {
     const replayRuntime: ProjectionWorkerContext = {
       ...runtime,
       lakeStorage: new Proxy(runtime.lakeStorage, { get: unavailable }),
-      getDatasetById: unavailable,
-      getProjectionById: unavailable,
+      datasets: { getById: unavailable },
+      projections: { getById: unavailable },
     }
 
     await expect(runCanonicalProjectionJob({ runtime: replayRuntime, job })).resolves.toMatchObject(
@@ -887,7 +894,9 @@ describe("runProjectionJob", () => {
       },
       { ...deps, lakeStorage }
     )
-    await sixb.objects(Room).upsert({ properties: { id: "r1", name: "Kitchen" } })
+    await createTestSixb(sixb)
+      .objects(Room)
+      .upsert({ properties: { id: "r1", name: "Kitchen" } })
     const version = await commitDatasetVersion(
       lakeStorage,
       roomReadingsDataset,
@@ -957,7 +966,9 @@ describe("runProjectionJob", () => {
       },
       { ...deps, lakeStorage }
     )
-    await sixb.objects(Room).upsert({ properties: { id: "r1", name: "Kitchen" } })
+    await createTestSixb(sixb)
+      .objects(Room)
+      .upsert({ properties: { id: "r1", name: "Kitchen" } })
     const version = await commitDatasetVersion(
       lakeStorage,
       roomReadingsDataset,
@@ -1049,9 +1060,11 @@ describe("runProjectionJob", () => {
       },
       deps
     )
-    await sixb.objects(Room).upsert({
-      properties: { id: "r1", name: "Kitchen" },
-    })
+    await createTestSixb(sixb)
+      .objects(Room)
+      .upsert({
+        properties: { id: "r1", name: "Kitchen" },
+      })
     const version1 = await commitDatasetVersion(deps.lakeStorage, roomReadingsDataset, [
       {
         room_id: "r1",
@@ -1120,9 +1133,11 @@ describe("runProjectionJob", () => {
       },
       deps
     )
-    await sixb.objects(Room).upsert({
-      properties: { id: "r1", name: "Kitchen" },
-    })
+    await createTestSixb(sixb)
+      .objects(Room)
+      .upsert({
+        properties: { id: "r1", name: "Kitchen" },
+      })
     const version = await commitDatasetVersion(deps.lakeStorage, roomReadingsDataset, [
       {
         room_id: "r1",
@@ -1207,7 +1222,9 @@ describe("runProjectionJob", () => {
       },
       deps
     )
-    await sixb.objects(Room).upsert({ properties: { id: "r1", name: "Kitchen" } })
+    await createTestSixb(sixb)
+      .objects(Room)
+      .upsert({ properties: { id: "r1", name: "Kitchen" } })
     const version = await commitDatasetVersion(deps.lakeStorage, roomReadingsDataset, [
       {
         room_id: "missing-room",
@@ -1251,7 +1268,9 @@ describe("runProjectionJob", () => {
       { datasets: [roomReadingsDataset], projections: [roomTemperatureProjection] },
       deps
     )
-    await sixb.objects(Room).upsert({ properties: { id: "r1", name: "Kitchen" } })
+    await createTestSixb(sixb)
+      .objects(Room)
+      .upsert({ properties: { id: "r1", name: "Kitchen" } })
     const version = await commitDatasetVersion(deps.lakeStorage, roomReadingsDataset, [
       {
         room_id: "missing-room",
@@ -1360,7 +1379,9 @@ describe("runProjectionJob", () => {
     ).rejects.toThrow("missing object")
     expect(await readRun()).toMatchObject({ missingTarget: { objectId: "late-room" } })
 
-    await sixb.objects(Room).upsert({ properties: { id: "late-room", name: "Late" } })
+    await createTestSixb(sixb)
+      .objects(Room)
+      .upsert({ properties: { id: "late-room", name: "Late" } })
     await runProjectionJob({ runtime: createRuntime(sixb), batchSize: 10, job })
 
     const run = await readRun()
@@ -1384,7 +1405,9 @@ describe("runProjectionJob", () => {
       },
       deps
     )
-    await sixb.objects(Room).upsert({ properties: { id: "r1", name: "Kitchen" } })
+    await createTestSixb(sixb)
+      .objects(Room)
+      .upsert({ properties: { id: "r1", name: "Kitchen" } })
     const version = await commitDatasetVersion(deps.lakeStorage, roomReadingsDataset, [
       {
         room_id: "r1",
@@ -1426,7 +1449,9 @@ describe("runProjectionJob", () => {
       },
       deps
     )
-    await sixb.objects(Room).upsert({ properties: { id: "r1", name: "Kitchen" } })
+    await createTestSixb(sixb)
+      .objects(Room)
+      .upsert({ properties: { id: "r1", name: "Kitchen" } })
     const version = await commitDatasetVersion(deps.lakeStorage, roomReadingsDataset, [
       {
         room_id: "r1",
@@ -1556,7 +1581,7 @@ describe("runProjectionJob", () => {
       },
       deps
     )
-    await sixb.upsertObject("Building", { id: "b1", name: "HQ" })
+    await createTestSixb(sixb).objects.upsert("Building", { id: "b1", name: "HQ" })
     const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
       { room_id: "r1", room_name: "Kitchen", building_ref: "b1" },
     ])
@@ -1591,8 +1616,8 @@ describe("runProjectionJob", () => {
       },
       deps
     )
-    await sixb.upsertObject("Building", { id: "b1", name: "Old HQ" })
-    await sixb.upsertObject("Building", { id: "b2", name: "New HQ" })
+    await createTestSixb(sixb).objects.upsert("Building", { id: "b1", name: "Old HQ" })
+    await createTestSixb(sixb).objects.upsert("Building", { id: "b2", name: "New HQ" })
     const firstVersion = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
       { room_id: "r1", room_name: "Kitchen", building_ref: "b1" },
     ])
@@ -1664,7 +1689,7 @@ describe("runProjectionJob", () => {
       deps
     )
     for (const sensorId of ["s1", "s2"]) {
-      await sixb.upsertObject("Sensor", { id: sensorId, name: sensorId })
+      await createTestSixb(sixb).objects.upsert("Sensor", { id: sensorId, name: sensorId })
     }
     const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
       { room_id: "r1", room_name: "Kitchen", building_ref: "s1" },
@@ -1831,10 +1856,10 @@ describe("runProjectionJob", () => {
       deps
     )
     for (const buildingId of ["b1", "b2"]) {
-      await sixb.upsertObject("Building", { id: buildingId, name: buildingId })
+      await createTestSixb(sixb).objects.upsert("Building", { id: buildingId, name: buildingId })
     }
 
-    const events = sixb.events as EventsRuntime
+    const events = sixb.events as DomainEventService
     const publish = events.publishEnvelopes.bind(events)
     const publishedB1Creates: string[] = []
     events.publishEnvelopes = async (envelopes) => {
@@ -1883,10 +1908,14 @@ describe("runProjectionJob", () => {
       },
       deps
     )
-    await sixb.upsertObject("Building", { id: "b1", name: "HQ" })
+    await createTestSixb(sixb).objects.upsert("Building", { id: "b1", name: "HQ" })
     for (const roomId of ["r1", "r2"]) {
-      await sixb.upsertObject("Room", { id: roomId, name: roomId, buildingRef: "b1" })
-      await sixb.upsertLink("Room", roomId, "inBuilding", {
+      await createTestSixb(sixb).objects.upsert("Room", {
+        id: roomId,
+        name: roomId,
+        buildingRef: "b1",
+      })
+      await createTestSixb(sixb).objects.upsertLink("Room", roomId, "inBuilding", {
         targetTypeId: "Building",
         targetId: "b1",
       })
@@ -1929,7 +1958,7 @@ describe("runProjectionJob", () => {
       },
       deps
     )
-    await sixb.upsertObject("Building", { id: "b1", name: "HQ" })
+    await createTestSixb(sixb).objects.upsert("Building", { id: "b1", name: "HQ" })
     const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
       { room_id: "r1", room_name: "Kitchen", building_ref: "b1" },
     ])
@@ -1998,8 +2027,8 @@ describe("runProjectionJob", () => {
       },
       deps
     )
-    await sixb.upsertObject("Room", { id: "r1", name: "Kitchen" })
-    await sixb.upsertObject("Sensor", { id: "s1", name: "Motion" })
+    await createTestSixb(sixb).objects.upsert("Room", { id: "r1", name: "Kitchen" })
+    await createTestSixb(sixb).objects.upsert("Sensor", { id: "s1", name: "Motion" })
     const version = await commitDatasetVersion(deps.lakeStorage, roomSensorsDataset, [
       { room_id: "r1", sensor_id: "s1" },
     ])
@@ -2038,10 +2067,10 @@ describe("runProjectionJob", () => {
       deps
     )
     for (const roomId of ["r1", "r2"]) {
-      await sixb.upsertObject("Room", { id: roomId, name: roomId })
+      await createTestSixb(sixb).objects.upsert("Room", { id: roomId, name: roomId })
     }
     for (const sensorId of ["s1", "s2", "s3"]) {
-      await sixb.upsertObject("Sensor", { id: sensorId, name: sensorId })
+      await createTestSixb(sixb).objects.upsert("Sensor", { id: sensorId, name: sensorId })
     }
 
     const first = await commitDatasetMerge(deps.lakeStorage, keyedRoomSensorsDataset, [
@@ -2113,8 +2142,8 @@ describe("runProjectionJob", () => {
       },
       { ...deps, lakeStorage }
     )
-    await sixb.upsertObject("Room", { id: "r1", name: "Kitchen" })
-    await sixb.upsertObject("Sensor", { id: "s1", name: "Motion" })
+    await createTestSixb(sixb).objects.upsert("Room", { id: "r1", name: "Kitchen" })
+    await createTestSixb(sixb).objects.upsert("Sensor", { id: "s1", name: "Motion" })
     const version = await commitDatasetVersion(lakeStorage, wideRoomSensorsDataset, [
       { room_id: "r1", sensor_id: "s1", unused_weight: 0.75 },
     ])
@@ -2158,8 +2187,8 @@ describe("runProjectionJob", () => {
       },
       { ...deps, lakeStorage }
     )
-    await sixb.upsertObject("Room", { id: "r1", name: "Kitchen" })
-    await sixb.upsertObject("Sensor", { id: "s1", name: "Motion" })
+    await createTestSixb(sixb).objects.upsert("Room", { id: "r1", name: "Kitchen" })
+    await createTestSixb(sixb).objects.upsert("Sensor", { id: "s1", name: "Motion" })
     const version = await commitDatasetVersion(lakeStorage, requiredExtraRoomSensorsDataset, [
       { room_id: "r1", sensor_id: "s1", relationship_weight: 0.75 },
     ])
@@ -2208,8 +2237,8 @@ describe("runProjectionJob", () => {
     expect(objectResult.run.progress.sourceRowsRead).toBe(2)
     expect(objectResult.run.progress.sourceRowsSkipped).toBe(1)
 
-    await objectSixb.upsertObject("Room", { id: "r1", name: "Kitchen" })
-    await objectSixb.upsertObject("Sensor", { id: "s1", name: "Motion" })
+    await createTestSixb(objectSixb).objects.upsert("Room", { id: "r1", name: "Kitchen" })
+    await createTestSixb(objectSixb).objects.upsert("Sensor", { id: "s1", name: "Motion" })
     const linkSixb = createSixb(
       {
         datasets: [roomSensorsDataset],
@@ -2254,7 +2283,7 @@ describe("runProjectionJob", () => {
       .fromDataset(devicesDataset)
       .properties({ id: "device_id", status: "device_status" })
     const deps = createDeps()
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "projection-worker-tests",
       ontology: [Device],
       ...deps,
@@ -2321,7 +2350,7 @@ describe("runProjectionJob", () => {
         readingCount: "reading_count",
       })
     const deps = createDeps()
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "projection-worker-tests",
       ontology: [Device],
       ...deps,
@@ -2374,7 +2403,7 @@ describe("runProjectionJob", () => {
       .fromDataset(devicesDataset)
       .properties({ id: "device_id", count: "device_count" })
     const deps = createDeps()
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "projection-worker-tests",
       ontology: [Device],
       ...deps,
@@ -2424,7 +2453,7 @@ describe("runProjectionJob", () => {
       .fromDataset(documentsDataset)
       .properties({ id: "document_id", attachment: "attachment" })
     const deps = createDeps()
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "projection-worker-tests",
       ontology: [Document],
       ...deps,
@@ -2589,7 +2618,7 @@ describe("runProjectionJob", () => {
       },
       deps
     )
-    const events = sixb.events as EventsRuntime
+    const events = sixb.events as DomainEventService
     const publish = events.publishEnvelopes.bind(events)
     let aborted = false
     events.publishEnvelopes = async (envelopes) => {
@@ -2741,7 +2770,9 @@ describe("runProjectionJob", () => {
       { ...deps, lakeStorage }
     )
 
-    await sixb.objects(Room).upsert({ properties: { id: "r1", name: "Kitchen" } })
+    await createTestSixb(sixb)
+      .objects(Room)
+      .upsert({ properties: { id: "r1", name: "Kitchen" } })
     const version = await commitDatasetVersion(lakeStorage, roomTargetsDataset, [
       {
         room_id: "r1",
@@ -2799,7 +2830,9 @@ describe("runProjectionJob", () => {
       deps
     )
 
-    await sixb.objects(Room).upsert({ properties: { id: "r1", name: "Kitchen" } })
+    await createTestSixb(sixb)
+      .objects(Room)
+      .upsert({ properties: { id: "r1", name: "Kitchen" } })
     const version = await commitDatasetVersion(deps.lakeStorage, roomTargetsDataset, [
       {
         room_id: "r1",

@@ -14,9 +14,9 @@ import {
   type LakeStorage,
   type ProjectionDefinition,
   prop,
-  Sixb,
   type SixbErrorContext,
   type SixbErrorHandler,
+  SixbHost,
 } from "@sixb/core"
 import type { ProjectionMaterializationIdentity } from "@sixb/core/internal/materialization"
 import { createProjectionRunId, getProjectionRegistry } from "@sixb/core/internal/projections"
@@ -55,7 +55,7 @@ function createSixb(
   },
   deps = createDeps()
 ) {
-  return new Sixb({
+  return new SixbHost({
     id: "projection-worker-tests",
     ontology: [Room],
     ...deps,
@@ -400,25 +400,12 @@ describe("ProjectionWorker", () => {
       datasets: [roomsDataset],
       projections: [roomProjection],
     })
-    const withoutProjectionRuns = {
-      id: sixb.id,
-      projectId: sixb.projectId,
-      ontology: sixb.ontology,
-      actionRegistry: sixb.actionRegistry,
-      events: sixb.events,
-      storage: {
-        ...sixb.storage,
-        projectionRuns: undefined,
+    const storage = { ...sixb.storage, projectionRuns: undefined }
+    const withoutProjectionRuns = new Proxy(sixb, {
+      get(target, property, receiver) {
+        return property === "storage" ? storage : Reflect.get(target, property, receiver)
       },
-      lakeStorage: sixb.lakeStorage,
-      blobStorage: sixb.blobStorage,
-      queues: sixb.queues,
-      listObjectProjections: () => sixb.listObjectProjections(),
-      listLinkProjections: () => sixb.listLinkProjections(),
-      listTelemetryProjections: () => sixb.listTelemetryProjections(),
-      getDatasetById: (datasetId: string) => sixb.getDatasetById(datasetId),
-      getProjectionById: (projectionId: string) => sixb.getProjectionById(projectionId),
-    }
+    })
 
     expect(() => new ProjectionWorker(withoutProjectionRuns)).toThrow("storage.projectionRuns")
   })

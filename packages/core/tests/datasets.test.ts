@@ -12,8 +12,8 @@ import {
   getDatasetRowValidationError,
   prop,
   RuntimeError,
-  Sixb,
 } from "../src"
+import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Room = defineObjectType({
@@ -261,35 +261,34 @@ describe("defineDataset", () => {
   })
 })
 
-describe("Sixb dataset registration", () => {
+describe("SixbHost dataset registration", () => {
   test("exposes dataset definitions and lookup by id", () => {
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Room],
       datasets: [rawOrdersDataset, canonicalOrdersDataset],
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.listDatasets().map((dataset) => dataset.id)).toEqual([
+    expect(sixb.datasets.list().map((dataset) => dataset.id)).toEqual([
       "raw.erp.orders",
       "canonical.orders",
     ])
-    expect(sixb.getDatasetById("raw.erp.orders")).toBe(rawOrdersDataset)
-    expect(sixb.getDatasetById("missing-dataset")).toBeNull()
+    expect(sixb.datasets.getById("raw.erp.orders")).toBe(rawOrdersDataset)
+    expect(sixb.datasets.getById("missing-dataset")).toBeNull()
   })
 
   test("rejects duplicate dataset ids", () => {
-    expect(
-      () =>
-        new Sixb<readonly []>({
-          ontology: [],
-          datasets: [
-            rawOrdersDataset,
-            defineDataset("raw.erp.orders", {
-              schema: [col("orderId", "string"), col("customerId", "string", { nullable: true })],
-            }),
-          ],
-          ...createTestRuntimeDeps(),
-        })
+    expect(() =>
+      createTestSixb<readonly []>({
+        ontology: [],
+        datasets: [
+          rawOrdersDataset,
+          defineDataset("raw.erp.orders", {
+            schema: [col("orderId", "string"), col("customerId", "string", { nullable: true })],
+          }),
+        ],
+        ...createTestRuntimeDeps(),
+      })
     ).toThrow("Duplicate dataset id: raw.erp.orders")
   })
 
@@ -299,21 +298,19 @@ describe("Sixb dataset registration", () => {
       .read(() => [])
       .intoDataset(rawOrdersDataset)
 
-    expect(
-      () =>
-        new Sixb<readonly []>({
-          ontology: [],
-          syncs: [sync],
-          ...createTestRuntimeDeps(),
-        })
+    expect(() =>
+      createTestSixb<readonly []>({
+        ontology: [],
+        syncs: [sync],
+        ...createTestRuntimeDeps(),
+      })
     ).toThrow(RuntimeError)
-    expect(
-      () =>
-        new Sixb<readonly []>({
-          ontology: [],
-          syncs: [sync],
-          ...createTestRuntimeDeps(),
-        })
+    expect(() =>
+      createTestSixb<readonly []>({
+        ontology: [],
+        syncs: [sync],
+        ...createTestRuntimeDeps(),
+      })
     ).toThrow("targets unknown dataset 'raw.erp.orders'")
   })
 
@@ -324,23 +321,21 @@ describe("Sixb dataset registration", () => {
       .run(async () => {})
     const pipeline = definePipeline("normalize-orders").then(step)
 
-    expect(
-      () =>
-        new Sixb<readonly []>({
-          ontology: [],
-          datasets: [rawOrdersDataset],
-          pipelines: [pipeline],
-          ...createTestRuntimeDeps(),
-        })
+    expect(() =>
+      createTestSixb<readonly []>({
+        ontology: [],
+        datasets: [rawOrdersDataset],
+        pipelines: [pipeline],
+        ...createTestRuntimeDeps(),
+      })
     ).toThrow(RuntimeError)
-    expect(
-      () =>
-        new Sixb<readonly []>({
-          ontology: [],
-          datasets: [rawOrdersDataset],
-          pipelines: [pipeline],
-          ...createTestRuntimeDeps(),
-        })
+    expect(() =>
+      createTestSixb<readonly []>({
+        ontology: [],
+        datasets: [rawOrdersDataset],
+        pipelines: [pipeline],
+        ...createTestRuntimeDeps(),
+      })
     ).toThrow("outputs unknown dataset 'canonical.orders'")
   })
 })

@@ -18,7 +18,7 @@ import {
   type OntologySource,
   prop,
   type RoleDefinition,
-  Sixb,
+  SixbHost,
 } from "@sixb/core"
 import { createAccessTokenCredential, createSessionCredential } from "@sixb/core/internal/auth"
 import { CSRF_TOKEN_RESPONSE_HEADER_NAME } from "../src/auth/csrf"
@@ -98,7 +98,7 @@ function createRuntime(
     },
   })
 
-  const sixb = new Sixb<readonly OntologySource[]>({
+  const sixb = new SixbHost<readonly OntologySource[]>({
     id: "test-project",
     ontology: [Device],
     broker: new InMemoryBroker(),
@@ -199,7 +199,7 @@ describe("server auth guard", () => {
   test("leaves routes open when auth is not configured outside production", async () => {
     const { sixb } = createRuntime()
     const app = createSixbApi(
-      new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
     )
 
     const response = await app.fetch(new Request("http://localhost/api/project"))
@@ -215,7 +215,9 @@ describe("server auth guard", () => {
     try {
       const { sixb } = createRuntime()
       expect(() =>
-        createSixbApi(new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() }))
+        createSixbApi(
+          new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
+        )
       ).toThrow("Auth is required in production")
     } finally {
       if (previous === undefined) {
@@ -232,7 +234,7 @@ describe("server auth guard", () => {
     expect(
       () =>
         new SixbServer({
-          sixb,
+          host: sixb,
           quiet: true,
           browser: {
             allowedOrigins: [
@@ -247,7 +249,7 @@ describe("server auth guard", () => {
   test("protects API routes with generic JSON 401", async () => {
     const { sixb } = createRuntime({ auth: true })
     const app = createSixbApi(
-      new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
     )
 
     const response = await app.fetch(new Request("http://localhost/api/project"))
@@ -259,7 +261,7 @@ describe("server auth guard", () => {
   test("protects a route registered outside the known prefixes", async () => {
     const { sixb } = createRuntime({ auth: true })
     const app = createSixbApi(
-      new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
     ).get("/internal/metrics", () => "secret")
 
     // This is the case the classifier's default actually governs. An *unregistered*
@@ -277,7 +279,7 @@ describe("server auth guard", () => {
     const { sixb, storage } = createRuntime({ auth: true })
     const credential = await seedAccessToken(storage)
     const app = createSixbApi(
-      new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
     )
     const headers = {
       authorization: `Bearer ${credential.tokenValue}`,
@@ -328,7 +330,7 @@ describe("server auth guard", () => {
     const { sixb, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage)
     const app = createSixbApi(
-      new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
     )
 
     const response = await app.fetch(
@@ -373,7 +375,7 @@ describe("server auth guard", () => {
         expiresAt: new Date(now.getTime() + 5 * 60_000),
       })
       const app = createSixbApi(
-        new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+        new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
       )
 
       const response = await app.fetch(
@@ -424,7 +426,7 @@ describe("server auth guard", () => {
         expiresAt: new Date(now.getTime() + 5 * 60_000),
       })
       const app = createSixbApi(
-        new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+        new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
       )
 
       const response = await app.fetch(
@@ -463,7 +465,7 @@ describe("server auth guard", () => {
         expiresAt: new Date(now.getTime() + 5 * 60_000),
       })
       const app = createSixbApi(
-        new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+        new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
       )
 
       const response = await app.fetch(
@@ -498,7 +500,7 @@ describe("server auth guard", () => {
         expiresAt: new Date(now.getTime() + 5 * 60_000),
       })
       const app = createSixbApi(
-        new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+        new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
       )
 
       const response = await app.fetch(
@@ -539,7 +541,7 @@ describe("server auth guard", () => {
     const { sixb, storage } = createRuntime({ auth: true, roles: [atlasAccess] })
     const atlasSession = await seedSession(storage)
     const app = createSixbApi(
-      new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
     )
 
     const deniedSession = await app.fetch(
@@ -576,7 +578,7 @@ describe("server auth guard", () => {
     const { sixb, storage } = createRuntime({ auth: true, roles: [atlasAccess] })
     const seeded = await seedSession(storage)
     const app = createSixbApi(
-      new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
     )
 
     const response = await app.fetch(
@@ -595,7 +597,7 @@ describe("server auth guard", () => {
     const { sixb, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage, { audience: "app" })
     const app = createSixbApi(
-      new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
     )
 
     const accepted = await app.fetch(
@@ -625,7 +627,7 @@ describe("server auth guard", () => {
     const seeded = await seedSession(storage, { audience: "app" })
     const app = createSixbApi(
       new SixbServer({
-        sixb,
+        host: sixb,
         quiet: true,
         browser: createTestBrowserPolicy(),
       })
@@ -664,7 +666,7 @@ describe("server auth guard", () => {
     const { sixb } = createRuntime({ auth: true })
     const app = createSixbApi(
       new SixbServer({
-        sixb,
+        host: sixb,
         quiet: true,
         browser: createTestBrowserPolicy({ includeApp: false }),
       })
@@ -685,7 +687,7 @@ describe("server auth guard", () => {
     const { sixb } = createRuntime({ auth: true })
     const app = createSixbApi(
       new SixbServer({
-        sixb,
+        host: sixb,
         quiet: true,
         browser: createTestBrowserPolicy({ includeApp: false }),
       })
@@ -725,7 +727,7 @@ describe("server auth guard", () => {
     const seeded = await seedSession(storage, { audience: "app" })
     const app = createSixbApi(
       new SixbServer({
-        sixb,
+        host: sixb,
         quiet: true,
         browser: createTestBrowserPolicy(),
       })
@@ -752,7 +754,7 @@ describe("server auth guard", () => {
     const { sixb, storage } = createRuntime({ auth: true, roles: [deviceWriter] })
     const seeded = await seedSession(storage)
     const app = createSixbApi(
-      new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
     )
     const body = JSON.stringify({ properties: { name: "Fan" } })
 
@@ -807,7 +809,7 @@ describe("server auth guard", () => {
         expiresAt: new Date(now.getTime() + 5 * 60_000),
       })
       const app = createSixbApi(
-        new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+        new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
       )
 
       const response = await app.fetch(
@@ -836,7 +838,7 @@ describe("server auth guard", () => {
     const { sixb, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage)
     const app = createSixbApi(
-      new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
     )
 
     const response = await app.fetch(
@@ -865,7 +867,7 @@ describe("server auth guard", () => {
   test("keeps webhooks public while connector verification remains authoritative", async () => {
     const { sixb } = createRuntime({ auth: true, connector: true })
     const app = createSixbApi(
-      new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
     )
 
     const response = await app.fetch(
@@ -884,8 +886,8 @@ describe("server auth guard", () => {
     const { sixb } = createRuntime({ auth: true })
     const port = await getFreePort()
     const server = new SixbServer({
-      sixb,
-      host: "127.0.0.1",
+      host: sixb,
+      hostname: "127.0.0.1",
       port,
       quiet: true,
       browser: createTestBrowserPolicy({ apiOrigin: `http://127.0.0.1:${port}` }),
@@ -906,8 +908,8 @@ describe("server auth guard", () => {
     const port = await getFreePort()
     const apiOrigin = `http://127.0.0.1:${port}`
     const server = new SixbServer({
-      sixb,
-      host: "127.0.0.1",
+      host: sixb,
+      hostname: "127.0.0.1",
       port,
       quiet: true,
       browser: createTestBrowserPolicy({ apiOrigin }),
@@ -940,8 +942,8 @@ describe("server auth guard", () => {
     const port = await getFreePort()
     const apiOrigin = `http://127.0.0.1:${port}`
     const server = new SixbServer({
-      sixb,
-      host: "127.0.0.1",
+      host: sixb,
+      hostname: "127.0.0.1",
       port,
       quiet: true,
       browser: createTestBrowserPolicy({ apiOrigin }),
@@ -965,8 +967,8 @@ describe("server auth guard", () => {
     const { sixb } = createRuntime({ auth: true })
     const port = await getFreePort()
     const server = new SixbServer({
-      sixb,
-      host: "127.0.0.1",
+      host: sixb,
+      hostname: "127.0.0.1",
       port,
       quiet: true,
       browser: createTestBrowserPolicy({ apiOrigin: `http://127.0.0.1:${port}` }),
@@ -994,7 +996,7 @@ describe("server auth guard", () => {
     const { sixb } = createRuntime({ auth: true })
     const app = createSixbApi(
       new SixbServer({
-        sixb,
+        host: sixb,
         quiet: true,
         browser: createTestBrowserPolicy({ includeApp: false }),
       })
@@ -1019,7 +1021,7 @@ describe("server auth guard", () => {
     const seeded = await seedSession(storage)
     const app = createSixbApi(
       new SixbServer({
-        sixb,
+        host: sixb,
         quiet: true,
         browser: createTestBrowserPolicy({ includeApp: false }),
       })

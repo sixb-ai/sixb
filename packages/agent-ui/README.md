@@ -76,3 +76,23 @@ import { AgentChatPage } from "@sixb/agent-ui/react-router"
 ```
 
 `routeBase` defaults to `/agents` and must match the path you mount it on.
+
+## Document previews
+
+Durable files attached by a user or produced by an agent open directly from the conversation when
+Sixb has a viewer for their format:
+
+- Markdown uses the shared Sixb Markdown renderer.
+- HTML is a static preview in a sandboxed iframe. Scripts, forms, network subresources, nested
+  frames, app-origin access, and parent navigation are blocked; inline styles and data/blob media remain
+  available.
+- CSV and TSV render as a scrollable table. The preview is limited to 5 MB, 500 rows, and 50 columns;
+  the original file remains available through Download.
+- PDF uses the browser's native viewer and the contextual file route's range support.
+
+On a desktop `AgentChatPage`, documents open beside the conversation in a resizable, tabbed pane.
+`AgentPanel` and mobile chat use a large dialog instead. Unsupported formats keep the browser's
+existing open/download behavior.
+
+Preview tabs support Left/Right Arrow, Home, End, Delete, and Backspace. Closing the final document
+returns focus to the attachment that opened the viewer.

@@ -20,13 +20,13 @@ import {
   prop,
   RuntimeError,
   ref,
-  Sixb,
   stringEnum,
   valueTypeRef,
   type WorkflowDefinition,
   WorkflowDefinitionError,
 } from "../src"
 import { schemaRecordToJsonSchema } from "../src/ontology/internal"
+import { createTestSixb } from "../src/testing"
 import { validateWorkflowDefinition } from "../src/workflows"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -590,7 +590,7 @@ describe("validateWorkflowDefinition", () => {
   })
 })
 
-describe("Sixb workflow registration", () => {
+describe("SixbHost workflow registration", () => {
   test("exposes registered workflow definitions and lookup by id", () => {
     const workflow = defineWorkflow("reconcile-transaction")
       .input({
@@ -610,7 +610,7 @@ describe("Sixb workflow registration", () => {
         },
       }))
 
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Transaction, Invoice],
       actions: [attachInvoice],
       schedules: [highValueTransaction],
@@ -631,7 +631,7 @@ describe("Sixb workflow registration", () => {
       .then(findBestInvoice)
       .then(approveInvoiceMatch)
 
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Transaction, Invoice],
       workflows: [workflow],
       ...createTestRuntimeDeps(),
@@ -646,14 +646,14 @@ describe("Sixb workflow registration", () => {
       .then(resolveInvoice)
 
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [Transaction, Invoice],
         workflows: [workflow],
         ...createTestRuntimeDeps(),
       })
     }).toThrow('references unknown agent "invoice-resolver"')
 
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Transaction, Invoice],
       agents: [resolverAgent],
       workflows: [workflow],
@@ -676,14 +676,14 @@ describe("Sixb workflow registration", () => {
     const workflows: readonly WorkflowDefinition[] = [first, second]
 
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [Transaction, Invoice],
         workflows,
         ...createTestRuntimeDeps(),
       })
     }).toThrow(RuntimeError)
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [Transaction, Invoice],
         workflows,
         ...createTestRuntimeDeps(),
@@ -701,14 +701,14 @@ describe("Sixb workflow registration", () => {
     } satisfies WorkflowDefinition
 
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [Transaction],
         workflows: [workflow],
         ...createTestRuntimeDeps(),
       })
     }).toThrow(WorkflowDefinitionError)
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [Transaction],
         workflows: [workflow],
         ...createTestRuntimeDeps(),
@@ -726,14 +726,14 @@ describe("Sixb workflow registration", () => {
       .then(findBestInvoice)
 
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [Transaction, Invoice],
         workflows: [workflow as unknown as WorkflowDefinition],
         ...createTestRuntimeDeps(),
       })
     }).toThrow(WorkflowDefinitionError)
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [Transaction, Invoice],
         workflows: [workflow as unknown as WorkflowDefinition],
         ...createTestRuntimeDeps(),
@@ -754,15 +754,15 @@ describe("Sixb workflow registration", () => {
       }))
       .then(findBestInvoice)
 
-    const sixb = new Sixb({
+    const sixb = createTestSixb({
       ontology: [Transaction, Invoice],
       schedules: [highValueTransaction],
       workflows: [workflow],
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.listSchedules()).toEqual([highValueTransaction])
-    expect(sixb.getScheduleById("transaction.high-value")).toBe(highValueTransaction)
+    expect(sixb.schedules.list()).toEqual([highValueTransaction])
+    expect(sixb.schedules.getById("transaction.high-value")).toBe(highValueTransaction)
     expect(sixb.workflows.getById("registered-event-schedule")).toBe(workflow)
   })
 
@@ -780,7 +780,7 @@ describe("Sixb workflow registration", () => {
       .then(findBestInvoice)
 
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [Transaction, Invoice],
         workflows: [workflow],
         ...createTestRuntimeDeps(),
@@ -799,7 +799,7 @@ describe("Sixb workflow registration", () => {
       .then(findBestInvoice)
 
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [Transaction, Invoice],
         schedules: [highValueTransaction],
         workflows: [workflow as unknown as WorkflowDefinition],
@@ -824,14 +824,14 @@ describe("Sixb workflow registration", () => {
       }))
 
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [Transaction, Invoice],
         workflows: [workflow],
         ...createTestRuntimeDeps(),
       })
     }).toThrow(WorkflowDefinitionError)
     expect(() => {
-      new Sixb({
+      createTestSixb({
         ontology: [Transaction, Invoice],
         workflows: [workflow],
         ...createTestRuntimeDeps(),

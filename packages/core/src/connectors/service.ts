@@ -6,29 +6,16 @@ type ConnectorConnectionState = {
   clientPromise: Promise<unknown>
 }
 
-export class ConnectorRuntime {
-  private readonly definitionsById = new Map<string, ConnectorDefinition>()
+/** Process-owned connector clients and their lifecycle. */
+export class ConnectorService {
+  private readonly definitionsById: ReadonlyMap<string, ConnectorDefinition>
   private readonly connectionStates = new Map<ConnectorDefinition, ConnectorConnectionState>()
 
   constructor(
     private readonly projectId: string,
     definitions: readonly ConnectorDefinition[]
   ) {
-    for (const definition of definitions) {
-      if (this.definitionsById.has(definition.id)) {
-        throw new ConnectorError(`Duplicate connector id: ${definition.id}`)
-      }
-
-      this.definitionsById.set(definition.id, definition)
-    }
-  }
-
-  list(): readonly ConnectorDefinition[] {
-    return [...this.definitionsById.values()]
-  }
-
-  getById(id: string): ConnectorDefinition | null {
-    return this.definitionsById.get(id) ?? null
+    this.definitionsById = new Map(definitions.map((definition) => [definition.id, definition]))
   }
 
   async connect<TAdapter extends ConnectorAdapter>(
@@ -71,7 +58,7 @@ export class ConnectorRuntime {
     }
   }
 
-  async disconnectAll(): Promise<void> {
+  async close(): Promise<void> {
     const activeConnections = [...this.connectionStates.entries()]
     this.connectionStates.clear()
 

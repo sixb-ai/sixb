@@ -24,10 +24,11 @@ import {
   type LoggerProvider,
   prop,
   type RuleDefinition,
-  Sixb,
+  SixbHost,
   type StorageMigrator,
 } from "@sixb/core"
 import { reportEventDeliveryFailure } from "@sixb/core/internal/error-reporting"
+import { createTestSixb } from "@sixb/core/testing"
 import {
   checkRuntimeLakeDefinitions,
   migrateRuntimeStorage,
@@ -169,7 +170,7 @@ describe("startSixbRuntime", () => {
     }
     const storage = Object.assign(new InMemoryStorage(), { migrators: [migrator] })
 
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "cli-with-migrations",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -187,7 +188,7 @@ describe("startSixbRuntime", () => {
   })
 
   test("skips workers when cohostWorkers is true but no definitions are registered", async () => {
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "cli-no-workers",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -216,7 +217,7 @@ describe("startSixbRuntime", () => {
       .from(erpDb)
       .read(() => [])
       .intoDataset(rawOrdersDataset)
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "cli-no-sync-worker",
       ontology: [Zone],
       connectors: [erpDb],
@@ -247,7 +248,7 @@ describe("startSixbRuntime", () => {
         col("currency", "string", { nullable: true }),
       ],
     })
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "cli-lake-definition-drift",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -264,7 +265,7 @@ describe("startSixbRuntime", () => {
   })
 
   test("skips the projection worker when cohostWorkers is true but no projections are registered", async () => {
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "cli-no-projections",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -285,7 +286,7 @@ describe("startSixbRuntime", () => {
     const projection = defineProjection("zone-proj", Zone)
       .fromDataset(rawOrdersDataset)
       .properties({ id: "orderId" })
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "cli-no-projection-worker",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -306,7 +307,7 @@ describe("startSixbRuntime", () => {
 
   test("does not co-host the workflow worker unless explicitly enabled", async () => {
     const workflow = defineWorkflow("runtime-manual-workflow").input({}).then(workflowStep)
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "cli-no-workflow-worker",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -329,7 +330,7 @@ describe("startSixbRuntime", () => {
       .from(erpDb)
       .read(() => [{ orderId: "ord_1" }])
       .intoDataset(rawOrdersDataset)
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "cli-with-sync-worker",
       ontology: [Zone],
       connectors: [erpDb],
@@ -389,7 +390,7 @@ describe("startSixbRuntime", () => {
       events.dataset(rawOrdersDataset).updated()
     )
     const pipeline = definePipeline("normalize-orders").when(rawOrdersUpdated).then(normalizeStep)
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "cli-with-pipeline-worker",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -441,7 +442,7 @@ describe("startSixbRuntime", () => {
     const projection = defineProjection("zone-proj", Zone)
       .fromDataset(rawOrdersDataset)
       .properties({ id: "orderId" })
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "cli-with-projection-route",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -530,7 +531,7 @@ describe("startSixbRuntime", () => {
       events.dataset(rawOrdersDataset).updated()
     )
     const pipeline = definePipeline("normalize-orders").when(rawOrdersUpdated).then(normalizeOrders)
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "cli-with-pipeline-route",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -582,7 +583,7 @@ describe("startSixbRuntime", () => {
 
   test("co-hosts the workflow worker when enabled and workflows are registered", async () => {
     const workflow = defineWorkflow("runtime-manual-workflow").input({}).then(workflowStep)
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "cli-with-workflow-worker",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -606,7 +607,7 @@ describe("startSixbRuntime", () => {
       .input({})
       .when(daily)
       .then(workflowStep)
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "cli-with-workflow-route",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -651,7 +652,7 @@ describe("startSixbRuntime", () => {
 
   test("co-hosts the rules worker when rules are registered", async () => {
     const broker = new InMemoryBroker()
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "cli-with-rules-worker",
       ontology: [Transaction],
       broker,
@@ -666,7 +667,7 @@ describe("startSixbRuntime", () => {
 
     expect(runtime.rulesWorker).not.toBeNull()
 
-    await sixb.upsertObject("Transaction", { id: "tx-1", status: "posted" })
+    await createTestSixb(sixb).objects.upsert("Transaction", { id: "tx-1", status: "posted" })
 
     const events = await waitFor(
       () => sixb.events.read({ topics: ["rules"] }),
@@ -681,7 +682,7 @@ describe("startSixbRuntime", () => {
   test("stops the rules worker before closing runtime providers", async () => {
     const calls: string[] = []
     const broker = new LifecycleBroker(calls)
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "cli-rules-lifecycle-order",
       ontology: [Transaction],
       broker,
@@ -691,7 +692,7 @@ describe("startSixbRuntime", () => {
       queues: new InMemoryQueues(),
       rules: [postedRule],
     })
-    sixb.disconnectConnectors = async () => {
+    sixb.closeConnectors = async () => {
       calls.push("connectors:stop")
     }
 
@@ -706,7 +707,7 @@ describe("startSixbRuntime", () => {
 
   test("closes optional provider handles during runtime cleanup", async () => {
     const calls: string[] = []
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "cli-provider-cleanup",
       ontology: [Transaction],
       broker: new LifecycleBroker(calls),
@@ -716,7 +717,7 @@ describe("startSixbRuntime", () => {
       queues: new ClosableQueues(calls),
       logger: new ClosableLogger(calls),
     })
-    sixb.disconnectConnectors = async () => {
+    sixb.closeConnectors = async () => {
       calls.push("connectors:stop")
     }
 
@@ -737,7 +738,7 @@ describe("startSixbRuntime", () => {
     const calls: string[] = []
     const handlerStarted = deferred<void>()
     const releaseHandler = deferred<void>()
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "cli-final-delivery-failure",
       ontology: [Transaction],
       broker: new InMemoryBroker(),
@@ -783,7 +784,7 @@ describe("startSixbRuntime", () => {
 describe("split production runtime roles", () => {
   test("starts only the scheduler for the scheduler role", async () => {
     const calls: string[] = []
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "cli-scheduler-role",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -793,10 +794,10 @@ describe("split production runtime roles", () => {
       queues: new InMemoryQueues(),
       schedules: [defineSchedule("role-daily").cron("0 2 * * *")],
     })
-    sixb.startScheduler = async () => {
+    sixb.scheduler.start = async () => {
       calls.push("scheduler:start")
     }
-    sixb.stopScheduler = async () => {
+    sixb.scheduler.stop = async () => {
       calls.push("scheduler:stop")
     }
     const runtime = await startSchedulerRuntime(sixb)
@@ -810,7 +811,7 @@ describe("split production runtime roles", () => {
 
   test("starts only rules evaluation for the rules role", async () => {
     const calls: string[] = []
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "cli-rules-role",
       ontology: [Transaction],
       broker: new LifecycleBroker(calls),
@@ -820,7 +821,7 @@ describe("split production runtime roles", () => {
       queues: new InMemoryQueues(),
       rules: [postedRule],
     })
-    sixb.startScheduler = async () => {
+    sixb.scheduler.start = async () => {
       calls.push("scheduler:start")
     }
 
@@ -841,7 +842,7 @@ describe("split production runtime roles", () => {
       .input({})
       .when(daily)
       .then(workflowStep)
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "cli-orchestrator-role",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -852,7 +853,7 @@ describe("split production runtime roles", () => {
       schedules: [daily],
       workflows: [workflow],
     })
-    sixb.startScheduler = async () => {
+    sixb.scheduler.start = async () => {
       calls.push("scheduler:start")
     }
 
@@ -896,7 +897,7 @@ describe("split runtime preparation", () => {
     const storage = Object.assign(new InMemoryStorage(), { migrators: [migrator] })
     const lakeStorage = new LakeAccessTrackingStorage(calls)
 
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "cli-migrate-runtime-storage",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -922,7 +923,7 @@ describe("split runtime preparation", () => {
         col("currency", "string", { nullable: true }),
       ],
     })
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "cli-check-lake-definitions-drift",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -942,7 +943,7 @@ describe("split runtime preparation", () => {
     const lakeStorage = createLakeStorage()
     await lakeStorage.createDataset(rawOrdersDataset)
 
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "cli-check-lake-definitions-ok",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -958,7 +959,7 @@ describe("split runtime preparation", () => {
 
   test("service startup helpers can start without calling lake storage", async () => {
     const calls: string[] = []
-    const sixb = new Sixb({
+    const sixb = new SixbHost({
       id: "cli-startup-without-lake-access",
       ontology: [Transaction],
       broker: new InMemoryBroker(),

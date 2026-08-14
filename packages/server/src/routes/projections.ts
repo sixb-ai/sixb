@@ -1,15 +1,13 @@
 import type {
   LinkProjectionDefinition,
   ObjectProjectionDefinition,
-  OntologySource,
   ProjectionDefinition,
-  Sixb,
+  SixbHostView,
   TelemetryProjectionDefinition,
 } from "@sixb/core"
-import { canViewProjection, canViewProjectionRun } from "@sixb/core/internal/authorization"
 import type { ProjectionRunRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
-import { requestAuthState } from "../auth/scope"
+import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
@@ -45,8 +43,6 @@ function serializeProjectionRun(run: ProjectionRunRecord) {
 }
 
 type SerializedProjectionRun = ReturnType<typeof serializeProjectionRun>
-type RequestAuthorization = ReturnType<typeof requestAuthState>["authz"]
-
 interface ViewableProjectionCatalog {
   readonly objectProjections: readonly ObjectProjectionDefinition[]
   readonly linkProjections: readonly LinkProjectionDefinition[]
@@ -54,32 +50,24 @@ interface ViewableProjectionCatalog {
 }
 
 async function getLatestProjectionRuns(
-  sixb: Sixb<readonly OntologySource[]>,
+  sixb: ReturnType<typeof requireRequestSixb>,
   projectionIds: readonly string[]
 ): Promise<Map<string, SerializedProjectionRun>> {
-  const storage = sixb.storage.projectionRuns
-  if (!storage || projectionIds.length === 0) {
+  if (projectionIds.length === 0) {
     return new Map()
   }
 
-  const result = await storage.listLatestByProjectionIds({ projectId: sixb.id, projectionIds })
+  const result = await sixb.projections.runs.listLatest(projectionIds)
   return new Map(result.runs.map((run) => [run.identity.projectionId, serializeProjectionRun(run)]))
 }
 
 function listViewableProjections(
-  sixb: Sixb<readonly OntologySource[]>,
-  authz: RequestAuthorization
+  sixb: ReturnType<typeof requireRequestSixb>
 ): ViewableProjectionCatalog {
   return {
-    objectProjections: sixb
-      .listObjectProjections()
-      .filter((projection) => canViewProjection(authz, projection)),
-    linkProjections: sixb
-      .listLinkProjections()
-      .filter((projection) => canViewProjection(authz, projection)),
-    telemetryProjections: sixb
-      .listTelemetryProjections()
-      .filter((projection) => canViewProjection(authz, projection)),
+    objectProjections: sixb.projections.listObjects(),
+    linkProjections: sixb.projections.listLinks(),
+    telemetryProjections: sixb.projections.listTelemetry(),
   }
 }
 
@@ -118,13 +106,13 @@ function serializeProjectionCatalog(
   }
 }
 
-export function registerProjectionRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
+export function registerProjectionRoutes(app: Elysia, host: SixbHostView) {
   return app
     .get(
       "/api/projections",
       async (context) => {
-        const { authz } = requestAuthState(context)
-        const catalog = listViewableProjections(sixb, authz)
+        const sixb = requireRequestSixb(context)
+        const catalog = listViewableProjections(sixb)
         const latestRuns = await getLatestProjectionRuns(sixb, projectionCatalogIds(catalog))
         return serializeProjectionCatalog(catalog, latestRuns)
       },
@@ -141,9 +129,9 @@ export function registerProjectionRoutes(app: Elysia, sixb: Sixb<readonly Ontolo
       "/api/projections/:projectionId",
       async (context) => {
         const { params, set } = context
-        const { authz } = requestAuthState(context)
-        const found = sixb.getProjectionById(params.projectionId)
-        if (!found || !canViewProjection(authz, found)) {
+        const sixb = requireRequestSixb(context)
+        const found = sixb.projections.getById(params.projectionId)
+        if (!found) {
           set.status = 404
           return { error: `Projection '${params.projectionId}' not found` }
         }
@@ -165,21 +153,19 @@ export function registerProjectionRoutes(app: Elysia, sixb: Sixb<readonly Ontolo
       "/api/projection-runs",
       async (context) => {
         const { query, set } = context
-        const { authz } = requestAuthState(context)
+        const sixb = requireRequestSixb(context)
         try {
-          const storage = sixb.storage.projectionRuns
+          const storage = host.storage.projectionRuns
           if (!storage) {
             return unconfiguredStorageResponse(set, "Projection run storage")
           }
 
           const parsed = ProjectionRunsQuerySchema.parse(query)
-          const result = await storage.list({
-            projectId: sixb.id,
+          const result = await sixb.projections.runs.list({
             projectionId: parsed.projectionId,
             projectionKind: parsed.projectionKind,
             datasetId: parsed.datasetId,
             datasetVersionId: parsed.datasetVersionId,
-            objectTypeIds: authz ? [...authz.grants["view:object"]] : undefined,
             statuses: parsed.status ? [parsed.status] : undefined,
             startedAfter: parseDate(parsed.startedAfter),
             startedBefore: parseDate(parsed.startedBefore),
@@ -215,15 +201,15 @@ export function registerProjectionRoutes(app: Elysia, sixb: Sixb<readonly Ontolo
       "/api/projection-runs/:runId",
       async (context) => {
         const { params, set } = context
-        const { authz } = requestAuthState(context)
+        const sixb = requireRequestSixb(context)
         try {
-          const storage = sixb.storage.projectionRuns
+          const storage = host.storage.projectionRuns
           if (!storage) {
             return unconfiguredStorageResponse(set, "Projection run storage")
           }
 
-          const run = await storage.getById({ projectId: sixb.id, id: params.runId })
-          if (!run || !canViewProjectionRun(authz, run.target)) {
+          const run = await sixb.projections.runs.getById(params.runId)
+          if (!run) {
             set.status = 404
             return { error: "Projection run not found" }
           }

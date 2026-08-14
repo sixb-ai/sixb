@@ -5,18 +5,17 @@
  * index. `can` (boolean) and `assertAuthorized` (throw) are the two ways to
  * consume a decision; every enforcement site goes through one of them.
  *
- * A missing authorization context means a privileged caller (raw `sixb`,
- * syncs, workers, tests) — everything is allowed. Scoped contexts are
- * default-deny: a request without a covering grant is denied.
- *
- * SECURITY — this makes "privileged" the silent default: any caller that
- * reaches a leaf without an authorization context bypasses all grant checks.
- * That is intended for internal callers, but it means HTTP routes serving
- * authenticated principals must go through the scoped runtime (`sixb.as(ctx)`),
- * never the raw runtime. See `RequestAuthState` in the server for the rule.
+ * Every protected leaf first resolves the opaque runtime capability. Missing, forged, or
+ * unregistered authority is denied; only an explicitly registered trusted or disabled execution
+ * is unrestricted.
  */
 
 import type { AuthSessionAudience } from "../auth/audience"
+import {
+  type ResolvedRuntimeAuthorization,
+  resolveRuntimeAuthorization,
+} from "../execution/authorization"
+import type { ExecutionContext, RuntimeAuthorization } from "../execution/types"
 import { AuthorizationError } from "./errors"
 import type { GrantKind } from "./grant-kinds"
 import type { AuthorizationContext, GrantIndex } from "./types"
@@ -45,6 +44,7 @@ export interface AuthzDecision {
 }
 
 interface AuthorizedRuntime {
+  readonly runtimeAuthorization?: RuntimeAuthorization
   readonly authorization?: AuthorizationContext
 }
 
@@ -116,15 +116,31 @@ export function isAllowed(
 }
 
 export function assertAuthorized(runtime: AuthorizedRuntime, request: AuthzRequest): void {
-  const decision = evaluate(runtime.authorization, request)
+  const resolved = assertRuntimeAuthorizationBound(runtime)
+  const authorization = resolved.type === "principal" ? resolved.context : undefined
+  const decision = evaluate(authorization, request)
   if (decision.allowed) {
     return
   }
 
   throw new AuthorizationError(
     decision.missing[0] ?? request.kind,
-    deniedMessage(runtime.authorization, request)
+    deniedMessage(authorization, request)
   )
+}
+
+/** Resolve registered process-local authority before a protected leaf makes a decision. */
+export function assertRuntimeAuthorizationBound(
+  runtime: AuthorizedRuntime
+): Exclude<ResolvedRuntimeAuthorization, { readonly type: "denied" }> {
+  const resolved = resolveRuntimeAuthorization(runtime.runtimeAuthorization)
+  if (resolved.type === "denied") {
+    throw new AuthorizationError(
+      "runtime:unbound",
+      "[Sixb] Protected operations require a registered execution scope."
+    )
+  }
+  return resolved
 }
 
 /**
@@ -162,11 +178,46 @@ export function assertCanAppendTelemetry(runtime: AuthorizedRuntime, objectTypeI
  *
  * One caller left — `listLinks`, whose rows reveal target types that no read grant covers. Object,
  * link, and telemetry writes moved to {@link assertCanEdit} / {@link assertCanAppendTelemetry}.
- * Keeps unsupported surfaces denied even if a scoped runtime context reaches a code path the scoped
- * SDK does not expose.
+ * Keeps unsupported surfaces denied even if a principal-bound runtime context reaches a code path
+ * the execution SDK does not expose.
  */
 export function assertPrivileged(runtime: AuthorizedRuntime, operation: string): void {
-  if (!runtime.authorization) {
+  const resolved = assertRuntimeAuthorizationBound(runtime)
+  if (resolved.type === "unrestricted") {
+    return
+  }
+
+  throw new AuthorizationError(
+    `privileged:${operation}`,
+    `[Sixb] Operation '${operation}' is not covered by scoped authorization grants.`
+  )
+}
+
+/**
+ * Assert access to process providers that trusted executions and genuine agent runs may use.
+ *
+ * Agent provenance alone is not authority: the registered capability must be bound to the exact
+ * same agent and run before this check succeeds.
+ */
+export function assertProviderAccess(
+  runtime: AuthorizedRuntime,
+  execution: ExecutionContext,
+  operation: string
+): void {
+  const resolved = assertRuntimeAuthorizationBound(runtime)
+  if (resolved.type === "unrestricted") {
+    return
+  }
+
+  const binding = resolved.executionBinding
+  const executor = execution.executor
+  if (
+    binding?.type === "agent" &&
+    executor.type === "agent" &&
+    binding.executionId === execution.id &&
+    binding.agentId === executor.agentId &&
+    binding.runId === executor.runId
+  ) {
     return
   }
 

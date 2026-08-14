@@ -1,3 +1,4 @@
+import type { AgentDocumentSource } from "./document-preview/types"
 import type { AgentMessagePart } from "./types"
 
 // The render-ready vocabulary shared by the durable transcript and the live streaming row.
@@ -19,13 +20,13 @@ export type NormalizedPart =
   | {
       readonly kind: "file"
       readonly fileRef: Extract<AgentMessagePart, { type: "file" }>["fileRef"]
-      readonly href?: string
+      readonly document?: AgentDocumentSource
     }
   | { readonly kind: "step-start" }
 
 export function normalizeDurableParts(
   parts: readonly AgentMessagePart[],
-  options: { readonly fileHref?: (partIndex: number) => string | undefined } = {}
+  options: { readonly fileSource?: (partIndex: number) => AgentDocumentSource | undefined } = {}
 ): NormalizedPart[] {
   // Context is rendered separately with the user message. It is invalid on assistant messages,
   // but filtering keeps old or malformed durable data from turning into a fake step boundary.
@@ -60,7 +61,7 @@ export function normalizeDurableParts(
           {
             kind: "file",
             fileRef: part.fileRef,
-            ...(options.fileHref === undefined ? {} : { href: options.fileHref(index) }),
+            ...(options.fileSource === undefined ? {} : { document: options.fileSource(index) }),
           },
         ]
       case "step-start":
