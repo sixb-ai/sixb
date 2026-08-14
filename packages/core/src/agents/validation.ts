@@ -6,7 +6,7 @@ import {
   type ValueType,
   validateSchemaValue,
 } from "../ontology"
-import type { GroupDefinition, SecurityRegistry } from "../security"
+import type { GroupDefinition, SecurityDefinitionCatalog } from "../security"
 import { AgentDefinitionError } from "./errors"
 import {
   AGENT_REASONING_LEVELS,
@@ -232,7 +232,7 @@ export function groupIdsFromDefinitions(
 
 export function validateAgentGroupReferences(
   agents: readonly AgentDefinition[],
-  security: SecurityRegistry
+  security: SecurityDefinitionCatalog
 ): void {
   for (const agent of agents) {
     assertNoDuplicateGroupIds(agent.id, agent.groupIds)

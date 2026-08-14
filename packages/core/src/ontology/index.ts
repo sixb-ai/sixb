@@ -55,7 +55,12 @@ export type {
 
 // ── Registry ──────────────────────────────────────────────
 
-export type { OntologyDocumentInput, OntologyRegistryOptions, OntologySource } from "./registry"
+export type {
+  OntologyDefinitionCatalog,
+  OntologyDocumentInput,
+  OntologyRegistryOptions,
+  OntologySource,
+} from "./registry"
 export { OntologyRegistry } from "./registry"
 
 // ── Errors ─────────────────────────────────────────────────

@@ -6,8 +6,8 @@
  */
 
 import type {
+  ActionDefinitionCatalog,
   ActionParamsConfig,
-  ActionRegistry,
   InferActionParams,
   RequestActionResult,
 } from "../actions"
@@ -49,7 +49,7 @@ import type { ActionRunRecord, ObjectLinkRow, Storage } from "../storage"
 export interface SixbHostContext {
   readonly projectId: string
   readonly ontology: OntologyRegistry
-  readonly actionRegistry: ActionRegistry
+  readonly actionRegistry: ActionDefinitionCatalog
   readonly events: DomainEventLog
   readonly storage: Storage
   readonly queues: Queues

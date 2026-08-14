@@ -1,4 +1,4 @@
-import type { LakeStorage, OntologyRegistry, SixbDefinitions } from "@sixb/core"
+import type { LakeStorage, OntologyDefinitionCatalog, SixbDefinitions } from "@sixb/core"
 import type { ProjectionMaterializationIdentity } from "@sixb/core/internal/materialization"
 import type {
   ProjectionRunClaim,
@@ -8,7 +8,7 @@ import type {
 
 export interface ProjectionWorkerContext {
   readonly projectId: string
-  readonly ontology: OntologyRegistry
+  readonly ontology: OntologyDefinitionCatalog
   readonly lakeStorage: LakeStorage
   readonly projectionRunsStorage: ProjectionRunStorage
   readonly datasets: Pick<SixbDefinitions["datasets"], "getById">

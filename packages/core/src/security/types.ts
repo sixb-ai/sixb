@@ -1,5 +1,4 @@
 import type { AuthSessionAudience } from "../auth/audience"
-import type { ResolvedRole } from "../authorization/types"
 
 export interface GroupDefinition<TId extends string = string> {
   readonly kind: "group"
@@ -142,15 +141,4 @@ export interface RegisteredSecurityDefinitions {
   readonly rolesById: ReadonlyMap<string, RoleDefinition>
   readonly membershipPolicies: readonly MembershipPolicyDefinition[]
   readonly membershipPoliciesById: ReadonlyMap<string, MembershipPolicyDefinition>
-}
-
-export interface SecurityRegistry {
-  listGroups(): readonly GroupDefinition[]
-  getGroupById(groupId: string): GroupDefinition | null
-  listRoles(): readonly RoleDefinition[]
-  getRoleById(roleId: string): RoleDefinition | null
-  /** Roles with their grants pre-expanded to concrete id sets for resolution. */
-  listResolvedRoles(): readonly ResolvedRole[]
-  listMembershipPolicies(): readonly MembershipPolicyDefinition[]
-  getMembershipPolicyById(policyId: string): MembershipPolicyDefinition | null
 }

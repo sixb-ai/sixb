@@ -1,5 +1,4 @@
-import type { ObjectType } from "../ontology"
-import type { OntologyRegistry } from "../ontology/registry"
+import type { ObjectType, OntologyDefinitionCatalog } from "../ontology"
 import {
   ActionDefinitionError,
   effectsWithoutEditsMessage,
@@ -15,16 +14,22 @@ export interface ActionDefinitionCatalog {
   listForType(type: ObjectType): readonly ObjectActionDefinition[]
 }
 
+export interface ActionRegistryOptions {
+  readonly actions: readonly ActionDefinition[]
+  readonly ontology: OntologyDefinitionCatalog
+}
+
 export class ActionRegistry implements ActionDefinitionCatalog {
   private readonly byId = new Map<string, ActionDefinition>()
   private readonly globalActions: ActionDefinition[] = []
   private readonly byTargetId = new Map<string, ObjectActionDefinition[]>()
 
-  constructor(
-    actions: readonly ActionDefinition[],
-    private readonly ontology: OntologyRegistry
-  ) {
-    for (const action of actions) {
+  private readonly ontology: OntologyDefinitionCatalog
+
+  constructor(options: ActionRegistryOptions) {
+    this.ontology = options.ontology
+
+    for (const action of options.actions) {
       const previous = this.byId.get(action.id)
       if (previous) {
         const chainDuplicate = this.getInheritanceDuplicate(action, previous)

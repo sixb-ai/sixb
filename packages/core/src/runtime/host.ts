@@ -59,12 +59,12 @@ import type {
   GroupDefinition,
   MembershipPolicyDefinition,
   RoleDefinition,
-  SecurityRegistry,
+  SecurityDefinitionCatalog,
 } from "../security"
 import type { Storage } from "../storage"
 import type { SyncDefinition } from "../syncs"
 import type { RegisteredWebhook } from "../webhooks"
-import { registerWebhooks, WebhookValidationError, webhookRoute } from "../webhooks"
+import { WebhookRegistry, WebhookValidationError } from "../webhooks"
 import type { WorkflowDefinition } from "../workflows"
 import type { SixbDefinitions } from "./definitions"
 import {
@@ -115,8 +115,7 @@ export class SixbHost<
   TOntologySources extends readonly OntologySource[] = readonly OntologySource[],
 > {
   readonly projectId: string
-  private readonly webhooksByRoute = new Map<string, RegisteredWebhook>()
-  private readonly webhooks: readonly RegisteredWebhook[]
+  private readonly webhookRegistry: WebhookRegistry
   private readonly hostContext: SixbHostContext
   private readonly committedFacts: OntologyOutboxDispatcher
   private readonly eventService: DomainEventService
@@ -175,11 +174,7 @@ export class SixbHost<
     const connectors = definitions.connectors.list()
     this.connectorService = new ConnectorService(this.projectId, connectors)
     assertWebhookDeliveryStorage(connectors, this.storage)
-    this.webhooks = registerWebhooks(connectors).webhooks
-
-    for (const registered of this.webhooks) {
-      this.webhooksByRoute.set(registered.route, registered)
-    }
+    this.webhookRegistry = new WebhookRegistry({ connectors })
 
     const materializer = createOntologyMaterializer({
       projectId: this.projectId,
@@ -251,12 +246,12 @@ export class SixbHost<
 
   /** All webhook endpoints registered through connector adapters. */
   listWebhooks(): readonly RegisteredWebhook[] {
-    return this.webhooks
+    return this.webhookRegistry.list()
   }
 
   /** Lookup a registered connector webhook by connector id and webhook id. */
   getWebhookById(connectorId: string, webhookId: string): RegisteredWebhook | null {
-    return this.webhooksByRoute.get(webhookRoute(connectorId, webhookId)) ?? null
+    return this.webhookRegistry.getById(connectorId, webhookId)
   }
 
   /** Start the API-owned recovery and retention loop. Embedded runtimes opt in explicitly. */
@@ -316,7 +311,7 @@ export type SixbHostView = Omit<SixbHost, "withScope"> & {
 
 function validateAuthStrategySecurityReferences(
   strategy: ReturnType<AuthRuntime["getStrategy"]>,
-  security: SecurityRegistry
+  security: SecurityDefinitionCatalog
 ): void {
   if (!isMagicLinkAuthStrategy(strategy) && !isOidcAuthStrategy(strategy)) {
     return
