@@ -153,7 +153,7 @@ function applyObjectTransition(
   try {
     const resolved = resolveObject(context.ontology, working)
     if (resolved) validateEffectiveObject(context.ontology, resolved.ref, resolved.properties)
-    validateWorkingCardinality(context.ontology, state.links.scopeSnapshots)
+    validateWorkingCardinality(state.links.slots)
   } catch (error) {
     working.override = previous
     throw error

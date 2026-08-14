@@ -38,7 +38,6 @@ import type {
 import type { SQLClient } from "../pg-client"
 import {
   databaseSafeInteger,
-  jsonKeyParameter,
   jsonParameter,
   linkRefFromColumns,
   objectRefFromColumns,
@@ -420,7 +419,7 @@ export class PgMaterializationStateReader {
     const accumulators = new Map(
       scopes.map(({ source, linkId }) => {
         const key = linkScopeSortKey(source, linkId)
-        return [key, startScopeAccumulator(source, linkId, key)] as const
+        return [key, startScopeAccumulator(source, linkId)] as const
       })
     )
     const requestedParameter = jsonParameter(this.sql, requested)
@@ -786,25 +785,6 @@ export class PgMaterializationStateReader {
     return new Map(
       rows.map((row) => [linkRefKey(linkRefFromColumns(row)), row.last_commit_id] as const)
     )
-  }
-
-  async overrideLastCommit(kind: "object" | "link", entityKey: string): Promise<string | null> {
-    const identity = jsonKeyParameter(this.sql, entityKey)
-    const [row] =
-      kind === "object"
-        ? await this.sql<{ readonly last_commit_id: string }[]>`
-            SELECT last_commit_id FROM ontology_object_overrides
-            WHERE project_id = ${this.projectId}
-              AND object_type_id = ${identity}->>0
-              AND primary_id = ${identity}->>1
-          `
-        : await this.sql<{ readonly last_commit_id: string }[]>`
-            SELECT last_commit_id FROM ontology_link_overrides
-            WHERE project_id = ${this.projectId}
-              AND identity_kind = 'edge'
-              AND identity_key = ${identity}
-          `
-    return row?.last_commit_id ?? null
   }
 
   private async replacementSources(

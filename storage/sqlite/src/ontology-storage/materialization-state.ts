@@ -438,7 +438,7 @@ export class SqliteMaterializationStateReader {
     const accumulators = new Map(
       scopes.map(({ source, linkId }) => {
         const key = linkScopeSortKey(source, linkId)
-        return [key, startScopeAccumulator(source, linkId, key)] as const
+        return [key, startScopeAccumulator(source, linkId)] as const
       })
     )
     const requestedJson = canonicalJson(requested)
@@ -709,28 +709,6 @@ export class SqliteMaterializationStateReader {
         ref.target.primaryId
       ) as { readonly last_commit_id: string | null } | null
     return row ? row.last_commit_id : undefined
-  }
-
-  overrideLastCommit(kind: "object" | "link", entityKey: string): string | null {
-    const row =
-      kind === "object"
-        ? (this.db
-            .query(
-              `SELECT last_commit_id FROM ontology_object_overrides
-               WHERE project_id = ?
-                 AND object_type_id = json_extract(?, '$[0]')
-                 AND primary_id = json_extract(?, '$[1]')`
-            )
-            .get(this.projectId, entityKey, entityKey) as {
-            readonly last_commit_id: string
-          } | null)
-        : (this.db
-            .query(
-              `SELECT last_commit_id FROM ontology_link_overrides
-               WHERE project_id = ? AND identity_kind = 'edge' AND identity_key = json(?)`
-            )
-            .get(this.projectId, entityKey) as { readonly last_commit_id: string } | null)
-    return row?.last_commit_id ?? null
   }
 
   private replacementSources(

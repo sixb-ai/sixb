@@ -1159,7 +1159,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     rows.sort((left, right) =>
       linkRefSortKey(linkRef(left)).localeCompare(linkRefSortKey(linkRef(right)))
     )
-    const accumulator = startScopeAccumulator(source, linkId, linkScopeSortKey(source, linkId))
+    const accumulator = startScopeAccumulator(source, linkId)
     for (let offset = 0; offset < rows.length; offset += 1_000) {
       const page = rows.slice(offset, offset + 1_000)
       this.hooks.observeBuffer?.("state.link-scope.page", page.length)
