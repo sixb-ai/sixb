@@ -77,7 +77,7 @@
     },
     "broker/redis": {
       "name": "@sixb/broker-redis",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
