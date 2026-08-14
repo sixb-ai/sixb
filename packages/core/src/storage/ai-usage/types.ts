@@ -22,6 +22,14 @@ export interface AiModelCallUsage extends AiModelCallUsageInput {
   readonly reportingStatus: AiUsageReportingStatus
 }
 
+/** Aggregated usage and call presence for one durable execution. */
+export interface AiUsageExecutionSummary {
+  /** Number of idempotent model-call ledger records included across every delivery attempt. */
+  readonly modelCallCount: number
+  /** Unavailable with a positive call count means the provider reported no normalized counts. */
+  readonly usage: AiModelCallUsage
+}
+
 /** The durable execution that owns a model call. */
 export type AiUsageExecutionIdentity =
   | {
@@ -90,12 +98,15 @@ export interface AiUsageStorage {
    */
   recordModelCall(input: RecordAiModelCallInput): Promise<RecordAiModelCallResult>
 
-  /** Aggregate normalized usage across every attempt of one execution. */
-  summarizeExecution(input: SummarizeAiUsageExecutionInput): Promise<AiModelCallUsage>
+  /** Aggregate normalized usage and call presence across every attempt of one execution. */
+  summarizeExecution(input: SummarizeAiUsageExecutionInput): Promise<AiUsageExecutionSummary>
 
   /**
    * Aggregate multiple executions in one storage read. Results have the same length and order as
-   * `executions`, including an unavailable result for executions without ledger records.
+   * `executions`. Executions without ledger records have a zero model-call count and unavailable
+   * usage.
    */
-  summarizeExecutions(input: SummarizeAiUsageExecutionsInput): Promise<readonly AiModelCallUsage[]>
+  summarizeExecutions(
+    input: SummarizeAiUsageExecutionsInput
+  ): Promise<readonly AiUsageExecutionSummary[]>
 }

@@ -11,6 +11,7 @@ export type {
   AiModelCallUsageInput,
   AiModelCallUsageRecord,
   AiUsageExecutionIdentity,
+  AiUsageExecutionSummary,
   AiUsageReportingStatus,
   AiUsageStorage,
   RecordAiModelCallInput,
