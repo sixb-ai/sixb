@@ -23,7 +23,7 @@ import {
   prop,
   ref,
   resolveAuthorizationContext,
-  type SecurityRegistry,
+  type SecurityDefinitionCatalog,
   SixbHost,
   type Storage,
   type StoredDomainEvent,
@@ -262,7 +262,7 @@ function bindPrincipal(host: TestExecutionHost, authorization: AuthorizationCont
 }
 
 function contextFor(
-  host: { definitions: { security: SecurityRegistry } },
+  host: { definitions: { security: SecurityDefinitionCatalog } },
   groupIds: readonly string[]
 ) {
   return resolveAuthorizationContext({

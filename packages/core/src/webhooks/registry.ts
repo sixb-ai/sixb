@@ -2,52 +2,75 @@ import type { ConnectorDefinition } from "../connectors/types"
 import { WebhookValidationError } from "./errors"
 import type { RegisteredWebhook, WebhookDefinition } from "./types"
 
-export function registerWebhooks(connectors: readonly ConnectorDefinition[]): {
-  readonly webhooks: readonly RegisteredWebhook[]
-} {
-  const registered: RegisteredWebhook[] = []
-  const routes = new Map<string, RegisteredWebhook>()
+/** Read-only access to connector webhooks registered by a host. */
+export interface WebhookCatalog {
+  list(): readonly RegisteredWebhook[]
+  getByRoute(route: string): RegisteredWebhook | null
+  getById(connectorId: string, webhookId: string): RegisteredWebhook | null
+}
 
-  for (const connector of connectors) {
-    const webhooks = connector.adapter.webhooks ?? []
-    if (!Array.isArray(webhooks)) {
-      throw new WebhookValidationError(
-        `[Sixb] Connector '${connector.id}' webhooks must be an array when provided.`
-      )
-    }
+export interface WebhookRegistryOptions {
+  readonly connectors: readonly ConnectorDefinition[]
+}
 
-    const ids = new Set<string>()
-    for (const webhook of webhooks) {
-      assertValidWebhook(connector.id, webhook)
+export class WebhookRegistry implements WebhookCatalog {
+  private readonly webhooks: readonly RegisteredWebhook[]
+  private readonly byRoute = new Map<string, RegisteredWebhook>()
 
-      if (ids.has(webhook.id)) {
+  constructor(options: WebhookRegistryOptions) {
+    const registered: RegisteredWebhook[] = []
+
+    for (const connector of options.connectors) {
+      const webhooks = connector.adapter.webhooks ?? []
+      if (!Array.isArray(webhooks)) {
         throw new WebhookValidationError(
-          `[Sixb] Duplicate webhook id '${webhook.id}' for connector '${connector.id}'.`
-        )
-      }
-      ids.add(webhook.id)
-
-      const route = webhookRoute(connector.id, webhook.id)
-      const duplicate = routes.get(route)
-      if (duplicate) {
-        throw new WebhookValidationError(
-          `[Sixb] Duplicate webhook route '${route}' for connectors '${duplicate.connector.id}' and '${connector.id}'.`
+          `[Sixb] Connector '${connector.id}' webhooks must be an array when provided.`
         )
       }
 
-      const registeredWebhook = {
-        connector,
-        webhook,
-        route,
-      } satisfies RegisteredWebhook
+      const ids = new Set<string>()
+      for (const webhook of webhooks) {
+        assertValidWebhook(connector.id, webhook)
 
-      routes.set(route, registeredWebhook)
-      registered.push(registeredWebhook)
+        if (ids.has(webhook.id)) {
+          throw new WebhookValidationError(
+            `[Sixb] Duplicate webhook id '${webhook.id}' for connector '${connector.id}'.`
+          )
+        }
+        ids.add(webhook.id)
+
+        const route = webhookRoute(connector.id, webhook.id)
+        const duplicate = this.byRoute.get(route)
+        if (duplicate) {
+          throw new WebhookValidationError(
+            `[Sixb] Duplicate webhook route '${route}' for connectors '${duplicate.connector.id}' and '${connector.id}'.`
+          )
+        }
+
+        const registeredWebhook = {
+          connector,
+          webhook,
+          route,
+        } satisfies RegisteredWebhook
+
+        this.byRoute.set(route, registeredWebhook)
+        registered.push(registeredWebhook)
+      }
     }
+
+    this.webhooks = Object.freeze(registered)
   }
 
-  return {
-    webhooks: registered,
+  list(): readonly RegisteredWebhook[] {
+    return this.webhooks
+  }
+
+  getByRoute(route: string): RegisteredWebhook | null {
+    return this.byRoute.get(route) ?? null
+  }
+
+  getById(connectorId: string, webhookId: string): RegisteredWebhook | null {
+    return this.getByRoute(webhookRoute(connectorId, webhookId))
   }
 }
 

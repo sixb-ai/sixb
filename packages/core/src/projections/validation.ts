@@ -6,7 +6,7 @@
  */
 
 import type { DatasetDefinition } from "../datasets"
-import type { OntologyRegistry } from "../ontology"
+import type { OntologyDefinitionCatalog } from "../ontology"
 import type { ObjectType, Property } from "../ontology/types"
 import { ProjectionValidationError } from "./errors"
 import {
@@ -284,7 +284,7 @@ export interface ValidatedProjectionCatalog {
 
 export function validateProjectionsAtStartup(
   projections: ProjectionValidationInput,
-  ontology: OntologyRegistry,
+  ontology: OntologyDefinitionCatalog,
   datasetsById: ReadonlyMap<string, DatasetDefinition>
 ): ValidatedProjectionCatalog {
   const { objectProjections, linkProjections, telemetryProjections } = projections
@@ -509,7 +509,7 @@ export function validateProjectionsAtStartup(
   }
 }
 
-function validateMaterializationOntologyConstraints(ontology: OntologyRegistry): void {
+function validateMaterializationOntologyConstraints(ontology: OntologyDefinitionCatalog): void {
   for (const objectType of ontology.getObjectTypesById().values()) {
     for (const property of objectType.properties) {
       if (property.mode === "telemetry" && property.required === true) {

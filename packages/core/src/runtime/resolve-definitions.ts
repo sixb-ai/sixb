@@ -7,12 +7,16 @@ import type { DatasetDefinition } from "../datasets/types"
 import { assertDatasetDefinition } from "../datasets/validation"
 import { OntologyRegistry } from "../ontology"
 import type { PipelineDefinition } from "../pipelines/types"
-import { ProjectionRegistry } from "../projections/registry"
+import { ProjectionRegistry } from "../projections"
 import type { ProjectionDefinition } from "../projections/types"
 import { type RuleDefinition, validateRulesAtStartup } from "../rules"
 import { type ScheduleDefinition, validateSchedulesAtStartup } from "../schedules"
-import type { GroupDefinition, MembershipPolicyDefinition, RoleDefinition } from "../security"
-import { createRuntimeSecurityRegistry } from "../security/runtime"
+import {
+  type GroupDefinition,
+  type MembershipPolicyDefinition,
+  type RoleDefinition,
+  SecurityRegistry,
+} from "../security"
 import type { SyncDefinition } from "../syncs"
 import {
   validateKeyedDatasetWriterTopology,
@@ -42,14 +46,16 @@ interface DefinitionOptions {
 }
 
 interface ResolvedDefinitions extends SixbDefinitions {
+  readonly ontology: OntologyRegistry
   readonly actions: ActionRegistry
   readonly projections: ProjectionRegistry
+  readonly security: SecurityRegistry
 }
 
 /** Resolve and cross-validate every registered definition before runtime services are composed. */
 export function resolveDefinitions(options: DefinitionOptions): ResolvedDefinitions {
   const ontology = new OntologyRegistry({ sources: options.ontology })
-  const actionRegistry = new ActionRegistry(options.actions ?? [], ontology)
+  const actionRegistry = new ActionRegistry({ actions: options.actions ?? [], ontology })
   const registeredActionIds = new Set(actionRegistry.list().map((action) => action.id))
 
   const agents = options.agents ?? []
@@ -120,7 +126,7 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
   })
   const workflowsById = indexUniqueDefinitions("workflow", workflows)
 
-  const security = createRuntimeSecurityRegistry({
+  const security = new SecurityRegistry({
     groups: options.groups ?? [],
     roles: options.roles ?? [],
     membershipPolicies: options.membershipPolicies ?? [],

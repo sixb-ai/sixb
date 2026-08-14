@@ -11,7 +11,7 @@ import {
   type MembershipPolicyScope,
   missingMembershipGroupIds,
   resolveMembershipPolicyScope,
-  type SecurityRegistry,
+  type SecurityDefinitionCatalog,
 } from "../security"
 import type { Storage } from "../storage"
 import {
@@ -120,14 +120,14 @@ const ACCESS_TOKEN_TOUCH_INTERVAL_MS = 60_000
 export interface AuthRuntimeOptions {
   readonly projectId: string
   readonly storage: Storage
-  readonly security: SecurityRegistry
+  readonly security: SecurityDefinitionCatalog
   readonly config?: SixbAuthConfig
 }
 
 export class AuthRuntime {
   private readonly projectId: string
   private readonly storage: Storage
-  private readonly security: SecurityRegistry
+  private readonly security: SecurityDefinitionCatalog
   private readonly config: ResolvedAuthConfig
   private readonly sessionCache: SessionCache | null
 

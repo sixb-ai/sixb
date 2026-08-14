@@ -1,5 +1,5 @@
 import type {
-  OntologyRegistry,
+  OntologyDefinitionCatalog,
   OntologySource,
   Queues,
   Sixb,
@@ -20,7 +20,7 @@ export type WorkflowLogSession = ReturnType<LoggingService["startExecution"]>
 
 export interface WorkflowWorkerContext {
   readonly projectId: string
-  readonly ontology: OntologyRegistry
+  readonly ontology: OntologyDefinitionCatalog
   readonly storage: Storage
   readonly queues: Queues
   readonly workflowRuns: WorkflowRunStorage

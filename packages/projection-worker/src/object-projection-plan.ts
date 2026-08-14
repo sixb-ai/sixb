@@ -4,7 +4,7 @@ import {
   type DatasetRow,
   getDatasetRowValidationError,
   type ObjectProjectionDefinition,
-  type OntologyRegistry,
+  type OntologyDefinitionCatalog,
   type Schema,
 } from "@sixb/core"
 import { ProjectionWorkerError } from "./errors"
@@ -53,7 +53,7 @@ type CollectPropertiesResult =
     }
 
 export function buildObjectProjectionPlan(input: {
-  readonly ontology: OntologyRegistry
+  readonly ontology: OntologyDefinitionCatalog
   readonly projection: ObjectProjectionDefinition
   readonly dataset: DatasetDefinition
   readonly primaryPropertyId: string
@@ -101,7 +101,7 @@ export function projectObjectRow(plan: ObjectProjectionPlan, row: unknown): Proj
 }
 
 function buildProjectedPropertyPlans(input: {
-  readonly ontology: OntologyRegistry
+  readonly ontology: OntologyDefinitionCatalog
   readonly projection: ObjectProjectionDefinition
   readonly dataset: DatasetDefinition
 }): ReadonlyMap<string, ProjectedPropertyPlan> {

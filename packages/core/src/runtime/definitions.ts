@@ -2,12 +2,12 @@ import type { ActionDefinitionCatalog } from "../actions"
 import type { AgentDefinition } from "../agents"
 import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets"
-import type { OntologyRegistry } from "../ontology"
+import type { OntologyDefinitionCatalog } from "../ontology"
 import type { PipelineDefinition } from "../pipelines"
-import type { ProjectionDefinitionCatalog } from "../projections/registry"
+import type { ProjectionDefinitionCatalog } from "../projections"
 import type { RuleDefinition } from "../rules"
 import type { ScheduleDefinition } from "../schedules"
-import type { SecurityRegistry } from "../security"
+import type { SecurityDefinitionCatalog } from "../security"
 import type { SyncDefinition } from "../syncs"
 import type { WorkflowDefinition } from "../workflows"
 
@@ -19,7 +19,7 @@ export interface DefinitionCatalog<TDefinition> {
 
 /** Definitions resolved and cross-validated while composing a {@link SixbHost}. */
 export interface SixbDefinitions {
-  readonly ontology: OntologyRegistry
+  readonly ontology: OntologyDefinitionCatalog
   readonly actions: ActionDefinitionCatalog
   readonly agents: DefinitionCatalog<AgentDefinition>
   readonly connectors: DefinitionCatalog<ConnectorDefinition>
@@ -28,7 +28,7 @@ export interface SixbDefinitions {
   readonly projections: ProjectionDefinitionCatalog
   readonly rules: DefinitionCatalog<RuleDefinition>
   readonly schedules: DefinitionCatalog<ScheduleDefinition>
-  readonly security: SecurityRegistry
+  readonly security: SecurityDefinitionCatalog
   readonly syncs: DefinitionCatalog<SyncDefinition>
   readonly workflows: DefinitionCatalog<WorkflowDefinition>
 }

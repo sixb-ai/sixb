@@ -2,7 +2,8 @@ export { defineWebhook } from "./builders"
 export type { WebhookConnectorClient } from "./connector"
 export { webhookConnector } from "./connector"
 export { WebhookValidationError } from "./errors"
-export { registerWebhooks, webhookRoute } from "./registry"
+export type { WebhookCatalog, WebhookRegistryOptions } from "./registry"
+export { WebhookRegistry, webhookRoute } from "./registry"
 export type {
   RegisteredWebhook,
   WebhookBodyFormat,

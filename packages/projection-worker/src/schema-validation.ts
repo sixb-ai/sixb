@@ -3,7 +3,7 @@ import type {
   DatasetDefinition,
   ObjectLink,
   ObjectTypeWithPropertyTokens,
-  OntologyRegistry,
+  OntologyDefinitionCatalog,
   ProjectionDefinition,
   Property,
   Schema,
@@ -78,7 +78,7 @@ export function assertProjectionCompatibleWithDataset(input: {
   readonly projection: ProjectionDefinition
   readonly dataset: DatasetDefinition
   readonly version: DatasetVersion
-  readonly ontology: OntologyRegistry
+  readonly ontology: OntologyDefinitionCatalog
 }): void {
   const { projection, dataset, version, ontology } = input
   const columnsByName = new Map(version.schema.columns.map((column) => [column.name, column]))
@@ -285,7 +285,7 @@ export function assertProjectionCompatibleWithDataset(input: {
 }
 
 function requireObjectType(
-  ontology: OntologyRegistry,
+  ontology: OntologyDefinitionCatalog,
   objectTypeId: string,
   projectionId: string,
   role: string
@@ -329,7 +329,7 @@ function requireLink(
 }
 
 function assertLinkTargetCompatible(input: {
-  readonly ontology: OntologyRegistry
+  readonly ontology: OntologyDefinitionCatalog
   readonly projectionId: string
   readonly link: ObjectLink
   readonly actualTargetObjectTypeId: string

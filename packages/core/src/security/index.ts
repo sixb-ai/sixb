@@ -16,6 +16,8 @@ export {
   missingMembershipGroupIds,
   resolveMembershipPolicyScope,
 } from "./membership-policies"
+export type { SecurityDefinitionCatalog, SecurityRegistryOptions } from "./registry"
+export { SecurityRegistry } from "./registry"
 export type {
   AccessGrant,
   AppendGrant,
@@ -34,7 +36,6 @@ export type {
   RoleDefinition,
   RunGrant,
   RunGrantTarget,
-  SecurityRegistry,
   Selection,
   ViewGrant,
   ViewGrantTarget,

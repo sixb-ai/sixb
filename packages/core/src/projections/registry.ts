@@ -1,5 +1,5 @@
 import type { DatasetDefinition } from "../datasets"
-import type { OntologyRegistry } from "../ontology"
+import type { OntologyDefinitionCatalog } from "../ontology"
 import { isProjectionDefinition } from "./builders"
 import { ProjectionValidationError } from "./errors"
 import {
@@ -22,10 +22,16 @@ type SourceProjectionDefinition = ObjectProjectionDefinition | LinkProjectionDef
 /** Public definition catalog backed by the host's validated projection registry. */
 export interface ProjectionDefinitionCatalog {
   list(): readonly ProjectionDefinition[]
+  getById(projectionId: string): ProjectionDefinition | null
   listObjects(): readonly ObjectProjectionDefinition[]
   listLinks(): readonly LinkProjectionDefinition[]
   listTelemetry(): readonly TelemetryProjectionDefinition[]
-  getById(projectionId: string): ProjectionDefinition | null
+}
+
+export interface ProjectionRegistryOptions {
+  readonly projections: readonly ProjectionDefinition[]
+  readonly ontology: OntologyDefinitionCatalog
+  readonly datasetsById: ReadonlyMap<string, DatasetDefinition>
 }
 
 export class ProjectionRegistry implements ProjectionDefinitionCatalog {
@@ -42,11 +48,7 @@ export class ProjectionRegistry implements ProjectionDefinitionCatalog {
   private readonly dispatchById = new Map<string, ProjectionDispatchDescriptor>()
   private readonly dispatchDescriptors: readonly ProjectionDispatchDescriptor[]
 
-  constructor(input: {
-    readonly projections: readonly ProjectionDefinition[]
-    readonly ontology: OntologyRegistry
-    readonly datasetsById: ReadonlyMap<string, DatasetDefinition>
-  }) {
+  constructor(input: ProjectionRegistryOptions) {
     const objectProjections: ObjectProjectionDefinition[] = []
     const linkProjections: LinkProjectionDefinition[] = []
     const telemetryProjections: TelemetryProjectionDefinition[] = []

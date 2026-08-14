@@ -1,11 +1,11 @@
 import { compareStrings } from "../json"
-import type { OntologyRegistry } from "../ontology"
+import type { OntologyDefinitionCatalog } from "../ontology"
 import { ProjectionValidationError } from "./errors"
 import type { ProjectionDefinition, ProjectionOwnership } from "./types"
 
 export function computeProjectionOwnership(
   projection: ProjectionDefinition,
-  ontology: OntologyRegistry
+  ontology: OntologyDefinitionCatalog
 ): ProjectionOwnership {
   if (projection._tag === "ObjectProjectionDefinition") {
     const primaryId = ontology.getPrimaryPropertyId(projection.objectTypeId)

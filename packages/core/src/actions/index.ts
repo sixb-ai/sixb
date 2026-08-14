@@ -9,7 +9,7 @@ export { commitActionEdits, findActionEditCommit } from "./commit-edits"
 export { ActionDefinitionError, ActionEditCommitError } from "./errors"
 export type { ActionReadFacadeOptions, ActionReadObjectSetSource } from "./read-facade"
 export { ActionReadRecorder, createActionReadFacade } from "./read-facade"
-export type { ActionDefinitionCatalog } from "./registry"
+export type { ActionDefinitionCatalog, ActionRegistryOptions } from "./registry"
 export { ActionRegistry } from "./registry"
 export type {
   RequestActionAndWaitInput,

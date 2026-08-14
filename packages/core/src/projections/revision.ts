@@ -1,11 +1,11 @@
 import type { DatasetDefinition } from "../datasets"
 import { compareStrings, type JsonValue } from "../json"
 import { sha256Canonical } from "../materialization/identity"
-import type { OntologyRegistry } from "../ontology"
+import type { OntologyDefinitionCatalog } from "../ontology"
 import type { ObjectFieldSchema, Property, Schema } from "../ontology/types"
 import type { ProjectionDefinition, ProjectionOwnership } from "./types"
 
-export function computeOntologyRevision(ontology: OntologyRegistry): string {
+export function computeOntologyRevision(ontology: OntologyDefinitionCatalog): string {
   const referencedValueTypeIds = collectOntologyValueTypeDependencies(ontology)
   return sha256Canonical({
     objectTypes: normalizeOntologyObjectTypes(ontology),
@@ -13,7 +13,9 @@ export function computeOntologyRevision(ontology: OntologyRegistry): string {
   })
 }
 
-function collectOntologyValueTypeDependencies(ontology: OntologyRegistry): ReadonlySet<string> {
+function collectOntologyValueTypeDependencies(
+  ontology: OntologyDefinitionCatalog
+): ReadonlySet<string> {
   const referencedValueTypeIds = new Set<string>()
   for (const objectType of ontology.getObjectTypesById().values()) {
     for (const property of objectType.properties) {
@@ -41,7 +43,7 @@ function collectOntologyValueTypeDependencies(ontology: OntologyRegistry): Reado
 }
 
 function normalizeOntologyValueTypes(
-  ontology: OntologyRegistry,
+  ontology: OntologyDefinitionCatalog,
   referencedValueTypeIds: ReadonlySet<string>
 ): JsonValue[] {
   return [...referencedValueTypeIds]
@@ -55,7 +57,7 @@ function normalizeOntologyValueTypes(
     }))
 }
 
-function normalizeOntologyObjectTypes(ontology: OntologyRegistry): JsonValue[] {
+function normalizeOntologyObjectTypes(ontology: OntologyDefinitionCatalog): JsonValue[] {
   return [...ontology.getObjectTypesById().values()]
     .sort((left, right) => compareStrings(left.id, right.id))
     .map((objectType) => ({

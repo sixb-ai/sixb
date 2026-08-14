@@ -2,7 +2,7 @@
  * Standalone ontology registry — owns all type state and resolution logic.
  *
  * Zero infrastructure dependencies: imports only from the `ontology/` module.
- * Other modules depend on `OntologyRegistry` instead of coupling to the full
+ * Other modules depend on its read-only catalog instead of coupling to the full
  * `Sixb` facade.
  */
 
@@ -38,6 +38,20 @@ export type OntologySource = ObjectTypeWithPropertyTokens | OntologyDocumentInpu
 
 export interface OntologyRegistryOptions {
   readonly sources: readonly OntologySource[]
+}
+
+/** Read-only access to the host's validated ontology definitions and type graph. */
+export interface OntologyDefinitionCatalog {
+  listObjectTypes(): readonly ObjectTypeWithPropertyTokens[]
+  getObjectTypeById(objectTypeId: string): ObjectTypeWithPropertyTokens | null
+  resolveObjectType(objectTypeId: string): ObjectTypeWithPropertyTokens
+  getPrimaryPropertyId(objectTypeId: string): string
+  listSubTypes(objectTypeId: string): string[]
+  listAncestorChain(objectType: ObjectType): readonly ObjectTypeWithPropertyTokens[]
+  isValidLinkTarget(expected: string | string[], actual: string): boolean
+  getObjectTypesById(): ReadonlyMap<string, ObjectTypeWithPropertyTokens>
+  getValueTypesById(): ReadonlyMap<string, ValueType>
+  getPrimaryByTypeId(): ReadonlyMap<string, string>
 }
 
 // ── Private helpers ──────────────────────────────────────────
@@ -156,7 +170,7 @@ function collectOntology(sources: readonly OntologySource[]): {
  *
  * Exposes read-only accessors so consumers never mutate ontology state.
  */
-export class OntologyRegistry {
+export class OntologyRegistry implements OntologyDefinitionCatalog {
   private readonly objectTypesById = new Map<string, ObjectTypeWithPropertyTokens>()
   private readonly valueTypesById = new Map<string, ValueType>()
   private readonly subTypesById = new Map<string, Set<string>>()
