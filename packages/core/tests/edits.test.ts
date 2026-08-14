@@ -20,7 +20,7 @@ import { createLinkScopeFingerprint } from "../src/materializer"
 import { getOntologyMutationRuntime } from "../src/runtime/internal"
 import type { ObjectRow, Storage } from "../src/storage"
 import { StorageTransactionError } from "../src/storage"
-import { createTestSixb } from "../src/testing"
+import { createTestSixb, queueTestActionRun } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Customer = defineObjectType({
@@ -75,7 +75,7 @@ type EditsHost = ReturnType<typeof createRuntime>["host"]
 async function startActionRun(host: EditsHost, runId: string, actionId = "markPaid") {
   const actionRuns = host.storage.actionRuns
   if (!actionRuns) throw new Error("Expected action run storage in the test runtime.")
-  await actionRuns.queue({
+  await queueTestActionRun(host.storage, {
     projectId: host.id,
     id: runId,
     actionId,

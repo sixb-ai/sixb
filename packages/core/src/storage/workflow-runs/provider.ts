@@ -1,4 +1,5 @@
 import type { ExecutionStorage } from "../executions"
+import { findPrimitiveRunExecution } from "../executions/run-link"
 import { WorkflowRunError } from "./errors"
 
 /** Validate the semantic link between a durable workflow run and its immutable execution. */
@@ -10,21 +11,14 @@ export async function assertWorkflowRunExecution(input: {
   readonly runId: string
   readonly workflowId: string
 }): Promise<void> {
-  const execution = await input.executions.getById({
+  const execution = await findPrimitiveRunExecution({
+    executions: input.executions,
     projectId: input.projectId,
-    id: input.executionId,
+    executionId: input.executionId,
+    primitive: { kind: "workflow", id: input.workflowId, runId: input.runId },
+    sourceTypes: ["execution", "schedule", "event"],
   })
-  const authority = execution?.authorizationRef
-  if (
-    !execution ||
-    execution.executor.type !== "primitive" ||
-    execution.executor.kind !== "workflow" ||
-    execution.executor.runId !== input.runId ||
-    authority?.type !== "trustedPrimitive" ||
-    authority.primitive.kind !== "workflow" ||
-    authority.primitive.id !== input.workflowId ||
-    authority.primitive.runId !== input.runId
-  ) {
+  if (!execution) {
     invalidExecution(input.executionId, input.runId)
   }
 

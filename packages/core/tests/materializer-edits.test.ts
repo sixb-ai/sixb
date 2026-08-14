@@ -3,6 +3,7 @@ import { createEventId, MaterializationConflictError } from "../src/materializer
 import { InMemoryStorage, type Storage, type StoredLinkSlotOverride } from "../src/storage"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
+import { queueTestActionRun } from "../src/testing"
 import {
   atomic,
   createMaterializerFixture,
@@ -53,7 +54,7 @@ describe("ontology materializer edits", () => {
       const storage = new InMemoryStorage()
       const runId = `run-${scenario.kind}`
       if (scenario.storedActionId) {
-        await storage.actionRuns.queue({
+        await queueTestActionRun(storage, {
           id: runId,
           projectId: "project",
           actionId: scenario.storedActionId,
@@ -112,7 +113,7 @@ describe("ontology materializer edits", () => {
 
   test("materializes a valid running Action without duplicating its ontology commit", async () => {
     const storage = new InMemoryStorage()
-    await storage.actionRuns.queue({
+    await queueTestActionRun(storage, {
       id: "run-valid",
       projectId: "project",
       actionId: "approve",
@@ -157,7 +158,7 @@ describe("ontology materializer edits", () => {
 
   test("replays an exact Action commit after the run becomes terminal", async () => {
     const storage = new InMemoryStorage()
-    await storage.actionRuns.queue({
+    await queueTestActionRun(storage, {
       id: "run-replay",
       projectId: "project",
       actionId: "approve",
@@ -204,7 +205,7 @@ describe("ontology materializer edits", () => {
 
   test("rechecks the Action run inside the transaction before ontology work", async () => {
     const storage = new InMemoryStorage()
-    await storage.actionRuns.queue({
+    await queueTestActionRun(storage, {
       id: "run-recheck",
       projectId: "project",
       actionId: "approve",

@@ -18,6 +18,7 @@ import {
 } from "../src/storage"
 import { getInMemoryStorageTestingAdapter } from "../src/storage/in-memory/testing"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
+import { queueTestActionRun } from "../src/testing"
 import {
   atomic,
   createMaterializerFixture,
@@ -40,7 +41,7 @@ describe("in-memory ontology storage", () => {
     expect(replacementCommit?.id).toBe(replacementResult.commitId)
     await expectLogicalOriginDuplicateRejected(storage, replacementCommit)
 
-    await storage.actionRuns.queue({
+    await queueTestActionRun(storage, {
       id: "origin-action-run",
       projectId: "project",
       actionId: "noop",
@@ -1015,7 +1016,7 @@ describe("in-memory ontology storage", () => {
   test("keeps Action materialization history exclusively in ontology commits", async () => {
     const storage = new InMemoryStorage()
     const { materializer } = createMaterializerFixture({ storage })
-    await storage.actionRuns.queue({
+    await queueTestActionRun(storage, {
       id: "action-materialization-run",
       projectId: "project",
       actionId: "createDevice",
@@ -1882,7 +1883,7 @@ describe("in-memory ontology storage", () => {
 
   test("rejects ordinal finalization mismatches with rollback", async () => {
     const storage = new InMemoryStorage()
-    await storage.actionRuns.queue({
+    await queueTestActionRun(storage, {
       id: "run",
       projectId: "project",
       actionId: "action",

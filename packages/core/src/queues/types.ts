@@ -160,7 +160,6 @@ export interface ActionRunRequestedQueueJob
   extends QueueJob<
     "action.run.requested",
     {
-      readonly actionId: string
       readonly runId: string
     }
   > {}

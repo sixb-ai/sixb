@@ -18,7 +18,7 @@ import {
   SixbHost,
 } from "@sixb/core"
 import { createSessionCredential } from "@sixb/core/internal/auth"
-import { createTestSixb, createTestWorkflowExecution } from "@sixb/core/testing"
+import { createTestSixb, createTestWorkflowExecution, queueTestActionRun } from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -89,7 +89,7 @@ async function createRunFileApi(options: { readonly auth?: boolean } = {}) {
     mediaType: "text/markdown",
   })
 
-  await storage.actionRuns.queue({
+  await queueTestActionRun(storage, {
     id: "action_run_1",
     projectId: sixb.id,
     actionId: extractDocument.id,

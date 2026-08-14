@@ -308,7 +308,6 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
               {
                 type: "action.run.requested",
                 payload: {
-                  actionId: "mark-paid",
                   runId: "act_1",
                 },
               },
@@ -348,7 +347,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
           expect(workflowLane).toHaveLength(1)
           expect(workflowLane[0]?.job.payload.runId).toBe("workflow-run-1")
           expect(actionLane).toHaveLength(1)
-          expect(actionLane[0]?.job.payload.actionId).toBe("mark-paid")
+          expect(actionLane[0]?.job.payload.runId).toBe("act_1")
           expect(sameLane).toHaveLength(1)
         })
       })

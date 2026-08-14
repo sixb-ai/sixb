@@ -1,4 +1,8 @@
 export {
+  createTestActionExecution,
+  queueTestActionRun,
+} from "./action-execution"
+export {
   type AgentStorageContractSuiteOptions,
   runAgentStorageContractSuite,
 } from "./agent-storage-contract"

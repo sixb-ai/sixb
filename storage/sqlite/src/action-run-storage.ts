@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite"
 import type { ActionSubject, JsonValue } from "@sixb/core"
+import { assertActionRunExecution } from "@sixb/core/internal/action-run-storage-provider"
 import type {
   ActionRunEffectsRecord,
   ActionRunFailure,
@@ -9,6 +10,7 @@ import type {
   ActionRunStorage,
   ActionRunWritebackRecord,
   EnterActionRunPhaseInput,
+  ExecutionStorage,
   FinishActionRunInput,
   ListActionRunsInput,
   ListActionRunsResult,
@@ -33,6 +35,8 @@ import {
 } from "./transactions"
 
 export interface SqliteActionRunStorageOptions {
+  /** Execution lookup sharing the same provider transaction. */
+  executions: ExecutionStorage
   /** Path to SQLite database file. Defaults to ':memory:' for in-memory database. */
   path?: string
   /** Internal shared connection used by bundled SqliteStorage. */
@@ -43,9 +47,12 @@ export class SqliteActionRunStorage implements ActionRunStorage {
   private readonly connection: SqliteStoreConnection
   private readonly db: Database
 
-  constructor(options: SqliteActionRunStorageOptions = {}) {
+  private readonly executions: ExecutionStorage
+
+  constructor(options: SqliteActionRunStorageOptions) {
     this.connection = openSqliteStoreConnection(options)
     this.db = this.connection.db
+    this.executions = options.executions
 
     if (this.connection.installFreshSchema) {
       installFreshSqliteSchema(this.db)
@@ -85,6 +92,13 @@ export class SqliteActionRunStorage implements ActionRunStorage {
 
   async queue(input: QueueActionRunInput): Promise<ActionRunRecord> {
     const queuedAt = input.queuedAt ?? new Date()
+    await assertActionRunExecution({
+      executions: this.executions,
+      projectId: input.projectId,
+      executionId: input.executionId,
+      runId: input.id,
+      actionId: input.actionId,
+    })
 
     try {
       this.db
@@ -93,6 +107,7 @@ export class SqliteActionRunStorage implements ActionRunStorage {
           INSERT INTO action_runs (
             project_id,
             id,
+            execution_id,
             action_id,
             subject_kind,
             object_type_id,
@@ -119,7 +134,7 @@ export class SqliteActionRunStorage implements ActionRunStorage {
             error_message,
             error_phase
           ) VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?,
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?,
             NULL, NULL, NULL, NULL, NULL, NULL,
             NULL, NULL, NULL, NULL, NULL,
             NULL, NULL, NULL
@@ -129,6 +144,7 @@ export class SqliteActionRunStorage implements ActionRunStorage {
         .run(
           input.projectId,
           input.id,
+          input.executionId,
           input.actionId,
           input.subject.kind,
           input.subject.kind === "object" ? input.subject.objectTypeId : null,
@@ -695,6 +711,7 @@ function rowToActionRunRecord(row: DatabaseRow): ActionRunRecord {
   return {
     id: row.id,
     projectId: row.project_id,
+    executionId: row.execution_id,
     actionId: row.action_id,
     subject: rowToActionSubject(row),
     status: row.status,
@@ -733,6 +750,7 @@ function isUniqueConstraintError(error: unknown): boolean {
 interface DatabaseRow {
   project_id: string
   id: string
+  execution_id: string
   action_id: string
   subject_kind: ActionSubject["kind"]
   object_type_id: string | null

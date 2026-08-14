@@ -14,7 +14,7 @@ import {
   requestActionAndWait as requestActionAndWaitLeaf,
   requestAction as requestActionLeaf,
 } from "../action"
-import type { ResolvedLinkContext, ResolvedObjectContext } from "../context"
+import type { ExecutionObjectContext, ResolvedLinkContext } from "../context"
 import { removeLink as removeLinkLeaf, upsertLink as upsertLinkLeaf } from "../link"
 import { deleteObject, restoreObject } from "../object"
 import { createTelemetryChannel } from "./telemetry-channel"
@@ -25,7 +25,7 @@ type AnyLinkToken = LinkToken<string, string, string | readonly string[], Object
 export function createObjectByIdHandle<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TValueTypes extends readonly ValueType[],
->(ctx: ResolvedObjectContext, primaryId: string): ObjectByIdHandle<TObjectType, TValueTypes> {
+>(ctx: ExecutionObjectContext, primaryId: string): ObjectByIdHandle<TObjectType, TValueTypes> {
   const objectHandle = {
     get: async () => {
       assertAuthorized(ctx, { kind: "object.view", objectTypeId: ctx.objectType.id })

@@ -3,7 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { migrateStorage, type Storage } from "@sixb/core"
-import { type ActionRunStorage, StorageTransactionError } from "@sixb/core/storage"
+import { StorageTransactionError } from "@sixb/core/storage"
+import { queueTestActionRun } from "@sixb/core/testing"
 import { SqliteStorage } from "../src"
 import { closeSqliteStoreConnection, openSqliteStoreConnection } from "../src/transactions"
 
@@ -29,7 +30,7 @@ test("file-backed snapshot reads remain available during a write transaction", a
     transactionEntered = resolve
   })
   const transaction = storage.transaction(async (tx) => {
-    await requireActionRuns(tx).queue(actionRunInput("concurrent-read-writer"))
+    await queueTestActionRun(tx, actionRunInput("concurrent-read-writer"))
     transactionEntered()
     await blocked
   })
@@ -66,7 +67,7 @@ describe("SqliteStorage.transaction", () => {
 
   test("commits writes atomically", async () => {
     await storage.transaction(async (tx) => {
-      await requireActionRuns(tx).queue(actionRunInput("run_commit"))
+      await queueTestActionRun(tx, actionRunInput("run_commit"))
     })
 
     expect(
@@ -90,7 +91,7 @@ describe("SqliteStorage.transaction", () => {
     await expect(
       storage.transaction(async (tx) => {
         const runs = requireTransactionalRunStores(tx)
-        await runs.actionRuns.queue(actionRunInput("run_rollback"))
+        await queueTestActionRun(tx, actionRunInput("run_rollback"))
         await runs.syncRuns.start(syncRunInput("sync_rollback"))
         await runs.webhookRuns.start(webhookRunInput("webhook_rollback"))
 
@@ -116,7 +117,7 @@ describe("SqliteStorage.transaction", () => {
     })
 
     const failed = storage.transaction(async (tx) => {
-      await requireActionRuns(tx).queue({
+      await queueTestActionRun(tx, {
         id: "rolled-back",
         projectId: "my-app",
         actionId: "paint",
@@ -131,19 +132,17 @@ describe("SqliteStorage.transaction", () => {
     await entered
 
     let rootFinished = false
-    const rootWrite = storage.actionRuns
-      .queue({
-        id: "root-write",
-        projectId: "my-app",
-        actionId: "paint",
-        subject: { kind: "none" },
-        params: {},
-        idempotencyKey: "root-write",
-      })
-      .then((run) => {
-        rootFinished = true
-        return run
-      })
+    const rootWrite = queueTestActionRun(storage, {
+      id: "root-write",
+      projectId: "my-app",
+      actionId: "paint",
+      subject: { kind: "none" },
+      params: {},
+      idempotencyKey: "root-write",
+    }).then((run) => {
+      rootFinished = true
+      return run
+    })
     await Promise.resolve()
     expect(rootFinished).toBe(false)
 
@@ -164,7 +163,7 @@ describe("SqliteStorage.transaction", () => {
     await storage.transaction(() => {
       detachedWrite = Promise.resolve().then(async () => {
         await detachedGate
-        return storage.actionRuns.queue({
+        return queueTestActionRun(storage, {
           id: "detached-write",
           projectId: "my-app",
           actionId: "paint",
@@ -239,13 +238,6 @@ function actionRunInput(id: string) {
     params: {},
     idempotencyKey: `action:my-app:${id}`,
   }
-}
-
-function requireActionRuns(tx: Storage): ActionRunStorage {
-  if (!tx.actionRuns) {
-    throw new Error("[test] expected transaction storage to expose actionRuns")
-  }
-  return tx.actionRuns
 }
 
 function requireTransactionalRunStores(tx: Storage) {

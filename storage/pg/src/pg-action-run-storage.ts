@@ -1,4 +1,5 @@
 import type { ActionSubject, JsonValue } from "@sixb/core"
+import { assertActionRunExecution } from "@sixb/core/internal/action-run-storage-provider"
 import type {
   ActionRunEffectsRecord,
   ActionRunFailure,
@@ -8,6 +9,7 @@ import type {
   ActionRunStorage,
   ActionRunWritebackRecord,
   EnterActionRunPhaseInput,
+  ExecutionStorage,
   FinishActionRunInput,
   ListActionRunsInput,
   ListActionRunsResult,
@@ -29,7 +31,10 @@ import { isUniqueViolation } from "./storage-errors"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 export class PgActionRunStorage implements ActionRunStorage {
-  constructor(private readonly sql: PgStoreClient) {}
+  constructor(
+    private readonly sql: PgStoreClient,
+    private readonly executions: ExecutionStorage
+  ) {}
 
   async lockForMaterialization(input: LockActionMaterializationRunInput): Promise<ActionRunRecord> {
     const [row] = await this.sql<DatabaseRow[]>`
@@ -57,11 +62,20 @@ export class PgActionRunStorage implements ActionRunStorage {
   }
 
   async queue(input: QueueActionRunInput): Promise<ActionRunRecord> {
+    await assertActionRunExecution({
+      executions: this.executions,
+      projectId: input.projectId,
+      executionId: input.executionId,
+      runId: input.id,
+      actionId: input.actionId,
+    })
+
     try {
       const [row] = await this.sql<DatabaseRow[]>`
         INSERT INTO action_runs (
           project_id,
           id,
+          execution_id,
           action_id,
           subject_kind,
           object_type_id,
@@ -90,6 +104,7 @@ export class PgActionRunStorage implements ActionRunStorage {
         ) VALUES (
           ${input.projectId},
           ${input.id},
+          ${input.executionId},
           ${input.actionId},
           ${input.subject.kind},
           ${input.subject.kind === "object" ? input.subject.objectTypeId : null},
@@ -595,6 +610,7 @@ function rowToActionRunRecord(row: DatabaseRow): ActionRunRecord {
   return {
     id: row.id,
     projectId: row.project_id,
+    executionId: row.execution_id,
     actionId: row.action_id,
     subject: rowToActionSubject(row),
     status: row.status,
@@ -629,6 +645,7 @@ function rowToActionSubject(row: DatabaseRow): ActionSubject {
 interface DatabaseRow {
   project_id: string
   id: string
+  execution_id: string
   action_id: string
   subject_kind: ActionSubject["kind"]
   object_type_id: string | null

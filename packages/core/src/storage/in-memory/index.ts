@@ -55,7 +55,7 @@ export class InMemoryStorage implements Storage {
   private readonly authStorage = new InMemoryAuthStorage()
   private readonly executionStorage = new InMemoryExecutionStorage(this.authStorage)
   private readonly agentStorage = new InMemoryAgentStorage()
-  private readonly actionRunStorage = new InMemoryActionRunStorage()
+  private readonly actionRunStorage = new InMemoryActionRunStorage(this.executionStorage)
   private readonly syncRunStorage = new InMemorySyncRunStorage()
   private readonly pipelineRunStorage = new InMemoryPipelineRunStorage()
   private readonly projectionRunStorage = new InMemoryProjectionRunStorage()

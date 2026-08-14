@@ -34,7 +34,7 @@ import {
   type Storage,
   type WorkflowDefinition,
 } from "@sixb/core"
-import { createTestSixb, createTestWorkflowExecution } from "@sixb/core/testing"
+import { createTestSixb, createTestWorkflowExecution, queueTestActionRun } from "@sixb/core/testing"
 import { SqliteStorage } from "@sixb/sqlite"
 import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
@@ -512,7 +512,7 @@ describe("SixbServer HTTP contract", () => {
       responseStatus: 202,
     })
 
-    await sixb.storage.actionRuns!.queue({
+    await queueTestActionRun(sixb.storage, {
       id: "act_audit_previous",
       projectId: "contract-project",
       actionId: "syncDeviceLabel",

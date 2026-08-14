@@ -1,4 +1,5 @@
 import { canViewActionRun, isAllowed } from "../authorization"
+import type { ExecutionContext } from "../execution"
 import type { ObjectType } from "../ontology"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type {
@@ -32,7 +33,10 @@ export interface ActionsRuntime {
   readonly runs: ActionRunsRuntime
 }
 
-export function createActionsRuntime(runtime: SixbRuntimeContext): ActionsRuntime {
+export function createActionsRuntime(
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext
+): ActionsRuntime {
   const canList = (action: ActionDefinition) =>
     isAllowed(runtime.authorization, { kind: "action.apply", actionId: action.id }) &&
     (action.binding.kind === "global" ||
@@ -49,8 +53,8 @@ export function createActionsRuntime(runtime: SixbRuntimeContext): ActionsRuntim
     },
     listGlobal: () => runtime.actionRegistry.listGlobal().filter(canList),
     listForType: (objectType) => runtime.actionRegistry.listForType(objectType).filter(canList),
-    request: (input) => requestAction(runtime, input),
-    requestAndWait: (input) => requestActionAndWait(runtime, input),
+    request: (input) => requestAction(runtime, execution, input),
+    requestAndWait: (input) => requestActionAndWait(runtime, execution, input),
     runs: {
       getById: async (runId) => {
         const run =

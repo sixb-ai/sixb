@@ -39,6 +39,7 @@ export interface ActionRunEffectsRecord {
 export interface ActionRunRecord {
   readonly id: string
   readonly projectId: string
+  readonly executionId: string
   readonly actionId: string
   readonly subject: ActionSubject
   readonly status: ActionRunStatus
@@ -56,6 +57,7 @@ export interface ActionRunRecord {
 export interface QueueActionRunInput {
   readonly id: string
   readonly projectId: string
+  readonly executionId: string
   readonly actionId: string
   readonly subject: ActionSubject
   readonly params: ActionRunParams

@@ -53,6 +53,8 @@ interface BaseActionRunResult {
 export interface RunActionJobInput {
   readonly runtime: ActionWorkerContext
   readonly job: ActionJob
+  /** Durable run loaded before the execution scope is restored. */
+  readonly run: ActionRunRecord
   readonly signal?: AbortSignal
   /** Queue delivery attempt, when invoked by ActionWorker. */
   readonly attempt?: number

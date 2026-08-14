@@ -75,8 +75,8 @@ function createExecutionFacades<TOntologySources extends readonly OntologySource
   dependencies: SixbDependencies
 ): Omit<Sixb<TOntologySources>, "execution"> {
   return {
-    objects: createObjectsRuntime<TOntologySources>(runtime),
-    actions: createActionsRuntime(runtime),
+    objects: createObjectsRuntime<TOntologySources>(runtime, execution),
+    actions: createActionsRuntime(runtime, execution),
     datasets: createDatasetsRuntime(runtime, dependencies.definitions.datasets),
     workflows: createWorkflowsRuntime(runtime, execution, dependencies.definitions.workflows),
     syncs: createSyncsRuntime(runtime, dependencies.definitions.syncs),

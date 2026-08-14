@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { defineObjectType, InMemoryStorage, OntologyRegistry, prop, type Storage } from "../src"
-import { type ActionRunStorage, StorageTransactionError } from "../src/storage"
-import { createMaterializerTestFixture } from "../src/testing"
+import { StorageTransactionError } from "../src/storage"
+import { createMaterializerTestFixture, queueTestActionRun } from "../src/testing"
 
 const Room = defineObjectType({
   id: "Room",
@@ -19,7 +19,7 @@ describe("InMemoryStorage.transaction", () => {
     const storage = new InMemoryStorage()
 
     await storage.transaction(async (tx) => {
-      await requireActionRuns(tx).queue(actionRunInput("run_commit"))
+      await queueTestActionRun(tx, actionRunInput("run_commit"))
     })
 
     expect(
@@ -85,7 +85,7 @@ describe("InMemoryStorage.transaction", () => {
     await expect(
       storage.transaction(async (tx) => {
         const runs = requireTransactionalRunStores(tx)
-        await runs.actionRuns.queue(actionRunInput("run_rollback"))
+        await queueTestActionRun(tx, actionRunInput("run_rollback"))
         await runs.syncRuns.start(syncRunInput("sync_rollback"))
         await runs.webhookRuns.start(webhookRunInput("webhook_rollback"))
 
@@ -105,7 +105,7 @@ describe("InMemoryStorage.transaction", () => {
 
     await storage.transaction(async (tx) => {
       const runs = requireTransactionalRunStores(tx)
-      await runs.actionRuns.queue(actionRunInput("run_commit"))
+      await queueTestActionRun(tx, actionRunInput("run_commit"))
       await runs.syncRuns.start(syncRunInput("sync_commit"))
       await runs.webhookRuns.start(webhookRunInput("webhook_commit"))
     })
@@ -147,7 +147,7 @@ describe("InMemoryStorage.transaction", () => {
     const releaseTransaction = deferred()
     const transactionResult = storage
       .transaction(async (tx) => {
-        await requireActionRuns(tx).queue(actionRunInput("run_uncommitted"))
+        await queueTestActionRun(tx, actionRunInput("run_uncommitted"))
         transactionStarted.resolve()
         await releaseTransaction.promise
         throw new Error("rollback")
@@ -378,13 +378,6 @@ describe("InMemoryStorage.transaction", () => {
     expect(() => transactionStorage.objects.queryCapabilities()).toThrow(StorageTransactionError)
   })
 })
-
-function requireActionRuns(tx: Storage): ActionRunStorage {
-  if (!tx.actionRuns) {
-    throw new Error("[test] expected transaction storage to expose actionRuns")
-  }
-  return tx.actionRuns
-}
 
 function requireTransactionalRunStores(tx: Storage) {
   if (!tx.actionRuns || !tx.syncRuns || !tx.webhookRuns) {

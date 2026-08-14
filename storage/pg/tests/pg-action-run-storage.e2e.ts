@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { queueTestActionRun } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
 
@@ -15,7 +16,7 @@ describe("PgActionRunStorage", () => {
   })
 
   test("persists V2 lifecycle records and recomposes relational commit diffs", async () => {
-    await storage.actionRuns.queue({
+    await queueTestActionRun(storage, {
       id: "act_1",
       projectId: "my-app",
       actionId: "createInvoice",
@@ -169,7 +170,7 @@ describe("PgActionRunStorage", () => {
 })
 
 async function queueRunningAction(storage: PostgresStorage, id: string): Promise<void> {
-  await storage.actionRuns.queue({
+  await queueTestActionRun(storage, {
     id,
     projectId: "my-app",
     actionId: "createInvoice",

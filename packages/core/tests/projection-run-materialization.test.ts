@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import type { ProjectionMaterializationIdentity } from "../src/materialization/model"
-import { InMemoryActionRunStorage } from "../src/storage/action-runs/in-memory"
 import { InMemoryStorage } from "../src/storage/index"
 import { InMemoryProjectionRunStorage } from "../src/storage/projection-runs/in-memory"
+import { queueTestActionRun } from "../src/testing"
 
 const replacementIdentity = {
   projectionId: "devices",
@@ -244,7 +244,8 @@ describe("projection run materialization ownership", () => {
 
 describe("action run materialization correlation", () => {
   test("requires an existing matching running Action", async () => {
-    const storage = new InMemoryActionRunStorage()
+    const provider = new InMemoryStorage()
+    const storage = provider.actionRuns
 
     await expect(
       storage.lockForMaterialization({
@@ -253,7 +254,7 @@ describe("action run materialization correlation", () => {
         runId: "action-run",
       })
     ).rejects.toThrow("not found")
-    await storage.queue({
+    await queueTestActionRun(provider, {
       id: "action-run",
       projectId: "project",
       actionId: "sendQuote",
@@ -350,7 +351,7 @@ describe("in-memory run root lock", () => {
       identity: replacementIdentity,
       target: { objectTypeId: "Device" },
     })
-    await storage.actionRuns.queue({
+    await queueTestActionRun(storage, {
       id: "action-run",
       projectId: "project",
       actionId: "sendQuote",
@@ -430,7 +431,7 @@ describe("in-memory run root lock", () => {
 
   test("does not treat async work inherited from a completed transaction as reentrant", async () => {
     const storage = new InMemoryStorage()
-    await storage.actionRuns.queue({
+    await queueTestActionRun(storage, {
       id: "action-run",
       projectId: "project",
       actionId: "sendQuote",

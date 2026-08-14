@@ -4,6 +4,7 @@
  * Context hierarchy: SixbRuntimeContext → ResolvedObjectContext → ResolvedLinkContext
  */
 
+import type { ExecutionContext } from "../../execution"
 import type { ObjectLink } from "../../ontology"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import type { SixbRuntimeContext } from "../../runtime/types"
@@ -12,6 +13,11 @@ import type { SixbRuntimeContext } from "../../runtime/types"
 export interface ResolvedObjectContext extends SixbRuntimeContext {
   readonly objectType: ObjectTypeWithPropertyTokens
   readonly primaryPropertyId: string
+}
+
+/** Object operations bound to one immutable execution. */
+export interface ExecutionObjectContext extends ResolvedObjectContext {
+  readonly execution: ExecutionContext
 }
 
 /** Resolved context for link operations. */

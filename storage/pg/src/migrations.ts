@@ -22,6 +22,7 @@ import narrowOntologySourceRootIndexSql from "./migrations/006-narrow-ontology-s
   type: "text",
 }
 import splitOverridesSql from "./migrations/007-split-overrides.sql" with { type: "text" }
+import actionExecutionsSql from "./migrations/008-action-executions.sql" with { type: "text" }
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -282,6 +283,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("005-workflow-executions", workflowExecutionsSql),
     pgSql("006-narrow-ontology-source-root-index", narrowOntologySourceRootIndexSql),
     pgSql("007-split-overrides", splitOverridesSql),
+    pgSql("008-action-executions", actionExecutionsSql),
   ],
 })
 

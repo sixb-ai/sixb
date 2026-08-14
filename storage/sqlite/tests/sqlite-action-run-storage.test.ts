@@ -1,20 +1,25 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import type { QueueActionRunInput } from "@sixb/core/storage"
 import { ActionRunError } from "@sixb/core/storage"
-import { SqliteActionRunStorage } from "../src/action-run-storage"
+import { queueTestActionRun } from "@sixb/core/testing"
+import { SqliteStorage } from "../src"
 
 describe("SqliteActionRunStorage", () => {
-  let storage: SqliteActionRunStorage
+  let root: SqliteStorage
 
   beforeEach(() => {
-    storage = new SqliteActionRunStorage()
+    root = new SqliteStorage()
   })
 
   afterEach(() => {
-    storage.close()
+    root.close()
   })
 
+  const queue = (input: Omit<QueueActionRunInput, "executionId">) => queueTestActionRun(root, input)
+
   test("queues, starts, and finishes runs", async () => {
-    await storage.queue({
+    const storage = root.actionRuns
+    await queue({
       id: "act_1",
       projectId: "my-app",
       actionId: "sendQuote",
@@ -48,7 +53,8 @@ describe("SqliteActionRunStorage", () => {
   })
 
   test("stores failures and supports filtered paging", async () => {
-    await storage.queue({
+    const storage = root.actionRuns
+    await queue({
       id: "act_1",
       projectId: "my-app",
       actionId: "sendQuote",
@@ -73,7 +79,7 @@ describe("SqliteActionRunStorage", () => {
       },
     })
 
-    await storage.queue({
+    await queue({
       id: "act_2",
       projectId: "my-app",
       actionId: "sendQuote",
@@ -110,7 +116,8 @@ describe("SqliteActionRunStorage", () => {
   })
 
   test("rejects duplicates and missing runs", async () => {
-    await storage.queue({
+    const storage = root.actionRuns
+    await queue({
       id: "act_1",
       projectId: "my-app",
       actionId: "sendQuote",
@@ -120,7 +127,7 @@ describe("SqliteActionRunStorage", () => {
     })
 
     await expect(
-      storage.queue({
+      queue({
         id: "act_1",
         projectId: "my-app",
         actionId: "sendQuote",
@@ -155,7 +162,8 @@ describe("SqliteActionRunStorage", () => {
   })
 
   test("rejects finishing terminal runs", async () => {
-    await storage.queue({
+    const storage = root.actionRuns
+    await queue({
       id: "act_1",
       projectId: "my-app",
       actionId: "sendQuote",
@@ -187,7 +195,8 @@ describe("SqliteActionRunStorage", () => {
   })
 
   test("requeues matching runs that failed during enqueue", async () => {
-    await storage.queue({
+    const storage = root.actionRuns
+    await queue({
       id: "act_1",
       projectId: "my-app",
       actionId: "sendQuote",
@@ -208,7 +217,7 @@ describe("SqliteActionRunStorage", () => {
       },
     })
 
-    const requeued = await storage.queue({
+    const requeued = await queue({
       id: "act_1",
       projectId: "my-app",
       actionId: "sendQuote",
@@ -227,7 +236,7 @@ describe("SqliteActionRunStorage", () => {
     expect(requeued.queuedAt.toISOString()).toBe("2026-04-29T10:00:02.000Z")
 
     await expect(
-      storage.queue({
+      queue({
         id: "act_1",
         projectId: "my-app",
         actionId: "sendQuote",
@@ -239,7 +248,8 @@ describe("SqliteActionRunStorage", () => {
   })
 
   test("persists V2 lifecycle records and recomposes relational commit diffs", async () => {
-    await storage.queue({
+    const storage = root.actionRuns
+    await queue({
       id: "act_1",
       projectId: "my-app",
       actionId: "createInvoice",
