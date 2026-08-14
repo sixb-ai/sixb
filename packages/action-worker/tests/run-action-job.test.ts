@@ -18,11 +18,11 @@ import {
 import { findActionEditCommit } from "@sixb/core/internal/actions"
 import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import { bindPrimitiveExecution } from "@sixb/core/internal/primitive-execution"
-import type { ActionRunParams } from "@sixb/core/storage"
-import { createTestSixb } from "@sixb/core/testing"
+import type { ActionRunParams, ActionRunRecord } from "@sixb/core/storage"
+import { createTestSixb, queueTestActionRun } from "@sixb/core/testing"
 import { ActionWorkerError } from "../src/errors"
 import { runActionJob } from "../src/run-action-job"
-import type { ActionWorkerContext } from "../src/types"
+import type { ActionWorkerContext, RunActionJobInput } from "../src/types"
 import type { ActionWorkerHost } from "../src/worker"
 
 const Device = defineObjectType({
@@ -105,8 +105,8 @@ async function queueActionRun(
     readonly subject: ActionSubject
     readonly params: ActionRunParams
   }
-): Promise<void> {
-  await host.storage.actionRuns!.queue({
+): Promise<ActionRunRecord> {
+  return queueTestActionRun(host.storage, {
     projectId: host.id,
     id: input.id,
     actionId: input.actionId,
@@ -116,20 +116,40 @@ async function queueActionRun(
   })
 }
 
+async function runStoredActionJob(
+  input: Omit<RunActionJobInput, "run">
+): ReturnType<typeof runActionJob> {
+  const run = await input.runtime.actionRunsStorage.getById({
+    projectId: input.runtime.id,
+    id: input.job.id,
+  })
+  if (!run) {
+    throw new Error(`[Test] Action run '${input.job.id}' was not queued.`)
+  }
+  return runActionJob({ ...input, run })
+}
+
 describe("runActionJob", () => {
-  test("throws ActionWorkerError when the stored run is missing", async () => {
+  test("rejects a durable run that does not match the requested job", async () => {
     const count = defineAction("count")
       .params({})
       .writeback(() => {})
     const { host } = createSixb([count])
+    const run = await queueActionRun(host, {
+      id: "act_stored",
+      actionId: "count",
+      subject: { kind: "none" },
+      params: {},
+    })
 
     await expect(
       runActionJob({
         runtime: createContext(host),
         job: {
-          id: "act_missing",
+          id: "act_other",
           actionId: "count",
         },
+        run,
       })
     ).rejects.toBeInstanceOf(ActionWorkerError)
   })
@@ -149,7 +169,7 @@ describe("runActionJob", () => {
       params: { reviewedAt: null },
     })
 
-    const result = await runActionJob({
+    const result = await runStoredActionJob({
       runtime: createContext(host),
       job: { id: "act_nullable", actionId: "captureNullable" },
     })
@@ -179,7 +199,7 @@ describe("runActionJob", () => {
       params: { status: "ready" },
     })
 
-    const result = await runActionJob({
+    const result = await runStoredActionJob({
       runtime: createContext(host),
       job: {
         id: "act_1",
@@ -229,7 +249,7 @@ describe("runActionJob", () => {
       params: {},
     })
 
-    const result = await runActionJob({
+    const result = await runStoredActionJob({
       runtime: createContext(host),
       job: {
         id: "act_1",
@@ -280,7 +300,7 @@ describe("runActionJob", () => {
       params: {},
     })
 
-    const result = await runActionJob({
+    const result = await runStoredActionJob({
       runtime: createContext(host),
       job: {
         id: "act_blob",
@@ -328,7 +348,7 @@ describe("runActionJob", () => {
       params: {},
     })
 
-    await runActionJob({
+    await runStoredActionJob({
       runtime: context,
       job: {
         id: "act_1",
@@ -336,7 +356,7 @@ describe("runActionJob", () => {
       },
     })
 
-    const duplicate = await runActionJob({
+    const duplicate = await runStoredActionJob({
       runtime: context,
       job: {
         id: "act_1",
@@ -367,7 +387,7 @@ describe("runActionJob", () => {
       subject: { kind: "none" },
       params: { id: "device-1" },
     })
-    const result = await runActionJob({
+    const result = await runStoredActionJob({
       runtime: createContext(host),
       job: {
         id: "act_1",
@@ -405,7 +425,7 @@ describe("runActionJob", () => {
       subject: { kind: "none" },
       params: { id: "device-1", name: "Device 1" },
     })
-    const created = await runActionJob({
+    const created = await runStoredActionJob({
       runtime: createContext(host),
       job: { id: "act_create", actionId: "createDevice" },
     })
@@ -416,7 +436,7 @@ describe("runActionJob", () => {
       subject: { kind: "none" },
       params: { id: "device-1", name: "Renamed Device" },
     })
-    const updated = await runActionJob({
+    const updated = await runStoredActionJob({
       runtime: createContext(host),
       job: { id: "act_rename", actionId: "renameDevice" },
     })
@@ -508,7 +528,7 @@ describe("runActionJob", () => {
     })
     expect(
       (
-        await runActionJob({
+        await runStoredActionJob({
           runtime: createContext(host),
           job: { id: "act_assign_sensor", actionId: "assignSensor" },
         })
@@ -539,7 +559,7 @@ describe("runActionJob", () => {
     })
     expect(
       (
-        await runActionJob({
+        await runStoredActionJob({
           runtime: createContext(host),
           job: { id: "act_clear_sensor", actionId: "clearSensor" },
         })
@@ -605,7 +625,7 @@ describe("runActionJob", () => {
       params: {},
     })
 
-    const result = await runActionJob({
+    const result = await runStoredActionJob({
       runtime: createContext(host),
       job: {
         id: "act_1",
@@ -671,7 +691,7 @@ describe("runActionJob", () => {
       params: {},
     })
 
-    const result = await runActionJob({
+    const result = await runStoredActionJob({
       runtime: createContext(host),
       job: {
         id: "act_1",
@@ -732,7 +752,7 @@ describe("runActionJob", () => {
       params: {},
     })
 
-    const result = await runActionJob({
+    const result = await runStoredActionJob({
       runtime: createContext(host),
       job: { id: "act_1", actionId: "captureSensorName" },
     })
@@ -751,7 +771,7 @@ describe("runActionJob", () => {
       params: {},
     })
 
-    const result = await runActionJob({
+    const result = await runStoredActionJob({
       runtime: createContext(host),
       job: {
         id: "act_1",
@@ -793,7 +813,7 @@ describe("runActionJob", () => {
       id: "act_1",
     })
 
-    const result = await runActionJob({
+    const result = await runStoredActionJob({
       runtime: createContext(host),
       job: {
         id: "act_1",
@@ -813,7 +833,7 @@ describe("runActionJob", () => {
     expect(run?.phase).toBe("validation")
     expect(run?.finishedAt).toBeInstanceOf(Date)
 
-    const redelivered = await runActionJob({
+    const redelivered = await runStoredActionJob({
       runtime: createContext(host),
       job: { id: "act_1", actionId: "count" },
       attempt: 2,
@@ -855,7 +875,7 @@ describe("runActionJob", () => {
       result: { status: "persisted" },
     })
 
-    const result = await runActionJob({
+    const result = await runStoredActionJob({
       runtime: createContext(host),
       job: {
         id: "act_1",
@@ -900,7 +920,7 @@ describe("runActionJob", () => {
       expectedLinkScopes: [],
     })
 
-    const resumed = await runActionJob({
+    const resumed = await runStoredActionJob({
       runtime: createContext(host),
       job: { id: "act_delete", actionId: "deleteDevice" },
       attempt: 2,
@@ -937,7 +957,7 @@ describe("runActionJob", () => {
       params: {},
     })
 
-    const result = await runActionJob({
+    const result = await runStoredActionJob({
       runtime: createContext(host),
       job: {
         id: "act_1",
@@ -991,7 +1011,7 @@ describe("runActionJob", () => {
     })
     const controller = new AbortController()
 
-    const execution = runActionJob({
+    const execution = runStoredActionJob({
       runtime: createContext(host),
       job: { id: "act_cancelled", actionId: "waitForCancel" },
       signal: controller.signal,
@@ -1027,7 +1047,7 @@ describe("runActionJob", () => {
       params: {},
     })
 
-    const result = await runActionJob({
+    const result = await runStoredActionJob({
       runtime: createContext(host),
       job: {
         id: "act_1",

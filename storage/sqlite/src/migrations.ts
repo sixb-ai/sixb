@@ -25,6 +25,7 @@ import narrowOntologySourceRootIndexSql from "./migrations/006-narrow-ontology-s
   type: "text",
 }
 import splitOverridesSql from "./migrations/007-split-overrides.sql" with { type: "text" }
+import actionExecutionsSql from "./migrations/008-action-executions.sql" with { type: "text" }
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -52,6 +53,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("005-workflow-executions", workflowExecutionsSql),
     sqliteSql("006-narrow-ontology-source-root-index", narrowOntologySourceRootIndexSql),
     sqliteSql("007-split-overrides", splitOverridesSql),
+    sqliteSql("008-action-executions", actionExecutionsSql),
   ],
 })
 

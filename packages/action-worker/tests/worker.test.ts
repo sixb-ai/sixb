@@ -197,6 +197,18 @@ describe("ActionWorker", () => {
       (value) => value?.status === "succeeded"
     )
     expect(run?.actionId).toBe("setStatus")
+    const durableExecution = run
+      ? await host.storage.executions.getById({ projectId: host.id, id: run.executionId })
+      : null
+    expect(durableExecution).toMatchObject({
+      source: { type: "execution", executionId: sixb.execution.id },
+      parentExecutionId: sixb.execution.id,
+      correlationId: sixb.execution.correlationId,
+      authorizationRef: {
+        type: "trustedPrimitive",
+        primitive: { kind: "action", id: "setStatus", runId },
+      },
+    })
 
     const events = await waitFor(
       () => host.events.read({ types: ["action.completed"] }),
@@ -204,6 +216,7 @@ describe("ActionWorker", () => {
     )
     expect(events[0]).toMatchObject({
       type: "action.completed",
+      correlationId: sixb.execution.correlationId,
       idempotencyKey: `action.completed:${runId}`,
       payload: {
         actionId: "setStatus",

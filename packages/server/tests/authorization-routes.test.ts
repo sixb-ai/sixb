@@ -30,7 +30,7 @@ import {
   type WorkflowDefinition,
 } from "@sixb/core"
 import { createSessionCredential } from "@sixb/core/internal/auth"
-import { createTestSixb, createTestWorkflowExecution } from "@sixb/core/testing"
+import { createTestSixb, createTestWorkflowExecution, queueTestActionRun } from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -1044,7 +1044,7 @@ describe("authorized action routes", () => {
       })
     )
     const requested = (await request.json()) as { runId: string }
-    await storage.actionRuns.queue({
+    await queueTestActionRun(storage, {
       id: "act_hidden_invoice",
       projectId: "test-project",
       actionId: "send-contract",

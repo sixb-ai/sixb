@@ -43,6 +43,7 @@ describe("Postgres storage migrations", () => {
             "005-workflow-executions",
             "006-narrow-ontology-source-root-index",
             "007-split-overrides",
+            "008-action-executions",
           ],
         },
       ])
@@ -95,6 +96,13 @@ describe("Postgres storage migrations", () => {
           id: "007-split-overrides",
           status: "applied",
           version: 7,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "008-action-executions",
+          status: "applied",
+          version: 8,
         },
       ])
     })
@@ -168,13 +176,16 @@ describe("Postgres storage migrations", () => {
       if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
       const sql = createPgClient({ connectionString, schemaName, max: 1 })
       try {
-        const splitOverridesMigration = postgresStorageMigrations.steps.at(-1)
-        if (splitOverridesMigration?.id !== "007-split-overrides") {
+        const splitOverridesIndex = postgresStorageMigrations.steps.findIndex(
+          (migration) => migration.id === "007-split-overrides"
+        )
+        const splitOverridesMigration = postgresStorageMigrations.steps[splitOverridesIndex]
+        if (!splitOverridesMigration) {
           throw new Error("PostgreSQL split-overrides migration is missing.")
         }
         const beforeScopeAuthority = defineMigrations({
           adapterId: POSTGRES_STORAGE_ADAPTER_ID,
-          steps: postgresStorageMigrations.steps.slice(0, -1),
+          steps: postgresStorageMigrations.steps.slice(0, splitOverridesIndex),
         })
         await createPostgresMigrator({
           sql,
@@ -341,6 +352,10 @@ describe("Postgres storage migrations", () => {
       await expect(readColumnNullable(schemaName, "workflow_runs", "execution_id")).resolves.toBe(
         "NO"
       )
+      expect(await readTableColumns(schemaName, "action_runs")).toContain("execution_id")
+      await expect(readColumnNullable(schemaName, "action_runs", "execution_id")).resolves.toBe(
+        "NO"
+      )
     })
   })
 
@@ -420,6 +435,37 @@ describe("Postgres storage migrations", () => {
 
         await expect(postgresStorageMigrations.steps[4]?.up(context)).rejects.toThrow()
         expect(await readTableColumns(schemaName, "workflow_runs")).not.toContain("execution_id")
+      } finally {
+        await sql.unsafe("RESET search_path")
+        await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
+      }
+    })
+  })
+
+  test("rejects legacy Action runs instead of inventing their execution authority", async () => {
+    const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    await withSql(async (sql) => {
+      const schema = quoteIdent(schemaName)
+      const context = { exec: (sqlText: string) => sql.unsafe(sqlText).then(() => undefined) }
+
+      try {
+        await sql.unsafe(`CREATE SCHEMA ${schema}`)
+        await sql.unsafe(`SET search_path TO ${schema}`)
+        for (const migration of postgresStorageMigrations.steps.slice(0, 6)) {
+          await migration.up(context)
+        }
+        await sql.unsafe(`
+          INSERT INTO action_runs (
+            project_id, id, action_id, subject_kind, status, phase, queued_at, params,
+            idempotency_key
+          ) VALUES (
+            'project-a', 'legacy-action-run', 'legacy-action', 'none', 'queued', 'request',
+            '2026-01-01T00:00:00.000Z', '{}', 'action:project-a:legacy-action-run'
+          )
+        `)
+
+        await expect(postgresStorageMigrations.steps[6]?.up(context)).rejects.toThrow()
+        expect(await readTableColumns(schemaName, "action_runs")).not.toContain("execution_id")
       } finally {
         await sql.unsafe("RESET search_path")
         await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
@@ -622,6 +668,13 @@ describe("Postgres storage migrations", () => {
           id: "007-split-overrides",
           status: "applied",
           version: 7,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "008-action-executions",
+          status: "applied",
+          version: 8,
         },
       ])
     } finally {

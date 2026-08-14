@@ -1,3 +1,4 @@
+import type { ExecutionStorage } from "../executions"
 import { ActionRunError } from "./errors"
 import {
   actionRunPhaseRecordsEqual,
@@ -5,6 +6,7 @@ import {
   canRequeueActionRunAfterEnqueueFailure,
   isTerminalActionRun,
 } from "./idempotency"
+import { assertActionRunExecution } from "./provider"
 import type {
   ActionRunEffectsRecord,
   ActionRunFailure,
@@ -109,7 +111,10 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
   private readonly rows = new Map<string, ActionRunRecord>()
   private readonly runRootOperation: RunRootOperation
 
-  constructor(input: { readonly runRootOperation?: RunRootOperation } = {}) {
+  constructor(
+    private readonly executions: ExecutionStorage,
+    input: { readonly runRootOperation?: RunRootOperation } = {}
+  ) {
     this.runRootOperation = input.runRootOperation ?? runDirectly
   }
 
@@ -129,7 +134,7 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
   }
 
   async queue(input: QueueActionRunInput): Promise<ActionRunRecord> {
-    return this.runRootOperation(() => {
+    return this.runRootOperation(async () => {
       const key = actionRunKey(input.projectId, input.id)
       const existing = this.rows.get(key)
       if (existing && !canRequeueActionRunAfterEnqueueFailure(existing, input)) {
@@ -137,10 +142,30 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
           `[Sixb] Action run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
+      if (
+        [...this.rows.values()].some(
+          (run) =>
+            run.projectId === input.projectId &&
+            run.id !== input.id &&
+            run.executionId === input.executionId
+        )
+      ) {
+        throw new ActionRunError(
+          `[Sixb] Execution '${input.executionId}' already belongs to another Action run.`
+        )
+      }
+      await assertActionRunExecution({
+        executions: this.executions,
+        projectId: input.projectId,
+        executionId: input.executionId,
+        runId: input.id,
+        actionId: input.actionId,
+      })
 
       const record: ActionRunRecord = {
         id: input.id,
         projectId: input.projectId,
+        executionId: input.executionId,
         actionId: input.actionId,
         subject: normalizeSubject(input.subject),
         status: "queued",

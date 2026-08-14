@@ -1,7 +1,7 @@
 import type { DomainEventLog, Queues, SixbDefinitions, Storage } from "@sixb/core"
 import type { LoggingService } from "@sixb/core/internal/logging"
 import {
-  bindPrimitiveExecution,
+  bindDurablePrimitiveExecution,
   type PrimitiveExecutionHost,
 } from "@sixb/core/internal/primitive-execution"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
@@ -77,24 +77,40 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
       throw new ActionWorkerError(`Unsupported action job type '${job.type}'.`)
     }
 
-    const actionJob: ActionJob = {
-      id: job.payload.runId,
-      actionId: job.payload.actionId,
+    const actionRuns = this.host.storage.actionRuns
+    if (!actionRuns) {
+      throw new ActionWorkerError("Action workers require storage.actionRuns support.")
+    }
+    const run = await actionRuns.getById({ projectId: this.host.id, id: job.payload.runId })
+    if (!run) {
+      throw new ActionWorkerError(`Action run '${job.payload.runId}' was not found.`)
     }
 
-    const execution = bindPrimitiveExecution(this.host, {
+    const durableExecution = await this.host.storage.executions.getById({
+      projectId: this.host.id,
+      id: run.executionId,
+    })
+    if (!durableExecution) {
+      throw new ActionWorkerError(
+        `Action run '${run.id}' references missing execution '${run.executionId}'.`
+      )
+    }
+
+    const actionJob: ActionJob = { id: run.id, actionId: run.actionId }
+    const execution = bindDurablePrimitiveExecution(this.host, {
+      execution: durableExecution,
       primitive: {
         kind: "action",
-        id: actionJob.actionId,
-        runId: actionJob.id,
+        id: run.actionId,
+        runId: run.id,
       },
-      source: { type: "queue", queue: "actions", jobId: job.id },
     })
     const context = buildActionContext(this.host, execution)
 
     const result = await runActionJob({
       runtime: context,
       job: actionJob,
+      run,
       signal,
       attempt: job.attempt,
     })
@@ -103,7 +119,7 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
       return
     }
 
-    await emitActionTerminalEvent(this.host, result)
+    await emitActionTerminalEvent(this.host, result, durableExecution.correlationId)
   }
 
   protected override async onExecutionError(
@@ -123,7 +139,8 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
 
 async function emitActionTerminalEvent(
   host: ActionWorkerHost,
-  result: Exclude<ActionRunResult, { skipped: true }>
+  result: Exclude<ActionRunResult, { skipped: true }>,
+  correlationId: string
 ): Promise<void> {
   const finishedAt = result.finishedAt.toISOString()
 
@@ -156,6 +173,7 @@ async function emitActionTerminalEvent(
                 },
               },
             ],
+      correlationId,
     },
     { source: "SixbActionWorker" }
   )
@@ -163,7 +181,7 @@ async function emitActionTerminalEvent(
 
 function buildActionContext(
   host: ActionWorkerHost,
-  execution: ReturnType<typeof bindPrimitiveExecution>
+  execution: ReturnType<typeof bindDurablePrimitiveExecution>
 ): ActionWorkerContext {
   const actionRunsStorage = host.storage.actionRuns
   if (!actionRunsStorage) {

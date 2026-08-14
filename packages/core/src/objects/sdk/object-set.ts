@@ -8,6 +8,7 @@ import type { ActionDefinition } from "../../actions"
 import type { AuthorizationContext } from "../../authorization"
 import { assertAuthorized } from "../../authorization"
 import { shareSixbErrorReporter } from "../../error-reporting/capability"
+import type { ExecutionContext } from "../../execution"
 import type { ValueType } from "../../ontology"
 import { OntologyValidationError } from "../../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
@@ -22,7 +23,7 @@ import {
   requestActionAndWait as requestActionAndWaitLeaf,
   requestAction as requestActionLeaf,
 } from "../action"
-import type { ResolvedLinkContext, ResolvedObjectContext } from "../context"
+import type { ExecutionObjectContext, ResolvedLinkContext } from "../context"
 import { requireLinkDefinition } from "../context"
 import { removeLink as removeLinkLeaf, upsertLink as upsertLinkLeaf } from "../link"
 import { upsertObject as upsertObjectLeaf } from "../object"
@@ -37,6 +38,7 @@ export function createObjectSet<
   TValueTypes extends readonly ValueType[],
 >(
   params: SixbRuntimeContext & {
+    readonly execution: ExecutionContext
     readonly objectType: TObjectType
     readonly authorization?: AuthorizationContext
   }
@@ -57,6 +59,7 @@ export function createObjectSet<
     queues,
     runtimeAuthorization,
     authorization,
+    execution,
   } = params
   const queryExecutor = createRuntimeQueryExecutor({
     projectId,
@@ -66,7 +69,7 @@ export function createObjectSet<
     authorization,
   })
 
-  const resolvedCtx: ResolvedObjectContext = {
+  const resolvedCtx: ExecutionObjectContext = {
     projectId,
     ontology,
     actionRegistry,
@@ -75,6 +78,7 @@ export function createObjectSet<
     queues,
     runtimeAuthorization,
     authorization,
+    execution,
     objectType,
     primaryPropertyId,
   }

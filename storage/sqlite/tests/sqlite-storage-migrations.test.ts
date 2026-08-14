@@ -65,6 +65,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 7,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "008-action-executions",
+    status: "applied",
+    version: 8,
+  },
 ]
 
 afterEach(async () => {
@@ -168,11 +175,16 @@ describe("SQLite storage migrations", () => {
   test("splits legacy overrides and derives unambiguous link slot authority", () => {
     const db = new Database(":memory:")
     try {
-      const splitOverridesMigration = sqliteStorageMigrations.steps.at(-1)
-      if (splitOverridesMigration?.id !== "007-split-overrides") {
+      const splitOverridesIndex = sqliteStorageMigrations.steps.findIndex(
+        (migration) => migration.id === "007-split-overrides"
+      )
+      const splitOverridesMigration = sqliteStorageMigrations.steps[splitOverridesIndex]
+      if (!splitOverridesMigration) {
         throw new Error("SQLite split-overrides migration is missing.")
       }
-      for (const migration of sqliteStorageMigrations.steps.slice(0, -1)) migration.up(db)
+      for (const migration of sqliteStorageMigrations.steps.slice(0, splitOverridesIndex)) {
+        migration.up(db)
+      }
 
       db.query(
         `INSERT INTO ontology_overrides (
@@ -531,6 +543,87 @@ describe("SQLite storage migrations", () => {
             "2026-01-01T00:00:00.000Z"
           )
       ).toThrow("UNIQUE constraint failed")
+    } finally {
+      db.close()
+    }
+  })
+
+  test("rejects legacy Action runs instead of inventing their execution authority", () => {
+    const db = new Database(":memory:")
+    try {
+      for (const migration of sqliteStorageMigrations.steps.slice(0, 6)) migration.up(db)
+      db.query(`
+        INSERT INTO action_runs (
+          project_id, id, action_id, subject_kind, status, phase, queued_at, params,
+          idempotency_key
+        ) VALUES (?, ?, ?, 'none', 'queued', 'request', ?, '{}', ?)
+      `).run(
+        "project-a",
+        "legacy-action-run",
+        "legacy-action",
+        "2026-01-01T00:00:00.000Z",
+        "action:project-a:legacy-action-run"
+      )
+
+      expect(() => sqliteStorageMigrations.steps[6]?.up(db)).toThrow()
+      expect(readMemoryTableColumns(db, "action_runs")).not.toContain("execution_id")
+    } finally {
+      db.close()
+    }
+  })
+
+  test("makes the Action execution link required and unique on an empty schema", () => {
+    const db = new Database(":memory:")
+    try {
+      for (const migration of sqliteStorageMigrations.steps) migration.up(db)
+
+      expect(readMemoryColumn(db, "action_runs", "execution_id")?.notnull).toBe(1)
+      db.query(`
+        INSERT INTO executions (
+          project_id, id, executor_kind, executor_id, source_kind, source_id,
+          correlation_id, authority_kind, authority_primitive_kind,
+          authority_primitive_id, created_at
+        ) VALUES (?, ?, 'action', ?, 'event', ?, ?, 'trustedPrimitive', 'action', ?, ?)
+      `).run(
+        "project-a",
+        "action-execution",
+        "action-run",
+        "action-event",
+        "action-correlation",
+        "send-quote",
+        "2026-01-01T00:00:00.000Z"
+      )
+      db.query(`
+        INSERT INTO action_runs (
+          project_id, id, execution_id, action_id, subject_kind, status, phase, queued_at,
+          params, idempotency_key
+        ) VALUES (?, ?, ?, ?, 'none', 'queued', 'request', ?, '{}', ?)
+      `).run(
+        "project-a",
+        "action-run",
+        "action-execution",
+        "send-quote",
+        "2026-01-01T00:00:00.000Z",
+        "action:project-a:action-run"
+      )
+
+      expect(() =>
+        db
+          .query(`
+            INSERT INTO action_runs (
+              project_id, id, execution_id, action_id, subject_kind, status, phase, queued_at,
+              params, idempotency_key
+            ) VALUES (?, ?, ?, ?, 'none', 'queued', 'request', ?, '{}', ?)
+          `)
+          .run(
+            "project-a",
+            "second-action-run",
+            "action-execution",
+            "send-quote",
+            "2026-01-01T00:00:00.000Z",
+            "action:project-a:second-action-run"
+          )
+      ).toThrow("UNIQUE")
     } finally {
       db.close()
     }

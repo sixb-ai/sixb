@@ -12,12 +12,12 @@ import {
   requestActionAndWait as requestRuntimeActionAndWait,
 } from "../../actions/request"
 import type { ActionRunRecord } from "../../storage"
-import type { ResolvedObjectContext } from "../context"
+import type { ExecutionObjectContext } from "../context"
 
 export type { RequestActionAndWaitOptions, RequestActionOptions }
 
 export async function requestAction(
-  ctx: ResolvedObjectContext,
+  ctx: ExecutionObjectContext,
   params: {
     primaryId: string
     actionId: string
@@ -25,7 +25,7 @@ export async function requestAction(
     options?: RequestActionOptions
   }
 ): Promise<RequestActionResult> {
-  return requestRuntimeAction(ctx, {
+  return requestRuntimeAction(ctx, ctx.execution, {
     actionId: params.actionId,
     subject: {
       kind: "object",
@@ -39,7 +39,7 @@ export async function requestAction(
 }
 
 export async function requestActionAndWait(
-  ctx: ResolvedObjectContext,
+  ctx: ExecutionObjectContext,
   params: {
     primaryId: string
     actionId: string
@@ -47,7 +47,7 @@ export async function requestActionAndWait(
     options?: RequestActionAndWaitOptions
   }
 ): Promise<ActionRunRecord> {
-  return requestRuntimeActionAndWait(ctx, {
+  return requestRuntimeActionAndWait(ctx, ctx.execution, {
     actionId: params.actionId,
     subject: {
       kind: "object",

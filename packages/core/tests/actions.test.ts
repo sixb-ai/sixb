@@ -14,6 +14,7 @@ import {
 } from "../src"
 import { flushSixbErrors } from "../src/error-reporting/internal"
 import { ActionRunError } from "../src/storage"
+import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -688,14 +689,40 @@ describe("requestAction", () => {
       params: {},
       idempotencyKey: `action:action-test:${result.runId}`,
     })
+    expect(run?.executionId).toBeString()
+    const execution = run
+      ? await runtimeDeps.storage.executions.getById({
+          projectId: "action-test",
+          id: run.executionId,
+        })
+      : null
+    expect(execution).toMatchObject({
+      executor: { type: "primitive", kind: "action", runId: result.runId },
+      source: { type: "execution", executionId: sixb.execution.id },
+      correlationId: sixb.execution.correlationId,
+      parentExecutionId: sixb.execution.id,
+      authorizationRef: {
+        type: "trustedPrimitive",
+        primitive: { kind: "action", id: "counted", runId: result.runId },
+      },
+    })
+    expect(
+      await runtimeDeps.storage.executions.getById({
+        projectId: "action-test",
+        id: sixb.execution.id,
+      })
+    ).toMatchObject({
+      id: sixb.execution.id,
+      correlationId: sixb.execution.correlationId,
+    })
     const jobs = await runtimeDeps.queues.actions.claim({
       projectId: "action-test",
       workerId: "test-worker",
       limit: 1,
     })
     expect(jobs).toHaveLength(1)
+    expect(jobs[0].job.id).toBe(result.runId)
     expect(jobs[0].job.payload).toEqual({
-      actionId: "counted",
       runId: result.runId,
     })
     expect(events.length).toBe(1)
@@ -710,6 +737,55 @@ describe("requestAction", () => {
       expect(events[0].payload.params).toEqual({})
       expect(events[0].payload.runId).toBe(result.runId)
     }
+  })
+
+  test("rolls back the Action execution when run persistence fails", async () => {
+    const runtimeDeps = createTestRuntimeDeps()
+    const sixb = createTestSixb({
+      id: "action-atomic-dispatch-test",
+      ontology: [Room],
+      actions: [actionDefinition(setTemperature)],
+      ...runtimeDeps,
+    })
+    let childExecutionId: string | undefined
+    const restore = decorateOperationScopedMethodForTesting(
+      runtimeDeps.storage.actionRuns,
+      "queue",
+      (queue) => async (input) => {
+        childExecutionId = input.executionId
+        await queue(input)
+        throw new Error("injected Action run persistence failure")
+      }
+    )
+
+    try {
+      await expect(
+        sixb.objects(Room).requestAction({
+          id: "room:1",
+          actionId: "setTemperature",
+          params: { target: 72 },
+          runId: "act_atomic_failure",
+        })
+      ).rejects.toThrow("injected Action run persistence failure")
+    } finally {
+      restore()
+    }
+
+    expect(childExecutionId).toBeString()
+    expect(
+      await runtimeDeps.storage.actionRuns.getById({
+        projectId: "action-atomic-dispatch-test",
+        id: "act_atomic_failure",
+      })
+    ).toBeNull()
+    expect(
+      childExecutionId
+        ? await runtimeDeps.storage.executions.getById({
+            projectId: "action-atomic-dispatch-test",
+            id: childExecutionId,
+          })
+        : undefined
+    ).toBeNull()
   })
 
   test("keeps a queued run when the action.requested observation event fails", async () => {
@@ -757,7 +833,6 @@ describe("requestAction", () => {
         limit: 1,
       })
       expect(jobs[0]?.job.payload).toEqual({
-        actionId: "createRoom",
         runId: "act_event_failure",
       })
 
@@ -895,7 +970,6 @@ describe("requestAction", () => {
       limit: 1,
     })
     expect(jobs[0]?.job.payload).toEqual({
-      actionId: "setTemperature",
       runId: "act_enqueue_retry",
     })
   })

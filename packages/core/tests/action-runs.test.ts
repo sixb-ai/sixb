@@ -1,14 +1,87 @@
 import { describe, expect, test } from "bun:test"
-import { ActionRunError, InMemoryActionRunStorage } from "../src/storage"
+import type { QueueActionRunInput } from "../src/storage"
+import { ActionRunError, InMemoryStorage } from "../src/storage"
+import { createTestActionExecution, queueTestActionRun } from "../src/testing"
+
+function createActionRunFixture() {
+  const provider = new InMemoryStorage()
+  return {
+    storage: provider.actionRuns,
+    queue: (input: Omit<QueueActionRunInput, "executionId">) => queueTestActionRun(provider, input),
+  }
+}
 
 describe("InMemoryActionRunStorage", () => {
+  test("requires one matching execution owned by the Action run", async () => {
+    const provider = new InMemoryStorage()
+
+    await expect(
+      provider.actionRuns.queue({
+        id: "act_missing",
+        projectId: "my-app",
+        executionId: "exec_missing",
+        actionId: "sendQuote",
+        subject: { kind: "none" },
+        params: {},
+        idempotencyKey: "action:my-app:act_missing",
+      })
+    ).rejects.toThrow("does not authorize Action run")
+
+    const executionId = await createTestActionExecution(provider.executions, {
+      projectId: "my-app",
+      actionId: "otherAction",
+      runId: "act_mismatch",
+    })
+    await expect(
+      provider.actionRuns.queue({
+        id: "act_mismatch",
+        projectId: "my-app",
+        executionId,
+        actionId: "sendQuote",
+        subject: { kind: "none" },
+        params: {},
+        idempotencyKey: "action:my-app:act_mismatch",
+      })
+    ).rejects.toThrow("does not authorize Action run")
+  })
+
+  test("links an execution to at most one Action run", async () => {
+    const provider = new InMemoryStorage()
+    const executionId = await createTestActionExecution(provider.executions, {
+      projectId: "my-app",
+      actionId: "sendQuote",
+      runId: "act_1",
+    })
+    await provider.actionRuns.queue({
+      id: "act_1",
+      projectId: "my-app",
+      executionId,
+      actionId: "sendQuote",
+      subject: { kind: "none" },
+      params: {},
+      idempotencyKey: "action:my-app:act_1",
+    })
+
+    await expect(
+      provider.actionRuns.queue({
+        id: "act_2",
+        projectId: "my-app",
+        executionId,
+        actionId: "sendQuote",
+        subject: { kind: "none" },
+        params: {},
+        idempotencyKey: "action:my-app:act_2",
+      })
+    ).rejects.toThrow("already belongs to another Action run")
+  })
+
   test("queues, starts, and finishes a successful action run", async () => {
-    const storage = new InMemoryActionRunStorage()
+    const { storage, queue } = createActionRunFixture()
     const queuedAt = new Date("2026-04-29T10:14:00.000Z")
     const startedAt = new Date("2026-04-29T10:14:01.000Z")
     const finishedAt = new Date("2026-04-29T10:14:03.842Z")
 
-    const queued = await storage.queue({
+    const queued = await queue({
       id: "act_1",
       projectId: "my-app",
       actionId: "sendQuote",
@@ -51,9 +124,9 @@ describe("InMemoryActionRunStorage", () => {
   })
 
   test("rejects duplicate queues, invalid starts, and missing finishes", async () => {
-    const storage = new InMemoryActionRunStorage()
+    const { storage, queue } = createActionRunFixture()
 
-    await storage.queue({
+    await queue({
       id: "act_1",
       projectId: "my-app",
       actionId: "sendQuote",
@@ -63,7 +136,7 @@ describe("InMemoryActionRunStorage", () => {
     })
 
     await expect(
-      storage.queue({
+      queue({
         id: "act_1",
         projectId: "my-app",
         actionId: "sendQuote",
@@ -99,9 +172,9 @@ describe("InMemoryActionRunStorage", () => {
   })
 
   test("rejects finishing terminal runs", async () => {
-    const storage = new InMemoryActionRunStorage()
+    const { storage, queue } = createActionRunFixture()
 
-    await storage.queue({
+    await queue({
       id: "act_1",
       projectId: "my-app",
       actionId: "sendQuote",
@@ -133,9 +206,9 @@ describe("InMemoryActionRunStorage", () => {
   })
 
   test("stores failed runs and lists with filters, ordering, and paging", async () => {
-    const storage = new InMemoryActionRunStorage()
+    const { storage, queue } = createActionRunFixture()
 
-    await storage.queue({
+    await queue({
       id: "act_1",
       projectId: "my-app",
       actionId: "sendQuote",
@@ -160,7 +233,7 @@ describe("InMemoryActionRunStorage", () => {
       },
     })
 
-    await storage.queue({
+    await queue({
       id: "act_2",
       projectId: "my-app",
       actionId: "sendQuote",
@@ -175,7 +248,7 @@ describe("InMemoryActionRunStorage", () => {
       startedAt: new Date("2026-04-29T11:00:00.000Z"),
     })
 
-    await storage.queue({
+    await queue({
       id: "act_3",
       projectId: "my-app",
       actionId: "closeOpportunity",
@@ -214,9 +287,9 @@ describe("InMemoryActionRunStorage", () => {
   })
 
   test("records V2 lifecycle records without failing committed actions on effects errors", async () => {
-    const storage = new InMemoryActionRunStorage()
+    const { storage, queue } = createActionRunFixture()
 
-    await storage.queue({
+    await queue({
       id: "act_1",
       projectId: "my-app",
       actionId: "createInvoice",
@@ -279,9 +352,9 @@ describe("InMemoryActionRunStorage", () => {
   })
 
   test("compares phase records without stripping user result fields", async () => {
-    const storage = new InMemoryActionRunStorage()
+    const { storage, queue } = createActionRunFixture()
 
-    await storage.queue({
+    await queue({
       id: "act_1",
       projectId: "my-app",
       actionId: "createInvoice",

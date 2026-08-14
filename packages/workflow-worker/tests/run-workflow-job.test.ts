@@ -22,7 +22,7 @@ import {
   type WorkflowDefinition,
   WorkflowValidationError,
 } from "@sixb/core"
-import { bindPrimitiveExecution } from "@sixb/core/internal/primitive-execution"
+import { bindDurablePrimitiveExecution } from "@sixb/core/internal/primitive-execution"
 import { snapshotWorkflowInput } from "@sixb/core/internal/workflows"
 import type {
   ActionRunStorage,
@@ -241,9 +241,22 @@ function createRuntime(host: WorkflowWorkerHost): WorkflowWorkerContext {
   const workflowId = host.definitions.workflows.list()[0]?.id ?? "missing-workflow"
   // Direct handler tests use one explicit trusted execution. Queue-worker tests exercise the real
   // per-delivery workflow id and run id binding in WorkflowWorker.execute.
-  const execution = bindPrimitiveExecution(host, {
-    primitive: { kind: "workflow", id: workflowId, runId: "direct-workflow-job-test" },
-    source: { type: "queue", queue: "workflows", jobId: "direct-workflow-job-test" },
+  const primitive = {
+    kind: "workflow" as const,
+    id: workflowId,
+    runId: "direct-workflow-job-test",
+  }
+  const execution = bindDurablePrimitiveExecution(host, {
+    execution: {
+      id: "direct-workflow-execution-test",
+      projectId: host.id,
+      executor: { type: "primitive", kind: primitive.kind, runId: primitive.runId },
+      source: { type: "event", eventId: "direct-workflow-event-test" },
+      correlationId: "direct-workflow-correlation-test",
+      authorizationRef: { type: "trustedPrimitive", primitive },
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    },
+    primitive,
   })
   return {
     projectId: host.id,
@@ -1279,6 +1292,32 @@ describe("runWorkflowJob", () => {
         actionRunId: "wfrun_action:action:1",
       })
       expect(result.run.output).toEqual(result.nodes[0]?.output)
+
+      const actionRun = await sixb.storage.actionRuns?.getById({
+        projectId: sixb.id,
+        id: "wfrun_action:action:1",
+      })
+      expect(actionRun).not.toBeNull()
+      const actionExecution = actionRun
+        ? await sixb.storage.executions.getById({
+            projectId: sixb.id,
+            id: actionRun.executionId,
+          })
+        : null
+      expect(actionExecution).toMatchObject({
+        executor: { type: "primitive", kind: "action", runId: "wfrun_action:action:1" },
+        source: { type: "execution", executionId: "direct-workflow-execution-test" },
+        parentExecutionId: "direct-workflow-execution-test",
+        correlationId: "direct-workflow-correlation-test",
+        authorizationRef: {
+          type: "trustedPrimitive",
+          primitive: {
+            kind: "action",
+            id: "attach-invoice",
+            runId: "wfrun_action:action:1",
+          },
+        },
+      })
     } finally {
       unsubscribe()
     }

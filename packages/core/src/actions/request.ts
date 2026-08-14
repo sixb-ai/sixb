@@ -1,19 +1,22 @@
 import { assertAuthorized } from "../authorization"
-import { reportRunFailure } from "../error-reporting/capability"
+import {
+  createPrimitiveExecutionRecord,
+  ensureExecutionRecord,
+  executionRecordInputFromRuntime,
+} from "../execution/durable"
+import type { ExecutionContext } from "../execution/types"
 import { ActionRunTimeoutError } from "../objects/action/errors"
 import { OntologyValidationError } from "../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { SixbRuntimeContext } from "../runtime/types"
 import {
   ActionRunError,
-  type ActionRunParams,
   type ActionRunRecord,
   type ActionRunStorage,
-  actionRunParamsEqual,
-  actionSubjectsEqual,
   isTerminalActionRun,
 } from "../storage"
-import { createActionRunId, createActionRunIdempotencyKey } from "./run-id"
+import { dispatchActionRun } from "./run-dispatch"
+import { createActionRunId } from "./run-id"
 import type { ActionDefinition, ActionSubject } from "./types"
 import {
   isObjectActionDefinition,
@@ -77,9 +80,10 @@ function getActionDefinition(runtime: SixbRuntimeContext, actionId: string): Act
 
 export async function requestAction(
   runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
   input: RequestActionInput
 ): Promise<RequestActionResult> {
-  const actionRuns = requireActionRunStorage(runtime)
+  requireActionRunStorage(runtime)
   const action = getActionDefinition(runtime, input.actionId)
   const actionId = action.id
   const rawParams: Record<string, unknown> = input.params ?? {}
@@ -103,147 +107,41 @@ export async function requestAction(
 
   const actionParams = normalizeActionParams(runtime, action.params, rawParams, pathPrefix)
 
-  const runId = createActionRunId(input.runId)
-  const existing = await actionRuns.getById({ projectId: runtime.projectId, id: runId })
-  if (existing) {
-    assertExistingRunMatchesRequest(existing, {
-      actionId,
-      subject,
-      params: actionParams,
-    })
-    if (isRetryableEnqueueFailure(existing)) {
-      const queuedAt = new Date()
-      await actionRuns.queue({
-        projectId: runtime.projectId,
-        id: runId,
-        actionId,
-        subject,
-        params: actionParams,
-        idempotencyKey: existing.idempotencyKey,
-        queuedAt,
-      })
-      return enqueueActionRunJob(runtime, {
-        actionRuns,
-        actionId,
-        subject,
-        params: actionParams,
-        runId,
-        queuedAt,
-        created: false,
-      })
-    }
-    return {
-      runId,
-      queuedAt: existing.queuedAt.toISOString(),
-      created: false,
-    }
-  }
-
-  const queuedAt = new Date()
-  const idempotencyKey = createActionRunIdempotencyKey(runtime.projectId, runId)
-
-  await actionRuns.queue({
+  return dispatchActionRun({
+    errorReporterHost: runtime,
     projectId: runtime.projectId,
-    id: runId,
+    storage: runtime.storage,
+    queue: runtime.queues.actions,
+    events: runtime.events,
     actionId,
     subject,
     params: actionParams,
-    idempotencyKey,
-    queuedAt,
-  })
-
-  return enqueueActionRunJob(runtime, {
-    actionRuns,
-    actionId,
-    subject,
-    params: actionParams,
-    runId,
-    queuedAt,
-    created: true,
-  })
-}
-
-async function enqueueActionRunJob(
-  runtime: SixbRuntimeContext,
-  params: {
-    readonly actionRuns: ActionRunStorage
-    readonly actionId: string
-    readonly subject: ActionSubject
-    readonly params: ActionRunParams
-    readonly runId: string
-    readonly queuedAt: Date
-    readonly created: boolean
-  }
-): Promise<RequestActionResult> {
-  let jobId: string | undefined
-  try {
-    const [job] = await runtime.queues.actions.enqueue({
-      projectId: runtime.projectId,
-      jobs: [
-        {
-          type: "action.run.requested",
-          payload: {
-            actionId: params.actionId,
-            runId: params.runId,
-          },
-        },
-      ],
-    })
-    jobId = job?.id
-  } catch (error) {
-    const failed = await params.actionRuns.finish({
-      projectId: runtime.projectId,
-      id: params.runId,
-      status: "failed",
-      phase: "enqueue",
-      error: toActionRunFailure(error, "enqueue"),
-    })
-    reportRunFailure(runtime, error, {
-      projectId: runtime.projectId,
-      occurredAt: failed.finishedAt,
-      run: {
-        kind: "action",
-        runId: params.runId,
-        actionId: params.actionId,
-      },
-    })
-    throw error
-  }
-
-  // The run is persisted and the job is queued, so the request has succeeded and the caller must not
-  // be told otherwise. `emit` keeps that promise and still escalates the lost trigger edge.
-  await runtime.events.emit(
-    {
-      events: [
-        {
-          type: "action.requested",
-          payload: {
-            actionId: params.actionId,
-            subject: params.subject,
-            params: params.params,
-            runId: params.runId,
-          },
-        },
-      ],
+    runId: input.runId,
+    createExecution: async (executionId, runId) => {
+      const caller = await ensureExecutionRecord(
+        runtime.storage.executions,
+        executionRecordInputFromRuntime({
+          execution,
+          runtimeAuthorization: runtime.runtimeAuthorization,
+        })
+      )
+      return createPrimitiveExecutionRecord({
+        id: executionId,
+        primitive: { kind: "action", id: actionId, runId },
+        origin: { type: "execution", parent: caller },
+      })
     },
-    { source: "Sixb" }
-  )
-
-  return {
-    runId: params.runId,
-    queuedAt: params.queuedAt.toISOString(),
-    ...(jobId ? { jobId } : {}),
-    created: params.created,
-  }
+  })
 }
 
 export async function requestActionAndWait(
   runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
   input: RequestActionAndWaitInput
 ): Promise<ActionRunRecord> {
   const runId = createActionRunId(input.runId)
 
-  await requestAction(runtime, {
+  await requestAction(runtime, execution, {
     ...input,
     runId,
   })
@@ -363,45 +261,4 @@ function requireActionRunStorage(runtime: SixbRuntimeContext): ActionRunStorage 
     throw new ActionRunError("[Sixb] Action run storage is not configured.")
   }
   return actionRuns
-}
-
-function assertExistingRunMatchesRequest(
-  existing: ActionRunRecord,
-  request: {
-    readonly actionId: string
-    readonly subject: ActionSubject
-    readonly params: ActionRunParams
-  }
-): void {
-  const matches =
-    existing.actionId === request.actionId &&
-    actionSubjectsEqual(existing.subject, request.subject) &&
-    actionRunParamsEqual(existing.params, request.params)
-
-  if (!matches) {
-    throw new ActionRunError(
-      `[Sixb] Action run '${existing.id}' already exists with a different request payload.`
-    )
-  }
-}
-
-function isRetryableEnqueueFailure(record: ActionRunRecord): boolean {
-  return record.status === "failed" && record.phase === "enqueue"
-}
-
-function toActionRunFailure(
-  error: unknown,
-  phase: "enqueue"
-): { name?: string; message: string; phase: "enqueue" } {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-      phase,
-    }
-  }
-  return {
-    message: String(error),
-    phase,
-  }
 }

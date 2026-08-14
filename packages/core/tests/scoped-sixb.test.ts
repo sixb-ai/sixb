@@ -370,6 +370,7 @@ describe("bound Sixb cross-type list", () => {
 describe("bound Sixb actions", () => {
   test("object actions require apply and view together", async () => {
     const host = createRuntime()
+    await seedPrincipal(host)
     const sixb = createTestSixb(host)
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
 
@@ -381,10 +382,25 @@ describe("bound Sixb actions", () => {
 
     // view without apply
     await sixb.objects(Invoice).upsert({ properties: { id: "i1" } })
-    const viewerOnly = bindPrincipal(host, contextFor(host, ["finance"]))
+    const viewerOnly = createTestSixb(host, {
+      authorization: contextFor(host, ["finance"]),
+      executionId: "exec_denied_action",
+      requestId: "request_denied_action",
+      correlationId: "correlation_denied_action",
+    })
     expect(
-      viewerOnly.objects(Invoice).requestAction({ id: "i1", actionId: "archive-invoice" })
+      viewerOnly.objects(Invoice).requestAction({
+        id: "i1",
+        actionId: "archive-invoice",
+        runId: "act_denied_action",
+      })
     ).rejects.toThrow(AuthorizationError)
+    expect(
+      await host.storage.actionRuns?.getById({ projectId: host.id, id: "act_denied_action" })
+    ).toBeNull()
+    expect(
+      await host.storage.executions.getById({ projectId: host.id, id: "exec_denied_action" })
+    ).toBeNull()
 
     // apply without view
     const senderOnly = bindPrincipal(host, contextFor(host, ["ops"]))
@@ -474,6 +490,7 @@ describe("bound Sixb operational access", () => {
 
   test("dynamic action requests enforce apply and view", async () => {
     const host = createRuntime()
+    await seedPrincipal(host)
     const sixb = createTestSixb(host)
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
 

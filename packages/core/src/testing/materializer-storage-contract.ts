@@ -17,6 +17,7 @@ import {
   type ProjectionSourceEntry,
 } from "../materializer"
 import type { ActionRunStorage, ProjectionRunStorage } from "../storage"
+import { queueTestActionRun } from "./action-execution"
 
 export interface MaterializerStorageContractProvider<TStorage extends Storage> {
   readonly createStorage: () => TStorage | Promise<TStorage>
@@ -173,7 +174,7 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
         })
       ).rejects.toThrow("missing-action-run")
 
-      await storage.actionRuns.queue({
+      await queueTestActionRun(storage, {
         id: "action-run",
         projectId: "materializer-storage-contract",
         actionId: "renameDevice",

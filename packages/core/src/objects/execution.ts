@@ -1,4 +1,5 @@
 import { assertAuthorized, isAllowed } from "../authorization"
+import type { ExecutionContext } from "../execution"
 import type { ValueType } from "../ontology"
 import { assertObjectTypeRegistered } from "../ontology"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
@@ -159,7 +160,8 @@ export interface ObjectsRuntime<TOntologySources extends readonly OntologySource
 }
 
 export function createObjectsRuntime<TOntologySources extends readonly OntologySource[]>(
-  runtime: SixbRuntimeContext
+  runtime: SixbRuntimeContext,
+  execution: ExecutionContext
 ): ObjectsRuntime<TOntologySources> {
   const objects = Object.assign(
     <TObjectType extends RegisteredObjectType<TOntologySources>>(objectType: TObjectType) => {
@@ -168,7 +170,7 @@ export function createObjectsRuntime<TOntologySources extends readonly OntologyS
         TObjectType,
         RegisteredObjectType<TOntologySources>,
         RegisteredValueTypes<TOntologySources>
-      >({ ...runtime, objectType }) as ExecutionObjectSet<
+      >({ ...runtime, execution, objectType }) as ExecutionObjectSet<
         TObjectType,
         RegisteredValueTypes<TOntologySources>,
         RegisteredObjectType<TOntologySources>

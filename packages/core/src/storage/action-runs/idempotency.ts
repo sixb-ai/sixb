@@ -47,6 +47,7 @@ export function canRequeueActionRunAfterEnqueueFailure(
   return (
     existing.status === "failed" &&
     existing.phase === "enqueue" &&
+    existing.executionId === input.executionId &&
     existing.actionId === input.actionId &&
     existing.idempotencyKey === input.idempotencyKey &&
     actionSubjectsEqual(existing.subject, input.subject) &&

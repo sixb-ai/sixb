@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { Storage } from "@sixb/core"
-import { type ActionRunStorage, StorageTransactionError } from "@sixb/core/storage"
+import { StorageTransactionError } from "@sixb/core/storage"
+import { queueTestActionRun } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
 
@@ -18,7 +19,7 @@ describe("PostgresStorage.transaction", () => {
 
   test("commits writes atomically", async () => {
     await storage.transaction(async (tx) => {
-      await requireActionRuns(tx).queue(actionRunInput("run_commit"))
+      await queueTestActionRun(tx, actionRunInput("run_commit"))
     })
 
     expect(
@@ -42,7 +43,7 @@ describe("PostgresStorage.transaction", () => {
     await expect(
       storage.transaction(async (tx) => {
         const runs = requireTransactionalRunStores(tx)
-        await runs.actionRuns.queue(actionRunInput("run_rollback"))
+        await queueTestActionRun(tx, actionRunInput("run_rollback"))
         await runs.syncRuns.start(syncRunInput("sync_rollback"))
         await runs.webhookRuns.start(webhookRunInput("webhook_rollback"))
 
@@ -88,13 +89,6 @@ function actionRunInput(id: string) {
     params: {},
     idempotencyKey: `action:my-app:${id}`,
   }
-}
-
-function requireActionRuns(tx: Storage): ActionRunStorage {
-  if (!tx.actionRuns) {
-    throw new Error("[test] expected transaction storage to expose actionRuns")
-  }
-  return tx.actionRuns
 }
 
 function requireTransactionalRunStores(tx: Storage) {

@@ -17,16 +17,14 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
 
   throwIfAborted(signal)
 
-  let existingRun = await runtime.actionRunsStorage.getById({
-    projectId: runtime.id,
-    id: job.id,
-  })
-  if (!existingRun) {
-    throw new ActionWorkerError(`Action run '${job.id}' was not found.`)
-  }
-  if (existingRun.actionId !== job.actionId) {
+  let existingRun = input.run
+  if (
+    existingRun.projectId !== runtime.id ||
+    existingRun.id !== job.id ||
+    existingRun.actionId !== job.actionId
+  ) {
     throw new ActionWorkerError(
-      `Action job '${job.id}' references action '${job.actionId}' but the stored run references '${existingRun.actionId}'.`
+      `Action job '${job.id}' does not match durable run '${existingRun.id}' in project '${existingRun.projectId}'.`
     )
   }
   if (isTerminalActionRun(existingRun)) {

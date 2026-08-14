@@ -73,6 +73,9 @@
       "@sixb/core/internal/workflow-run-storage-provider": [
         "./packages/core/src/storage/workflow-runs/provider.ts"
       ],
+      "@sixb/core/internal/action-run-storage-provider": [
+        "./packages/core/src/storage/action-runs/provider.ts"
+      ],
       "@sixb/core/internal/projections": ["./packages/core/src/projections/internal.ts"],
       "@sixb/core/internal/agent-execution": ["./packages/core/src/execution/agent.ts"],
       "@sixb/core/internal/primitive-execution": ["./packages/core/src/execution/primitive.ts"],
