@@ -128,7 +128,7 @@ async function appendScheduleTriggered(
   scheduleId: string
 ) {
   const occurrenceAt = "2026-04-18T02:00:00.000Z"
-  await sixb.events.append({
+  const [event] = await sixb.events.append({
     events: [
       {
         type: "schedule.triggered",
@@ -141,6 +141,7 @@ async function appendScheduleTriggered(
       },
     ],
   })
+  return event!
 }
 
 describe("startSixbRuntime", () => {
@@ -626,7 +627,7 @@ describe("startSixbRuntime", () => {
       expect(runtime.orchestratorWorker).not.toBeNull()
       expect(runtime.warnings).toHaveLength(0)
 
-      await appendScheduleTriggered(sixb, daily.id)
+      const sourceEvent = await appendScheduleTriggered(sixb, daily.id)
 
       const workflowRuns = await waitFor(
         () =>
@@ -639,6 +640,16 @@ describe("startSixbRuntime", () => {
       )
 
       expect(workflowRuns.runs[0]?.input).toEqual({})
+      const workflowExecution = await sixb.storage.executions.getById({
+        projectId: sixb.id,
+        id: workflowRuns.runs[0]!.executionId,
+      })
+      expect(workflowExecution).toMatchObject({
+        source: { type: "schedule", eventId: sourceEvent.id },
+        correlationId: sourceEvent.id,
+      })
+      expect(workflowExecution?.parentExecutionId).toBeUndefined()
+      expect(workflowExecution?.requestedBy).toBeUndefined()
 
       const workflowJobs = await sixb.queues.workflows.claim({
         projectId: sixb.id,

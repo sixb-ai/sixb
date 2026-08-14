@@ -3,6 +3,8 @@ import type { OntologySource } from "../ontology"
 import type { OntologyMutationRuntime } from "../runtime/ontology-mutations"
 import { getOntologyMutationRuntime } from "../runtime/ontology-mutations"
 import { isBoundSixb, type Sixb } from "../runtime/sixb"
+import type { ExecutionRecord } from "../storage/executions"
+import { restoreTrustedPrimitiveExecutionScope } from "./durable"
 import { createTrustedPrimitiveScope } from "./scopes"
 import type {
   AuthorizablePrincipal,
@@ -46,6 +48,24 @@ export function bindPrimitiveExecution(
       ? {}
       : { parentExecutionId: input.parentExecutionId }),
   })
+  return bindPrimitiveScope(host, scope)
+}
+
+/** Bind a worker to the immutable execution already owned by its durable primitive run. */
+export function bindDurablePrimitiveExecution(
+  host: PrimitiveExecutionHost,
+  input: {
+    readonly execution: ExecutionRecord
+    readonly primitive: TrustedPrimitiveRef
+  }
+): BoundPrimitiveExecution {
+  return bindPrimitiveScope(host, restoreTrustedPrimitiveExecutionScope(input))
+}
+
+function bindPrimitiveScope(
+  host: PrimitiveExecutionHost,
+  scope: ExecutionScope
+): BoundPrimitiveExecution {
   let ontologyMutations: OntologyMutationRuntime | undefined
 
   const sixb = host.withScope(scope)

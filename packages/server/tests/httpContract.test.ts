@@ -34,7 +34,7 @@ import {
   type Storage,
   type WorkflowDefinition,
 } from "@sixb/core"
-import { createTestSixb } from "@sixb/core/testing"
+import { createTestSixb, createTestWorkflowExecution } from "@sixb/core/testing"
 import { SqliteStorage } from "@sixb/sqlite"
 import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
@@ -224,11 +224,22 @@ async function seedPendingReviewIntervention(
   const pendingInterventionId = `workflow-intervention-${suffix}`
   const stepOutput = { deviceId: "fan-1", healthy: true }
 
+  const workflowExecutionId = await createTestWorkflowExecution(sixb.storage.executions, {
+    projectId: sixb.id,
+    workflowId: "review-device-health-workflow",
+    runId,
+  })
+  await workflowRuns.queue({
+    id: runId,
+    projectId: sixb.id,
+    executionId: workflowExecutionId,
+    workflowId: "review-device-health-workflow",
+    input: { deviceId: "fan-1" },
+    queuedAt: new Date("2026-02-18T09:19:59.000Z"),
+  })
   await workflowRuns.start({
     id: runId,
     projectId: sixb.id,
-    workflowId: "review-device-health-workflow",
-    input: { deviceId: "fan-1" },
     startedAt: new Date("2026-02-18T09:20:00.000Z"),
   })
   await workflowRuns.nodes.start({
@@ -438,11 +449,22 @@ describe("SixbServer HTTP contract", () => {
       },
     })
 
+    const previousWorkflowExecutionId = await createTestWorkflowExecution(sixb.storage.executions, {
+      projectId: "contract-project",
+      workflowId: "inspect-device-workflow",
+      runId: "workflow-run-previous",
+    })
+    await sixb.storage.workflowRuns!.queue({
+      id: "workflow-run-previous",
+      projectId: "contract-project",
+      executionId: previousWorkflowExecutionId,
+      workflowId: "inspect-device-workflow",
+      input: { deviceId: "fan-1" },
+      queuedAt: new Date("2026-02-18T09:06:59.000Z"),
+    })
     await sixb.storage.workflowRuns!.start({
       id: "workflow-run-previous",
       projectId: "contract-project",
-      workflowId: "inspect-device-workflow",
-      input: { deviceId: "fan-1" },
       startedAt: new Date("2026-02-18T09:07:00.000Z"),
     })
     await sixb.storage.workflowRuns!.nodes.start({
@@ -1871,12 +1893,19 @@ describe("SixbServer HTTP contract", () => {
       const runs = sixb.storage.workflowRuns!
       const runId = "workflow-agent-observability"
       const nodeRunId = `${runId}:node:0`
-      await runs.start({
+      const workflowExecutionId = await createTestWorkflowExecution(sixb.storage.executions, {
+        projectId: sixb.id,
+        workflowId: "review-device-health-workflow",
+        runId,
+      })
+      await runs.queue({
         id: runId,
         projectId: sixb.id,
+        executionId: workflowExecutionId,
         workflowId: "review-device-health-workflow",
         input: { deviceId: "fan-1" },
       })
+      await runs.start({ id: runId, projectId: sixb.id })
       await runs.nodes.start({
         id: nodeRunId,
         projectId: sixb.id,

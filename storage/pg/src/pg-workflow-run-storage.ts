@@ -1,10 +1,11 @@
-import type { Principal, WorkflowRunSource } from "@sixb/core"
+import { assertWorkflowRunExecution } from "@sixb/core/internal/workflow-run-storage-provider"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type {
   CancelWorkflowAgentNodeRunInput,
   ConfirmWorkflowAgentNodeRunExecutionOwnershipInput,
   ConfirmWorkflowRunExecutionOwnershipInput,
   CreateWorkflowAgentNodeRunInput,
+  ExecutionStorage,
   FinishWorkflowAgentNodeRunInput,
   FinishWorkflowNodeRunInput,
   FinishWorkflowRunInput,
@@ -43,39 +44,45 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
   readonly nodes: PgWorkflowNodeRunStorage
   readonly agentNodes: PgWorkflowAgentNodeRunStorage
 
-  constructor(private readonly sql: PgStoreClient) {
+  constructor(
+    private readonly sql: PgStoreClient,
+    private readonly executions: ExecutionStorage
+  ) {
     this.nodes = new PgWorkflowNodeRunStorage(sql)
     this.agentNodes = new PgWorkflowAgentNodeRunStorage(sql)
   }
 
   async queue(input: QueueWorkflowRunInput): Promise<WorkflowRunRecord> {
     const queuedAt = input.queuedAt ?? new Date()
+    await assertWorkflowRunExecution({
+      executions: this.executions,
+      projectId: input.projectId,
+      executionId: input.executionId,
+      runId: input.id,
+      workflowId: input.workflowId,
+    })
 
     try {
       const [row] = await this.sql<WorkflowRunDatabaseRow[]>`
         INSERT INTO workflow_runs (
           project_id,
           id,
+          execution_id,
           workflow_id,
           status,
           input,
           queued_at,
           started_at,
-          source,
-          requested_by_principal_type,
-          requested_by_principal_id,
           attempt
         ) VALUES (
           ${input.projectId},
           ${input.id},
+          ${input.executionId},
           ${input.workflowId},
           ${"queued"},
           ${serializeRecord(input.input)}::text::jsonb,
           ${queuedAt},
           ${queuedAt},
-          ${input.source ? JSON.stringify(input.source) : null}::text::jsonb,
-          ${input.requestedByPrincipal?.type ?? "system"},
-          ${input.requestedByPrincipal?.id ?? "system"},
           ${0}
         )
         RETURNING *
@@ -85,7 +92,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new WorkflowRunError(
-          `[SixbPg] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
+          `[SixbPg] Workflow run '${input.id}' or execution '${input.executionId}' is already linked for project '${input.projectId}'.`
         )
       }
 
@@ -102,83 +109,29 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
         FOR UPDATE
       `
 
-      if (existing) {
-        if (existing.status !== "queued") {
-          throw new WorkflowRunError(
-            `[SixbPg] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
-          )
-        }
-
-        if (existing.workflow_id !== input.workflowId) {
-          throw new WorkflowRunError(
-            `[SixbPg] Workflow run '${input.id}' workflow '${input.workflowId}' does not match existing workflow '${existing.workflow_id}'.`
-          )
-        }
-
-        const [updated] = await tx<WorkflowRunDatabaseRow[]>`
-          UPDATE workflow_runs
-          SET
-            status = ${"running"},
-            input = ${serializeRecord(input.input)}::text::jsonb,
-            started_at = ${startedAt},
-            finished_at = ${null},
-            error = ${null},
-            source = COALESCE(
-              source,
-              ${input.source ? JSON.stringify(input.source) : null}::text::jsonb
-            ),
-            attempt = attempt + 1,
-            execution_token = ${input.execution?.token ?? null},
-            execution_queue_lease_expires_at = ${input.execution?.queueLeaseExpiresAt ?? null}
-          WHERE project_id = ${input.projectId} AND id = ${input.id}
-          RETURNING *
-        `
-
-        return rowToWorkflowRunRecord(updated)
+      if (!existing || existing.status !== "queued") {
+        throw new WorkflowRunError(
+          existing
+            ? `[SixbPg] Workflow run '${input.id}' cannot start from status '${existing.status}'.`
+            : `[SixbPg] Workflow run '${input.id}' not found for project '${input.projectId}'.`
+        )
       }
 
-      try {
-        const [row] = await tx<WorkflowRunDatabaseRow[]>`
-          INSERT INTO workflow_runs (
-            project_id,
-            id,
-            workflow_id,
-            status,
-            input,
-            started_at,
-            source,
-            requested_by_principal_type,
-            requested_by_principal_id,
-            attempt,
-            execution_token,
-            execution_queue_lease_expires_at
-          ) VALUES (
-            ${input.projectId},
-            ${input.id},
-            ${input.workflowId},
-            ${"running"},
-            ${serializeRecord(input.input)}::text::jsonb,
-            ${startedAt},
-            ${input.source ? JSON.stringify(input.source) : null}::text::jsonb,
-            ${input.requestedByPrincipal?.type ?? "system"},
-            ${input.requestedByPrincipal?.id ?? "system"},
-            ${1},
-            ${input.execution?.token ?? null},
-            ${input.execution?.queueLeaseExpiresAt ?? null}
-          )
-          RETURNING *
-        `
+      const [updated] = await tx<WorkflowRunDatabaseRow[]>`
+        UPDATE workflow_runs
+        SET
+          status = ${"running"},
+          started_at = ${startedAt},
+          finished_at = ${null},
+          error = ${null},
+          attempt = attempt + 1,
+          execution_token = ${input.execution?.token ?? null},
+          execution_queue_lease_expires_at = ${input.execution?.queueLeaseExpiresAt ?? null}
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+        RETURNING *
+      `
 
-        return rowToWorkflowRunRecord(row)
-      } catch (error) {
-        if (isUniqueViolation(error)) {
-          throw new WorkflowRunError(
-            `[SixbPg] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
-          )
-        }
-
-        throw error
-      }
+      return rowToWorkflowRunRecord(updated)
     })
   }
 
@@ -824,6 +777,7 @@ function rowToWorkflowRunRecord(row: WorkflowRunDatabaseRow): WorkflowRunRecord 
   return {
     id: row.id,
     projectId: row.project_id,
+    executionId: row.execution_id,
     workflowId: row.workflow_id,
     status: row.status,
     input: parseRecord(row.input),
@@ -832,11 +786,6 @@ function rowToWorkflowRunRecord(row: WorkflowRunDatabaseRow): WorkflowRunRecord 
     startedAt: new Date(row.started_at),
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     error: row.error ?? undefined,
-    source: parseSource(row.source),
-    requestedByPrincipal: {
-      type: row.requested_by_principal_type,
-      id: row.requested_by_principal_id,
-    },
     attempt: Number(row.attempt),
     ...(row.execution_token && row.execution_queue_lease_expires_at
       ? {
@@ -847,14 +796,6 @@ function rowToWorkflowRunRecord(row: WorkflowRunDatabaseRow): WorkflowRunRecord 
         }
       : {}),
   }
-}
-
-function parseSource(value: WorkflowRunSource | string | null): WorkflowRunSource | undefined {
-  if (value === null || value === undefined) {
-    return undefined
-  }
-
-  return typeof value === "string" ? (JSON.parse(value) as WorkflowRunSource) : value
 }
 
 function rowToWorkflowNodeRunRecord(row: WorkflowNodeRunDatabaseRow): WorkflowNodeRunRecord {
@@ -896,6 +837,7 @@ function canFinishWorkflowRun(
 interface WorkflowRunDatabaseRow {
   project_id: string
   id: string
+  execution_id: string
   workflow_id: string
   status: WorkflowRunRecord["status"]
   input: WorkflowIOSnapshot | string
@@ -904,9 +846,6 @@ interface WorkflowRunDatabaseRow {
   started_at: Date | string
   finished_at: Date | string | null
   error: string | null
-  source: WorkflowRunSource | string | null
-  requested_by_principal_type: Principal["type"]
-  requested_by_principal_id: string
   attempt: number | string
   execution_token: string | null
   execution_queue_lease_expires_at: Date | string | null

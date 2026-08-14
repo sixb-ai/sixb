@@ -1,10 +1,10 @@
 import type { AgentMessagePart } from "../../agents/message"
 import type { Principal } from "../../auth"
 import type { JsonValue } from "../../json"
-import type { WorkflowIOSnapshot, WorkflowRunSource } from "../../workflows/types"
+import type { WorkflowIOSnapshot } from "../../workflows/types"
 import type { AgentExecutionStatus, AgentRunFinishReason, AgentRunUsage } from "../agents"
 
-export type { WorkflowIOSnapshot, WorkflowRunSource } from "../../workflows/types"
+export type { WorkflowIOSnapshot } from "../../workflows/types"
 
 export type WorkflowRunStatus =
   | "queued"
@@ -118,6 +118,7 @@ export interface ListWorkflowAgentNodeRunsResult {
 export interface WorkflowRunRecord {
   readonly id: string
   readonly projectId: string
+  readonly executionId: string
   readonly workflowId: string
   readonly status: WorkflowRunStatus
   readonly input: WorkflowIOSnapshot
@@ -126,8 +127,6 @@ export interface WorkflowRunRecord {
   readonly startedAt: Date
   readonly finishedAt?: Date
   readonly error?: string
-  readonly source?: WorkflowRunSource
-  readonly requestedByPrincipal: Principal
   readonly attempt: number
   readonly execution?: WorkflowRunExecution
 }
@@ -152,22 +151,17 @@ export interface WorkflowNodeRunRecord {
 export interface StartWorkflowRunInput {
   readonly id: string
   readonly projectId: string
-  readonly workflowId: string
-  readonly input: WorkflowIOSnapshot
   readonly startedAt?: Date
-  readonly source?: WorkflowRunSource
-  readonly requestedByPrincipal?: Principal
   readonly execution?: WorkflowRunExecution
 }
 
 export interface QueueWorkflowRunInput {
   readonly id: string
   readonly projectId: string
+  readonly executionId: string
   readonly workflowId: string
   readonly input: WorkflowIOSnapshot
   readonly queuedAt?: Date
-  readonly source?: WorkflowRunSource
-  readonly requestedByPrincipal?: Principal
 }
 
 export interface ReclaimWorkflowRunInput {

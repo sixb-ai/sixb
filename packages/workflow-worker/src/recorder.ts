@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util"
-import type { WorkflowDefinition, WorkflowRunSource } from "@sixb/core"
+import type { WorkflowDefinition } from "@sixb/core"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type {
   WorkflowInterventionRecord,
@@ -60,16 +60,10 @@ export class WorkflowRunRecorder {
     return [...this.nodeRuns]
   }
 
-  async startRun(params: {
-    readonly input: WorkflowIOSnapshot
-    readonly source?: WorkflowRunSource
-  }): Promise<WorkflowRunRecord> {
+  async startRun(): Promise<WorkflowRunRecord> {
     const run = await this.dependencies.workflowRuns.start({
       projectId: this.dependencies.projectId,
       id: this.dependencies.runId,
-      workflowId: this.dependencies.workflow.id,
-      input: params.input,
-      source: params.source,
       execution: this.dependencies.execution,
     })
     this.started = true

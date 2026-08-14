@@ -54,7 +54,7 @@ import {
   AgentStorageError,
   type AppendAgentMessageInput,
 } from "@sixb/core/storage"
-import { createTestSixb } from "@sixb/core/testing"
+import { createTestSixb, createTestWorkflowExecution } from "@sixb/core/testing"
 import { jsonSchema, type ToolSet, tool } from "ai"
 import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test"
 import { AgentWorker, type AgentWorkerOptions } from "../src"
@@ -1155,11 +1155,21 @@ describe("AgentWorker", () => {
     const runs = sixb.storage.workflowRuns!
     const runId = "workflow-agent-run"
     const nodeRunId = `${runId}:node:0`
+    const executionId = await createTestWorkflowExecution(sixb.storage.executions, {
+      projectId: PROJECT_ID,
+      workflowId: workflow.id,
+      runId,
+    })
+    await runs.queue({
+      id: runId,
+      projectId: PROJECT_ID,
+      executionId,
+      workflowId: workflow.id,
+      input: { query: "alpha" },
+    })
     await runs.start({
       id: runId,
       projectId: PROJECT_ID,
-      workflowId: workflow.id,
-      input: { query: "alpha" },
     })
     await runs.nodes.start({
       id: nodeRunId,

@@ -5,6 +5,7 @@ import { migrateStorage } from "@sixb/core"
 import { flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import { getProjectionDispatchDescriptors } from "@sixb/core/internal/projections"
 import type { Worker } from "@sixb/core/internal/workers"
+import { WorkflowRunDispatcher } from "@sixb/core/internal/workflows"
 import { assertLakeDatasetDefinitionsCompatible } from "@sixb/core/lake-storage"
 import {
   type CompileRoutesDiagnostic,
@@ -150,6 +151,9 @@ export async function startOrchestratorRuntime(
       events: sixb.events,
       queues: sixb.queues,
       routes,
+      dispatchers: {
+        workflows: new WorkflowRunDispatcher(sixb),
+      },
       ...(projectionDispatch ? { projectionDispatch } : {}),
     })
     await orchestratorWorker.start()

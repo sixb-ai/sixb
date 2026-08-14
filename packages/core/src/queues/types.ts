@@ -1,7 +1,6 @@
 import type { JsonValue } from "../json"
 import type { ProjectionMaterializationIdentity } from "../materialization/model"
 import type { ProviderScope } from "../provider-scope"
-import type { WorkflowRunSource } from "../workflows/types"
 
 export interface QueueJobEnvelope {
   readonly id: string
@@ -135,7 +134,6 @@ export interface WorkflowRunRequestedQueueJob
       readonly workflowId: string
       readonly runId?: string
       readonly input?: Readonly<Record<string, unknown>>
-      readonly source?: WorkflowRunSource
     }
   > {}
 

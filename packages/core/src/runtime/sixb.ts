@@ -78,7 +78,7 @@ function createExecutionFacades<TOntologySources extends readonly OntologySource
     objects: createObjectsRuntime<TOntologySources>(runtime),
     actions: createActionsRuntime(runtime),
     datasets: createDatasetsRuntime(runtime, dependencies.definitions.datasets),
-    workflows: createWorkflowsRuntime(runtime, dependencies.definitions.workflows),
+    workflows: createWorkflowsRuntime(runtime, execution, dependencies.definitions.workflows),
     syncs: createSyncsRuntime(runtime, dependencies.definitions.syncs),
     pipelines: createPipelinesRuntime(runtime, dependencies.definitions.pipelines),
     projections: createProjectionsRuntime(runtime, dependencies.definitions.projections),

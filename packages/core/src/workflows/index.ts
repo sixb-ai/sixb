@@ -13,6 +13,13 @@ export type {
 } from "./request"
 export { requestWorkflowRun } from "./request"
 export {
+  type AutomaticWorkflowExecutionSource,
+  type AutomaticWorkflowRunDispatchInput,
+  WorkflowRunDispatcher,
+  type WorkflowRunDispatcherDependencies,
+  type WorkflowRunDispatchPort,
+} from "./run-dispatch"
+export {
   snapshotWorkflowActionInput,
   snapshotWorkflowAgentStepInput,
   snapshotWorkflowAgentStepOutput,

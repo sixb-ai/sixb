@@ -59,7 +59,7 @@ export class InMemoryStorage implements Storage {
   private readonly syncRunStorage = new InMemorySyncRunStorage()
   private readonly pipelineRunStorage = new InMemoryPipelineRunStorage()
   private readonly projectionRunStorage = new InMemoryProjectionRunStorage()
-  private readonly workflowRunStorage = new InMemoryWorkflowRunStorage()
+  private readonly workflowRunStorage = new InMemoryWorkflowRunStorage(this.executionStorage)
   private readonly workflowInterventionStorage = new InMemoryWorkflowInterventionStorage()
   private readonly webhookDeliveryStorage = new InMemoryWebhookDeliveryStorage()
   private readonly webhookRunStorage = new InMemoryWebhookRunStorage()

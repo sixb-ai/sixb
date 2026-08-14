@@ -257,6 +257,12 @@
       "import": "./dist/workflows/index.js",
       "default": "./dist/workflows/index.js"
     },
+    "./internal/workflow-run-storage-provider": {
+      "types": "./dist/storage/workflow-runs/provider.d.ts",
+      "bun": "./src/storage/workflow-runs/provider.ts",
+      "import": "./dist/storage/workflow-runs/provider.js",
+      "default": "./dist/storage/workflow-runs/provider.js"
+    },
     "./lake-storage": {
       "types": "./dist/lake-storage/index.d.ts",
       "bun": "./src/lake-storage/index.ts",

@@ -25,6 +25,7 @@ import {
   resolveAuthorizationContext,
   type SecurityRegistry,
   SixbHost,
+  type Storage,
   type StoredDomainEvent,
   type WorkflowDefinition,
 } from "../src"
@@ -271,6 +272,18 @@ function contextFor(
   })
 }
 
+async function seedPrincipal(
+  host: TestExecutionHost & { readonly storage: Pick<Storage, "auth"> }
+): Promise<void> {
+  const auth = host.storage.auth
+  if (!auth) throw new Error("Test runtime requires auth storage.")
+  await auth.users.create({
+    projectId: host.id,
+    id: principal.id,
+    email: "adam@example.com",
+  })
+}
+
 describe("bound Sixb object reads", () => {
   test("granted types support get, list, byId.get, and query", async () => {
     const host = createRuntime()
@@ -399,6 +412,7 @@ describe("bound Sixb operational access", () => {
 
   test("workflow runs require can.run", async () => {
     const host = createRuntime()
+    await seedPrincipal(host)
     const sixb = createTestSixb(host)
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
     const input = {
@@ -514,6 +528,7 @@ describe("bound Sixb operational access", () => {
 
   test("workflow permission encapsulates agent nodes", async () => {
     const host = createRuntime()
+    await seedPrincipal(host)
     const _sixb = createTestSixb(host)
     const workflowOnlyPrincipal = bindPrincipal(host, contextFor(host, ["workflow-only"]))
 

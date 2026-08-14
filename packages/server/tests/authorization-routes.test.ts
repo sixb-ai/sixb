@@ -30,7 +30,7 @@ import {
   type WorkflowDefinition,
 } from "@sixb/core"
 import { createSessionCredential } from "@sixb/core/internal/auth"
-import { createTestSixb } from "@sixb/core/testing"
+import { createTestSixb, createTestWorkflowExecution } from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -1393,9 +1393,15 @@ describe("authorized event and workflow routes", () => {
       })
     )
     const requested = (await request.json()) as { runId: string }
+    const hiddenExecutionId = await createTestWorkflowExecution(storage.executions, {
+      projectId: "test-project",
+      workflowId: "hidden-workflow",
+      runId: "wf_hidden",
+    })
     await storage.workflowRuns.queue({
       id: "wf_hidden",
       projectId: "test-project",
+      executionId: hiddenExecutionId,
       workflowId: "hidden-workflow",
       input: {},
       queuedAt: new Date("2099-01-01T00:00:00.000Z"),
@@ -1433,7 +1439,12 @@ describe("authorized event and workflow routes", () => {
       new Request("http://localhost/api/workflow-runs?limit=1", { headers: runner.headers })
     )
     expect(await runnerRuns.json()).toMatchObject({
-      runs: [expect.objectContaining({ id: requested.runId })],
+      runs: [
+        expect.objectContaining({
+          id: requested.runId,
+          requestedBy: { principalType: "user", principalId: "usr_run" },
+        }),
+      ],
       hasMore: false,
       total: 1,
     })

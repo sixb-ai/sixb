@@ -43,6 +43,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 4,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "005-workflow-executions",
+    status: "applied",
+    version: 5,
+  },
 ]
 
 afterEach(async () => {
@@ -244,6 +251,86 @@ describe("SQLite storage migrations", () => {
         { id: "data-run", output: { winner: 10 } },
         { id: "failed-run", output: null },
       ])
+    } finally {
+      db.close()
+    }
+  })
+
+  test("requires explicit project handling for legacy workflow runs", () => {
+    const db = new Database(":memory:")
+    try {
+      for (const migration of sqliteStorageMigrations.steps.slice(0, 4)) {
+        migration.up(db)
+      }
+      db.query(`
+        INSERT INTO workflow_runs (
+          project_id, id, workflow_id, status, input, started_at
+        ) VALUES (?, ?, ?, 'queued', '{}', ?)
+      `).run("project-a", "legacy-run", "legacy-workflow", "2026-01-01T00:00:00.000Z")
+
+      expect(() => sqliteStorageMigrations.steps[4]?.up(db)).toThrow()
+      expect(readMemoryTableColumns(db, "workflow_runs")).not.toContain("execution_id")
+    } finally {
+      db.close()
+    }
+  })
+
+  test("makes the workflow execution link required and unique on an empty schema", () => {
+    const db = new Database(":memory:")
+    try {
+      for (const migration of sqliteStorageMigrations.steps) {
+        migration.up(db)
+      }
+
+      const columns = readMemoryTableColumns(db, "workflow_runs")
+      expect(columns).toContain("execution_id")
+      expect(columns).not.toContain("source")
+      expect(columns).not.toContain("requested_by_principal_type")
+      expect(columns).not.toContain("requested_by_principal_id")
+      expect(readMemoryColumn(db, "workflow_runs", "execution_id")?.notnull).toBe(1)
+
+      db.query(`
+        INSERT INTO executions (
+          project_id, id, executor_kind, executor_id, source_kind, source_id,
+          correlation_id, authority_kind, authority_primitive_kind,
+          authority_primitive_id, created_at
+        ) VALUES (?, ?, 'workflow', ?, 'schedule', ?, ?, 'trustedPrimitive', 'workflow', ?, ?)
+      `).run(
+        "project-a",
+        "workflow-execution",
+        "workflow-run",
+        "schedule-event",
+        "workflow-correlation",
+        "reconcile-transaction",
+        "2026-01-01T00:00:00.000Z"
+      )
+      db.query(`
+        INSERT INTO workflow_runs (
+          project_id, id, execution_id, workflow_id, status, input, started_at
+        ) VALUES (?, ?, ?, ?, 'queued', '{}', ?)
+      `).run(
+        "project-a",
+        "workflow-run",
+        "workflow-execution",
+        "reconcile-transaction",
+        "2026-01-01T00:00:00.000Z"
+      )
+
+      expect(() =>
+        db
+          .query(`
+          INSERT INTO workflow_runs (
+            project_id, id, execution_id, workflow_id, status, input, started_at
+          ) VALUES (?, ?, ?, ?, 'queued', '{}', ?)
+        `)
+          .run(
+            "project-a",
+            "second-workflow-run",
+            "workflow-execution",
+            "reconcile-transaction",
+            "2026-01-01T00:00:00.000Z"
+          )
+      ).toThrow("UNIQUE constraint failed")
     } finally {
       db.close()
     }
@@ -533,7 +620,7 @@ describe("SQLite migration status is read-only", () => {
     expect(await migrator?.status()).toMatchObject({
       adapterId: SQLITE_STORAGE_ADAPTER_ID,
       state: "current",
-      appliedVersion: 4,
+      appliedVersion: 5,
     })
 
     expect(statSync(path).mtimeMs).toBe(before)

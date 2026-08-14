@@ -18,7 +18,7 @@ import {
   SixbHost,
 } from "@sixb/core"
 import { createSessionCredential } from "@sixb/core/internal/auth"
-import { createTestSixb } from "@sixb/core/testing"
+import { createTestSixb, createTestWorkflowExecution } from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -114,14 +114,25 @@ async function createRunFileApi(options: { readonly auth?: boolean } = {}) {
     completedAt: new Date("2026-06-30T12:00:45.000Z"),
   })
 
-  await storage.workflowRuns.start({
+  const workflowExecutionId = await createTestWorkflowExecution(storage.executions, {
+    projectId: sixb.id,
+    workflowId: inspectDocumentWorkflow.id,
+    runId: "workflow_run_1",
+  })
+  await storage.workflowRuns.queue({
     id: "workflow_run_1",
     projectId: sixb.id,
+    executionId: workflowExecutionId,
     workflowId: inspectDocumentWorkflow.id,
     input: {
       document: fileRefJson(workflowInput),
       title: "not a file",
     },
+    queuedAt: new Date("2026-06-30T12:00:59.000Z"),
+  })
+  await storage.workflowRuns.start({
+    id: "workflow_run_1",
+    projectId: sixb.id,
     startedAt: new Date("2026-06-30T12:01:00.000Z"),
   })
   await storage.workflowRuns.nodes.start({

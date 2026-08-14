@@ -1,4 +1,4 @@
-import { SYSTEM_PRINCIPAL } from "../../auth"
+import type { ExecutionStorage } from "../executions"
 import {
   cloneRecord,
   compareStartedAt,
@@ -10,6 +10,7 @@ import {
   toStatusSet,
 } from "../run-listing"
 import { WorkflowRunError } from "./errors"
+import { assertWorkflowRunExecution } from "./provider"
 import type {
   CancelWorkflowAgentNodeRunInput,
   ConfirmWorkflowAgentNodeRunExecutionOwnershipInput,
@@ -55,7 +56,7 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
 
   private readonly runs = new Map<string, WorkflowRunRecord>()
 
-  constructor() {
+  constructor(private readonly executions: ExecutionStorage) {
     this.nodes = new InMemoryWorkflowNodeRunStorage({
       requireRunningWorkflowRun: (projectId, id) => this.requireRunningWorkflowRun(projectId, id),
       requireActiveWorkflowRun: (projectId, id) => this.requireActiveWorkflowRun(projectId, id),
@@ -91,19 +92,34 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
         `[Sixb] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
       )
     }
+    if (
+      [...this.runs.values()].some(
+        (run) => run.projectId === input.projectId && run.executionId === input.executionId
+      )
+    ) {
+      throw new WorkflowRunError(
+        `[Sixb] Execution '${input.executionId}' already belongs to another workflow run.`
+      )
+    }
+    await assertWorkflowRunExecution({
+      executions: this.executions,
+      projectId: input.projectId,
+      executionId: input.executionId,
+      runId: input.id,
+      workflowId: input.workflowId,
+    })
 
     const queuedAt = new Date(input.queuedAt ?? new Date())
     const record: WorkflowRunRecord = {
       id: input.id,
       projectId: input.projectId,
+      executionId: input.executionId,
       workflowId: input.workflowId,
       status: "queued",
       input: cloneRecord(input.input),
       queuedAt,
       startedAt: queuedAt,
       attempt: 0,
-      requestedByPrincipal: cloneRecord(input.requestedByPrincipal ?? SYSTEM_PRINCIPAL),
-      ...(input.source ? { source: cloneRecord(input.source) } : {}),
     }
 
     this.runs.set(key, cloneRecord(record))
@@ -113,51 +129,26 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
   async start(input: StartWorkflowRunInput): Promise<WorkflowRunRecord> {
     const key = storageKey(input.projectId, input.id)
     const existing = this.runs.get(key)
-    if (existing) {
-      if (existing.status !== "queued") {
-        throw new WorkflowRunError(
-          `[Sixb] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
-        )
-      }
-
-      if (existing.workflowId !== input.workflowId) {
-        throw new WorkflowRunError(
-          `[Sixb] Workflow run '${input.id}' workflow '${input.workflowId}' does not match existing workflow '${existing.workflowId}'.`
-        )
-      }
-
-      const next: WorkflowRunRecord = {
-        ...existing,
-        status: "running",
-        input: cloneRecord(input.input),
-        startedAt: new Date(input.startedAt ?? new Date()),
-        finishedAt: undefined,
-        error: undefined,
-        source:
-          existing.source ?? (input.source === undefined ? undefined : cloneRecord(input.source)),
-        attempt: existing.attempt + 1,
-        execution: input.execution ? cloneRecord(input.execution) : undefined,
-      }
-
-      this.runs.set(key, cloneRecord(next))
-      return cloneRecord(next)
+    if (!existing || existing.status !== "queued") {
+      throw new WorkflowRunError(
+        existing
+          ? `[Sixb] Workflow run '${input.id}' cannot start from status '${existing.status}'.`
+          : `[Sixb] Workflow run '${input.id}' not found for project '${input.projectId}'.`
+      )
     }
 
-    const record: WorkflowRunRecord = {
-      id: input.id,
-      projectId: input.projectId,
-      workflowId: input.workflowId,
+    const next: WorkflowRunRecord = {
+      ...existing,
       status: "running",
-      input: cloneRecord(input.input),
       startedAt: new Date(input.startedAt ?? new Date()),
-      attempt: 1,
-      requestedByPrincipal: cloneRecord(input.requestedByPrincipal ?? SYSTEM_PRINCIPAL),
-      ...(input.execution ? { execution: cloneRecord(input.execution) } : {}),
-      ...(input.source ? { source: cloneRecord(input.source) } : {}),
+      finishedAt: undefined,
+      error: undefined,
+      attempt: existing.attempt + 1,
+      execution: input.execution ? cloneRecord(input.execution) : undefined,
     }
 
-    this.runs.set(key, cloneRecord(record))
-    return cloneRecord(record)
+    this.runs.set(key, cloneRecord(next))
+    return cloneRecord(next)
   }
 
   async finish(input: FinishWorkflowRunInput): Promise<WorkflowRunRecord> {

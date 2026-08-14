@@ -12,6 +12,10 @@ import type {
 } from "@sixb/core"
 import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projections"
 import type { RuntimeEventScheduleDefinition } from "@sixb/core/internal/schedules"
+import type {
+  AutomaticWorkflowRunDispatchInput,
+  WorkflowRunDispatchPort,
+} from "@sixb/core/internal/workflows"
 import type { LakeStorage } from "@sixb/core/lake-storage"
 import type {
   NewQueueJob,
@@ -103,11 +107,20 @@ export interface ProjectionDispatchPorts {
   readonly projectionRuns: Pick<ProjectionRunStorage, "getById">
 }
 
+export type WorkflowDispatchInput = AutomaticWorkflowRunDispatchInput
+export type WorkflowDispatcherPort = WorkflowRunDispatchPort
+
+export interface OrchestratorDispatchers {
+  /** Required when the compiled routes contain automatic workflow triggers. */
+  readonly workflows?: WorkflowDispatcherPort
+}
+
 export interface OrchestratorRuntimeOptions {
   readonly projectId: string
   readonly events: DomainEventLog
   readonly queues: Queues
   readonly routes: OrchestratorRoutes
+  readonly dispatchers: OrchestratorDispatchers
   /** Required when the compiled routes contain projections. */
   readonly projectionDispatch?: ProjectionDispatchPorts
 }

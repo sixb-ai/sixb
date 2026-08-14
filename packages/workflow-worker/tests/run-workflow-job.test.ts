@@ -19,17 +19,21 @@ import {
   prop,
   ref,
   SixbHost,
-  SYSTEM_PRINCIPAL,
   type WorkflowDefinition,
   WorkflowValidationError,
 } from "@sixb/core"
 import { bindPrimitiveExecution } from "@sixb/core/internal/primitive-execution"
-import type { ActionRunStorage, WorkflowRunStorage } from "@sixb/core/storage"
-import { createTestSixb } from "@sixb/core/testing"
+import { snapshotWorkflowInput } from "@sixb/core/internal/workflows"
+import type {
+  ActionRunStorage,
+  QueueWorkflowRunInput,
+  WorkflowRunStorage,
+} from "@sixb/core/storage"
+import { createTestSixb, createTestWorkflowExecution } from "@sixb/core/testing"
 import { WorkflowWorkerError } from "../src/errors"
 import { EventsRuntimeWorkflowRunObserver } from "../src/events"
-import { runWorkflowJob, runWorkflowResumeJob } from "../src/run-workflow-job"
-import type { WorkflowRunObserver, WorkflowWorkerContext } from "../src/types"
+import { runWorkflowJob as executeWorkflowJob, runWorkflowResumeJob } from "../src/run-workflow-job"
+import type { RunWorkflowJobInput, WorkflowRunObserver, WorkflowWorkerContext } from "../src/types"
 import type { WorkflowWorkerHost } from "../src/worker"
 
 const Transaction = defineObjectType({
@@ -252,6 +256,43 @@ function createRuntime(host: WorkflowWorkerHost): WorkflowWorkerContext {
   }
 }
 
+async function queueWorkflowRunFixture(
+  host: Pick<WorkflowWorkerContext, "storage">,
+  input: Omit<QueueWorkflowRunInput, "executionId">
+) {
+  const executionId = await createTestWorkflowExecution(host.storage.executions, {
+    projectId: input.projectId,
+    workflowId: input.workflowId,
+    runId: input.id,
+  })
+  return requireWorkflowRunsStorage(host).queue({ ...input, executionId })
+}
+
+async function runWorkflowJob(input: RunWorkflowJobInput) {
+  const existing = await input.runtime.workflowRuns.getById({
+    projectId: input.runtime.projectId,
+    id: input.job.id,
+  })
+  if (!existing) {
+    const workflow = input.runtime.sixb.workflows.getById(input.job.workflowId)
+    if (!workflow) {
+      return executeWorkflowJob(input)
+    }
+    const snapshot = snapshotWorkflowInput({
+      workflow,
+      value: input.job.input ?? {},
+      valueTypesById: input.runtime.ontology.getValueTypesById(),
+    })
+    await queueWorkflowRunFixture(input.runtime, {
+      id: input.job.id,
+      projectId: input.runtime.projectId,
+      workflowId: input.job.workflowId,
+      input: snapshot,
+    })
+  }
+  return executeWorkflowJob(input)
+}
+
 async function completeRequestedActions(
   sixb: {
     readonly id: string
@@ -389,7 +430,7 @@ describe("runWorkflowJob", () => {
     const workflowInput = {
       transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
     }
-    await sixb.storage.workflowRuns!.queue({
+    await queueWorkflowRunFixture(sixb, {
       id: "wfrun_observed",
       projectId: sixb.id,
       workflowId: workflow.id,
@@ -419,41 +460,6 @@ describe("runWorkflowJob", () => {
       "node-finished:0:succeeded",
       "run-finished:succeeded",
     ])
-  })
-
-  test("persists workflow run source from the requested queue job", async () => {
-    const workflow = defineWorkflow("triggered-workflow")
-      .input({
-        transaction: ref(Transaction),
-      })
-      .then(findBestInvoice)
-    const sixb = createSixb({ workflows: [workflow] })
-    const source = {
-      type: "schedule" as const,
-      scheduleId: "transaction.high-value",
-      eventId: "evt-1",
-      principal: SYSTEM_PRINCIPAL,
-    }
-    const workflowInput = {
-      transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
-    }
-
-    await runWorkflowJob({
-      runtime: createRuntime(sixb),
-      job: {
-        id: "wfrun_triggered",
-        workflowId: workflow.id,
-        input: workflowInput,
-        source,
-      },
-    })
-
-    const run = await sixb.storage.workflowRuns!.getById({
-      projectId: sixb.id,
-      id: "wfrun_triggered",
-    })
-
-    expect(run?.source).toEqual(source)
   })
 
   test("treats duplicate requested jobs for an existing run as no-op", async () => {
@@ -506,11 +512,15 @@ describe("runWorkflowJob", () => {
       confidence: 0.98,
     } as const
     const runs = sixb.storage.workflowRuns!
-    await runs.start({
+    await queueWorkflowRunFixture(sixb, {
       id: "wfrun_recovered",
       projectId: sixb.id,
       workflowId: workflow.id,
       input,
+    })
+    await runs.start({
+      id: "wfrun_recovered",
+      projectId: sixb.id,
       execution: {
         token: "workflow-exec-old",
         queueLeaseExpiresAt: new Date("2026-05-08T10:05:00.000Z"),
@@ -1081,7 +1091,7 @@ describe("runWorkflowJob", () => {
     const sixb = createSixb({ workflows: [workflow] })
     const observerCalls: string[] = []
 
-    await sixb.storage.workflowRuns!.queue({
+    await queueWorkflowRunFixture(sixb, {
       id: "wfrun_queued_invalid_input",
       projectId: sixb.id,
       workflowId: workflow.id,

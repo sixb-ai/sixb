@@ -1,17 +1,27 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { WorkflowRunError } from "@sixb/core/storage"
+import {
+  type QueueWorkflowRunInput,
+  type StartWorkflowRunInput,
+  WorkflowRunError,
+} from "@sixb/core/storage"
+import {
+  createTestAutomaticWorkflowExecution,
+  createTestWorkflowExecution,
+} from "@sixb/core/testing"
 import { SqliteStorage } from "../src"
 import { SqliteWorkflowRunStorage } from "../src/workflow-run-storage"
 
 describe("SqliteWorkflowRunStorage", () => {
-  let storage: SqliteWorkflowRunStorage
+  let root: SqliteStorage
+  let storage: ReturnType<typeof createWorkflowRunStorage>
 
   beforeEach(() => {
-    storage = new SqliteWorkflowRunStorage()
+    root = new SqliteStorage()
+    storage = createWorkflowRunStorage(root)
   })
 
   afterEach(() => {
-    storage.close()
+    root.close()
   })
 
   test("starts and finishes workflow runs with JSON input", async () => {
@@ -48,64 +58,41 @@ describe("SqliteWorkflowRunStorage", () => {
     expect(stored?.finishedAt?.toISOString()).toBe("2026-05-08T10:00:04.500Z")
   })
 
-  test("persists workflow run source when starting directly or from a queued run", async () => {
-    const scheduleSource = {
-      type: "schedule",
-      scheduleId: "invoice-payment-linked",
-      eventId: "evt_1",
-      principal: { type: "system", id: "sixb-orchestrator" },
-    } as const
+  test("requires a queued run linked to its matching workflow execution", async () => {
+    await expect(
+      root.workflowRuns.start({ id: "wf-run-missing", projectId: "my-app" })
+    ).rejects.toBeInstanceOf(WorkflowRunError)
 
-    const started = await storage.start({
-      id: "wf-run-triggered",
+    const executionId = await createTestWorkflowExecution(root.executions, {
       projectId: "my-app",
-      workflowId: "reconcile-transaction",
-      input: { transactionId: "txn_123" },
-      source: scheduleSource,
+      workflowId: "other-workflow",
+      runId: "wf-run-mismatched",
     })
-
-    expect(started.source).toEqual(scheduleSource)
-    expect(
-      await storage.getById({
+    await expect(
+      SqliteWorkflowRunStorage.prototype.queue.call(root.workflowRuns, {
+        id: "wf-run-mismatched",
         projectId: "my-app",
-        id: "wf-run-triggered",
+        executionId,
+        workflowId: "reconcile-transaction",
+        input: {},
       })
-    ).toMatchObject({ source: scheduleSource })
+    ).rejects.toBeInstanceOf(WorkflowRunError)
 
-    await storage.queue({
-      id: "wf-run-queued-without-source",
+    const automaticExecutionId = await createTestAutomaticWorkflowExecution(root.executions, {
       projectId: "my-app",
       workflowId: "reconcile-transaction",
-      input: { transactionId: "txn_456" },
+      runId: "wf-run-automatic",
+      source: { type: "event", eventId: "source-event-1" },
     })
-
-    const running = await storage.start({
-      id: "wf-run-queued-without-source",
-      projectId: "my-app",
-      workflowId: "reconcile-transaction",
-      input: { transactionId: "txn_456" },
-      source: scheduleSource,
-    })
-
-    expect(running.source).toEqual(scheduleSource)
-
-    await storage.queue({
-      id: "wf-run-queued-with-source",
-      projectId: "my-app",
-      workflowId: "reconcile-transaction",
-      input: { transactionId: "txn_789" },
-      source: { type: "manual" },
-    })
-
-    const alreadySourced = await storage.start({
-      id: "wf-run-queued-with-source",
-      projectId: "my-app",
-      workflowId: "reconcile-transaction",
-      input: { transactionId: "txn_789" },
-      source: scheduleSource,
-    })
-
-    expect(alreadySourced.source).toEqual({ type: "manual" })
+    await expect(
+      SqliteWorkflowRunStorage.prototype.queue.call(root.workflowRuns, {
+        id: "wf-run-automatic",
+        projectId: "my-app",
+        executionId: automaticExecutionId,
+        workflowId: "reconcile-transaction",
+        input: {},
+      })
+    ).resolves.toMatchObject({ id: "wf-run-automatic", executionId: automaticExecutionId })
   })
 
   test("allows exactly one concurrent claim of a queued workflow run", async () => {
@@ -627,4 +614,49 @@ describe("SqliteWorkflowRunStorage", () => {
 
 function closeSqliteStorage(storage: SqliteStorage): void {
   storage.close()
+}
+
+type TestQueueWorkflowRunInput = Omit<QueueWorkflowRunInput, "executionId"> & {
+  readonly executionId?: string
+}
+
+type TestStartWorkflowRunInput = StartWorkflowRunInput & {
+  readonly workflowId?: string
+  readonly input?: QueueWorkflowRunInput["input"]
+}
+
+function createWorkflowRunStorage(root: SqliteStorage) {
+  const storage = root.workflowRuns
+  const queue = storage.queue.bind(storage)
+  const start = storage.start.bind(storage)
+  const queueFixture = async (input: TestQueueWorkflowRunInput) => {
+    const executionId = await createTestWorkflowExecution(root.executions, {
+      projectId: input.projectId,
+      workflowId: input.workflowId,
+      runId: input.id,
+      ...(input.executionId === undefined ? {} : { executionId: input.executionId }),
+    })
+    return queue({ ...input, executionId })
+  }
+
+  return Object.assign(storage, {
+    queue: queueFixture,
+    start: async (input: TestStartWorkflowRunInput) => {
+      const existing = await storage.getById({ projectId: input.projectId, id: input.id })
+      if (!existing && input.workflowId && input.input) {
+        await queueFixture({
+          id: input.id,
+          projectId: input.projectId,
+          workflowId: input.workflowId,
+          input: input.input,
+        })
+      }
+      return start({
+        id: input.id,
+        projectId: input.projectId,
+        ...(input.startedAt === undefined ? {} : { startedAt: input.startedAt }),
+        ...(input.execution === undefined ? {} : { execution: input.execution }),
+      })
+    },
+  })
 }

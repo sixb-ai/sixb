@@ -254,6 +254,7 @@ function createSqliteStores(
   }
 ): SqliteStoreSet {
   const auth = new SqliteAuthStorage({ connection })
+  const executions = new SqliteExecutionStorage(connection.db, auth)
   return {
     objects: new SqliteObjectStorage({ connection }),
     ontology: new SqliteOntologyStorage({
@@ -262,14 +263,14 @@ function createSqliteStores(
       transactionContext: options.transactionContext,
     }),
     auth,
-    executions: new SqliteExecutionStorage(connection.db, auth),
+    executions,
     agents: new SqliteAgentStorage({ connection }),
     actionRuns: new SqliteActionRunStorage({ connection }),
     pipelineRuns: new SqlitePipelineRunStorage({ connection }),
     timeseries: new SqliteTimeseriesStorage({ connection }),
     syncRuns: new SqliteSyncRunStorage({ connection }),
     projectionRuns: new SqliteProjectionRunStorage({ connection }),
-    workflowRuns: new SqliteWorkflowRunStorage({ connection }),
+    workflowRuns: new SqliteWorkflowRunStorage({ connection, executions }),
     workflowInterventions: new SqliteWorkflowInterventionStorage({ connection }),
     webhookDeliveries: new SqliteWebhookDeliveryStorage({ connection }),
     webhookRuns: new SqliteWebhookRunStorage({ connection }),

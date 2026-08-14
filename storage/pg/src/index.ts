@@ -317,6 +317,7 @@ function createPostgresStores(
   }
 ): PostgresStoreSet {
   const auth = new PgAuthStorage({ sql })
+  const executions = new PgExecutionStorage(sql, auth)
   return {
     objects: new PgObjectStorage(sql),
     ontology: new PgOntologyStorage({
@@ -325,11 +326,11 @@ function createPostgresStores(
       transactionContext: options.transactionContext,
     }),
     auth,
-    executions: new PgExecutionStorage(sql, auth),
+    executions,
     agents: new PgAgentStorage({ sql }),
     actionRuns: new PgActionRunStorage(sql),
     pipelineRuns: new PgPipelineRunStorage(sql),
-    workflowRuns: new PgWorkflowRunStorage(sql),
+    workflowRuns: new PgWorkflowRunStorage(sql, executions),
     workflowInterventions: new PgWorkflowInterventionStorage(sql),
     syncRuns: new PgSyncRunStorage(sql),
     projectionRuns: new PgProjectionRunStorage(sql),

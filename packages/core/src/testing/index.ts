@@ -82,3 +82,7 @@ export {
   type SandboxesContractCapabilities,
   type SandboxesContractSuiteOptions,
 } from "./sandboxes-contract"
+export {
+  createTestAutomaticWorkflowExecution,
+  createTestWorkflowExecution,
+} from "./workflow-execution"

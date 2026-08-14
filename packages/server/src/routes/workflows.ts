@@ -6,7 +6,7 @@ import {
   type WorkflowDefinition,
 } from "@sixb/core"
 import { publishAgentRunCancel } from "@sixb/core/internal/agents"
-import type { Sixb } from "@sixb/core/internal/request-execution"
+import type { Sixb, WorkflowRunView } from "@sixb/core/internal/request-execution"
 import {
   snapshotWorkflowInterventionResponse,
   type WorkflowInterventionNodeDefinition,
@@ -85,7 +85,7 @@ const WorkflowNodeFileContentParamsSchema = WorkflowRunParamsSchema.extend({
   nodeKey: z.string().min(1),
 })
 
-function serializeWorkflowRunSummary(run: WorkflowRunRecord) {
+function serializeWorkflowRunSummary(run: WorkflowRunView) {
   return {
     id: run.id,
     projectId: run.projectId,
@@ -95,11 +95,11 @@ function serializeWorkflowRunSummary(run: WorkflowRunRecord) {
     startedAt: toIsoString(run.startedAt),
     finishedAt: run.finishedAt ? toIsoString(run.finishedAt) : undefined,
     error: run.error,
-    requestedBy: serializePrincipal(run.requestedByPrincipal),
+    requestedBy: serializePrincipal(run.requestedBy ?? SYSTEM_PRINCIPAL),
   }
 }
 
-function serializeWorkflowRunDetail(run: WorkflowRunRecord) {
+function serializeWorkflowRunDetail(run: WorkflowRunView) {
   return {
     ...serializeWorkflowRunSummary(run),
     input: run.input,
@@ -1146,7 +1146,10 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
             order: "asc",
           })
           return CancelWorkflowRunResponseSchema.parse({
-            run: serializeWorkflowRunDetail(result.run),
+            run: serializeWorkflowRunDetail({
+              ...result.run,
+              ...(existing.requestedBy === undefined ? {} : { requestedBy: existing.requestedBy }),
+            }),
             nodes: await Promise.all(
               nodes.nodes.map((node) => serializeWorkflowNodeWithExecution(storage, node))
             ),

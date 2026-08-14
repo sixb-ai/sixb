@@ -1,5 +1,4 @@
 import type { DomainEvent } from "@sixb/core"
-import { SYSTEM_PRINCIPAL } from "@sixb/core"
 import type { StoredDomainEvent } from "@sixb/core/internal/events"
 import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projections"
 import { evaluateEventSchedule } from "@sixb/core/internal/schedules"
@@ -9,6 +8,7 @@ import { runProjectionDispatchReconciler } from "./projection-dispatch-reconcile
 import { buildProjectionJob } from "./projection-job"
 import { routeKeysForEvent } from "./route-key"
 import type {
+  OrchestratorDispatchers,
   OrchestratorEventScheduleBinding,
   OrchestratorEventScheduleTarget,
   OrchestratorJob,
@@ -35,6 +35,7 @@ export class OrchestratorWorker extends Worker {
         "Projection routes require lake and projection-run storage for durable dispatch."
       )
     }
+    if (hasWorkflowRoutes(options.routes)) requireDispatcher(options.dispatchers, "workflows")
   }
 
   protected async run(signal: AbortSignal): Promise<void> {
@@ -283,29 +284,25 @@ async function enqueueDirectJob(
       return
     }
     case "workflows": {
-      const scheduleSource = workflowScheduleSource(sourceEvent)
-      await options.queues.workflows.enqueue({
-        projectId: options.projectId,
-        jobs: [
-          {
-            ...item.job,
-            payload: {
-              ...item.job.payload,
-              ...(scheduleSource
-                ? {
-                    runId: scheduleConsumerRunId(
-                      "workflow",
-                      item.job.payload.workflowId,
-                      scheduleSource.scheduleId,
-                      sourceEvent.id
-                    ),
-                    source: scheduleSource,
-                  }
-                : {}),
-            },
-            metadata,
-          },
-        ],
+      if (sourceEvent.type !== "schedule.triggered") {
+        throw new OrchestratorError(
+          `Direct workflow route received unsupported event '${sourceEvent.type}'.`
+        )
+      }
+      const scheduleId = sourceEvent.payload.scheduleId
+      await requireDispatcher(options.dispatchers, "workflows").dispatch({
+        workflowId: item.job.payload.workflowId,
+        runId: scheduleConsumerRunId(
+          "workflow",
+          item.job.payload.workflowId,
+          scheduleId,
+          sourceEvent.id
+        ),
+        input: item.job.payload.input,
+        scheduleId,
+        source: { type: "schedule", eventId: sourceEvent.id },
+        correlationId: correlationIdForEvent(sourceEvent),
+        metadata,
       })
       return
     }
@@ -363,30 +360,14 @@ async function enqueueEventScheduleTarget(
           `Workflow '${target.workflowId}' schedule mapper must return an input object.`
         )
       }
-      await options.queues.workflows.enqueue({
-        projectId: options.projectId,
-        jobs: [
-          {
-            type: "workflow.run.requested",
-            payload: {
-              workflowId: target.workflowId,
-              runId: scheduleConsumerRunId(
-                "workflow",
-                target.workflowId,
-                scheduleId,
-                sourceEvent.id
-              ),
-              input,
-              source: {
-                type: "schedule",
-                scheduleId,
-                eventId: sourceEvent.id,
-                principal: SYSTEM_PRINCIPAL,
-              },
-            },
-            metadata,
-          },
-        ],
+      await requireDispatcher(options.dispatchers, "workflows").dispatch({
+        workflowId: target.workflowId,
+        runId: scheduleConsumerRunId("workflow", target.workflowId, scheduleId, sourceEvent.id),
+        input,
+        scheduleId,
+        source: { type: "event", eventId: sourceEvent.id },
+        correlationId: correlationIdForEvent(sourceEvent),
+        metadata,
       })
       return
     }
@@ -422,16 +403,6 @@ function withPipelineScheduleRunId(
       sourceEvent.payload.scheduleId,
       sourceEvent.id
     ),
-  }
-}
-
-function workflowScheduleSource(sourceEvent: StoredDomainEvent) {
-  if (sourceEvent.type !== "schedule.triggered") return null
-  return {
-    type: "schedule" as const,
-    scheduleId: sourceEvent.payload.scheduleId,
-    eventId: sourceEvent.id,
-    principal: SYSTEM_PRINCIPAL,
   }
 }
 
@@ -486,6 +457,17 @@ function buildMetadata(event: StoredDomainEvent): Record<string, string> {
   }
 }
 
+function correlationIdForEvent(event: StoredDomainEvent): string {
+  if (
+    "correlationId" in event &&
+    typeof event.correlationId === "string" &&
+    event.correlationId.trim()
+  ) {
+    return event.correlationId
+  }
+  return event.id
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
@@ -509,6 +491,31 @@ function projectionDescriptors(
   return [...descriptors.values()].sort((left, right) =>
     left.projectionId.localeCompare(right.projectionId)
   )
+}
+
+function hasWorkflowRoutes(routes: OrchestratorRoutes): boolean {
+  for (const route of routes.values()) {
+    if (route.jobs.some((item) => item.queue === "workflows")) return true
+    if (
+      route.eventSchedules?.some((binding) =>
+        binding.targets.some((target) => target.queue === "workflows")
+      )
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+function requireDispatcher<TKey extends keyof OrchestratorDispatchers>(
+  dispatchers: OrchestratorDispatchers,
+  key: TKey
+): NonNullable<OrchestratorDispatchers[TKey]> {
+  const dispatcher = dispatchers[key]
+  if (!dispatcher) {
+    throw new OrchestratorError(`Routes require the '${key}' dispatcher.`)
+  }
+  return dispatcher
 }
 
 function projectionDescriptorsEqual(
