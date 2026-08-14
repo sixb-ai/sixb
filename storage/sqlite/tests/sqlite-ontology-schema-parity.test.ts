@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test"
 import postgresSchema from "../../pg/src/migrations/001-initial-schema.sql" with { type: "text" }
+import postgresSplitOverrides from "../../pg/src/migrations/007-split-overrides.sql" with {
+  type: "text",
+}
 import sqliteSchema from "../src/migrations/001-initial-schema.sql" with { type: "text" }
+import sqliteSplitOverrides from "../src/migrations/007-split-overrides.sql" with { type: "text" }
 
 const ontologyTables = [
   "ontology_commits",
@@ -29,6 +33,20 @@ test("SQLite and PostgreSQL ontology schemas have logical table and index parity
     applicationIndexes(postgresSchema, parityTables).filter(
       ({ name }) => name !== "idx_objects_properties"
     )
+  )
+})
+
+test("SQLite and PostgreSQL override tables stay aligned", () => {
+  const tables = ["ontology_object_overrides", "ontology_link_overrides"]
+  expect(applicationTables(sqliteSplitOverrides)).toEqual(tables)
+  expect(applicationTables(postgresSplitOverrides)).toEqual(tables)
+  for (const table of tables) {
+    expect(tableColumns(sqliteSplitOverrides, table)).toEqual(
+      tableColumns(postgresSplitOverrides, table)
+    )
+  }
+  expect(applicationIndexes(sqliteSplitOverrides, tables)).toEqual(
+    applicationIndexes(postgresSplitOverrides, tables)
   )
 })
 

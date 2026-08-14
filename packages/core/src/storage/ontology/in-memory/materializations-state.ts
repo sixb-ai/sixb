@@ -9,6 +9,7 @@ import type { ObjectLinkRow, ObjectRow } from "../../objects/types"
 import type { TimeseriesPoint } from "../../timeseries/types"
 import type {
   StoredLinkOverride,
+  StoredLinkSlotOverride,
   StoredObjectOverride,
   StoredTelemetryPoint,
 } from "../materializations"
@@ -23,6 +24,7 @@ import type {
   InMemoryOntologyState,
   InMemorySourceMaterialization,
   InMemoryStoredLinkOverride,
+  InMemoryStoredLinkSlotOverride,
   InMemoryStoredObjectOverride,
 } from "./shared-state"
 
@@ -37,6 +39,14 @@ export function publicObjectOverride(
 export function publicLinkOverride(
   value: InMemoryStoredLinkOverride | undefined
 ): StoredLinkOverride | null {
+  if (!value) return null
+  const { projectId: _, ...stored } = value
+  return stored
+}
+
+export function publicLinkSlotOverride(
+  value: InMemoryStoredLinkSlotOverride | undefined
+): StoredLinkSlotOverride | null {
   if (!value) return null
   const { projectId: _, ...stored } = value
   return stored

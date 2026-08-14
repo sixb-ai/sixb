@@ -12,6 +12,7 @@ import type {
 import {
   linkRefKey,
   linkRefSortKey,
+  linkScopeKey,
   linkScopeSortKey,
   objectRefKey,
   objectRefSortKey,
@@ -81,6 +82,7 @@ import {
   linkSnapshot,
   objectSnapshot,
   publicLinkOverride,
+  publicLinkSlotOverride,
   publicObjectOverride,
   storedPoint,
   storedSource,
@@ -435,6 +437,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
               )
             : base.source,
           override: base.override,
+          slotOverride: base.slotOverride,
           effective: base.effective,
           diffRequired: entry.diffRequired,
         })
@@ -565,7 +568,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       apply()
     }
 
-    for (const item of input.chunk.overrides.objectUpserts)
+    for (const item of input.chunk.overrides.objects.upserts)
       write("override.object.upsert", () => {
         const key = projectEntityKey(projectId, objectRefKey(item.ref))
         assertLastCommit(
@@ -584,7 +587,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
           })
         )
       })
-    for (const item of input.chunk.overrides.objectDeletes)
+    for (const item of input.chunk.overrides.objects.deletes)
       write("override.object.delete", () => {
         const key = projectEntityKey(projectId, objectRefKey(item.ref))
         assertLastCommit(
@@ -594,13 +597,13 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         )
         this.state.objectOverrides.delete(key)
       })
-    for (const item of input.chunk.overrides.linkUpserts)
+    for (const item of input.chunk.overrides.links.edges.upserts)
       write("override.link.upsert", () => {
         const key = projectEntityKey(projectId, linkRefKey(item.ref))
         assertLastCommit(
           this.state.linkOverrides.get(key),
           item.expectedLastCommitId,
-          "link override"
+          "link edge override"
         )
         this.state.linkOverrides.set(
           key,
@@ -613,15 +616,44 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
           })
         )
       })
-    for (const item of input.chunk.overrides.linkDeletes)
+    for (const item of input.chunk.overrides.links.edges.deletes)
       write("override.link.delete", () => {
         const key = projectEntityKey(projectId, linkRefKey(item.ref))
         assertLastCommit(
           this.state.linkOverrides.get(key),
           item.expectedLastCommitId,
-          "link override"
+          "link edge override"
         )
         this.state.linkOverrides.delete(key)
+      })
+    for (const item of input.chunk.overrides.links.slots.upserts)
+      write("override.link-slot.upsert", () => {
+        const key = projectEntityKey(projectId, linkScopeKey(item.ref.source, item.ref.linkId))
+        assertLastCommit(
+          this.state.linkSlotOverrides.get(key),
+          item.expectedLastCommitId,
+          "link slot override"
+        )
+        this.state.linkSlotOverrides.set(
+          key,
+          structuredClone({
+            projectId,
+            ref: item.ref,
+            value: item.value,
+            lastCommitId: item.lastCommitId,
+            updatedAt: item.updatedAt,
+          })
+        )
+      })
+    for (const item of input.chunk.overrides.links.slots.deletes)
+      write("override.link-slot.delete", () => {
+        const key = projectEntityKey(projectId, linkScopeKey(item.ref.source, item.ref.linkId))
+        assertLastCommit(
+          this.state.linkSlotOverrides.get(key),
+          item.expectedLastCommitId,
+          "link slot override"
+        )
+        this.state.linkSlotOverrides.delete(key)
       })
 
     for (const item of input.chunk.effective.linkDeletes)
@@ -883,6 +915,15 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       if (override.projectId !== projectId) continue
       if (touchesIncident(override.ref)) addReplacementLink(replacement, override.ref, true)
     }
+    for (const override of this.state.linkSlotOverrides.values()) {
+      if (override.projectId !== projectId) continue
+      const ref = {
+        source: override.ref.source,
+        linkId: override.ref.linkId,
+        target: override.value.target,
+      }
+      if (touchesIncident(ref)) addReplacementLink(replacement, ref, true)
+    }
     for (const active of this.state.sourceMaterializations.values()) {
       if (active.projectId !== projectId || active.status !== "active") continue
       for (const row of active.rowsByEntity.values()) {
@@ -898,6 +939,22 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         addReplacementLink(replacement, ref, false)
       }
     })
+    for (const override of this.state.linkSlotOverrides.values()) {
+      if (
+        override.projectId === projectId &&
+        replacement.affectedScopes.has(linkScopeSortKey(override.ref.source, override.ref.linkId))
+      ) {
+        addReplacementLink(
+          replacement,
+          {
+            source: override.ref.source,
+            linkId: override.ref.linkId,
+            target: override.value.target,
+          },
+          false
+        )
+      }
+    }
     replacement.linksExpanded = true
     replacement.orderedLinks = null
   }
@@ -1061,6 +1118,13 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
           this.state.linkOverrides.get(projectEntityKey(projectId, linkRefKey(ref)))
         )
       ),
+      slotOverride: structuredClone(
+        publicLinkSlotOverride(
+          this.state.linkSlotOverrides.get(
+            projectEntityKey(projectId, linkScopeKey(ref.source, ref.linkId))
+          )
+        )
+      ),
       effective: row ? linkSnapshot(row) : null,
     }
   }
@@ -1103,7 +1167,51 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         appendScopeSnapshot(accumulator, linkSnapshot(row))
       }
     }
-    return finishScopeAccumulator(accumulator)
+    const effective = rows.length === 1 ? linkSnapshot(rows[0]!) : null
+    return {
+      ...finishScopeAccumulator(accumulator),
+      sourceAssertion: this.findActiveLinkScopeSource(projectId, source, linkId),
+      override: structuredClone(
+        publicLinkSlotOverride(
+          this.state.linkSlotOverrides.get(
+            projectEntityKey(projectId, linkScopeKey(source, linkId))
+          )
+        )
+      ),
+      effective,
+    }
+  }
+
+  private findActiveLinkScopeSource(
+    projectId: string,
+    source: OntologyObjectRef,
+    linkId: string
+  ): StoredSourceLinkAssertion | null {
+    let found: StoredSourceLinkAssertion | null = null
+    for (const active of this.state.sourceMaterializations.values()) {
+      if (active.projectId !== projectId || active.status !== "active") continue
+      for (const row of active.rowsByEntity.values()) {
+        if (
+          row.assertion.kind !== "link" ||
+          objectRefKey(row.assertion.ref.source) !== objectRefKey(source) ||
+          row.assertion.ref.linkId !== linkId
+        ) {
+          continue
+        }
+        if (found) {
+          throw new MaterializationConflictError(
+            "source-materialization",
+            `Multiple active source links assert cardinality-one scope '${source.objectTypeId}.${linkId}'.`
+          )
+        }
+        found = storedSource(
+          active.source.projectionId,
+          active.materializationId,
+          row
+        ) as StoredSourceLinkAssertion
+      }
+    }
+    return structuredClone(found)
   }
 
   private findActiveObjectSource(
@@ -1171,6 +1279,14 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     )
     for (const override of this.state.linkOverrides.values()) {
       if (override.projectId === projectId) consider(override.ref)
+    }
+    for (const override of this.state.linkSlotOverrides.values()) {
+      if (override.projectId !== projectId) continue
+      consider({
+        source: override.ref.source,
+        linkId: override.ref.linkId,
+        target: override.value.target,
+      })
     }
     for (const active of this.state.sourceMaterializations.values()) {
       if (active.projectId !== projectId || active.status !== "active") continue

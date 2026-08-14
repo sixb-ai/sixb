@@ -6,6 +6,8 @@ import type {
   ExactEffectiveObjectWrite,
   ExactLinkOverrideDelete,
   ExactLinkOverrideWrite,
+  ExactLinkSlotOverrideDelete,
+  ExactLinkSlotOverrideWrite,
   ExactObjectOverrideDelete,
   ExactObjectOverrideWrite,
   ExactTimeseriesPointWrite,
@@ -37,10 +39,20 @@ export async function* planStream(
 
 type MutableChunk = {
   overrides: {
-    objectUpserts: ExactObjectOverrideWrite[]
-    objectDeletes: ExactObjectOverrideDelete[]
-    linkUpserts: ExactLinkOverrideWrite[]
-    linkDeletes: ExactLinkOverrideDelete[]
+    objects: {
+      upserts: ExactObjectOverrideWrite[]
+      deletes: ExactObjectOverrideDelete[]
+    }
+    links: {
+      edges: {
+        upserts: ExactLinkOverrideWrite[]
+        deletes: ExactLinkOverrideDelete[]
+      }
+      slots: {
+        upserts: ExactLinkSlotOverrideWrite[]
+        deletes: ExactLinkSlotOverrideDelete[]
+      }
+    }
   }
   effective: {
     objectUpserts: ExactEffectiveObjectWrite[]
@@ -54,7 +66,13 @@ type MutableChunk = {
 
 function mutableChunk(): MutableChunk {
   return {
-    overrides: { objectUpserts: [], objectDeletes: [], linkUpserts: [], linkDeletes: [] },
+    overrides: {
+      objects: { upserts: [], deletes: [] },
+      links: {
+        edges: { upserts: [], deletes: [] },
+        slots: { upserts: [], deletes: [] },
+      },
+    },
     effective: { objectUpserts: [], objectDeletes: [], linkUpserts: [], linkDeletes: [] },
     timeseries: { pointUpserts: [] },
     outbox: [],
@@ -64,16 +82,22 @@ function mutableChunk(): MutableChunk {
 function appendItem(chunk: MutableChunk, item: MaterializationPlanItem): void {
   switch (item.kind) {
     case "object-override-upsert":
-      chunk.overrides.objectUpserts.push(item.value)
+      chunk.overrides.objects.upserts.push(item.value)
       break
     case "object-override-delete":
-      chunk.overrides.objectDeletes.push(item.value)
+      chunk.overrides.objects.deletes.push(item.value)
       break
     case "link-override-upsert":
-      chunk.overrides.linkUpserts.push(item.value)
+      chunk.overrides.links.edges.upserts.push(item.value)
       break
     case "link-override-delete":
-      chunk.overrides.linkDeletes.push(item.value)
+      chunk.overrides.links.edges.deletes.push(item.value)
+      break
+    case "link-slot-override-upsert":
+      chunk.overrides.links.slots.upserts.push(item.value)
+      break
+    case "link-slot-override-delete":
+      chunk.overrides.links.slots.deletes.push(item.value)
       break
     case "object-upsert":
       chunk.effective.objectUpserts.push(item.value)

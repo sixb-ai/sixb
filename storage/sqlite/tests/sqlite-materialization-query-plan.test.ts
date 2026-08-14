@@ -46,7 +46,7 @@ describe("SQLite materialization query plans", () => {
       )
       expectRequestedFirstLookup(
         db,
-        findRecorded(recorded, "SELECT overrides.* FROM requested", "'object'"),
+        findRecorded(recorded, "CROSS JOIN ontology_object_overrides AS overrides"),
         "SEARCH overrides",
         ["project_id=?", "object_type_id=?", "primary_id=?"]
       )
@@ -91,7 +91,7 @@ describe("SQLite materialization query plans", () => {
       )
       expectRequestedFirstLookup(
         db,
-        findRecorded(recorded, "SELECT overrides.* FROM requested", "'link'"),
+        findRecorded(recorded, "CROSS JOIN ontology_link_overrides AS overrides", "'edge'"),
         "SEARCH overrides",
         [
           "project_id=?",

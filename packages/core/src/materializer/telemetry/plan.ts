@@ -31,7 +31,7 @@ import { loadState, oneStateRequest } from "../effective/load-state"
 import { validateEffectiveObject } from "../effective/validate"
 import { stageWorkBounded } from "../execution/work-executor"
 import {
-  appendObjectEffectivePlan,
+  appendEffectiveObjectWork,
   classificationWork,
   eventWork,
   planWork,
@@ -331,7 +331,7 @@ async function stageTelemetryObjectPlan(
   if (change) {
     counts.latestObjectsChanged += 1
     const items: MaterializationPlanWorkItem[] = []
-    appendObjectEffectivePlan(items, change)
+    appendEffectiveObjectWork(items, change)
     work.push(...items.map((item) => planWork(item, sortKey)))
     const eventContext = telemetryEventContext(context, planContext)
     work.push(eventWork(buildObjectMaterializationEventDraft({ ...eventContext, change })))

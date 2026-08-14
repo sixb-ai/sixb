@@ -32,10 +32,12 @@ export function assertPageRows(value: number): void {
 
 export function materializationChunkRows(chunk: MaterializationPlanChunk): number {
   return (
-    chunk.overrides.objectUpserts.length +
-    chunk.overrides.objectDeletes.length +
-    chunk.overrides.linkUpserts.length +
-    chunk.overrides.linkDeletes.length +
+    chunk.overrides.objects.upserts.length +
+    chunk.overrides.objects.deletes.length +
+    chunk.overrides.links.edges.upserts.length +
+    chunk.overrides.links.edges.deletes.length +
+    chunk.overrides.links.slots.upserts.length +
+    chunk.overrides.links.slots.deletes.length +
     chunk.effective.objectUpserts.length +
     chunk.effective.objectDeletes.length +
     chunk.effective.linkUpserts.length +
@@ -49,20 +51,28 @@ export function materializationPlanItems(
   chunk: MaterializationPlanChunk
 ): MaterializationPlanWorkItem[] {
   return [
-    ...chunk.overrides.objectUpserts.map((value) => ({
+    ...chunk.overrides.objects.upserts.map((value) => ({
       kind: "object-override-upsert" as const,
       value,
     })),
-    ...chunk.overrides.objectDeletes.map((value) => ({
+    ...chunk.overrides.objects.deletes.map((value) => ({
       kind: "object-override-delete" as const,
       value,
     })),
-    ...chunk.overrides.linkUpserts.map((value) => ({
+    ...chunk.overrides.links.edges.upserts.map((value) => ({
       kind: "link-override-upsert" as const,
       value,
     })),
-    ...chunk.overrides.linkDeletes.map((value) => ({
+    ...chunk.overrides.links.edges.deletes.map((value) => ({
       kind: "link-override-delete" as const,
+      value,
+    })),
+    ...chunk.overrides.links.slots.upserts.map((value) => ({
+      kind: "link-slot-override-upsert" as const,
+      value,
+    })),
+    ...chunk.overrides.links.slots.deletes.map((value) => ({
+      kind: "link-slot-override-delete" as const,
       value,
     })),
     ...chunk.effective.linkDeletes.map((value) => ({ kind: "link-delete" as const, value })),
@@ -129,7 +139,7 @@ export function workUniquenessKey(record: MaterializationWorkRecord): string {
     case "incident-object":
       return `incident-object:${objectRefKey(record.ref)}`
     case "cardinality":
-      return `cardinality:${record.scopeSortKey}:${record.linkSortKey}`
+      return `cardinality:${record.view}:${record.scopeSortKey}:${record.linkSortKey}`
     case "plan":
       return `plan:${record.item.kind}:${record.sortKey}`
     case "event":
@@ -159,16 +169,20 @@ function planKindOrder(kind: MaterializationPlanWorkItem["kind"]): number {
       return 2
     case "link-override-delete":
       return 3
-    case "point-upsert":
+    case "link-slot-override-upsert":
       return 4
-    case "link-delete":
+    case "link-slot-override-delete":
       return 5
-    case "object-delete":
+    case "point-upsert":
       return 6
-    case "object-upsert":
+    case "link-delete":
       return 7
-    case "link-upsert":
+    case "object-delete":
       return 8
+    case "object-upsert":
+      return 9
+    case "link-upsert":
+      return 10
   }
 }
 
@@ -177,10 +191,15 @@ export function compareCardinalityWork(
   right: MaterializationCardinalityOccupantWorkRecord
 ): number {
   return (
+    cardinalityViewOrder(left.view) - cardinalityViewOrder(right.view) ||
     left.scopeSortKey.localeCompare(right.scopeSortKey) ||
     left.linkSortKey.localeCompare(right.linkSortKey) ||
     left.recordKey.localeCompare(right.recordKey)
   )
+}
+
+function cardinalityViewOrder(view: MaterializationCardinalityOccupantWorkRecord["view"]): number {
+  return view === "effective" ? 0 : 1
 }
 
 export function compareEventWork(

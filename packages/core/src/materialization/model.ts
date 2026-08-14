@@ -16,6 +16,12 @@ export interface OntologyLinkRef {
   readonly target: OntologyObjectRef
 }
 
+/** Identity of the single value slot owned by a cardinality-one link. */
+export interface OntologyLinkScopeRef {
+  readonly source: OntologyObjectRef
+  readonly linkId: string
+}
+
 export interface ProjectionSourceRef {
   readonly projectionId: string
 }
@@ -392,3 +398,22 @@ export type LinkOverride =
       readonly properties?: Readonly<Record<string, JsonValue>>
     }
   | { readonly kind: "delete" }
+
+/**
+ * Managed authority for a link slot: the single-valued `(source, linkId)` identity of a
+ * cardinality-one link.
+ *
+ * The target is part of the value, not the authority identity. A clear keeps the target that was
+ * removed as an operation anchor so the existing target-shaped reset API remains deterministic;
+ * it still suppresses every projected value in the scope.
+ */
+export type LinkSlotOverride =
+  | {
+      readonly kind: "set"
+      readonly target: OntologyObjectRef
+      readonly properties?: Readonly<Record<string, JsonValue>>
+    }
+  | {
+      readonly kind: "clear"
+      readonly target: OntologyObjectRef
+    }

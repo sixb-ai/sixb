@@ -179,6 +179,8 @@ are cleared, and required link properties must be present every time.
 The target is an `ObjectRef` (`{ objectTypeId, primaryId }`). TypeScript checks it against the
 link's declared target, so linking `members` to a `Customer` is a compile error.
 
+Sixb distinguishes an exact link **edge**, identified by `(source, linkId, target)`, from a single-valued link **slot**, identified by `(source, linkId)`. Cardinality-many overrides own edges; cardinality-one overrides own slots and select at most one target.
+
 For a `cardinality: "one"` link, `link(...)` is not a setter. Calling `link(...)` with the same
 target updates that relationship's properties, but calling it with a different target while one is
 already present is rejected. Reassign by removing the current target, then linking the new one:
@@ -199,8 +201,9 @@ await projects.byId("proj-001").link(Project.l.lead, {
 })
 ```
 
-`unlink(...)` removes one exact relationship row. Even for `cardinality: "one"` links, pass the
-current target; when you only know the `linkId`, read it first with `listLinks(Project.l.lead)`.
+For `cardinality: "many"`, `unlink(...)` removes one exact relationship row. For `cardinality: "one"`, it clears the whole `(source, linkId)` slot: the target remains required as
+the operation anchor, but a later projected target stays hidden instead of appearing beside the managed decision. When you only know the `linkId`, read the current target first with
+`listLinks(Project.l.lead)`.
 
 Inside an action's staged `.edits(...)` facade the same `link(...)` and `unlink(...)` shapes apply,
 plus `resetLink(...)` to forget a relationship the action added so a projected one shows again. An

@@ -9,7 +9,7 @@ import type {
   OntologyLinkRef,
   OntologyObjectRef,
 } from "../../materialization/model"
-import { linkRefSortKey, objectRefSortKey, projectionEntityKey } from "../../materialization/refs"
+import { projectionEntityKey } from "../../materialization/refs"
 import type { OntologyCommitOriginSelector, OntologyCommitWrite } from "./commits"
 import type {
   FinalizeMaterializationInput,
@@ -22,6 +22,7 @@ import type {
   MaterializationWorkRecord,
   SourceActivationWrite,
   StageMaterializationWorkInput,
+  StoredLinkSlotOverride,
   StreamMaterializationWorkInput,
 } from "./materializations"
 import { assertNonblank, assertTimestamp } from "./provider-validation"
@@ -106,9 +107,66 @@ export function finishScopeAccumulator(
   return {
     source: accumulator.source,
     linkId: accumulator.linkId,
+    sourceAssertion: null,
+    override: null,
+    effective: null,
     effectiveCount: accumulator.effectiveCount,
     fingerprint: accumulator.hash.digest("hex"),
   }
+}
+
+export function linkSlotOverrideValue(
+  value: unknown,
+  scopeLabel: string
+): StoredLinkSlotOverride["value"] {
+  if (!isRecord(value) || typeof value.kind !== "string") {
+    throw invalidLinkSlotOverride(scopeLabel)
+  }
+  if (value.kind === "legacy-conflict") {
+    return { kind: "legacy-conflict" }
+  }
+  if (
+    (value.kind !== "set" && value.kind !== "clear") ||
+    !isRecord(value.target) ||
+    typeof value.target.objectTypeId !== "string" ||
+    value.target.objectTypeId.trim().length === 0 ||
+    typeof value.target.primaryId !== "string" ||
+    value.target.primaryId.trim().length === 0
+  ) {
+    throw invalidLinkSlotOverride(scopeLabel)
+  }
+  const target = {
+    objectTypeId: value.target.objectTypeId,
+    primaryId: value.target.primaryId,
+  }
+  if (value.kind === "clear") return { kind: "clear", target }
+  if (value.properties === undefined) return { kind: "set", target }
+  if (!isJsonObject(value.properties)) throw invalidLinkSlotOverride(scopeLabel)
+  return { kind: "set", target, properties: structuredClone(value.properties) }
+}
+
+function invalidLinkSlotOverride(scopeLabel: string): MaterializationConflictError {
+  return new MaterializationConflictError(
+    "effective-state",
+    `Cardinality-one link slot ${scopeLabel} contains an invalid stored override.`
+  )
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function isJsonObject(
+  value: unknown
+): value is Readonly<Record<string, import("../../json").JsonValue>> {
+  return isRecord(value) && Object.values(value).every(isJsonValue)
+}
+
+function isJsonValue(value: unknown): value is import("../../json").JsonValue {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true
+  if (typeof value === "number") return Number.isFinite(value)
+  if (Array.isArray(value)) return value.every(isJsonValue)
+  return isRecord(value) && Object.values(value).every(isJsonValue)
 }
 
 export interface ProviderReplacementSessionState {
@@ -417,44 +475,6 @@ export function uniqueSorted<T>(
   )
 }
 
-export type OverrideEntity =
-  | { readonly kind: "object"; readonly ref: OntologyObjectRef }
-  | { readonly kind: "link"; readonly ref: OntologyLinkRef }
-
-export function overrideEntityColumns(entity: OverrideEntity): {
-  readonly sortKey: string
-  readonly objectTypeId: string | null
-  readonly primaryId: string | null
-  readonly sourceTypeId: string | null
-  readonly sourcePrimaryId: string | null
-  readonly linkId: string | null
-  readonly targetTypeId: string | null
-  readonly targetPrimaryId: string | null
-} {
-  if (entity.kind === "object") {
-    return {
-      sortKey: objectRefSortKey(entity.ref),
-      objectTypeId: entity.ref.objectTypeId,
-      primaryId: entity.ref.primaryId,
-      sourceTypeId: null,
-      sourcePrimaryId: null,
-      linkId: null,
-      targetTypeId: null,
-      targetPrimaryId: null,
-    }
-  }
-  return {
-    sortKey: linkRefSortKey(entity.ref),
-    objectTypeId: null,
-    primaryId: null,
-    sourceTypeId: entity.ref.source.objectTypeId,
-    sourcePrimaryId: entity.ref.source.primaryId,
-    linkId: entity.ref.linkId,
-    targetTypeId: entity.ref.target.objectTypeId,
-    targetPrimaryId: entity.ref.target.primaryId,
-  }
-}
-
 export function sameNonnegativeCounts(actual: object, expected: object): boolean {
   const actualCounts = actual as Record<string, unknown>
   return Object.entries(expected).every(
@@ -489,7 +509,7 @@ export function materializationWorkColumns(record: MaterializationWorkRecord): {
   if (record.kind === "cardinality") {
     return {
       lane: "cardinality",
-      majorOrder: 0,
+      majorOrder: record.view === "effective" ? 0 : 1,
       minorOrder: 0,
       sortOne: record.scopeSortKey,
       sortTwo: record.linkSortKey,
@@ -517,16 +537,20 @@ function materializationPlanKindRank(kind: MaterializationPlanWorkItem["kind"]):
       return 2
     case "link-override-delete":
       return 3
-    case "point-upsert":
+    case "link-slot-override-upsert":
       return 4
-    case "link-delete":
+    case "link-slot-override-delete":
       return 5
-    case "object-delete":
+    case "point-upsert":
       return 6
-    case "object-upsert":
+    case "link-delete":
       return 7
-    case "link-upsert":
+    case "object-delete":
       return 8
+    case "object-upsert":
+      return 9
+    case "link-upsert":
+      return 10
   }
 }
 

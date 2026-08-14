@@ -5,6 +5,7 @@ import type {
   EffectiveLinkChange,
   EffectiveObjectChange,
   LinkOverride,
+  LinkSlotOverride,
   ObjectOverride,
   OntologyEditOperation,
 } from "../src/materializer"
@@ -142,6 +143,7 @@ async function runGeneratedSequence(seed: number): Promise<void> {
   const sourceLinks = new Set<string>()
   const objectOverrides = new Map<string, ObjectOverride>()
   const linkOverrides = new Map<string, LinkOverride>()
+  const linkSlotOverrides = new Map<string, LinkSlotOverride>()
   const latest = new Map<string, { at: string; value: number }>()
   const objectRevisions = new Map<string, { version: number; lastCommitId: string }>()
   const linkRevisions = new Map<string, string>()
@@ -157,6 +159,7 @@ async function runGeneratedSequence(seed: number): Promise<void> {
   })
   const linkKey = (linkId: string, sourceId: string, targetId: string) =>
     JSON.stringify([sourceId, linkId, targetId])
+  const linkScopeKey = (linkId: string, sourceId: string) => JSON.stringify([sourceId, linkId])
 
   const resolveObjects = (): Map<string, ModelProperties> => {
     const ids = new Set([...sourceObjects.keys(), ...objectOverrides.keys()])
@@ -188,11 +191,28 @@ async function runGeneratedSequence(seed: number): Promise<void> {
     const resolved = new Map<string, ModelLink>()
     for (const key of keys) {
       const [sourceId, linkId, targetId] = JSON.parse(key) as string[]
+      if (linkId === "parent") continue
       if (!objects.has(sourceId) || !objects.has(targetId)) continue
       const override = linkOverrides.get(key)
       if (override?.kind === "delete") continue
       if (override?.kind !== "upsert" && !sourceLinks.has(key)) continue
       resolved.set(key, { sourceId, linkId, targetId })
+    }
+    const sourceTargets = new Map<string, string>()
+    for (const key of sourceLinks) {
+      const [sourceId, linkId, targetId] = JSON.parse(key) as string[]
+      if (linkId === "parent") sourceTargets.set(linkScopeKey(linkId, sourceId), targetId!)
+    }
+    const scopes = new Set([...sourceTargets.keys(), ...linkSlotOverrides.keys()])
+    for (const scope of scopes) {
+      const [sourceId, linkId] = JSON.parse(scope) as string[]
+      const override = linkSlotOverrides.get(scope)
+      if (override?.kind === "clear") continue
+      const targetId =
+        override?.kind === "set" ? override.target.primaryId : sourceTargets.get(scope)
+      if (!targetId || !objects.has(sourceId!) || !objects.has(targetId)) continue
+      const key = linkKey(linkId!, sourceId!, targetId)
+      resolved.set(key, { sourceId: sourceId!, linkId: linkId!, targetId })
     }
     return resolved
   }
@@ -256,6 +276,13 @@ async function runGeneratedSequence(seed: number): Promise<void> {
           ])
       )
     ).toEqual(linkOverrides)
+    expect(
+      new Map(
+        [...snapshot.linkSlotOverrides.values()]
+          .filter((value) => value.projectId === "project")
+          .map((value) => [linkScopeKey(value.ref.linkId, value.ref.source.primaryId), value.value])
+      )
+    ).toEqual(linkSlotOverrides)
   }
 
   const applyEffectiveTransition = (
@@ -467,14 +494,14 @@ async function runGeneratedSequence(seed: number): Promise<void> {
     linkOverrides.delete(peersKey)
   )
 
-  const parentAB = linkKey("parent", "a", "b")
+  const parentScope = linkScopeKey("parent", "a")
   await commitEdit(
     { id: "source-link-delete", kind: "link.delete", ref: linkRef("parent", "a", "b") },
-    () => linkOverrides.set(parentAB, { kind: "delete" })
+    () => linkSlotOverrides.set(parentScope, { kind: "clear", target: objectRef("b") })
   )
   await commitEdit(
     { id: "source-link-reset", kind: "link.reset", ref: linkRef("parent", "a", "b") },
-    () => linkOverrides.delete(parentAB)
+    () => linkSlotOverrides.delete(parentScope)
   )
 
   const nextObjects = new Map<string, ModelProperties>([

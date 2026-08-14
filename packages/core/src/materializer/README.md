@@ -83,7 +83,7 @@ then applies the fenced run transition.
 ```text
 ordered edit operations
   -> transaction-local EditWorkingState
-  -> update object/link overrides
+  -> update object, link-edge, and link-slot overrides
   -> validate effective objects, endpoints, and cardinality
   -> diff final working state against commit-start state
   -> plan and finalize one commit

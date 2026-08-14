@@ -273,9 +273,9 @@ the same object instead of a duplicate.
 
 ### Reassigning a cardinality-one link
 
-`link(...)` adds a relationship, `unlink(...)` removes one exact relationship, and `resetLink(...)`
-forgets a relationship this action added so a projected one shows again. There is no setter: to
-repoint a `cardinality: "one"` link, read the current target and replace it in the same handler.
+`link(...)` adds a relationship, `unlink(...)` removes a relationship, and `resetLink(...)` forgets a relationship this action managed so a projected one shows again. There is no setter: to repoint a `cardinality: "one"` link, read the current target and replace it in the same handler.
+
+For a cardinality-one link, the managed decision owns the `(source, linkId)` slot. If the projection later proposes another target, the managed target (or clear) remains authoritative; `resetLink(...)` releases the slot and reveals the latest projected target.
 
 ```ts
 .edits(async ({ objects, read, params, subject }) => {

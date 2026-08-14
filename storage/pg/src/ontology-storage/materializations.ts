@@ -594,6 +594,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
           payload->'ref'->>'linkId' AS link_id
         FROM ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}
         WHERE session_id = ${session.id} AND kind = 'cardinality'
+          AND payload->>'view' = 'effective'
       ), duplicate AS (
         SELECT scope_sort_key FROM work WHERE occupied
         GROUP BY scope_sort_key HAVING COUNT(*) > 1

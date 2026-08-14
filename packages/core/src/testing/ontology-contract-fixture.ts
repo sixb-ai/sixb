@@ -12,7 +12,13 @@ export interface OntologyContractStorage extends Storage {
 }
 
 const emptyChunk = {
-  overrides: { objectUpserts: [], objectDeletes: [], linkUpserts: [], linkDeletes: [] },
+  overrides: {
+    objects: { upserts: [], deletes: [] },
+    links: {
+      edges: { upserts: [], deletes: [] },
+      slots: { upserts: [], deletes: [] },
+    },
+  },
   effective: {
     objectUpserts: [],
     objectDeletes: [],

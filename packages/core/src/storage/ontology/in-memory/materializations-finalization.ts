@@ -371,6 +371,7 @@ function assertFinalCardinality(
   projectId: string,
   objects: InMemoryObjectStorage
 ): void {
+  const effectiveOccupants = records.filter((record) => record.view === "effective")
   const scopes = new Map<
     string,
     {
@@ -381,7 +382,7 @@ function assertFinalCardinality(
   >()
   let currentScope: string | null = null
   let occupiedCount = 0
-  for (const record of records) {
+  for (const record of effectiveOccupants) {
     if (record.scopeSortKey !== currentScope) {
       currentScope = record.scopeSortKey
       occupiedCount = 0

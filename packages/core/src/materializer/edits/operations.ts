@@ -1,7 +1,7 @@
+import { stableJsonStringify } from "../../json"
 import { MaterializationValidationError } from "../../materialization/errors"
 import type { OntologyEditOperation, OntologyOperationOutcome } from "../../materialization/model"
-import { linkRefKey, objectRefKey } from "../../materialization/refs"
-import type { MaterializationLinkScopeState } from "../../storage/ontology"
+import { linkRefKey, linkScopeKey, objectRefKey } from "../../materialization/refs"
 import type { MaterializerContext } from "../context"
 import { diffEffectiveObject } from "../effective/diff"
 import {
@@ -16,27 +16,17 @@ import type { TimedCommitIdentity } from "../shared/identity"
 import { applyLinkEdit, applyObjectEdit } from "./apply"
 import { linkCardinality } from "./read-set"
 import {
-  resolveLink,
+  type EditWorkingState,
+  resolveLinkEdge,
+  resolveLinkSlot,
   resolveObject,
   validateWorkingCardinality,
-  type WorkingLink,
+  type WorkingLinkEdge,
   type WorkingObject,
 } from "./working-state"
 
 type ObjectOperation = Extract<OntologyEditOperation, { readonly kind: `object.${string}` }>
 type LinkOperation = Extract<OntologyEditOperation, { readonly kind: `link.${string}` }>
-
-/**
- * Transaction-local edit working set.
- *
- * Loaded snapshots remain pinned to the commit start while each successful operation updates the
- * mutable override. Operation N+1 can therefore observe operation N before anything is durable.
- */
-export interface EditWorkingState {
-  readonly objects: Map<string, WorkingObject>
-  readonly links: Map<string, WorkingLink>
-  readonly scopeSnapshots: Map<string, MaterializationLinkScopeState>
-}
 
 /**
  * Undo record for one override the current operation group replaced.
@@ -163,7 +153,7 @@ function applyObjectTransition(
   try {
     const resolved = resolveObject(context.ontology, working)
     if (resolved) validateEffectiveObject(context.ontology, resolved.ref, resolved.properties)
-    validateWorkingCardinality(context.ontology, state.objects, state.links, state.scopeSnapshots)
+    validateWorkingCardinality(context.ontology, state.links.scopeSnapshots)
   } catch (error) {
     working.override = previous
     throw error
@@ -209,10 +199,13 @@ function applyLinkOperation(
   cardinality: "one" | "many" | undefined,
   journal?: EditUndoJournal
 ): OntologyOperationOutcome {
-  const working = requireWorkingLink(state, operation)
   validateLinkEndpoints(context, state, operation)
   const normalizedProperties = validateLinkOperation(context, operation)
-  const currentEffective = resolveLink(context.ontology, working, state.objects)
+  if (cardinality === "one") {
+    return applyLinkSlotOperation(context, state, operation, normalizedProperties, journal)
+  }
+  const working = requireWorkingLinkEdge(state, operation)
+  const currentEffective = resolveLinkEdge(context.ontology, working, state.objects)
   const transitionInput = {
     operation,
     hasSource: working.source !== null,
@@ -220,12 +213,66 @@ function applyLinkOperation(
     effectiveExists: currentEffective !== null,
   }
   const transition = applyLinkEdit({ ...transitionInput, normalizedProperties })
-  applyLinkTransition(context, state, working, transition.next, cardinality, journal)
+  applyLinkEdgeTransition(working, transition.next, journal)
   return { id: operation.id, ok: true, authority: authorityOutcome(transition.changed) }
 }
 
-function requireWorkingLink(state: EditWorkingState, operation: LinkOperation): WorkingLink {
-  const working = state.links.get(linkRefKey(operation.ref))
+function applyLinkSlotOperation(
+  context: MaterializerContext,
+  state: EditWorkingState,
+  operation: LinkOperation,
+  normalizedProperties: ReturnType<typeof validateLinkAuthorityProperties> | undefined,
+  journal?: EditUndoJournal
+): OntologyOperationOutcome {
+  const key = linkScopeKey(operation.ref.source, operation.ref.linkId)
+  const working = state.links.slots.get(key)
+  if (!working) {
+    throw new MaterializationValidationError("Link slot state was not loaded.")
+  }
+  const current = resolveLinkSlot(context.ontology, working, state.objects)
+  const previous = working.override
+  let next = previous
+
+  switch (operation.kind) {
+    case "link.upsert":
+      if (current && linkRefKey(current.ref) !== linkRefKey(operation.ref)) {
+        throw new MaterializationValidationError(
+          `Link scope '${operation.ref.source.objectTypeId}.${operation.ref.linkId}' has cardinality one.`
+        )
+      }
+      next = {
+        kind: "set",
+        target: operation.ref.target,
+        ...(normalizedProperties !== undefined ? { properties: normalizedProperties } : {}),
+      }
+      break
+    case "link.delete":
+      if (current && linkRefKey(current.ref) === linkRefKey(operation.ref)) {
+        next = { kind: "clear", target: operation.ref.target }
+      }
+      break
+    case "link.reset":
+      if (previous && objectRefKey(previous.target) === objectRefKey(operation.ref.target)) {
+        next = null
+      }
+      break
+  }
+
+  const changed = stableJsonStringify(previous) !== stableJsonStringify(next)
+  working.override = next
+  journal?.push({
+    restore: () => {
+      working.override = previous
+    },
+  })
+  return { id: operation.id, ok: true, authority: authorityOutcome(changed) }
+}
+
+function requireWorkingLinkEdge(
+  state: EditWorkingState,
+  operation: LinkOperation
+): WorkingLinkEdge {
+  const working = state.links.edges.get(linkRefKey(operation.ref))
   if (!working) throw new MaterializationValidationError("Link state was not loaded.")
   return working
 }
@@ -252,24 +299,13 @@ function validateLinkOperation(
   return validateLinkAuthorityProperties(context.ontology, operation.ref, operation.properties)
 }
 
-function applyLinkTransition(
-  context: Pick<MaterializerContext, "ontology">,
-  state: EditWorkingState,
-  working: WorkingLink,
-  next: WorkingLink["override"],
-  cardinality: "one" | "many" | undefined,
+function applyLinkEdgeTransition(
+  working: WorkingLinkEdge,
+  next: WorkingLinkEdge["override"],
   journal?: EditUndoJournal
 ): void {
   const previous = working.override
   working.override = next
-  try {
-    if (cardinality === "one") {
-      validateWorkingCardinality(context.ontology, state.objects, state.links, state.scopeSnapshots)
-    }
-  } catch (error) {
-    working.override = previous
-    throw error
-  }
   journal?.push({
     restore: () => {
       working.override = previous

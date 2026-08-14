@@ -12,6 +12,7 @@ import {
 } from ".."
 import {
   createOntologyMaterializer,
+  type OntologyEditOperation,
   ProjectionRegistry,
   type ProjectionSourceEntry,
 } from "../materializer"
@@ -283,6 +284,104 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
           propertyId: "temperature",
         })
       ).toMatchObject({ value: 21.5, lastCommitId: telemetry.commitId })
+    } finally {
+      await provider.cleanup?.(createdStorage)
+    }
+  })
+
+  test(`${name} persists cardinality-one edit authority by scope`, async () => {
+    const createdStorage = await provider.createStorage()
+    const storage = requireContractStorage(createdStorage)
+    let materializationOrdinal = 0
+    const materializer = createOntologyMaterializer({
+      projectId: "materializer-storage-contract",
+      ontology,
+      projections,
+      storage,
+      dependencies: {
+        batching: { sourceStageRows: 1, statePageRows: 1, planChunkRows: 1 },
+        clock: () => new Date("2026-02-01T12:00:00.000Z"),
+        materializationId: () => `scope-contract-candidate-${++materializationOrdinal}`,
+      },
+    })
+    const linkRef = (targetId: string) => ({
+      source: { objectTypeId: Device.id, primaryId: "document" },
+      linkId: "parent",
+      target: { objectTypeId: Device.id, primaryId: targetId },
+    })
+    const replace = async (versionId: string, parentId: string) => {
+      const datasetVersion = {
+        datasetId: devices.id,
+        versionId,
+        createdAt: `2026-01-0${versionId.slice(1)}T00:00:00.000Z`,
+      }
+      const execution = await claim(storage, {
+        runId: `scope-${versionId}`,
+        projectionId: deviceProjection.id,
+        protocol: "replacement",
+        datasetVersion,
+      })
+      await materializer.projections.replace({
+        source: { projectionId: deviceProjection.id },
+        datasetVersion,
+        execution,
+        entries: entries([
+          sourceEntry("document", "Document", parentId),
+          sourceEntry("rockland", "Rockland"),
+          sourceEntry("haverstraw", "Haverstraw"),
+        ]),
+      })
+    }
+    const edit = (requestId: string, operation: OntologyEditOperation) =>
+      materializer.edits.commit({
+        mode: "atomic",
+        source: { kind: "runtime", requestId },
+        operations: [operation],
+        expectedObjects: [],
+        expectedLinks: [],
+        expectedLinkScopes: [],
+      })
+    const targets = async () =>
+      (
+        await storage.objects.listLinks({
+          projectId: "materializer-storage-contract",
+          objectTypeId: Device.id,
+          objectId: "document",
+        })
+      ).map((row) => row.targetId)
+
+    try {
+      await replace("v1", "rockland")
+      await edit("scope-set", {
+        id: "set",
+        kind: "link.upsert",
+        ref: linkRef("rockland"),
+      })
+
+      await replace("v2", "haverstraw")
+      expect(await targets()).toEqual(["rockland"])
+
+      await edit("scope-reset", {
+        id: "reset",
+        kind: "link.reset",
+        ref: linkRef("rockland"),
+      })
+      expect(await targets()).toEqual(["haverstraw"])
+
+      await edit("scope-clear", {
+        id: "clear",
+        kind: "link.delete",
+        ref: linkRef("haverstraw"),
+      })
+      await replace("v3", "rockland")
+      expect(await targets()).toEqual([])
+
+      await edit("scope-clear-reset", {
+        id: "reset",
+        kind: "link.reset",
+        ref: linkRef("haverstraw"),
+      })
+      expect(await targets()).toEqual(["rockland"])
     } finally {
       await provider.cleanup?.(createdStorage)
     }

@@ -18,6 +18,7 @@ import {
 import {
   appendScopeSnapshot,
   finishScopeAccumulator,
+  linkSlotOverrideValue,
   startScopeAccumulator,
 } from "@sixb/core/internal/ontology-storage-provider"
 import type {
@@ -27,6 +28,7 @@ import type {
   SourceReplacementLinkState,
   SourceReplacementObjectState,
   StoredLinkOverride,
+  StoredLinkSlotOverride,
   StoredObjectOverride,
   StoredSourceAssertion,
   StoredSourceLinkAssertion,
@@ -40,8 +42,8 @@ import {
   jsonParameter,
   linkRefFromColumns,
   objectRefFromColumns,
-  type PgOntologyOverrideRow,
   type PgOntologySourceAssertionRow,
+  type PgStoredOverrideRow,
   toIsoString,
 } from "./shared"
 
@@ -94,17 +96,28 @@ interface LinkScopeRow extends EffectiveLinkRow {
   readonly link_sort_key: string
 }
 
-interface ObjectOverrideRow extends PgOntologyOverrideRow {
+interface ObjectOverrideRow extends PgStoredOverrideRow {
   readonly object_type_id: string
   readonly primary_id: string
 }
 
-interface LinkOverrideRow extends PgOntologyOverrideRow {
+interface LinkOverrideRow extends PgStoredOverrideRow {
   readonly source_type_id: string
   readonly source_primary_id: string
   readonly link_id: string
   readonly target_type_id: string
   readonly target_primary_id: string
+}
+
+interface LinkSlotOverrideRow {
+  readonly source_type_id: string
+  readonly source_primary_id: string
+  readonly link_id: string
+  readonly target_type_id: string
+  readonly target_primary_id: string
+  readonly value: unknown
+  readonly last_commit_id: string
+  readonly updated_at: Date | string
 }
 
 export type ReplacementIdentity =
@@ -193,10 +206,9 @@ export class PgMaterializationStateReader {
           SELECT DISTINCT * FROM jsonb_to_recordset(${requestedParameter})
             AS requested_values(object_type_id TEXT, primary_id TEXT)
         )
-        SELECT overrides.* FROM ontology_overrides AS overrides
+        SELECT overrides.* FROM ontology_object_overrides AS overrides
         JOIN requested USING (object_type_id, primary_id)
         WHERE overrides.project_id = ${this.projectId}
-          AND overrides.entity_kind = 'object'
       `,
       this.sql<TelemetryRow[]>`
         WITH requested AS (
@@ -266,7 +278,7 @@ export class PgMaterializationStateReader {
       target_primary_id: ref.target.primaryId,
     }))
     const requestedParameter = jsonParameter(this.sql, requested)
-    const [effectiveRows, sourceRows, overrideRows] = await Promise.all([
+    const [effectiveRows, sourceRows, overrideRows, slotOverrideRows] = await Promise.all([
       this.sql<EffectiveLinkRow[]>`
         WITH requested AS (
           SELECT DISTINCT * FROM jsonb_to_recordset(${requestedParameter}) AS requested_values(
@@ -305,12 +317,23 @@ export class PgMaterializationStateReader {
             target_type_id TEXT, target_primary_id TEXT
           )
         )
-        SELECT overrides.* FROM ontology_overrides AS overrides
+        SELECT overrides.* FROM ontology_link_overrides AS overrides
         JOIN requested USING (
           source_type_id, source_primary_id, link_id, target_type_id, target_primary_id
         )
         WHERE overrides.project_id = ${this.projectId}
-          AND overrides.entity_kind = 'link'
+          AND overrides.identity_kind = 'edge'
+      `,
+      this.sql<LinkSlotOverrideRow[]>`
+        WITH requested AS (
+          SELECT DISTINCT * FROM jsonb_to_recordset(${requestedParameter}) AS requested_values(
+            source_type_id TEXT, source_primary_id TEXT, link_id TEXT
+          )
+        )
+        SELECT overrides.* FROM ontology_link_overrides AS overrides
+        JOIN requested USING (source_type_id, source_primary_id, link_id)
+        WHERE overrides.project_id = ${this.projectId}
+          AND overrides.identity_kind = 'slot'
       `,
     ])
     const effective = new Map(
@@ -322,6 +345,12 @@ export class PgMaterializationStateReader {
         (row) => [linkRefKey(linkRefFromOverrideColumns(row)), storedLinkOverride(row)] as const
       )
     )
+    const slotOverrides = new Map(
+      slotOverrideRows.map((row) => {
+        const stored = storedLinkSlotOverride(row)
+        return [linkScopeSortKey(stored.ref.source, stored.ref.linkId), stored] as const
+      })
+    )
     return refs.map((ref) => {
       const key = linkRefKey(ref)
       const effectiveRow = effective.get(key)
@@ -329,6 +358,7 @@ export class PgMaterializationStateReader {
         ref: structuredClone(ref),
         source: sourceLink(sources.get(projectionEntityKey({ kind: "link", ref }))),
         override: overrides.get(key) ?? null,
+        slotOverride: slotOverrides.get(linkScopeSortKey(ref.source, ref.linkId)) ?? null,
         effective: effectiveRow ? effectiveLinkSnapshot(effectiveRow) : null,
       }
     })
@@ -393,12 +423,60 @@ export class PgMaterializationStateReader {
         return [key, startScopeAccumulator(source, linkId, key)] as const
       })
     )
+    const requestedParameter = jsonParameter(this.sql, requested)
+    const [sourceRows, slotOverrideRows] = await Promise.all([
+      this.sql<PgOntologySourceAssertionRow[]>`
+        WITH requested AS (
+          SELECT DISTINCT * FROM jsonb_to_recordset(${requestedParameter})
+            AS requested_values(
+              scope_sort_key TEXT, source_type_id TEXT, source_id TEXT, link_id TEXT
+            )
+        )
+        SELECT rows.*
+        FROM ontology_source_rows AS rows
+        JOIN requested
+          ON requested.source_type_id = rows.source_type_id
+         AND requested.source_id = rows.source_primary_id
+         AND requested.link_id = rows.link_id
+        JOIN ontology_sources AS sources
+          ON sources.project_id = rows.project_id
+         AND sources.source_id = rows.source_id
+         AND sources.materialization_id = rows.materialization_id
+        WHERE rows.project_id = ${this.projectId}
+          AND rows.entity_kind = 'link'
+          AND sources.status = 'active'
+      `,
+      this.sql<LinkSlotOverrideRow[]>`
+        WITH requested AS (
+          SELECT DISTINCT * FROM jsonb_to_recordset(${requestedParameter})
+            AS requested_values(
+              scope_sort_key TEXT, source_type_id TEXT, source_id TEXT, link_id TEXT
+            )
+        )
+        SELECT overrides.*
+        FROM ontology_link_overrides AS overrides
+        JOIN requested
+          ON requested.source_type_id = overrides.source_type_id
+         AND requested.source_id = overrides.source_primary_id
+         AND requested.link_id = overrides.link_id
+        WHERE overrides.project_id = ${this.projectId}
+          AND overrides.identity_kind = 'slot'
+      `,
+    ])
+    const sources = activeScopeSourceMap(sourceRows)
+    const overrides = new Map(
+      slotOverrideRows.map((row) => {
+        const stored = storedLinkSlotOverride(row)
+        return [linkScopeSortKey(stored.ref.source, stored.ref.linkId), stored] as const
+      })
+    )
+    const effective = new Map<string, EffectiveLinkSnapshot | null>()
     let scopeCursor: string | null = null
     let linkCursor: string | null = null
     while (true) {
       const rows: LinkScopeRow[] = await this.sql`
         WITH requested AS (
-          SELECT DISTINCT * FROM jsonb_to_recordset(${jsonParameter(this.sql, requested)})
+          SELECT DISTINCT * FROM jsonb_to_recordset(${requestedParameter})
             AS requested_values(
               scope_sort_key TEXT, source_type_id TEXT, source_id TEXT, link_id TEXT
             )
@@ -423,16 +501,24 @@ export class PgMaterializationStateReader {
             `Unexpected link scope '${row.scope_sort_key}' returned by storage.`
           )
         }
-        appendScopeSnapshot(accumulator, effectiveLinkSnapshot(row))
+        const snapshot = effectiveLinkSnapshot(row)
+        appendScopeSnapshot(accumulator, snapshot)
+        effective.set(row.scope_sort_key, accumulator.effectiveCount === 1 ? snapshot : null)
       }
       if (rows.length < 500) break
       const last: LinkScopeRow = rows[rows.length - 1]!
       scopeCursor = last.scope_sort_key
       linkCursor = last.link_sort_key
     }
-    return scopes.map(({ source, linkId }) =>
-      finishScopeAccumulator(accumulators.get(linkScopeSortKey(source, linkId))!)
-    )
+    return scopes.map(({ source, linkId }) => {
+      const key = linkScopeSortKey(source, linkId)
+      return {
+        ...finishScopeAccumulator(accumulators.get(key)!),
+        sourceAssertion: sources.get(key) ?? null,
+        override: overrides.get(key) ?? null,
+        effective: effective.get(key) ?? null,
+      }
+    })
   }
 
   async linkScope(
@@ -485,20 +571,20 @@ export class PgMaterializationStateReader {
           SELECT overrides.source_type_id, overrides.source_primary_id AS source_id,
             overrides.link_id, overrides.target_type_id,
             overrides.target_primary_id AS target_id
-          FROM ontology_overrides AS overrides
+          FROM ontology_link_overrides AS overrides
           JOIN requested
             ON requested.object_type_id = overrides.source_type_id
            AND requested.primary_id = overrides.source_primary_id
-          WHERE overrides.project_id = ${this.projectId} AND overrides.entity_kind = 'link'
+          WHERE overrides.project_id = ${this.projectId}
           UNION
           SELECT overrides.source_type_id, overrides.source_primary_id AS source_id,
             overrides.link_id, overrides.target_type_id,
             overrides.target_primary_id AS target_id
-          FROM ontology_overrides AS overrides
+          FROM ontology_link_overrides AS overrides
           JOIN requested
             ON requested.object_type_id = overrides.target_type_id
            AND requested.primary_id = overrides.target_primary_id
-          WHERE overrides.project_id = ${this.projectId} AND overrides.entity_kind = 'link'
+          WHERE overrides.project_id = ${this.projectId}
           UNION
           SELECT rows.source_type_id, rows.source_primary_id AS source_id,
             rows.link_id, rows.target_type_id, rows.target_primary_id AS target_id
@@ -609,6 +695,7 @@ export class PgMaterializationStateReader {
           ? sourceLink(candidate?.get(key))
           : state.source,
         override: state.override,
+        slotOverride: state.slotOverride,
         effective: state.effective,
         diffRequired: identities[index]!.diffRequired,
       }
@@ -702,12 +789,21 @@ export class PgMaterializationStateReader {
   }
 
   async overrideLastCommit(kind: "object" | "link", entityKey: string): Promise<string | null> {
-    const [row] = await this.sql<{ readonly last_commit_id: string }[]>`
-      SELECT last_commit_id FROM ontology_overrides
-      WHERE project_id = ${this.projectId}
-        AND entity_kind = ${kind}
-        AND entity_key = ${jsonKeyParameter(this.sql, entityKey)}
-    `
+    const identity = jsonKeyParameter(this.sql, entityKey)
+    const [row] =
+      kind === "object"
+        ? await this.sql<{ readonly last_commit_id: string }[]>`
+            SELECT last_commit_id FROM ontology_object_overrides
+            WHERE project_id = ${this.projectId}
+              AND object_type_id = ${identity}->>0
+              AND primary_id = ${identity}->>1
+          `
+        : await this.sql<{ readonly last_commit_id: string }[]>`
+            SELECT last_commit_id FROM ontology_link_overrides
+            WHERE project_id = ${this.projectId}
+              AND identity_kind = 'edge'
+              AND identity_key = ${identity}
+          `
     return row?.last_commit_id ?? null
   }
 
@@ -824,20 +920,20 @@ export class PgMaterializationStateReader {
         SELECT overrides.source_type_id, overrides.source_primary_id AS source_id,
           overrides.link_id, overrides.target_type_id,
           overrides.target_primary_id AS target_id
-        FROM ontology_overrides AS overrides
+        FROM ontology_link_overrides AS overrides
         JOIN incident_objects
           ON incident_objects.object_type_id = overrides.source_type_id
          AND incident_objects.primary_id = overrides.source_primary_id
-        WHERE overrides.project_id = ${this.projectId} AND overrides.entity_kind = 'link'
+        WHERE overrides.project_id = ${this.projectId}
         UNION
         SELECT overrides.source_type_id, overrides.source_primary_id AS source_id,
           overrides.link_id, overrides.target_type_id,
           overrides.target_primary_id AS target_id
-        FROM ontology_overrides AS overrides
+        FROM ontology_link_overrides AS overrides
         JOIN incident_objects
           ON incident_objects.object_type_id = overrides.target_type_id
          AND incident_objects.primary_id = overrides.target_primary_id
-        WHERE overrides.project_id = ${this.projectId} AND overrides.entity_kind = 'link'
+        WHERE overrides.project_id = ${this.projectId}
         UNION
         SELECT rows.source_type_id, rows.source_primary_id AS source_id,
           rows.link_id, rows.target_type_id, rows.target_primary_id AS target_id
@@ -879,6 +975,16 @@ export class PgMaterializationStateReader {
         FROM links
         JOIN affected_scopes USING (source_type_id, source_id, link_id)
         WHERE links.project_id = ${this.projectId}
+        UNION ALL
+        SELECT overrides.source_type_id, overrides.source_primary_id AS source_id,
+          overrides.link_id, overrides.target_type_id,
+          overrides.target_primary_id AS target_id, FALSE AS diff_required
+        FROM ontology_link_overrides AS overrides
+        JOIN affected_scopes
+          ON affected_scopes.source_type_id = overrides.source_type_id
+         AND affected_scopes.source_id = overrides.source_primary_id
+         AND affected_scopes.link_id = overrides.link_id
+        WHERE overrides.project_id = ${this.projectId} AND overrides.identity_kind = 'slot'
       ), selected AS (
         SELECT source_type_id, source_id, link_id, target_type_id, target_id,
           ${this.sql.unsafe(linkKeyExpression("all_links"))} AS identity_key,
@@ -939,6 +1045,26 @@ function activeSourceMap(
   return result
 }
 
+function activeScopeSourceMap(
+  rows: readonly PgOntologySourceAssertionRow[]
+): ReadonlyMap<string, StoredSourceLinkAssertion> {
+  const result = new Map<string, StoredSourceLinkAssertion>()
+  for (const row of rows) {
+    const source = sourceLink(storedSource(row))
+    if (!source) continue
+    const ref = source.assertion.ref
+    const key = linkScopeSortKey(ref.source, ref.linkId)
+    if (result.has(key)) {
+      throw new MaterializationConflictError(
+        "source-materialization",
+        `Multiple active sources assert cardinality-one link slot ${key}.`
+      )
+    }
+    result.set(key, source)
+  }
+  return result
+}
+
 function sourceObject(
   source: StoredSourceAssertion | undefined
 ): StoredSourceObjectAssertion | null {
@@ -969,12 +1095,32 @@ function storedLinkOverride(row: LinkOverrideRow): StoredLinkOverride {
   }
 }
 
+function storedLinkSlotOverride(row: LinkSlotOverrideRow): StoredLinkSlotOverride {
+  const ref = {
+    source: { objectTypeId: row.source_type_id, primaryId: row.source_primary_id },
+    linkId: row.link_id,
+  }
+  return {
+    ref,
+    value: linkSlotOverrideValue(row.value, linkScopeLabel(ref)),
+    lastCommitId: row.last_commit_id,
+    updatedAt: toIsoString(row.updated_at),
+  }
+}
+
 function linkRefFromOverrideColumns(row: LinkOverrideRow): OntologyLinkRef {
   return {
     source: { objectTypeId: row.source_type_id, primaryId: row.source_primary_id },
     linkId: row.link_id,
     target: { objectTypeId: row.target_type_id, primaryId: row.target_primary_id },
   }
+}
+
+function linkScopeLabel(scope: {
+  readonly source: OntologyObjectRef
+  readonly linkId: string
+}): string {
+  return JSON.stringify([scope.source.objectTypeId, scope.source.primaryId, scope.linkId])
 }
 
 function storedSource(row: PgOntologySourceAssertionRow): StoredSourceAssertion {

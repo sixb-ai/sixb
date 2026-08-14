@@ -1,9 +1,13 @@
 import { MaterializationValidationError } from "../../../materialization/errors"
-import type { OntologyMaterializationOrigin } from "../../../materialization/model"
+import type {
+  LinkSlotOverride,
+  OntologyMaterializationOrigin,
+} from "../../../materialization/model"
 import type { OntologyCommitOriginSelector, OntologyCommitRecord } from "../commits"
 import type {
   MaterializationWorkRecord,
   StoredLinkOverride,
+  StoredLinkSlotOverride,
   StoredObjectOverride,
 } from "../materializations"
 import type { OntologyOutboxRecord } from "../outbox"
@@ -23,6 +27,11 @@ export interface InMemoryStoredLinkOverride extends StoredLinkOverride {
   readonly projectId: string
 }
 
+export interface InMemoryStoredLinkSlotOverride extends Omit<StoredLinkSlotOverride, "value"> {
+  readonly projectId: string
+  readonly value: LinkSlotOverride
+}
+
 export interface InMemoryOntologyState {
   readonly commitsById: Map<string, OntologyCommitRecord>
   readonly commitIdByIdempotency: Map<string, string>
@@ -30,6 +39,7 @@ export interface InMemoryOntologyState {
   readonly sourceMaterializations: Map<string, InMemorySourceMaterialization>
   readonly objectOverrides: Map<string, InMemoryStoredObjectOverride>
   readonly linkOverrides: Map<string, InMemoryStoredLinkOverride>
+  readonly linkSlotOverrides: Map<string, InMemoryStoredLinkSlotOverride>
   readonly outbox: Map<string, OntologyOutboxRecord>
 }
 
@@ -49,6 +59,7 @@ export function createInMemoryOntologyState(): InMemoryOntologyState {
     sourceMaterializations: new Map(),
     objectOverrides: new Map(),
     linkOverrides: new Map(),
+    linkSlotOverrides: new Map(),
     outbox: new Map(),
   }
 }

@@ -233,6 +233,9 @@ sixb worker projection
 - Object and link projections are authoritative replacements for their source. A later dataset
   version withdraws source-owned objects or links that are no longer present; managed edits remain
   separate overrides.
+- Link overrides follow ontology cardinality: a `many` override owns one exact edge, while a `one`
+  override owns the `(source, linkId)` slot. A projected target change therefore stays hidden until
+  that slot is reset; it cannot create a second effective target beside the managed one.
 - Replacement snapshots are the only pre-0.1 source materialization protocol. Activation, the
   durable `ontology_commits` record, and stable outbox envelopes commit atomically. Dataset CDC or
   change-stream projection is deferred.

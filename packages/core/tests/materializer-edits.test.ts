@@ -962,7 +962,7 @@ describe("ontology materializer edits", () => {
     })
   })
 
-  test("restore validates complete dormant link scopes", async () => {
+  test("restore keeps a cardinality-one scope override authoritative over dormant source", async () => {
     for (const statePageRows of [1, 1_000]) {
       const { materializer, storage } = createMaterializerFixture({
         dependencies: { batching: { statePageRows } },
@@ -996,18 +996,25 @@ describe("ontology materializer edits", () => {
         ])
       )
 
-      await expect(
-        materializer.edits.commit(
-          atomic("restore-target", [{ id: "restore", kind: "object.restore", ref: ref("dormant") }])
-        )
-      ).rejects.toThrow("cardinality one")
+      await materializer.edits.commit(
+        atomic("restore-target", [{ id: "restore", kind: "object.restore", ref: ref("dormant") }])
+      )
       expect(
         await storage.objects.getByPrimaryId({
           projectId: "project",
           objectTypeId: "Device",
           primaryId: "dormant",
         })
-      ).toBeNull()
+      ).not.toBeNull()
+      expect(
+        (
+          await storage.objects.listLinks({
+            projectId: "project",
+            objectTypeId: "Device",
+            objectId: "source",
+          })
+        ).map((link) => link.targetId)
+      ).toEqual(["live"])
     }
   })
 

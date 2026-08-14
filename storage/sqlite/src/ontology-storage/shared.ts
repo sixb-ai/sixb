@@ -83,8 +83,7 @@ export interface SqliteOntologySourceAssertionRow {
   readonly assertion: string
 }
 
-export interface SqliteOntologyOverrideRow {
-  readonly entity_kind: "object" | "link"
+export interface SqliteStoredOverrideRow {
   readonly value: string
   readonly last_commit_id: string
   readonly updated_at: string

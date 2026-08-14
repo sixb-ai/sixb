@@ -6,6 +6,7 @@ import type {
   EffectiveObjectSnapshot,
   OntologyMaterializationPropertyChangeMap,
 } from "../../materialization/model"
+import { linkRefKey } from "../../materialization/refs"
 import type { ResolvedLinkValue, ResolvedObjectValue } from "./resolve"
 
 export function diffEffectiveObject(input: {
@@ -89,6 +90,27 @@ export function diffEffectiveLink(input: {
   if (!input.resolved) return deleteLinkChange(input.before)
   if (sameProperties(input.before.properties ?? {}, input.resolved.properties ?? {})) return null
   return updateLinkChange(input.before, input.resolved, input.commitId, input.committedAt)
+}
+
+/** Diffs a cardinality-one value slot while preserving edge identity at the physical boundary. */
+export function diffEffectiveLinkSlot(input: {
+  readonly before: EffectiveLinkSnapshot | null
+  readonly resolved: ResolvedLinkValue | null
+  readonly commitId: string
+  readonly committedAt: string
+}): EffectiveLinkChange[] {
+  if (
+    input.before &&
+    input.resolved &&
+    linkRefKey(input.before.ref) !== linkRefKey(input.resolved.ref)
+  ) {
+    return [
+      diffEffectiveLink({ ...input, resolved: null })!,
+      diffEffectiveLink({ ...input, before: null })!,
+    ]
+  }
+  const change = diffEffectiveLink(input)
+  return change ? [change] : []
 }
 
 function createLinkChange(
