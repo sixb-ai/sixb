@@ -306,7 +306,7 @@ describe("WorkflowWorker", () => {
     expect(claimed).toHaveLength(0)
   })
 
-  test("uses the persisted run instead of untrusted queue payload data", async () => {
+  test("loads workflow input from the persisted run referenced by the queue job", async () => {
     const echoTransaction = defineWorkflowStep("echo-transaction")
       .input({ transaction: ref(Transaction) })
       .output({ transaction: ref(Transaction) })
@@ -335,13 +335,7 @@ describe("WorkflowWorker", () => {
       jobs: [
         {
           type: "workflow.run.requested",
-          payload: {
-            workflowId: workflow.id,
-            runId,
-            input: {
-              transaction: { objectTypeId: "Transaction", primaryId: "txn_forged" },
-            },
-          },
+          payload: { runId },
         },
       ],
     })
@@ -380,13 +374,7 @@ describe("WorkflowWorker", () => {
       jobs: [
         {
           type: "workflow.run.requested",
-          payload: {
-            workflowId: workflow.id,
-            runId: "wfrun_worker_failed",
-            input: {
-              transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
-            },
-          },
+          payload: { runId: "wfrun_worker_failed" },
         },
       ],
     })
@@ -497,11 +485,7 @@ describe("WorkflowWorker", () => {
       jobs: [
         {
           type: "workflow.run.requested",
-          payload: {
-            workflowId: workflow.id,
-            runId: "wfrun_queued_invalid",
-            input: {},
-          },
+          payload: { runId: "wfrun_queued_invalid" },
         },
       ],
     })
@@ -656,7 +640,6 @@ describe("WorkflowWorker", () => {
         {
           type: "workflow.run.resume.requested",
           payload: {
-            workflowId: workflow.id,
             runId: "wfrun_worker_resume",
             resume: {
               kind: "intervention",
@@ -762,7 +745,6 @@ describe("WorkflowWorker", () => {
         {
           type: "workflow.run.resume.requested",
           payload: {
-            workflowId: workflow.id,
             runId: "wfrun_worker_resume_failed",
             resume: {
               kind: "intervention",

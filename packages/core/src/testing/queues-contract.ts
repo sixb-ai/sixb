@@ -298,12 +298,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
             jobs: [
               {
                 type: "workflow.run.requested",
-                payload: {
-                  workflowId: "reconcile-transaction",
-                  input: {
-                    transaction: { objectTypeId: "Transaction", primaryId: "txn_123" },
-                  },
-                },
+                payload: { runId: "workflow-run-1" },
               },
             ],
           })
@@ -351,7 +346,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
           expect(projectionLane).toHaveLength(1)
           expect(projectionLane[0]?.job.payload.projectionId).toBe("room-projection")
           expect(workflowLane).toHaveLength(1)
-          expect(workflowLane[0]?.job.payload.workflowId).toBe("reconcile-transaction")
+          expect(workflowLane[0]?.job.payload.runId).toBe("workflow-run-1")
           expect(actionLane).toHaveLength(1)
           expect(actionLane[0]?.job.payload.actionId).toBe("mark-paid")
           expect(sameLane).toHaveLength(1)

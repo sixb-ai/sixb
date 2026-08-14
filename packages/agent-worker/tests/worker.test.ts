@@ -1251,7 +1251,6 @@ describe("AgentWorker", () => {
         type: "workflow.run.resume.requested",
         payload: {
           runId,
-          workflowId: workflow.id,
           resume: { kind: "agentNode", nodeRunId },
         },
       })

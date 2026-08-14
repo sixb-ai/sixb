@@ -709,7 +709,6 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
               {
                 type: "workflow.run.resume.requested",
                 payload: {
-                  workflowId: submitted.workflowId,
                   runId: submitted.workflowRunId,
                   resume: { kind: "intervention", interventionId: submitted.id },
                 },

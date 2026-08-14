@@ -1,4 +1,3 @@
-import { isDeepStrictEqual } from "node:util"
 import type { ExecutionStorage } from "../executions"
 import { WorkflowRunError } from "./errors"
 
@@ -30,28 +29,15 @@ export async function assertWorkflowRunExecution(input: {
   }
 
   if (execution.source.type === "schedule" || execution.source.type === "event") {
-    if (execution.parentExecutionId !== undefined || execution.requestedBy !== undefined) {
+    if (execution.requestedBy !== undefined) {
       invalidExecution(input.executionId, input.runId)
     }
     return
   }
 
-  if (
-    execution.source.type !== "execution" ||
-    execution.parentExecutionId !== execution.source.executionId
-  ) {
-    invalidExecution(input.executionId, input.runId)
-  }
-
-  const parent = await input.executions.getById({
-    projectId: input.projectId,
-    id: execution.parentExecutionId,
-  })
-  if (
-    !parent ||
-    execution.correlationId !== parent.correlationId ||
-    !isDeepStrictEqual(execution.requestedBy, parent.requestedBy)
-  ) {
+  // ExecutionStorage already validates the immutable parent reference, correlation id, and
+  // requested-by propagation. This boundary only owns the workflow-specific source restriction.
+  if (execution.source.type !== "execution") {
     invalidExecution(input.executionId, input.runId)
   }
 }

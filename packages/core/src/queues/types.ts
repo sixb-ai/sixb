@@ -131,9 +131,7 @@ export interface WorkflowRunRequestedQueueJob
   extends QueueJob<
     "workflow.run.requested",
     {
-      readonly workflowId: string
-      readonly runId?: string
-      readonly input?: Readonly<Record<string, unknown>>
+      readonly runId: string
     }
   > {}
 
@@ -151,7 +149,6 @@ export interface WorkflowRunResumeRequestedQueueJob
   extends QueueJob<
     "workflow.run.resume.requested",
     {
-      readonly workflowId: string
       readonly runId: string
       readonly resume: WorkflowRunResumeCause
     }
