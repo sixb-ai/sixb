@@ -20,6 +20,41 @@ export function throwIfAborted(signal: AbortSignal): void {
   }
 }
 
+/** Translate work performed by an Action phase without misclassifying its bookkeeping. */
+export function translateActionPhaseError(
+  error: unknown,
+  phase: Exclude<ActionRunPhase, "request" | "enqueue" | "cancelled">,
+  input: {
+    readonly actionId: string
+    readonly runId: string
+    readonly signal: AbortSignal
+  }
+): unknown {
+  if (input.signal.aborted || (isSixbError(error) && error.code === "internal.unexpected")) {
+    return error
+  }
+
+  return createSixbError(
+    "action.phase_failed",
+    summarizeErrorMessage(error, "Action phase execution failed."),
+    {
+      cause: error,
+      details: {
+        actionId: input.actionId,
+        runId: input.runId,
+        phase,
+      },
+    }
+  )
+}
+
+/** Recover the native phase error for direct callers and error-monitoring integrations. */
+export function unwrapActionPhaseError(error: unknown): unknown {
+  return isSixbError(error) && error.code === "action.phase_failed" && error.cause !== undefined
+    ? error.cause
+    : error
+}
+
 export function toActionRunFailure<TPhase extends ActionRunPhase>(
   error: unknown,
   phase: TPhase,
@@ -39,7 +74,7 @@ export function toActionRunFailure<TPhase extends ActionRunPhase>(
     code,
     summarizeErrorMessage(error, "Action execution failed."),
     {
-      cause: error,
+      cause: unwrapActionPhaseError(error),
       details: {
         actionId: input.actionId,
         runId: input.runId,

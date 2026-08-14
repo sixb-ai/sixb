@@ -2153,7 +2153,7 @@ export type ListSyncsResponses = {
       expectedLatestVersionId?: string
       commitMessage?: string
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled"
+        code: "internal.unexpected" | "runtime.cancelled" | "sync.execution_failed"
         message: string
         retryable: boolean
         at: string
@@ -2254,7 +2254,7 @@ export type GetSyncResponses = {
       expectedLatestVersionId?: string
       commitMessage?: string
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled"
+        code: "internal.unexpected" | "runtime.cancelled" | "sync.execution_failed"
         message: string
         retryable: boolean
         at: string
@@ -2333,7 +2333,7 @@ export type ListSyncRunsResponses = {
       expectedLatestVersionId?: string
       commitMessage?: string
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled"
+        code: "internal.unexpected" | "runtime.cancelled" | "sync.execution_failed"
         message: string
         retryable: boolean
         at: string
@@ -5864,7 +5864,11 @@ export type ListActionRunsResponses = {
       startedAt?: string
       finishedAt?: string
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "queue.enqueue_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "queue.enqueue_failed"
+          | "action.phase_failed"
         message: string
         retryable: boolean
         at: string
@@ -5954,7 +5958,11 @@ export type GetActionRunResponses = {
     startedAt?: string
     finishedAt?: string
     error?: {
-      code: "internal.unexpected" | "runtime.cancelled" | "queue.enqueue_failed"
+      code:
+        | "internal.unexpected"
+        | "runtime.cancelled"
+        | "queue.enqueue_failed"
+        | "action.phase_failed"
       message: string
       retryable: boolean
       at: string
@@ -5997,7 +6005,11 @@ export type GetActionRunResponses = {
           status: "failed"
           completedAt: string
           error: {
-            code: "internal.unexpected" | "runtime.cancelled" | "queue.enqueue_failed"
+            code:
+              | "internal.unexpected"
+              | "runtime.cancelled"
+              | "queue.enqueue_failed"
+              | "action.phase_failed"
             message: string
             retryable: boolean
             at: string
@@ -6018,7 +6030,11 @@ export type GetActionRunResponses = {
           status: "failed"
           completedAt: string
           error: {
-            code: "internal.unexpected" | "runtime.cancelled" | "queue.enqueue_failed"
+            code:
+              | "internal.unexpected"
+              | "runtime.cancelled"
+              | "queue.enqueue_failed"
+              | "action.phase_failed"
             message: string
             retryable: boolean
             at: string

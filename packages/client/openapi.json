@@ -6089,7 +6089,11 @@
                             "properties": {
                               "code": {
                                 "type": "string",
-                                "enum": ["internal.unexpected", "runtime.cancelled"]
+                                "enum": [
+                                  "internal.unexpected",
+                                  "runtime.cancelled",
+                                  "sync.execution_failed"
+                                ]
                               },
                               "message": {
                                 "type": "string",
@@ -6355,7 +6359,11 @@
                           "properties": {
                             "code": {
                               "type": "string",
-                              "enum": ["internal.unexpected", "runtime.cancelled"]
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "sync.execution_failed"
+                              ]
                             },
                             "message": {
                               "type": "string",
@@ -6578,7 +6586,11 @@
                             "properties": {
                               "code": {
                                 "type": "string",
-                                "enum": ["internal.unexpected", "runtime.cancelled"]
+                                "enum": [
+                                  "internal.unexpected",
+                                  "runtime.cancelled",
+                                  "sync.execution_failed"
+                                ]
                               },
                               "message": {
                                 "type": "string",
@@ -16733,7 +16745,8 @@
                                 "enum": [
                                   "internal.unexpected",
                                   "runtime.cancelled",
-                                  "queue.enqueue_failed"
+                                  "queue.enqueue_failed",
+                                  "action.phase_failed"
                                 ]
                               },
                               "message": {
@@ -16949,7 +16962,8 @@
                           "enum": [
                             "internal.unexpected",
                             "runtime.cancelled",
-                            "queue.enqueue_failed"
+                            "queue.enqueue_failed",
+                            "action.phase_failed"
                           ]
                         },
                         "message": {
@@ -17058,7 +17072,8 @@
                                   "enum": [
                                     "internal.unexpected",
                                     "runtime.cancelled",
-                                    "queue.enqueue_failed"
+                                    "queue.enqueue_failed",
+                                    "action.phase_failed"
                                   ]
                                 },
                                 "message": {
@@ -17137,7 +17152,8 @@
                                   "enum": [
                                     "internal.unexpected",
                                     "runtime.cancelled",
-                                    "queue.enqueue_failed"
+                                    "queue.enqueue_failed",
+                                    "action.phase_failed"
                                   ]
                                 },
                                 "message": {

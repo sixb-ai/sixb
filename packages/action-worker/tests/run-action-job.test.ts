@@ -272,8 +272,8 @@ describe("runActionJob", () => {
     expect(result.status).toBe("failed")
     if ("error" in result) {
       expect(result.error).toMatchObject({
-        code: "internal.unexpected",
-        message: "An unexpected internal error occurred.",
+        code: "action.phase_failed",
+        message: "Action execution failed.",
         retryable: false,
         details: { actionId: "failWriteback", runId: "act_1", phase: "writeback" },
       })
@@ -287,6 +287,42 @@ describe("runActionJob", () => {
     ).toBeNull()
     const updated = await deviceObjects(sixb).get("device-1")
     expect(updated?.properties.status).toBe("old")
+  })
+
+  test("keeps run finalization failures out of the phase-failed vocabulary", async () => {
+    const complete = defineAction("complete")
+      .params({})
+      .writeback(() => ({ ok: true }))
+    const { host } = createSixb([complete])
+    await queueActionRun(host, {
+      id: "act_finalize",
+      actionId: "complete",
+      subject: { kind: "none" },
+      params: {},
+    })
+
+    const actionRuns = host.storage.actionRuns!
+    const finish = actionRuns.finish.bind(actionRuns)
+    actionRuns.finish = async (input) => {
+      if (input.status === "succeeded") {
+        throw new Error("finish exploded")
+      }
+      return finish(input)
+    }
+
+    const result = await runStoredActionJob({
+      runtime: createContext(host),
+      job: { id: "act_finalize", actionId: "complete" },
+    })
+
+    expect(result.status).toBe("failed")
+    if ("error" in result) {
+      expect(result.error).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        details: { actionId: "complete", runId: "act_finalize", phase: "writeback" },
+      })
+    }
   })
 
   test("exposes immutable blob operations inside action writeback", async () => {
@@ -986,8 +1022,8 @@ describe("runActionJob", () => {
     expect(run?.effects).toMatchObject({
       status: "failed",
       error: {
-        code: "internal.unexpected",
-        message: "An unexpected internal error occurred.",
+        code: "action.phase_failed",
+        message: "Action execution failed.",
         retryable: false,
         details: { actionId: "setStatus", runId: "act_1", phase: "effects" },
       },

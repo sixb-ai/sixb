@@ -48,8 +48,8 @@ Each boundary exposes only the codes it can persist.
 
 | Boundary | Allowed codes |
 | --- | --- |
-| Action run or phase | `internal.unexpected`, `queue.enqueue_failed`, `runtime.cancelled` |
-| Sync run | `internal.unexpected`, `runtime.cancelled` |
+| Action run or phase | `action.phase_failed`, `internal.unexpected`, `queue.enqueue_failed`, `runtime.cancelled` |
+| Sync run | `internal.unexpected`, `runtime.cancelled`, `sync.execution_failed` |
 | Agent execution | `internal.unexpected`, `runtime.cancelled` |
 | Projection run | `internal.unexpected`, `runtime.cancelled` |
 | Pipeline run or step | `internal.unexpected`, `runtime.cancelled`, `pipeline.step_failed` |
@@ -76,6 +76,7 @@ Additional rules:
 
 | Code | Retryable | What happened | What to do |
 | --- | --- | --- | --- |
+| `action.phase_failed` | No | An Action phase could not complete successfully. | Inspect `phase` and the cause; retry only when its side-effect boundary makes that safe. |
 | `dataset.not_found` | No | Dataset is unavailable to the caller. | Check its ID and access policy. |
 | `dataset.version_incompatible` | No | Version does not match the required dataset or schema. | Materialize a compatible version. |
 | `dataset.version_not_found` | No | Version does not exist or nothing has been committed yet. | Check the ID or materialize the dataset. |
@@ -89,5 +90,6 @@ Additional rules:
 | `projection.run_identity_mismatch` | No | Delivery does not match the run's pinned identity. | Discard it and dispatch from the current definition. |
 | `queue.enqueue_failed` | Yes | A job could not be handed to its queue. | Retry while the run remains in its enqueue phase. |
 | `runtime.cancelled` | No | Work was cancelled before completion. | Confirm the cancellation before requesting another run. |
+| `sync.execution_failed` | No | A Sync failed while reading, validating, or writing its dataset. | Inspect the `onError` report, fix the source or data, then request a new run. |
 | `webhook.delivery_failed` | Yes | A claimed webhook delivery failed retryably. | Let the provider retry; inspect the handler if it persists. |
 | `workflow.node_failed` | No | A node failed during preparation or execution. | Inspect its identity and `onError` report. |

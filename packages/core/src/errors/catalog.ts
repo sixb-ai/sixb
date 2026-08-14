@@ -10,6 +10,10 @@ interface SixbErrorDefinition {
  * `SixbFailure` values, not a mutable registry.
  */
 export const SIXB_ERROR_DEFINITIONS = {
+  "action.phase_failed": {
+    publicMessage: "Action execution failed.",
+    retryable: false,
+  },
   "dataset.not_found": {
     publicMessage: "Dataset not found.",
     retryable: false,
@@ -60,6 +64,10 @@ export const SIXB_ERROR_DEFINITIONS = {
   },
   "runtime.cancelled": {
     publicMessage: "Execution was cancelled.",
+    retryable: false,
+  },
+  "sync.execution_failed": {
+    publicMessage: "Sync execution failed.",
     retryable: false,
   },
   "webhook.delivery_failed": {

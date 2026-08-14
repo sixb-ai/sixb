@@ -305,7 +305,8 @@ events
   .run("run-1")
   .subscribe((event) => {
     if (event.type === "sync.run.finished" && event.payload.error) {
-      const code: "internal.unexpected" | "runtime.cancelled" = event.payload.error.code
+      const code: "internal.unexpected" | "runtime.cancelled" | "sync.execution_failed" =
+        event.payload.error.code
       const message: string = event.payload.error.message
       // @ts-expect-error — sync lifecycle failures expose only their primitive's code union.
       const datasetCode: "dataset.not_found" = event.payload.error.code
@@ -335,8 +336,15 @@ events
   .byId("sensor-1")
   .failed()
   .subscribe((event) => {
+    const code:
+      | "internal.unexpected"
+      | "runtime.cancelled"
+      | "queue.enqueue_failed"
+      | "action.phase_failed" = event.payload.error.code
     const message: string = event.payload.error.message
-    void message
+    // @ts-expect-error — Action lifecycle failures expose only their primitive's code union.
+    const datasetCode: "dataset.not_found" = event.payload.error.code
+    void [code, message, datasetCode]
   })
 
 events

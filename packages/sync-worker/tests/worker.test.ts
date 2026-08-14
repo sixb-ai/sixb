@@ -185,6 +185,14 @@ describe("SyncWorker", () => {
         (count) => count === 1
       )
 
+      expect(run?.error).toMatchObject({
+        code: "sync.execution_failed",
+        details: {
+          syncId: sync.id,
+          runId: "run-failed",
+          datasetId: dataset.id,
+        },
+      })
       expect(reports).toHaveLength(1)
       expect(reports[0]?.error).toBe(originalError)
       expect(reports[0]?.context).toEqual({

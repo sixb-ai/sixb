@@ -3,7 +3,7 @@ import { isObjectActionDefinition } from "@sixb/core"
 import type { ActionEditCommitResult } from "@sixb/core/internal/actions"
 import { reportActionPhaseFailure } from "@sixb/core/internal/error-reporting"
 import type { ActionRunRecord } from "@sixb/core/storage"
-import { toActionRunFailure } from "../normalize"
+import { toActionRunFailure, translateActionPhaseError } from "../normalize"
 import { type BasePhaseContext, requireObjectSubject, toActionRuntimeFacade } from "./context"
 import type { LoadedObjectTarget, PhaseExecutionBase, UpdateActiveRun } from "./types"
 
@@ -50,17 +50,14 @@ export async function runEffectsPhase(
         commit: input.commit,
       })
     }
-
-    run = await input.runtime.actionRunsStorage.recordEffects({
-      projectId: input.runtime.id,
-      id: input.run.id,
-      status: "succeeded",
-    })
-    input.updateActiveRun(run)
-    return run
   } catch (error) {
     const completedAt = new Date()
-    const failure = toActionRunFailure(error, "effects", {
+    const phaseError = translateActionPhaseError(error, "effects", {
+      actionId: input.action.id,
+      runId: input.run.id,
+      signal: input.signal,
+    })
+    const failure = toActionRunFailure(phaseError, "effects", {
       actionId: input.action.id,
       runId: input.run.id,
       at: completedAt,
@@ -82,4 +79,12 @@ export async function runEffectsPhase(
     })
     return run
   }
+
+  run = await input.runtime.actionRunsStorage.recordEffects({
+    projectId: input.runtime.id,
+    id: input.run.id,
+    status: "succeeded",
+  })
+  input.updateActiveRun(run)
+  return run
 }

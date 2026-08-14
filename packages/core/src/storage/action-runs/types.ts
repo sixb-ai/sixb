@@ -26,6 +26,7 @@ export const ACTION_RUN_FAILURE_CODES = [
   "internal.unexpected",
   "runtime.cancelled",
   "queue.enqueue_failed",
+  "action.phase_failed",
 ] as const satisfies readonly [SixbErrorCode, ...SixbErrorCode[]]
 
 export type ActionRunFailureCode = (typeof ACTION_RUN_FAILURE_CODES)[number]

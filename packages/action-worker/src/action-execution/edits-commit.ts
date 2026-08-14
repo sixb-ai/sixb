@@ -4,6 +4,7 @@ import { recordEdits } from "@sixb/core/actions/worker"
 import type { ActionEditCommitResult, ActionReadRecorder } from "@sixb/core/internal/actions"
 import { commitActionEdits, createActionReadFacade } from "@sixb/core/internal/actions"
 import type { ActionRunRecord } from "@sixb/core/storage"
+import { translateActionPhaseError } from "../normalize"
 import { type BasePhaseContext, requireObjectSubject } from "./context"
 import type {
   LoadedObjectTarget,
@@ -58,42 +59,51 @@ export async function runEditsAndCommitPhase(
     )
   }
 
-  const batch = await recordEdits(
-    {
-      runId: run.id,
-      valueTypesById: input.runtime.sixb.objects.getValueTypesById(),
-    },
-    async ({ objects }) => {
-      const baseContext = {
-        ...input.baseContext,
-        objects,
-        read: createActionReadFacade(
-          (objectType) => input.runtime.sixb.objects(objectType) as ActionReadObjectSetSource,
-          {
-            recorder: reads,
-            resolveLinkIds: (objectTypeId) =>
-              input.runtime.sixb.objects
-                .resolveType(objectTypeId)
-                .links.map((definition) => definition.id),
-          }
-        ),
-        writeback: input.writeback,
-      }
+  let batch: Awaited<ReturnType<typeof recordEdits>>
+  try {
+    batch = await recordEdits(
+      {
+        runId: run.id,
+        valueTypesById: input.runtime.sixb.objects.getValueTypesById(),
+      },
+      async ({ objects }) => {
+        const baseContext = {
+          ...input.baseContext,
+          objects,
+          read: createActionReadFacade(
+            (objectType) => input.runtime.sixb.objects(objectType) as ActionReadObjectSetSource,
+            {
+              recorder: reads,
+              resolveLinkIds: (objectTypeId) =>
+                input.runtime.sixb.objects
+                  .resolveType(objectTypeId)
+                  .links.map((definition) => definition.id),
+            }
+          ),
+          writeback: input.writeback,
+        }
 
-      if (isObjectActionDefinition(input.action)) {
-        await handler({
-          ...baseContext,
-          subject: requireObjectSubject(input.run.subject, {
-            actionId: input.action.id,
-            runId: input.run.id,
-          }),
-        })
-        return
-      }
+        if (isObjectActionDefinition(input.action)) {
+          await handler({
+            ...baseContext,
+            subject: requireObjectSubject(input.run.subject, {
+              actionId: input.action.id,
+              runId: input.run.id,
+            }),
+          })
+          return
+        }
 
-      await handler(baseContext)
-    }
-  )
+        await handler(baseContext)
+      }
+    )
+  } catch (error) {
+    throw translateActionPhaseError(error, "edits", {
+      actionId: input.action.id,
+      runId: input.run.id,
+      signal: input.signal,
+    })
+  }
 
   run = await input.runtime.actionRunsStorage.enterPhase({
     projectId: input.runtime.id,
@@ -102,14 +112,23 @@ export async function runEditsAndCommitPhase(
   })
   input.updateActiveRun(run)
 
-  const commit = await commitActionEdits({
-    mutations: input.runtime.ontologyMutations,
-    projectId: input.runtime.id,
-    runId: run.id,
-    actionId: input.action.id,
-    batch,
-    dependencies: reads.dependencies(),
-  })
+  let commit: ActionEditCommitResult
+  try {
+    commit = await commitActionEdits({
+      mutations: input.runtime.ontologyMutations,
+      projectId: input.runtime.id,
+      runId: run.id,
+      actionId: input.action.id,
+      batch,
+      dependencies: reads.dependencies(),
+    })
+  } catch (error) {
+    throw translateActionPhaseError(error, "commit", {
+      actionId: input.action.id,
+      runId: input.run.id,
+      signal: input.signal,
+    })
+  }
 
   return { run, result: commit }
 }

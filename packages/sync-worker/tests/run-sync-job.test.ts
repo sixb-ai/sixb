@@ -955,11 +955,15 @@ describe("runSyncJob", () => {
       status: "failed",
       rowsRead: 1,
       error: {
-        code: "internal.unexpected",
-        message: "An unexpected internal error occurred.",
+        code: "sync.execution_failed",
+        message: "Sync execution failed.",
         retryable: false,
         at: expect.any(String),
-        details: { syncId: "sync-orders", runId: "run_1" },
+        details: {
+          syncId: "sync-orders",
+          runId: "run_1",
+          datasetId: "raw.erp.orders",
+        },
       },
     })
   })
@@ -992,11 +996,15 @@ describe("runSyncJob", () => {
       status: "failed",
       rowsRead: 0,
       error: {
-        code: "internal.unexpected",
-        message: "An unexpected internal error occurred.",
+        code: "sync.execution_failed",
+        message: "Sync execution failed.",
         retryable: false,
         at: expect.any(String),
-        details: { syncId: "sync-orders", runId: "run_1" },
+        details: {
+          syncId: "sync-orders",
+          runId: "run_1",
+          datasetId: "raw.erp.orders",
+        },
       },
     })
   })
@@ -1029,11 +1037,15 @@ describe("runSyncJob", () => {
       status: "failed",
       rowsRead: 0,
       error: {
-        code: "internal.unexpected",
-        message: "An unexpected internal error occurred.",
+        code: "sync.execution_failed",
+        message: "Sync execution failed.",
         retryable: false,
         at: expect.any(String),
-        details: { syncId: "sync-orders", runId: "run_schema_error" },
+        details: {
+          syncId: "sync-orders",
+          runId: "run_schema_error",
+          datasetId: "raw.erp.orders",
+        },
       },
     })
   })
@@ -1075,11 +1087,15 @@ describe("runSyncJob", () => {
       status: "failed",
       rowsRead: 0,
       error: {
-        code: "internal.unexpected",
-        message: "An unexpected internal error occurred.",
+        code: "sync.execution_failed",
+        message: "Sync execution failed.",
         retryable: false,
         at: expect.any(String),
-        details: { syncId: "sync-docs", runId: "run_missing_blob" },
+        details: {
+          syncId: "sync-docs",
+          runId: "run_missing_blob",
+          datasetId: "raw.docs",
+        },
       },
     })
   })
@@ -1268,7 +1284,16 @@ describe("runSyncJob", () => {
           finishedRuns.push(run)
         },
       })
-    ).rejects.toThrow("dataset commit may already have succeeded")
+    ).rejects.toMatchObject({
+      code: "internal.unexpected",
+      message: expect.stringContaining("dataset commit may already have succeeded"),
+      details: {
+        syncId: "sync-orders",
+        runId: "run_1",
+        datasetId: "raw.erp.orders",
+        versionId: expect.any(String),
+      },
+    })
 
     const latestVersion = await lakeStorage.getLatestVersion("raw.erp.orders")
     expect(latestVersion?.producer).toEqual({
