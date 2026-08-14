@@ -1,5 +1,11 @@
-import { access, mkdir, readdir, rm } from "node:fs/promises"
+import { access, mkdir, readdir, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { promisify } from "node:util"
+import {
+  brotliCompress as brotliCompressCallback,
+  gzip as gzipCallback,
+  constants as zlibConstants,
+} from "node:zlib"
 import { renderSixbBrowserRuntimeScript } from "@sixb/client/browser"
 import type { AuthSessionAudience } from "@sixb/core"
 
@@ -34,6 +40,9 @@ export interface BuiltInUiShellConfig extends BuiltInUiRuntimeConfig {
  * bundler is presumed stuck rather than slow.
  */
 const BUNDLE_TIMEOUT_MS = 120_000
+const PRECOMPRESSION_CONCURRENCY = 4
+const brotliCompress = promisify(brotliCompressCallback)
+const gzip = promisify(gzipCallback)
 
 let readyBundle: Promise<BuiltInUiBundle> | null = null
 const packageRoot = join(import.meta.dir, "..")
@@ -146,6 +155,7 @@ export async function buildBuiltInUiBundle(
     await stderrText.catch(() => "")
   }
 
+  await precompressBuiltInUiAssets(outdir)
   return await resolveBuiltInUiBundle(outdir)
 }
 
@@ -181,14 +191,48 @@ export function renderBuiltInUiShell(config: BuiltInUiShellConfig): string {
     <meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#09090b" media="(prefers-color-scheme: dark)" />
     <title>Sixb Atlas</title>
+    <style data-sixb-loading-shell>
+      .sixb-loading-shell{position:fixed;inset:0;display:grid;place-items:center;background:#f6f7fb;color:#71717a}
+      .sixb-loading-spinner{width:1.25rem;height:1.25rem;border:2px solid currentColor;border-right-color:transparent;border-radius:9999px;animation:sixb-loading-spin .7s linear infinite}
+      @media(prefers-color-scheme:dark){.sixb-loading-shell{background:#09090b;color:#a1a1aa}}
+      @media(prefers-reduced-motion:reduce){.sixb-loading-spinner{animation-duration:1.5s}}
+      @keyframes sixb-loading-spin{to{transform:rotate(360deg)}}
+    </style>
     <link rel="stylesheet" href="${config.stylesheetPath}" />
     ${runtimeConfigScript}
     <script type="module" src="${config.scriptPath}"></script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><div class="sixb-loading-shell" role="status" aria-label="Loading Atlas"><span class="sixb-loading-spinner" aria-hidden="true"></span></div></div>
   </body>
 </html>`
+}
+
+async function precompressBuiltInUiAssets(outdir: string): Promise<void> {
+  const paths = (await readdir(outdir))
+    .filter((file) => file.endsWith(".js") || file.endsWith(".css"))
+    .map((file) => join(outdir, file))
+  let cursor = 0
+
+  const worker = async () => {
+    while (cursor < paths.length) {
+      const path = paths[cursor++]
+      const bytes = await Bun.file(path).arrayBuffer()
+      const [brotli, gzipped] = await Promise.all([
+        brotliCompress(bytes, {
+          params: {
+            [zlibConstants.BROTLI_PARAM_QUALITY]: 5,
+          },
+        }),
+        gzip(bytes, { level: 9 }),
+      ])
+      await Promise.all([writeFile(`${path}.br`, brotli), writeFile(`${path}.gz`, gzipped)])
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(PRECOMPRESSION_CONCURRENCY, paths.length) }, worker)
+  )
 }
 
 async function resolveBuiltInUiBundle(outdir: string): Promise<BuiltInUiBundle> {

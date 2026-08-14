@@ -78,6 +78,7 @@ interface SidebarProps {
   selectedProject: ProjectInfo | null
   viewMode: ViewMode
   onViewChange: (mode: ViewMode) => void
+  onViewIntent?: (mode: ViewMode) => void
   datasetCount?: number
   connectorCount?: number
   syncCount?: number
@@ -95,6 +96,7 @@ export function Sidebar({
   selectedProject,
   viewMode,
   onViewChange,
+  onViewIntent,
   datasetCount,
   connectorCount,
   syncCount,
@@ -166,6 +168,9 @@ export function Sidebar({
                     <SidebarMenuButton
                       isActive={isActive}
                       tooltip={item.label}
+                      onPointerEnter={() => onViewIntent?.(item.id)}
+                      onPointerDown={() => onViewIntent?.(item.id)}
+                      onFocus={() => onViewIntent?.(item.id)}
                       onClick={() => onViewChange(item.id)}
                     >
                       <item.Icon />
