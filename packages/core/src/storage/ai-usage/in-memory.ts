@@ -3,6 +3,7 @@ import { assertAiUsageExecution, normalizeAiModelCallRecord } from "./record"
 import type {
   AiModelCallUsageRecord,
   AiUsageExecutionIdentity,
+  AiUsageExecutionSummary,
   AiUsageStorage,
   RecordAiModelCallInput,
   RecordAiModelCallResult,
@@ -65,7 +66,9 @@ export class InMemoryAiUsageStorage implements AiUsageStorage {
     return { record: structuredClone(record), created: true }
   }
 
-  async summarizeExecution(input: SummarizeAiUsageExecutionInput) {
+  async summarizeExecution(
+    input: SummarizeAiUsageExecutionInput
+  ): Promise<AiUsageExecutionSummary> {
     const [summary] = await this.summarizeExecutions({
       projectId: input.projectId,
       executions: [input.execution],
@@ -73,7 +76,9 @@ export class InMemoryAiUsageStorage implements AiUsageStorage {
     return summary!
   }
 
-  async summarizeExecutions(input: SummarizeAiUsageExecutionsInput) {
+  async summarizeExecutions(
+    input: SummarizeAiUsageExecutionsInput
+  ): Promise<readonly AiUsageExecutionSummary[]> {
     if (typeof input.projectId !== "string" || input.projectId.trim().length === 0) {
       throw new TypeError("[Sixb] AI usage projectId must be nonblank.")
     }
@@ -90,9 +95,13 @@ export class InMemoryAiUsageStorage implements AiUsageStorage {
       usageByExecution.get(executionKey(record.execution))?.push(record.usage)
     }
 
-    return input.executions.map((execution) =>
-      aggregateAiModelCallUsage(usageByExecution.get(executionKey(execution)) ?? [])
-    )
+    return input.executions.map((execution) => {
+      const usages = usageByExecution.get(executionKey(execution)) ?? []
+      return {
+        modelCallCount: usages.length,
+        usage: aggregateAiModelCallUsage(usages),
+      }
+    })
   }
 
   snapshot(): InMemoryAiUsageStorageSnapshot {

@@ -32,7 +32,8 @@ describe("InMemoryAiUsageStorage", () => {
 
     storage.restore(empty)
     await expect(storage.summarizeExecution(executionSummaryInput())).resolves.toEqual({
-      reportingStatus: "unavailable",
+      modelCallCount: 0,
+      usage: { reportingStatus: "unavailable" },
     })
     await expect(storage.recordModelCall(modelCallInput())).resolves.toMatchObject({
       created: true,

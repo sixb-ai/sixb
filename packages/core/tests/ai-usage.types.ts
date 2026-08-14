@@ -1,5 +1,6 @@
 import type {
   AiModelCallUsageRecord,
+  AiUsageExecutionSummary,
   AiUsageStorage,
   Principal,
   ReadonlyJsonObject,
@@ -9,6 +10,10 @@ import type {
 
 const requesterPrincipal: Principal = { type: "user", id: "usr_1" }
 const rawUsage: ReadonlyJsonObject = { provider_counter: 1 }
+const emptySummary: AiUsageExecutionSummary = {
+  modelCallCount: 0,
+  usage: { reportingStatus: "unavailable" },
+}
 
 const input: RecordAiModelCallInput = {
   id: "usage_1",
@@ -40,10 +45,10 @@ const provider = {
     return { record, created: true }
   },
   async summarizeExecution() {
-    return { reportingStatus: "unavailable" as const }
+    return emptySummary
   },
   async summarizeExecutions({ executions }) {
-    return executions.map(() => ({ reportingStatus: "unavailable" as const }))
+    return executions.map(() => emptySummary)
   },
 } satisfies AiUsageStorage
 

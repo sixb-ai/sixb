@@ -129,15 +129,18 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
         await expect(
           storage.summarizeExecution({ projectId, execution: agentExecution })
         ).resolves.toEqual({
-          inputTokens: 16,
-          outputTokens: 14,
-          totalTokens: 30,
-          uncachedInputTokens: 13,
-          cacheReadInputTokens: 3,
-          cacheWriteInputTokens: 3,
-          textOutputTokens: 11,
-          reasoningOutputTokens: 3,
-          reportingStatus: "complete",
+          modelCallCount: 2,
+          usage: {
+            inputTokens: 16,
+            outputTokens: 14,
+            totalTokens: 30,
+            uncachedInputTokens: 13,
+            cacheReadInputTokens: 3,
+            cacheWriteInputTokens: 3,
+            textOutputTokens: 11,
+            reasoningOutputTokens: 3,
+            reportingStatus: "complete",
+          },
         })
       })
     })
@@ -166,15 +169,18 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
         await expect(
           storage.summarizeExecution({ projectId, execution: agentExecution })
         ).resolves.toEqual({
-          inputTokens: 16,
-          outputTokens: 14,
-          totalTokens: 30,
-          uncachedInputTokens: 13,
-          cacheReadInputTokens: 3,
-          cacheWriteInputTokens: 3,
-          textOutputTokens: 11,
-          reasoningOutputTokens: 3,
-          reportingStatus: "complete",
+          modelCallCount: 2,
+          usage: {
+            inputTokens: 16,
+            outputTokens: 14,
+            totalTokens: 30,
+            uncachedInputTokens: 13,
+            cacheReadInputTokens: 3,
+            cacheWriteInputTokens: 3,
+            textOutputTokens: 11,
+            reasoningOutputTokens: 3,
+            reportingStatus: "complete",
+          },
         })
       })
     })
@@ -189,7 +195,20 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
         expect(results.map((result) => result.created).sort()).toEqual([false, true])
         await expect(
           storage.summarizeExecution({ projectId, execution: agentExecution })
-        ).resolves.toMatchObject({ inputTokens: 12, outputTokens: 8, totalTokens: 20 })
+        ).resolves.toEqual({
+          modelCallCount: 1,
+          usage: {
+            inputTokens: 12,
+            outputTokens: 8,
+            totalTokens: 20,
+            uncachedInputTokens: 9,
+            cacheReadInputTokens: 3,
+            cacheWriteInputTokens: 1,
+            textOutputTokens: 6,
+            reasoningOutputTokens: 2,
+            reportingStatus: "complete",
+          },
+        })
       })
     })
 
@@ -219,24 +238,33 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
         await expect(
           storage.summarizeExecution({ projectId, execution: workflowExecution })
         ).resolves.toEqual({
-          inputTokens: 5,
-          outputTokens: 3,
-          totalTokens: 8,
-          reportingStatus: "complete",
+          modelCallCount: 1,
+          usage: {
+            inputTokens: 5,
+            outputTokens: 3,
+            totalTokens: 8,
+            reportingStatus: "complete",
+          },
         })
         await expect(
           storage.summarizeExecution({ projectId, execution: agentExecution })
-        ).resolves.toEqual({ reportingStatus: "unavailable" })
+        ).resolves.toEqual({
+          modelCallCount: 0,
+          usage: { reportingStatus: "unavailable" },
+        })
         await expect(
           storage.summarizeExecution({
             projectId,
             execution: { ...workflowExecution, workflowRunId: "workflow_run_2" },
           })
-        ).resolves.toEqual({ reportingStatus: "unavailable" })
+        ).resolves.toEqual({
+          modelCallCount: 0,
+          usage: { reportingStatus: "unavailable" },
+        })
       })
     })
 
-    test("summarizes multiple executions in input order with one unavailable entry per miss", async () => {
+    test("summarizes multiple executions in input order with one zero-call entry per miss", async () => {
       await withStorage(async (storage) => {
         await expect(storage.summarizeExecutions({ projectId, executions: [] })).resolves.toEqual(
           []
@@ -280,29 +308,63 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
             ],
           })
         ).resolves.toEqual([
-          { inputTokens: 4, outputTokens: 6, totalTokens: 10, reportingStatus: "complete" },
-          { reportingStatus: "unavailable" },
-          { inputTokens: 5, outputTokens: 3, totalTokens: 8, reportingStatus: "complete" },
           {
-            inputTokens: 12,
-            outputTokens: 8,
-            totalTokens: 20,
-            uncachedInputTokens: 9,
-            cacheReadInputTokens: 3,
-            cacheWriteInputTokens: 1,
-            textOutputTokens: 6,
-            reasoningOutputTokens: 2,
-            reportingStatus: "complete",
+            modelCallCount: 1,
+            usage: {
+              inputTokens: 4,
+              outputTokens: 6,
+              totalTokens: 10,
+              reportingStatus: "complete",
+            },
           },
-          { inputTokens: 4, outputTokens: 6, totalTokens: 10, reportingStatus: "complete" },
+          { modelCallCount: 0, usage: { reportingStatus: "unavailable" } },
+          {
+            modelCallCount: 1,
+            usage: {
+              inputTokens: 5,
+              outputTokens: 3,
+              totalTokens: 8,
+              reportingStatus: "complete",
+            },
+          },
+          {
+            modelCallCount: 1,
+            usage: {
+              inputTokens: 12,
+              outputTokens: 8,
+              totalTokens: 20,
+              uncachedInputTokens: 9,
+              cacheReadInputTokens: 3,
+              cacheWriteInputTokens: 1,
+              textOutputTokens: 6,
+              reasoningOutputTokens: 2,
+              reportingStatus: "complete",
+            },
+          },
+          {
+            modelCallCount: 1,
+            usage: {
+              inputTokens: 4,
+              outputTokens: 6,
+              totalTokens: 10,
+              reportingStatus: "complete",
+            },
+          },
         ])
       })
     })
 
-    test("preserves completely missing provider usage instead of inventing zeroes", async () => {
+    test("distinguishes no model calls from a call without reported usage", async () => {
       // Regression guard: coerce nullable SQL token columns with `Number(null)` and this becomes a
       // complete zero-token report instead of an unavailable one.
       await withStorage(async (storage) => {
+        await expect(
+          storage.summarizeExecution({ projectId, execution: agentExecution })
+        ).resolves.toEqual({
+          modelCallCount: 0,
+          usage: { reportingStatus: "unavailable" },
+        })
+
         const result = await storage.recordModelCall(
           modelCallInput({ usage: {}, rawUsage: undefined })
         )
@@ -311,7 +373,10 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
         expect(result.record.rawUsage).toBeUndefined()
         await expect(
           storage.summarizeExecution({ projectId, execution: agentExecution })
-        ).resolves.toEqual({ reportingStatus: "unavailable" })
+        ).resolves.toEqual({
+          modelCallCount: 1,
+          usage: { reportingStatus: "unavailable" },
+        })
       })
     })
 
@@ -348,8 +413,11 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
         await expect(
           storage.summarizeExecution({ projectId, execution: agentExecution })
         ).resolves.toEqual({
-          inputTokens: 10,
-          reportingStatus: "partial",
+          modelCallCount: 2,
+          usage: {
+            inputTokens: 10,
+            reportingStatus: "partial",
+          },
         })
       })
     })
@@ -390,7 +458,10 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
         await expect(error).rejects.toMatchObject({ code: "duplicate_id" })
         await expect(
           storage.summarizeExecution({ projectId, execution: agentExecution })
-        ).resolves.toMatchObject({ inputTokens: 12, outputTokens: 8, totalTokens: 20 })
+        ).resolves.toMatchObject({
+          modelCallCount: 1,
+          usage: { inputTokens: 12, outputTokens: 8, totalTokens: 20 },
+        })
       })
     })
 
@@ -417,7 +488,10 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
         ).rejects.toThrow()
         await expect(
           storage.summarizeExecution({ projectId, execution: agentExecution })
-        ).resolves.toEqual({ reportingStatus: "unavailable" })
+        ).resolves.toEqual({
+          modelCallCount: 0,
+          usage: { reportingStatus: "unavailable" },
+        })
       })
     })
   })
