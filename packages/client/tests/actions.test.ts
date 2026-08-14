@@ -64,7 +64,7 @@ function actionFailure(
   message: string
 ): ActionRunFailure {
   return {
-    code: phase === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+    code: phase === "cancelled" ? "runtime.cancelled" : "action.phase_failed",
     message,
     retryable: false,
     at: "2026-06-29T12:00:02.000Z",

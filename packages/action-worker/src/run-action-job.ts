@@ -8,7 +8,7 @@ import {
   requireFinishedAt,
   resolveRedeliveredRunningRun,
 } from "./action-execution/results"
-import { throwIfAborted, toActionRunFailure } from "./normalize"
+import { throwIfAborted, toActionRunFailure, unwrapActionPhaseError } from "./normalize"
 import type { ActionRunResult, RunActionJobInput } from "./types"
 
 export async function runActionJob(input: RunActionJobInput): Promise<ActionRunResult> {
@@ -126,6 +126,7 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
       record: finalRun,
     }
   } catch (error) {
+    const nativeError = unwrapActionPhaseError(error)
     const status = signal.aborted ? "cancelled" : "failed"
     const finishedAt = new Date()
     const writebackFailure =
@@ -155,10 +156,10 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
       .catch(() => null)
 
     if (!finishedRun) {
-      throw error
+      throw nativeError
     }
     if (status === "failed" && finishedRun.status === "failed") {
-      reportActionFailure(input, error, failure)
+      reportActionFailure(input, nativeError, failure)
     }
 
     const startedAt = startedRun?.startedAt ?? finishedRun.startedAt ?? finishedRun.queuedAt

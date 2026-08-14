@@ -271,6 +271,10 @@ describe("ActionWorker", () => {
     await reporter.flush()
 
     expect(failed.status).toBe("failed")
+    expect(failed.error).toMatchObject({
+      code: "action.phase_failed",
+      details: { actionId: "fail", runId: failed.id, phase: "writeback" },
+    })
     expect(reports).toHaveLength(1)
     expect(reports[0]?.error).toBe(originalError)
     expect(reports[0]?.context).toMatchObject({
@@ -324,7 +328,7 @@ describe("ActionWorker", () => {
       actionId: "fail",
     })
     expect(failed.status).toBe("failed")
-    expect(failed.error?.message).toBe("An unexpected internal error occurred.")
+    expect(failed.error?.message).toBe("Action execution failed.")
 
     await worker.stop()
   })

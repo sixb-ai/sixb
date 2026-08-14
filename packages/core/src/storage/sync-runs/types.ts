@@ -10,6 +10,7 @@ export type SyncRunStatus = "running" | "succeeded" | "failed" | "cancelled"
 export const SYNC_RUN_FAILURE_CODES = [
   "internal.unexpected",
   "runtime.cancelled",
+  "sync.execution_failed",
 ] as const satisfies readonly [SixbErrorCode, ...SixbErrorCode[]]
 
 export type SyncRunFailureCode = (typeof SYNC_RUN_FAILURE_CODES)[number]
