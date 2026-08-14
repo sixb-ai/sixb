@@ -209,6 +209,59 @@ describe("runPipelineJob", () => {
     })
   })
 
+  test("keeps step finalization failures out of the step-failed vocabulary", async () => {
+    const lakeStorage = new InMemoryLakeStorage()
+    await seedDatasetVersion(lakeStorage, rawCustomersDataset, [{ id: "cust_1", name: "Ada" }])
+    const step = definePipelineStep("clean-customers")
+      .inputs({ rawCustomers: rawCustomersDataset })
+      .output(customersDataset)
+      .run(async ({ inputs, output }) => {
+        await output.writeRows(inputs.rawCustomers.readRows({ columns: ["id", "name"] }))
+      })
+    const pipeline = definePipeline("customers").then(step)
+    const pipelineRunsStorage = new InMemoryPipelineRunStorage()
+    const finishStep = pipelineRunsStorage.finishStep.bind(pipelineRunsStorage)
+    const finishCause = new Error("step finish unavailable")
+    pipelineRunsStorage.finishStep = async (input) => {
+      if (input.status === "succeeded") throw finishCause
+      return finishStep(input)
+    }
+    const runtime = createRuntime({
+      pipelines: [pipeline],
+      datasets: [rawCustomersDataset, customersDataset],
+      lakeStorage,
+      pipelineRunsStorage,
+    })
+
+    await expect(
+      runPipelineJob({ runtime, job: { id: "run_step_finish_failed", pipelineId: pipeline.id } })
+    ).rejects.toMatchObject({
+      code: "internal.unexpected",
+      cause: finishCause,
+      details: {
+        pipelineId: pipeline.id,
+        pipelineRunId: "run_step_finish_failed",
+        stepId: step.id,
+        stepRunId: "run_step_finish_failed:step:1:clean-customers",
+      },
+    })
+
+    const run = await pipelineRunsStorage.getById({
+      projectId: runtime.id,
+      id: "run_step_finish_failed",
+    })
+    expect(run?.error).toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      details: {
+        pipelineId: pipeline.id,
+        pipelineRunId: "run_step_finish_failed",
+        stepId: step.id,
+        stepRunId: "run_step_finish_failed:step:1:clean-customers",
+      },
+    })
+  })
+
   test("fails clearly when an input has no committed version", async () => {
     const cleanStep = definePipelineStep("clean-customers")
       .inputs({ rawCustomers: rawCustomersDataset })
@@ -249,16 +302,15 @@ describe("runPipelineJob", () => {
     })
     expect(run?.status).toBe("failed")
     expect(run?.error).toMatchObject({
-      code: "internal.unexpected",
+      code: "pipeline.step_failed",
       retryable: false,
       details: {
         pipelineId: "customers",
         pipelineRunId: "run_missing_input",
         stepId: "clean-customers",
-        datasetId: "raw.customers",
       },
     })
-    expect(run?.error?.message).toBe("An unexpected internal error occurred.")
+    expect(run?.error?.message).toBe("Pipeline step execution failed.")
 
     const steps = await pipelineRunsStorage.listSteps({
       projectId: runtime.id,
@@ -509,11 +561,8 @@ describe("runPipelineJob", () => {
     })
     expect(stepRuns.steps.map((step) => step.status)).toEqual(["succeeded", "failed"])
     expect(run?.error).toMatchObject({
-      code: "internal.unexpected",
-      details: { pipelineId: "customers", runId: "run_failure" },
-    })
-    expect(stepRuns.steps[1]?.error).toMatchObject({
-      code: "internal.unexpected",
+      code: "pipeline.step_failed",
+      retryable: false,
       details: {
         pipelineId: "customers",
         pipelineRunId: "run_failure",
@@ -521,7 +570,17 @@ describe("runPipelineJob", () => {
         stepRunId: "run_failure:step:2:customer-stats",
       },
     })
-    expect(stepRuns.steps[1]?.error?.message).toBe("An unexpected internal error occurred.")
+    expect(stepRuns.steps[1]?.error).toMatchObject({
+      code: "pipeline.step_failed",
+      retryable: false,
+      details: {
+        pipelineId: "customers",
+        pipelineRunId: "run_failure",
+        stepId: "customer-stats",
+        stepRunId: "run_failure:step:2:customer-stats",
+      },
+    })
+    expect(stepRuns.steps[1]?.error?.message).toBe("Pipeline step execution failed.")
 
     const committedRows = await collectRows(lakeStorage.readRows({ datasetId: "customers" }))
     expect(committedRows).toEqual([{ id: "cust_1", name: "Ada" }])
@@ -683,6 +742,16 @@ describe("runPipelineJob", () => {
       id: "run_sql_no_support",
     })
     expect(run?.status).toBe("failed")
+    expect(run?.error).toMatchObject({
+      code: "pipeline.step_failed",
+      retryable: false,
+      details: {
+        pipelineId: "customers",
+        pipelineRunId: "run_sql_no_support",
+        stepId: "customer-stats",
+        stepRunId: "run_sql_no_support:step:1:customer-stats",
+      },
+    })
 
     const stepRuns = await pipelineRunsStorage.listSteps({
       projectId: runtime.id,
@@ -692,16 +761,16 @@ describe("runPipelineJob", () => {
       stepId: "customer-stats",
       status: "failed",
       error: {
-        code: "internal.unexpected",
+        code: "pipeline.step_failed",
         retryable: false,
         details: {
           pipelineId: "customers",
           pipelineRunId: "run_sql_no_support",
           stepId: "customer-stats",
-          datasetId: "customer_stats",
+          stepRunId: "run_sql_no_support:step:1:customer-stats",
         },
       },
     })
-    expect(stepRuns.steps[0]?.error?.message).toBe("An unexpected internal error occurred.")
+    expect(stepRuns.steps[0]?.error?.message).toBe("Pipeline step execution failed.")
   })
 })

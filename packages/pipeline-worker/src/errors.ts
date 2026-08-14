@@ -1,5 +1,5 @@
 import type { DatasetDefinition, PipelineDefinition } from "@sixb/core"
-import { createSixbError } from "@sixb/core/internal/errors"
+import { createSixbError, isSixbError, summarizeErrorMessage } from "@sixb/core/internal/errors"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type { PipelineRunStatus } from "@sixb/core/storage"
 import type { PipelineJob } from "./types"
@@ -57,6 +57,34 @@ export function createStepBookkeepingError(options: {
       },
     }
   )
+}
+
+export function createPipelineStepFailure(options: {
+  readonly pipelineId: string
+  readonly pipelineRunId: string
+  readonly stepId: string
+  readonly stepRunId?: string
+  readonly cause: unknown
+}) {
+  return createSixbError(
+    "pipeline.step_failed",
+    summarizeErrorMessage(options.cause, "Pipeline step execution failed."),
+    {
+      cause: options.cause,
+      details: {
+        pipelineId: options.pipelineId,
+        pipelineRunId: options.pipelineRunId,
+        stepId: options.stepId,
+        ...(options.stepRunId ? { stepRunId: options.stepRunId } : {}),
+      },
+    }
+  )
+}
+
+export function unwrapPipelineStepFailure(error: unknown): unknown {
+  return isSixbError(error) && error.code === "pipeline.step_failed" && error.cause !== undefined
+    ? error.cause
+    : error
 }
 
 export function createPipelineBookkeepingError(options: {

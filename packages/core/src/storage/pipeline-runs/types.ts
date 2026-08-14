@@ -7,6 +7,7 @@ export type PipelineRunStatus = "running" | "succeeded" | "failed" | "cancelled"
 export const PIPELINE_RUN_FAILURE_CODES = [
   "internal.unexpected",
   "runtime.cancelled",
+  "pipeline.step_failed",
 ] as const satisfies readonly [SixbErrorCode, ...SixbErrorCode[]]
 
 export type PipelineRunFailureCode = (typeof PIPELINE_RUN_FAILURE_CODES)[number]

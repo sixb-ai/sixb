@@ -7131,7 +7131,11 @@
                             "properties": {
                               "code": {
                                 "type": "string",
-                                "enum": ["internal.unexpected", "runtime.cancelled"]
+                                "enum": [
+                                  "internal.unexpected",
+                                  "runtime.cancelled",
+                                  "pipeline.step_failed"
+                                ]
                               },
                               "message": {
                                 "type": "string",
@@ -7497,7 +7501,11 @@
                           "properties": {
                             "code": {
                               "type": "string",
-                              "enum": ["internal.unexpected", "runtime.cancelled"]
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "pipeline.step_failed"
+                              ]
                             },
                             "message": {
                               "type": "string",
@@ -7688,7 +7696,11 @@
                             "properties": {
                               "code": {
                                 "type": "string",
-                                "enum": ["internal.unexpected", "runtime.cancelled"]
+                                "enum": [
+                                  "internal.unexpected",
+                                  "runtime.cancelled",
+                                  "pipeline.step_failed"
+                                ]
                               },
                               "message": {
                                 "type": "string",
@@ -7851,7 +7863,11 @@
                           "properties": {
                             "code": {
                               "type": "string",
-                              "enum": ["internal.unexpected", "runtime.cancelled"]
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "pipeline.step_failed"
+                              ]
                             },
                             "message": {
                               "type": "string",
@@ -7973,7 +7989,11 @@
                             "properties": {
                               "code": {
                                 "type": "string",
-                                "enum": ["internal.unexpected", "runtime.cancelled"]
+                                "enum": [
+                                  "internal.unexpected",
+                                  "runtime.cancelled",
+                                  "pipeline.step_failed"
+                                ]
                               },
                               "message": {
                                 "type": "string",
@@ -8565,7 +8585,11 @@
                             "properties": {
                               "code": {
                                 "type": "string",
-                                "enum": ["internal.unexpected", "runtime.cancelled"]
+                                "enum": [
+                                  "internal.unexpected",
+                                  "runtime.cancelled",
+                                  "workflow.node_failed"
+                                ]
                               },
                               "message": {
                                 "type": "string",
@@ -9025,7 +9049,11 @@
                           "properties": {
                             "code": {
                               "type": "string",
-                              "enum": ["internal.unexpected", "runtime.cancelled"]
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "workflow.node_failed"
+                              ]
                             },
                             "message": {
                               "type": "string",
@@ -10506,7 +10534,11 @@
                             "properties": {
                               "code": {
                                 "type": "string",
-                                "enum": ["internal.unexpected", "runtime.cancelled"]
+                                "enum": [
+                                  "internal.unexpected",
+                                  "runtime.cancelled",
+                                  "workflow.node_failed"
+                                ]
                               },
                               "message": {
                                 "type": "string",
@@ -10693,7 +10725,11 @@
                           "properties": {
                             "code": {
                               "type": "string",
-                              "enum": ["internal.unexpected", "runtime.cancelled"]
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "workflow.node_failed"
+                              ]
                             },
                             "message": {
                               "type": "string",
@@ -10913,7 +10949,11 @@
                             "properties": {
                               "code": {
                                 "type": "string",
-                                "enum": ["internal.unexpected", "runtime.cancelled"]
+                                "enum": [
+                                  "internal.unexpected",
+                                  "runtime.cancelled",
+                                  "workflow.node_failed"
+                                ]
                               },
                               "message": {
                                 "type": "string",
@@ -11359,7 +11399,11 @@
                           "properties": {
                             "code": {
                               "type": "string",
-                              "enum": ["internal.unexpected", "runtime.cancelled"]
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "workflow.node_failed"
+                              ]
                             },
                             "message": {
                               "type": "string",
@@ -11579,7 +11623,11 @@
                             "properties": {
                               "code": {
                                 "type": "string",
-                                "enum": ["internal.unexpected", "runtime.cancelled"]
+                                "enum": [
+                                  "internal.unexpected",
+                                  "runtime.cancelled",
+                                  "workflow.node_failed"
+                                ]
                               },
                               "message": {
                                 "type": "string",

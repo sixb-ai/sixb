@@ -1203,7 +1203,19 @@ describe("runWorkflowJob", () => {
     expect(run?.status).toBe("failed")
     expect(nodes.nodes).toHaveLength(1)
     expect(nodes.nodes[0]?.status).toBe("failed")
-    expect(nodes.nodes[0]?.error?.message).toBe("An unexpected internal error occurred.")
+    expect(run?.error).toMatchObject({
+      code: "workflow.node_failed",
+      retryable: false,
+      details: {
+        workflowId: workflow.id,
+        workflowRunId: "wfrun_invalid_output",
+        nodeId: invalidOutputStep.id,
+        nodeRunId: "wfrun_invalid_output:node:0",
+        stepId: invalidOutputStep.id,
+      },
+    })
+    expect(nodes.nodes[0]?.error).toEqual(run?.error)
+    expect(nodes.nodes[0]?.error?.message).toBe("Workflow node execution failed.")
   })
 
   test("marks the active step and workflow failed when a step handler throws", async () => {
@@ -1242,24 +1254,29 @@ describe("runWorkflowJob", () => {
     expect(run?.status).toBe("failed")
     expect(nodes.nodes.map((node) => node.status)).toEqual(["succeeded", "failed"])
     expect(run?.error).toMatchObject({
-      code: "internal.unexpected",
+      code: "workflow.node_failed",
       retryable: false,
       details: {
         workflowId: workflow.id,
         workflowRunId: "wfrun_step_failed",
+        nodeId: failingStep.id,
         nodeRunId: "wfrun_step_failed:node:1",
+        stepId: failingStep.id,
       },
     })
     expect(nodes.nodes[1]?.error).toMatchObject({
-      code: "internal.unexpected",
+      code: "workflow.node_failed",
       retryable: false,
       details: {
         workflowId: workflow.id,
         workflowRunId: "wfrun_step_failed",
+        nodeId: failingStep.id,
         nodeRunId: "wfrun_step_failed:node:1",
+        stepId: failingStep.id,
       },
     })
-    expect(nodes.nodes[1]?.error?.message).toBe("An unexpected internal error occurred.")
+    expect(nodes.nodes[1]?.error).toEqual(run?.error)
+    expect(nodes.nodes[1]?.error?.message).toBe("Workflow node execution failed.")
   })
 
   test("preserves the cause and run details when workflow finalization fails after side effects", async () => {
@@ -1314,6 +1331,62 @@ describe("runWorkflowJob", () => {
         runId: "wfrun_bookkeeping_failed",
       },
     })
+  })
+
+  test("keeps node finalization failures out of the node-failed vocabulary", async () => {
+    const workflow = defineWorkflow("node-finalization-failure-workflow")
+      .input({ transaction: ref(Transaction) })
+      .then(findBestInvoice)
+    const sixb = createSixb({ workflows: [workflow] })
+    const runtime = createRuntime(sixb)
+    const finishNode = runtime.workflowRuns.nodes.finish.bind(runtime.workflowRuns.nodes)
+    const finishCause = new Error("node finish unavailable")
+    runtime.workflowRuns.nodes.finish = async (input) => {
+      if (input.status === "succeeded") throw finishCause
+      return finishNode(input)
+    }
+
+    await expect(
+      runWorkflowJob({
+        runtime,
+        job: {
+          id: "wfrun_node_finish_failed",
+          workflowId: workflow.id,
+          input: {
+            transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+          },
+        },
+      })
+    ).rejects.toMatchObject({
+      code: "internal.unexpected",
+      cause: finishCause,
+      details: {
+        workflowId: workflow.id,
+        workflowRunId: "wfrun_node_finish_failed",
+        nodeId: findBestInvoice.id,
+        nodeRunId: "wfrun_node_finish_failed:node:0",
+      },
+    })
+
+    const run = await runtime.workflowRuns.getById({
+      projectId: sixb.id,
+      id: "wfrun_node_finish_failed",
+    })
+    const node = await runtime.workflowRuns.nodes.getById({
+      projectId: sixb.id,
+      id: "wfrun_node_finish_failed:node:0",
+    })
+    expect(run?.error).toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      details: {
+        workflowId: workflow.id,
+        workflowRunId: "wfrun_node_finish_failed",
+        nodeId: findBestInvoice.id,
+        nodeRunId: "wfrun_node_finish_failed:node:0",
+      },
+    })
+    expect(node?.error).toEqual(run?.error)
   })
 
   test("uses the workflow input as output when every node is an action", async () => {
@@ -1533,11 +1606,22 @@ describe("runWorkflowJob", () => {
       .then(createInvoice)
     const sixb = createSixb({ actions: [createInvoice], workflows: [workflow] })
 
-    const details = {
-      actionId: createInvoice.id,
-      workflowId: workflow.id,
-      workflowRunId: "wfrun_invalid_global_action_input",
-      nodeId: "create-invoice",
+    const expectedOriginalError = {
+      code: "internal.unexpected",
+      retryable: false,
+      message:
+        "[SixbWorkflowWorker] Workflow 'invalid-global-action-input-workflow' action node 'create-invoice' direct input must not include subject for a global action.",
+      details: {
+        actionId: createInvoice.id,
+        workflowId: workflow.id,
+        workflowRunId: "wfrun_invalid_global_action_input",
+        nodeId: "create-invoice",
+      },
+    }
+    const expectedFailure = {
+      ...expectedOriginalError,
+      code: "workflow.node_failed",
+      message: "Workflow node execution failed.",
     }
     await expect(
       runWorkflowJob({
@@ -1550,13 +1634,7 @@ describe("runWorkflowJob", () => {
           },
         },
       })
-    ).rejects.toMatchObject({
-      code: "internal.unexpected",
-      retryable: false,
-      message:
-        "[SixbWorkflowWorker] Workflow 'invalid-global-action-input-workflow' action node 'create-invoice' direct input must not include subject for a global action.",
-      details,
-    })
+    ).rejects.toMatchObject(expectedOriginalError)
 
     const run = await sixb.storage.workflowRuns!.getById({
       projectId: sixb.id,
@@ -1567,12 +1645,7 @@ describe("runWorkflowJob", () => {
       workflowRunId: "wfrun_invalid_global_action_input",
       order: "asc",
     })
-    expect(run?.error).toMatchObject({
-      code: "internal.unexpected",
-      retryable: false,
-      message: "An unexpected internal error occurred.",
-      details,
-    })
+    expect(run?.error).toMatchObject(expectedFailure)
     expect(nodes.nodes.map((node) => node.nodeId)).toEqual([
       "find-best-invoice",
       "prepare-attach-invoice-action",
@@ -1848,7 +1921,20 @@ describe("runWorkflowJob", () => {
     })
     expect(run?.status).toBe("failed")
     expect(nodes.nodes.map((node) => node.status)).toEqual(["succeeded", "failed"])
-    expect(nodes.nodes[1]?.error?.message).toBe("An unexpected internal error occurred.")
+    expect(run?.error).toMatchObject({
+      code: "workflow.node_failed",
+      retryable: false,
+      details: {
+        workflowId: workflow.id,
+        workflowRunId: "wfrun_action_run_failed",
+        nodeId: attachInvoice.id,
+        nodeRunId: "wfrun_action_run_failed:node:1",
+        actionId: attachInvoice.id,
+        actionRunId: "wfrun_action_run_failed:action:1",
+      },
+    })
+    expect(nodes.nodes[1]?.error).toEqual(run?.error)
+    expect(nodes.nodes[1]?.error?.message).toBe("Workflow node execution failed.")
   })
 
   test("marks action node and workflow failed when the action run fails after request", async () => {
@@ -1948,10 +2034,24 @@ describe("runWorkflowJob", () => {
       })
     ).rejects.toThrow("mapper exploded")
 
+    const run = await sixb.storage.workflowRuns!.getById({
+      projectId: sixb.id,
+      id: "wfrun_mapper_failed",
+    })
     const nodes = await sixb.storage.workflowRuns!.nodes.list({
       projectId: sixb.id,
       workflowRunId: "wfrun_mapper_failed",
       order: "asc",
+    })
+    expect(run?.error).toMatchObject({
+      code: "workflow.node_failed",
+      retryable: false,
+      details: {
+        workflowId: workflow.id,
+        workflowRunId: "wfrun_mapper_failed",
+        nodeId: reviewInvoiceMatch.id,
+        stepId: reviewInvoiceMatch.id,
+      },
     })
     expect(nodes.nodes.map((node) => node.nodeId)).toEqual(["find-best-invoice"])
   })

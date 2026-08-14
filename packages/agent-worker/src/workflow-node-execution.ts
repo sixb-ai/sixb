@@ -4,10 +4,16 @@ import {
   resolveAgentExecutionAuthorization,
 } from "@sixb/core/internal/agents"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
-import { captureSixbFailure, createSixbError, toSixbFailure } from "@sixb/core/internal/errors"
+import {
+  captureSixbFailure,
+  createSixbError,
+  summarizeErrorMessage,
+  toSixbFailure,
+} from "@sixb/core/internal/errors"
 import type { QueueDelivery } from "@sixb/core/internal/workers"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { WorkflowAgentNodeDefinition } from "@sixb/core/internal/workflows"
+import { createWorkflowNodeFailure } from "@sixb/core/internal/workflows"
 import type {
   AgentQueueJob,
   AgentQueueJobFailureCode,
@@ -437,26 +443,32 @@ async function finishWorkflowAgentNodeFailed(input: {
   readonly failure: SixbFailure<WorkflowRunFailureCode>
 }> {
   const at = new Date()
-  const failure = captureSixbFailure(input.error, {
+  const workflowFailureError =
+    input.status === "failed"
+      ? createWorkflowNodeFailure(input.error, {
+          workflowId: input.nodeRun.workflowId,
+          workflowRunId: input.nodeRun.workflowRunId,
+          nodeId: input.nodeRun.nodeId,
+          nodeRunId: input.nodeRun.id,
+          child: { type: "agent", agentId: input.agent.id },
+        })
+      : createSixbError(
+          "runtime.cancelled",
+          summarizeErrorMessage(input.error, "Agent workflow node execution failed."),
+          {
+            cause: input.error,
+            details: workflowAgentErrorDetails(input.agent.id, input.nodeRun),
+          }
+        )
+  const workflowFailure = toSixbFailure(workflowFailureError, {
     allowedCodes: WORKFLOW_RUN_FAILURE_CODES,
-    defaultCode: input.status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
     at,
-    details: {
-      workflowId: input.nodeRun.workflowId,
-      workflowRunId: input.nodeRun.workflowRunId,
-      nodeRunId: input.nodeRun.id,
-    },
   })
   const agentFailure = captureSixbFailure(input.error, {
     allowedCodes: AGENT_RUN_FAILURE_CODES,
     defaultCode: input.status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
     at,
-    details: {
-      agentId: input.agent.id,
-      workflowId: input.nodeRun.workflowId,
-      workflowRunId: input.nodeRun.workflowRunId,
-      nodeRunId: input.nodeRun.id,
-    },
+    details: workflowAgentErrorDetails(input.agent.id, input.nodeRun),
   })
   return input.context.storage.transaction(async (tx) => {
     const runs = tx.workflowRuns
@@ -480,17 +492,17 @@ async function finishWorkflowAgentNodeFailed(input: {
       projectId: input.context.id,
       id: input.nodeRun.id,
       status: input.status,
-      error: failure,
       finishedAt: at,
+      error: workflowFailure,
     })
     const run = await runs.finish({
       projectId: input.context.id,
       id: input.nodeRun.workflowRunId,
       status: input.status,
-      error: failure,
       finishedAt: at,
+      error: workflowFailure,
     })
-    return { node, run, failure }
+    return { node, run, failure: workflowFailure }
   })
 }
 
@@ -641,12 +653,13 @@ function requireFinishedAt(
 
 function workflowAgentErrorDetails(
   agentId: string,
-  nodeRun: Pick<WorkflowNodeRunRecord, "id" | "workflowId" | "workflowRunId">
+  nodeRun: Pick<WorkflowNodeRunRecord, "id" | "workflowId" | "workflowRunId" | "nodeId">
 ): Readonly<Record<string, string>> {
   return {
     agentId,
     workflowId: nodeRun.workflowId,
     workflowRunId: nodeRun.workflowRunId,
+    nodeId: nodeRun.nodeId,
     nodeRunId: nodeRun.id,
   }
 }

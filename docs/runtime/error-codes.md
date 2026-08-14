@@ -1,9 +1,18 @@
 # Runtime error codes
 
-Sixb failures carry a stable `code` for programmatic decisions and a message for humans. Code can
-branch on `failure.code`; it must never parse `failure.message`.
+Sixb failures have two identities:
 
-HTTP error responses expose the same identity as an optional `code` while endpoints migrate. The Sixb client copies it to `SixbApiError.code`; clients should handle unknown strings so an older client remains compatible with codes introduced by a newer server.
+- `code` is stable and intended for programmatic decisions.
+- `message` is written for humans and must not be parsed.
+
+Unknown legacy exceptions use `internal.unexpected` until their call site receives a specific code.
+
+## API errors
+
+HTTP errors expose an optional `code` while endpoints migrate. The client copies it to
+`SixbApiError.code`.
+
+Always tolerate unknown codes: a newer server may introduce one before the client is upgraded.
 
 ```ts
 if (isSixbApiError(error) && error.code === "dataset.not_found") {
@@ -11,12 +20,9 @@ if (isSixbApiError(error) && error.code === "dataset.not_found") {
 }
 ```
 
-The catalog starts deliberately small and grows with each primitive's vertical migration. Unknown
-legacy exceptions use `internal.unexpected` until their call site receives a specific code.
-
 ## Failure records
 
-Persisted run failures use the same portable record returned by their API:
+Persisted failures and API responses use the same portable record:
 
 ```ts
 interface SixbFailure<TCode extends SixbErrorCode = SixbErrorCode> {
@@ -29,36 +35,59 @@ interface SixbFailure<TCode extends SixbErrorCode = SixbErrorCode> {
 }
 ```
 
-Each primitive specializes `TCode` to the codes it can persist. Most migrated runs currently allow
-`internal.unexpected | runtime.cancelled`. Action failures also allow the retryable
-`queue.enqueue_failed` code and require `{ actionId, runId, phase }` in `details`.
-Webhook runs allow `internal.unexpected | webhook.delivery_failed`; only retryable post-claim
-failures use the delivery code. The idempotency journal and run reuse the same failure record.
-Expected non-retryable outcomes remain represented by their HTTP status and claim result.
-Workflow completion events reuse the exact failure stored on the run or node.
-Pipeline completion events reuse the exact failure stored on the run or step run.
-Sync completion events reuse the exact failure stored on the run.
-`agent.run.finished.error` reuses the exact failure stored on the Agent run.
-The ontology outbox declares `event.delivery_failed`; its durable record is retained while publication
-is retried.
+Messages are safe, bounded summaries owned by Sixb. Native errors, stacks, and causes stay on the
+private `error` argument passed to `onError`; they are never copied into storage or API responses.
+`truncated` indicates that optional context exceeded the durable failure size budget.
 
-Runtime `onError(error, context)` notifications expose the same record as `context.failure`. Failed runs and persisted outbox attempts reuse the exact object written to storage; failures without durable storage, such as rejected framework emits and rule evaluations, are normalized once at the reporting
-boundary. The native `error` argument remains available for stacks and error-monitoring integrations.
+`retryable` is the policy attached to the code. It does not override a worker's safety rules; a
+worker may still refuse to replay work that has already produced side effects.
 
-Each storage and wire change remains independently reviewable even though every migrated primitive shares the same portable base record.
+## Contracts by boundary
+
+Each boundary exposes only the codes it can persist.
+
+| Boundary | Allowed codes |
+| --- | --- |
+| Action run or phase | `internal.unexpected`, `queue.enqueue_failed`, `runtime.cancelled` |
+| Sync run | `internal.unexpected`, `runtime.cancelled` |
+| Agent execution | `internal.unexpected`, `runtime.cancelled` |
+| Projection run | `internal.unexpected`, `runtime.cancelled` |
+| Pipeline run or step | `internal.unexpected`, `runtime.cancelled`, `pipeline.step_failed` |
+| Workflow run or node | `internal.unexpected`, `runtime.cancelled`, `workflow.node_failed` |
+| Webhook run | `internal.unexpected`, `webhook.delivery_failed` |
+| Ontology outbox | `event.delivery_failed` |
+
+Additional rules:
+
+- Action failures require `{ actionId, runId, phase }` in `details`.
+- Agent, Pipeline, Sync, and Workflow completion events reuse the failure stored on the run.
+- `agent.run.finished.error` reuses the failure stored on the Agent run.
+- Webhook non-retryable outcomes remain HTTP outcomes; only retryable post-claim failures use
+  `webhook.delivery_failed`.
+- The outbox retains `event.delivery_failed` while publication is retried.
+
+## Reporting
+
+- `context.failure` is the same record written to durable storage when one exists.
+- `error` remains the native error for stacks and monitoring integrations.
+- Failures without durable storage are normalized once at the reporting boundary.
+
+## Error catalog
 
 | Code | Retryable | What happened | What to do |
 | --- | --- | --- | --- |
-| `dataset.not_found` | No | The requested dataset is not registered or is not visible to the caller. | Check the dataset ID and the caller's access. |
-| `dataset.version_incompatible` | No | The immutable dataset version does not match the dataset or schema required by the operation. | Materialize a compatible version and dispatch a new run. |
-| `dataset.version_not_found` | No | The requested dataset version does not exist, or the dataset has no committed version yet. | Check the version ID or materialize the dataset before reading rows. |
+| `dataset.not_found` | No | Dataset is unavailable to the caller. | Check its ID and access policy. |
+| `dataset.version_incompatible` | No | Version does not match the required dataset or schema. | Materialize a compatible version. |
+| `dataset.version_not_found` | No | Version does not exist or nothing has been committed yet. | Check the ID or materialize the dataset. |
 | `dataset.version_read_inconsistent` | Yes | Read results conflict with immutable version metadata. | Retry, then inspect lake storage integrity. |
-| `event.delivery_failed` | Yes | A persisted ontology event could not be published. | Let the outbox retry, then inspect the broker. |
-| `internal.unexpected` | No | Sixb caught an exception that has not yet been assigned a more specific code. | Inspect internal logs. Do not retry automatically. |
-| `queue.enqueue_failed` | Yes | A job could not be handed to its queue. | Retry the unchanged request while the durable run remains in its enqueue phase. |
-| `projection.definition_invalid` | No | A projection definition is incompatible with its ontology or dataset mapping. | Fix the projection definition and dispatch a new run. |
-| `projection.not_found` | No | The requested projection is not registered in the current runtime. | Check the projection ID and ensure its definition is deployed. |
-| `projection.run_already_terminal` | No | A delivery targeted a projection run that had already failed or been cancelled. | Do not reuse the terminal run ID; dispatch a new semantic run if needed. |
-| `projection.run_identity_mismatch` | No | A projection run or delivery does not match its pinned semantic identity. | Discard the stale delivery and dispatch from the current projection definition. |
-| `runtime.cancelled` | No | An in-flight operation was cancelled before completion. | Confirm the cancellation was intentional before requesting another run. |
-| `webhook.delivery_failed` | Yes | A webhook handler failed with a retryable outcome. | Let the provider retry, then inspect the handler. |
+| `event.delivery_failed` | Yes | A persisted event could not reach the event stream. | Let the outbox retry; inspect the broker if it persists. |
+| `internal.unexpected` | No | The exception has no specific code yet. | Inspect its `onError` report and correlation details. |
+| `pipeline.step_failed` | No | A step failed before committing its output. | Fix the cause and request a new pipeline run. |
+| `projection.definition_invalid` | No | Projection definition is invalid for its ontology or dataset. | Fix the definition and request a new run. |
+| `projection.not_found` | No | Projection is not registered. | Check its ID and deployment. |
+| `projection.run_already_terminal` | No | Delivery targets a run that is already terminal. | Use a new run ID for new work. |
+| `projection.run_identity_mismatch` | No | Delivery does not match the run's pinned identity. | Discard it and dispatch from the current definition. |
+| `queue.enqueue_failed` | Yes | A job could not be handed to its queue. | Retry while the run remains in its enqueue phase. |
+| `runtime.cancelled` | No | Work was cancelled before completion. | Confirm the cancellation before requesting another run. |
+| `webhook.delivery_failed` | Yes | A claimed webhook delivery failed retryably. | Let the provider retry; inspect the handler if it persists. |
+| `workflow.node_failed` | No | A node failed during preparation or execution. | Inspect its identity and `onError` report. |

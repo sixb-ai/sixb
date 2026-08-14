@@ -1,4 +1,5 @@
 import { captureSixbFailure } from "@sixb/core/internal/errors"
+import { unwrapWorkflowNodeFailure } from "@sixb/core/internal/workflows"
 import { WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { workflowNodeExecutors } from "./execution/node-executors"
 import { WorkflowRunSession } from "./execution/workflow-run-session"
@@ -43,7 +44,7 @@ export async function runWorkflowJob(input: RunWorkflowJobInput): Promise<Workfl
     }
     await session.finishAfterError(error)
     await failQueuedRun(input, error)
-    throw error
+    throw unwrapWorkflowNodeFailure(error)
   } finally {
     await session.flushLogs()
   }
@@ -71,7 +72,7 @@ export async function runWorkflowResumeJob(
       throw error
     }
     await session.finishAfterError(error)
-    throw error
+    throw unwrapWorkflowNodeFailure(error)
   } finally {
     await session.flushLogs()
   }

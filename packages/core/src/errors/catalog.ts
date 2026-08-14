@@ -38,6 +38,10 @@ export const SIXB_ERROR_DEFINITIONS = {
     publicMessage: "The job could not be enqueued.",
     retryable: true,
   },
+  "pipeline.step_failed": {
+    publicMessage: "Pipeline step execution failed.",
+    retryable: false,
+  },
   "projection.definition_invalid": {
     publicMessage: "Projection definition is invalid.",
     retryable: false,
@@ -61,6 +65,10 @@ export const SIXB_ERROR_DEFINITIONS = {
   "webhook.delivery_failed": {
     publicMessage: "Webhook delivery failed.",
     retryable: true,
+  },
+  "workflow.node_failed": {
+    publicMessage: "Workflow node execution failed.",
+    retryable: false,
   },
 } as const satisfies Readonly<Record<string, SixbErrorDefinition>>
 
