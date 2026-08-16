@@ -2142,8 +2142,9 @@ export type ListSyncsResponses = {
       syncId: string
       datasetId: string
       mode: "snapshot" | "append" | "merge"
-      status: "running" | "succeeded" | "failed" | "cancelled"
-      startedAt: string
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      queuedAt: string
+      startedAt?: string
       finishedAt?: string
       rowsRead?: number
       output?: {
@@ -2153,7 +2154,11 @@ export type ListSyncsResponses = {
       expectedLatestVersionId?: string
       commitMessage?: string
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "sync.execution_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "queue.enqueue_failed"
+          | "sync.execution_failed"
         message: string
         retryable: boolean
         at: string
@@ -2243,8 +2248,9 @@ export type GetSyncResponses = {
       syncId: string
       datasetId: string
       mode: "snapshot" | "append" | "merge"
-      status: "running" | "succeeded" | "failed" | "cancelled"
-      startedAt: string
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      queuedAt: string
+      startedAt?: string
       finishedAt?: string
       rowsRead?: number
       output?: {
@@ -2254,7 +2260,11 @@ export type GetSyncResponses = {
       expectedLatestVersionId?: string
       commitMessage?: string
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "sync.execution_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "queue.enqueue_failed"
+          | "sync.execution_failed"
         message: string
         retryable: boolean
         at: string
@@ -2284,7 +2294,7 @@ export type ListSyncRunsData = {
   query?: {
     syncId?: string
     datasetId?: string
-    status?: "running" | "succeeded" | "failed" | "cancelled"
+    status?: "queued" | "running" | "succeeded" | "failed" | "cancelled"
     startedAfter?: string
     startedBefore?: string
     limit?: string
@@ -2322,8 +2332,9 @@ export type ListSyncRunsResponses = {
       syncId: string
       datasetId: string
       mode: "snapshot" | "append" | "merge"
-      status: "running" | "succeeded" | "failed" | "cancelled"
-      startedAt: string
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      queuedAt: string
+      startedAt?: string
       finishedAt?: string
       rowsRead?: number
       output?: {
@@ -2333,7 +2344,11 @@ export type ListSyncRunsResponses = {
       expectedLatestVersionId?: string
       commitMessage?: string
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "sync.execution_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "queue.enqueue_failed"
+          | "sync.execution_failed"
         message: string
         retryable: boolean
         at: string
@@ -2494,15 +2509,20 @@ export type ListPipelinesResponses = {
       id: string
       projectId: string
       pipelineId: string
-      status: "running" | "succeeded" | "failed" | "cancelled"
-      startedAt: string
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      queuedAt: string
+      startedAt?: string
       finishedAt?: string
       output?: {
         datasetId: string
         versionId: string
       }
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "pipeline.step_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "queue.enqueue_failed"
+          | "pipeline.step_failed"
         message: string
         retryable: boolean
         at: string
@@ -2625,15 +2645,20 @@ export type GetPipelineResponses = {
       id: string
       projectId: string
       pipelineId: string
-      status: "running" | "succeeded" | "failed" | "cancelled"
-      startedAt: string
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      queuedAt: string
+      startedAt?: string
       finishedAt?: string
       output?: {
         datasetId: string
         versionId: string
       }
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "pipeline.step_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "queue.enqueue_failed"
+          | "pipeline.step_failed"
         message: string
         retryable: boolean
         at: string
@@ -2662,7 +2687,7 @@ export type ListPipelineRunsData = {
   path?: never
   query?: {
     pipelineId?: string
-    status?: "running" | "succeeded" | "failed" | "cancelled"
+    status?: "queued" | "running" | "succeeded" | "failed" | "cancelled"
     startedAfter?: string
     startedBefore?: string
     limit?: string
@@ -2698,15 +2723,20 @@ export type ListPipelineRunsResponses = {
       id: string
       projectId: string
       pipelineId: string
-      status: "running" | "succeeded" | "failed" | "cancelled"
-      startedAt: string
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      queuedAt: string
+      startedAt?: string
       finishedAt?: string
       output?: {
         datasetId: string
         versionId: string
       }
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "pipeline.step_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "queue.enqueue_failed"
+          | "pipeline.step_failed"
         message: string
         retryable: boolean
         at: string
@@ -2773,15 +2803,20 @@ export type GetPipelineRunResponses = {
       id: string
       projectId: string
       pipelineId: string
-      status: "running" | "succeeded" | "failed" | "cancelled"
-      startedAt: string
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      queuedAt: string
+      startedAt?: string
       finishedAt?: string
       output?: {
         datasetId: string
         versionId: string
       }
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "pipeline.step_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "queue.enqueue_failed"
+          | "pipeline.step_failed"
         message: string
         retryable: boolean
         at: string
@@ -2821,7 +2856,11 @@ export type GetPipelineRunResponses = {
       }
       rowsWritten?: number
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "pipeline.step_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "queue.enqueue_failed"
+          | "pipeline.step_failed"
         message: string
         retryable: boolean
         at: string

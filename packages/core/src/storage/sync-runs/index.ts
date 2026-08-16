@@ -1,4 +1,5 @@
 export { SyncRunError } from "./errors"
+export { canRequeueSyncRunAfterEnqueueFailure } from "./idempotency"
 export { InMemorySyncRunStorage } from "./in-memory"
 export type {
   FinishSyncRunInput,
@@ -6,6 +7,7 @@ export type {
   ListLatestSyncRunsResult,
   ListSyncRunsInput,
   ListSyncRunsResult,
+  QueueSyncRunInput,
   StartSyncRunInput,
   SyncRunFailureCode,
   SyncRunMode,

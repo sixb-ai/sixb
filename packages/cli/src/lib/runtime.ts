@@ -3,7 +3,9 @@ import { ActionWorker } from "@sixb/action-worker"
 import { AgentWorker } from "@sixb/agent-worker"
 import { migrateStorage } from "@sixb/core"
 import { flushSixbErrors } from "@sixb/core/internal/error-reporting"
+import { PipelineRunDispatcher } from "@sixb/core/internal/pipelines"
 import { getProjectionDispatchDescriptors } from "@sixb/core/internal/projections"
+import { SyncRunDispatcher } from "@sixb/core/internal/syncs"
 import type { Worker } from "@sixb/core/internal/workers"
 import { WorkflowRunDispatcher } from "@sixb/core/internal/workflows"
 import { assertLakeDatasetDefinitionsCompatible } from "@sixb/core/lake-storage"
@@ -152,6 +154,8 @@ export async function startOrchestratorRuntime(
       queues: sixb.queues,
       routes,
       dispatchers: {
+        syncs: new SyncRunDispatcher(sixb),
+        pipelines: new PipelineRunDispatcher(sixb),
         workflows: new WorkflowRunDispatcher(sixb),
       },
       ...(projectionDispatch ? { projectionDispatch } : {}),

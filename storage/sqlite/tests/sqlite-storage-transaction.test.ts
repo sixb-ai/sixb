@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { migrateStorage, type Storage } from "@sixb/core"
 import { StorageTransactionError } from "@sixb/core/storage"
-import { queueTestActionRun } from "@sixb/core/testing"
+import { queueTestActionRun, startTestSyncRun } from "@sixb/core/testing"
 import { SqliteStorage } from "../src"
 import { closeSqliteStoreConnection, openSqliteStoreConnection } from "../src/transactions"
 
@@ -92,7 +92,7 @@ describe("SqliteStorage.transaction", () => {
       storage.transaction(async (tx) => {
         const runs = requireTransactionalRunStores(tx)
         await queueTestActionRun(tx, actionRunInput("run_rollback"))
-        await runs.syncRuns.start(syncRunInput("sync_rollback"))
+        await startTestSyncRun(tx, syncRunInput("sync_rollback"))
         await runs.webhookRuns.start(webhookRunInput("webhook_rollback"))
 
         throw new Error("boom")

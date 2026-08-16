@@ -130,10 +130,7 @@ export interface SyncRunRequestedQueueJob
   extends QueueJob<
     "sync.run.requested",
     {
-      readonly syncId: string
-      readonly runId?: string
-      readonly expectedLatestVersionId?: string
-      readonly commitMessage?: string
+      readonly runId: string
     }
   > {}
 
@@ -141,8 +138,7 @@ export interface PipelineRunRequestedQueueJob
   extends QueueJob<
     "pipeline.run.requested",
     {
-      readonly pipelineId: string
-      readonly runId?: string
+      readonly runId: string
     }
   > {}
 

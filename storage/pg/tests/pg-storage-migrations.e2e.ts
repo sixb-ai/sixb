@@ -9,7 +9,11 @@ import {
   SYNC_RUN_FAILURE_CODES,
   WEBHOOK_DELIVERY_FAILURE_CODES,
 } from "@sixb/core/storage"
-import { createMaterializerTestFixture, createTestWorkflowExecution } from "@sixb/core/testing"
+import {
+  createMaterializerTestFixture,
+  createTestWorkflowExecution,
+  startTestSyncRun,
+} from "@sixb/core/testing"
 import { SQL } from "bun"
 import { PostgresStorage, type PostgresStorage as PostgresStorageType } from "../src"
 import {
@@ -63,6 +67,7 @@ describe("Postgres storage migrations", () => {
             "017-action-failure-record",
             "018-ontology-outbox-failure-record",
             "019-webhook-delivery-failure-record",
+            "020-sync-pipeline-executions",
           ],
         },
       ])
@@ -199,6 +204,13 @@ describe("Postgres storage migrations", () => {
           id: "019-webhook-delivery-failure-record",
           status: "applied",
           version: 19,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "020-sync-pipeline-executions",
+          status: "applied",
+          version: 20,
         },
       ])
     })
@@ -674,6 +686,11 @@ describe("Postgres storage migrations", () => {
       await expect(readColumnNullable(schemaName, "action_runs", "execution_id")).resolves.toBe(
         "NO"
       )
+      for (const table of ["sync_runs", "pipeline_runs"] as const) {
+        await expect(readColumnNullable(schemaName, table, "execution_id")).resolves.toBe("NO")
+        await expect(readColumnNullable(schemaName, table, "queued_at")).resolves.toBe("NO")
+        await expect(readColumnNullable(schemaName, table, "started_at")).resolves.toBe("YES")
+      }
     })
   })
 
@@ -832,6 +849,60 @@ describe("Postgres storage migrations", () => {
         await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
       }
     })
+  })
+
+  test("rejects legacy Sync and Pipeline runs instead of inventing execution authority", async () => {
+    for (const kind of ["sync", "pipeline"] as const) {
+      const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+      await withSql(async (sql) => {
+        const schema = quoteIdent(schemaName)
+        const context = { exec: (sqlText: string) => sql.unsafe(sqlText).then(() => undefined) }
+
+        try {
+          await sql.unsafe(`CREATE SCHEMA ${schema}`)
+          await sql.unsafe(`SET search_path TO ${schema}`)
+          const executionMigrationIndex = postgresStorageMigrations.steps.findIndex(
+            (migration) => migration.id === "010-sync-pipeline-executions"
+          )
+          const executionMigration = postgresStorageMigrations.steps[executionMigrationIndex]
+          if (!executionMigration) {
+            throw new Error("PostgreSQL sync-pipeline-executions migration is missing.")
+          }
+          for (const migration of postgresStorageMigrations.steps.slice(
+            0,
+            executionMigrationIndex
+          )) {
+            await migration.up(context)
+          }
+          if (kind === "sync") {
+            await sql.unsafe(`
+              INSERT INTO sync_runs (
+                project_id, id, sync_id, dataset_id, mode, status, started_at
+              ) VALUES (
+                'project-a', 'legacy-sync-run', 'sync-orders', 'raw.orders', 'snapshot',
+                'running', '2026-01-01T00:00:00.000Z'
+              )
+            `)
+          } else {
+            await sql.unsafe(`
+              INSERT INTO pipeline_runs (
+                project_id, id, pipeline_id, status, started_at
+              ) VALUES (
+                'project-a', 'legacy-pipeline-run', 'pipeline-orders', 'running',
+                '2026-01-01T00:00:00.000Z'
+              )
+            `)
+          }
+
+          await expect(executionMigration.up(context)).rejects.toThrow()
+          expect(await readTableColumns(schemaName, "sync_runs")).not.toContain("execution_id")
+          expect(await readTableColumns(schemaName, "pipeline_runs")).not.toContain("execution_id")
+        } finally {
+          await sql.unsafe("RESET search_path")
+          await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
+        }
+      })
+    }
   })
 
   test("untracked existing schema collides and rolls back without conversion", async () => {
@@ -1181,7 +1252,7 @@ async function seedExistingStoreRows(storage: PostgresStorage): Promise<void> {
       },
     ],
   })
-  await storage.syncRuns.start({
+  await startTestSyncRun(storage, {
     id: "run-1",
     projectId: "project-a",
     syncId: "sync-orders",

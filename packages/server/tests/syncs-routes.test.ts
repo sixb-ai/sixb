@@ -116,10 +116,12 @@ describe("sync routes", () => {
             {
               id: "run-invoices",
               projectId: "my-app",
+              executionId: "exec-run-invoices",
               syncId: "sync-invoices",
               datasetId: "raw.erp.invoices",
               mode: "merge",
               status: "running",
+              queuedAt: new Date("2026-04-06T15:59:59.000Z"),
               startedAt: new Date("2026-04-06T16:00:00.000Z"),
             },
           ],

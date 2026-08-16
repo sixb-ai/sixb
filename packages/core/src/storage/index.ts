@@ -383,10 +383,13 @@ export type {
   PipelineRunStatus,
   PipelineRunStorage,
   PipelineStepRunRecord,
+  PipelineStepRunStatus,
+  QueuePipelineRunInput,
   StartPipelineRunInput,
   StartPipelineStepRunInput,
 } from "./pipeline-runs"
 export {
+  canRequeuePipelineRunAfterEnqueueFailure,
   InMemoryPipelineRunStorage,
   PIPELINE_RUN_FAILURE_CODES,
   PipelineRunError,
@@ -444,6 +447,7 @@ export type {
   ListLatestSyncRunsResult,
   ListSyncRunsInput,
   ListSyncRunsResult,
+  QueueSyncRunInput,
   StartSyncRunInput,
   SyncRunFailureCode,
   SyncRunMode,
@@ -451,7 +455,12 @@ export type {
   SyncRunStatus,
   SyncRunStorage,
 } from "./sync-runs"
-export { InMemorySyncRunStorage, SYNC_RUN_FAILURE_CODES, SyncRunError } from "./sync-runs"
+export {
+  canRequeueSyncRunAfterEnqueueFailure,
+  InMemorySyncRunStorage,
+  SYNC_RUN_FAILURE_CODES,
+  SyncRunError,
+} from "./sync-runs"
 export type {
   TimeseriesHistoryBatchInput,
   TimeseriesHistoryBatchResult,
