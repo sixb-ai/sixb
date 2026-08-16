@@ -28,6 +28,8 @@ import {
   type StorageMigrator,
 } from "@sixb/core"
 import { reportEventDeliveryFailure } from "@sixb/core/internal/error-reporting"
+import { PipelineRunDispatcher } from "@sixb/core/internal/pipelines"
+import { SyncRunDispatcher } from "@sixb/core/internal/syncs"
 import { createTestSixb } from "@sixb/core/testing"
 import {
   checkRuntimeLakeDefinitions,
@@ -348,17 +350,16 @@ describe("startSixbRuntime", () => {
 
     expect(runtime.syncWorker).not.toBeNull()
 
-    await sixb.queues.syncRuns.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          type: "sync.run.requested",
-          payload: {
-            syncId: "sync-orders",
-            runId: "runtime-sync-1",
-          },
-        },
-      ],
+    await new SyncRunDispatcher({
+      id: sixb.id,
+      definitions: sixb.definitions,
+      storage: sixb.storage,
+      queues: sixb.queues,
+    }).dispatch({
+      syncId: "sync-orders",
+      runId: "runtime-sync-1",
+      source: { type: "schedule", eventId: "event-runtime-sync-1" },
+      correlationId: "correlation-runtime-sync-1",
     })
 
     const run = await waitFor(
@@ -411,17 +412,16 @@ describe("startSixbRuntime", () => {
       expect(runtime.pipelineWorker).not.toBeNull()
       expect(runtime.warnings).toHaveLength(0)
 
-      await sixb.queues.pipelines.enqueue({
-        projectId: sixb.id,
-        jobs: [
-          {
-            type: "pipeline.run.requested",
-            payload: {
-              pipelineId: "normalize-orders",
-              runId: "runtime-pipeline-1",
-            },
-          },
-        ],
+      await new PipelineRunDispatcher({
+        id: sixb.id,
+        definitions: sixb.definitions,
+        storage: sixb.storage,
+        queues: sixb.queues,
+      }).dispatch({
+        pipelineId: "normalize-orders",
+        runId: "runtime-pipeline-1",
+        source: { type: "schedule", eventId: "event-runtime-pipeline-1" },
+        correlationId: "correlation-runtime-pipeline-1",
       })
 
       const run = await waitFor(

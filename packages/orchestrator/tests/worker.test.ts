@@ -33,6 +33,8 @@ import { reconcileProjectionDispatch } from "../src/projection-dispatch-reconcil
 import type {
   OrchestratorRoutes,
   OrchestratorRuntimeOptions,
+  PipelineDispatcherPort,
+  SyncDispatcherPort,
   WorkflowDispatcherPort,
   WorkflowDispatchInput,
 } from "../src/types"
@@ -182,12 +184,72 @@ async function startWorker(
     events: eventRuntime,
     queues,
     routes,
-    dispatchers: { workflows: workflowDispatcher },
+    dispatchers: {
+      syncs: createTestSyncRunDispatcher(queues, projectId),
+      pipelines: createTestPipelineRunDispatcher(queues, projectId),
+      workflows: workflowDispatcher,
+    },
     ...(projectionDispatch === undefined ? {} : { projectionDispatch }),
   })
   workers.push(worker)
   await worker.start()
   return worker
+}
+
+function createTestSyncRunDispatcher(
+  queues: InMemoryQueues,
+  projectId = PROJECT_ID
+): SyncDispatcherPort {
+  return {
+    async dispatch(input) {
+      const [job] = await queues.syncRuns.enqueue({
+        projectId,
+        jobs: [
+          {
+            id: input.runId,
+            type: "sync.run.requested",
+            payload: { runId: input.runId },
+            metadata: input.metadata,
+          },
+        ],
+      })
+      return {
+        syncId: input.syncId,
+        runId: input.runId,
+        queuedAt: job!.createdAt,
+        jobId: job!.id,
+        created: true,
+      }
+    },
+  }
+}
+
+function createTestPipelineRunDispatcher(
+  queues: InMemoryQueues,
+  projectId = PROJECT_ID
+): PipelineDispatcherPort {
+  return {
+    async dispatch(input) {
+      const [job] = await queues.pipelines.enqueue({
+        projectId,
+        jobs: [
+          {
+            id: input.runId,
+            type: "pipeline.run.requested",
+            payload: { runId: input.runId },
+            metadata: input.metadata,
+          },
+        ],
+      })
+      return {
+        pipelineId: input.pipelineId,
+        runId: input.runId,
+        queuedAt: job!.createdAt,
+        jobId: job!.id,
+        created: true,
+      }
+    },
+  }
 }
 
 function createTestWorkflowRunDispatcher(
@@ -277,31 +339,28 @@ describe("OrchestratorWorker", () => {
       events: [makeScheduleTriggeredEvent(daily.id)],
     })
 
-    await waitFor(async () => {
-      const syncJobs = await queues.syncRuns.claim({ projectId: PROJECT_ID, workerId: "sync" })
-      const workflowJobs = await queues.workflows.claim({
-        projectId: PROJECT_ID,
-        workerId: "workflow",
-      })
-      if (syncJobs.length === 0 || workflowJobs.length === 0) return false
-
-      expect(syncJobs[0]!.job.payload.runId).toBe(
-        `sync:${sync.id}:schedule:${daily.id}:event:${sourceEvent!.id}`
-      )
-      expect(workflowJobs[0]!.job.payload).toEqual({
-        runId: `workflow:${workflow.id}:schedule:${daily.id}:event:${sourceEvent!.id}`,
-      })
-      expect(dispatches).toEqual([
-        expect.objectContaining({
-          workflowId: workflow.id,
-          input: {},
-          scheduleId: daily.id,
-          source: { type: "schedule", eventId: sourceEvent!.id },
-          correlationId: sourceEvent!.id,
-        }),
-      ])
-      return true
+    await waitFor(() => dispatches.length === 1)
+    const syncJobs = await queues.syncRuns.claim({ projectId: PROJECT_ID, workerId: "sync" })
+    const workflowJobs = await queues.workflows.claim({
+      projectId: PROJECT_ID,
+      workerId: "workflow",
     })
+
+    expect(syncJobs[0]!.job.payload.runId).toBe(
+      `sync:${sync.id}:schedule:${daily.id}:event:${sourceEvent!.id}`
+    )
+    expect(workflowJobs[0]!.job.payload).toEqual({
+      runId: `workflow:${workflow.id}:schedule:${daily.id}:event:${sourceEvent!.id}`,
+    })
+    expect(dispatches).toEqual([
+      expect.objectContaining({
+        workflowId: workflow.id,
+        input: {},
+        scheduleId: daily.id,
+        source: { type: "schedule", eventId: sourceEvent!.id },
+        correlationId: sourceEvent!.id,
+      }),
+    ])
   })
 
   test("event schedule fires only on a false-to-true transition and maps { event }", async () => {

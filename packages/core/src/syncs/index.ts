@@ -6,6 +6,13 @@ export type {
   SyncRunRequestResult,
 } from "./request"
 export { requestSyncRun } from "./request"
+export {
+  type AutomaticSyncExecutionSource,
+  type AutomaticSyncRunDispatchInput,
+  SyncRunDispatcher,
+  type SyncRunDispatcherDependencies,
+  type SyncRunDispatchPort,
+} from "./run-dispatch"
 export type {
   BatchSyncConfig,
   BatchSyncDefinitionConfig,

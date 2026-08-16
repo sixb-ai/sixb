@@ -2,7 +2,7 @@ import type { DomainEventLog, LakeStorage, Queues, SixbDefinitions, Storage } fr
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import type { LoggingService } from "@sixb/core/internal/logging"
 import {
-  bindPrimitiveExecution,
+  bindDurablePrimitiveExecution,
   type PrimitiveExecutionHost,
 } from "@sixb/core/internal/primitive-execution"
 import { QueueWorker } from "@sixb/core/internal/workers"
@@ -10,7 +10,7 @@ import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type { ClaimedQueueJob, SyncRunRequestedQueueJob } from "@sixb/core/queues"
 import { SYNC_RUN_FAILURE_CODES, type SyncRunRecord, type SyncRunStatus } from "@sixb/core/storage"
 import { runSyncJob, SyncRunAlreadyStartedError } from "./run-sync-job"
-import type { SyncJob, SyncWorkerContext } from "./types"
+import type { SyncWorkerContext } from "./types"
 
 const SOURCE = "SixbSyncWorker"
 
@@ -50,26 +50,45 @@ export class SyncWorker extends QueueWorker<
     signal: AbortSignal
   ): Promise<void> {
     const { job } = claimed
-    const syncJob: SyncJob = {
-      id: job.payload.runId ?? `${job.id}:attempt:${job.attempt}`,
-      syncId: job.payload.syncId,
-      expectedLatestVersionId: job.payload.expectedLatestVersionId,
-      commitMessage: job.payload.commitMessage,
+    const syncRuns = this.host.storage.syncRuns
+    if (!syncRuns) {
+      throw new Error("[SixbSyncWorker] Sync workers require storage.syncRuns support.")
     }
-    const execution = bindPrimitiveExecution(this.host, {
-      primitive: { kind: "sync", id: syncJob.syncId, runId: syncJob.id },
-      source: { type: "queue", queue: "syncRuns", jobId: job.id },
+    const run = await syncRuns.getById({ projectId: this.host.id, id: job.payload.runId })
+    if (!run) {
+      throw new Error(`[SixbSyncWorker] Sync run '${job.payload.runId}' was not found.`)
+    }
+
+    const durableExecution = await this.host.storage.executions.getById({
+      projectId: this.host.id,
+      id: run.executionId,
+    })
+    if (!durableExecution) {
+      throw new Error(
+        `[SixbSyncWorker] Sync run '${run.id}' references missing execution '${run.executionId}'.`
+      )
+    }
+
+    const execution = bindDurablePrimitiveExecution(this.host, {
+      execution: durableExecution,
+      primitive: { kind: "sync", id: run.syncId, runId: run.id },
     })
     const context = buildSyncContext(this.host, execution.sixb)
 
     try {
       await runSyncJob({
         runtime: context,
-        job: syncJob,
+        run,
         signal,
-        onRunStarted: (run) => emitSyncRunStarted(this.host, run),
-        onRunFinished: (run, createdVersion) =>
-          emitSyncRunFinishedEvents(this.host, run, createdVersion),
+        onRunStarted: (started) =>
+          emitSyncRunStarted(this.host, started, durableExecution.correlationId),
+        onRunFinished: (finished, createdVersion) =>
+          emitSyncRunFinishedEvents(
+            this.host,
+            finished,
+            durableExecution.correlationId,
+            createdVersion
+          ),
         onRunFailed: (error, run, failure) => {
           reportRunFailure(this.host, error, {
             projectId: this.host.id,
@@ -92,8 +111,12 @@ export class SyncWorker extends QueueWorker<
 
 async function emitSyncRunStarted(
   host: SyncWorkerHost,
-  run: Pick<SyncRunRecord, "id" | "syncId" | "startedAt">
+  run: Pick<SyncRunRecord, "id" | "syncId" | "startedAt">,
+  correlationId: string
 ): Promise<void> {
+  if (!run.startedAt) {
+    throw new Error(`[SixbSyncWorker] Sync run '${run.id}' started without a timestamp.`)
+  }
   await host.events?.emit(
     {
       events: [
@@ -106,6 +129,7 @@ async function emitSyncRunStarted(
           },
         },
       ],
+      correlationId,
     },
     { source: SOURCE }
   )
@@ -114,6 +138,7 @@ async function emitSyncRunStarted(
 async function emitSyncRunFinishedEvents(
   host: SyncWorkerHost,
   run: Pick<SyncRunRecord, "id" | "syncId" | "datasetId" | "status" | "output" | "error">,
+  correlationId: string,
   createdVersion?: DatasetVersion
 ): Promise<void> {
   await host.events?.emit(
@@ -148,6 +173,7 @@ async function emitSyncRunFinishedEvents(
           },
         },
       ],
+      correlationId,
     },
     { source: SOURCE }
   )
@@ -156,9 +182,9 @@ async function emitSyncRunFinishedEvents(
 function requireTerminalStatus(
   status: SyncRunStatus,
   context: string
-): Exclude<SyncRunStatus, "running"> {
-  if (status === "running") {
-    throw new Error(`[SixbSyncWorker] ${context} is still running.`)
+): Exclude<SyncRunStatus, "queued" | "running"> {
+  if (status === "queued" || status === "running") {
+    throw new Error(`[SixbSyncWorker] ${context} is not terminal.`)
   }
 
   return status
@@ -172,7 +198,7 @@ function assertSyncStorage(host: SyncWorkerHost): void {
 
 function buildSyncContext(
   host: SyncWorkerHost,
-  sixb: ReturnType<typeof bindPrimitiveExecution>["sixb"]
+  sixb: ReturnType<typeof bindDurablePrimitiveExecution>["sixb"]
 ): SyncWorkerContext {
   const syncRunsStorage = host.storage.syncRuns
   if (!syncRunsStorage) {

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { type SixbFailure, SyncRunError, type SyncRunFailureCode } from "@sixb/core/storage"
+import { createTestSyncExecution, startTestSyncRun } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
 
@@ -24,7 +25,7 @@ describe("PgSyncRunStorage", () => {
   })
 
   test("starts and finishes runs with checkpoints", async () => {
-    await storage.syncRuns.start({
+    await startTestSyncRun(storage, {
       id: "run-1",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -59,7 +60,7 @@ describe("PgSyncRunStorage", () => {
       seenIds: ["evt-1", "evt-2"],
     })
 
-    await storage.syncRuns.start({
+    await startTestSyncRun(storage, {
       id: "run-null",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -81,7 +82,7 @@ describe("PgSyncRunStorage", () => {
     expect(nullFinished.checkpoint).toBeNull()
     expect(storedNull?.checkpoint).toBeNull()
 
-    await storage.syncRuns.start({
+    await startTestSyncRun(storage, {
       id: "run-empty",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -98,7 +99,7 @@ describe("PgSyncRunStorage", () => {
     expect(emptyFinished.output).toBeUndefined()
     expect(emptyFinished.checkpoint).toEqual({ cursor: "cursor-empty" })
 
-    await storage.syncRuns.start({
+    await startTestSyncRun(storage, {
       id: "run-empty-snapshot",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -113,7 +114,7 @@ describe("PgSyncRunStorage", () => {
     })
     expect(emptySnapshotFinished.output).toBeUndefined()
 
-    const mergeStarted = await storage.syncRuns.start({
+    const mergeStarted = await startTestSyncRun(storage, {
       id: "run-merge-noop",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -136,7 +137,7 @@ describe("PgSyncRunStorage", () => {
   })
 
   test("stores failures and supports filtered paging", async () => {
-    await storage.syncRuns.start({
+    await startTestSyncRun(storage, {
       id: "run-1",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -152,7 +153,7 @@ describe("PgSyncRunStorage", () => {
       error: FAILURE,
     })
 
-    await storage.syncRuns.start({
+    await startTestSyncRun(storage, {
       id: "run-2",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -161,7 +162,7 @@ describe("PgSyncRunStorage", () => {
       startedAt: new Date("2026-04-06T16:00:00.000Z"),
     })
 
-    await storage.syncRuns.start({
+    await startTestSyncRun(storage, {
       id: "run-3",
       projectId: "my-app",
       syncId: "sync-customers",
@@ -202,7 +203,7 @@ describe("PgSyncRunStorage", () => {
   })
 
   test("lists the latest run for multiple sync ids", async () => {
-    await storage.syncRuns.start({
+    await startTestSyncRun(storage, {
       id: "run-orders-a",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -210,7 +211,7 @@ describe("PgSyncRunStorage", () => {
       mode: "snapshot",
       startedAt: new Date("2026-04-06T16:00:00.000Z"),
     })
-    await storage.syncRuns.start({
+    await startTestSyncRun(storage, {
       id: "run-orders-z",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -218,7 +219,7 @@ describe("PgSyncRunStorage", () => {
       mode: "snapshot",
       startedAt: new Date("2026-04-06T16:00:00.000Z"),
     })
-    await storage.syncRuns.start({
+    await startTestSyncRun(storage, {
       id: "run-customers",
       projectId: "my-app",
       syncId: "sync-customers",
@@ -226,7 +227,7 @@ describe("PgSyncRunStorage", () => {
       mode: "append",
       startedAt: new Date("2026-04-06T15:00:00.000Z"),
     })
-    await storage.syncRuns.start({
+    await startTestSyncRun(storage, {
       id: "run-other-project",
       projectId: "other-app",
       syncId: "sync-orders",
@@ -244,7 +245,7 @@ describe("PgSyncRunStorage", () => {
   })
 
   test("rejects duplicates, missing runs, and mismatched success outputs", async () => {
-    await storage.syncRuns.start({
+    await startTestSyncRun(storage, {
       id: "run-1",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -256,9 +257,6 @@ describe("PgSyncRunStorage", () => {
       storage.syncRuns.start({
         id: "run-1",
         projectId: "my-app",
-        syncId: "sync-orders",
-        datasetId: "raw.erp.orders",
-        mode: "snapshot",
       })
     ).rejects.toBeInstanceOf(SyncRunError)
 
@@ -281,6 +279,25 @@ describe("PgSyncRunStorage", () => {
           datasetId: "raw.erp.invoices",
           versionId: "ver_1",
         },
+      })
+    ).rejects.toBeInstanceOf(SyncRunError)
+  })
+
+  test("rejects a run whose execution authorizes a different Sync", async () => {
+    const executionId = await createTestSyncExecution(storage.executions, {
+      projectId: "my-app",
+      syncId: "sync-customers",
+      runId: "run-1",
+    })
+
+    await expect(
+      storage.syncRuns.queue({
+        id: "run-1",
+        projectId: "my-app",
+        executionId,
+        syncId: "sync-orders",
+        datasetId: "raw.erp.orders",
+        mode: "snapshot",
       })
     ).rejects.toBeInstanceOf(SyncRunError)
   })

@@ -1,15 +1,17 @@
-import { randomUUID } from "node:crypto"
 import { assertAuthorized } from "../authorization"
+import {
+  createPrimitiveExecutionRecord,
+  ensureExecutionRecord,
+  executionRecordInputFromRuntime,
+} from "../execution/durable"
+import type { ExecutionContext } from "../execution/types"
 import type { SixbRuntimeContext } from "../runtime/types"
 import { PipelineError } from "./errors"
+import { dispatchPipelineRun } from "./run-dispatch"
 import type { PipelineDefinition } from "./types"
 
 export interface PipelineRunRequestOptions {
-  /**
-   * Identity of the run to create. Deduplicated when a worker claims the job, not here: two requests
-   * carrying the same id enqueue two jobs, and the second loses to the unique run id. So one run
-   * happens, but this call cannot tell you whether it was yours.
-   */
+  /** Stable identity used to make dispatch idempotent. */
   readonly runId?: string
 }
 
@@ -20,9 +22,10 @@ export interface RequestPipelineRunInput extends PipelineRunRequestOptions {
 export interface PipelineRunRequestResult {
   readonly pipelineId: string
   readonly runId: string
-  /** When the job was enqueued. Not persisted — the run row records `startedAt` instead. */
+  /** Durable time at which the run entered the queue. */
   readonly queuedAt: string
   readonly jobId?: string
+  readonly created: boolean
 }
 
 /**
@@ -31,11 +34,11 @@ export interface PipelineRunRequestResult {
  * Operates on an already-resolved definition and the shared runtime context, so the HTTP route and
  * the runtime verb cannot drift apart.
  *
- * Like `requestSyncRun` and unlike `requestWorkflowRun`, the run row is created by the worker that
- * claims the job — see the note there for why the two cannot be aligned by adding a field.
+ * The immutable child execution and queued run are persisted before queue publication.
  */
 export async function requestPipelineRun(
   runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
   pipeline: PipelineDefinition,
   options: PipelineRunRequestOptions = {}
 ): Promise<PipelineRunRequestResult> {
@@ -49,23 +52,26 @@ export async function requestPipelineRun(
     throw new PipelineError("[Sixb] Pipeline run queue is not configured.")
   }
 
-  const runId = createPipelineRunId(options.runId)
-  const queuedAt = new Date().toISOString()
-  const [job] = await queue.enqueue({
+  return dispatchPipelineRun({
+    errorReporterHost: runtime,
     projectId: runtime.projectId,
-    jobs: [{ type: "pipeline.run.requested", payload: { pipelineId: pipeline.id, runId } }],
+    pipeline,
+    storage: runtime.storage,
+    queue,
+    ...options,
+    createExecution: async (executionId, runId) => {
+      const caller = await ensureExecutionRecord(
+        runtime.storage.executions,
+        executionRecordInputFromRuntime({
+          execution,
+          runtimeAuthorization: runtime.runtimeAuthorization,
+        })
+      )
+      return createPrimitiveExecutionRecord({
+        id: executionId,
+        primitive: { kind: "pipeline", id: pipeline.id, runId },
+        origin: { type: "execution", parent: caller },
+      })
+    },
   })
-
-  return { pipelineId: pipeline.id, runId, queuedAt, jobId: job?.id }
-}
-
-function createPipelineRunId(runId: string | undefined): string {
-  if (runId !== undefined) {
-    if (!runId.trim()) {
-      throw new PipelineError("[Sixb] Pipeline run id must not be empty")
-    }
-    return runId
-  }
-
-  return `run_${randomUUID()}`
 }

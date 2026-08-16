@@ -266,26 +266,25 @@ interface SyncCommitResult {
 }
 
 /**
- * Run one sync job end to end using a caller-supplied run id.
+ * Run one already-persisted Sync run end to end.
  *
- * The worker creates the operational sync-run record, streams source values into lake storage,
- * commits or reuses a dataset version when one exists, and then finalizes the run record. It does
- * not own scheduling, retries, or run-id generation.
+ * Dispatch owns identity and queueing. The worker only transitions the durable run from queued to
+ * running, streams source values, and records its terminal outcome.
  */
 export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult> {
-  const { runtime, job } = input
+  const { runtime, run } = input
+  const job = {
+    id: run.id,
+    syncId: run.syncId,
+    expectedLatestVersionId: run.expectedLatestVersionId,
+    commitMessage: run.commitMessage,
+  }
   const signal = input.signal ?? new AbortController().signal
   const { syncRunsStorage, lakeStorage, blobs: blobStorage } = runtime
 
-  const sync = runtime.syncs.getById(job.syncId)
-  if (!sync) {
-    throw new Error(`[SixbSyncWorker] Unknown sync '${job.syncId}'.`)
-  }
-
-  const dataset = runtime.datasets.getById(sync.target.dataset.id)
-  if (!dataset) {
+  if (run.projectId !== runtime.id) {
     throw new Error(
-      `[SixbSyncWorker] Sync '${sync.id}' targets unknown dataset '${sync.target.dataset.id}'.`
+      `[SixbSyncWorker] Sync run '${run.id}' belongs to project '${run.projectId}', not '${runtime.id}'.`
     )
   }
 
@@ -296,15 +295,10 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
     startedRun = await syncRunsStorage.start({
       projectId: runtime.id,
       id: job.id,
-      syncId: sync.id,
-      datasetId: dataset.id,
-      mode: sync.config.mode,
-      expectedLatestVersionId: job.expectedLatestVersionId,
-      commitMessage: job.commitMessage,
     })
   } catch (error) {
     const existing = await syncRunsStorage.getById({ projectId: runtime.id, id: job.id })
-    if (existing?.syncId === sync.id && existing.datasetId === dataset.id) {
+    if (existing?.syncId === run.syncId && existing.executionId === run.executionId) {
       throw new SyncRunAlreadyStartedError(existing)
     }
     throw error
@@ -321,6 +315,23 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
   let committedVersion: DatasetVersion | undefined
 
   try {
+    const sync = runtime.syncs.getById(run.syncId)
+    if (!sync) {
+      throw new Error(`[SixbSyncWorker] Unknown sync '${run.syncId}'.`)
+    }
+    if (sync.target.dataset.id !== run.datasetId || sync.config.mode !== run.mode) {
+      throw new Error(
+        `[SixbSyncWorker] Sync run '${run.id}' no longer matches Sync '${sync.id}' configuration.`
+      )
+    }
+
+    const dataset = runtime.datasets.getById(run.datasetId)
+    if (!dataset) {
+      throw new Error(
+        `[SixbSyncWorker] Sync '${sync.id}' targets unknown dataset '${run.datasetId}'.`
+      )
+    }
+
     throwIfAborted(signal)
     await lakeStorage.createDataset(dataset)
 
@@ -436,7 +447,7 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
             syncId: sync.id,
             datasetId: dataset.id,
             mode: sync.config.mode,
-            startedAt: startedRun.startedAt,
+            startedAt: requireStartedAt(job.id, startedRun.startedAt),
             finishedAt,
             rowsRead,
             ...(version ? { version } : {}),
@@ -500,7 +511,7 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
       syncId: sync.id,
       datasetId: dataset.id,
       mode: sync.config.mode,
-      startedAt: startedRun.startedAt,
+      startedAt: requireStartedAt(job.id, startedRun.startedAt),
       finishedAt,
       rowsRead,
     }
@@ -517,26 +528,26 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
         const failureError =
           status === "failed"
             ? translateSyncExecutionError(error, {
-                syncId: sync.id,
+                syncId: run.syncId,
                 runId: job.id,
-                datasetId: dataset.id,
+                datasetId: run.datasetId,
               })
             : error
         const failure = captureSixbFailure(failureError, {
           allowedCodes: SYNC_RUN_FAILURE_CODES,
           defaultCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
-          details: { syncId: sync.id, runId: job.id, datasetId: dataset.id },
+          details: { syncId: run.syncId, runId: job.id, datasetId: run.datasetId },
         })
-        const run = await syncRunsStorage.finish({
+        const failedRun = await syncRunsStorage.finish({
           projectId: runtime.id,
           id: job.id,
           status,
           rowsRead,
           error: failure,
         })
-        await notifyRunFinished(input.onRunFinished, run)
-        if (status === "failed" && run.status === "failed") {
-          input.onRunFailed?.(error, run, failure)
+        await notifyRunFinished(input.onRunFinished, failedRun)
+        if (status === "failed" && failedRun.status === "failed") {
+          input.onRunFailed?.(error, failedRun, failure)
         }
       } catch {
         // The run did not transition to the requested terminal status.
@@ -561,4 +572,13 @@ async function notifyRunFinished(
     // invariant in a custom lifecycle handler and must not change an already durable outcome.
     console.error("[SixbSyncWorker] Sync run lifecycle handler failed:", error)
   }
+}
+
+function requireStartedAt(runId: string, startedAt: Date | undefined): Date {
+  if (startedAt) return startedAt
+  throw createSixbError(
+    "internal.unexpected",
+    `[SixbSyncWorker] Sync run '${runId}' started without a startedAt timestamp.`,
+    { details: { runId } }
+  )
 }

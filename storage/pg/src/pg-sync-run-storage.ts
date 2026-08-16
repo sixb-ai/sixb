@@ -1,16 +1,23 @@
 import type { JsonValue } from "@sixb/core"
 import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/internal/errors"
+import { assertSyncRunExecution } from "@sixb/core/internal/sync-run-storage-provider"
 import type {
+  ExecutionStorage,
   FinishSyncRunInput,
   ListLatestSyncRunsInput,
   ListLatestSyncRunsResult,
   ListSyncRunsInput,
   ListSyncRunsResult,
+  QueueSyncRunInput,
   StartSyncRunInput,
   SyncRunRecord,
   SyncRunStorage,
 } from "@sixb/core/storage"
-import { SYNC_RUN_FAILURE_CODES, SyncRunError } from "@sixb/core/storage"
+import {
+  canRequeueSyncRunAfterEnqueueFailure,
+  SYNC_RUN_FAILURE_CODES,
+  SyncRunError,
+} from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import type { SqlParameter } from "./pg-client"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"
@@ -18,29 +25,43 @@ import { isUniqueViolation } from "./storage-errors"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 export class PgSyncRunStorage implements SyncRunStorage {
-  constructor(private readonly sql: PgStoreClient) {}
+  constructor(
+    private readonly sql: PgStoreClient,
+    private readonly executions: ExecutionStorage
+  ) {}
 
-  async start(input: StartSyncRunInput): Promise<SyncRunRecord> {
+  async queue(input: QueueSyncRunInput): Promise<SyncRunRecord> {
+    await assertSyncRunExecution({
+      executions: this.executions,
+      projectId: input.projectId,
+      executionId: input.executionId,
+      runId: input.id,
+      syncId: input.syncId,
+    })
     try {
       const [row] = await this.sql<DatabaseRow[]>`
         INSERT INTO sync_runs (
           project_id,
           id,
+          execution_id,
           sync_id,
           dataset_id,
           mode,
           status,
+          queued_at,
           started_at,
           expected_latest_version_id,
           commit_message
         ) VALUES (
           ${input.projectId},
           ${input.id},
+          ${input.executionId},
           ${input.syncId},
           ${input.datasetId},
           ${input.mode},
-          ${"running"},
-          ${input.startedAt ?? new Date()},
+          ${"queued"},
+          ${input.queuedAt ?? new Date()},
+          ${null},
           ${input.expectedLatestVersionId ?? null},
           ${input.commitMessage ?? null}
         )
@@ -50,13 +71,57 @@ export class PgSyncRunStorage implements SyncRunStorage {
       return rowToSyncRunRecord(row)
     } catch (error) {
       if (isUniqueViolation(error)) {
+        return this.requeueAfterEnqueueFailure(input)
+      }
+
+      throw error
+    }
+  }
+
+  private async requeueAfterEnqueueFailure(input: QueueSyncRunInput): Promise<SyncRunRecord> {
+    return runPgTransaction(this.sql, async (tx) => {
+      const [existing] = await tx<DatabaseRow[]>`
+        SELECT *, checkpoint IS NOT NULL AS checkpoint_present FROM sync_runs
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+        FOR UPDATE
+      `
+      if (!existing || !canRequeueSyncRunAfterEnqueueFailure(rowToSyncRunRecord(existing), input)) {
         throw new SyncRunError(
           `[SixbPg] Sync run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
 
-      throw error
+      const [updated] = await tx<DatabaseRow[]>`
+        UPDATE sync_runs
+        SET status = ${"queued"}, queued_at = ${input.queuedAt ?? new Date()},
+            started_at = ${null}, finished_at = ${null}, rows_read = ${null},
+            output_version_id = ${null}, error = ${null}, checkpoint = ${null}
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+        RETURNING *, checkpoint IS NOT NULL AS checkpoint_present
+      `
+      return rowToSyncRunRecord(updated)
+    })
+  }
+
+  async start(input: StartSyncRunInput): Promise<SyncRunRecord> {
+    const [updated] = await this.sql<DatabaseRow[]>`
+      UPDATE sync_runs
+      SET status = ${"running"}, started_at = ${input.startedAt ?? new Date()},
+          error = ${null}
+      WHERE project_id = ${input.projectId} AND id = ${input.id} AND status = ${"queued"}
+      RETURNING *, checkpoint IS NOT NULL AS checkpoint_present
+    `
+    if (updated) return rowToSyncRunRecord(updated)
+
+    const existing = await this.getById({ projectId: input.projectId, id: input.id })
+    if (!existing) {
+      throw new SyncRunError(
+        `[SixbPg] Sync run '${input.id}' not found for project '${input.projectId}'.`
+      )
     }
+    throw new SyncRunError(
+      `[SixbPg] Sync run '${input.id}' cannot start from status '${existing.status}'.`
+    )
   }
 
   async finish(input: FinishSyncRunInput): Promise<SyncRunRecord> {
@@ -69,6 +134,17 @@ export class PgSyncRunStorage implements SyncRunStorage {
       if (!existing) {
         throw new SyncRunError(
           `[SixbPg] Sync run '${input.id}' not found for project '${input.projectId}'.`
+        )
+      }
+
+      const enqueueFailure =
+        input.status === "failed" && input.error.code === "queue.enqueue_failed"
+      if (
+        (enqueueFailure && existing.status !== "queued") ||
+        (!enqueueFailure && existing.status !== "running")
+      ) {
+        throw new SyncRunError(
+          `[SixbPg] Sync run '${input.id}' cannot finish from status '${existing.status}'.`
         )
       }
 
@@ -154,7 +230,13 @@ export class PgSyncRunStorage implements SyncRunStorage {
       params.push(input.datasetId)
     }
 
-    index = appendRunListFilters(whereClauses, params, index, input)
+    index = appendRunListFilters(
+      whereClauses,
+      params,
+      index,
+      input,
+      "COALESCE(started_at, queued_at)"
+    )
 
     const { rows, total, hasMore } = await queryRunList<DatabaseRow>({
       sql: this.sql,
@@ -200,11 +282,13 @@ function rowToSyncRunRecord(row: DatabaseRow): SyncRunRecord {
   return {
     id: row.id,
     projectId: row.project_id,
+    executionId: row.execution_id,
     syncId: row.sync_id,
     datasetId: row.dataset_id,
     mode: row.mode,
     status: row.status,
-    startedAt: new Date(row.started_at),
+    queuedAt: new Date(row.queued_at),
+    startedAt: row.started_at ? new Date(row.started_at) : undefined,
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     rowsRead: row.rows_read != null ? Number(row.rows_read) : undefined,
     output: row.output_version_id
@@ -233,11 +317,13 @@ function hasCheckpoint(row: DatabaseRow): boolean {
 interface DatabaseRow {
   project_id: string
   id: string
+  execution_id: string
   sync_id: string
   dataset_id: string
   mode: SyncRunRecord["mode"]
   status: SyncRunRecord["status"]
-  started_at: Date | string
+  queued_at: Date | string
+  started_at: Date | string | null
   finished_at: Date | string | null
   rows_read: number | string | null
   output_version_id: string | null

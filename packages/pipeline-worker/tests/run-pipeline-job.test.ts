@@ -12,6 +12,7 @@ import {
   definePipeline,
   definePipelineStep,
   InMemoryLakeStorage,
+  InMemoryStorage,
 } from "@sixb/core"
 import type {
   DatasetWriteMode,
@@ -19,14 +20,17 @@ import type {
   LakeSqlTransformCapabilities,
 } from "@sixb/core/lake-storage"
 import type {
+  ExecutionStorage,
   FinishPipelineRunInput,
   PipelineRunRecord,
   PipelineRunStorage,
 } from "@sixb/core/storage"
 import { InMemoryPipelineRunStorage } from "@sixb/core/storage"
 import { createPipelineBookkeepingError, createStepBookkeepingError } from "../src/errors"
-import { runPipelineJob } from "../src/run-pipeline-job"
-import type { PipelineWorkerContext } from "../src/types"
+import { runPipelineJob as runPipelineJobWithDurableRun } from "../src/run-pipeline-job"
+import type { PipelineWorkerContext, RunPipelineJobInput } from "../src/types"
+
+const executionsByRunStorage = new WeakMap<PipelineRunStorage, ExecutionStorage>()
 
 const rawCustomersDataset = defineDataset("raw.customers", {
   schema: [col("id", "string"), col("name", "string"), col("email", "string", { nullable: true })],
@@ -53,7 +57,7 @@ function createRuntime(options: {
 
   return {
     id: "project-1",
-    pipelineRunsStorage: options.pipelineRunsStorage ?? new InMemoryPipelineRunStorage(),
+    pipelineRunsStorage: options.pipelineRunsStorage ?? createPipelineRunStorage(),
     lakeStorage: options.lakeStorage ?? new InMemoryLakeStorage(),
     pipelines: {
       getById(pipelineId) {
@@ -66,6 +70,56 @@ function createRuntime(options: {
       },
     },
   }
+}
+
+function createPipelineRunStorage(): PipelineRunStorage {
+  const provider = new InMemoryStorage()
+  executionsByRunStorage.set(provider.pipelineRuns, provider.executions)
+  return provider.pipelineRuns
+}
+
+interface TestPipelineJob {
+  readonly id: string
+  readonly pipelineId: string
+}
+
+type TestRunPipelineJobInput = Omit<RunPipelineJobInput, "run"> & {
+  readonly job: TestPipelineJob
+}
+
+async function queueTestPipelineRun(runtime: PipelineWorkerContext, job: TestPipelineJob) {
+  const existing = await runtime.pipelineRunsStorage.getById({
+    projectId: runtime.id,
+    id: job.id,
+  })
+  if (existing) return existing
+
+  const executions = executionsByRunStorage.get(runtime.pipelineRunsStorage)
+  if (!executions) throw new Error("[Test] Pipeline run storage has no execution storage.")
+  const executionId = `exec:${job.id}`
+  await executions.create({
+    id: executionId,
+    projectId: runtime.id,
+    executor: { type: "primitive", kind: "pipeline", runId: job.id },
+    source: { type: "schedule", eventId: `event:${job.id}` },
+    correlationId: `correlation:${job.id}`,
+    authorizationRef: {
+      type: "trustedPrimitive",
+      primitive: { kind: "pipeline", id: job.pipelineId, runId: job.id },
+    },
+  })
+  return runtime.pipelineRunsStorage.queue({
+    id: job.id,
+    projectId: runtime.id,
+    executionId,
+    pipelineId: job.pipelineId,
+  })
+}
+
+async function runPipelineJob(input: TestRunPipelineJobInput) {
+  const { job, ...options } = input
+  const run = await queueTestPipelineRun(input.runtime, job)
+  return runPipelineJobWithDurableRun({ ...options, run })
 }
 
 async function seedDatasetVersion(
@@ -268,7 +322,7 @@ describe("runPipelineJob", () => {
       .output(customersDataset)
       .run(async () => {})
     const pipeline = definePipeline("customers").then(cleanStep)
-    const pipelineRunsStorage = new InMemoryPipelineRunStorage()
+    const pipelineRunsStorage = createPipelineRunStorage()
     const runtime = createRuntime({
       pipelines: [pipeline],
       datasets: [rawCustomersDataset, customersDataset],
@@ -374,7 +428,7 @@ describe("runPipelineJob", () => {
         await output.writeRows(rows)
       })
     const pipeline = definePipeline("customers").then(cleanStep)
-    const pipelineRunsStorage = new InMemoryPipelineRunStorage()
+    const pipelineRunsStorage = createPipelineRunStorage()
     const runtime = createRuntime({
       pipelines: [pipeline],
       datasets: [rawCustomersDataset, customersDataset],
@@ -523,7 +577,7 @@ describe("runPipelineJob", () => {
         throw new Error("stats exploded")
       })
     const pipeline = definePipeline("customers").then(cleanStep).then(failingStep)
-    const pipelineRunsStorage = new InMemoryPipelineRunStorage()
+    const pipelineRunsStorage = createPipelineRunStorage()
     const runtime = createRuntime({
       pipelines: [pipeline],
       datasets: [rawCustomersDataset, customersDataset, customerStatsDataset],
@@ -702,7 +756,7 @@ describe("runPipelineJob", () => {
   test("fails SQL steps clearly when lake storage has no SQL transform support", async () => {
     const lakeStorage = new InMemoryLakeStorage()
     await seedDatasetVersion(lakeStorage, rawCustomersDataset, [{ id: "cust_1", name: "Ada" }])
-    const pipelineRunsStorage = new InMemoryPipelineRunStorage()
+    const pipelineRunsStorage = createPipelineRunStorage()
 
     const statsStep = definePipelineStep("customer-stats")
       .inputs({ rawCustomers: rawCustomersDataset })

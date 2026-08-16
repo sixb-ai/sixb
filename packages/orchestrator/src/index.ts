@@ -6,6 +6,10 @@ export type {
   OrchestratorDispatchers,
   OrchestratorRoutes,
   OrchestratorRuntimeOptions,
+  PipelineDispatcherPort,
+  PipelineDispatchInput,
+  SyncDispatcherPort,
+  SyncDispatchInput,
   WorkflowDispatcherPort,
   WorkflowDispatchInput,
 } from "./types"

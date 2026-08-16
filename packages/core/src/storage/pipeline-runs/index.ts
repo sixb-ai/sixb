@@ -1,4 +1,5 @@
 export { PipelineRunError } from "./errors"
+export { canRequeuePipelineRunAfterEnqueueFailure } from "./idempotency"
 export { InMemoryPipelineRunStorage } from "./in-memory"
 export type {
   FinishPipelineRunInput,
@@ -14,6 +15,8 @@ export type {
   PipelineRunStatus,
   PipelineRunStorage,
   PipelineStepRunRecord,
+  PipelineStepRunStatus,
+  QueuePipelineRunInput,
   StartPipelineRunInput,
   StartPipelineStepRunInput,
 } from "./types"
