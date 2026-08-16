@@ -27,9 +27,14 @@ export class PipelineRunAlreadyStartedError extends Error {
 }
 
 export async function runPipelineJob(input: RunPipelineJobInput): Promise<PipelineRunResult> {
-  const { runtime, job } = input
+  const { runtime, run: durableRun } = input
+  const job = { id: durableRun.id, pipelineId: durableRun.pipelineId }
   const signal = input.signal ?? new AbortController().signal
-  const pipeline = requirePipeline(runtime.pipelines.getById(job.pipelineId), job)
+  if (durableRun.projectId !== runtime.id) {
+    throw new Error(
+      `[SixbPipelineWorker] Pipeline run '${durableRun.id}' belongs to project '${durableRun.projectId}', not '${runtime.id}'.`
+    )
+  }
   const logSession = resolveLoggingService(runtime.id, runtime.logging).startExecution({
     kind: "pipeline",
     id: job.id,
@@ -46,19 +51,23 @@ export async function runPipelineJob(input: RunPipelineJobInput): Promise<Pipeli
       startedRun = await runtime.pipelineRunsStorage.start({
         projectId: runtime.id,
         id: job.id,
-        pipelineId: pipeline.id,
       })
     } catch (error) {
       const existing = await runtime.pipelineRunsStorage.getById({
         projectId: runtime.id,
         id: job.id,
       })
-      if (existing?.pipelineId === pipeline.id) {
+      if (
+        existing?.pipelineId === durableRun.pipelineId &&
+        existing.executionId === durableRun.executionId
+      ) {
         throw new PipelineRunAlreadyStartedError(existing)
       }
       throw error
     }
     await input.onRunStarted?.(startedRun)
+
+    const pipeline = requirePipeline(runtime.pipelines.getById(job.pipelineId), job)
 
     for (const [stepIndex, node] of pipeline.graph.nodes.entries()) {
       const stepResult = await runStep({
@@ -127,7 +136,7 @@ export async function runPipelineJob(input: RunPipelineJobInput): Promise<Pipeli
         const failure = captureSixbFailure(error, {
           allowedCodes: PIPELINE_RUN_FAILURE_CODES,
           defaultCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
-          details: { pipelineId: pipeline.id, runId: job.id },
+          details: { pipelineId: durableRun.pipelineId, runId: job.id },
         })
         const run = await runtime.pipelineRunsStorage.finish({
           projectId: runtime.id,

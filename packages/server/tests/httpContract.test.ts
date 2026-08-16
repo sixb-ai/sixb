@@ -39,6 +39,8 @@ import {
   createTestSixb,
   createTestWorkflowExecution,
   queueTestActionRun,
+  startTestPipelineRun,
+  startTestSyncRun,
 } from "@sixb/core/testing"
 import { SqliteStorage } from "@sixb/sqlite"
 import { SixbServer } from "../src/server"
@@ -394,7 +396,7 @@ describe("SixbServer HTTP contract", () => {
     ])
     const committedVersion = await write.commit({ commitMessage: "previous import" })
 
-    await sixb.storage.syncRuns!.start({
+    await startTestSyncRun(sixb.storage, {
       id: "run-previous",
       projectId: "contract-project",
       syncId: "sync-github-events",
@@ -416,7 +418,7 @@ describe("SixbServer HTTP contract", () => {
       checkpoint: { cursor: "secret-sync-cursor" },
     })
 
-    await sixb.storage.pipelineRuns!.start({
+    await startTestPipelineRun(sixb.storage, {
       id: "pipeline-run-previous",
       projectId: "contract-project",
       pipelineId: "github-events-pipeline",
@@ -2400,15 +2402,35 @@ describe("SixbServer HTTP contract", () => {
       expect(requestSyncRunBody.jobId).toBeTruthy()
       expect(requestSyncRunBody.syncId).toBe("sync-github-events")
 
+      const durableSyncRun = await sixb.storage.syncRuns!.getById({
+        projectId: sixb.id,
+        id: requestSyncRunBody.runId,
+      })
+      const durableSyncExecution = await sixb.storage.executions.getById({
+        projectId: sixb.id,
+        id: durableSyncRun!.executionId,
+      })
+      expect(durableSyncRun).toMatchObject({ status: "queued", startedAt: undefined })
+      expect(durableSyncExecution).toMatchObject({
+        executor: { type: "primitive", kind: "sync", runId: requestSyncRunBody.runId },
+        source: { type: "execution" },
+        parentExecutionId: expect.any(String),
+        authorizationRef: {
+          type: "trustedPrimitive",
+          primitive: {
+            kind: "sync",
+            id: "sync-github-events",
+            runId: requestSyncRunBody.runId,
+          },
+        },
+      })
+
       const [queuedSyncRun] = await sixb.queues.syncRuns.claim({
         projectId: sixb.id,
         workerId: "contract-test",
       })
       expect(queuedSyncRun?.job.payload).toEqual({
-        syncId: "sync-github-events",
         runId: requestSyncRunBody.runId,
-        expectedLatestVersionId: undefined,
-        commitMessage: "manual import",
       })
 
       const requestPipelineRunResponse = await fetch(
@@ -2425,12 +2447,34 @@ describe("SixbServer HTTP contract", () => {
       expect(requestPipelineRunBody.jobId).toBeTruthy()
       expect(requestPipelineRunBody.pipelineId).toBe("github-events-pipeline")
 
+      const durablePipelineRun = await sixb.storage.pipelineRuns!.getById({
+        projectId: sixb.id,
+        id: requestPipelineRunBody.runId,
+      })
+      const durablePipelineExecution = await sixb.storage.executions.getById({
+        projectId: sixb.id,
+        id: durablePipelineRun!.executionId,
+      })
+      expect(durablePipelineRun).toMatchObject({ status: "queued", startedAt: undefined })
+      expect(durablePipelineExecution).toMatchObject({
+        executor: { type: "primitive", kind: "pipeline", runId: requestPipelineRunBody.runId },
+        source: { type: "execution" },
+        parentExecutionId: expect.any(String),
+        authorizationRef: {
+          type: "trustedPrimitive",
+          primitive: {
+            kind: "pipeline",
+            id: "github-events-pipeline",
+            runId: requestPipelineRunBody.runId,
+          },
+        },
+      })
+
       const [queuedPipelineRun] = await sixb.queues.pipelines.claim({
         projectId: sixb.id,
         workerId: "contract-test",
       })
       expect(queuedPipelineRun?.job.payload).toEqual({
-        pipelineId: "github-events-pipeline",
         runId: requestPipelineRunBody.runId,
       })
 

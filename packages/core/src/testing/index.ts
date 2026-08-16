@@ -76,6 +76,11 @@ export {
   runOntologyStorageContractSuite,
 } from "./ontology-storage-contract"
 export {
+  createTestPipelineExecution,
+  queueTestPipelineRun,
+  startTestPipelineRun,
+} from "./pipeline-execution"
+export {
   type ProjectionRunStorageContractSuiteOptions,
   runProjectionRunStorageContractSuite,
 } from "./projection-run-storage-contract"
@@ -88,6 +93,11 @@ export {
   type SandboxesContractCapabilities,
   type SandboxesContractSuiteOptions,
 } from "./sandboxes-contract"
+export {
+  createTestSyncExecution,
+  queueTestSyncRun,
+  startTestSyncRun,
+} from "./sync-execution"
 export {
   runWebhookDeliveryStorageContractSuite,
   type WebhookDeliveryStorageContractSuiteOptions,

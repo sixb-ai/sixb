@@ -158,6 +158,8 @@ export type {
   PipelineRunStatus,
   PipelineRunStorage,
   PipelineStepRunRecord,
+  PipelineStepRunStatus,
+  QueuePipelineRunInput,
   StartPipelineRunInput,
   StartPipelineStepRunInput,
 } from "./pipeline-runs"
@@ -196,6 +198,7 @@ export type {
   FinishSyncRunInput,
   ListSyncRunsInput,
   ListSyncRunsResult,
+  QueueSyncRunInput,
   StartSyncRunInput,
   SyncRunFailureCode,
   SyncRunMode,

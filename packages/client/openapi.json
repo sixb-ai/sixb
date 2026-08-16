@@ -6054,7 +6054,10 @@
                           },
                           "status": {
                             "type": "string",
-                            "enum": ["running", "succeeded", "failed", "cancelled"]
+                            "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                          },
+                          "queuedAt": {
+                            "type": "string"
                           },
                           "startedAt": {
                             "type": "string"
@@ -6092,6 +6095,7 @@
                                 "enum": [
                                   "internal.unexpected",
                                   "runtime.cancelled",
+                                  "queue.enqueue_failed",
                                   "sync.execution_failed"
                                 ]
                               },
@@ -6145,7 +6149,7 @@
                           "datasetId",
                           "mode",
                           "status",
-                          "startedAt"
+                          "queuedAt"
                         ],
                         "additionalProperties": false,
                         "nullable": true
@@ -6324,7 +6328,10 @@
                         },
                         "status": {
                           "type": "string",
-                          "enum": ["running", "succeeded", "failed", "cancelled"]
+                          "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                        },
+                        "queuedAt": {
+                          "type": "string"
                         },
                         "startedAt": {
                           "type": "string"
@@ -6362,6 +6369,7 @@
                               "enum": [
                                 "internal.unexpected",
                                 "runtime.cancelled",
+                                "queue.enqueue_failed",
                                 "sync.execution_failed"
                               ]
                             },
@@ -6415,7 +6423,7 @@
                         "datasetId",
                         "mode",
                         "status",
-                        "startedAt"
+                        "queuedAt"
                       ],
                       "additionalProperties": false,
                       "nullable": true
@@ -6475,7 +6483,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["running", "succeeded", "failed", "cancelled"]
+              "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
             }
           },
           {
@@ -6551,7 +6559,10 @@
                           },
                           "status": {
                             "type": "string",
-                            "enum": ["running", "succeeded", "failed", "cancelled"]
+                            "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                          },
+                          "queuedAt": {
+                            "type": "string"
                           },
                           "startedAt": {
                             "type": "string"
@@ -6589,6 +6600,7 @@
                                 "enum": [
                                   "internal.unexpected",
                                   "runtime.cancelled",
+                                  "queue.enqueue_failed",
                                   "sync.execution_failed"
                                 ]
                               },
@@ -6642,7 +6654,7 @@
                           "datasetId",
                           "mode",
                           "status",
-                          "startedAt"
+                          "queuedAt"
                         ],
                         "additionalProperties": false
                       }
@@ -7117,7 +7129,10 @@
                           },
                           "status": {
                             "type": "string",
-                            "enum": ["running", "succeeded", "failed", "cancelled"]
+                            "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                          },
+                          "queuedAt": {
+                            "type": "string"
                           },
                           "startedAt": {
                             "type": "string"
@@ -7146,6 +7161,7 @@
                                 "enum": [
                                   "internal.unexpected",
                                   "runtime.cancelled",
+                                  "queue.enqueue_failed",
                                   "pipeline.step_failed"
                                 ]
                               },
@@ -7192,7 +7208,7 @@
                             "additionalProperties": false
                           }
                         },
-                        "required": ["id", "projectId", "pipelineId", "status", "startedAt"],
+                        "required": ["id", "projectId", "pipelineId", "status", "queuedAt"],
                         "additionalProperties": false,
                         "nullable": true
                       }
@@ -7487,7 +7503,10 @@
                         },
                         "status": {
                           "type": "string",
-                          "enum": ["running", "succeeded", "failed", "cancelled"]
+                          "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                        },
+                        "queuedAt": {
+                          "type": "string"
                         },
                         "startedAt": {
                           "type": "string"
@@ -7516,6 +7535,7 @@
                               "enum": [
                                 "internal.unexpected",
                                 "runtime.cancelled",
+                                "queue.enqueue_failed",
                                 "pipeline.step_failed"
                               ]
                             },
@@ -7562,7 +7582,7 @@
                           "additionalProperties": false
                         }
                       },
-                      "required": ["id", "projectId", "pipelineId", "status", "startedAt"],
+                      "required": ["id", "projectId", "pipelineId", "status", "queuedAt"],
                       "additionalProperties": false,
                       "nullable": true
                     }
@@ -7613,7 +7633,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["running", "succeeded", "failed", "cancelled"]
+              "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
             }
           },
           {
@@ -7682,7 +7702,10 @@
                           },
                           "status": {
                             "type": "string",
-                            "enum": ["running", "succeeded", "failed", "cancelled"]
+                            "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                          },
+                          "queuedAt": {
+                            "type": "string"
                           },
                           "startedAt": {
                             "type": "string"
@@ -7711,6 +7734,7 @@
                                 "enum": [
                                   "internal.unexpected",
                                   "runtime.cancelled",
+                                  "queue.enqueue_failed",
                                   "pipeline.step_failed"
                                 ]
                               },
@@ -7757,7 +7781,7 @@
                             "additionalProperties": false
                           }
                         },
-                        "required": ["id", "projectId", "pipelineId", "status", "startedAt"],
+                        "required": ["id", "projectId", "pipelineId", "status", "queuedAt"],
                         "additionalProperties": false
                       }
                     },
@@ -7849,7 +7873,10 @@
                         },
                         "status": {
                           "type": "string",
-                          "enum": ["running", "succeeded", "failed", "cancelled"]
+                          "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                        },
+                        "queuedAt": {
+                          "type": "string"
                         },
                         "startedAt": {
                           "type": "string"
@@ -7878,6 +7905,7 @@
                               "enum": [
                                 "internal.unexpected",
                                 "runtime.cancelled",
+                                "queue.enqueue_failed",
                                 "pipeline.step_failed"
                               ]
                             },
@@ -7924,7 +7952,7 @@
                           "additionalProperties": false
                         }
                       },
-                      "required": ["id", "projectId", "pipelineId", "status", "startedAt"],
+                      "required": ["id", "projectId", "pipelineId", "status", "queuedAt"],
                       "additionalProperties": false
                     },
                     "steps": {
@@ -8004,6 +8032,7 @@
                                 "enum": [
                                   "internal.unexpected",
                                   "runtime.cancelled",
+                                  "queue.enqueue_failed",
                                   "pipeline.step_failed"
                                 ]
                               },

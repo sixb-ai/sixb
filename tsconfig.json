@@ -74,8 +74,14 @@
       "@sixb/core/internal/ontology-storage-provider": [
         "./packages/core/src/storage/ontology/provider.ts"
       ],
+      "@sixb/core/internal/pipeline-run-storage-provider": [
+        "./packages/core/src/storage/pipeline-runs/provider.ts"
+      ],
       "@sixb/core/internal/projection-run-storage-provider": [
         "./packages/core/src/storage/projection-runs/lifecycle.ts"
+      ],
+      "@sixb/core/internal/sync-run-storage-provider": [
+        "./packages/core/src/storage/sync-runs/provider.ts"
       ],
       "@sixb/core/internal/workflow-run-storage-provider": [
         "./packages/core/src/storage/workflow-runs/provider.ts"
@@ -90,6 +96,7 @@
       "@sixb/core/internal/execution-storage": [
         "./packages/core/src/storage/executions/provider.ts"
       ],
+      "@sixb/core/internal/pipelines": ["./packages/core/src/pipelines/index.ts"],
       "@sixb/core/internal/query": ["./packages/core/src/objects/query/index.ts"],
       "@sixb/core/internal/rules": ["./packages/core/src/rules/internal.ts"],
       "@sixb/core/internal/runtime": ["./packages/core/src/runtime/internal.ts"],
@@ -98,6 +105,7 @@
       "@sixb/core/internal/storage-operation-scope": [
         "./packages/core/src/storage/operation-scope.ts"
       ],
+      "@sixb/core/internal/syncs": ["./packages/core/src/syncs/index.ts"],
       "@sixb/core/internal/workers": ["./packages/core/src/workers/index.ts"],
       "@sixb/core/internal/workflows": ["./packages/core/src/workflows/index.ts"],
       "@sixb/core/lake-storage": ["./packages/core/src/lake-storage/index.ts"],

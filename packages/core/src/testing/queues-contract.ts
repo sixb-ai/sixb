@@ -64,7 +64,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
             jobs: [
               {
                 type: "sync.run.requested",
-                payload: { syncId: "sync-1", commitMessage: "manual" },
+                payload: { runId: "sync-1" },
               },
             ],
           })
@@ -73,7 +73,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
           expect(job?.projectId).toBe("project-a")
           expect(job?.attempt).toBe(0)
           expect(job?.type).toBe("sync.run.requested")
-          expect(job?.payload.syncId).toBe("sync-1")
+          expect(job?.payload.runId).toBe("sync-1")
           expect(Date.parse(job!.createdAt)).toBeGreaterThanOrEqual(before)
           expect(job?.availableAt).toBe(job?.createdAt)
         })
@@ -84,7 +84,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
           const input = {
             id: "dispatch-run-1",
             type: "sync.run.requested" as const,
-            payload: { syncId: "sync-1" },
+            payload: { runId: "sync-1" },
           }
           const [[first], [second]] = await Promise.all([
             queues.syncRuns.enqueue({ projectId: "project-a", jobs: [input] }),
@@ -105,7 +105,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
           const input = {
             id,
             type: "sync.run.requested" as const,
-            payload: { syncId: "sync-1" },
+            payload: { runId: "sync-1" },
           }
 
           const [[first], [duplicate]] = await Promise.all([
@@ -155,7 +155,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
           await expect(
             queues.syncRuns.enqueue({
               projectId: "   ",
-              jobs: [{ type: "sync.run.requested", payload: { syncId: "sync-1" } }],
+              jobs: [{ type: "sync.run.requested", payload: { runId: "sync-1" } }],
             })
           ).rejects.toBeInstanceOf(QueueError)
         })
@@ -167,7 +167,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
         await withQueues(async (queues) => {
           await queues.pipelines.enqueue({
             projectId: "project-a",
-            jobs: [{ type: "pipeline.run.requested", payload: { pipelineId: "p-1" } }],
+            jobs: [{ type: "pipeline.run.requested", payload: { runId: "p-1" } }],
           })
 
           const [claimed] = await queues.pipelines.claim({
@@ -176,7 +176,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
           })
 
           expect(claimed?.job.attempt).toBe(1)
-          expect(claimed?.job.payload.pipelineId).toBe("p-1")
+          expect(claimed?.job.payload.runId).toBe("p-1")
           expect(claimed?.leaseId).toBeTruthy()
           expect(Date.parse(claimed!.leaseExpiresAt)).toBeGreaterThan(
             Date.parse(claimed!.claimedAt)
@@ -188,7 +188,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
         await withQueues(async (queues) => {
           await queues.syncRuns.enqueue({
             projectId: "project-a",
-            jobs: [{ type: "sync.run.requested", payload: { syncId: "s-1" } }],
+            jobs: [{ type: "sync.run.requested", payload: { runId: "s-1" } }],
           })
 
           const zero = await queues.syncRuns.claim({
@@ -211,7 +211,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
         await withQueues(async (queues) => {
           await queues.syncRuns.enqueue({
             projectId: "project-a",
-            jobs: [{ type: "sync.run.requested", payload: { syncId: "s-1" } }],
+            jobs: [{ type: "sync.run.requested", payload: { runId: "s-1" } }],
           })
 
           await expect(
@@ -228,7 +228,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
           const availableAt = new Date(Date.now() + shortLeaseMs + 20).toISOString()
           await queues.syncRuns.enqueue({
             projectId: "project-a",
-            jobs: [{ type: "sync.run.requested", payload: { syncId: "s-1" }, availableAt }],
+            jobs: [{ type: "sync.run.requested", payload: { runId: "s-1" }, availableAt }],
           })
 
           const before = await queues.syncRuns.claim({
@@ -251,11 +251,11 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
         await withQueues(async (queues) => {
           await queues.syncRuns.enqueue({
             projectId: "project-a",
-            jobs: [{ type: "sync.run.requested", payload: { syncId: "a-1" } }],
+            jobs: [{ type: "sync.run.requested", payload: { runId: "a-1" } }],
           })
           await queues.syncRuns.enqueue({
             projectId: "project-b",
-            jobs: [{ type: "sync.run.requested", payload: { syncId: "b-1" } }],
+            jobs: [{ type: "sync.run.requested", payload: { runId: "b-1" } }],
           })
 
           const claimedB = await queues.syncRuns.claim({
@@ -265,7 +265,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
           })
 
           expect(claimedB).toHaveLength(1)
-          expect(claimedB[0]?.job.payload.syncId).toBe("b-1")
+          expect(claimedB[0]?.job.payload.runId).toBe("b-1")
           expect(claimedB[0]?.job.projectId).toBe("project-b")
         })
       })
@@ -274,11 +274,11 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
         await withQueues(async (queues) => {
           await queues.syncRuns.enqueue({
             projectId: "project-a",
-            jobs: [{ type: "sync.run.requested", payload: { syncId: "s-1" } }],
+            jobs: [{ type: "sync.run.requested", payload: { runId: "s-1" } }],
           })
           await queues.pipelines.enqueue({
             projectId: "project-a",
-            jobs: [{ type: "pipeline.run.requested", payload: { pipelineId: "p-1" } }],
+            jobs: [{ type: "pipeline.run.requested", payload: { runId: "p-1" } }],
           })
           await queues.projections.enqueue({
             projectId: "project-a",
@@ -349,7 +349,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
           })
 
           expect(crossLane).toHaveLength(1)
-          expect(crossLane[0]?.job.payload.pipelineId).toBe("p-1")
+          expect(crossLane[0]?.job.payload.runId).toBe("p-1")
           expect(projectionLane).toHaveLength(1)
           expect(projectionLane[0]?.job.payload.projectionId).toBe("room-projection")
           expect(workflowLane).toHaveLength(1)
@@ -366,7 +366,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
         await withQueues(async (queues) => {
           const [job] = await queues.syncRuns.enqueue({
             projectId: "project-a",
-            jobs: [{ type: "sync.run.requested", payload: { syncId: "s-1" } }],
+            jobs: [{ type: "sync.run.requested", payload: { runId: "s-1" } }],
           })
           const [claim] = await queues.syncRuns.claim({
             projectId: "project-a",
@@ -392,7 +392,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
         await withQueues(async (queues) => {
           const [job] = await queues.syncRuns.enqueue({
             projectId: "project-a",
-            jobs: [{ type: "sync.run.requested", payload: { syncId: "s-1" } }],
+            jobs: [{ type: "sync.run.requested", payload: { runId: "s-1" } }],
           })
           await queues.syncRuns.claim({
             projectId: "project-a",
@@ -416,7 +416,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
         await withQueues(async (queues) => {
           const [job] = await queues.syncRuns.enqueue({
             projectId: "project-a",
-            jobs: [{ type: "sync.run.requested", payload: { syncId: "s-1" } }],
+            jobs: [{ type: "sync.run.requested", payload: { runId: "s-1" } }],
           })
           const [firstClaim] = await queues.syncRuns.claim({
             projectId: "project-a",
@@ -447,7 +447,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
         await withQueues(async (queues) => {
           const [job] = await queues.syncRuns.enqueue({
             projectId: "project-a",
-            jobs: [{ type: "sync.run.requested", payload: { syncId: "s-1" } }],
+            jobs: [{ type: "sync.run.requested", payload: { runId: "s-1" } }],
           })
           const [claim] = await queues.syncRuns.claim({
             projectId: "project-a",
@@ -472,7 +472,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
         await withQueues(async (queues) => {
           const [job] = await queues.pipelines.enqueue({
             projectId: "project-a",
-            jobs: [{ type: "pipeline.run.requested", payload: { pipelineId: "p-1" } }],
+            jobs: [{ type: "pipeline.run.requested", payload: { runId: "p-1" } }],
           })
           const [claim] = await queues.pipelines.claim({
             projectId: "project-a",
@@ -501,7 +501,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
         await withQueues(async (queues) => {
           const [job] = await queues.syncRuns.enqueue({
             projectId: "project-a",
-            jobs: [{ type: "sync.run.requested", payload: { syncId: "s-1" } }],
+            jobs: [{ type: "sync.run.requested", payload: { runId: "s-1" } }],
           })
           const [claim] = await queues.syncRuns.claim({
             projectId: "project-a",
@@ -541,7 +541,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
         await withQueues(async (queues) => {
           const [job] = await queues.syncRuns.enqueue({
             projectId: "project-a",
-            jobs: [{ type: "sync.run.requested", payload: { syncId: "s-1" } }],
+            jobs: [{ type: "sync.run.requested", payload: { runId: "s-1" } }],
           })
           await queues.syncRuns.claim({
             projectId: "project-a",
@@ -566,7 +566,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
         await withQueues(async (queues) => {
           const [job] = await queues.syncRuns.enqueue({
             projectId: "project-a",
-            jobs: [{ type: "sync.run.requested", payload: { syncId: "s-1" } }],
+            jobs: [{ type: "sync.run.requested", payload: { runId: "s-1" } }],
           })
           const [first] = await queues.syncRuns.claim({
             projectId: "project-a",
@@ -591,7 +591,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
         await withQueues(async (queues) => {
           const [job] = await queues.syncRuns.enqueue({
             projectId: "project-a",
-            jobs: [{ type: "sync.run.requested", payload: { syncId: "s-1" } }],
+            jobs: [{ type: "sync.run.requested", payload: { runId: "s-1" } }],
           })
           const [claim] = await queues.syncRuns.claim({
             projectId: "project-a",

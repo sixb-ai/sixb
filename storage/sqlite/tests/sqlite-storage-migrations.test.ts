@@ -168,6 +168,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 20,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "021-sync-pipeline-executions",
+    status: "applied",
+    version: 21,
+  },
 ]
 
 afterEach(async () => {
@@ -1287,6 +1294,65 @@ describe("SQLite storage migrations", () => {
         "project_id",
         "execution_id",
       ])
+    } finally {
+      db.close()
+    }
+  })
+
+  test("rejects legacy Sync and Pipeline runs instead of inventing execution authority", () => {
+    for (const kind of ["sync", "pipeline"] as const) {
+      const db = new Database(":memory:")
+      try {
+        const executionMigrationIndex = sqliteStorageMigrations.steps.findIndex(
+          (migration) => migration.id === "010-sync-pipeline-executions"
+        )
+        const executionMigration = sqliteStorageMigrations.steps[executionMigrationIndex]
+        if (!executionMigration) {
+          throw new Error("SQLite sync-pipeline-executions migration is missing.")
+        }
+        for (const migration of sqliteStorageMigrations.steps.slice(0, executionMigrationIndex)) {
+          migration.up(db)
+        }
+        if (kind === "sync") {
+          db.query(`
+            INSERT INTO sync_runs (
+              project_id, id, sync_id, dataset_id, mode, status, started_at
+            ) VALUES (?, ?, ?, ?, 'snapshot', 'running', ?)
+          `).run(
+            "project-a",
+            "legacy-sync-run",
+            "sync-orders",
+            "raw.orders",
+            "2026-01-01T00:00:00.000Z"
+          )
+        } else {
+          db.query(`
+            INSERT INTO pipeline_runs (
+              project_id, id, pipeline_id, status, started_at
+            ) VALUES (?, ?, ?, 'running', ?)
+          `).run("project-a", "legacy-pipeline-run", "pipeline-orders", "2026-01-01T00:00:00.000Z")
+        }
+
+        expect(() => db.transaction(() => executionMigration.up(db))()).toThrow()
+        expect(readMemoryTableColumns(db, "sync_runs")).not.toContain("execution_id")
+        expect(readMemoryTableColumns(db, "pipeline_runs")).not.toContain("execution_id")
+      } finally {
+        db.close()
+      }
+    }
+  })
+
+  test("makes Sync and Pipeline execution links required and unique", () => {
+    const db = new Database(":memory:")
+    try {
+      for (const migration of sqliteStorageMigrations.steps) migration.up(db)
+
+      for (const table of ["sync_runs", "pipeline_runs"] as const) {
+        expect(readMemoryColumn(db, table, "execution_id")?.notnull).toBe(1)
+        expect(readMemoryColumn(db, table, "queued_at")?.notnull).toBe(1)
+        expect(readMemoryColumn(db, table, "started_at")?.notnull).toBe(0)
+        expect(readMemoryUniqueIndexes(db, table)).toContainEqual(["project_id", "execution_id"])
+      }
     } finally {
       db.close()
     }

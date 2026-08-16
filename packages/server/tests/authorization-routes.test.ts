@@ -30,7 +30,13 @@ import {
   type WorkflowDefinition,
 } from "@sixb/core"
 import { createSessionCredential } from "@sixb/core/internal/auth"
-import { createTestSixb, createTestWorkflowExecution, queueTestActionRun } from "@sixb/core/testing"
+import {
+  createTestSixb,
+  createTestWorkflowExecution,
+  queueTestActionRun,
+  startTestPipelineRun,
+  startTestSyncRun,
+} from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -1140,7 +1146,7 @@ describe("authorized sync routes", () => {
     const operator = await seedSession(storage, ["commercial"], "usr_op")
     const admin = await seedSession(storage, ["admins"], "usr_admin")
 
-    await storage.syncRuns!.start({
+    await startTestSyncRun(storage, {
       id: "run-orders",
       projectId: "test-project",
       syncId: "sync-orders",
@@ -1148,7 +1154,7 @@ describe("authorized sync routes", () => {
       mode: "snapshot",
       startedAt: new Date("2026-05-16T12:00:00.000Z"),
     })
-    await storage.syncRuns!.start({
+    await startTestSyncRun(storage, {
       id: "run-customers",
       projectId: "test-project",
       syncId: "sync-customers",
@@ -1248,13 +1254,13 @@ describe("authorized pipeline routes", () => {
     const operator = await seedSession(storage, ["commercial"], "usr_op")
     const admin = await seedSession(storage, ["admins"], "usr_admin")
 
-    await storage.pipelineRuns!.start({
+    await startTestPipelineRun(storage, {
       id: "run-orders",
       projectId: "test-project",
       pipelineId: "pipeline-orders",
       startedAt: new Date("2026-05-16T12:00:00.000Z"),
     })
-    await storage.pipelineRuns!.start({
+    await startTestPipelineRun(storage, {
       id: "run-customers",
       projectId: "test-project",
       pipelineId: "pipeline-customers",
