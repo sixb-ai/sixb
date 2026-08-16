@@ -232,7 +232,7 @@ describe("Postgres storage migrations", () => {
   })
 
   test("merge sync migration preserves existing runs and admits merge mode", async () => {
-    await withStorage(false, async (storage, schemaName) => {
+    await withStorage(false, async (_storage, schemaName) => {
       const migrationsBeforeMerge = postgresStorageMigrations.steps.slice(0, 2)
       if (migrationsBeforeMerge.length !== 2) {
         throw new Error("PostgreSQL migrations before merge sync support are missing.")
@@ -263,7 +263,17 @@ describe("Postgres storage migrations", () => {
           ["project-a", "run-append", "sync-orders", "raw.orders", "2026-08-07T12:00:00.000Z"]
         )
 
-        await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
+        // This fixture intentionally predates durable execution links. Exercise migration 003
+        // without crossing migration 010, which must reject legacy runs with unknown authority.
+        const throughMerge = defineMigrations({
+          adapterId: POSTGRES_STORAGE_ADAPTER_ID,
+          steps: postgresStorageMigrations.steps.slice(0, 3),
+        })
+        await createPostgresMigrator({
+          sql,
+          schemaName,
+          migrations: throughMerge,
+        }).migrate()
         await sql.unsafe(
           `
             INSERT INTO ${quoteIdent(schemaName)}.sync_runs (
@@ -1345,6 +1355,13 @@ describe("Postgres storage migrations", () => {
           id: "020-drop-run-usage-projections",
           status: "applied",
           version: 20,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "021-sync-pipeline-executions",
+          status: "applied",
+          version: 21,
         },
       ])
     } finally {

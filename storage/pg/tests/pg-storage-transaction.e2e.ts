@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { Storage } from "@sixb/core"
 import { StorageTransactionError } from "@sixb/core/storage"
-import { queueTestActionRun } from "@sixb/core/testing"
+import { queueTestActionRun, startTestSyncRun } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
 
@@ -44,7 +44,7 @@ describe("PostgresStorage.transaction", () => {
       storage.transaction(async (tx) => {
         const runs = requireTransactionalRunStores(tx)
         await queueTestActionRun(tx, actionRunInput("run_rollback"))
-        await runs.syncRuns.start(syncRunInput("sync_rollback"))
+        await startTestSyncRun(tx, syncRunInput("sync_rollback"))
         await runs.webhookRuns.start(webhookRunInput("webhook_rollback"))
 
         throw new Error("boom")
