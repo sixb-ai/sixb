@@ -47,7 +47,6 @@ import {
   runImmediateTransactionAsync,
   type SqliteStoreConnection,
 } from "./transactions"
-import { SqliteWebhookDeliveryStorage } from "./webhook-delivery-storage"
 import { SqliteWebhookRunStorage } from "./webhook-run-storage"
 import { SqliteWorkflowInterventionStorage } from "./workflow-intervention-storage"
 import { SqliteWorkflowRunStorage } from "./workflow-run-storage"
@@ -61,7 +60,7 @@ export interface SqliteStorageOptions {
  * SQLite storage provider for Sixb.
  *
  * Bundles object, timeseries, auth, execution, AI usage, sync run, pipeline run, projection run,
- * workflow run, webhook run, and webhook delivery storage backed by SQLite.
+ * workflow run, and webhook run storage backed by SQLite.
  *
  * Usage:
  * ```ts
@@ -87,7 +86,6 @@ export class SqliteStorage implements MigrationCapableStorage {
   readonly workflowRuns: SqliteWorkflowRunStorage
   readonly workflowInterventions: SqliteWorkflowInterventionStorage
   readonly timeseries: Storage["timeseries"]
-  readonly webhookDeliveries: SqliteWebhookDeliveryStorage
   readonly webhookRuns: SqliteWebhookRunStorage
   readonly rules: SqliteRulesStorage
   readonly migrators: readonly StorageMigrator[]
@@ -149,7 +147,6 @@ export class SqliteStorage implements MigrationCapableStorage {
     this.projectionRuns = createOperationScopedFacade(stores.projectionRuns, scope)
     this.workflowRuns = createWorkflowRunOperationScope(stores.workflowRuns, scope)
     this.workflowInterventions = createOperationScopedFacade(stores.workflowInterventions, scope)
-    this.webhookDeliveries = createOperationScopedFacade(stores.webhookDeliveries, scope)
     this.webhookRuns = createOperationScopedFacade(stores.webhookRuns, scope)
     this.rules = createOperationScopedFacade(stores.rules, scope)
     this.migrators = options.path ? createSqliteStorageMigrators(options.path) : []
@@ -301,8 +298,7 @@ function createSqliteStores(
     projectionRuns: new SqliteProjectionRunStorage({ connection, executions }),
     workflowRuns: new SqliteWorkflowRunStorage({ connection, executions }),
     workflowInterventions: new SqliteWorkflowInterventionStorage({ connection }),
-    webhookDeliveries: new SqliteWebhookDeliveryStorage({ connection }),
-    webhookRuns: new SqliteWebhookRunStorage({ connection }),
+    webhookRuns: new SqliteWebhookRunStorage({ connection, executions }),
     rules: new SqliteRulesStorage({ connection }),
   }
 }
@@ -321,7 +317,6 @@ interface SqliteStoreSet {
   readonly workflowRuns: SqliteWorkflowRunStorage
   readonly workflowInterventions: SqliteWorkflowInterventionStorage
   readonly timeseries: SqliteTimeseriesStorage
-  readonly webhookDeliveries: SqliteWebhookDeliveryStorage
   readonly webhookRuns: SqliteWebhookRunStorage
   readonly rules: SqliteRulesStorage
 }

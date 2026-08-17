@@ -28,7 +28,6 @@ import type { TimeseriesStorage } from "../timeseries"
 import { InMemoryTimeseriesStorage } from "../timeseries/store"
 import { createTransactionStorageProxy, throwNestedStorageTransaction } from "../transaction"
 import type { Storage, StorageTransactionOptions } from "../types"
-import { InMemoryWebhookDeliveryStorage, type WebhookDeliveryStorage } from "../webhook-deliveries"
 import { InMemoryWebhookRunStorage, type WebhookRunStorage } from "../webhook-runs"
 import {
   InMemoryWorkflowInterventionStorage,
@@ -65,8 +64,7 @@ export class InMemoryStorage implements Storage {
   })
   private readonly workflowRunStorage = new InMemoryWorkflowRunStorage(this.executionStorage)
   private readonly workflowInterventionStorage = new InMemoryWorkflowInterventionStorage()
-  private readonly webhookDeliveryStorage = new InMemoryWebhookDeliveryStorage()
-  private readonly webhookRunStorage = new InMemoryWebhookRunStorage()
+  private readonly webhookRunStorage = new InMemoryWebhookRunStorage(this.executionStorage)
   private readonly rulesStorage = new InMemoryRulesStorage()
   private readonly fileUploadSessionStorage = new InMemoryFileUploadSessions()
   readonly auth: AuthStorage
@@ -79,7 +77,6 @@ export class InMemoryStorage implements Storage {
   readonly projectionRuns: InMemoryProjectionRunStorage
   readonly workflowRuns: WorkflowRunStorage
   readonly workflowInterventions: WorkflowInterventionStorage
-  readonly webhookDeliveries: WebhookDeliveryStorage
   readonly webhookRuns: WebhookRunStorage
   readonly rules: RulesStorage
   readonly fileUploadSessions: FileUploadSessionStore
@@ -104,7 +101,6 @@ export class InMemoryStorage implements Storage {
       this.workflowInterventionStorage,
       scope
     )
-    this.webhookDeliveries = createOperationScopedFacade(this.webhookDeliveryStorage, scope)
     this.webhookRuns = createOperationScopedFacade(this.webhookRunStorage, scope)
     this.rules = createOperationScopedFacade(this.rulesStorage, scope)
     this.fileUploadSessions = createOperationScopedFacade(this.fileUploadSessionStorage, scope)
@@ -241,7 +237,6 @@ export class InMemoryStorage implements Storage {
       projectionRuns: this.projectionRunStorage,
       workflowRuns: this.workflowRunStorage,
       workflowInterventions: this.workflowInterventionStorage,
-      webhookDeliveries: this.webhookDeliveryStorage,
       webhookRuns: this.webhookRunStorage,
       rules: this.rulesStorage,
       fileUploadSessions: this.fileUploadSessionStorage,
@@ -267,7 +262,6 @@ export class InMemoryStorage implements Storage {
       projectionRuns: this.projectionRunStorage.snapshot(),
       workflowRuns: this.workflowRunStorage.snapshot(),
       workflowInterventions: this.workflowInterventionStorage.snapshot(),
-      webhookDeliveries: this.webhookDeliveryStorage.snapshot(),
       webhookRuns: this.webhookRunStorage.snapshot(),
       rules: this.rulesStorage.snapshot(),
       fileUploadSessions: this.fileUploadSessionStorage.snapshot(),
@@ -288,7 +282,6 @@ export class InMemoryStorage implements Storage {
     this.projectionRunStorage.restore(snapshot.projectionRuns)
     this.workflowRunStorage.restore(snapshot.workflowRuns)
     this.workflowInterventionStorage.restore(snapshot.workflowInterventions)
-    this.webhookDeliveryStorage.restore(snapshot.webhookDeliveries)
     this.webhookRunStorage.restore(snapshot.webhookRuns)
     this.rulesStorage.restore(snapshot.rules)
     this.fileUploadSessionStorage.restore(snapshot.fileUploadSessions)
@@ -309,7 +302,6 @@ export interface InMemoryStorageSnapshot {
   readonly projectionRuns: ReturnType<InMemoryProjectionRunStorage["snapshot"]>
   readonly workflowRuns: ReturnType<InMemoryWorkflowRunStorage["snapshot"]>
   readonly workflowInterventions: ReturnType<InMemoryWorkflowInterventionStorage["snapshot"]>
-  readonly webhookDeliveries: ReturnType<InMemoryWebhookDeliveryStorage["snapshot"]>
   readonly webhookRuns: ReturnType<InMemoryWebhookRunStorage["snapshot"]>
   readonly rules: ReturnType<InMemoryRulesStorage["snapshot"]>
   readonly fileUploadSessions: ReturnType<InMemoryFileUploadSessions["snapshot"]>

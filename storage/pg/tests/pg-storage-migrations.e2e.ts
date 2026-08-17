@@ -7,13 +7,13 @@ import {
   defineMigrations,
   ONTOLOGY_OUTBOX_FAILURE_CODES,
   SYNC_RUN_FAILURE_CODES,
-  WEBHOOK_DELIVERY_FAILURE_CODES,
 } from "@sixb/core/storage"
 import {
   createMaterializerTestFixture,
   createTestWorkflowExecution,
   startTestProjectionRun,
   startTestSyncRun,
+  startTestWebhookRun,
 } from "@sixb/core/testing"
 import { SQL } from "bun"
 import { PostgresStorage, type PostgresStorage as PostgresStorageType } from "../src"
@@ -23,6 +23,9 @@ import {
   postgresStorageMigrations,
   quoteIdent,
 } from "../src/migrations"
+
+const LEGACY_WEBHOOK_DELIVERY_FAILURE_CODES = ["webhook.delivery_failed"] as const
+
 import { jsonParameter } from "../src/ontology-storage/shared"
 import { createPgClient } from "../src/pg-client"
 import { createTestStorage } from "./helpers"
@@ -71,6 +74,7 @@ describe("Postgres storage migrations", () => {
             "020-drop-run-usage-projections",
             "021-sync-pipeline-executions",
             "022-projection-executions",
+            "023-webhook-executions",
           ],
         },
       ])
@@ -229,6 +233,13 @@ describe("Postgres storage migrations", () => {
           status: "applied",
           version: 22,
         },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "023-webhook-executions",
+          status: "applied",
+          version: 23,
+        },
       ])
     })
   })
@@ -273,7 +284,7 @@ describe("Postgres storage migrations", () => {
         )
 
         // This fixture intentionally predates durable execution links. Exercise migration 003
-        // without crossing migration 010, which must reject legacy runs with unknown authority.
+        // without crossing migration 020, which must reject legacy runs with unknown authority.
         const throughMerge = defineMigrations({
           adapterId: POSTGRES_STORAGE_ADAPTER_ID,
           steps: postgresStorageMigrations.steps.slice(0, 3),
@@ -609,7 +620,7 @@ describe("Postgres storage migrations", () => {
           ORDER BY idempotency_key
         `)
         expect(rows[0]?.idempotency_key).toBe("delivery-failed-at")
-        expect(parseSixbFailure(rows[0]?.failure, WEBHOOK_DELIVERY_FAILURE_CODES)).toEqual({
+        expect(parseSixbFailure(rows[0]?.failure, LEGACY_WEBHOOK_DELIVERY_FAILURE_CODES)).toEqual({
           code: "webhook.delivery_failed",
           message: "Webhook delivery failed.",
           retryable: true,
@@ -622,7 +633,7 @@ describe("Postgres storage migrations", () => {
             timestampSource: "failedAt",
           },
         })
-        expect(parseSixbFailure(rows[1]?.failure, WEBHOOK_DELIVERY_FAILURE_CODES)).toEqual({
+        expect(parseSixbFailure(rows[1]?.failure, LEGACY_WEBHOOK_DELIVERY_FAILURE_CODES)).toEqual({
           code: "webhook.delivery_failed",
           message: "Webhook delivery failed.",
           retryable: true,
@@ -741,6 +752,25 @@ describe("Postgres storage migrations", () => {
         await expect(readColumnNullable(schemaName, table, "queued_at")).resolves.toBe("NO")
         await expect(readColumnNullable(schemaName, table, "started_at")).resolves.toBe("YES")
       }
+      expect(await readTableNames(schemaName)).not.toContain("webhook_deliveries")
+      expect(await readTableColumns(schemaName, "webhook_runs")).not.toContain(
+        "delivery_claim_result"
+      )
+      await expect(readColumnNullable(schemaName, "webhook_runs", "execution_id")).resolves.toBe(
+        "NO"
+      )
+      await expect(
+        readColumnNullable(schemaName, "webhook_runs", "request_body_bytes")
+      ).resolves.toBe("NO")
+      await expect(
+        readColumnNullable(schemaName, "webhook_runs", "request_body_sha256")
+      ).resolves.toBe("NO")
+      expect(await readUniqueConstraints(schemaName, "webhook_runs")).toEqual(
+        expect.arrayContaining([
+          ["project_id", "execution_id"],
+          ["project_id", "connector_id", "webhook_id", "idempotency_key"],
+        ])
+      )
     })
   })
 
@@ -995,6 +1025,61 @@ describe("Postgres storage migrations", () => {
         await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
       }
     })
+  })
+
+  test("rejects legacy Webhook runs and deliveries instead of inventing authority", async () => {
+    for (const legacyRecord of ["run", "delivery"] as const) {
+      const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+      await withSql(async (sql) => {
+        const schema = quoteIdent(schemaName)
+        const context = { exec: (sqlText: string) => sql.unsafe(sqlText).then(() => undefined) }
+
+        try {
+          await sql.unsafe(`CREATE SCHEMA ${schema}`)
+          await sql.unsafe(`SET search_path TO ${schema}`)
+          const executionMigrationIndex = postgresStorageMigrations.steps.findIndex(
+            (migration) => migration.id === "023-webhook-executions"
+          )
+          const executionMigration = postgresStorageMigrations.steps[executionMigrationIndex]
+          if (!executionMigration) {
+            throw new Error("PostgreSQL webhook-executions migration is missing.")
+          }
+          for (const migration of postgresStorageMigrations.steps.slice(
+            0,
+            executionMigrationIndex
+          )) {
+            await migration.up(context)
+          }
+
+          if (legacyRecord === "run") {
+            await sql.unsafe(`
+              INSERT INTO webhook_runs (
+                project_id, id, connector_id, webhook_id, status, method, route, started_at
+              ) VALUES (
+                'project-a', 'legacy-webhook-run', 'github', 'events', 'running', 'POST',
+                '/api/webhooks/github/events', '2026-01-01T00:00:00.000Z'
+              )
+            `)
+          } else {
+            await sql.unsafe(`
+              INSERT INTO webhook_deliveries (
+                project_id, connector_id, webhook_id, idempotency_key, status, received_at
+              ) VALUES (
+                'project-a', 'github', 'events', 'delivery-1', 'in_progress',
+                '2026-01-01T00:00:00.000Z'
+              )
+            `)
+          }
+
+          await expect(executionMigration.up(context)).rejects.toThrow()
+          expect(await readTableColumns(schemaName, "webhook_runs")).not.toContain("execution_id")
+          expect(await readTableNames(schemaName)).toContain("webhook_deliveries")
+        } finally {
+          await sql.unsafe("RESET search_path")
+          await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
+        }
+      })
+    }
   })
 
   test("untracked existing schema collides and rolls back without conversion", async () => {
@@ -1444,6 +1529,13 @@ describe("Postgres storage migrations", () => {
           status: "applied",
           version: 22,
         },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "023-webhook-executions",
+          status: "applied",
+          version: 23,
+        },
       ])
     } finally {
       await storages[0]?.dropSchema()
@@ -1562,27 +1654,16 @@ async function seedExistingStoreRows(storage: PostgresStorage): Promise<void> {
     output: { transactionId: "txn-1" },
     finishedAt: new Date("2026-04-19T12:00:01.000Z"),
   })
-  await storage.webhookDeliveries.claim({
-    projectId: "project-a",
-    connectorId: "github",
-    webhookId: "events",
-    idempotencyKey: "delivery-1",
-    receivedAt: "2026-04-19T12:00:00.000Z",
-  })
-  await storage.webhookDeliveries.complete({
-    projectId: "project-a",
-    connectorId: "github",
-    webhookId: "events",
-    idempotencyKey: "delivery-1",
-    completedAt: "2026-04-19T12:00:02.000Z",
-  })
-  await storage.webhookRuns.start({
+  await startTestWebhookRun(storage, {
     id: "webhook-run-1",
     projectId: "project-a",
     connectorId: "github",
     webhookId: "events",
     method: "POST",
     route: "/api/webhooks/github/events",
+    requestBodyBytes: 12,
+    requestBodySha256: "0".repeat(64),
+    idempotencyKey: "delivery-1",
     startedAt: new Date("2026-04-19T12:00:00.000Z"),
   })
   await storage.webhookRuns.finish({
@@ -1591,9 +1672,6 @@ async function seedExistingStoreRows(storage: PostgresStorage): Promise<void> {
     status: "succeeded",
     finishedAt: new Date("2026-04-19T12:00:02.000Z"),
     responseStatus: 202,
-    requestBodyBytes: 12,
-    idempotencyKey: "delivery-1",
-    deliveryClaimResult: "claimed",
   })
 }
 
@@ -1725,6 +1803,36 @@ async function readColumnNullable(
     )) as Array<{ is_nullable: "YES" | "NO" }>
     if (!row) throw new Error(`Column ${tableName}.${columnName} was not found.`)
     return row.is_nullable
+  })
+}
+
+async function readUniqueConstraints(
+  schemaName: string,
+  tableName: string
+): Promise<readonly (readonly string[])[]> {
+  return withSql(async (sql) => {
+    const rows = (await sql.unsafe(
+      `
+        SELECT tc.constraint_name, kcu.column_name
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON kcu.constraint_schema = tc.constraint_schema
+          AND kcu.constraint_name = tc.constraint_name
+        WHERE tc.table_schema = $1
+          AND tc.table_name = $2
+          AND tc.constraint_type = 'UNIQUE'
+        ORDER BY tc.constraint_name, kcu.ordinal_position
+      `,
+      [schemaName, tableName]
+    )) as Array<{ readonly constraint_name: string; readonly column_name: string }>
+
+    const constraints = new Map<string, string[]>()
+    for (const row of rows) {
+      const columns = constraints.get(row.constraint_name) ?? []
+      columns.push(row.column_name)
+      constraints.set(row.constraint_name, columns)
+    }
+    return [...constraints.values()]
   })
 }
 

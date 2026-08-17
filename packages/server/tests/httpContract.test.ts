@@ -41,6 +41,7 @@ import {
   queueTestActionRun,
   startTestPipelineRun,
   startTestSyncRun,
+  startTestWebhookRun,
 } from "@sixb/core/testing"
 import { SqliteStorage } from "@sixb/sqlite"
 import { SixbServer } from "../src/server"
@@ -503,13 +504,15 @@ describe("SixbServer HTTP contract", () => {
       finishedAt: new Date("2026-02-18T09:07:02.000Z"),
     })
 
-    await sixb.storage.webhookRuns!.start({
+    await startTestWebhookRun(sixb.storage, {
       id: "webhook-run-previous",
       projectId: "contract-project",
       connectorId: "github",
       webhookId: "events",
       method: "POST",
       route: "/api/webhooks/github/events",
+      requestBodyBytes: 18,
+      requestBodySha256: "0".repeat(64),
       startedAt: new Date("2026-02-18T09:10:00.000Z"),
     })
     await sixb.storage.webhookRuns!.finish({
@@ -517,7 +520,6 @@ describe("SixbServer HTTP contract", () => {
       projectId: "contract-project",
       status: "succeeded",
       finishedAt: new Date("2026-02-18T09:10:01.000Z"),
-      requestBodyBytes: 18,
       responseStatus: 202,
     })
 

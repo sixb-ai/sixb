@@ -39,7 +39,6 @@ import { PgProjectionRunStorage } from "./pg-projection-run-storage"
 import { PgRulesStorage } from "./pg-rules-storage"
 import { PgSyncRunStorage } from "./pg-sync-run-storage"
 import { PgTimeseriesStorage } from "./pg-timeseries-storage"
-import { PgWebhookDeliveryStorage } from "./pg-webhook-delivery-storage"
 import { PgWebhookRunStorage } from "./pg-webhook-run-storage"
 import { PgWorkflowInterventionStorage } from "./pg-workflow-intervention-storage"
 import { PgWorkflowRunStorage } from "./pg-workflow-run-storage"
@@ -141,7 +140,6 @@ export class PostgresStorage implements MigrationCapableStorage {
   readonly syncRuns: PgSyncRunStorage
   readonly projectionRuns: PgProjectionRunStorage
   readonly timeseries: Storage["timeseries"]
-  readonly webhookDeliveries: PgWebhookDeliveryStorage
   readonly webhookRuns: PgWebhookRunStorage
   readonly rules: PgRulesStorage
   readonly migrators: readonly StorageMigrator[]
@@ -214,7 +212,6 @@ export class PostgresStorage implements MigrationCapableStorage {
     this.syncRuns = createOperationScopedFacade(stores.syncRuns, scope)
     this.projectionRuns = createOperationScopedFacade(stores.projectionRuns, scope)
     this.timeseries = createOperationScopedFacade(stores.timeseries, scope)
-    this.webhookDeliveries = createOperationScopedFacade(stores.webhookDeliveries, scope)
     this.webhookRuns = createOperationScopedFacade(stores.webhookRuns, scope)
     this.rules = createOperationScopedFacade(stores.rules, scope)
   }
@@ -340,8 +337,7 @@ function createPostgresStores(
     syncRuns: new PgSyncRunStorage(sql, executions),
     projectionRuns: new PgProjectionRunStorage(sql, executions),
     timeseries: new PgTimeseriesStorage(sql),
-    webhookDeliveries: new PgWebhookDeliveryStorage(sql),
-    webhookRuns: new PgWebhookRunStorage(sql),
+    webhookRuns: new PgWebhookRunStorage(sql, executions),
     rules: new PgRulesStorage(sql),
   }
 }
@@ -360,7 +356,6 @@ interface PostgresStoreSet {
   readonly syncRuns: PgSyncRunStorage
   readonly projectionRuns: PgProjectionRunStorage
   readonly timeseries: PgTimeseriesStorage
-  readonly webhookDeliveries: PgWebhookDeliveryStorage
   readonly webhookRuns: PgWebhookRunStorage
   readonly rules: PgRulesStorage
 }
