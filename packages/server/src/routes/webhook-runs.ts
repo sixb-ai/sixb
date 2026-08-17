@@ -16,6 +16,7 @@ function serializeWebhookRun(run: WebhookRunRecord) {
   return {
     id: run.id,
     projectId: run.projectId,
+    executionId: run.executionId,
     connectorId: run.connectorId,
     webhookId: run.webhookId,
     status: run.status,
@@ -26,7 +27,6 @@ function serializeWebhookRun(run: WebhookRunRecord) {
     requestBodyBytes: run.requestBodyBytes,
     responseStatus: run.responseStatus,
     idempotencyKey: run.idempotencyKey,
-    deliveryClaimResult: run.deliveryClaimResult,
     error: run.error,
   }
 }

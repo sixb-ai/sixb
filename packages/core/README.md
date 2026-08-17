@@ -248,9 +248,7 @@ const edgeGateway = defineConnector(
 )
 ```
 
-Use `.json(schema)` for JSON bodies so payloads are validated at runtime. The `.verify(...)`,
-`.idempotencyKey(...)`, and `.handle(...)` callbacks each receive a run-scoped `logger`. Omit
-`.idempotencyKey(...)` for deterministic upserts where duplicate provider deliveries are harmless.
+Use `.json(schema)` for JSON bodies so payloads are validated at runtime. Verification and idempotency resolution run before admission and cannot access the execution SDK. After admission, `.handle(...)` receives the execution-bound `sixb` and its run-scoped `logger`. Omit `.idempotencyKey(...)` for deterministic upserts where duplicate provider deliveries are harmless.
 
 ## Syncs
 

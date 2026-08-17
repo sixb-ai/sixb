@@ -10355,7 +10355,7 @@ export type ListWebhookRunsData = {
   query?: {
     connectorId?: string
     webhookId?: string
-    status?: "running" | "succeeded" | "failed" | "skipped"
+    status?: "running" | "succeeded" | "failed"
     idempotencyKey?: string
     startedAfter?: string
     startedBefore?: string
@@ -10391,19 +10391,19 @@ export type ListWebhookRunsResponses = {
     runs: Array<{
       id: string
       projectId: string
+      executionId: string
       connectorId: string
       webhookId: string
-      status: "running" | "succeeded" | "failed" | "skipped"
+      status: "running" | "succeeded" | "failed"
       method: string
       route: string
       startedAt: string
       finishedAt?: string
-      requestBodyBytes?: number
+      requestBodyBytes: number
       responseStatus?: number
       idempotencyKey?: string
-      deliveryClaimResult?: "claimed" | "duplicate" | "in_progress"
       error?: {
-        code: "internal.unexpected" | "webhook.delivery_failed"
+        code: "internal.unexpected" | "webhook.delivery_failed" | "webhook.delivery_rejected"
         message: string
         retryable: boolean
         at: string

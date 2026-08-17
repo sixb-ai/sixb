@@ -16,7 +16,6 @@ import {
   type SixbHostOptions,
 } from "@sixb/core"
 import { flushSixbErrors } from "@sixb/core/internal/error-reporting"
-import type { WebhookDeliveryFailure } from "@sixb/core/storage"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -31,6 +30,11 @@ describe("webhook routes", () => {
     let rawBodyText = ""
     let requestHeader = ""
     let connected = false
+    let handlerExecutionId = ""
+    let verificationHadSdk = false
+    let idempotencyHadSdk = false
+    let verificationHadLogger = false
+    let idempotencyHadLogger = false
     const logEntries: LogEntry[] = []
     const logger: LoggerProvider = {
       write(entry) {
@@ -52,17 +56,21 @@ describe("webhook routes", () => {
               return { name: value.name }
             },
           })
-          .verify(({ request, rawBody, logger }) => {
-            logger.info("verified")
+          .verify((context) => {
+            const { request, rawBody } = context
+            verificationHadSdk = "sixb" in context
+            verificationHadLogger = "logger" in context
             requestHeader = request.headers.get("x-provider") ?? ""
             rawBodyText = new TextDecoder().decode(rawBody)
           })
-          .idempotencyKey(({ logger }) => {
-            logger.info("resolved idempotency")
+          .idempotencyKey((context) => {
+            idempotencyHadSdk = "sixb" in context
+            idempotencyHadLogger = "logger" in context
             return null
           })
           .handle(async ({ body, client, sixb, request, webhook, logger }) => {
             logger.info("handled")
+            handlerExecutionId = sixb.execution.id
             const resolved = (await client()) as { source: string }
             connected = resolved.source === "github"
 
@@ -103,6 +111,10 @@ describe("webhook routes", () => {
     expect(rawBodyText).toBe(payload)
     expect(requestHeader).toBe("github")
     expect(connected).toBe(true)
+    expect(verificationHadSdk).toBe(false)
+    expect(idempotencyHadSdk).toBe(false)
+    expect(verificationHadLogger).toBe(false)
+    expect(idempotencyHadLogger).toBe(false)
 
     const runs = await storage.webhookRuns.list({
       projectId: "test-project",
@@ -110,6 +122,7 @@ describe("webhook routes", () => {
       webhookId: "events",
     })
     const [run] = runs.runs
+    if (!run) throw new Error("Expected one admitted Webhook run.")
 
     expect(runs.total).toBe(1)
     expect(run).toMatchObject({
@@ -120,13 +133,22 @@ describe("webhook routes", () => {
       status: "succeeded",
       responseStatus: 201,
     })
-    expect(run?.requestBodyBytes).toBe(new TextEncoder().encode(payload).byteLength)
+    expect(run.executionId).toBe(handlerExecutionId)
+    await expect(
+      storage.executions.getById({ projectId: "test-project", id: run.executionId })
+    ).resolves.toMatchObject({
+      executor: { type: "primitive", kind: "webhook", runId: run.id },
+      source: { type: "webhook", deliveryId: run.id },
+      authorizationRef: {
+        type: "trustedPrimitive",
+        primitive: { kind: "webhook", id: run.route, runId: run.id },
+      },
+    })
+    expect(run.requestBodyBytes).toBe(new TextEncoder().encode(payload).byteLength)
     expect(logEntries.map((entry) => [entry.message, entry.context.phase])).toEqual([
-      ["verified", "verify"],
-      ["resolved idempotency", "idempotency"],
       ["handled", "handle"],
     ])
-    expect(new Set(logEntries.map((entry) => entry.context.run.id))).toEqual(new Set([run?.id]))
+    expect(new Set(logEntries.map((entry) => entry.context.run.id))).toEqual(new Set([run.id]))
     expect(logEntries.every((entry) => entry.context.run.kind === "webhook")).toBe(true)
   })
 
@@ -171,30 +193,10 @@ describe("webhook routes", () => {
     expect(calls).toBe(0)
 
     const runs = await storage.webhookRuns.list({ projectId: "test-project" })
-    const [run] = runs.runs
-
-    expect(runs.total).toBe(1)
-    expect(run).toMatchObject({
-      connectorId: "edge",
-      webhookId: "telemetry",
-      status: "failed",
-      responseStatus: 400,
-      error: {
-        code: "internal.unexpected",
-        message: "An unexpected internal error occurred.",
-        retryable: false,
-        details: {
-          connectorId: "edge",
-          webhookId: "telemetry",
-          runId: run?.id,
-        },
-      },
-    })
-    expect(run?.requestBodyBytes).toBe(new TextEncoder().encode(payload).byteLength)
-    expect(run?.error?.at).toBe(run?.finishedAt?.toISOString())
+    expect(runs.total).toBe(0)
   })
 
-  test("skips duplicate idempotent deliveries before handlers run", async () => {
+  test("acknowledges duplicate idempotent deliveries without rerunning handlers", async () => {
     let calls = 0
     const connector = defineConnector("github", {
       type: "test",
@@ -237,24 +239,17 @@ describe("webhook routes", () => {
       webhookId: "events",
       order: "asc",
     })
-    const succeeded = runs.runs.find((run) => run.status === "succeeded")
-    const skipped = runs.runs.find((run) => run.status === "skipped")
+    const [succeeded] = runs.runs
 
-    expect(runs.total).toBe(2)
+    expect(runs.total).toBe(1)
     expect(succeeded).toMatchObject({
       responseStatus: 202,
       idempotencyKey: "delivery-1",
-      deliveryClaimResult: "claimed",
-    })
-    expect(skipped).toMatchObject({
-      responseStatus: 202,
-      idempotencyKey: "delivery-1",
-      deliveryClaimResult: "duplicate",
     })
 
     const listResponse = await app.fetch(
       new Request(
-        "http://localhost/api/webhook-runs?connectorId=github&webhookId=events&status=skipped&idempotencyKey=delivery-1"
+        "http://localhost/api/webhook-runs?connectorId=github&webhookId=events&status=succeeded&idempotencyKey=delivery-1"
       )
     )
     const listBody = (await listResponse.json()) as {
@@ -263,7 +258,7 @@ describe("webhook routes", () => {
         connectorId: string
         webhookId: string
         idempotencyKey?: string
-        deliveryClaimResult?: string
+        executionId: string
       }>
       total: number
       hasMore: boolean
@@ -277,25 +272,21 @@ describe("webhook routes", () => {
         {
           connectorId: "github",
           webhookId: "events",
-          status: "skipped",
+          status: "succeeded",
           idempotencyKey: "delivery-1",
-          deliveryClaimResult: "duplicate",
         },
       ],
     })
   })
 
-  test("provides webhook logging when run history storage is not configured", async () => {
-    const logEntries: LogEntry[] = []
+  test("requires durable run storage when Webhooks are registered", () => {
     const connector = defineConnector("github", {
       type: "test",
       webhooks: [
         defineWebhook("events")
           .post()
           .json()
-          .handle(({ logger }) => {
-            logger.info("handled without history")
-          }),
+          .handle(() => undefined),
       ],
       connect() {
         return {}
@@ -303,24 +294,45 @@ describe("webhook routes", () => {
     })
     const storage = new InMemoryStorage()
     Object.defineProperty(storage, "webhookRuns", { value: undefined })
-    const app = createWebhookApp([connector], storage, {
-      write(entry) {
-        logEntries.push(entry)
+    expect(() => createWebhookApp([connector], storage)).toThrow(
+      "[Sixb] Webhooks require storage.webhookRuns to be configured."
+    )
+  })
+
+  test("rejects a reused delivery key with a different payload", async () => {
+    let calls = 0
+    const connector = defineConnector("github", {
+      type: "test",
+      webhooks: [
+        defineWebhook("events")
+          .post()
+          .json()
+          .idempotencyKey(() => "delivery-1")
+          .handle(() => {
+            calls += 1
+          }),
+      ],
+      connect() {
+        return {}
       },
     })
+    const storage = new InMemoryStorage()
+    const app = createWebhookApp([connector], storage)
+    const dispatch = (value: number) =>
+      app.fetch(
+        new Request("http://localhost/api/webhooks/github/events", {
+          method: "POST",
+          body: JSON.stringify({ value }),
+        })
+      )
 
-    const response = await app.fetch(
-      new Request("http://localhost/api/webhooks/github/events", {
-        method: "POST",
-        body: JSON.stringify({ ok: true }),
-      })
-    )
-
-    expect(response.status).toBe(202)
-    expect(logEntries).toHaveLength(1)
-    expect(logEntries[0]).toMatchObject({
-      message: "handled without history",
-      context: { run: { kind: "webhook" }, phase: "handle" },
+    expect((await dispatch(1)).status).toBe(202)
+    const conflict = await dispatch(2)
+    expect(conflict.status).toBe(409)
+    expect(await conflict.json()).toEqual({ error: "Webhook delivery conflict" })
+    expect(calls).toBe(1)
+    await expect(storage.webhookRuns.list({ projectId: "test-project" })).resolves.toMatchObject({
+      total: 1,
     })
   })
 
@@ -389,44 +401,18 @@ describe("webhook routes", () => {
 
     const runs = await storage.webhookRuns.list({ projectId: "test-project" })
 
-    expect(runs.total).toBe(3)
-    expect(runs.runs).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          webhookId: "events",
-          method: "GET",
-          status: "failed",
-          responseStatus: 405,
-          error: expect.objectContaining({
-            code: "internal.unexpected",
-            message: "An unexpected internal error occurred.",
-            retryable: false,
-          }),
-        }),
-        expect.objectContaining({
-          webhookId: "events",
-          method: "POST",
-          status: "failed",
-          responseStatus: 401,
-          error: expect.objectContaining({
-            code: "internal.unexpected",
-            message: "An unexpected internal error occurred.",
-            retryable: false,
-          }),
-        }),
-        expect.objectContaining({
-          webhookId: "failing",
-          method: "POST",
-          status: "failed",
-          responseStatus: 500,
-          error: expect.objectContaining({
-            code: "webhook.delivery_failed",
-            message: "Webhook delivery failed.",
-            retryable: true,
-          }),
-        }),
-      ])
-    )
+    expect(runs.total).toBe(1)
+    expect(runs.runs[0]).toMatchObject({
+      webhookId: "failing",
+      method: "POST",
+      status: "failed",
+      responseStatus: 500,
+      error: {
+        code: "webhook.delivery_failed",
+        message: "Webhook delivery failed.",
+        retryable: true,
+      },
+    })
 
     const failedRun = runs.runs.find((run) => run.webhookId === "failing")
     expect(failedRun?.error).toMatchObject({
@@ -465,23 +451,11 @@ describe("webhook routes", () => {
     })
   })
 
-  test("reports delivery infrastructure and returned non-4xx failures exactly once", async () => {
-    const claimError = new Error("claim storage unavailable")
-    const completionError = new Error("completion storage unavailable")
+  test("reports returned non-4xx failures exactly once", async () => {
     const reports: Array<{ error: Error; context: SixbErrorContext }> = []
     const connector = defineConnector("github", {
       type: "test",
       webhooks: [
-        defineWebhook("claim-failure")
-          .post()
-          .json()
-          .idempotencyKey(() => "claim-delivery")
-          .handle(() => undefined),
-        defineWebhook("completion-failure")
-          .post()
-          .json()
-          .idempotencyKey(() => "completion-delivery")
-          .handle(() => undefined),
         defineWebhook("unavailable")
           .post()
           .json()
@@ -505,25 +479,6 @@ describe("webhook routes", () => {
     })
 
     const storage = new InMemoryStorage()
-    const deliveries = storage.webhookDeliveries
-    const claim = deliveries.claim.bind(deliveries)
-    const complete = deliveries.complete.bind(deliveries)
-    deliveries.claim = async (input) => {
-      if (input.webhookId === "claim-failure") {
-        throw claimError
-      }
-      return claim(input)
-    }
-    deliveries.complete = async (input) => {
-      if (input.webhookId === "completion-failure") {
-        throw completionError
-      }
-      return complete(input)
-    }
-    storage.webhookRuns.finish = async () => {
-      throw new Error("run history unavailable")
-    }
-
     const { app, sixb } = createWebhookRuntime(
       [connector],
       storage,
@@ -540,34 +495,22 @@ describe("webhook routes", () => {
         })
       )
 
-    const claimFailure = await dispatch("claim-failure")
-    const completionFailure = await dispatch("completion-failure")
-    const skippedRetry = await dispatch("completion-failure")
     const unavailable = await dispatch("unavailable")
     const redirected = await dispatch("redirected")
     const clientRejection = await dispatch("client-rejection")
     const success = await dispatch("success")
     await flushSixbErrors(sixb)
 
-    expect(claimFailure.status).toBe(500)
-    expect(completionFailure.status).toBe(500)
-    expect(skippedRetry.status).toBe(202)
     expect(unavailable.status).toBe(503)
     expect(await unavailable.json()).toEqual({ error: "Retry later" })
     expect(redirected.status).toBe(302)
     expect(clientRejection.status).toBe(422)
     expect(success.status).toBe(202)
 
-    expect(reports).toHaveLength(4)
-    expect(reports.map((report) => report.error)).toEqual([
-      claimError,
-      completionError,
-      expect.any(Error),
-      expect.any(Error),
-    ])
-    expect(reports[2]?.error.message).toBe("Webhook handler returned HTTP 503")
-    expect(reports[3]?.error.message).toBe("Webhook handler returned HTTP 302")
-    expect(reports[2]?.error).toMatchObject({
+    expect(reports).toHaveLength(2)
+    expect(reports[0]?.error.message).toBe("Webhook handler returned HTTP 503")
+    expect(reports[1]?.error.message).toBe("Webhook handler returned HTTP 302")
+    expect(reports[0]?.error).toMatchObject({
       code: "webhook.delivery_failed",
       retryable: true,
       details: {
@@ -576,7 +519,7 @@ describe("webhook routes", () => {
         responseStatus: 503,
       },
     })
-    expect(reports[3]?.error).toMatchObject({
+    expect(reports[1]?.error).toMatchObject({
       code: "webhook.delivery_failed",
       retryable: true,
       details: {
@@ -596,16 +539,6 @@ describe("webhook routes", () => {
       {
         runId: expect.stringMatching(/^webhookrun_/),
         connectorId: "github",
-        webhookId: "claim-failure",
-      },
-      {
-        runId: expect.stringMatching(/^webhookrun_/),
-        connectorId: "github",
-        webhookId: "completion-failure",
-      },
-      {
-        runId: expect.stringMatching(/^webhookrun_/),
-        connectorId: "github",
         webhookId: "unavailable",
       },
       {
@@ -615,17 +548,16 @@ describe("webhook routes", () => {
       },
     ])
     expect(runContexts.map((context) => context.failure.code)).toEqual([
-      "internal.unexpected",
-      "internal.unexpected",
       "webhook.delivery_failed",
       "webhook.delivery_failed",
     ])
     expect(reports.every((report) => report.context.projectId === "test-project")).toBe(true)
-    expect(new Set(runContexts.map((context) => context.run.runId)).size).toBe(4)
+    expect(new Set(runContexts.map((context) => context.run.runId)).size).toBe(2)
   })
 
   test("retries idempotent deliveries after a returned server failure", async () => {
     let invocations = 0
+    const executionIds: string[] = []
     const connector = defineConnector("github", {
       type: "test",
       webhooks: [
@@ -633,8 +565,9 @@ describe("webhook routes", () => {
           .post()
           .json()
           .idempotencyKey(() => "delivery-1")
-          .handle(() => {
+          .handle(({ sixb }) => {
             invocations += 1
+            executionIds.push(sixb.execution.id)
             return { status: 503, body: { error: "Retry later" } }
           }),
       ],
@@ -643,21 +576,18 @@ describe("webhook routes", () => {
       },
     })
     const storage = new InMemoryStorage()
-    const deliveryFailures: WebhookDeliveryFailure[] = []
     const runFailures: unknown[] = []
-    const failDelivery = storage.webhookDeliveries.fail.bind(storage.webhookDeliveries)
+    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
     const finishRun = storage.webhookRuns.finish.bind(storage.webhookRuns)
-    storage.webhookDeliveries.fail = async (input) => {
-      deliveryFailures.push(input.failure)
-      return failDelivery(input)
-    }
     storage.webhookRuns.finish = async (input) => {
       if (input.status === "failed") {
         runFailures.push(input.error)
       }
       return finishRun(input)
     }
-    const app = createWebhookRuntime([connector], storage, undefined, () => {}).app
+    const { app, sixb } = createWebhookRuntime([connector], storage, undefined, (error, context) =>
+      reports.push({ error, context })
+    )
     const dispatch = () =>
       app.fetch(
         new Request("http://localhost/api/webhooks/github/retryable", {
@@ -668,15 +598,16 @@ describe("webhook routes", () => {
 
     const first = await dispatch()
     const retry = await dispatch()
+    await flushSixbErrors(sixb)
 
     expect(first.status).toBe(503)
     expect(retry.status).toBe(503)
     expect(invocations).toBe(2)
-    expect(deliveryFailures).toHaveLength(2)
     expect(runFailures).toHaveLength(2)
-    expect(runFailures[0]).toBe(deliveryFailures[0])
-    expect(runFailures[1]).toBe(deliveryFailures[1])
-    expect(deliveryFailures).toEqual([
+    expect(reports).toHaveLength(2)
+    expect(reports[0]?.context).toMatchObject({ failure: runFailures[0] })
+    expect(reports[1]?.context).toMatchObject({ failure: runFailures[1] })
+    expect(runFailures).toEqual([
       expect.objectContaining({
         code: "webhook.delivery_failed",
         message: "Webhook delivery failed.",
@@ -702,6 +633,15 @@ describe("webhook routes", () => {
         },
       }),
     ])
+    expect(new Set(executionIds).size).toBe(1)
+    const runs = await storage.webhookRuns.list({ projectId: "test-project" })
+    expect(runs.total).toBe(1)
+    expect(runs.runs[0]).toMatchObject({
+      executionId: executionIds[0],
+      status: "failed",
+      responseStatus: 503,
+      error: runFailures[1],
+    })
   })
 })
 

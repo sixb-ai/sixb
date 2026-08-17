@@ -62,6 +62,7 @@ import syncPipelineExecutionsSql from "./migrations/021-sync-pipeline-executions
 import projectionExecutionsSql from "./migrations/022-projection-executions.sql" with {
   type: "text",
 }
+import webhookExecutionsSql from "./migrations/023-webhook-executions.sql" with { type: "text" }
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -114,6 +115,20 @@ export const sqliteStorageMigrations = defineMigrations({
         db.run(projectionExecutionsSql)
       },
       { checksum: checksum(projectionExecutionsSql) }
+    ),
+    sqliteStep(
+      "023-webhook-executions",
+      (db) => {
+        const hasRuns = db.query("SELECT 1 FROM webhook_runs LIMIT 1").get()
+        const hasDeliveries = db.query("SELECT 1 FROM webhook_deliveries LIMIT 1").get()
+        if (hasRuns || hasDeliveries) {
+          throw new Error(
+            "[SixbSqliteStorage] Webhook execution migration cannot preserve legacy runs or deliveries with unknown authority."
+          )
+        }
+        db.run(webhookExecutionsSql)
+      },
+      { checksum: checksum(webhookExecutionsSql) }
     ),
   ],
 })

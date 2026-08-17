@@ -82,6 +82,10 @@ export const SIXB_ERROR_DEFINITIONS = {
     publicMessage: "Webhook delivery failed.",
     retryable: true,
   },
+  "webhook.delivery_rejected": {
+    publicMessage: "Webhook delivery was rejected.",
+    retryable: false,
+  },
   "workflow.node_failed": {
     publicMessage: "Workflow node execution failed.",
     retryable: false,

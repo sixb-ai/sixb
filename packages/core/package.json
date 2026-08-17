@@ -113,6 +113,12 @@
       "import": "./dist/storage/sync-runs/provider.js",
       "default": "./dist/storage/sync-runs/provider.js"
     },
+    "./internal/webhook-run-storage-provider": {
+      "types": "./dist/storage/webhook-runs/provider.d.ts",
+      "bun": "./src/storage/webhook-runs/provider.ts",
+      "import": "./dist/storage/webhook-runs/provider.js",
+      "default": "./dist/storage/webhook-runs/provider.js"
+    },
     "./internal/agents": {
       "types": "./dist/agents/index.d.ts",
       "bun": "./src/agents/index.ts",
@@ -250,6 +256,12 @@
       "bun": "./src/execution/request.ts",
       "import": "./dist/execution/request.js",
       "default": "./dist/execution/request.js"
+    },
+    "./internal/webhooks": {
+      "types": "./dist/webhooks/internal.d.ts",
+      "bun": "./src/webhooks/internal.ts",
+      "import": "./dist/webhooks/internal.js",
+      "default": "./dist/webhooks/internal.js"
     },
     "./internal/query": {
       "types": "./dist/objects/query/index.d.ts",

@@ -104,12 +104,10 @@ export {
   queueTestSyncRun,
   startTestSyncRun,
 } from "./sync-execution"
-export {
-  runWebhookDeliveryStorageContractSuite,
-  type WebhookDeliveryStorageContractSuiteOptions,
-} from "./webhook-delivery-storage-contract"
+export { createTestWebhookExecution, startTestWebhookRun } from "./webhook-execution"
 export {
   runWebhookRunStorageContractSuite,
+  type WebhookRunStorageContractStorage,
   type WebhookRunStorageContractSuiteOptions,
 } from "./webhook-run-storage-contract"
 export {
