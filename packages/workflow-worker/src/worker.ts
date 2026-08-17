@@ -101,7 +101,7 @@ export class WorkflowWorker extends QueueWorker<
           job: {
             id: run.id,
             workflowId: run.workflowId,
-            resume: claimed.job.payload.resume,
+            nodeRunId: claimed.job.payload.nodeRunId,
             execution,
           },
           signal,

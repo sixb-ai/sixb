@@ -26,7 +26,7 @@ export function executionRecordInputFromRuntime(input: {
       ? {}
       : { requestedBy: structuredClone(execution.requestedBy) }),
     executor: durableExecutor(execution),
-    source: durableSource(execution),
+    source: structuredClone(execution.source),
     correlationId: execution.correlationId,
     authorizationRef: getAuthorizationRef(input.runtimeAuthorization),
   }
@@ -127,7 +127,7 @@ export function restoreTrustedPrimitiveExecutionScope(input: {
     projectId: input.execution.projectId,
     ...(input.execution.requestedBy === undefined
       ? {}
-      : { requestedBy: structuredClone(input.execution.requestedBy) }),
+      : { requestedBy: Object.freeze(structuredClone(input.execution.requestedBy)) }),
     executor: Object.freeze({ type: "primitive", ...structuredClone(input.primitive) }),
     source: Object.freeze(structuredClone(input.execution.source)),
     correlationId: input.execution.correlationId,
@@ -156,16 +156,6 @@ function durableExecutor(execution: ExecutionContext): CreateExecutionInput["exe
     case "kernel":
       return { type: "kernel", operation: structuredClone(execution.executor.operation) }
   }
-}
-
-function durableSource(execution: ExecutionContext): CreateExecutionInput["source"] {
-  if (execution.source.type === "queue") {
-    throw new ExecutionStorageError(
-      "invalid_input",
-      `[Sixb] Execution '${execution.id}' has a transient queue source and cannot be persisted.`
-    )
-  }
-  return structuredClone(execution.source)
 }
 
 function assertExecutionRecordMatches(

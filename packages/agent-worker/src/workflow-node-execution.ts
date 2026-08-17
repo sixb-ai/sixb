@@ -592,7 +592,7 @@ export async function enqueueWorkflowAgentNodeResume(
         type: "workflow.run.resume.requested",
         payload: {
           runId: node.workflowRunId,
-          resume: { kind: "agentNode", nodeRunId: node.id },
+          nodeRunId: node.id,
         },
       },
     ],

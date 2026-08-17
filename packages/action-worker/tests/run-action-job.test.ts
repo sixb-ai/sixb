@@ -18,7 +18,7 @@ import {
 } from "@sixb/core"
 import { findActionEditCommit } from "@sixb/core/internal/actions"
 import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
-import { bindPrimitiveExecution } from "@sixb/core/internal/primitive-execution"
+import { bindDurablePrimitiveExecution } from "@sixb/core/internal/primitive-execution"
 import type { ActionRunParams, ActionRunRecord } from "@sixb/core/storage"
 import { createTestSixb, queueTestActionRun } from "@sixb/core/testing"
 import { runActionJob } from "../src/run-action-job"
@@ -72,13 +72,22 @@ function createSixb(
 }
 
 function createContext(host: ActionWorkerHost): ActionWorkerContext {
-  const execution = bindPrimitiveExecution(host, {
-    primitive: {
-      kind: "action",
-      id: host.definitions.actions.list()[0]?.id ?? "test-action",
-      runId: "direct-action-job-test",
+  const primitive = {
+    kind: "action" as const,
+    id: host.definitions.actions.list()[0]?.id ?? "test-action",
+    runId: "direct-action-job-test",
+  }
+  const execution = bindDurablePrimitiveExecution(host, {
+    execution: {
+      id: "direct-action-execution-test",
+      projectId: host.id,
+      executor: { type: "primitive", kind: primitive.kind, runId: primitive.runId },
+      source: { type: "event", eventId: "direct-action-event-test" },
+      correlationId: "direct-action-correlation-test",
+      authorizationRef: { type: "trustedPrimitive", primitive },
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
     },
-    source: { type: "queue", queue: "actions", jobId: "direct-action-job-test" },
+    primitive,
   })
   return {
     id: host.id,
