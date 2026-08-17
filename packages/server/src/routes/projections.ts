@@ -31,12 +31,14 @@ function serializeProjectionRun(run: ProjectionRunRecord) {
   return ProjectionRunSchema.parse({
     id: run.id,
     projectId: run.projectId,
+    executionId: run.executionId,
     identity: run.identity,
     target: run.target,
     status: run.status,
     attempt: run.attempt,
     progress: run.progress,
-    startedAt: toIsoString(run.startedAt),
+    queuedAt: toIsoString(run.queuedAt),
+    startedAt: run.startedAt ? toIsoString(run.startedAt) : undefined,
     finishedAt: run.finishedAt ? toIsoString(run.finishedAt) : undefined,
     error: run.error,
   })

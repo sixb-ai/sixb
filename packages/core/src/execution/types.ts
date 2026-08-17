@@ -47,6 +47,7 @@ export type ExecutionSource =
   | { readonly type: "webhook"; readonly deliveryId: string }
   | { readonly type: "schedule"; readonly eventId: string }
   | { readonly type: "event"; readonly eventId: string }
+  | { readonly type: "datasetVersion"; readonly datasetId: string; readonly versionId: string }
   | { readonly type: "execution"; readonly executionId: string }
   | { readonly type: "queue"; readonly queue: string; readonly jobId: string }
 

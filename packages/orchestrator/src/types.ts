@@ -14,7 +14,11 @@ import type {
   AutomaticPipelineRunDispatchInput,
   PipelineRunDispatchPort,
 } from "@sixb/core/internal/pipelines"
-import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projections"
+import type {
+  ProjectionDispatchDescriptor,
+  ProjectionRunDispatchInput,
+  ProjectionRunDispatchPort,
+} from "@sixb/core/internal/projections"
 import type { RuntimeEventScheduleDefinition } from "@sixb/core/internal/schedules"
 import type { AutomaticSyncRunDispatchInput, SyncRunDispatchPort } from "@sixb/core/internal/syncs"
 import type {
@@ -22,8 +26,6 @@ import type {
   WorkflowRunDispatchPort,
 } from "@sixb/core/internal/workflows"
 import type { LakeStorage } from "@sixb/core/lake-storage"
-import type { ProjectionRunRequestedQueueJob } from "@sixb/core/queues"
-import type { ProjectionRunStorage } from "@sixb/core/storage"
 
 export type RoutableProjectionDefinition = ProjectionDispatchDescriptor
 
@@ -39,8 +41,8 @@ export type OrchestratorRouteKey =
   | DatasetVersionCommittedRouteKey
   | EventScheduleRouteKey
 
-export interface ProjectionRunRequestedJobTemplate {
-  readonly type: ProjectionRunRequestedQueueJob["type"]
+export interface ProjectionDispatchJobTemplate {
+  readonly type: "projection.dispatch"
   readonly payload: ProjectionDispatchDescriptor
 }
 
@@ -65,7 +67,7 @@ export interface PipelineRunDispatchJobTemplate {
 export type OrchestratorJob =
   | { readonly queue: "syncRuns"; readonly job: SyncRunDispatchJobTemplate }
   | { readonly queue: "pipelines"; readonly job: PipelineRunDispatchJobTemplate }
-  | { readonly queue: "projections"; readonly job: ProjectionRunRequestedJobTemplate }
+  | { readonly queue: "projections"; readonly job: ProjectionDispatchJobTemplate }
   | { readonly queue: "workflows"; readonly job: WorkflowRunDispatchJobTemplate }
 
 export type OrchestratorEventScheduleTarget =
@@ -119,9 +121,8 @@ export interface CompileRoutesResult {
   readonly diagnostics: readonly CompileRoutesDiagnostic[]
 }
 
-export interface ProjectionDispatchPorts {
+export interface ProjectionReconciliationPorts {
   readonly lakeStorage: Pick<LakeStorage, "getLatestVersion" | "getVersion" | "listVersions">
-  readonly projectionRuns: Pick<ProjectionRunStorage, "getById">
 }
 
 export type WorkflowDispatchInput = AutomaticWorkflowRunDispatchInput
@@ -130,6 +131,8 @@ export type SyncDispatchInput = AutomaticSyncRunDispatchInput
 export type SyncDispatcherPort = SyncRunDispatchPort
 export type PipelineDispatchInput = AutomaticPipelineRunDispatchInput
 export type PipelineDispatcherPort = PipelineRunDispatchPort
+export type ProjectionDispatchInput = ProjectionRunDispatchInput
+export type ProjectionDispatcherPort = ProjectionRunDispatchPort
 
 export interface OrchestratorDispatchers {
   /** Required when the compiled routes contain automatic Sync triggers. */
@@ -138,6 +141,8 @@ export interface OrchestratorDispatchers {
   readonly pipelines?: PipelineDispatcherPort
   /** Required when the compiled routes contain automatic workflow triggers. */
   readonly workflows?: WorkflowDispatcherPort
+  /** Required when the compiled routes contain Projection triggers. */
+  readonly projections?: ProjectionDispatcherPort
 }
 
 export interface OrchestratorRuntimeOptions {
@@ -147,5 +152,5 @@ export interface OrchestratorRuntimeOptions {
   readonly routes: OrchestratorRoutes
   readonly dispatchers: OrchestratorDispatchers
   /** Required when the compiled routes contain projections. */
-  readonly projectionDispatch?: ProjectionDispatchPorts
+  readonly projectionReconciliation?: ProjectionReconciliationPorts
 }

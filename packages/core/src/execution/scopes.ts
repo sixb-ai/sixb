@@ -224,6 +224,9 @@ function freezeExecution(execution: ExecutionContext): ExecutionContext {
 function snapshotExecutionSource(source: ExecutionSource): ExecutionSource {
   const field = sourceIdentifier(source)
   assertNonEmpty(field.value, field.label)
+  if (source.type === "datasetVersion") {
+    assertNonEmpty(source.datasetId, "Execution source dataset id")
+  }
   if (source.type === "queue") {
     assertNonEmpty(source.queue, "Execution source queue")
   }
@@ -242,6 +245,8 @@ function sourceIdentifier(source: ExecutionSource): {
     case "schedule":
     case "event":
       return { label: "Execution source event id", value: source.eventId }
+    case "datasetVersion":
+      return { label: "Execution source dataset version id", value: source.versionId }
     case "execution":
       return { label: "Execution source execution id", value: source.executionId }
     case "queue":

@@ -131,7 +131,7 @@ export default function HomePage() {
     run?.status === "succeeded" &&
     Boolean(versionId) &&
     !projections.isError &&
-    (!projection || projection.status === "running")
+    (!projection || projection.status === "queued" || projection.status === "running")
   const awaiting = syncPending || materializing
   const timedOut = Boolean(awaiting && requestedAt && now.getTime() - requestedAt > 30_000)
   const missingVersion = run?.status === "succeeded" && !versionId

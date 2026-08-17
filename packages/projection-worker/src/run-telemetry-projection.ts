@@ -16,8 +16,6 @@ import { normalizeProjectedValue } from "./projection-value-coercion"
 import type { ClaimedProjectionExecution, ProjectionWorkerContext } from "./types"
 import { isBlank, isPlainObject, throwIfAborted } from "./utils"
 
-export const TELEMETRY_PROJECTION_BATCH_SIZE = 500
-
 interface TelemetryProjectionPlan {
   readonly projection: TelemetryProjectionDefinition
   readonly dataset: DatasetDefinition

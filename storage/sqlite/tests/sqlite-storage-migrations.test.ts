@@ -168,6 +168,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 20,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "021-projection-executions",
+    status: "applied",
+    version: 21,
+  },
 ]
 
 afterEach(async () => {
@@ -1356,6 +1363,69 @@ describe("SQLite storage migrations", () => {
     }
   })
 
+  test("rejects legacy Projection runs instead of inventing execution authority", () => {
+    const db = new Database(":memory:")
+    try {
+      const executionMigrationIndex = sqliteStorageMigrations.steps.findIndex(
+        (migration) => migration.id === "021-projection-executions"
+      )
+      const executionMigration = sqliteStorageMigrations.steps[executionMigrationIndex]
+      if (!executionMigration) {
+        throw new Error("SQLite projection-executions migration is missing.")
+      }
+      for (const migration of sqliteStorageMigrations.steps.slice(0, executionMigrationIndex)) {
+        migration.up(db)
+      }
+      db.query(`
+        INSERT INTO projection_runs (
+          project_id, id, projection_id, projection_kind, materialization_protocol,
+          dataset_id, dataset_version_id, dataset_version_created_at, ontology_revision,
+          projection_revision, ownership_hash, object_type_id, status, started_at, attempt,
+          execution_token
+        ) VALUES (
+          ?, ?, ?, 'object', 'replacement', ?, ?, ?, ?, ?, ?, ?, 'running', ?, 1, ?
+        )
+      `).run(
+        "project-a",
+        "legacy-projection-run",
+        "project-devices",
+        "raw.devices",
+        "version-1",
+        "2026-01-01T00:00:00.000Z",
+        "ontology-1",
+        "projection-1",
+        "ownership-1",
+        "Device",
+        "2026-01-01T00:00:00.000Z",
+        "legacy-token"
+      )
+
+      expect(() => db.transaction(() => executionMigration.up(db))()).toThrow()
+      expect(readMemoryTableColumns(db, "projection_runs")).not.toContain("execution_id")
+    } finally {
+      db.close()
+    }
+  })
+
+  test("makes the Projection execution link required and unique", () => {
+    const db = new Database(":memory:")
+    try {
+      for (const migration of sqliteStorageMigrations.steps) migration.up(db)
+
+      expect(readMemoryForeignKeyTables(db, "executions")).toContain("executions")
+      expect(readMemoryForeignKeyTables(db, "executions")).not.toContain("executions_v2")
+      expect(readMemoryColumn(db, "projection_runs", "execution_id")?.notnull).toBe(1)
+      expect(readMemoryColumn(db, "projection_runs", "queued_at")?.notnull).toBe(1)
+      expect(readMemoryColumn(db, "projection_runs", "started_at")?.notnull).toBe(0)
+      expect(readMemoryUniqueIndexes(db, "projection_runs")).toContainEqual([
+        "project_id",
+        "execution_id",
+      ])
+    } finally {
+      db.close()
+    }
+  })
+
   test("migrations install auth storage tables", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-auth-migrations-"))
     tempDirs.push(tempDir)
@@ -1645,6 +1715,12 @@ function readMemoryUniqueIndexes(db: Database, tableName: string): string[][] {
   return indexes
     .filter((index) => index.unique === 1)
     .map((index) => readMemoryIndexColumns(db, index.name))
+}
+
+function readMemoryForeignKeyTables(db: Database, tableName: string): string[] {
+  return (
+    db.query(`PRAGMA foreign_key_list(${tableName})`).all() as { readonly table: string }[]
+  ).map((foreignKey) => foreignKey.table)
 }
 
 function readMemoryColumn(

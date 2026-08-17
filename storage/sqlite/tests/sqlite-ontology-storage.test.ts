@@ -12,7 +12,6 @@ import {
 } from "@sixb/core/testing"
 import { SqliteStorage } from "../src"
 import { sqliteStoragePath } from "../src/migrations"
-import { SqliteProjectionRunStorage } from "../src/projection-run-storage"
 
 runOntologyStorageContractSuite("SQLite ontology storage contract", {
   createStorage: () => new SqliteStorage(),
@@ -61,11 +60,17 @@ test("SQLite work staging rolls back a partial batch after a later record confli
 })
 
 runProjectionRunStorageContractSuite("SQLite projection-run storage contract", {
-  createStorage: () => new SqliteProjectionRunStorage(),
-  cleanup(storage) {
-    storage.close()
+  createStorage: () => {
+    const storage = new SqliteStorage()
+    projectionRunContractOwners.set(storage.projectionRuns, storage)
+    return { projectionRuns: storage.projectionRuns, executions: storage.executions }
+  },
+  cleanup(context) {
+    projectionRunContractOwners.get(context.projectionRuns)?.close()
   },
 })
+
+const projectionRunContractOwners = new WeakMap<SqliteStorage["projectionRuns"], SqliteStorage>()
 
 interface FailureStorage extends SqliteStorage {
   readonly testDirectory: string

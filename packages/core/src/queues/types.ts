@@ -143,7 +143,12 @@ export interface PipelineRunRequestedQueueJob
   > {}
 
 export interface ProjectionRunRequestedQueueJob
-  extends QueueJob<"projection.run.requested", ProjectionMaterializationIdentity> {}
+  extends QueueJob<
+    "projection.run.requested",
+    {
+      readonly runId: string
+    }
+  > {}
 
 export interface WorkflowRunRequestedQueueJob
   extends QueueJob<

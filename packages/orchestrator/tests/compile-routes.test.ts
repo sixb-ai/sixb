@@ -288,7 +288,7 @@ describe("compileRoutes", () => {
       {
         queue: "projections",
         job: {
-          type: "projection.run.requested",
+          type: "projection.dispatch",
           payload: descriptor,
         },
       },

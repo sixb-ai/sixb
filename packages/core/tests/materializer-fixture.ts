@@ -19,6 +19,7 @@ import {
   type ProjectionSourceReplacement,
   type TelemetryAppend,
 } from "../src/materializer"
+import { claimTestProjectionRun } from "../src/testing"
 
 export const Device = defineObjectType({
   id: "Device",
@@ -211,7 +212,7 @@ export async function claimProjectionExecution(
   }
   const common = { id: input.runId, projectId: "project" } as const
   if (definition._tag === "TelemetryProjectionDefinition") {
-    const claim = await storage.projectionRuns.startOrReclaim({
+    const claim = await claimTestProjectionRun(storage, {
       ...common,
       identity: { ...identityBase, projectionKind: "telemetry", protocol: "telemetry" },
       target: { objectTypeId: definition.objectTypeId },
@@ -223,7 +224,7 @@ export async function claimProjectionExecution(
     throw new Error("Telemetry execution requires a telemetry projection")
   }
   if (definition._tag === "LinkProjectionDefinition") {
-    const claim = await storage.projectionRuns.startOrReclaim({
+    const claim = await claimTestProjectionRun(storage, {
       ...common,
       identity: { ...identityBase, projectionKind: "link", protocol: "replacement" },
       target: {
@@ -233,7 +234,7 @@ export async function claimProjectionExecution(
     })
     return claim.execution
   }
-  const claim = await storage.projectionRuns.startOrReclaim({
+  const claim = await claimTestProjectionRun(storage, {
     ...common,
     identity: { ...identityBase, projectionKind: "object", protocol: "replacement" },
     target: { objectTypeId: definition.objectTypeId },

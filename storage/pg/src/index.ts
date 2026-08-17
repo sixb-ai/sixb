@@ -338,7 +338,7 @@ function createPostgresStores(
     workflowRuns: new PgWorkflowRunStorage(sql, executions),
     workflowInterventions: new PgWorkflowInterventionStorage(sql),
     syncRuns: new PgSyncRunStorage(sql, executions),
-    projectionRuns: new PgProjectionRunStorage(sql),
+    projectionRuns: new PgProjectionRunStorage(sql, executions),
     timeseries: new PgTimeseriesStorage(sql),
     webhookDeliveries: new PgWebhookDeliveryStorage(sql),
     webhookRuns: new PgWebhookRunStorage(sql),
