@@ -298,7 +298,7 @@ function createSqliteStores(
     pipelineRuns: new SqlitePipelineRunStorage({ connection, executions }),
     timeseries: new SqliteTimeseriesStorage({ connection }),
     syncRuns: new SqliteSyncRunStorage({ connection, executions }),
-    projectionRuns: new SqliteProjectionRunStorage({ connection }),
+    projectionRuns: new SqliteProjectionRunStorage({ connection, executions }),
     workflowRuns: new SqliteWorkflowRunStorage({ connection, executions }),
     workflowInterventions: new SqliteWorkflowInterventionStorage({ connection }),
     webhookDeliveries: new SqliteWebhookDeliveryStorage({ connection }),

@@ -18,6 +18,7 @@ import {
   contractEditResult,
   type OntologyContractStorage,
 } from "./ontology-contract-fixture"
+import { startTestProjectionRun } from "./projection-execution"
 
 export interface OntologyStorageContractStorage extends OntologyContractStorage {
   readonly projectionRuns: ProjectionRunStorage
@@ -204,7 +205,7 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
     test("stages insert-only source rows, seals counts, and fences stale execution tokens", async () => {
       await withStorage(async (storage) => {
         const identity = replacementIdentity("01")
-        const claimed = await storage.projectionRuns.startOrReclaim({
+        const claimed = await startTestProjectionRun(storage, {
           id: "staging-run",
           projectId: "contract-project",
           identity,
@@ -702,7 +703,7 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
           projectionRevision: "telemetry-contract-revision",
           ownershipHash: "telemetry-contract-ownership",
         }
-        const run = await storage.projectionRuns.startOrReclaim({
+        const run = await startTestProjectionRun(storage, {
           id: "telemetry-run",
           projectId: "contract-project",
           identity,
@@ -784,7 +785,7 @@ async function createReadyEmptyCandidate(
   versionId: string
 ): Promise<ReadyCandidate> {
   const identity = replacementIdentity(versionId)
-  const run = await storage.projectionRuns.startOrReclaim({
+  const run = await startTestProjectionRun(storage, {
     id: runId,
     projectId: "contract-project",
     identity,

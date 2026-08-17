@@ -22,7 +22,9 @@ export function queryLatestRunsByOwnerId<TRow>(
 
   const placeholders = ownerIds.map(() => "?").join(", ")
   const orderColumn =
-    input.tableName === "sync_runs" || input.tableName === "pipeline_runs"
+    input.tableName === "sync_runs" ||
+    input.tableName === "pipeline_runs" ||
+    input.tableName === "projection_runs"
       ? "COALESCE(started_at, queued_at)"
       : "started_at"
   const rows = input.db

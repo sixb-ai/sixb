@@ -384,6 +384,13 @@ function trustedPrimitiveSource(
   if (kind === "pipeline") {
     return { type: "schedule", eventId: `schedule-event-${id}` }
   }
+  if (kind === "projection") {
+    return {
+      type: "datasetVersion",
+      datasetId: "contract-dataset",
+      versionId: `version-${id}`,
+    }
+  }
   if (kind === "webhook") {
     return { type: "webhook", deliveryId: `delivery-${id}` }
   }

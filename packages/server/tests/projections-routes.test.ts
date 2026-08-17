@@ -56,6 +56,7 @@ function makeRun(
   return {
     id: "run-1",
     projectId: "my-app",
+    executionId: "execution-run-1",
     identity: {
       projectionId: input.projectionId ?? "rooms",
       projectionKind: "object",
@@ -72,6 +73,7 @@ function makeRun(
     target: { objectTypeId: input.objectTypeId ?? "room" },
     status: "succeeded",
     attempt: 2,
+    queuedAt: new Date("2026-05-04T08:59:00.000Z"),
     startedAt: new Date("2026-05-04T09:00:00.000Z"),
     progress: { sourceRowsRead: 0, sourceRowsSkipped: 0 },
     ...input.run,
@@ -212,7 +214,11 @@ describe("projection routes", () => {
     )
     const body = (await response.json()) as { runs: Record<string, unknown>[] }
 
-    expect(body.runs[0]).toMatchObject({ attempt: 2 })
+    expect(body.runs[0]).toMatchObject({
+      executionId: "execution-run-1",
+      attempt: 2,
+      queuedAt: "2026-05-04T08:59:00.000Z",
+    })
     expect(body.runs[0]).not.toHaveProperty("executionToken")
     expect(body.runs[0]).not.toHaveProperty("telemetryCheckpoint")
     expect(body.runs[0]).toHaveProperty("identity.ontologyRevision", "ontology-revision")

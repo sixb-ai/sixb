@@ -70,9 +70,10 @@ type PrimitiveExecutionOrigin =
       readonly projectId: string
       readonly source: Extract<
         CreateExecutionInput["source"],
-        { readonly type: "schedule" | "event" }
+        { readonly type: "schedule" | "event" | "datasetVersion" }
       >
       readonly correlationId: string
+      readonly requestedBy?: CreateExecutionInput["requestedBy"]
     }
 
 /** Build an immutable primitive execution from its parent execution or automatic trigger. */
@@ -93,6 +94,9 @@ export function createPrimitiveExecutionRecord(input: {
         }
       : {
           projectId: input.origin.projectId,
+          ...(input.origin.requestedBy === undefined
+            ? {}
+            : { requestedBy: structuredClone(input.origin.requestedBy) }),
           source: structuredClone(input.origin.source),
           correlationId: input.origin.correlationId,
         }

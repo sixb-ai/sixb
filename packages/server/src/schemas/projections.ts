@@ -7,7 +7,13 @@ const ProjectionRunFailureSchema: z.ZodType<SixbFailure<ProjectionRunFailureCode
   sixbFailureSchema(PROJECTION_RUN_FAILURE_CODES)
 
 export const ProjectionKindSchema = z.enum(["object", "link", "telemetry"])
-export const ProjectionRunStatusSchema = z.enum(["running", "succeeded", "failed", "cancelled"])
+export const ProjectionRunStatusSchema = z.enum([
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+  "cancelled",
+])
 
 const ProjectionRunIdentityBaseSchema = z.object({
   projectionId: z.string(),
@@ -24,13 +30,15 @@ const ProjectionRunIdentityBaseSchema = z.object({
 const ProjectionRunBaseSchema = z.object({
   id: z.string(),
   projectId: z.string(),
+  executionId: z.string(),
   status: ProjectionRunStatusSchema,
   attempt: z.number(),
   progress: z.object({
     sourceRowsRead: z.number(),
     sourceRowsSkipped: z.number(),
   }),
-  startedAt: z.string(),
+  queuedAt: z.string(),
+  startedAt: z.string().optional(),
   finishedAt: z.string().optional(),
   error: ProjectionRunFailureSchema.optional(),
 })

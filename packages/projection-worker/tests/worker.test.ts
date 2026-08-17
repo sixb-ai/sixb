@@ -18,8 +18,10 @@ import {
   type SixbErrorHandler,
   SixbHost,
 } from "@sixb/core"
-import type { ProjectionMaterializationIdentity } from "@sixb/core/internal/materialization"
-import { createProjectionRunId, getProjectionRegistry } from "@sixb/core/internal/projections"
+import {
+  ProjectionRunDispatcher,
+  type ProjectionRunDispatcherDependencies,
+} from "@sixb/core/internal/projections"
 import type { ProjectionRunStorage } from "@sixb/core/storage"
 import { ProjectionWorker } from "../src"
 
@@ -90,14 +92,19 @@ async function commitDatasetVersion(
   return write.commit({ commitMessage: "test projection input" })
 }
 
-function projectionIdentity(
-  sixb: object,
+async function dispatchProjectionRun(
+  sixb: ProjectionRunDispatcherDependencies,
   projectionId: string,
-  datasetVersion: ProjectionMaterializationIdentity["datasetVersion"]
-): ProjectionMaterializationIdentity {
-  const descriptor = getProjectionRegistry(sixb).resolveDispatch(projectionId)
-  const { datasetId: _datasetId, ...semanticIdentity } = descriptor
-  return { ...semanticIdentity, datasetVersion }
+  version: { readonly datasetId: string; readonly versionId: string; readonly createdAt: Date }
+) {
+  return new ProjectionRunDispatcher(sixb).dispatch({
+    projectionId,
+    datasetVersion: {
+      datasetId: version.datasetId,
+      versionId: version.versionId,
+      createdAt: version.createdAt.toISOString(),
+    },
+  })
 }
 
 async function waitFor<T>(
@@ -127,28 +134,14 @@ describe("ProjectionWorker", () => {
     const version = await commitDatasetVersion(sixb.lakeStorage, roomsDataset, [
       { room_id: "r1", room_name: "Kitchen" },
     ])
-    const payload = projectionIdentity(sixb, roomProjection.id, {
-      datasetId: roomsDataset.id,
-      versionId: version.versionId,
-      createdAt: version.createdAt.toISOString(),
-    })
-    const runId = createProjectionRunId(sixb.id, payload)
-    const [queued] = await sixb.queues.projections.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          id: runId,
-          type: "projection.run.requested",
-          payload,
-        },
-      ],
-    })
+    const dispatched = await dispatchProjectionRun(sixb, roomProjection.id, version)
+    const runId = dispatched.runId
 
     const worker = new ProjectionWorker(sixb)
     await worker.start()
 
     try {
-      expect(queued?.id).toBe(runId)
+      expect(dispatched.jobId).toBe(runId)
       const projectionRunsStorage = requireProjectionRunsStorage(sixb)
       const run = await waitFor(
         () => projectionRunsStorage.getById({ projectId: sixb.id, id: runId }),
@@ -191,28 +184,14 @@ describe("ProjectionWorker", () => {
         yield { room_id: 42, room_name: "invalid" }
       },
     })
-    const payload = projectionIdentity(sixb, roomProjection.id, {
-      datasetId: roomsDataset.id,
-      versionId: version.versionId,
-      createdAt: version.createdAt.toISOString(),
-    })
-    const runId = createProjectionRunId(sixb.id, payload)
-    const [queued] = await sixb.queues.projections.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          id: runId,
-          type: "projection.run.requested",
-          payload,
-        },
-      ],
-    })
+    const dispatched = await dispatchProjectionRun(sixb, roomProjection.id, version)
+    const runId = dispatched.runId
 
     const worker = new ProjectionWorker(sixb)
     await worker.start()
 
     try {
-      expect(queued?.id).toBe(runId)
+      expect(dispatched.jobId).toBe(runId)
       const projectionRunsStorage = requireProjectionRunsStorage(sixb)
       const run = await waitFor(
         () => projectionRunsStorage.getById({ projectId: sixb.id, id: runId }),
@@ -280,16 +259,7 @@ describe("ProjectionWorker", () => {
       { room_name: "Kitchen", room_id: "r1" },
     ])
     const sixb = createSixb({ datasets: [currentDataset], projections: [currentProjection] }, deps)
-    const payload = projectionIdentity(sixb, currentProjection.id, {
-      datasetId: currentDataset.id,
-      versionId: version.versionId,
-      createdAt: version.createdAt.toISOString(),
-    })
-    const runId = createProjectionRunId(sixb.id, payload)
-    await sixb.queues.projections.enqueue({
-      projectId: sixb.id,
-      jobs: [{ id: runId, type: "projection.run.requested", payload }],
-    })
+    const { runId } = await dispatchProjectionRun(sixb, currentProjection.id, version)
 
     const worker = new ProjectionWorker(sixb)
     await worker.start()
@@ -320,16 +290,7 @@ describe("ProjectionWorker", () => {
       { room_id: "r1", room_name: 42 },
     ])
     const sixb = createSixb({ datasets: [roomsDataset], projections: [roomProjection] }, deps)
-    const payload = projectionIdentity(sixb, roomProjection.id, {
-      datasetId: roomsDataset.id,
-      versionId: version.versionId,
-      createdAt: version.createdAt.toISOString(),
-    })
-    const runId = createProjectionRunId(sixb.id, payload)
-    await sixb.queues.projections.enqueue({
-      projectId: sixb.id,
-      jobs: [{ id: runId, type: "projection.run.requested", payload }],
-    })
+    const { runId } = await dispatchProjectionRun(sixb, roomProjection.id, version)
 
     const retry = sixb.queues.projections.retry.bind(sixb.queues.projections)
     const fail = sixb.queues.projections.fail.bind(sixb.queues.projections)
@@ -354,7 +315,7 @@ describe("ProjectionWorker", () => {
       expect(retryCount).toBe(0)
       expect(
         await requireProjectionRunsStorage(sixb).getById({ projectId: sixb.id, id: runId })
-      ).toBeNull()
+      ).toMatchObject({ status: "failed" })
     } finally {
       await worker.stop()
     }
@@ -365,16 +326,7 @@ describe("ProjectionWorker", () => {
     const version = await commitDatasetVersion(sixb.lakeStorage, roomsDataset, [
       { room_id: "r1", room_name: "Kitchen" },
     ])
-    const payload = projectionIdentity(sixb, roomProjection.id, {
-      datasetId: roomsDataset.id,
-      versionId: version.versionId,
-      createdAt: version.createdAt.toISOString(),
-    })
-    const runId = createProjectionRunId(sixb.id, payload)
-    await sixb.queues.projections.enqueue({
-      projectId: sixb.id,
-      jobs: [{ id: runId, type: "projection.run.requested", payload }],
-    })
+    await dispatchProjectionRun(sixb, roomProjection.id, version)
 
     sixb.lakeStorage.getDataset = async () => {
       throw new Error("temporary lake outage")

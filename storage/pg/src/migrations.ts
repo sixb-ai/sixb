@@ -56,6 +56,9 @@ import dropRunUsageProjectionsSql from "./migrations/020-drop-run-usage-projecti
 import syncPipelineExecutionsSql from "./migrations/021-sync-pipeline-executions.sql" with {
   type: "text",
 }
+import projectionExecutionsSql from "./migrations/022-projection-executions.sql" with {
+  type: "text",
+}
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -330,6 +333,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("019-webhook-delivery-failure-record", webhookDeliveryFailureRecordSql),
     pgSql("020-drop-run-usage-projections", dropRunUsageProjectionsSql),
     pgSql("021-sync-pipeline-executions", syncPipelineExecutionsSql),
+    pgSql("022-projection-executions", projectionExecutionsSql),
   ],
 })
 

@@ -22,6 +22,7 @@ import {
 } from "../src/storage"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
+import { startTestProjectionRun } from "../src/testing"
 import {
   atomic,
   claimProjectionExecution,
@@ -81,7 +82,7 @@ describe("ontology materializer projection replacement", () => {
       versionId: "wrong-target",
       createdAt: "2026-01-01T00:00:00.000Z",
     }
-    const run = await storage.projectionRuns.startOrReclaim({
+    const run = await startTestProjectionRun(storage, {
       id: "wrong-target-run",
       projectId: "project",
       identity: {

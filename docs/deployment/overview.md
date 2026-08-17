@@ -173,15 +173,16 @@ This is the core production data flow. Everything asynchronous in Sixb moves
 through it:
 
 ```txt
-event  ->  orchestrator  ->  queue  ->  worker  ->  event
+event  ->  orchestrator  ->  dispatcher  ->  execution + run  ->  queue  ->  worker  ->  event
 ```
 
 1. Something produces a [domain event](../events/overview.md) — a sync finishes,
    a dataset version is committed, or a schedule triggers.
 2. The **orchestrator** subscribes to events, matches each against compiled
-   routes, and enqueues a job onto the right queue.
-3. A **worker** claims the job, runs it, and writes a run record.
-4. The worker emits a finished event, which can drive the next step (for example
+   routes, and delegates to the primitive's Core dispatcher.
+3. The **dispatcher** atomically persists the immutable execution and queued run, then publishes a queue job containing the run identity.
+4. A **worker** claims the job, restores the stored execution, and advances the durable run lifecycle.
+5. The worker emits a finished event, which can drive the next step (for example
    `sync.run.finished` -> a projection job).
 
 The orchestrator subscribes only to the event types its routes need, and fan-out
