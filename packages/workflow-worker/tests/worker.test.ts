@@ -679,10 +679,7 @@ describe("WorkflowWorker", () => {
           type: "workflow.run.resume.requested",
           payload: {
             runId: "wfrun_worker_resume",
-            resume: {
-              kind: "intervention",
-              interventionId: "wfrun_worker_resume:intervention:1",
-            },
+            nodeRunId: "wfrun_worker_resume:node:1",
           },
         },
       ],
@@ -784,10 +781,7 @@ describe("WorkflowWorker", () => {
           type: "workflow.run.resume.requested",
           payload: {
             runId: "wfrun_worker_resume_failed",
-            resume: {
-              kind: "intervention",
-              interventionId: "wfrun_worker_resume_failed:intervention:1",
-            },
+            nodeRunId: "wfrun_worker_resume_failed:node:1",
           },
         },
       ],

@@ -1,19 +1,24 @@
 import { describe, expect, test } from "bun:test"
+import { agentServiceAccountId } from "../src/agents/authority"
 import type { Principal } from "../src/auth"
 import { type AuthorizationContext, emptyGrantIndex } from "../src/authorization"
+import { restoreAgentExecutionScope } from "../src/execution/agent"
 import {
   assertExecutionScopeProject,
   createPrincipalRuntimeAuthorization,
+  createTrustedPrimitiveRuntimeAuthorization,
   getAuthorizationRef,
   resolveRuntimeAuthorization,
 } from "../src/execution/authorization"
 import {
-  createAgentScope,
+  createPrimitiveExecutionRecord,
+  restoreTrustedPrimitiveExecutionScope,
+} from "../src/execution/durable"
+import {
   createDisabledRequestScope,
   createKernelScope,
   createPrincipalRequestScope,
   createTestingScope,
-  createTrustedPrimitiveScope,
 } from "../src/execution/scopes"
 import {
   createRuntimeAuthorizationCapability,
@@ -119,7 +124,7 @@ describe("runtime authorization capabilities", () => {
   })
 })
 
-describe("execution scope factories", () => {
+describe("execution scopes", () => {
   test("creates a principal request scope with explicit request provenance", () => {
     const scope = createPrincipalRequestScope({
       projectId: "project-1",
@@ -172,12 +177,19 @@ describe("execution scope factories", () => {
   })
 
   test("creates an immutable trusted primitive scope", () => {
-    const scope = createTrustedPrimitiveScope({
-      projectId: "project-1",
-      primitive: { kind: "action", id: "send-email", runId: "action-run-1" },
-      source: { type: "queue", queue: "actions", jobId: "job-1" },
-      requestedBy: { type: "user", id: "user-1" },
-      correlationId: "correlation-1",
+    const primitive = { kind: "action", id: "send-email", runId: "action-run-1" } as const
+    const scope = restoreTrustedPrimitiveExecutionScope({
+      execution: {
+        id: "execution-action-1",
+        projectId: "project-1",
+        requestedBy: { type: "user", id: "user-1" },
+        executor: { type: "primitive", kind: primitive.kind, runId: primitive.runId },
+        source: { type: "event", eventId: "event-1" },
+        correlationId: "correlation-1",
+        authorizationRef: { type: "trustedPrimitive", primitive },
+        createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      },
+      primitive,
     })
 
     expect(scope.execution).toMatchObject({
@@ -187,7 +199,7 @@ describe("execution scope factories", () => {
         id: "send-email",
         runId: "action-run-1",
       },
-      source: { type: "queue", queue: "actions", jobId: "job-1" },
+      source: { type: "event", eventId: "event-1" },
       requestedBy: { type: "user", id: "user-1" },
       correlationId: "correlation-1",
     })
@@ -203,24 +215,21 @@ describe("execution scope factories", () => {
   })
 
   test("runs agents with service-account authority", () => {
-    const parent = createTestingScope({
-      projectId: "project-1",
-      context: authorizationContext({ type: "user", id: "user-1" }),
-      executionId: "execution-parent",
-      requestId: "request-parent",
-      correlationId: "correlation-1",
-    })
-    const scope = createAgentScope({
-      projectId: "project-1",
+    const principal = { type: "serviceAccount", id: agentServiceAccountId("research") } as const
+    const scope = restoreAgentExecutionScope({
       agentId: "research",
       runId: "agent-run-1",
-      context: authorizationContext({
-        type: "serviceAccount",
-        id: "agent-service-account",
-      }),
-      source: { type: "execution", executionId: parent.execution.id },
-      requestedBy: { type: "user", id: "user-1" },
-      correlationId: parent.execution.correlationId,
+      authorization: authorizationContext(principal),
+      execution: {
+        id: "execution-agent-1",
+        projectId: "project-1",
+        requestedBy: { type: "user", id: "user-1" },
+        executor: { type: "agent", runId: "agent-run-1" },
+        source: { type: "execution", executionId: "execution-parent" },
+        correlationId: "correlation-1",
+        authorizationRef: { type: "principal", principal },
+        createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      },
     })
 
     expect(scope.execution.executor).toEqual({
@@ -231,30 +240,38 @@ describe("execution scope factories", () => {
     expect(scope.execution.requestedBy).toEqual({ type: "user", id: "user-1" })
     expect(scope.execution.source).toEqual({
       type: "execution",
-      executionId: parent.execution.id,
+      executionId: "execution-parent",
     })
-    expect(scope.execution.correlationId).toBe(parent.execution.correlationId)
+    expect(scope.execution.correlationId).toBe("correlation-1")
     expect(getAuthorizationRef(scope.authorization)).toEqual({
       type: "principal",
-      principal: { type: "serviceAccount", id: "agent-service-account" },
+      principal,
     })
+    expect(Object.isFrozen(scope.execution.requestedBy)).toBe(true)
   })
 
   test("rejects trusted authority for agents", () => {
+    const principal = { type: "serviceAccount", id: agentServiceAccountId("research") } as const
     expect(() =>
-      createAgentScope({
-        projectId: "project-1",
+      restoreAgentExecutionScope({
         agentId: "research",
         runId: "agent-run-2",
-        context: authorizationContext({ type: "user", id: "user-1" }),
-        source: { type: "queue", queue: "agents", jobId: "job-2" },
+        authorization: authorizationContext({ type: "user", id: "user-1" }),
+        execution: {
+          id: "execution-agent-2",
+          projectId: "project-1",
+          executor: { type: "agent", runId: "agent-run-2" },
+          source: { type: "execution", executionId: "execution-parent" },
+          correlationId: "correlation-1",
+          authorizationRef: { type: "principal", principal },
+          createdAt: new Date("2026-01-01T00:00:00.000Z"),
+        },
       })
-    ).toThrow("Agent execution authority must belong to a service account")
+    ).toThrow("does not authorize Agent run")
     expect(() =>
-      createTrustedPrimitiveScope({
+      createTrustedPrimitiveRuntimeAuthorization({
         projectId: "project-1",
         primitive: { kind: "agent", id: "research", runId: "agent-run-2" } as never,
-        source: { type: "queue", queue: "agents", jobId: "job-2" },
       })
     ).toThrow("Unknown trusted primitive kind 'agent'")
   })
@@ -276,23 +293,31 @@ describe("execution scope factories", () => {
     })
   })
 
-  test("requires nested scopes to preserve a parent correlation id", () => {
+  test("derives nested primitive provenance from its durable parent", () => {
     const primitive = { kind: "workflow", id: "onboarding", runId: "workflow-run-1" } as const
+    const execution = createPrimitiveExecutionRecord({
+      id: "workflow-execution-1",
+      primitive,
+      origin: {
+        type: "execution",
+        parent: {
+          id: "execution-parent",
+          projectId: "project-1",
+          requestedBy: { type: "user", id: "user-1" },
+          executor: { type: "request", requestId: "request-1" },
+          source: { type: "http", requestId: "request-1" },
+          correlationId: "correlation-1",
+          authorizationRef: { type: "disabled" },
+          createdAt: new Date("2026-01-01T00:00:00.000Z"),
+        },
+      },
+    })
 
-    expect(() =>
-      createTrustedPrimitiveScope({
-        projectId: "project-1",
-        primitive,
-        source: { type: "execution", executionId: "execution-parent" },
-      })
-    ).toThrow("Nested execution must preserve its parent correlation id")
-    expect(
-      createTrustedPrimitiveScope({
-        projectId: "project-1",
-        primitive,
-        source: { type: "queue", queue: "workflows", jobId: "job-1" },
-      })
-    ).toMatchObject({ execution: { source: { type: "queue", jobId: "job-1" } } })
+    expect(execution).toMatchObject({
+      source: { type: "execution", executionId: "execution-parent" },
+      correlationId: "correlation-1",
+      requestedBy: { type: "user", id: "user-1" },
+    })
   })
 })
 

@@ -29,7 +29,7 @@ import {
 } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
 import type { DomainEventService } from "@sixb/core/internal/events"
-import { bindPrimitiveExecution } from "@sixb/core/internal/primitive-execution"
+import { bindDurablePrimitiveExecution } from "@sixb/core/internal/primitive-execution"
 import {
   createProjectionRunId,
   getProjectionRegistry,
@@ -313,9 +313,22 @@ function createRuntime(
     datasets: catalogs.datasets ?? host.definitions.datasets,
     projections: catalogs.projections ?? host.definitions.projections,
   } satisfies TestProjectionWorkerContext
-  const execution = bindPrimitiveExecution(host, {
-    primitive: { kind: "projection", ...primitive },
-    source: { type: "queue", queue: "projections", jobId: primitive.runId },
+  const trustedPrimitive = { kind: "projection" as const, ...primitive }
+  const execution = bindDurablePrimitiveExecution(host, {
+    execution: {
+      id: `direct-projection-execution-test:${primitive.runId}`,
+      projectId: host.id,
+      executor: {
+        type: "primitive",
+        kind: trustedPrimitive.kind,
+        runId: trustedPrimitive.runId,
+      },
+      source: { type: "event", eventId: `direct-projection-event-test:${primitive.runId}` },
+      correlationId: `direct-projection-correlation-test:${primitive.runId}`,
+      authorizationRef: { type: "trustedPrimitive", primitive: trustedPrimitive },
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    },
+    primitive: trustedPrimitive,
   })
   registerOntologyMutationRuntime(runtime, execution.ontologyMutations)
   shareProjectionRegistry(host, runtime)

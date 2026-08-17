@@ -30,7 +30,7 @@ import {
   type WorkflowDefinition,
 } from "../src"
 import { agentServiceAccountId, ensureAgentExecutionIdentity } from "../src/agents/authority"
-import { createAgentScope } from "../src/execution/scopes"
+import { restoreAgentExecutionScope } from "../src/execution/agent"
 import type { AuthStorage } from "../src/storage"
 import { createTestSixb, type TestExecutionHost } from "../src/testing"
 import { createTestRuntimeDeps, waitFor } from "./test-runtime-deps"
@@ -1068,17 +1068,28 @@ describe("bound Sixb fails closed on ungranted surfaces", () => {
 
   test("agent provider access is bound to the exact registered run", async () => {
     const host = createRuntime()
+    const principal = {
+      type: "serviceAccount" as const,
+      id: agentServiceAccountId("contract-agent"),
+    }
     const authorization = resolveAuthorizationContext({
-      principal: { type: "serviceAccount", id: "agent-service-account" },
+      principal,
       groupIds: [],
       roles: host.definitions.security.listResolvedRoles(),
     })
-    const scope = createAgentScope({
-      projectId: host.id,
+    const scope = restoreAgentExecutionScope({
       agentId: "contract-agent",
       runId: "agent-run-1",
-      context: authorization,
-      source: { type: "queue", queue: "agents", jobId: "job-1" },
+      authorization,
+      execution: {
+        id: "agent-execution-1",
+        projectId: host.id,
+        executor: { type: "agent", runId: "agent-run-1" },
+        source: { type: "execution", executionId: "request-execution-1" },
+        correlationId: "agent-correlation-1",
+        authorizationRef: { type: "principal", principal },
+        createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      },
     })
     const agentSixb = host.withScope(scope)
 

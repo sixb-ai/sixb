@@ -1,11 +1,9 @@
 import { randomUUID } from "node:crypto"
 import type { AuthorizationContext } from "../authorization"
 import {
-  createAgentRuntimeAuthorization,
   createDisabledRuntimeAuthorization,
   createKernelRuntimeAuthorization,
   createPrincipalRuntimeAuthorization,
-  createTrustedPrimitiveRuntimeAuthorization,
 } from "./authorization"
 import type {
   AuthorizablePrincipal,
@@ -14,7 +12,6 @@ import type {
   ExecutionScope,
   ExecutionSource,
   KernelOperation,
-  TrustedPrimitiveRef,
 } from "./types"
 
 export function createPrincipalRequestScope(input: {
@@ -52,67 +49,6 @@ export function createDisabledRequestScope(input: {
   })
 }
 
-export function createTrustedPrimitiveScope(input: {
-  readonly projectId: string
-  readonly primitive: TrustedPrimitiveRef
-  readonly source: ExecutionSource
-  readonly requestedBy?: AuthorizablePrincipal
-  readonly correlationId?: string
-}): ExecutionScope {
-  const execution = createInternalExecution({
-    projectId: input.projectId,
-    requestedBy: input.requestedBy,
-    executor: Object.freeze({
-      type: "primitive",
-      kind: input.primitive.kind,
-      id: input.primitive.id,
-      runId: input.primitive.runId,
-    }),
-    source: input.source,
-    correlationId: input.correlationId,
-  })
-  return Object.freeze({
-    execution,
-    authorization: createTrustedPrimitiveRuntimeAuthorization({
-      projectId: input.projectId,
-      primitive: input.primitive,
-    }),
-  })
-}
-
-export function createAgentScope(input: {
-  readonly projectId: string
-  readonly agentId: string
-  readonly runId: string
-  readonly context: AuthorizationContext
-  readonly source: ExecutionSource
-  readonly requestedBy?: AuthorizablePrincipal
-  readonly correlationId?: string
-}): ExecutionScope {
-  if (input.context.principal.type !== "serviceAccount") {
-    throw new Error("[Sixb] Agent execution authority must belong to a service account.")
-  }
-  assertNonEmpty(input.agentId, "Agent id")
-  assertNonEmpty(input.runId, "Agent run id")
-  const execution = createInternalExecution({
-    projectId: input.projectId,
-    requestedBy: input.requestedBy,
-    executor: Object.freeze({ type: "agent", agentId: input.agentId, runId: input.runId }),
-    source: input.source,
-    correlationId: input.correlationId,
-  })
-  return Object.freeze({
-    execution,
-    authorization: createAgentRuntimeAuthorization({
-      projectId: input.projectId,
-      context: input.context,
-      executionId: execution.id,
-      agentId: input.agentId,
-      runId: input.runId,
-    }),
-  })
-}
-
 export function createKernelScope(input: {
   readonly projectId: string
   readonly operation: KernelOperation
@@ -120,9 +56,9 @@ export function createKernelScope(input: {
   readonly correlationId?: string
 }): ExecutionScope {
   const operation = Object.freeze({ ...input.operation })
-  const execution = createInternalExecution({
+  const execution = createKernelExecution({
     projectId: input.projectId,
-    executor: Object.freeze({ type: "kernel", operation }),
+    operation,
     source: input.source,
     correlationId: input.correlationId,
   })
@@ -132,10 +68,9 @@ export function createKernelScope(input: {
   })
 }
 
-function createInternalExecution(input: {
+function createKernelExecution(input: {
   readonly projectId: string
-  readonly requestedBy?: AuthorizablePrincipal
-  readonly executor: Exclude<ExecutionContext["executor"], { readonly type: "request" }>
+  readonly operation: KernelOperation
   readonly source: ExecutionSource
   readonly correlationId?: string
 }): ExecutionContext {
@@ -144,10 +79,7 @@ function createInternalExecution(input: {
   return freezeExecution({
     id: `exec_${randomUUID()}`,
     projectId: input.projectId,
-    ...(input.requestedBy === undefined
-      ? {}
-      : { requestedBy: asAuthorizablePrincipal(input.requestedBy) }),
-    executor: input.executor,
+    executor: Object.freeze({ type: "kernel", operation: input.operation }),
     source,
     correlationId: input.correlationId ?? `corr_${randomUUID()}`,
   })
@@ -227,9 +159,6 @@ function snapshotExecutionSource(source: ExecutionSource): ExecutionSource {
   if (source.type === "datasetVersion") {
     assertNonEmpty(source.datasetId, "Execution source dataset id")
   }
-  if (source.type === "queue") {
-    assertNonEmpty(source.queue, "Execution source queue")
-  }
   return Object.freeze({ ...source })
 }
 
@@ -249,8 +178,6 @@ function sourceIdentifier(source: ExecutionSource): {
       return { label: "Execution source dataset version id", value: source.versionId }
     case "execution":
       return { label: "Execution source execution id", value: source.executionId }
-    case "queue":
-      return { label: "Execution source job id", value: source.jobId }
   }
 }
 
