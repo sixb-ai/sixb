@@ -12,7 +12,10 @@ export type DurableExecutionExecutor =
   | { readonly type: "agent"; readonly runId: string }
   | { readonly type: "kernel"; readonly operation: KernelOperation }
 
-/** Durable trigger provenance. Queue delivery is attempt transport and is never persisted here. */
+/**
+ * Durable trigger provenance. An `execution` source is the single logical parent; queue delivery
+ * is attempt transport and is never persisted here.
+ */
 export type DurableExecutionSource =
   | { readonly type: "http"; readonly requestId: string }
   | { readonly type: "webhook"; readonly deliveryId: string }
@@ -28,7 +31,6 @@ export interface ExecutionRecord {
   readonly executor: DurableExecutionExecutor
   readonly source: DurableExecutionSource
   readonly correlationId: string
-  readonly parentExecutionId?: string
   readonly authorizationRef: AuthorizationRef
   readonly createdAt: Date
 }

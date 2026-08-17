@@ -279,7 +279,6 @@ async function assertAutomaticExecutionIdentity(
     execution.source.type !== input.source.type ||
     execution.source.eventId !== input.source.eventId ||
     execution.correlationId !== input.correlationId ||
-    execution.parentExecutionId !== undefined ||
     execution.requestedBy !== undefined
   ) {
     throw new PipelineError(
