@@ -72,7 +72,6 @@ export async function createTestAgentExecution(
       ? {}
       : { requestedBy: structuredClone(parent.requestedBy) }),
     correlationId: parent.correlationId,
-    parentExecutionId,
     authorizationRef: {
       type: "principal",
       principal: { type: "serviceAccount", id: serviceAccountId },

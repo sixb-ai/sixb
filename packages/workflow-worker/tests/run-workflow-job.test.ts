@@ -1514,7 +1514,6 @@ describe("runWorkflowJob", () => {
       expect(actionExecution).toMatchObject({
         executor: { type: "primitive", kind: "action", runId: "wfrun_action:action:1" },
         source: { type: "execution", executionId: result.run.executionId },
-        parentExecutionId: result.run.executionId,
         correlationId: workflowExecution?.correlationId,
         authorizationRef: {
           type: "trustedPrimitive",

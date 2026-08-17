@@ -648,7 +648,6 @@ describe("startSixbRuntime", () => {
         source: { type: "schedule", eventId: sourceEvent.id },
         correlationId: sourceEvent.id,
       })
-      expect(workflowExecution?.parentExecutionId).toBeUndefined()
       expect(workflowExecution?.requestedBy).toBeUndefined()
 
       const workflowJobs = await sixb.queues.workflows.claim({

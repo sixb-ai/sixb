@@ -28,9 +28,6 @@ export function executionRecordInputFromRuntime(input: {
     executor: durableExecutor(execution),
     source: durableSource(execution),
     correlationId: execution.correlationId,
-    ...(execution.parentExecutionId === undefined
-      ? {}
-      : { parentExecutionId: execution.parentExecutionId }),
     authorizationRef: getAuthorizationRef(input.runtimeAuthorization),
   }
 }
@@ -93,7 +90,6 @@ export function createPrimitiveExecutionRecord(input: {
             : { requestedBy: structuredClone(input.origin.parent.requestedBy) }),
           source: { type: "execution" as const, executionId: input.origin.parent.id },
           correlationId: input.origin.parent.correlationId,
-          parentExecutionId: input.origin.parent.id,
         }
       : {
           projectId: input.origin.projectId,
@@ -131,9 +127,6 @@ export function restoreTrustedPrimitiveExecutionScope(input: {
     executor: Object.freeze({ type: "primitive", ...structuredClone(input.primitive) }),
     source: Object.freeze(structuredClone(input.execution.source)),
     correlationId: input.execution.correlationId,
-    ...(input.execution.parentExecutionId === undefined
-      ? {}
-      : { parentExecutionId: input.execution.parentExecutionId }),
   })
   return Object.freeze({
     execution: context,
