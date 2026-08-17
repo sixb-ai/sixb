@@ -1,37 +1,45 @@
 import { describe, expect, test } from "bun:test"
 import type { SixbFailure } from "../errors/types"
-import type { WebhookRunFailureCode, WebhookRunStorage } from "../storage/webhook-runs"
+import type { CreateExecutionInput, Storage } from "../storage"
+import type { WebhookRunFailureCode } from "../storage/webhook-runs"
+import { startTestWebhookRun } from "./webhook-execution"
+
+export type WebhookRunStorageContractStorage = Storage & {
+  readonly webhookRuns: NonNullable<Storage["webhookRuns"]>
+}
 
 export interface WebhookRunStorageContractSuiteOptions<
-  TStorage extends WebhookRunStorage = WebhookRunStorage,
+  TStorage extends WebhookRunStorageContractStorage = WebhookRunStorageContractStorage,
 > {
-  /** Factory that returns an isolated webhook-run store for each test. */
   readonly createStorage: () => TStorage | Promise<TStorage>
-  readonly setup?: (storage: TStorage) => void | Promise<void>
   readonly cleanup?: (storage: TStorage) => void | Promise<void>
 }
 
-const projectId = "contract-project"
-const startedAt = new Date("2026-06-01T11:59:00.000Z")
-const finishedAt = new Date("2026-06-01T12:00:00.000Z")
-
-const failure = {
+const projectId = "webhook-contract"
+const route = "/api/webhooks/github/events"
+const bodySha256 = "0".repeat(64)
+const finishedAt = new Date("2026-06-01T12:01:00.000Z")
+const retryableFailure = {
   code: "webhook.delivery_failed",
   message: "Webhook delivery failed.",
   retryable: true,
   at: finishedAt.toISOString(),
-  details: { connectorId: "github", webhookId: "events", runId: "failed-run" },
+  details: { connectorId: "github", webhookId: "events", runId: "delivery-retry" },
+} as const satisfies SixbFailure<WebhookRunFailureCode>
+const rejectedFailure = {
+  code: "webhook.delivery_rejected",
+  message: "Webhook delivery was rejected.",
+  retryable: false,
+  at: finishedAt.toISOString(),
 } as const satisfies SixbFailure<WebhookRunFailureCode>
 
-/** Runs the durable webhook-run lifecycle and failure contract against a provider. */
-export function runWebhookRunStorageContractSuite<TStorage extends WebhookRunStorage>(
-  label: string,
-  options: WebhookRunStorageContractSuiteOptions<TStorage>
-): void {
+/** Runs the durable Webhook delivery contract against one complete storage provider. */
+export function runWebhookRunStorageContractSuite<
+  TStorage extends WebhookRunStorageContractStorage,
+>(label: string, options: WebhookRunStorageContractSuiteOptions<TStorage>): void {
   const withStorage = async (body: (storage: TStorage) => Promise<void>): Promise<void> => {
     const storage = await options.createStorage()
     try {
-      await options.setup?.(storage)
       await body(storage)
     } finally {
       await options.cleanup?.(storage)
@@ -39,112 +47,194 @@ export function runWebhookRunStorageContractSuite<TStorage extends WebhookRunSto
   }
 
   describe(label, () => {
-    test("persists a validated, detached failure and exposes it through get and list", async () => {
+    test("round-trips the immutable execution and delivery identity", async () => {
       await withStorage(async (storage) => {
-        await storage.start(runInput("failed-run"))
-        const mutableFailure = {
-          code: "webhook.delivery_failed" as const,
-          message: String(failure.message),
-          retryable: true as const,
-          at: failure.at,
-          details: {
-            connectorId: String(failure.details.connectorId),
-            webhookId: String(failure.details.webhookId),
-            runId: String(failure.details.runId),
-          },
-        }
-        const finished = await storage.finish({
-          id: "failed-run",
+        const run = await startTestWebhookRun(storage, runInput("delivery-1", "provider-1"))
+        expect(run).toMatchObject({
+          id: "delivery-1",
           projectId,
+          executionId: "test_webhook_execution:delivery-1",
+          connectorId: "github",
+          webhookId: "events",
+          status: "running",
+          route,
+          requestBodyBytes: 12,
+          requestBodySha256: bodySha256,
+          idempotencyKey: "provider-1",
+        })
+        await expect(
+          storage.webhookRuns.getByDelivery({
+            projectId,
+            connectorId: "github",
+            webhookId: "events",
+            idempotencyKey: "provider-1",
+          })
+        ).resolves.toEqual(run)
+      })
+    })
+
+    test("rejects missing or mismatched execution authority", async () => {
+      await withStorage(async (storage) => {
+        const missing = runInput("missing-execution")
+        await expect(
+          storage.webhookRuns.start({ ...missing, executionId: "missing" })
+        ).rejects.toMatchObject({ code: "invalid_execution" })
+
+        await storage.executions.create(disabledRequestExecution("wrong-execution"))
+        await expect(
+          storage.webhookRuns.start({ ...missing, executionId: "wrong-execution" })
+        ).rejects.toMatchObject({ code: "invalid_execution" })
+      })
+    })
+
+    test("enforces one run per provider delivery key", async () => {
+      await withStorage(async (storage) => {
+        await startTestWebhookRun(storage, runInput("delivery-first", "provider-shared"))
+        await expect(
+          startTestWebhookRun(storage, runInput("delivery-second", "provider-shared"))
+        ).rejects.toMatchObject({ code: "duplicate_run" })
+      })
+    })
+
+    test("restarts only retryable failures without changing execution identity", async () => {
+      await withStorage(async (storage) => {
+        const started = await startTestWebhookRun(
+          storage,
+          runInput("delivery-retry", "provider-retry")
+        )
+        await storage.webhookRuns.finish({
+          projectId,
+          id: started.id,
           status: "failed",
           finishedAt,
-          requestBodyBytes: 128,
-          responseStatus: 500,
-          idempotencyKey: "delivery-1",
-          deliveryClaimResult: "claimed",
+          responseStatus: 503,
+          error: retryableFailure,
+        })
+        const restarted = await storage.webhookRuns.restart({ projectId, id: started.id })
+        expect(restarted).toMatchObject({
+          id: started.id,
+          executionId: started.executionId,
+          status: "running",
+        })
+        expect(restarted.finishedAt).toBeUndefined()
+        expect(restarted.responseStatus).toBeUndefined()
+        expect(restarted.error).toBeUndefined()
+
+        await storage.webhookRuns.finish({
+          projectId,
+          id: started.id,
+          status: "succeeded",
+          responseStatus: 202,
+        })
+        await expect(
+          storage.webhookRuns.restart({ projectId, id: started.id })
+        ).rejects.toMatchObject({ code: "invalid_transition" })
+      })
+    })
+
+    test("does not reopen a terminal client rejection", async () => {
+      await withStorage(async (storage) => {
+        const run = await startTestWebhookRun(storage, runInput("delivery-rejected"))
+        await storage.webhookRuns.finish({
+          projectId,
+          id: run.id,
+          status: "failed",
+          finishedAt,
+          responseStatus: 422,
+          error: rejectedFailure,
+        })
+        await expect(storage.webhookRuns.restart({ projectId, id: run.id })).rejects.toMatchObject({
+          code: "invalid_transition",
+        })
+      })
+    })
+
+    test("persists a validated, detached failure through get and list", async () => {
+      await withStorage(async (storage) => {
+        const run = await startTestWebhookRun(storage, runInput("failed-run", "failed-key"))
+        const failedRunFailure = {
+          ...retryableFailure,
+          details: { ...retryableFailure.details, runId: run.id },
+        }
+        const mutableFailure = {
+          code: "webhook.delivery_failed" as const,
+          message: String(failedRunFailure.message),
+          retryable: true as const,
+          at: failedRunFailure.at,
+          details: {
+            connectorId: String(failedRunFailure.details.connectorId),
+            webhookId: String(failedRunFailure.details.webhookId),
+            runId: String(failedRunFailure.details.runId),
+          },
+        }
+        const finished = await storage.webhookRuns.finish({
+          projectId,
+          id: run.id,
+          status: "failed",
+          finishedAt,
+          responseStatus: 503,
           error: mutableFailure,
         })
 
-        mutableFailure.message = "mutated after write"
         mutableFailure.details.runId = "mutated-after-write"
-
-        expect(finished).toMatchObject({
-          id: "failed-run",
-          status: "failed",
-          finishedAt,
-          requestBodyBytes: 128,
-          responseStatus: 500,
-          idempotencyKey: "delivery-1",
-          deliveryClaimResult: "claimed",
-          error: failure,
-        })
-        expect(await storage.getById({ projectId, id: "failed-run" })).toMatchObject({
-          error: failure,
-        })
+        expect(finished.error).toEqual(failedRunFailure)
+        await expect(storage.webhookRuns.getById({ projectId, id: run.id })).resolves.toMatchObject(
+          {
+            error: failedRunFailure,
+          }
+        )
         await expect(
-          storage.list({ projectId, statuses: ["failed"], idempotencyKey: "delivery-1" })
-        ).resolves.toMatchObject({ runs: [{ id: "failed-run", error: failure }], total: 1 })
+          storage.webhookRuns.list({
+            projectId,
+            statuses: ["failed"],
+            idempotencyKey: "failed-key",
+          })
+        ).resolves.toMatchObject({ runs: [{ id: run.id, error: failedRunFailure }], total: 1 })
       })
     })
 
-    test("rejects failures outside the webhook-run code contract without finishing the run", async () => {
+    test("rejects failures outside the Webhook run contract without finishing", async () => {
       await withStorage(async (storage) => {
-        await storage.start(runInput("invalid-failure-run"))
-
+        const run = await startTestWebhookRun(storage, runInput("invalid-failure"))
         await expect(
-          storage.finish({
-            id: "invalid-failure-run",
+          storage.webhookRuns.finish({
             projectId,
+            id: run.id,
             status: "failed",
-            error: { ...failure, code: "runtime.cancelled" } as never,
+            finishedAt,
+            error: { ...retryableFailure, code: "runtime.cancelled" } as never,
           })
         ).rejects.toThrow("code is not allowed by this failure contract")
-        const unchanged = await storage.getById({ projectId, id: "invalid-failure-run" })
+        const unchanged = await storage.webhookRuns.getById({ projectId, id: run.id })
         expect(unchanged?.status).toBe("running")
         expect(unchanged?.error).toBeUndefined()
-      })
-    })
-
-    test("keeps successful and skipped runs failure-free and terminal", async () => {
-      await withStorage(async (storage) => {
-        await storage.start(runInput("succeeded-run"))
-        await storage.start(runInput("skipped-run", "stripe", "payments"))
-
-        await expect(
-          storage.finish({
-            id: "succeeded-run",
-            projectId,
-            status: "succeeded",
-            finishedAt,
-            responseStatus: 204,
-          })
-        ).resolves.toMatchObject({ status: "succeeded" })
-        await expect(
-          storage.finish({ id: "skipped-run", projectId, status: "skipped", finishedAt })
-        ).resolves.toMatchObject({ status: "skipped" })
-        expect((await storage.getById({ projectId, id: "succeeded-run" }))?.error).toBeUndefined()
-        expect((await storage.getById({ projectId, id: "skipped-run" }))?.error).toBeUndefined()
-        await expect(
-          storage.finish({
-            id: "succeeded-run",
-            projectId,
-            status: "failed",
-            error: failure,
-          })
-        ).rejects.toThrow("already terminal")
       })
     })
   })
 }
 
-function runInput(id: string, connectorId = "github", webhookId = "events") {
+function runInput(id: string, idempotencyKey?: string) {
   return {
     id,
     projectId,
-    connectorId,
-    webhookId,
+    connectorId: "github",
+    webhookId: "events",
     method: "POST",
-    route: `/webhooks/${connectorId}/${webhookId}`,
-    startedAt,
+    route,
+    requestBodyBytes: 12,
+    requestBodySha256: bodySha256,
+    ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+    startedAt: new Date("2026-06-01T12:00:00.000Z"),
+  }
+}
+
+function disabledRequestExecution(id: string): CreateExecutionInput {
+  return {
+    id,
+    projectId,
+    executor: { type: "request", requestId: id },
+    source: { type: "http", requestId: id },
+    correlationId: `correlation:${id}`,
+    authorizationRef: { type: "disabled" },
   }
 }

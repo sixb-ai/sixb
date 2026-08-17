@@ -13,7 +13,6 @@ import {
   PIPELINE_RUN_FAILURE_CODES,
   PROJECTION_RUN_FAILURE_CODES,
   SYNC_RUN_FAILURE_CODES,
-  WEBHOOK_DELIVERY_FAILURE_CODES,
   WEBHOOK_RUN_FAILURE_CODES,
   WORKFLOW_RUN_FAILURE_CODES,
 } from "@sixb/core/storage"
@@ -27,6 +26,7 @@ import {
 import { SqliteMaterializationStateReader } from "../src/ontology-storage/materialization-state"
 
 const tempDirs: string[] = []
+const LEGACY_WEBHOOK_DELIVERY_FAILURE_CODES = ["webhook.delivery_failed"] as const
 const expectedStorageMigrationRows = [
   {
     adapter_id: SQLITE_STORAGE_ADAPTER_ID,
@@ -174,6 +174,13 @@ const expectedStorageMigrationRows = [
     id: "021-projection-executions",
     status: "applied",
     version: 21,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "022-webhook-executions",
+    status: "applied",
+    version: 22,
   },
 ]
 
@@ -940,7 +947,7 @@ describe("SQLite storage migrations", () => {
         .query("SELECT idempotency_key, failure FROM webhook_deliveries ORDER BY idempotency_key")
         .all() as Array<{ readonly idempotency_key: string; readonly failure: string | null }>
       expect(rows[0]?.idempotency_key).toBe("delivery-failed-at")
-      expect(parseSixbFailure(rows[0]?.failure, WEBHOOK_DELIVERY_FAILURE_CODES)).toEqual({
+      expect(parseSixbFailure(rows[0]?.failure, LEGACY_WEBHOOK_DELIVERY_FAILURE_CODES)).toEqual({
         code: "webhook.delivery_failed",
         message: "Webhook delivery failed.",
         retryable: true,
@@ -953,7 +960,7 @@ describe("SQLite storage migrations", () => {
           timestampSource: "failedAt",
         },
       })
-      expect(parseSixbFailure(rows[1]?.failure, WEBHOOK_DELIVERY_FAILURE_CODES)).toEqual({
+      expect(parseSixbFailure(rows[1]?.failure, LEGACY_WEBHOOK_DELIVERY_FAILURE_CODES)).toEqual({
         code: "webhook.delivery_failed",
         message: "Webhook delivery failed.",
         retryable: true,
@@ -1421,6 +1428,73 @@ describe("SQLite storage migrations", () => {
         "project_id",
         "execution_id",
       ])
+    } finally {
+      db.close()
+    }
+  })
+
+  test("rejects legacy Webhook runs and deliveries instead of inventing authority", () => {
+    for (const legacyRecord of ["run", "delivery"] as const) {
+      const db = new Database(":memory:")
+      try {
+        const executionMigrationIndex = sqliteStorageMigrations.steps.findIndex(
+          (migration) => migration.id === "022-webhook-executions"
+        )
+        const executionMigration = sqliteStorageMigrations.steps[executionMigrationIndex]
+        if (!executionMigration) {
+          throw new Error("SQLite webhook-executions migration is missing.")
+        }
+        for (const migration of sqliteStorageMigrations.steps.slice(0, executionMigrationIndex)) {
+          migration.up(db)
+        }
+
+        if (legacyRecord === "run") {
+          db.query(`
+            INSERT INTO webhook_runs (
+              project_id, id, connector_id, webhook_id, status, method, route, started_at
+            ) VALUES (?, ?, ?, ?, 'running', 'POST', ?, ?)
+          `).run(
+            "project-a",
+            "legacy-webhook-run",
+            "github",
+            "events",
+            "/api/webhooks/github/events",
+            "2026-01-01T00:00:00.000Z"
+          )
+        } else {
+          db.query(`
+            INSERT INTO webhook_deliveries (
+              project_id, connector_id, webhook_id, idempotency_key, status, received_at
+            ) VALUES (?, ?, ?, ?, 'in_progress', ?)
+          `).run("project-a", "github", "events", "delivery-1", "2026-01-01T00:00:00.000Z")
+        }
+
+        expect(() => db.transaction(() => executionMigration.up(db))()).toThrow()
+        expect(readMemoryTableColumns(db, "webhook_runs")).not.toContain("execution_id")
+        expect(readMemoryTableNames(db)).toContain("webhook_deliveries")
+      } finally {
+        db.close()
+      }
+    }
+  })
+
+  test("makes the Webhook delivery and execution links required and unique", () => {
+    const db = new Database(":memory:")
+    try {
+      for (const migration of sqliteStorageMigrations.steps) migration.up(db)
+
+      expect(readMemoryTableNames(db)).not.toContain("webhook_deliveries")
+      expect(readMemoryColumn(db, "webhook_runs", "execution_id")?.notnull).toBe(1)
+      expect(readMemoryColumn(db, "webhook_runs", "request_body_bytes")?.notnull).toBe(1)
+      expect(readMemoryColumn(db, "webhook_runs", "request_body_sha256")?.notnull).toBe(1)
+      expect(readMemoryTableColumns(db, "webhook_runs")).not.toContain("delivery_claim_result")
+      expect(readMemoryForeignKeyTables(db, "webhook_runs")).toContain("executions")
+      expect(readMemoryUniqueIndexes(db, "webhook_runs")).toEqual(
+        expect.arrayContaining([
+          ["project_id", "execution_id"],
+          ["project_id", "connector_id", "webhook_id", "idempotency_key"],
+        ])
+      )
     } finally {
       db.close()
     }

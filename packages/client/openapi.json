@@ -30070,7 +30070,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["running", "succeeded", "failed", "skipped"]
+              "enum": ["running", "succeeded", "failed"]
             }
           },
           {
@@ -30142,6 +30142,9 @@
                           "projectId": {
                             "type": "string"
                           },
+                          "executionId": {
+                            "type": "string"
+                          },
                           "connectorId": {
                             "type": "string"
                           },
@@ -30150,7 +30153,7 @@
                           },
                           "status": {
                             "type": "string",
-                            "enum": ["running", "succeeded", "failed", "skipped"]
+                            "enum": ["running", "succeeded", "failed"]
                           },
                           "method": {
                             "type": "string"
@@ -30173,16 +30176,16 @@
                           "idempotencyKey": {
                             "type": "string"
                           },
-                          "deliveryClaimResult": {
-                            "type": "string",
-                            "enum": ["claimed", "duplicate", "in_progress"]
-                          },
                           "error": {
                             "type": "object",
                             "properties": {
                               "code": {
                                 "type": "string",
-                                "enum": ["internal.unexpected", "webhook.delivery_failed"]
+                                "enum": [
+                                  "internal.unexpected",
+                                  "webhook.delivery_failed",
+                                  "webhook.delivery_rejected"
+                                ]
                               },
                               "message": {
                                 "type": "string",
@@ -30230,12 +30233,14 @@
                         "required": [
                           "id",
                           "projectId",
+                          "executionId",
                           "connectorId",
                           "webhookId",
                           "status",
                           "method",
                           "route",
-                          "startedAt"
+                          "startedAt",
+                          "requestBodyBytes"
                         ],
                         "additionalProperties": false
                       }

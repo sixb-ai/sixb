@@ -70,7 +70,7 @@ type PrimitiveExecutionOrigin =
       readonly projectId: string
       readonly source: Extract<
         CreateExecutionInput["source"],
-        { readonly type: "schedule" | "event" | "datasetVersion" }
+        { readonly type: "schedule" | "event" | "datasetVersion" | "webhook" }
       >
       readonly correlationId: string
       readonly requestedBy?: CreateExecutionInput["requestedBy"]

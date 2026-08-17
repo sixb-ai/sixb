@@ -83,6 +83,9 @@
       "@sixb/core/internal/sync-run-storage-provider": [
         "./packages/core/src/storage/sync-runs/provider.ts"
       ],
+      "@sixb/core/internal/webhook-run-storage-provider": [
+        "./packages/core/src/storage/webhook-runs/provider.ts"
+      ],
       "@sixb/core/internal/workflow-run-storage-provider": [
         "./packages/core/src/storage/workflow-runs/provider.ts"
       ],
@@ -93,6 +96,7 @@
       "@sixb/core/internal/agent-execution": ["./packages/core/src/execution/agent.ts"],
       "@sixb/core/internal/primitive-execution": ["./packages/core/src/execution/primitive.ts"],
       "@sixb/core/internal/request-execution": ["./packages/core/src/execution/request.ts"],
+      "@sixb/core/internal/webhooks": ["./packages/core/src/webhooks/internal.ts"],
       "@sixb/core/internal/execution-storage": [
         "./packages/core/src/storage/executions/provider.ts"
       ],

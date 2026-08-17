@@ -254,7 +254,7 @@ export const acmeErpConnector = defineConnector("acme-erp", {
 
 `parseInvoiceWebhookEvent` is a plain function that validates `unknown` and returns the typed event
 (it gives `body` its `type`, `invoiceId`, and `deliveryId` fields). Bare `.json()` is also valid
-when you do not need a typed body.
+when you do not need a typed body. Verification and idempotency resolution run before admission; only the handler receives an execution-bound `sixb` and run logger.
 
 ## Discovery and registration
 

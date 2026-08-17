@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import { defineObjectType, InMemoryStorage, OntologyRegistry, prop, type Storage } from "../src"
 import { StorageTransactionError } from "../src/storage"
-import { createMaterializerTestFixture, queueTestActionRun, startTestSyncRun } from "../src/testing"
+import {
+  createMaterializerTestFixture,
+  queueTestActionRun,
+  startTestSyncRun,
+  startTestWebhookRun,
+} from "../src/testing"
 
 const Room = defineObjectType({
   id: "Room",
@@ -84,10 +89,10 @@ describe("InMemoryStorage.transaction", () => {
 
     await expect(
       storage.transaction(async (tx) => {
-        const runs = requireTransactionalRunStores(tx)
+        requireTransactionalRunStores(tx)
         await queueTestActionRun(tx, actionRunInput("run_rollback"))
         await startTestSyncRun(tx, syncRunInput("sync_rollback"))
-        await runs.webhookRuns.start(webhookRunInput("webhook_rollback"))
+        await startTestWebhookRun(tx, webhookRunInput("webhook_rollback"))
 
         throw new Error("boom")
       })
@@ -104,10 +109,10 @@ describe("InMemoryStorage.transaction", () => {
     const storage = new InMemoryStorage()
 
     await storage.transaction(async (tx) => {
-      const runs = requireTransactionalRunStores(tx)
+      requireTransactionalRunStores(tx)
       await queueTestActionRun(tx, actionRunInput("run_commit"))
       await startTestSyncRun(tx, syncRunInput("sync_commit"))
-      await runs.webhookRuns.start(webhookRunInput("webhook_commit"))
+      await startTestWebhookRun(tx, webhookRunInput("webhook_commit"))
     })
 
     expect(
@@ -268,7 +273,7 @@ describe("InMemoryStorage.transaction", () => {
 
         await tx.agents.threads.create(agentThreadInput("thread_uncommitted"))
         await startTestSyncRun(tx, syncRunInput("sync_uncommitted"))
-        await tx.webhookRuns.start(webhookRunInput("webhook_uncommitted"))
+        await startTestWebhookRun(tx, webhookRunInput("webhook_uncommitted"))
         transactionStarted.resolve()
         await releaseTransaction.promise
         throw new Error("rollback")
@@ -316,12 +321,12 @@ describe("InMemoryStorage.transaction", () => {
       settled.syncWrite = true
       return record
     })
-    const webhookWrite = storage.webhookRuns
-      .start(webhookRunInput("webhook_external"))
-      .then((record) => {
+    const webhookWrite = startTestWebhookRun(storage, webhookRunInput("webhook_external")).then(
+      (record) => {
         settled.webhookWrite = true
         return record
-      })
+      }
+    )
 
     await flushMicrotasks()
     expect(settled).toEqual({
@@ -379,14 +384,9 @@ describe("InMemoryStorage.transaction", () => {
   })
 })
 
-function requireTransactionalRunStores(tx: Storage) {
+function requireTransactionalRunStores(tx: Storage): void {
   if (!tx.actionRuns || !tx.syncRuns || !tx.webhookRuns) {
     throw new Error("[test] expected transaction storage to expose all run stores")
-  }
-  return {
-    actionRuns: tx.actionRuns,
-    syncRuns: tx.syncRuns,
-    webhookRuns: tx.webhookRuns,
   }
 }
 
@@ -434,6 +434,8 @@ function webhookRunInput(id: string) {
     webhookId: "payments",
     method: "POST",
     route: "/webhooks/stripe/payments",
+    requestBodyBytes: 2,
+    requestBodySha256: "0".repeat(64),
     startedAt: new Date("2026-06-17T10:00:00.000Z"),
   }
 }
