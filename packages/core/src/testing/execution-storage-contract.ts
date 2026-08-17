@@ -212,25 +212,24 @@ export function runExecutionStorageContractSuite<TStorage extends ExecutionStora
         await storage.executions.create(principalRequest({ id: "parent" }))
 
         const validChild = trustedPrimitive("valid-child", {
-          parentExecutionId: "parent",
           correlationId: "correlation-parent",
           source: { type: "execution", executionId: "parent" },
         })
-        await expect(storage.executions.create(validChild)).resolves.toMatchObject({
-          parentExecutionId: "parent",
+        const storedChild = await storage.executions.create(validChild)
+        expect(storedChild).toMatchObject({
+          source: { type: "execution", executionId: "parent" },
         })
+        expect(storedChild).not.toHaveProperty("parentExecutionId")
 
         const invalidChildren: readonly [CreateExecutionInput, string][] = [
           [
             trustedPrimitive("missing-parent", {
-              parentExecutionId: "unknown-parent",
               source: { type: "execution", executionId: "unknown-parent" },
             }),
             "missing_parent_execution",
           ],
           [
             trustedPrimitive("wrong-correlation", {
-              parentExecutionId: "parent",
               correlationId: "different-correlation",
               source: { type: "execution", executionId: "parent" },
             }),
@@ -238,7 +237,6 @@ export function runExecutionStorageContractSuite<TStorage extends ExecutionStora
           ],
           [
             trustedPrimitive("wrong-requester", {
-              parentExecutionId: "parent",
               requestedBy: { type: "user", id: "user-other" },
               source: { type: "execution", executionId: "parent" },
             }),
@@ -360,9 +358,7 @@ function disabledRequest(id: string, inputProjectId = projectId): CreateExecutio
 
 function trustedPrimitive(
   id: string,
-  overrides: Partial<
-    Pick<CreateExecutionInput, "correlationId" | "parentExecutionId" | "requestedBy" | "source">
-  > = {},
+  overrides: Partial<Pick<CreateExecutionInput, "correlationId" | "requestedBy" | "source">> = {},
   kind: TrustedPrimitiveKind = "action"
 ): CreateExecutionInput {
   const runId = `run-${id}`

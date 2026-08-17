@@ -31,9 +31,6 @@ export function normalizeExecutionRecord(
     executor: structuredClone(input.executor),
     source: structuredClone(input.source),
     correlationId: input.correlationId,
-    ...(input.parentExecutionId === undefined
-      ? {}
-      : { parentExecutionId: input.parentExecutionId }),
     authorizationRef: structuredClone(input.authorizationRef),
     createdAt: new Date(createdAt),
   }
@@ -75,21 +72,10 @@ function assertRecordShape(record: ExecutionRecord): void {
   if (record.requestedBy) {
     assertPrincipal(record.requestedBy, "Requested-by principal")
   }
-  if (record.parentExecutionId !== undefined) {
-    assertNonBlank(record.parentExecutionId, "Parent execution id")
-  }
 
   assertExecutor(record.executor)
   assertSource(record.source)
   assertAuthorizationRef(record.authorizationRef)
-
-  if (record.source.type === "execution") {
-    if (record.parentExecutionId !== record.source.executionId) {
-      invalid("Execution source must match the direct parent execution id.")
-    }
-  } else if (record.parentExecutionId !== undefined) {
-    invalid("A parent execution requires an execution source.")
-  }
 }
 
 function assertExecutor(executor: DurableExecutionExecutor): void {
@@ -295,16 +281,17 @@ async function validateParent(
   record: ExecutionRecord,
   lookup: ExecutionValidationLookup
 ): Promise<void> {
-  if (!record.parentExecutionId) return
+  if (record.source.type !== "execution") return
+  const parentExecutionId = record.source.executionId
 
   const parent = await lookup.getExecution({
     projectId: record.projectId,
-    id: record.parentExecutionId,
+    id: parentExecutionId,
   })
   if (!parent) {
     throw new ExecutionStorageError(
       "missing_parent_execution",
-      `[Sixb] Parent execution '${record.parentExecutionId}' does not exist in project '${record.projectId}'.`
+      `[Sixb] Parent execution '${parentExecutionId}' does not exist in project '${record.projectId}'.`
     )
   }
   if (parent.correlationId !== record.correlationId) {

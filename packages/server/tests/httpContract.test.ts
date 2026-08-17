@@ -2413,8 +2413,7 @@ describe("SixbServer HTTP contract", () => {
       expect(durableSyncRun).toMatchObject({ status: "queued", startedAt: undefined })
       expect(durableSyncExecution).toMatchObject({
         executor: { type: "primitive", kind: "sync", runId: requestSyncRunBody.runId },
-        source: { type: "execution" },
-        parentExecutionId: expect.any(String),
+        source: { type: "execution", executionId: expect.any(String) },
         authorizationRef: {
           type: "trustedPrimitive",
           primitive: {
@@ -2458,8 +2457,7 @@ describe("SixbServer HTTP contract", () => {
       expect(durablePipelineRun).toMatchObject({ status: "queued", startedAt: undefined })
       expect(durablePipelineExecution).toMatchObject({
         executor: { type: "primitive", kind: "pipeline", runId: requestPipelineRunBody.runId },
-        source: { type: "execution" },
-        parentExecutionId: expect.any(String),
+        source: { type: "execution", executionId: expect.any(String) },
         authorizationRef: {
           type: "trustedPrimitive",
           primitive: {

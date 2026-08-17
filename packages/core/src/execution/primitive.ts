@@ -30,7 +30,6 @@ export interface BindPrimitiveExecutionInput {
   readonly source: ExecutionSource
   readonly requestedBy?: AuthorizablePrincipal
   readonly correlationId?: string
-  readonly parentExecutionId?: string
 }
 
 /** Bind the trusted authority of one claimed primitive run to the domain SDK. */
@@ -44,9 +43,6 @@ export function bindPrimitiveExecution(
     source: input.source,
     ...(input.requestedBy === undefined ? {} : { requestedBy: input.requestedBy }),
     ...(input.correlationId === undefined ? {} : { correlationId: input.correlationId }),
-    ...(input.parentExecutionId === undefined
-      ? {}
-      : { parentExecutionId: input.parentExecutionId }),
   })
   return bindPrimitiveScope(host, scope)
 }

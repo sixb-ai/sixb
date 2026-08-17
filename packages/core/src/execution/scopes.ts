@@ -58,7 +58,6 @@ export function createTrustedPrimitiveScope(input: {
   readonly source: ExecutionSource
   readonly requestedBy?: AuthorizablePrincipal
   readonly correlationId?: string
-  readonly parentExecutionId?: string
 }): ExecutionScope {
   const execution = createInternalExecution({
     projectId: input.projectId,
@@ -71,7 +70,6 @@ export function createTrustedPrimitiveScope(input: {
     }),
     source: input.source,
     correlationId: input.correlationId,
-    parentExecutionId: input.parentExecutionId,
   })
   return Object.freeze({
     execution,
@@ -90,7 +88,6 @@ export function createAgentScope(input: {
   readonly source: ExecutionSource
   readonly requestedBy?: AuthorizablePrincipal
   readonly correlationId?: string
-  readonly parentExecutionId?: string
 }): ExecutionScope {
   if (input.context.principal.type !== "serviceAccount") {
     throw new Error("[Sixb] Agent execution authority must belong to a service account.")
@@ -103,7 +100,6 @@ export function createAgentScope(input: {
     executor: Object.freeze({ type: "agent", agentId: input.agentId, runId: input.runId }),
     source: input.source,
     correlationId: input.correlationId,
-    parentExecutionId: input.parentExecutionId,
   })
   return Object.freeze({
     execution,
@@ -142,10 +138,9 @@ function createInternalExecution(input: {
   readonly executor: Exclude<ExecutionContext["executor"], { readonly type: "request" }>
   readonly source: ExecutionSource
   readonly correlationId?: string
-  readonly parentExecutionId?: string
 }): ExecutionContext {
   const source = snapshotExecutionSource(input.source)
-  assertNestedProvenance(source, input.parentExecutionId, input.correlationId)
+  assertNestedProvenance(source, input.correlationId)
   return freezeExecution({
     id: `exec_${randomUUID()}`,
     projectId: input.projectId,
@@ -155,25 +150,12 @@ function createInternalExecution(input: {
     executor: input.executor,
     source,
     correlationId: input.correlationId ?? `corr_${randomUUID()}`,
-    ...(input.parentExecutionId === undefined
-      ? {}
-      : { parentExecutionId: input.parentExecutionId }),
   })
 }
 
-function assertNestedProvenance(
-  source: ExecutionSource,
-  parentExecutionId: string | undefined,
-  correlationId: string | undefined
-): void {
-  if (parentExecutionId !== undefined) {
-    assertNonEmpty(parentExecutionId, "Parent execution id")
-    if (correlationId === undefined) {
-      throw new Error("[Sixb] Nested execution must preserve its parent correlation id.")
-    }
-  }
-  if (source.type === "execution" && source.executionId !== parentExecutionId) {
-    throw new Error("[Sixb] Execution source must match the direct parent execution id.")
+function assertNestedProvenance(source: ExecutionSource, correlationId: string | undefined): void {
+  if (source.type === "execution" && correlationId === undefined) {
+    throw new Error("[Sixb] Nested execution must preserve its parent correlation id.")
   }
 }
 
@@ -236,9 +218,6 @@ function freezeExecution(execution: ExecutionContext): ExecutionContext {
   assertNonEmpty(execution.id, "Execution id")
   assertNonEmpty(execution.projectId, "Execution project id")
   assertNonEmpty(execution.correlationId, "Execution correlation id")
-  if (execution.parentExecutionId !== undefined) {
-    assertNonEmpty(execution.parentExecutionId, "Parent execution id")
-  }
   return Object.freeze(execution)
 }
 

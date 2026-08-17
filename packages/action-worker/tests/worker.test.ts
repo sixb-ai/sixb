@@ -216,7 +216,6 @@ describe("ActionWorker", () => {
       : null
     expect(durableExecution).toMatchObject({
       source: { type: "execution", executionId: sixb.execution.id },
-      parentExecutionId: sixb.execution.id,
       correlationId: sixb.execution.correlationId,
       authorizationRef: {
         type: "trustedPrimitive",
