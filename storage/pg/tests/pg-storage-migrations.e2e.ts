@@ -12,6 +12,7 @@ import {
 import {
   createMaterializerTestFixture,
   createTestWorkflowExecution,
+  startTestProjectionRun,
   startTestSyncRun,
 } from "@sixb/core/testing"
 import { SQL } from "bun"
@@ -1369,7 +1370,7 @@ async function seedExistingStoreRows(storage: PostgresStorage): Promise<void> {
     },
     checkpoint: { cursor: "legacy" },
   })
-  const projectionRun = await storage.projectionRuns.startOrReclaim({
+  const projectionRun = await startTestProjectionRun(storage, {
     id: "proj-run-1",
     projectId: "project-a",
     identity: {
