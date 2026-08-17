@@ -219,6 +219,34 @@ describe("InMemoryActionRunStorage", () => {
     ).rejects.toBeInstanceOf(ActionRunError)
   })
 
+  test("does not requeue a non-retryable enqueue failure", async () => {
+    const { storage, queue } = createActionRunFixture()
+    const input = {
+      id: "act_enqueue",
+      projectId: "my-app",
+      actionId: "sendQuote",
+      subject: { kind: "none" } as const,
+      params: {},
+      idempotencyKey: "action:my-app:act_enqueue",
+    }
+
+    await queue(input)
+    await storage.finish({
+      id: input.id,
+      projectId: input.projectId,
+      status: "failed",
+      error: {
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        retryable: false,
+        at: FAILURE_AT,
+        details: { actionId: input.actionId, runId: input.id, phase: "enqueue" },
+      },
+    })
+
+    await expect(queue(input)).rejects.toBeInstanceOf(ActionRunError)
+  })
+
   test("stores failed runs and lists with filters, ordering, and paging", async () => {
     const { storage, queue } = createActionRunFixture()
 

@@ -75,14 +75,14 @@ Additional rules:
 ## Normalization
 
 - Coded errors receive their `details` where they are created.
-- Fallback details are reserved for native, infrastructure, and cancellation errors at a boundary.
+- Native or out-of-contract errors use one typed capture policy at the boundary.
 
 ## Error catalog
 
 | Code | Retryable | What happened | What to do |
 | --- | --- | --- | --- |
-| `action.phase_failed` | No | An Action phase could not complete successfully. | Inspect `phase` and the `onError` report; retry only when its side-effect boundary makes that safe. |
-| `agent.execution_failed` | No | An active Agent execution failed. | Inspect the run identity and `onError` report before requesting another run. |
+| `action.phase_failed` | No | An Action phase could not complete successfully. | Inspect `details.phase` and the native error reported to `onError`. |
+| `agent.execution_failed` | No | An active Agent execution failed. | Inspect the run identity and the native error reported to `onError`. |
 | `dataset.not_found` | No | Dataset is unavailable to the caller. | Check its ID and access policy. |
 | `dataset.version_incompatible` | No | Version does not match the required dataset or schema. | Materialize a compatible version. |
 | `dataset.version_not_found` | No | Version does not exist or nothing has been committed yet. | Check the ID or materialize the dataset. |
@@ -95,8 +95,8 @@ Additional rules:
 | `projection.not_found` | No | Projection is not registered. | Check its ID and deployment. |
 | `projection.run_already_terminal` | No | Delivery targets a run that is already terminal. | Use a new run ID for new work. |
 | `projection.run_identity_mismatch` | No | Delivery does not match the run's pinned identity. | Discard it and dispatch from the current definition. |
-| `queue.enqueue_failed` | Yes | A job could not be handed to its queue. | Retry while the run remains in its enqueue phase. |
+| `queue.enqueue_failed` | Yes | A job could not be handed to its queue. | Retry the unchanged request while the durable run remains in its enqueue phase. |
 | `runtime.cancelled` | No | Work was cancelled before completion. | Confirm the cancellation before requesting another run. |
 | `sync.execution_failed` | No | A Sync failed while reading, validating, or writing its dataset. | Inspect the `onError` report, fix the source or data, then request a new run. |
 | `webhook.delivery_failed` | Yes | A claimed webhook delivery failed retryably. | Let the provider retry; inspect the handler if it persists. |
-| `workflow.node_failed` | No | A node failed during preparation or execution. | Inspect its identity and `onError` report. |
+| `workflow.node_failed` | No | A node failed during preparation or execution. | Inspect its identity and the native error reported to `onError`. |

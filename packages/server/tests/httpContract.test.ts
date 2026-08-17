@@ -552,7 +552,7 @@ describe("SixbServer HTTP contract", () => {
       completedAt: new Date("2026-02-18T09:12:04.000Z"),
       error: {
         code: "internal.unexpected",
-        message: "Notification failed",
+        message: "An unexpected internal error occurred.",
         retryable: false,
         at: "2026-02-18T09:12:04.000Z",
         details: {
@@ -2184,7 +2184,7 @@ describe("SixbServer HTTP contract", () => {
           completedAt: "2026-02-18T09:12:04.000Z",
           error: {
             code: "internal.unexpected",
-            message: "Notification failed",
+            message: "An unexpected internal error occurred.",
             retryable: false,
             at: "2026-02-18T09:12:04.000Z",
             details: {

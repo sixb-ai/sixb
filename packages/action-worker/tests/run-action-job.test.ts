@@ -831,8 +831,12 @@ describe("runActionJob", () => {
 
     expect(result.status).toBe("failed")
     if ("error" in result) {
-      expect(result.error.message).toBe("An unexpected internal error occurred.")
-      expect(result.error.details.phase).toBe("validation")
+      expect(result.error).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        retryable: false,
+        details: { actionId: "missingAction", runId: "act_1", phase: "validation" },
+      })
     }
     const run = await host.storage.actionRuns!.getById({ projectId: host.id, id: "act_1" })
     expect(run?.status).toBe("failed")
@@ -982,6 +986,7 @@ describe("runActionJob", () => {
   })
 
   test("records effects errors without failing committed actions", async () => {
+    const originalError = new Error("notification failed")
     const setStatus = defineAction("setStatus")
       .on(Device)
       .params({})
@@ -989,7 +994,7 @@ describe("runActionJob", () => {
         objects(Device).byId(subject.primaryId).update({ status: "ready" })
       })
       .effects(() => {
-        throw new Error("notification failed")
+        throw originalError
       })
 
     const { host, sixb } = createSixb([setStatus])
@@ -1030,14 +1035,16 @@ describe("runActionJob", () => {
     })
     await reporter.flush()
     expect(reports).toHaveLength(1)
-    expect(reports[0]?.error.message).toBe("notification failed")
+    expect(reports[0]?.error).toBe(originalError)
     expect(reports[0]?.context).toMatchObject({
       type: "action.phase.failed",
+      projectId: host.id,
       actionId: "setStatus",
       runId: "act_1",
       phase: "effects",
       failure: run?.effects?.error,
     })
+    expect(reports[0]?.context.occurredAt).toBe(run?.effects?.error?.at ?? "")
   })
 
   test("does not report cancelled runs", async () => {
@@ -1087,7 +1094,11 @@ describe("runActionJob", () => {
         code: "runtime.cancelled",
         message: "Execution was cancelled.",
         retryable: false,
-        details: { actionId: "waitForCancel", runId: "act_cancelled", phase: "cancelled" },
+        details: {
+          actionId: "waitForCancel",
+          runId: "act_cancelled",
+          phase: "cancelled",
+        },
       })
     }
     await reporter.flush()
@@ -1125,8 +1136,12 @@ describe("runActionJob", () => {
 
     expect(result.status).toBe("failed")
     if ("error" in result) {
-      expect(result.error.message).toBe("An unexpected internal error occurred.")
-      expect(result.error.details.phase).toBe("validation")
+      expect(result.error).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        retryable: false,
+        details: { actionId: "setStatus", runId: "act_1", phase: "validation" },
+      })
     }
     expect(invoked).toBe(0)
   })

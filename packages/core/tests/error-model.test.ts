@@ -139,6 +139,18 @@ describe("Sixb error model", () => {
     expect(scopedFailure.code).toBe("internal.unexpected")
     expect(scopedFailure.details).toEqual({ syncId: "sync-1", runId: "run-1" })
 
+    const cancellation = createSixbError("runtime.cancelled", "Sync cancelled", {
+      details: { syncId: "sync-1", runId: "run-1", reason: "shutdown" },
+    })
+    expect(
+      captureSixbFailure(cancellation, {
+        allowedCodes: SYNC_RUN_FAILURE_CODES,
+        defaultCode: "internal.unexpected",
+        details: { syncId: "fallback", runId: "fallback" },
+        at: AT,
+      }).details
+    ).toEqual({ syncId: "sync-1", runId: "run-1", reason: "shutdown" })
+
     const datasetFailure = toSixbFailure(datasetError, { at: AT })
     expect(parseSixbFailure(datasetFailure)).toEqual(datasetFailure)
     expect(() => parseSixbFailure(datasetFailure, SYNC_RUN_FAILURE_CODES)).toThrow(

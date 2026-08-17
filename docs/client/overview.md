@@ -39,7 +39,7 @@ layer and never touch the transport directly. In a standalone app, configure
 | `@sixb/client/hooks` | TanStack Query hooks and `*Options` factories, `SixbProvider`, the events layer, and `useAgentRunStream` |
 | `@sixb/client/logs` | The `logs` builder — read, tail, and subscribe to run logs |
 | `@sixb/client/browser` | CSRF/auth bootstrap and `__SIXB_RUNTIME__` handoff |
-| `@sixb/client/models` | `encode`/`decodeObjectId`, `executeAction`, UI shape mappers |
+| `@sixb/client/models` | `encode`/`decodeObjectId` and UI shape mappers |
 
 > `@sixb/client/hooks` re-exports the events layer and the typed-query hooks,
 > so a React app usually only imports from `/hooks`.
@@ -210,35 +210,24 @@ failed requests are not replayed; users must submit failed mutations again.
 
 See [authentication](../auth/authentication.md) to configure session timeouts.
 
-## /models: ids and actions
+## /models: ids and UI shapes
 
-`@sixb/client/models` holds object-id codecs, the action helper, and the UI
-shape mappers used by the built-in UI.
+`@sixb/client/models` holds object-id codecs and the UI shape mappers used by the built-in UI.
 
 | Export | Purpose |
 | --- | --- |
 | `encodeObjectId(typeId, primaryId)` | Encode a `typeId~primaryId` opaque object id |
 | `decodeObjectId(id)` | Decode it back to `{ objectTypeId, primaryId }` or `null` |
-| `executeAction({ path, body })` | Request an action on an object by encoded id |
-| `executeGlobalAction({ path, body })` | Request a project-level (non-object) action |
 
 ```ts
-import { encodeObjectId, executeAction } from "@sixb/client/models"
+import { decodeObjectId, encodeObjectId } from "@sixb/client/models"
 
 const id = encodeObjectId("Invoice", "inv-2042")
-const { data } = await executeAction({
-  path: { objectId: id, actionId: "markPaid" },
-  body: { params: {} },
-})
+// "Invoice~inv-2042"
 
-if (!data.success) {
-  console.error(data.error.message, data.error.code, data.error.status)
-}
+const identity = decodeObjectId(id)
+// { objectTypeId: "Invoice", primaryId: "inv-2042" }
 ```
-
-The result is discriminated by `success`: successful requests always contain `runId`; rejected
-requests contain a serializable `{ message, code?, status? }` error. This is a request error, not a
-durable `SixbFailure` record.
 
 Object ids are encoded as `encodeURIComponent(typeId)~encodeURIComponent(primaryId)`,
 so they are safe to pass through URLs and route params.
@@ -255,7 +244,7 @@ so they are safe to pass through URLs and route params.
 | Live run logs in an app | `logs.actions()`/`.syncs()`/… `.subscribe()` (`@sixb/client/logs`) |
 | Stream a live agent run | `useAgentRunStream` (`@sixb/client/hooks`) |
 | Bootstrap a standalone browser client | `@sixb/client/browser` |
-| Encode/decode ids or fire actions | `@sixb/client/models` |
+| Encode/decode ids or map API responses to UI shapes | `@sixb/client/models` |
 
 ## Related
 

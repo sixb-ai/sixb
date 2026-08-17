@@ -13,6 +13,8 @@ export const sixb = await createSixb({
     const subject =
       context.type === "run.failed"
         ? `${context.runKind} run ${context.run.runId}`
+        : context.type === "action.phase.failed"
+          ? `action ${context.actionId} ${context.phase} phase`
         : context.type === "event.delivery.failed"
           ? `delivery of ${context.eventTypes.join(", ")}`
           : `${context.source} rule evaluation`
@@ -27,8 +29,9 @@ export const sixb = await createSixb({
 When `onError` is omitted, Sixb reports the same failures to `console.error`; they are never silently dropped.
 Configuring `onError` replaces that default console destination, so each failure is reported once.
 
-The callback covers failed action, agent, pipeline, projection, sync, workflow, and webhook runs,
-plus failed ontology-outbox publication attempts and Rules evaluation passes.
+The callback covers failed action, agent, pipeline, projection, sync, workflow, and webhook runs;
+post-commit Action effects failures; failed ontology-outbox publication attempts; and Rules
+evaluation passes.
 It does not run for successes, cancellations, retries that remain recoverable, workflow nodes or
 pipeline steps separately, or routine webhook 4xx rejections.
 
@@ -72,13 +75,26 @@ interface SixbRuleEvaluationFailedContext {
   readonly ruleId?: string
   readonly subject?: { readonly objectTypeId: string; readonly primaryId: string }
 }
+
+interface SixbActionPhaseFailedContext {
+  readonly type: "action.phase.failed"
+  readonly notificationId: string
+  readonly projectId: string
+  readonly occurredAt: string
+  readonly actionId: string
+  readonly runId: string
+  readonly phase: "effects"
+  readonly failure: ActionRunFailure<"effects">
+}
 ```
 
 `runKind` is the top-level discriminant for action, agent, pipeline, projection, sync, workflow, and
-webhook failures. Narrowing it narrows both `run` and `failure`: action failures retain their lifecycle
-`phase`, while every other primitive exposes its exact allowed code union without a cast. Every `run`
-carries a `runId`. Rules are the exception: they are evaluated live, per subject, with no run record,
-so they report as `rule.evaluation.failed` rather than being handed an id nothing can resolve.
+webhook run failures. Narrowing it narrows both `run` and `failure`: Action failures carry their
+lifecycle phase in `failure.details`, while every other primitive exposes its exact allowed code union
+without a cast. Every `run` carries a `runId`.
+
+`action.phase.failed` is separate because an `effects` failure happens after commit: its failure is
+stored, but the Action run remains succeeded. Rules are also separate because they have no run record.
 
 `failure` is the machine-readable contract. For run failures and persisted outbox attempts it is the
 same object sent to durable storage, not a second normalization. The first `error` argument remains the
@@ -136,12 +152,22 @@ onError(error, context) {
     return
   }
 
+  if (context.type === "action.phase.failed") {
+    console.error(`Action ${context.actionId} effects failed`, context.failure, error)
+    return
+  }
+
+  // The remaining variant is `run.failed`.
+
   if (context.runKind === "projection") {
     console.error(`Projection ${context.run.projectionId} failed`, context.failure, error)
   }
 
   if (context.runKind === "action") {
-    console.error(`Action ${context.run.actionId} failed in ${context.failure.phase}`, error)
+    console.error(
+      `Action ${context.run.actionId} failed in ${context.failure.details.phase}`,
+      error
+    )
   }
 }
 ```

@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import { defineObjectType, migrateStorage, OntologyRegistry, prop } from "@sixb/core"
+import { parseActionRunFailure } from "@sixb/core/internal/action-run-storage"
 import { parseSixbFailure } from "@sixb/core/internal/errors"
 import {
+  ACTION_RUN_FAILURE_CODES,
   defineMigrations,
   ONTOLOGY_OUTBOX_FAILURE_CODES,
+  SYNC_RUN_FAILURE_CODES,
   WEBHOOK_DELIVERY_FAILURE_CODES,
 } from "@sixb/core/storage"
 import { createMaterializerTestFixture, createTestWorkflowExecution } from "@sixb/core/testing"
@@ -362,6 +365,77 @@ describe("Postgres storage migrations", () => {
             },
           },
         ])
+      } finally {
+        await sql.end()
+      }
+    })
+  })
+
+  test("migrates failed run records from the version 10 main schema", async () => {
+    await withStorage(false, async (storage, schemaName) => {
+      const connectionString = process.env.DATABASE_URL
+      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
+
+      const sql = createPgClient({ connectionString, schemaName, max: 1 })
+      try {
+        const versionTen = defineMigrations({
+          adapterId: POSTGRES_STORAGE_ADAPTER_ID,
+          steps: postgresStorageMigrations.steps.slice(0, 10),
+        })
+        await createPostgresMigrator({ sql, schemaName, migrations: versionTen }).migrate()
+        const schema = quoteIdent(schemaName)
+        await sql.unsafe(`
+          INSERT INTO ${schema}.executions (
+            project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
+            authority_kind, authority_primitive_kind, authority_primitive_id, created_at
+          ) VALUES (
+            'project-a', 'execution-action-legacy', 'action', 'action-legacy', 'event',
+            'event-action-legacy', 'correlation-action-legacy', 'trustedPrimitive', 'action',
+            'approve', '2026-08-10T12:00:00.000Z'
+          );
+
+          INSERT INTO ${schema}.sync_runs (
+            project_id, id, sync_id, dataset_id, mode, status, started_at, finished_at,
+            error_name, error_message
+          ) VALUES (
+            'project-a', 'sync-legacy', 'sync.orders', 'orders', 'snapshot', 'failed',
+            '2026-08-10T12:00:00.000Z', '2026-08-10T12:01:00.000Z',
+            'ProviderError', 'secret sync diagnostic'
+          );
+
+          INSERT INTO ${schema}.action_runs (
+            project_id, id, execution_id, action_id, subject_kind, status, phase, queued_at,
+            finished_at, params, idempotency_key, error_name, error_message, error_phase
+          ) VALUES (
+            'project-a', 'action-legacy', 'execution-action-legacy', 'approve', 'none', 'failed',
+            'enqueue',
+            '2026-08-10T12:00:00.000Z', '2026-08-10T12:01:00.000Z', '{}'::jsonb,
+            'action-legacy', 'QueueError', 'secret queue diagnostic', 'enqueue'
+          );
+        `)
+
+        await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
+
+        const [sync] = await sql.unsafe<Array<{ readonly error: unknown }>>(
+          `SELECT error FROM ${schema}.sync_runs WHERE id = 'sync-legacy'`
+        )
+        const [action] = await sql.unsafe<Array<{ readonly error: unknown }>>(
+          `SELECT error FROM ${schema}.action_runs WHERE id = 'action-legacy'`
+        )
+        expect(parseSixbFailure(sync?.error, SYNC_RUN_FAILURE_CODES)).toMatchObject({
+          code: "internal.unexpected",
+          message: "An unexpected internal error occurred.",
+          details: { syncId: "sync.orders", runId: "sync-legacy" },
+        })
+        expect(parseActionRunFailure(action?.error)).toMatchObject({
+          code: "queue.enqueue_failed",
+          retryable: true,
+          details: { actionId: "approve", runId: "action-legacy", phase: "enqueue" },
+        })
+        expect(JSON.stringify(sync)).not.toContain("secret")
+        expect(await readTableColumns(schemaName, "sync_runs")).not.toContain("error_message")
+        expect(await readTableColumns(schemaName, "action_runs")).not.toContain("error_phase")
+        expect(ACTION_RUN_FAILURE_CODES).toContain("queue.enqueue_failed")
       } finally {
         await sql.end()
       }

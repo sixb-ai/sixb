@@ -99,6 +99,19 @@ export interface SixbActionPhaseFailedContext extends SixbFailureContext<"action
 }
 
 /**
+ * A post-commit Action phase failed without changing the committed Action outcome.
+ *
+ * Effects run after the authoritative commit, so the Action run remains succeeded while this
+ * context exposes the exact phase failure stored on the run.
+ */
+export interface SixbActionPhaseFailedContext extends SixbFailureContext<"action.phase.failed"> {
+  readonly actionId: string
+  readonly runId: string
+  readonly phase: "effects"
+  readonly failure: ActionRunFailure<"effects">
+}
+
+/**
  * A batch of domain events never reached its subscribers.
  *
  * Every event Sixb publishes is a potential trigger edge — a rule's `.when()`, an event schedule, a

@@ -16,7 +16,6 @@ const FAILURE = {
   retryable: false,
   at: "2026-01-02T03:04:04.000Z",
   details: { agentId: "assistant", runId: "agt_run_1" },
-  causeChain: [{ name: "ProviderError", message: "provider unavailable" }],
 }
 
 function runRecord(overrides: Partial<AgentRunRecord> = {}): AgentRunRecord {
