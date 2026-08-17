@@ -157,22 +157,13 @@ export interface WorkflowRunRequestedQueueJob
     }
   > {}
 
-export type WorkflowRunResumeCause =
-  | {
-      readonly kind: "intervention"
-      readonly interventionId: string
-    }
-  | {
-      readonly kind: "agentNode"
-      readonly nodeRunId: string
-    }
-
+/** Wake a durable wait edge; the worker resolves its type and current state from storage. */
 export interface WorkflowRunResumeRequestedQueueJob
   extends QueueJob<
     "workflow.run.resume.requested",
     {
       readonly runId: string
-      readonly resume: WorkflowRunResumeCause
+      readonly nodeRunId: string
     }
   > {}
 

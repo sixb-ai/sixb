@@ -905,7 +905,7 @@ describe("runWorkflowJob", () => {
       job: {
         id: waiting.id,
         workflowId: workflow.id,
-        resume: { kind: "agentNode", nodeRunId: node!.id },
+        nodeRunId: node!.id,
       },
     })
     expect(resumed.status).toBe("succeeded")
@@ -995,10 +995,7 @@ describe("runWorkflowJob", () => {
       job: {
         id: "wfrun_resume",
         workflowId: workflow.id,
-        resume: {
-          kind: "intervention",
-          interventionId: "wfrun_resume:intervention:1",
-        },
+        nodeRunId: "wfrun_resume:node:1",
       },
       observer,
     })
@@ -1050,10 +1047,7 @@ describe("runWorkflowJob", () => {
       job: {
         id: "wfrun_resume",
         workflowId: workflow.id,
-        resume: {
-          kind: "intervention",
-          interventionId: "wfrun_resume:intervention:1",
-        },
+        nodeRunId: "wfrun_resume:node:1",
       },
       observer,
     })
@@ -1065,6 +1059,52 @@ describe("runWorkflowJob", () => {
 
     expect(duplicate.status).toBe("succeeded")
     expect(afterDuplicate.nodes.map((node) => node.id)).toEqual(nodes.nodes.map((node) => node.id))
+  })
+
+  test("rejects a foreign resume node before recovering a running delivery", async () => {
+    const workflow = defineWorkflow("intervention-resume-identity")
+      .input({
+        transaction: ref(Transaction),
+      })
+      .then(findBestInvoice)
+      .then(reviewBeforeAttach)
+    const sixb = createSixb({ workflows: [workflow] })
+    const runtime = createRuntime(sixb)
+
+    for (const id of ["wfrun_resume_owner", "wfrun_resume_other"]) {
+      await runWorkflowJob({
+        runtime,
+        job: {
+          id,
+          workflowId: workflow.id,
+          input: {
+            transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+          },
+        },
+      })
+    }
+
+    await sixb.storage.workflowRuns!.resume({
+      projectId: sixb.id,
+      id: "wfrun_resume_owner",
+    })
+
+    await expect(
+      runWorkflowResumeJob({
+        runtime,
+        job: {
+          id: "wfrun_resume_owner",
+          workflowId: workflow.id,
+          nodeRunId: "wfrun_resume_other:node:1",
+        },
+      })
+    ).rejects.toThrow("does not match run 'wfrun_resume_owner'")
+
+    const run = await sixb.storage.workflowRuns!.getById({
+      projectId: sixb.id,
+      id: "wfrun_resume_owner",
+    })
+    expect(run?.status).toBe("running")
   })
 
   test("keeps runs waiting when submitted intervention responses are invalid", async () => {
@@ -1104,10 +1144,7 @@ describe("runWorkflowJob", () => {
         job: {
           id: "wfrun_invalid_resume_response",
           workflowId: workflow.id,
-          resume: {
-            kind: "intervention",
-            interventionId: "wfrun_invalid_resume_response:intervention:1",
-          },
+          nodeRunId: "wfrun_invalid_resume_response:node:1",
         },
       })
     ).rejects.toBeInstanceOf(WorkflowValidationError)

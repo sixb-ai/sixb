@@ -69,7 +69,7 @@ export function restoreAgentExecutionScope(input: {
     projectId: input.execution.projectId,
     ...(input.execution.requestedBy === undefined
       ? {}
-      : { requestedBy: structuredClone(input.execution.requestedBy) }),
+      : { requestedBy: Object.freeze(structuredClone(input.execution.requestedBy)) }),
     executor: Object.freeze({ type: "agent", agentId: input.agentId, runId: input.runId }),
     source: Object.freeze(structuredClone(input.execution.source)),
     correlationId: input.execution.correlationId,

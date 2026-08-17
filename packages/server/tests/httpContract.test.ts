@@ -1802,7 +1802,7 @@ describe("SixbServer HTTP contract", () => {
         type: "workflow.run.resume.requested",
         payload: {
           runId: pending.workflowRunId,
-          resume: { kind: "intervention", interventionId: pending.id },
+          nodeRunId: pending.nodeRunId,
         },
       })
 
