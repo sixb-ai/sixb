@@ -395,6 +395,7 @@ export {
 } from "./pipeline-runs"
 export type {
   AdvanceProjectionTelemetryCheckpointInput,
+  FailProjectionRunEnqueueInput,
   FinishProjectionRunInput,
   LinkProjectionRunRecord,
   LinkProjectionTarget,
@@ -415,6 +416,7 @@ export type {
   ProjectionRunStorage,
   ProjectionTarget,
   ProjectionTelemetryCheckpoint,
+  QueueProjectionRunInput,
   RecordProjectionMissingTargetInput,
   StartOrReclaimProjectionRunInput,
   TelemetryProjectionRunRecord,

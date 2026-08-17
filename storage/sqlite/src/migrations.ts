@@ -59,6 +59,9 @@ import dropRunUsageProjectionsSql from "./migrations/020-drop-run-usage-projecti
 import syncPipelineExecutionsSql from "./migrations/021-sync-pipeline-executions.sql" with {
   type: "text",
 }
+import projectionExecutionsSql from "./migrations/022-projection-executions.sql" with {
+  type: "text",
+}
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -100,6 +103,18 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("019-webhook-delivery-failure-record", webhookDeliveryFailureRecordSql),
     sqliteSql("020-drop-run-usage-projections", dropRunUsageProjectionsSql),
     sqliteSql("021-sync-pipeline-executions", syncPipelineExecutionsSql),
+    sqliteStep(
+      "022-projection-executions",
+      (db) => {
+        if (db.query("SELECT 1 FROM projection_runs LIMIT 1").get()) {
+          throw new Error(
+            "[SixbSqliteStorage] Projection execution migration cannot preserve legacy runs with unknown authority."
+          )
+        }
+        db.run(projectionExecutionsSql)
+      },
+      { checksum: checksum(projectionExecutionsSql) }
+    ),
   ],
 })
 
@@ -210,15 +225,27 @@ function sqliteMigrationHistoryStore(db: Database): MigrationHistoryStore {
       `).run(at, adapterId, migration.version)
     },
     async transaction(run) {
+      // SQLite cannot rebuild a referenced parent table while foreign-key enforcement is active,
+      // even when the replacement satisfies every deferred reference. Migrations therefore run
+      // with enforcement paused, validate the complete schema before commit, then restore it.
+      db.run("PRAGMA foreign_keys = OFF")
       db.run("BEGIN")
 
       try {
         const result = await run()
+        const violations = db.query("PRAGMA foreign_key_check").all()
+        if (violations.length > 0) {
+          throw new Error(
+            `[${SQLITE_STORAGE_ADAPTER_ID}] Migration produced ${violations.length} foreign-key violation(s).`
+          )
+        }
         db.run("COMMIT")
         return result
       } catch (error) {
         rollbackQuietly(db)
         throw error
+      } finally {
+        db.run("PRAGMA foreign_keys = ON")
       }
     },
   }

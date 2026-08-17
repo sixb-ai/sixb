@@ -2,6 +2,7 @@ export { ProjectionRunError } from "./errors"
 export { InMemoryProjectionRunStorage } from "./in-memory"
 export type {
   AdvanceProjectionTelemetryCheckpointInput,
+  FailProjectionRunEnqueueInput,
   FinishProjectionRunInput,
   LinkProjectionRunRecord,
   LinkProjectionTarget,
@@ -25,6 +26,7 @@ export type {
   ProjectionRunStorage,
   ProjectionTarget,
   ProjectionTelemetryCheckpoint,
+  QueueProjectionRunInput,
   RecordProjectionMissingTargetInput,
   StartOrReclaimProjectionRunInput,
   TelemetryProjectionRunRecord,

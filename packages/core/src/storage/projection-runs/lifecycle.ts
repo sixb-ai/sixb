@@ -13,6 +13,7 @@ import { PROJECTION_RUN_FAILURE_CODES } from "../../projections/types"
 import { ProjectionRunError } from "./errors"
 import type {
   AdvanceProjectionTelemetryCheckpointInput,
+  FailProjectionRunEnqueueInput,
   FinishProjectionRunInput,
   ProjectionMissingTarget,
   ProjectionRunClaim,
@@ -20,6 +21,7 @@ import type {
   ProjectionRunRecord,
   ProjectionRunStatus,
   ProjectionTelemetryCheckpoint,
+  QueueProjectionRunInput,
   StartOrReclaimProjectionRunInput,
   TelemetryProjectionRunRecord,
 } from "./types"
@@ -32,6 +34,7 @@ export type StoredProjectionRunRecord = ProjectionRunRecord & {
 export interface PersistedProjectionRunRecord {
   readonly id: string
   readonly projectId: string
+  readonly executionId: string
   readonly projectionId: string
   readonly projectionKind: ProjectionKind
   readonly protocol?: "replacement" | "telemetry"
@@ -45,7 +48,8 @@ export interface PersistedProjectionRunRecord {
   readonly sourceObjectTypeId?: string
   readonly targetObjectTypeId?: string
   readonly status: ProjectionRunStatus
-  readonly startedAt: Date
+  readonly queuedAt: Date
+  readonly startedAt?: Date
   readonly finishedAt?: Date
   readonly attempt: number
   readonly executionToken?: string
@@ -67,7 +71,7 @@ export interface ProjectionTelemetryAdvance {
 }
 
 export interface ProjectionRunFinishPlan {
-  readonly status: Exclude<ProjectionRunStatus, "running">
+  readonly status: Exclude<ProjectionRunStatus, "queued" | "running">
   readonly finishedAt: Date
   readonly progress: ProjectionRunProgress
   readonly inputExhausted?: true
@@ -152,11 +156,25 @@ export function assertProjectionRunTargetMatches(
 export function assertProjectionRunStartInput(input: StartOrReclaimProjectionRunInput): void {
   assertProjectionRunNonEmpty(input.id, "id")
   assertProjectionRunNonEmpty(input.projectId, "projectId")
+  assertProjectionRunIdentityAndTarget(input)
+  if (input.startedAt) assertProjectionRunDate(input.startedAt, "startedAt")
+}
+
+export function assertProjectionRunQueueInput(input: QueueProjectionRunInput): void {
+  assertProjectionRunNonEmpty(input.id, "id")
+  assertProjectionRunNonEmpty(input.projectId, "projectId")
+  assertProjectionRunNonEmpty(input.executionId, "executionId")
+  assertProjectionRunIdentityAndTarget(input)
+  if (input.queuedAt) assertProjectionRunDate(input.queuedAt, "queuedAt")
+}
+
+function assertProjectionRunIdentityAndTarget(
+  input: QueueProjectionRunInput | StartOrReclaimProjectionRunInput
+): void {
   assertProjectionRunIdentity(input.identity)
   assertProjectionTarget(input.identity.projectionKind, input.target)
-  if (input.startedAt) assertProjectionRunDate(input.startedAt, "startedAt")
   if (input.identity.projectionKind === "telemetry") {
-    const telemetry = input as ProjectionRunStart<"telemetry">
+    const telemetry = input as ProjectionRunIdentityInput<"telemetry">
     assertPositiveCounter(telemetry.fixedBatchSize, "fixedBatchSize")
   } else if (input.fixedBatchSize !== undefined) {
     throw new ProjectionRunError(
@@ -169,7 +187,11 @@ export function planProjectionRunReclaim(
   record: StoredProjectionRunRecord,
   input: StartOrReclaimProjectionRunInput
 ): { readonly attempt: number } {
-  assertProjectionRunRunning(record)
+  if (record.status !== "queued" && record.status !== "running") {
+    throw new ProjectionRunError(
+      `[Sixb] Projection run '${record.id}' cannot start from status '${record.status}'.`
+    )
+  }
   assertProjectionRunIdentityMatches(record, input.identity)
   assertProjectionRunTargetMatches(record, input.target)
   if (record.telemetryCheckpoint?.fixedBatchSize !== input.fixedBatchSize) {
@@ -177,35 +199,36 @@ export function planProjectionRunReclaim(
       `[Sixb] Projection run '${input.id}' fixed batch size does not match.`
     )
   }
-  return { attempt: nextProjectionRunAttempt(record.attempt) }
+  return { attempt: record.status === "queued" ? 1 : nextProjectionRunAttempt(record.attempt) }
 }
 
 // ── Lifecycle transitions ───────────────────────────────────
 
 export function createProjectionRunRecord(
-  input: StartOrReclaimProjectionRunInput,
+  input: QueueProjectionRunInput,
   now: Date = new Date()
 ): ProjectionRunRecord {
-  assertProjectionRunStartInput(input)
+  assertProjectionRunQueueInput(input)
   const base = {
     id: input.id,
     projectId: input.projectId,
-    status: "running" as const,
-    attempt: 1,
+    executionId: input.executionId,
+    status: "queued" as const,
+    attempt: 0,
     progress: zeroProjectionRunProgress(),
-    startedAt: new Date(input.startedAt ?? now),
+    queuedAt: new Date(input.queuedAt ?? now),
   }
   switch (input.identity.projectionKind) {
     case "object": {
-      const object = input as ProjectionRunStart<"object">
+      const object = input as ProjectionRunAdmission<"object">
       return { ...base, identity: object.identity, target: object.target }
     }
     case "link": {
-      const link = input as ProjectionRunStart<"link">
+      const link = input as ProjectionRunAdmission<"link">
       return { ...base, identity: link.identity, target: link.target }
     }
     case "telemetry": {
-      const telemetry = input as ProjectionRunStart<"telemetry">
+      const telemetry = input as ProjectionRunAdmission<"telemetry">
       return {
         ...base,
         identity: telemetry.identity,
@@ -225,12 +248,15 @@ export function assertProjectionRunRunning(
   record: Pick<ProjectionRunRecord, "id" | "projectId" | "status">
 ): void {
   if (record.status === "running") return
+  if (record.status !== "queued") {
+    throw new ProjectionRunError(`[Sixb] Projection run '${record.id}' is already terminal.`)
+  }
   throw new ProjectionRunError(
-    `[Sixb] Projection run '${record.id}' for project '${record.projectId}' is already terminal.`
+    `[Sixb] Projection run '${record.id}' for project '${record.projectId}' is not running.`
   )
 }
 
-export function assertProjectionRunExecution(
+export function assertProjectionRunAttempt(
   record: StoredProjectionRunRecord,
   input: {
     readonly id: string
@@ -390,32 +416,69 @@ export function finishProjectionRunRecord(
   return { ...record, ...terminal }
 }
 
+export function failProjectionRunEnqueue(
+  record: StoredProjectionRunRecord,
+  input: FailProjectionRunEnqueueInput,
+  now: Date = new Date()
+): StoredProjectionRunRecord {
+  if (record.status !== "queued") {
+    throw new ProjectionRunError(
+      `[Sixb] Projection run '${record.id}' cannot fail enqueue from status '${record.status}'.`
+    )
+  }
+  const error = parseSixbFailure(input.error, PROJECTION_RUN_FAILURE_CODES)
+  if (error.code !== "queue.enqueue_failed") {
+    throw new ProjectionRunError(
+      `[Sixb] Projection run '${record.id}' enqueue failure must use code 'queue.enqueue_failed'.`
+    )
+  }
+  const finishedAt = new Date(input.finishedAt ?? now)
+  assertProjectionRunDate(finishedAt, "finishedAt")
+  return {
+    ...record,
+    status: "failed",
+    finishedAt,
+    error,
+  }
+}
+
+export function canRequeueProjectionRunAfterEnqueueFailure(
+  record: ProjectionRunRecord,
+  input: QueueProjectionRunInput
+): boolean {
+  return (
+    record.status === "failed" &&
+    record.error?.code === "queue.enqueue_failed" &&
+    record.error.retryable &&
+    record.executionId === input.executionId &&
+    projectionRunIdentitiesEqual(record.identity, input.identity) &&
+    projectionTargetsEqual(record.target, input.target) &&
+    record.telemetryCheckpoint?.fixedBatchSize === input.fixedBatchSize
+  )
+}
+
 // ── Persistence mapping ─────────────────────────────────────
 
 export function restoreProjectionRun(row: PersistedProjectionRunRecord): StoredProjectionRunRecord {
   assertProjectionRunNonEmpty(row.id, "id")
   assertProjectionRunNonEmpty(row.projectId, "projectId")
+  assertProjectionRunNonEmpty(row.executionId, "executionId")
   assertProjectionRunCounter(row.attempt, "attempt")
-  if (row.attempt < 1) {
-    throw new ProjectionRunError(`[Sixb] Projection run '${row.id}' attempt must be positive.`)
-  }
   assertProjectionRunProgress(row.progress)
-  assertValidDate(row.startedAt, "startedAt")
+  assertValidDate(row.queuedAt, "queuedAt")
+  if (row.startedAt) assertValidDate(row.startedAt, "startedAt")
   if (row.finishedAt) assertValidDate(row.finishedAt, "finishedAt")
-  if ((row.status === "running") !== (row.finishedAt === undefined)) {
-    throw incompleteProjectionRun(row.id)
-  }
-  if ((row.status === "running") !== (row.executionToken !== undefined)) {
-    throw incompleteProjectionRun(row.id)
-  }
+  assertPersistedLifecycle(row)
 
   const identity = restoreIdentity(row)
   const base = {
     id: row.id,
     projectId: row.projectId,
+    executionId: row.executionId,
     identity,
     status: row.status,
-    startedAt: new Date(row.startedAt),
+    queuedAt: new Date(row.queuedAt),
+    startedAt: row.startedAt ? new Date(row.startedAt) : undefined,
     finishedAt: row.finishedAt ? new Date(row.finishedAt) : undefined,
     attempt: row.attempt,
     progress: { ...row.progress },
@@ -529,6 +592,61 @@ function assertCanonicalTimestamp(value: string, fieldName: string): void {
 function assertValidDate(value: Date, fieldName: string): void {
   if (!Number.isFinite(value.getTime())) {
     throw new ProjectionRunError(`[Sixb] Projection run persisted ${fieldName} is invalid.`)
+  }
+}
+
+function assertPersistedLifecycle(row: PersistedProjectionRunRecord): void {
+  const hasError = row.error !== undefined
+
+  if (row.status === "queued") {
+    if (
+      row.attempt !== 0 ||
+      row.startedAt !== undefined ||
+      row.finishedAt !== undefined ||
+      row.executionToken !== undefined ||
+      hasError
+    ) {
+      throw incompleteProjectionRun(row.id)
+    }
+    return
+  }
+
+  if (row.status === "running") {
+    if (
+      row.attempt < 1 ||
+      row.startedAt === undefined ||
+      row.finishedAt !== undefined ||
+      row.executionToken === undefined ||
+      hasError
+    ) {
+      throw incompleteProjectionRun(row.id)
+    }
+    return
+  }
+
+  if (row.finishedAt === undefined || row.executionToken !== undefined) {
+    throw incompleteProjectionRun(row.id)
+  }
+  if (row.error !== undefined) {
+    const failure = parseSixbFailure(row.error, PROJECTION_RUN_FAILURE_CODES)
+    if (failure.code === "queue.enqueue_failed") {
+      if (
+        !failure.retryable ||
+        row.status !== "failed" ||
+        row.attempt !== 0 ||
+        row.startedAt !== undefined
+      ) {
+        throw incompleteProjectionRun(row.id)
+      }
+      return
+    }
+  }
+  if (
+    row.attempt < 1 ||
+    row.startedAt === undefined ||
+    (row.status === "succeeded" && hasError)
+  ) {
+      throw incompleteProjectionRun(row.id)
   }
 }
 
@@ -791,8 +909,13 @@ export function requireTelemetryProjectionRun<TRecord extends ProjectionRunRecor
   )
 }
 
-type ProjectionRunStart<TKind extends ProjectionKind> = Extract<
-  StartOrReclaimProjectionRunInput,
+type ProjectionRunIdentityInput<TKind extends ProjectionKind> = Extract<
+  QueueProjectionRunInput | StartOrReclaimProjectionRunInput,
+  { readonly identity: { readonly projectionKind: TKind } }
+>
+
+type ProjectionRunAdmission<TKind extends ProjectionKind> = Extract<
+  QueueProjectionRunInput,
   { readonly identity: { readonly projectionKind: TKind } }
 >
 

@@ -2,15 +2,14 @@
 
 Queue worker for materializing committed dataset versions into the Sixb ontology.
 
-One deterministic `projection.run.requested` job pins the dataset version and complete projection
-identity. The worker validates that identity, then routes replacement or telemetry input through the
-internal ontology mutation runtime.
+One deterministic `projection.run.requested` job carries only a durable `runId`. The worker loads the pinned dataset version, projection identity, and execution from storage, validates their link, then routes replacement or telemetry input through the internal ontology mutation runtime.
 
 ## Responsibilities
 
 - replay an existing terminal run before reading registry or lake state
 - validate the pinned projection and dataset-version identity
-- claim and fence projection execution through the projection-run record
+- restore the immutable execution linked to the projection-run record
+- claim and fence one materialization attempt independently of that execution identity
 - read the exact committed dataset version from lake storage
 - stage and atomically activate object/link replacement snapshots through the Materializer
 - append telemetry in resumable fixed physical batches

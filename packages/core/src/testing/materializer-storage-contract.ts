@@ -18,6 +18,7 @@ import {
 } from "../materializer"
 import type { ActionRunStorage, ProjectionRunStorage } from "../storage"
 import { queueTestActionRun } from "./action-execution"
+import { startTestProjectionRun } from "./projection-execution"
 
 export interface MaterializerStorageContractProvider<TStorage extends Storage> {
   readonly createStorage: () => TStorage | Promise<TStorage>
@@ -459,7 +460,7 @@ async function claim(
   } as const
 
   if (definition._tag === "TelemetryProjectionDefinition") {
-    const claim = await storage.projectionRuns.startOrReclaim({
+    const claim = await startTestProjectionRun(storage, {
       ...common,
       identity: { ...identityBase, projectionKind: "telemetry", protocol: "telemetry" },
       target: { objectTypeId: definition.objectTypeId },
@@ -469,7 +470,7 @@ async function claim(
   }
 
   if (definition._tag === "LinkProjectionDefinition") {
-    const claim = await storage.projectionRuns.startOrReclaim({
+    const claim = await startTestProjectionRun(storage, {
       ...common,
       identity: { ...identityBase, projectionKind: "link", protocol: "replacement" },
       target: {
@@ -480,7 +481,7 @@ async function claim(
     return claim.execution
   }
 
-  const claim = await storage.projectionRuns.startOrReclaim({
+  const claim = await startTestProjectionRun(storage, {
     ...common,
     identity: { ...identityBase, projectionKind: "object", protocol: "replacement" },
     target: { objectTypeId: definition.objectTypeId },

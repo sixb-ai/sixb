@@ -1,16 +1,13 @@
 import { createSixbError } from "@sixb/core/internal/errors"
 import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projections"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
-import type { ProjectionRunRequestedQueueJob, Queue } from "@sixb/core/queues"
-import type { ProjectionRunRecord } from "@sixb/core/storage"
-import { buildProjectionJob } from "./projection-job"
-import type { ProjectionDispatchPorts } from "./types"
+import type { ProjectionDispatcherPort, ProjectionReconciliationPorts } from "./types"
 
 const RECONCILIATION_INTERVAL_MS = 30_000
 
-interface ProjectionDispatchReconcilerInput extends ProjectionDispatchPorts {
+interface ProjectionDispatchReconcilerInput extends ProjectionReconciliationPorts {
   readonly projectId: string
-  readonly queue: Queue<ProjectionRunRequestedQueueJob>
+  readonly dispatcher: ProjectionDispatcherPort
   readonly descriptors: readonly ProjectionDispatchDescriptor[]
 }
 
@@ -51,54 +48,15 @@ async function reconcileProjection(
   })
   if (!version) return
 
-  const job = buildProjectionJob({
-    projectId: input.projectId,
-    descriptor,
+  await input.dispatcher.dispatch({
+    projectionId: descriptor.projectionId,
     datasetVersion: pinnedVersion(version),
     metadata: { dispatchSource: "lake-reconciliation" },
   })
-  const run = await input.projectionRuns.getById({ projectId: input.projectId, id: job.id })
-  if (run) {
-    if (!runMatchesJob(run, job.payload)) {
-      throw createSixbError(
-        "internal.unexpected",
-        `[SixbOrchestrator] Projection run '${run.id}' does not match its deterministic dispatch identity.`,
-        {
-          details: {
-            projectId: input.projectId,
-            projectionId: descriptor.projectionId,
-            runId: run.id,
-            datasetId: descriptor.datasetId,
-            versionId: version.versionId,
-          },
-        }
-      )
-    }
-    return
-  }
-
-  await input.queue.enqueue({ projectId: input.projectId, jobs: [job] })
-}
-
-function runMatchesJob(
-  run: ProjectionRunRecord,
-  identity: ProjectionRunRequestedQueueJob["payload"]
-): boolean {
-  return (
-    run.identity.projectionId === identity.projectionId &&
-    run.identity.projectionKind === identity.projectionKind &&
-    run.identity.protocol === identity.protocol &&
-    run.identity.datasetVersion.datasetId === identity.datasetVersion.datasetId &&
-    run.identity.datasetVersion.versionId === identity.datasetVersion.versionId &&
-    run.identity.datasetVersion.createdAt === identity.datasetVersion.createdAt &&
-    run.identity.ontologyRevision === identity.ontologyRevision &&
-    run.identity.projectionRevision === identity.projectionRevision &&
-    run.identity.ownershipHash === identity.ownershipHash
-  )
 }
 
 async function findLatestDataVersion(input: {
-  readonly lakeStorage: ProjectionDispatchPorts["lakeStorage"]
+  readonly lakeStorage: ProjectionReconciliationPorts["lakeStorage"]
   readonly projectId: string
   readonly projectionId: string
   readonly datasetId: string

@@ -1,7 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import type { ProjectionMaterializationIdentity } from "../src/materialization/model"
+import { InMemoryAuthStorage } from "../src/storage/auth"
+import { InMemoryExecutionStorage } from "../src/storage/executions/in-memory"
+import type { ExecutionStorage } from "../src/storage/executions/types"
 import { InMemoryStorage } from "../src/storage/index"
 import { InMemoryProjectionRunStorage } from "../src/storage/projection-runs/in-memory"
+import type {
+  ProjectionRunStorage,
+  StartOrReclaimProjectionRunInput,
+} from "../src/storage/projection-runs/types"
 import { queueTestActionRun } from "../src/testing"
 
 const replacementIdentity = {
@@ -35,7 +42,7 @@ const telemetryIdentity = {
 describe("projection run materialization ownership", () => {
   test("rotates execution tokens on reclaim and fences stale attempts", async () => {
     const tokens = ["execution-1", "execution-2"]
-    const storage = new InMemoryProjectionRunStorage({
+    const { executions, projectionRuns: storage } = createProjectionRunStorage({
       executionToken: () => tokens.shift() ?? "unexpected-token",
     })
     const input = {
@@ -45,6 +52,7 @@ describe("projection run materialization ownership", () => {
       target: { objectTypeId: "Device" },
     } as const
 
+    await admitProjectionRun(executions, storage, input)
     const first = await storage.startOrReclaim(input)
     const second = await storage.startOrReclaim(input)
     expect(first).toMatchObject({
@@ -77,14 +85,18 @@ describe("projection run materialization ownership", () => {
   })
 
   test("stores only telemetry resume state and advances it contiguously", async () => {
-    const storage = new InMemoryProjectionRunStorage({ executionToken: () => "execution" })
-    await storage.startOrReclaim({
+    const { executions, projectionRuns: storage } = createProjectionRunStorage({
+      executionToken: () => "execution",
+    })
+    const input = {
       id: "telemetry-run",
       projectId: "project",
       identity: telemetryIdentity,
       target: { objectTypeId: "Device" },
       fixedBatchSize: 2,
-    })
+    } as const
+    await admitProjectionRun(executions, storage, input)
+    await storage.startOrReclaim(input)
 
     expect(await storage.getById({ projectId: "project", id: "telemetry-run" })).toMatchObject({
       telemetryCheckpoint: {
@@ -205,14 +217,18 @@ describe("projection run materialization ownership", () => {
   })
 
   test("requires explicit EOF before storage-level telemetry success", async () => {
-    const storage = new InMemoryProjectionRunStorage({ executionToken: () => "execution" })
-    await storage.startOrReclaim({
+    const { executions, projectionRuns: storage } = createProjectionRunStorage({
+      executionToken: () => "execution",
+    })
+    const input = {
       id: "telemetry-run",
       projectId: "project",
       identity: telemetryIdentity,
       target: { objectTypeId: "Device" },
       fixedBatchSize: 10,
-    })
+    } as const
+    await admitProjectionRun(executions, storage, input)
+    await storage.startOrReclaim(input)
 
     await expect(
       storage.finish({
@@ -241,6 +257,39 @@ describe("projection run materialization ownership", () => {
     })
   })
 })
+
+function createProjectionRunStorage(input: { readonly executionToken: () => string }) {
+  const auth = new InMemoryAuthStorage()
+  const executions = new InMemoryExecutionStorage(auth)
+  return {
+    executions,
+    projectionRuns: new InMemoryProjectionRunStorage({ executions, ...input }),
+  }
+}
+
+async function admitProjectionRun(
+  executions: ExecutionStorage,
+  projectionRuns: ProjectionRunStorage,
+  input: StartOrReclaimProjectionRunInput
+): Promise<void> {
+  const executionId = `execution:${input.id}`
+  await executions.create({
+    id: executionId,
+    projectId: input.projectId,
+    executor: { type: "primitive", kind: "projection", runId: input.id },
+    source: {
+      type: "datasetVersion",
+      datasetId: input.identity.datasetVersion.datasetId,
+      versionId: input.identity.datasetVersion.versionId,
+    },
+    correlationId: input.id,
+    authorizationRef: {
+      type: "trustedPrimitive",
+      primitive: { kind: "projection", id: input.identity.projectionId, runId: input.id },
+    },
+  })
+  await projectionRuns.queue({ ...input, executionId })
+}
 
 describe("action run materialization correlation", () => {
   test("requires an existing matching running Action", async () => {
@@ -306,6 +355,7 @@ describe("in-memory run root lock", () => {
       identity: replacementIdentity,
       target: { objectTypeId: "Device" },
     } as const
+    await admitProjectionRun(storage.executions, storage.projectionRuns, start)
     const first = await storage.projectionRuns.startOrReclaim(start)
     const source = { projectionId: replacementIdentity.projectionId }
     await storage.ontology.sources.beginMaterialization({
@@ -345,12 +395,14 @@ describe("in-memory run root lock", () => {
 
   test("serializes projection and action run writes after a failed transaction rollback", async () => {
     const storage = new InMemoryStorage()
-    const projection = await storage.projectionRuns.startOrReclaim({
+    const projectionInput = {
       id: "replacement-run",
       projectId: "project",
       identity: replacementIdentity,
       target: { objectTypeId: "Device" },
-    })
+    } as const
+    await admitProjectionRun(storage.executions, storage.projectionRuns, projectionInput)
+    const projection = await storage.projectionRuns.startOrReclaim(projectionInput)
     await queueTestActionRun(storage, {
       id: "action-run",
       projectId: "project",

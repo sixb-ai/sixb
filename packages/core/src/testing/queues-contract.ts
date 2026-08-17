@@ -285,19 +285,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
             jobs: [
               {
                 type: "projection.run.requested",
-                payload: {
-                  projectionId: "room-projection",
-                  projectionKind: "object",
-                  protocol: "replacement",
-                  datasetVersion: {
-                    datasetId: "canonical.rooms",
-                    versionId: "ver_1",
-                    createdAt: "2026-01-01T00:00:00.000Z",
-                  },
-                  ontologyRevision: "ontology-v1",
-                  projectionRevision: "projection-v1",
-                  ownershipHash: "ownership-v1",
-                },
+                payload: { runId: "projection-run-1" },
               },
             ],
           })
@@ -351,7 +339,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
           expect(crossLane).toHaveLength(1)
           expect(crossLane[0]?.job.payload.runId).toBe("p-1")
           expect(projectionLane).toHaveLength(1)
-          expect(projectionLane[0]?.job.payload.projectionId).toBe("room-projection")
+          expect(projectionLane[0]?.job.payload.runId).toBe("projection-run-1")
           expect(workflowLane).toHaveLength(1)
           expect(workflowLane[0]?.job.payload.runId).toBe("workflow-run-1")
           expect(actionLane).toHaveLength(1)

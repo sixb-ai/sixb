@@ -12,7 +12,13 @@ export async function findPrimitiveRunExecution(input: {
   readonly projectId: string
   readonly executionId: string
   readonly primitive: TrustedPrimitiveRef
-  readonly sourceTypes: readonly ("event" | "execution" | "schedule" | "webhook")[]
+  readonly sourceTypes: readonly (
+    | "datasetVersion"
+    | "event"
+    | "execution"
+    | "schedule"
+    | "webhook"
+  )[]
 }): Promise<ExecutionRecord | null> {
   const execution = await input.executions.getById({
     projectId: input.projectId,

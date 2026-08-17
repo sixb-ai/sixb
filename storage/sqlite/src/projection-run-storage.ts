@@ -5,12 +5,17 @@ import {
   advanceProjectionTelemetry,
   assertGenericProgressDoesNotAdvanceTelemetry,
   assertProjectionMissingTarget,
-  assertProjectionRunExecution,
+  assertProjectionRunAttempt,
+  assertProjectionRunDurableExecution,
   assertProjectionRunListWindow,
   assertProjectionRunNonEmpty,
+  assertProjectionRunQueueInput,
   assertProjectionRunRunning,
   assertProjectionRunStartInput,
+  canRequeueProjectionRunAfterEnqueueFailure,
   createProjectionRunClaim,
+  createProjectionRunRecord,
+  failProjectionRunEnqueue,
   immutableDatasetVersionConflict,
   mergeProjectionRunProgress,
   type PersistedProjectionRunRecord,
@@ -25,6 +30,8 @@ import {
 } from "@sixb/core/internal/projection-run-storage-provider"
 import type {
   AdvanceProjectionTelemetryCheckpointInput,
+  ExecutionStorage,
+  FailProjectionRunEnqueueInput,
   FinishProjectionRunInput,
   ListLatestProjectionRunsInput,
   ListLatestProjectionRunsResult,
@@ -37,6 +44,7 @@ import type {
   ProjectionRunRecord,
   ProjectionRunStatus,
   ProjectionRunStorage,
+  QueueProjectionRunInput,
   RecordProjectionMissingTargetInput,
   StartOrReclaimProjectionRunInput,
   TelemetryProjectionRunRecord,
@@ -53,6 +61,8 @@ import {
 } from "./transactions"
 
 export interface SqliteProjectionRunStorageOptions {
+  /** Execution lookup sharing the same provider transaction. */
+  executions: ExecutionStorage
   /** Path to SQLite database file. Defaults to ':memory:' for in-memory database. */
   path?: string
   /** Internal shared connection used by bundled SqliteStorage. */
@@ -62,14 +72,74 @@ export interface SqliteProjectionRunStorageOptions {
 export class SqliteProjectionRunStorage implements ProjectionRunStorage {
   private readonly connection: SqliteStoreConnection
   private readonly db: Database
+  private readonly executions: ExecutionStorage
 
-  constructor(options: SqliteProjectionRunStorageOptions = {}) {
+  constructor(options: SqliteProjectionRunStorageOptions) {
     this.connection = openSqliteStoreConnection(options)
     this.db = this.connection.db
+    this.executions = options.executions
 
     if (this.connection.installFreshSchema) {
       installFreshSqliteSchema(this.db)
     }
+  }
+
+  async queue(input: QueueProjectionRunInput): Promise<ProjectionRunRecord> {
+    assertProjectionRunQueueInput(input)
+    await assertProjectionRunDurableExecution({
+      executions: this.executions,
+      projectId: input.projectId,
+      executionId: input.executionId,
+      runId: input.id,
+      projectionId: input.identity.projectionId,
+      datasetId: input.identity.datasetVersion.datasetId,
+      datasetVersionId: input.identity.datasetVersion.versionId,
+    })
+
+    return runImmediateTransaction(this.db, () => {
+      this.assertDatasetVersionIsImmutable(input)
+      const existing = this.findRow(input.projectId, input.id)
+      if (existing) {
+        const restored = restoreProjectionRunRow(existing)
+        if (!canRequeueProjectionRunAfterEnqueueFailure(restored, input)) {
+          throw duplicateProjectionRun(input)
+        }
+        const queuedAt = input.queuedAt ?? new Date()
+        const result = this.db
+          .query(
+            `
+              UPDATE projection_runs
+              SET status = 'queued', queued_at = ?, started_at = NULL, finished_at = NULL,
+                attempt = 0, execution_token = NULL, next_batch_ordinal = ?, next_row_offset = ?,
+                input_exhausted = ?, missing_target_object_type_id = NULL,
+                missing_target_object_id = NULL, missing_target_batch_ordinal = NULL,
+                missing_target_first_seen_at = NULL, source_rows_read = 0,
+                source_rows_skipped = 0, error = NULL
+              WHERE project_id = ? AND id = ? AND status = 'failed'
+                AND json_extract(error, '$.code') = 'queue.enqueue_failed'
+            `
+          )
+          .run(
+            queuedAt.toISOString(),
+            input.fixedBatchSize === undefined ? null : 0,
+            input.fixedBatchSize === undefined ? null : 0,
+            input.fixedBatchSize === undefined ? null : 0,
+            input.projectId,
+            input.id
+          )
+        if (result.changes !== 1) throw duplicateProjectionRun(input)
+        return rowToProjectionRunRecord(this.requireRow(input.projectId, input.id))
+      }
+
+      const record = createProjectionRunRecord(input)
+      try {
+        this.insertQueued(record)
+      } catch (error) {
+        if (isUniqueConstraintError(error)) throw duplicateProjectionRun(input)
+        throw error
+      }
+      return rowToProjectionRunRecord(this.requireRow(input.projectId, input.id))
+    })
   }
 
   async startOrReclaim(input: StartOrReclaimProjectionRunInput): Promise<ProjectionRunClaim> {
@@ -97,95 +167,61 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
         throw immutableDatasetVersionConflict(input.identity)
       }
 
-      const existing = this.findRow(input.projectId, input.id)
-      let attempt = 1
-      if (existing) {
-        const existingRecord = restoreProjectionRunRow(existing)
-        attempt = planProjectionRunReclaim(existingRecord, input).attempt
-      }
+      const existing = this.requireRow(input.projectId, input.id)
+      const existingRecord = restoreProjectionRunRow(existing)
+      const attempt = planProjectionRunReclaim(existingRecord, input).attempt
 
-      const executionToken = createFreshExecutionToken(existing?.execution_token ?? null)
-
-      if (existing) {
-        const result = this.db
-          .query(
-            `
-            UPDATE projection_runs
-            SET attempt = ?, execution_token = ?
-            WHERE project_id = ? AND id = ? AND status = 'running' AND execution_token = ?
+      const executionToken = createFreshExecutionToken(existing.execution_token)
+      const result = this.db
+        .query(
           `
-          )
-          .run(attempt, executionToken, input.projectId, input.id, existing.execution_token)
-        if (result.changes !== 1) throw staleProjectionRunExecution(input.id)
-      } else {
-        try {
-          this.db
-            .query(
-              `
-              INSERT INTO projection_runs (
-                project_id,
-                id,
-                projection_id,
-                projection_kind,
-                materialization_protocol,
-                dataset_id,
-                dataset_version_id,
-                dataset_version_created_at,
-                ontology_revision,
-                projection_revision,
-                ownership_hash,
-                object_type_id,
-                source_object_type_id,
-                target_object_type_id,
-                status,
-                started_at,
-                attempt,
-                execution_token,
-                fixed_batch_size,
-                next_batch_ordinal,
-                next_row_offset,
-                input_exhausted,
-                source_rows_read,
-                source_rows_skipped
-              ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, 1, ?, ?, ?, ?, ?,
-                0, 0
+            UPDATE projection_runs
+            SET status = 'running', started_at = COALESCE(started_at, ?), finished_at = NULL,
+              attempt = ?, execution_token = ?, error = NULL
+            WHERE project_id = ? AND id = ?
+              AND (
+                (status = 'queued' AND execution_token IS NULL)
+                OR (status = 'running' AND execution_token = ?)
               )
-            `
-            )
-            .run(
-              input.projectId,
-              input.id,
-              input.identity.projectionId,
-              input.identity.projectionKind,
-              input.identity.protocol,
-              input.identity.datasetVersion.datasetId,
-              input.identity.datasetVersion.versionId,
-              input.identity.datasetVersion.createdAt,
-              input.identity.ontologyRevision,
-              input.identity.projectionRevision,
-              input.identity.ownershipHash,
-              "objectTypeId" in input.target ? input.target.objectTypeId : null,
-              "sourceObjectTypeId" in input.target ? input.target.sourceObjectTypeId : null,
-              "sourceObjectTypeId" in input.target ? input.target.targetObjectTypeId : null,
-              (input.startedAt ?? new Date()).toISOString(),
-              executionToken,
-              input.fixedBatchSize ?? null,
-              input.fixedBatchSize === undefined ? null : 0,
-              input.fixedBatchSize === undefined ? null : 0,
-              input.fixedBatchSize === undefined ? null : 0
-            )
-        } catch (error) {
-          if (isUniqueConstraintError(error)) {
-            throw new ProjectionRunError(
-              `[SixbSqlite] Projection run '${input.id}' already exists for project '${input.projectId}'.`
-            )
-          }
-          throw error
-        }
-      }
+          `
+        )
+        .run(
+          (input.startedAt ?? new Date()).toISOString(),
+          attempt,
+          executionToken,
+          input.projectId,
+          input.id,
+          existing.execution_token
+        )
+      if (result.changes !== 1) throw staleProjectionRunExecution(input.id)
 
       return projectionRunClaim(this.requireRow(input.projectId, input.id))
+    })
+  }
+
+  async failEnqueue(input: FailProjectionRunEnqueueInput): Promise<ProjectionRunRecord> {
+    return runImmediateTransaction(this.db, () => {
+      const existing = restoreProjectionRunRow(this.requireRow(input.projectId, input.id))
+      const failed = failProjectionRunEnqueue(existing, input)
+      if (!failed.finishedAt || !failed.error) {
+        throw new ProjectionRunError(`[SixbSqlite] Projection run '${input.id}' did not finish.`)
+      }
+      const result = this.db
+        .query(
+          `
+            UPDATE projection_runs
+            SET status = 'failed', finished_at = ?, error = ?
+            WHERE project_id = ? AND id = ? AND status = 'queued'
+          `
+        )
+        .run(
+          failed.finishedAt.toISOString(),
+          serializeSixbFailure(failed.error, PROJECTION_RUN_FAILURE_CODES),
+          input.projectId,
+          input.id
+        )
+      if (result.changes !== 1) throw duplicateProjectionRun(input)
+      return rowToProjectionRunRecord(this.requireRow(input.projectId, input.id))
     })
   }
 
@@ -369,11 +405,11 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
       args.push(...input.statuses)
     }
     if (input.startedAfter) {
-      whereClauses.push("started_at >= ?")
+      whereClauses.push("COALESCE(started_at, queued_at) >= ?")
       args.push(input.startedAfter.toISOString())
     }
     if (input.startedBefore) {
-      whereClauses.push("started_at <= ?")
+      whereClauses.push("COALESCE(started_at, queued_at) <= ?")
       args.push(input.startedBefore.toISOString())
     }
 
@@ -389,7 +425,7 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
     let query = `
       SELECT * FROM projection_runs
       ${where}
-      ORDER BY started_at ${order}, id ${order}
+      ORDER BY COALESCE(started_at, queued_at) ${order}, id ${order}
     `
     const queryArgs = [...args]
 
@@ -427,6 +463,69 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
     closeSqliteStoreConnection(this.connection)
   }
 
+  private assertDatasetVersionIsImmutable(input: QueueProjectionRunInput): void {
+    const conflict = this.db
+      .query(
+        `
+          SELECT 1 FROM projection_runs
+          WHERE project_id = ? AND id <> ? AND dataset_id = ? AND dataset_version_id = ?
+            AND dataset_version_created_at <> ?
+          LIMIT 1
+        `
+      )
+      .get(
+        input.projectId,
+        input.id,
+        input.identity.datasetVersion.datasetId,
+        input.identity.datasetVersion.versionId,
+        input.identity.datasetVersion.createdAt
+      )
+    if (conflict) throw immutableDatasetVersionConflict(input.identity)
+  }
+
+  private insertQueued(record: ProjectionRunRecord): void {
+    const checkpoint = record.telemetryCheckpoint
+    this.db
+      .query(
+        `
+          INSERT INTO projection_runs (
+            project_id, id, execution_id, projection_id, projection_kind,
+            materialization_protocol, dataset_id, dataset_version_id,
+            dataset_version_created_at, ontology_revision, projection_revision, ownership_hash,
+            object_type_id, source_object_type_id, target_object_type_id, status, queued_at,
+            started_at, finished_at, attempt, execution_token, fixed_batch_size,
+            next_batch_ordinal, next_row_offset, input_exhausted, source_rows_read,
+            source_rows_skipped
+          ) VALUES (
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, NULL, NULL, 0, NULL,
+            ?, ?, ?, ?, 0, 0
+          )
+        `
+      )
+      .run(
+        record.projectId,
+        record.id,
+        record.executionId,
+        record.identity.projectionId,
+        record.identity.projectionKind,
+        record.identity.protocol,
+        record.identity.datasetVersion.datasetId,
+        record.identity.datasetVersion.versionId,
+        record.identity.datasetVersion.createdAt,
+        record.identity.ontologyRevision,
+        record.identity.projectionRevision,
+        record.identity.ownershipHash,
+        "objectTypeId" in record.target ? record.target.objectTypeId : null,
+        "sourceObjectTypeId" in record.target ? record.target.sourceObjectTypeId : null,
+        "sourceObjectTypeId" in record.target ? record.target.targetObjectTypeId : null,
+        record.queuedAt.toISOString(),
+        checkpoint?.fixedBatchSize ?? null,
+        checkpoint?.nextBatchOrdinal ?? null,
+        checkpoint?.nextRowOffset ?? null,
+        checkpoint === undefined ? null : checkpoint.inputExhausted ? 1 : 0
+      )
+  }
+
   private updateProgress(
     existing: DatabaseRow,
     progress: ProjectionRunProgress,
@@ -458,7 +557,7 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
     input: LockProjectionRunForMaterializationInput
   ): DatabaseRow {
     const row = this.requireRunning(input.projectId, input.id)
-    assertProjectionRunExecution(restoreProjectionRunRow(row), input)
+    assertProjectionRunAttempt(restoreProjectionRunRow(row), input)
     return row
   }
 
@@ -497,6 +596,7 @@ function restoreProjectionRunRow(row: DatabaseRow): StoredProjectionRunRecord {
   const persisted: PersistedProjectionRunRecord = {
     id: row.id,
     projectId: row.project_id,
+    executionId: row.execution_id,
     projectionId: row.projection_id,
     projectionKind: row.projection_kind,
     protocol: row.materialization_protocol ?? undefined,
@@ -510,7 +610,8 @@ function restoreProjectionRunRow(row: DatabaseRow): StoredProjectionRunRecord {
     sourceObjectTypeId: row.source_object_type_id ?? undefined,
     targetObjectTypeId: row.target_object_type_id ?? undefined,
     status: row.status,
-    startedAt: new Date(row.started_at),
+    queuedAt: new Date(row.queued_at),
+    startedAt: row.started_at ? new Date(row.started_at) : undefined,
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     attempt: databaseSafeInteger(row.attempt, "attempt"),
     executionToken: row.execution_token ?? undefined,
@@ -564,6 +665,7 @@ function isUniqueConstraintError(error: unknown): boolean {
 interface DatabaseRow {
   project_id: string
   id: string
+  execution_id: string
   projection_id: string
   projection_kind: ProjectionKind
   materialization_protocol: "replacement" | "telemetry" | null
@@ -577,7 +679,8 @@ interface DatabaseRow {
   source_object_type_id: string | null
   target_object_type_id: string | null
   status: ProjectionRunStatus
-  started_at: string
+  queued_at: string
+  started_at: string | null
   finished_at: string | null
   attempt: number
   execution_token: string | null
@@ -592,4 +695,10 @@ interface DatabaseRow {
   source_rows_read: number
   source_rows_skipped: number
   error: string | null
+}
+
+function duplicateProjectionRun(input: { readonly projectId: string; readonly id: string }) {
+  return new ProjectionRunError(
+    `[SixbSqlite] Projection run '${input.id}' already exists for project '${input.projectId}'.`
+  )
 }

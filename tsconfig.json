@@ -78,7 +78,7 @@
         "./packages/core/src/storage/pipeline-runs/provider.ts"
       ],
       "@sixb/core/internal/projection-run-storage-provider": [
-        "./packages/core/src/storage/projection-runs/lifecycle.ts"
+        "./packages/core/src/storage/projection-runs/provider.ts"
       ],
       "@sixb/core/internal/sync-run-storage-provider": [
         "./packages/core/src/storage/sync-runs/provider.ts"

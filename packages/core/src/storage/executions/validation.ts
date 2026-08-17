@@ -110,6 +110,10 @@ function assertSource(source: DurableExecutionSource): void {
     case "event":
       assertNonBlank(source.eventId, "Execution source event id")
       return
+    case "datasetVersion":
+      assertNonBlank(source.datasetId, "Execution source dataset id")
+      assertNonBlank(source.versionId, "Execution source dataset version id")
+      return
     case "execution":
       assertNonBlank(source.executionId, "Execution source execution id")
       return

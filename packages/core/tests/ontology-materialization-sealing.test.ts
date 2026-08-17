@@ -12,6 +12,7 @@ import type {
   OntologyMaterializationStorage,
   ProjectionRunClaim,
 } from "../src/storage"
+import { startTestProjectionRun } from "../src/testing"
 import { createMaterializerFixture } from "./materializer-fixture"
 
 const projectId = "project"
@@ -57,7 +58,7 @@ async function prepareEmptyCandidate(
   let run: ProjectionRunClaim
   const common = { id: input.runId, projectId }
   if (input.projectionKind === "object") {
-    run = await storage.projectionRuns.startOrReclaim({
+    run = await startTestProjectionRun(storage, {
       ...common,
       identity: {
         projectionId: input.projectionId,
@@ -71,7 +72,7 @@ async function prepareEmptyCandidate(
       target: { objectTypeId: "Device" },
     })
   } else {
-    run = await storage.projectionRuns.startOrReclaim({
+    run = await startTestProjectionRun(storage, {
       ...common,
       identity: {
         projectionId: input.projectionId,

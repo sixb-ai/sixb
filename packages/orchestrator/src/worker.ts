@@ -5,7 +5,6 @@ import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projectio
 import { evaluateEventSchedule } from "@sixb/core/internal/schedules"
 import { Worker } from "@sixb/core/internal/workers"
 import { runProjectionDispatchReconciler } from "./projection-dispatch-reconciler"
-import { buildProjectionJob } from "./projection-job"
 import { routeKeysForEvent } from "./route-key"
 import type {
   OrchestratorDispatchers,
@@ -30,10 +29,10 @@ export class OrchestratorWorker extends Worker {
     super()
     this.options = options
     this.projectionDescriptors = projectionDescriptors(options.projectId, options.routes)
-    if (this.projectionDescriptors.length > 0 && !options.projectionDispatch) {
+    if (this.projectionDescriptors.length > 0 && !options.projectionReconciliation) {
       throw createSixbError(
         "internal.unexpected",
-        "[SixbOrchestrator] Projection routes require lake and projection-run storage for durable dispatch.",
+        "[SixbOrchestrator] Projection routes require lake storage for durable reconciliation.",
         {
           details: {
             projectId: options.projectId,
@@ -42,7 +41,7 @@ export class OrchestratorWorker extends Worker {
         }
       )
     }
-    for (const key of ["syncs", "pipelines", "workflows"] as const) {
+    for (const key of ["syncs", "pipelines", "projections", "workflows"] as const) {
       if (hasDispatcherRoutes(options.routes, key)) requireDispatcher(options, key)
     }
   }
@@ -58,14 +57,21 @@ export class OrchestratorWorker extends Worker {
       consumers.push(consumeRetainedEventSchedules(this.options, eventType, signal))
     }
     if (this.projectionDescriptors.length > 0) {
-      const dispatch = this.options.projectionDispatch!
+      const reconciliation = this.options.projectionReconciliation
+      if (!reconciliation) {
+        throw createSixbError(
+          "internal.unexpected",
+          "[SixbOrchestrator] Projection reconciliation is not configured.",
+          { details: { projectId: this.options.projectId } }
+        )
+      }
       consumers.push(
         runProjectionDispatchReconciler(
           {
             projectId: this.options.projectId,
-            queue: this.options.queues.projections,
+            dispatcher: requireDispatcher(this.options, "projections"),
             descriptors: this.projectionDescriptors,
-            ...dispatch,
+            ...reconciliation,
           },
           signal
         )
@@ -317,19 +323,14 @@ async function enqueueDirectJob(
           }
         )
       }
-      const job = buildProjectionJob({
-        projectId: options.projectId,
-        descriptor: item.job.payload,
+      await requireDispatcher(options, "projections").dispatch({
+        projectionId: item.job.payload.projectionId,
         datasetVersion: {
           datasetId: sourceEvent.payload.datasetId,
           versionId: sourceEvent.payload.versionId,
           createdAt: sourceEvent.payload.createdAt,
         },
         metadata,
-      })
-      await options.queues.projections.enqueue({
-        projectId: options.projectId,
-        jobs: [job],
       })
       return
     }

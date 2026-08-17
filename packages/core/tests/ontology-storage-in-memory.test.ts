@@ -19,7 +19,7 @@ import {
 } from "../src/storage"
 import { getInMemoryStorageTestingAdapter } from "../src/storage/in-memory/testing"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
-import { queueTestActionRun } from "../src/testing"
+import { claimTestProjectionRun, queueTestActionRun, startTestProjectionRun } from "../src/testing"
 import {
   atomic,
   createMaterializerFixture,
@@ -2039,7 +2039,7 @@ describe("in-memory ontology storage", () => {
       projectionRevision: "projection-revision",
       ownershipHash: "ownership-hash",
     }
-    const run = await storage.projectionRuns.startOrReclaim({
+    const run = await startTestProjectionRun(storage, {
       id: "sealed-run",
       projectId: "project",
       identity,
@@ -2250,7 +2250,7 @@ describe("in-memory ontology storage", () => {
         versionId: "v1",
         createdAt: "2026-01-01T00:00:00.000Z",
       }
-      const run = await storage.projectionRuns.startOrReclaim({
+      const run = await startTestProjectionRun(storage, {
         id: "run",
         projectId: "project",
         identity: {
@@ -2475,7 +2475,7 @@ async function claimReplacementExecution(
   if (resolved.definition._tag !== "ObjectProjectionDefinition") {
     throw new Error("Expected the devices object projection")
   }
-  const run = await storage.projectionRuns.startOrReclaim({
+  const run = await claimTestProjectionRun(storage, {
     id: input.runId,
     projectId: input.projectId,
     identity: replacementIdentity(projections, input.datasetVersion),
