@@ -20,7 +20,7 @@ function actionFailure<TPhase extends ActionRunPhase>(
     message,
     retryable: phase === "enqueue",
     at: FAILURE_AT,
-    details: { actionId: "sendQuote", runId: "act_1", phase },
+    details: { actionId: "createInvoice", runId: "act_1", phase },
   }
 }
 

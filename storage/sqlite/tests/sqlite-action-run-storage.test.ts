@@ -8,7 +8,9 @@ const FAILURE_AT = "2026-04-29T10:00:00.000Z"
 
 function actionFailure<TPhase extends ActionRunPhase>(
   phase: TPhase,
-  message: string
+  message: string,
+  actionId = "sendQuote",
+  runId = "act_1"
 ): ActionRunFailure<TPhase> {
   return {
     code:
@@ -20,7 +22,7 @@ function actionFailure<TPhase extends ActionRunPhase>(
     message,
     retryable: phase === "enqueue",
     at: FAILURE_AT,
-    details: { actionId: "sendQuote", runId: "act_1", phase },
+    details: { actionId, runId, phase },
   }
 }
 
@@ -280,7 +282,7 @@ describe("SqliteActionRunStorage", () => {
       id: "act_1",
       projectId: "my-app",
       status: "failed",
-      error: actionFailure("effects", "Slack timed out"),
+      error: actionFailure("effects", "Slack timed out", "createInvoice"),
     })
 
     await storage.finish({
@@ -304,7 +306,7 @@ describe("SqliteActionRunStorage", () => {
       },
       effects: {
         status: "failed",
-        error: actionFailure("effects", "Slack timed out"),
+        error: actionFailure("effects", "Slack timed out", "createInvoice"),
       },
     })
   })

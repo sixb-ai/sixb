@@ -1,6 +1,4 @@
 import type { DomainEvent } from "@sixb/core"
-import { isSixbApiError, type SixbApiErrorCode } from "./api"
-import { requestAction } from "./generated/sdk.gen"
 import type {
   GetProjectInfoResponse,
   GetTelemetryHistoryResponse,
@@ -54,27 +52,6 @@ export interface TelemetryProperty {
 export interface ProjectInfo {
   name: string
 }
-
-/** Serializable request error returned by the convenience Action helpers. */
-export interface ActionRequestError {
-  readonly message: string
-  readonly code?: SixbApiErrorCode
-  readonly status?: number
-}
-
-export type ExecuteActionResult = {
-  readonly data:
-    | {
-        readonly success: true
-        readonly runId: string
-      }
-    | {
-        readonly success: false
-        readonly error: ActionRequestError
-      }
-}
-
-export type ExecuteGlobalActionResult = ExecuteActionResult
 
 export type ObjectSummary = {
   id: string
@@ -337,133 +314,4 @@ export function toTelemetryHistoryWithRange(input: {
           sample.value !== undefined
       ),
   }
-}
-
-export async function executeAction(options: {
-  path: {
-    objectId: string
-    actionId: string
-  }
-  body: {
-    params?: Record<string, unknown>
-    runId?: string
-  }
-}): Promise<ExecuteActionResult> {
-  const parsed = decodeObjectId(options.path.objectId)
-  if (!parsed) {
-    return {
-      data: {
-        success: false,
-        error: {
-          message: `[SixbClient] Invalid object id '${options.path.objectId}'.`,
-        },
-      },
-    }
-  }
-
-  try {
-    const response = await requestAction({
-      path: {
-        actionId: options.path.actionId,
-      },
-      body: {
-        subject: {
-          kind: "object",
-          objectTypeId: parsed.objectTypeId,
-          primaryId: parsed.primaryId,
-        },
-        params: options.body.params,
-        runId: options.body.runId,
-      },
-      throwOnError: true,
-    })
-
-    return {
-      data: {
-        success: true,
-        runId: response.data.runId,
-      },
-    }
-  } catch (error) {
-    return {
-      data: {
-        success: false,
-        error: toActionRequestError(error),
-      },
-    }
-  }
-}
-
-export async function executeGlobalAction(options: {
-  path: {
-    actionId: string
-  }
-  body: {
-    params?: Record<string, unknown>
-    runId?: string
-  }
-}): Promise<ExecuteGlobalActionResult> {
-  try {
-    const response = await requestAction({
-      path: {
-        actionId: options.path.actionId,
-      },
-      body: {
-        params: options.body.params,
-        runId: options.body.runId,
-      },
-      throwOnError: true,
-    })
-
-    return {
-      data: {
-        success: true,
-        runId: response.data.runId,
-      },
-    }
-  } catch (error) {
-    return {
-      data: {
-        success: false,
-        error: toActionRequestError(error),
-      },
-    }
-  }
-}
-
-function toActionRequestError(error: unknown): ActionRequestError {
-  const message = actionRequestErrorMessage(error)
-  if (!isSixbApiError(error)) {
-    return { message }
-  }
-
-  return {
-    message,
-    status: error.status,
-    ...(error.code === undefined ? {} : { code: error.code }),
-  }
-}
-
-function actionRequestErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message
-  }
-  if (typeof error === "string" && error.trim()) {
-    return error
-  }
-  if (error && typeof error === "object") {
-    try {
-      const message = Reflect.get(error, "message")
-      if (typeof message === "string" && message.trim()) {
-        return message
-      }
-      const detail = Reflect.get(error, "error")
-      if (typeof detail === "string" && detail.trim()) {
-        return detail
-      }
-    } catch {
-      // Fall through to the stable request-level message.
-    }
-  }
-  return "[SixbClient] Action request failed."
 }

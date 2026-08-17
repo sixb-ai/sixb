@@ -9,7 +9,11 @@ SET writeback_error = jsonb_build_object(
   'message', 'An unexpected internal error occurred.',
   'retryable', false,
   'at', to_char(COALESCE(writeback_completed_at, finished_at, queued_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
-  'details', jsonb_build_object('actionId', action_id, 'runId', id, 'phase', 'writeback')
+  'details', jsonb_build_object(
+    'actionId', action_id,
+    'runId', id,
+    'phase', 'writeback'
+  )
 )
 WHERE writeback_error_name IS NOT NULL OR writeback_error_message IS NOT NULL;
 
@@ -19,7 +23,11 @@ SET effects_error = jsonb_build_object(
   'message', 'An unexpected internal error occurred.',
   'retryable', false,
   'at', to_char(COALESCE(effects_completed_at, finished_at, queued_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
-  'details', jsonb_build_object('actionId', action_id, 'runId', id, 'phase', 'effects')
+  'details', jsonb_build_object(
+    'actionId', action_id,
+    'runId', id,
+    'phase', 'effects'
+  )
 )
 WHERE effects_error_name IS NOT NULL OR effects_error_message IS NOT NULL;
 

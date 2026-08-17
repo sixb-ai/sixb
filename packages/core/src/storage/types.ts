@@ -24,6 +24,7 @@ export type {
 export type {
   ActionRunFailure,
   ActionRunFailureCode,
+  ActionRunFailureDetails,
   ActionRunParams,
   ActionRunPhase,
   ActionRunRecord,

@@ -41,14 +41,27 @@ const ACTION_FAILURE_AT = "2026-05-08T10:00:00.000Z"
 
 function actionFailure<TPhase extends ActionRunPhase>(
   phase: TPhase,
-  message: string
+  _message: string,
+  actionId: string,
+  runId: string
 ): ActionRunFailure<TPhase> {
+  const code =
+    phase === "cancelled"
+      ? "runtime.cancelled"
+      : phase === "enqueue"
+        ? "queue.enqueue_failed"
+        : "action.phase_failed"
   return {
-    code: phase === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
-    message,
-    retryable: false,
+    code,
+    message:
+      code === "runtime.cancelled"
+        ? "Execution was cancelled."
+        : code === "queue.enqueue_failed"
+          ? "The job could not be enqueued."
+          : "Action execution failed.",
+    retryable: code === "queue.enqueue_failed",
     at: ACTION_FAILURE_AT,
-    details: { actionId: "sendInvoice", runId: "action-run", phase },
+    details: { actionId, runId, phase },
   }
 }
 
@@ -391,7 +404,12 @@ async function completeRequestedActions(
               projectId: sixb.id,
               id: event.payload.runId,
               status: "failed",
-              error: actionFailure("effects", options.effectsErrorMessage),
+              error: actionFailure(
+                "effects",
+                options.effectsErrorMessage,
+                event.payload.actionId,
+                event.payload.runId
+              ),
             })
           }
 
@@ -408,7 +426,12 @@ async function completeRequestedActions(
                   id: event.payload.runId,
                   status: "failed",
                   finishedAt: new Date("2026-05-08T10:00:00.000Z"),
-                  error: actionFailure("writeback", errorMessage),
+                  error: actionFailure(
+                    "writeback",
+                    errorMessage,
+                    event.payload.actionId,
+                    event.payload.runId
+                  ),
                 }
           )
 
@@ -430,7 +453,12 @@ async function completeRequestedActions(
                       actionId: event.payload.actionId,
                       runId: event.payload.runId,
                       subject: event.payload.subject,
-                      error: actionFailure("writeback", errorMessage),
+                      error: actionFailure(
+                        "writeback",
+                        errorMessage,
+                        event.payload.actionId,
+                        event.payload.runId
+                      ),
                       finishedAt: "2026-05-08T10:00:00.000Z",
                     },
                   },
@@ -1801,7 +1829,10 @@ describe("runWorkflowJob", () => {
       expect(actionRun?.status).toBe("succeeded")
       expect(actionRun?.effects).toMatchObject({
         status: "failed",
-        error: { message: "notification failed", details: { phase: "effects" } },
+        error: {
+          message: "Action execution failed.",
+          details: { phase: "effects" },
+        },
       })
     } finally {
       unsubscribe()
@@ -1905,7 +1936,7 @@ describe("runWorkflowJob", () => {
             },
           },
         })
-      ).rejects.toThrow("attach failed")
+      ).rejects.toThrow("Action execution failed.")
     } finally {
       unsubscribe()
     }
@@ -1968,7 +1999,7 @@ describe("runWorkflowJob", () => {
             },
           },
         })
-      ).rejects.toThrow("Object not found for action request")
+      ).rejects.toThrow("Action execution failed.")
     } finally {
       unsubscribe()
     }

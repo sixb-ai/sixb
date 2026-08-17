@@ -18,6 +18,7 @@ export type {
   ActionRunEffectsRecord,
   ActionRunFailure,
   ActionRunFailureCode,
+  ActionRunFailureDetails,
   ActionRunParams,
   ActionRunPhase,
   ActionRunPhaseRecord,

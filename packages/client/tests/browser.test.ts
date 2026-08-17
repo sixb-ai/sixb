@@ -167,7 +167,6 @@ describe("agent stream websocket helpers", () => {
       retryable: false,
       at: "2026-06-27T15:59:59.000Z",
       details: { agentId: "agent_1", runId: "run_1" },
-      causeChain: [{ name: "ProviderError", message: "connection reset" }],
     } as const
     const frame = {
       type: "record",
