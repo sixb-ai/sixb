@@ -1,10 +1,9 @@
-import {
-  type AgentDefinition,
-  type AgentInboundUiMessagePart,
-  type AgentMessage,
-  type AgentMessagePart,
-  type Storage,
-  SYSTEM_PRINCIPAL,
+import type {
+  AgentDefinition,
+  AgentInboundUiMessagePart,
+  AgentMessage,
+  AgentMessagePart,
+  Storage,
 } from "@sixb/core"
 import {
   buildAgentSystemPrompt,
@@ -58,13 +57,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     throw new AgentWorkerError(`Agent run '${runId}' has no execution token.`)
   }
   const agents = storage.agents
-  const durableExecution = await storage.executions.getById({
-    projectId,
-    id: run.executionId,
-  })
-  if (!durableExecution) {
-    throw new AgentWorkerError(`Agent run '${runId}' has no durable execution.`)
-  }
 
   const history = await agents.messages.list({ projectId, threadId: run.threadId, order: "asc" })
   const attachmentContext =
@@ -94,10 +86,10 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   const usageRecorder = new AiModelCallRecorder({
     storage: storage.aiUsage,
     projectId,
-    execution: { kind: "agentRun", runId },
+    executionId: run.executionId,
     attempt: run.attempt,
-    requesterPrincipal: durableExecution.requestedBy ?? SYSTEM_PRINCIPAL,
     requesterGroupIds: run.requesterGroupIds,
+    recoverAiModelCall: context.recoverAiModelCall,
     errorRunId: runId,
   })
 

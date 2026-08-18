@@ -12,7 +12,12 @@ import type {
 } from "@sixb/core"
 import type { AgentExecutionHost } from "@sixb/core/internal/agent-execution"
 import type { LoggingService } from "@sixb/core/internal/logging"
-import type { AgentStorage, AiUsageStorage, AuthStorage } from "@sixb/core/storage"
+import type {
+  AgentStorage,
+  AiUsageStorage,
+  AuthStorage,
+  RecordAiModelCallInput,
+} from "@sixb/core/storage"
 import type { ToolSet } from "ai"
 import type { AgentSkill } from "./agent-skills"
 import type { PreparedAgentAttachmentContext } from "./attachments"
@@ -25,6 +30,8 @@ export type AgentWorkerStorage = Storage & {
   readonly aiUsage: AiUsageStorage
   readonly auth: AuthStorage
 }
+
+export type RecoverAiModelCall = (record: RecordAiModelCallInput) => Promise<void>
 
 /**
  * The host surface the agent worker is constructed with. `SixbHost` satisfies it structurally, so
@@ -56,6 +63,8 @@ export interface AgentWorkerContext {
   readonly valueTypesById: ReadonlyMap<string, ValueType>
   readonly apiBaseUrl: string
   readonly streamSink: StreamSink
+  /** Durable fallback used only when the direct model-call ledger append remains unavailable. */
+  readonly recoverAiModelCall: RecoverAiModelCall
   readonly agentSkills: Promise<readonly AgentSkill[]>
   readonly defaultMaxSteps: number
   readonly turnTimeoutMs: number
@@ -87,6 +96,7 @@ export interface AgentTurnContext {
   readonly sandboxReady?: Promise<BashSandboxHandle>
   readonly sandboxWasUsed?: () => boolean
   readonly streamSink: StreamSink
+  readonly recoverAiModelCall: RecoverAiModelCall
   readonly defaultMaxSteps: number
   readonly turnTimeoutMs: number
 }

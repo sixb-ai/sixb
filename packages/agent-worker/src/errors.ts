@@ -8,16 +8,22 @@ export class AgentWorkerError extends Error {
   }
 }
 
-/** A completed provider call could not be written to the durable accounting ledger. */
+/** A completed provider call was not recorded synchronously, so this turn must stop. */
 export class AgentUsageRecordingError extends AgentWorkerError {
   override readonly name = "AgentUsageRecordingError"
 
   constructor(
     readonly runId: string,
     readonly callId: string,
+    readonly recoveryScheduled: boolean,
     options?: ErrorOptions
   ) {
-    super(`Could not record AI usage for call '${callId}' in agent execution '${runId}'.`, options)
+    super(
+      recoveryScheduled
+        ? `AI usage for call '${callId}' in agent execution '${runId}' was deferred to durable recovery.`
+        : `Could not preserve AI usage for call '${callId}' in agent execution '${runId}'.`,
+      options
+    )
   }
 }
 

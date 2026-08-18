@@ -1,25 +1,23 @@
 import { randomUUID } from "node:crypto"
 import { omitUndefinedObjectProperties } from "@sixb/core/internal/agents"
-import type {
-  AiUsageExecutionIdentity,
-  AiUsageStorage,
-  ReadonlyJsonObject,
-  RecordAiModelCallInput,
-} from "@sixb/core/storage"
+import type { AiUsageStorage, ReadonlyJsonObject, RecordAiModelCallInput } from "@sixb/core/storage"
+import { normalizeAiModelCallRecord } from "@sixb/core/storage"
 import type { LanguageModelCallEndEvent } from "ai"
 import { aiModelCallUsageFromAiSdk } from "./ai-sdk-adapters"
 import { AgentUsageRecordingError } from "./errors"
+import { isPermanentAiUsageRecoveryError } from "./model-call-recovery"
+import type { RecoverAiModelCall } from "./types"
 
 const STORAGE_RETRY_DELAYS_MS = [50, 200, 600] as const
 
 export interface AiModelCallRecorderInput {
   readonly storage: AiUsageStorage
   readonly projectId: string
-  readonly execution: AiUsageExecutionIdentity
+  readonly executionId: string
   readonly attempt: number
-  readonly requesterPrincipal: RecordAiModelCallInput["requesterPrincipal"]
   readonly requesterGroupIds: readonly string[]
-  /** Run identity used only to report recorder and terminal-summary failures. */
+  readonly recoverAiModelCall: RecoverAiModelCall
+  /** Run identity used only in terminal recorder diagnostics. */
   readonly errorRunId: string
 }
 
@@ -33,8 +31,9 @@ interface AiModelCallRecorderInternals {
 /**
  * Persist every completed AI SDK provider call before the tool loop can begin another model step.
  *
- * AI SDK deliberately swallows lifecycle callback errors. This recorder therefore retains a
- * terminal append failure and exposes `prepareStep`, which throws it before another provider call.
+ * AI SDK deliberately swallows lifecycle callback errors. This recorder therefore hands a failed
+ * append to durable recovery and retains the failure for `prepareStep` to surface before another
+ * provider call. Recovery can then continue independently without allowing unaccounted spend.
  */
 export class AiModelCallRecorder {
   private readonly generateId: () => string
@@ -66,10 +65,9 @@ export class AiModelCallRecorder {
       const record: RecordAiModelCallInput = {
         id: this.generateId(),
         projectId: this.input.projectId,
-        execution: this.input.execution,
+        executionId: this.input.executionId,
         attempt: this.input.attempt,
         callId: event.callId,
-        requesterPrincipal: this.input.requesterPrincipal,
         requesterGroupIds: this.input.requesterGroupIds,
         providerId: event.provider,
         requestedModelId: event.modelId,
@@ -78,16 +76,44 @@ export class AiModelCallRecorder {
         ...(rawUsage === undefined ? {} : { rawUsage }),
         occurredAt: this.now(),
       }
+      // Reject malformed SDK/provider data before retrying storage or handing a poison record to
+      // the durable queue. The storage boundary repeats this validation defensively.
+      normalizeAiModelCallRecord(record)
 
-      await retryStorageOperation(
-        () => this.input.storage.recordModelCall(record),
-        this.retryDelaysMs,
-        this.sleep
-      )
+      try {
+        await retryOperation(
+          () => this.input.storage.recordModelCall(record),
+          this.retryDelaysMs,
+          this.sleep,
+          (error) => !isPermanentAiUsageRecoveryError(error)
+        )
+      } catch (storageError) {
+        if (isPermanentAiUsageRecoveryError(storageError)) throw storageError
+
+        try {
+          await retryOperation(
+            () => this.input.recoverAiModelCall(record),
+            this.retryDelaysMs,
+            this.sleep,
+            (error) => !isPermanentAiUsageRecoveryError(error)
+          )
+        } catch (recoveryError) {
+          throw new AggregateError(
+            [storageError, recoveryError],
+            "Direct AI usage recording and durable recovery both failed."
+          )
+        }
+        throw new AgentUsageRecordingError(this.input.errorRunId, event.callId, true, {
+          cause: storageError,
+        })
+      }
     } catch (error) {
-      this.recordingError = new AgentUsageRecordingError(this.input.errorRunId, event.callId, {
-        cause: error,
-      })
+      this.recordingError =
+        error instanceof AgentUsageRecordingError
+          ? error
+          : new AgentUsageRecordingError(this.input.errorRunId, event.callId, false, {
+              cause: error,
+            })
     }
   }
 
@@ -102,15 +128,17 @@ export class AiModelCallRecorder {
   }
 }
 
-async function retryStorageOperation<TResult>(
+async function retryOperation<TResult>(
   operation: () => Promise<TResult>,
   retryDelaysMs: readonly number[],
-  wait: (ms: number) => Promise<void>
+  wait: (ms: number) => Promise<void>,
+  shouldRetry: (error: unknown) => boolean
 ): Promise<TResult> {
   for (let attempt = 0; ; attempt += 1) {
     try {
       return await operation()
     } catch (error) {
+      if (!shouldRetry(error)) throw error
       const delay = retryDelaysMs[attempt]
       if (delay === undefined) throw error
       await wait(delay)

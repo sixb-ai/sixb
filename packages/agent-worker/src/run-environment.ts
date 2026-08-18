@@ -190,6 +190,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
       sandboxReady: ready,
       sandboxWasUsed: () => sandboxWasUsed,
       streamSink: context.streamSink,
+      recoverAiModelCall: context.recoverAiModelCall,
       defaultMaxSteps: context.defaultMaxSteps,
       turnTimeoutMs: context.turnTimeoutMs,
     },
