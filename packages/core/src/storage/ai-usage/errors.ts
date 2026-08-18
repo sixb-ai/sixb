@@ -1,4 +1,4 @@
-export type AiUsageStorageErrorCode = "duplicate_id"
+export type AiUsageStorageErrorCode = "duplicate_id" | "missing_execution"
 
 /** Storage failure specific to the AI model-call usage ledger. */
 export class AiUsageStorageError extends Error {

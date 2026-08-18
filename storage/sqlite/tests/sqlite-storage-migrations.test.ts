@@ -778,6 +778,15 @@ describe("SQLite storage migrations", () => {
     expect(tables).toContain("agent_messages")
     expect(tables).toContain("ai_model_call_usage")
     expect(tables).toContain("ai_model_call_usage_groups")
+    expect(readTableColumns(path, "ai_model_call_usage")).toContain("execution_id")
+    expect(readTableColumns(path, "ai_model_call_usage")).not.toContain("execution_kind")
+    expect(readTableColumns(path, "ai_model_call_usage")).not.toContain("requester_principal_id")
+    expect(readTableForeignKeys(path, "ai_model_call_usage")).toContainEqual({
+      from: "execution_id",
+      onDelete: "RESTRICT",
+      table: "executions",
+      to: "id",
+    })
     expect(readTableColumns(path, "agent_runs")).toContain("requester_group_ids")
     expect(readTableColumns(path, "workflow_runs")).toContain("requester_group_ids")
     expect(readTableColumns(path, "agent_runs")).toContain("usage_input_tokens")
@@ -925,6 +934,35 @@ function readTableColumns(path: string, tableName: string): readonly string[] {
     }>
 
     return rows.map((row) => row.name)
+  } finally {
+    db.close()
+  }
+}
+
+function readTableForeignKeys(
+  path: string,
+  tableName: string
+): readonly {
+  readonly from: string
+  readonly onDelete: string
+  readonly table: string
+  readonly to: string
+}[] {
+  const db = new Database(path, { readonly: true })
+
+  try {
+    const rows = db.query(`PRAGMA foreign_key_list(${tableName})`).all() as Array<{
+      readonly from: string
+      readonly on_delete: string
+      readonly table: string
+      readonly to: string
+    }>
+    return rows.map(({ from, on_delete, table, to }) => ({
+      from,
+      onDelete: on_delete,
+      table,
+      to,
+    }))
   } finally {
     db.close()
   }

@@ -618,6 +618,19 @@ describe("Postgres storage migrations", () => {
           "ai_model_call_usage_groups",
         ])
       )
+      expect(await readTableColumns(schemaName, "ai_model_call_usage")).toContain("execution_id")
+      expect(await readTableColumns(schemaName, "ai_model_call_usage")).not.toContain(
+        "execution_kind"
+      )
+      expect(await readTableColumns(schemaName, "ai_model_call_usage")).not.toContain(
+        "requester_principal_id"
+      )
+      expect(await readTableForeignKeys(schemaName, "ai_model_call_usage")).toContainEqual({
+        column_name: "execution_id",
+        delete_action: "r",
+        foreign_column_name: "id",
+        foreign_table_name: "executions",
+      })
       expect(await readTableColumns(schemaName, "agent_runs")).toEqual(
         expect.arrayContaining(["requester_group_ids", "usage_input_tokens"])
       )
@@ -974,6 +987,54 @@ async function readTableColumns(schemaName: string, tableName: string): Promise<
     )) as Array<{ column_name: string }>
 
     return rows.map((row) => row.column_name)
+  })
+}
+
+async function readTableForeignKeys(
+  schemaName: string,
+  tableName: string
+): Promise<
+  readonly {
+    readonly column_name: string
+    readonly delete_action: string
+    readonly foreign_column_name: string
+    readonly foreign_table_name: string
+  }[]
+> {
+  return withSql(async (sql) => {
+    return (await sql.unsafe(
+      `
+        SELECT
+          source_column.attname AS column_name,
+          target_table.relname AS foreign_table_name,
+          target_column.attname AS foreign_column_name,
+          c.confdeltype::text AS delete_action
+        FROM pg_constraint AS c
+        JOIN pg_class AS source_table ON source_table.oid = c.conrelid
+        JOIN pg_namespace AS source_schema ON source_schema.oid = source_table.relnamespace
+        JOIN pg_class AS target_table ON target_table.oid = c.confrelid
+        JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS source_key(attnum, position)
+          ON TRUE
+        JOIN LATERAL unnest(c.confkey) WITH ORDINALITY AS target_key(attnum, position)
+          ON target_key.position = source_key.position
+        JOIN pg_attribute AS source_column
+          ON source_column.attrelid = source_table.oid
+          AND source_column.attnum = source_key.attnum
+        JOIN pg_attribute AS target_column
+          ON target_column.attrelid = target_table.oid
+          AND target_column.attnum = target_key.attnum
+        WHERE c.contype = 'f'
+          AND source_schema.nspname = $1
+          AND source_table.relname = $2
+        ORDER BY c.conname, source_key.position
+      `,
+      [schemaName, tableName]
+    )) as Array<{
+      readonly column_name: string
+      readonly delete_action: string
+      readonly foreign_column_name: string
+      readonly foreign_table_name: string
+    }>
   })
 }
 

@@ -1,3 +1,4 @@
+import { compareStrings } from "../json"
 import type { AuthStorage } from "../storage/auth"
 import type { Principal } from "./types"
 
@@ -28,5 +29,20 @@ export async function snapshotRequesterGroupIds(input: {
           serviceAccountId: input.principal.id,
         })
 
-  return [...new Set(memberships.map((membership) => membership.groupId))].sort()
+  return normalizeRequesterGroupIds(memberships.map((membership) => membership.groupId))
+}
+
+/** Validate and canonicalize an immutable requester-group snapshot at a storage boundary. */
+export function normalizeRequesterGroupIds(groupIds: readonly string[]): readonly string[] {
+  if (!Array.isArray(groupIds)) {
+    throw new TypeError("[Sixb] requesterGroupIds must be an array.")
+  }
+  const unique = new Set<string>()
+  for (const groupId of groupIds) {
+    if (typeof groupId !== "string" || groupId.trim().length === 0) {
+      throw new TypeError("[Sixb] requesterGroupIds entries must be nonblank.")
+    }
+    unique.add(groupId)
+  }
+  return [...unique].sort(compareStrings)
 }

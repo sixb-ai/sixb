@@ -1,13 +1,27 @@
 import { describe, expect, test } from "bun:test"
 import type { AiUsageStorage, RecordAiModelCallInput } from "@sixb/core/storage"
-import { runAiUsageStorageContractSuite } from "@sixb/core/testing"
+import {
+  runAiUsageStorageContractSuite,
+  seedAiUsageStorageContractExecutions,
+} from "@sixb/core/testing"
 import { SqliteStorage } from "../src"
-import { SqliteAiUsageStorage } from "../src/ai-usage-storage"
 
+const contractBundles = new Map<AiUsageStorage, SqliteStorage>()
 runAiUsageStorageContractSuite("SqliteAiUsageStorage", {
-  createStorage: () => new SqliteAiUsageStorage(),
+  createStorage: () => {
+    const bundle = new SqliteStorage()
+    contractBundles.set(bundle.aiUsage, bundle)
+    return bundle.aiUsage
+  },
+  setup: async (storage) => {
+    const bundle = contractBundles.get(storage)
+    if (!bundle) throw new Error("Expected SQLite storage bundle")
+    await seedAiUsageStorageContractExecutions(bundle.executions)
+  },
   cleanup: (storage) => {
-    storage.close()
+    const bundle = contractBundles.get(storage)
+    contractBundles.delete(storage)
+    bundle?.close()
   },
 })
 
@@ -17,6 +31,7 @@ describe("SqliteStorage AI usage", () => {
 
     try {
       expect(storage.aiUsage).toBeDefined()
+      await seedAiUsageStorageContractExecutions(storage.executions)
       await expect(
         storage.transaction(async (tx) => {
           await requireAiUsage(tx.aiUsage).recordModelCall(modelCallInput())
@@ -40,11 +55,10 @@ describe("SqliteStorage AI usage", () => {
 function modelCallInput(): RecordAiModelCallInput {
   return {
     id: "usage_1",
-    projectId: "project_1",
-    execution: { kind: "agentRun", runId: "run_1" },
+    projectId: "contract-project",
+    executionId: "exec_agent_1",
     attempt: 1,
     callId: "call_1",
-    requesterPrincipal: { type: "user", id: "usr_1" },
     requesterGroupIds: ["engineering", "support"],
     providerId: "gateway",
     requestedModelId: "openai/gpt-5",
@@ -57,8 +71,8 @@ function modelCallInput(): RecordAiModelCallInput {
 
 function summaryInput() {
   return {
-    projectId: "project_1",
-    execution: { kind: "agentRun", runId: "run_1" },
+    projectId: "contract-project",
+    executionId: "exec_agent_1",
   } as const
 }
 

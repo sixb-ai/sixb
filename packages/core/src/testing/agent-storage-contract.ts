@@ -81,7 +81,7 @@ function runInput(overrides: Partial<TestRunInput> = {}): TestRunInput {
     agentId: "sales",
     triggerMessageId: "msg_user_1",
     executionId: "test_agent_execution:run_1",
-    requesterGroupIds: ["engineering", "support"],
+    requesterGroupIds: ["support", "engineering", "support"],
     execution: execution("exec_1"),
     createdAt: at("2026-06-23T10:00:10.000Z"),
     ...overrides,

@@ -1,13 +1,12 @@
-import type { Principal, ReadonlyJsonObject } from "@sixb/core/storage"
+import type { ReadonlyJsonObject } from "@sixb/core/storage"
 import {
   type AiModelCallUsageInput,
   type AiModelCallUsageRecord,
-  type AiUsageExecutionIdentity,
   type AiUsageExecutionSummary,
   type AiUsageStorage,
   AiUsageStorageError,
   aggregateAiModelCallUsage,
-  assertAiUsageExecution,
+  assertAiUsageExecutionId,
   normalizeAiModelCallRecord,
   type RecordAiModelCallInput,
   type RecordAiModelCallResult,
@@ -44,6 +43,7 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
     return runImmediateTransaction(this.connection.db, () => {
       const existing = this.findByIdempotencyKey(record)
       if (existing) return { record: existing, created: false }
+      this.assertExecutionExists(record.projectId, record.executionId)
 
       try {
         this.insertRecord(record)
@@ -79,7 +79,7 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
   ): Promise<AiUsageExecutionSummary> {
     const [summary] = await this.summarizeExecutions({
       projectId: input.projectId,
-      executions: [input.execution],
+      executionIds: [input.executionId],
     })
     return summary!
   }
@@ -88,11 +88,11 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
     input: SummarizeAiUsageExecutionsInput
   ): Promise<readonly AiUsageExecutionSummary[]> {
     assertNonBlankProjectId(input.projectId)
-    for (const execution of input.executions) assertAiUsageExecution(execution)
-    if (input.executions.length === 0) return []
+    for (const executionId of input.executionIds) assertAiUsageExecutionId(executionId)
+    if (input.executionIds.length === 0) return []
 
     const rows = this.executionRows(input)
-    return aggregateExecutionRows(input.executions, rows)
+    return aggregateExecutionRows(input.executionIds, rows)
   }
 
   close(): void {
@@ -100,21 +100,15 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
   }
 
   private insertRecord(record: AiModelCallUsageRecord): void {
-    const execution = executionColumns(record.execution)
     this.connection.db
       .query(
         `
           INSERT INTO ai_model_call_usage (
             project_id,
             id,
-            execution_kind,
-            agent_run_id,
-            workflow_run_id,
-            workflow_node_run_id,
+            execution_id,
             attempt,
             call_id,
-            requester_principal_type,
-            requester_principal_id,
             provider_id,
             requested_model_id,
             response_model_id,
@@ -132,21 +126,16 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
             occurred_at,
             recorded_at
           ) VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
           )
         `
       )
       .run(
         record.projectId,
         record.id,
-        record.execution.kind,
-        execution.agentRunId,
-        execution.workflowRunId,
-        execution.workflowNodeRunId,
+        record.executionId,
         record.attempt,
         record.callId,
-        record.requesterPrincipal.type,
-        record.requesterPrincipal.id,
         record.providerId,
         record.requestedModelId,
         record.responseModelId ?? null,
@@ -169,51 +158,27 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
   private findByIdempotencyKey(
     record: Pick<
       AiModelCallUsageRecord,
-      "projectId" | "execution" | "attempt" | "callId" | "responseId"
+      "projectId" | "executionId" | "attempt" | "callId" | "responseId"
     >
   ): AiModelCallUsageRecord | null {
-    const row =
-      record.execution.kind === "agentRun"
-        ? (this.connection.db
-            .query(
-              `
-                SELECT * FROM ai_model_call_usage
-                WHERE project_id = ?
-                  AND execution_kind = 'agentRun'
-                  AND agent_run_id = ?
-                  AND attempt = ?
-                  AND call_id = ?
-                  AND response_id = ?
-              `
-            )
-            .get(
-              record.projectId,
-              record.execution.runId,
-              record.attempt,
-              record.callId,
-              record.responseId
-            ) as AiUsageRow | null)
-        : (this.connection.db
-            .query(
-              `
-                SELECT * FROM ai_model_call_usage
-                WHERE project_id = ?
-                  AND execution_kind = 'workflowAgentNode'
-                  AND workflow_run_id = ?
-                  AND workflow_node_run_id = ?
-                  AND attempt = ?
-                  AND call_id = ?
-                  AND response_id = ?
-              `
-            )
-            .get(
-              record.projectId,
-              record.execution.workflowRunId,
-              record.execution.nodeRunId,
-              record.attempt,
-              record.callId,
-              record.responseId
-            ) as AiUsageRow | null)
+    const row = this.connection.db
+      .query(
+        `
+          SELECT * FROM ai_model_call_usage
+          WHERE project_id = ?
+            AND execution_id = ?
+            AND attempt = ?
+            AND call_id = ?
+            AND response_id = ?
+        `
+      )
+      .get(
+        record.projectId,
+        record.executionId,
+        record.attempt,
+        record.callId,
+        record.responseId
+      ) as AiUsageRow | null
     return row ? this.rowToRecord(row) : null
   }
 
@@ -239,13 +204,9 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
     return {
       id: row.id,
       projectId: row.project_id,
-      execution: executionFromRow(row),
+      executionId: row.execution_id,
       attempt: row.attempt,
       callId: row.call_id,
-      requesterPrincipal: {
-        type: row.requester_principal_type,
-        id: row.requester_principal_id,
-      },
       requesterGroupIds: groupRows.map((group) => group.group_id),
       providerId: row.provider_id,
       requestedModelId: row.requested_model_id,
@@ -265,56 +226,41 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
   }
 
   private executionRows(input: SummarizeAiUsageExecutionsInput): AiUsageRow[] {
-    const requested = JSON.stringify([
-      ...new Map(
-        input.executions.map((execution) => [executionKey(execution), execution])
-      ).values(),
-    ])
+    const requested = JSON.stringify([...new Set(input.executionIds)])
     return this.connection.db
       .query(
         `
           WITH requested AS (
-            SELECT DISTINCT
-              json_extract(value, '$.kind') AS kind,
-              json_extract(value, '$.runId') AS agent_run_id,
-              json_extract(value, '$.workflowRunId') AS workflow_run_id,
-              json_extract(value, '$.nodeRunId') AS workflow_node_run_id
+            SELECT DISTINCT value AS execution_id
             FROM json_each(?)
-          ), requested_agent_runs AS (
-            SELECT agent_run_id FROM requested WHERE kind = 'agentRun'
-          ), requested_workflow_nodes AS (
-            SELECT workflow_run_id, workflow_node_run_id
-            FROM requested WHERE kind = 'workflowAgentNode'
           )
-          SELECT usage.* FROM requested_agent_runs AS requested
-          CROSS JOIN ai_model_call_usage AS usage
+          SELECT usage.* FROM requested
+          JOIN ai_model_call_usage AS usage
             ON usage.project_id = ?
-            AND usage.execution_kind = 'agentRun'
-            AND usage.agent_run_id = requested.agent_run_id
-          UNION ALL
-          SELECT usage.* FROM requested_workflow_nodes AS requested
-          CROSS JOIN ai_model_call_usage AS usage
-            ON usage.project_id = ?
-            AND usage.execution_kind = 'workflowAgentNode'
-            AND usage.workflow_run_id = requested.workflow_run_id
-            AND usage.workflow_node_run_id = requested.workflow_node_run_id
+            AND usage.execution_id = requested.execution_id
         `
       )
-      .all(requested, input.projectId, input.projectId) as AiUsageRow[]
+      .all(requested, input.projectId) as AiUsageRow[]
+  }
+
+  private assertExecutionExists(projectId: string, executionId: string): void {
+    const execution = this.connection.db
+      .query("SELECT 1 FROM executions WHERE project_id = ? AND id = ?")
+      .get(projectId, executionId)
+    if (execution) return
+    throw new AiUsageStorageError(
+      "missing_execution",
+      `[SixbSqlite] AI usage execution '${executionId}' does not exist in project '${projectId}'.`
+    )
   }
 }
 
 interface AiUsageRow {
   readonly project_id: string
   readonly id: string
-  readonly execution_kind: AiUsageExecutionIdentity["kind"]
-  readonly agent_run_id: string | null
-  readonly workflow_run_id: string | null
-  readonly workflow_node_run_id: string | null
+  readonly execution_id: string
   readonly attempt: number
   readonly call_id: string
-  readonly requester_principal_type: Principal["type"]
-  readonly requester_principal_id: string
   readonly provider_id: string
   readonly requested_model_id: string
   readonly response_model_id: string | null
@@ -334,27 +280,21 @@ interface AiUsageRow {
 }
 
 function aggregateExecutionRows(
-  executions: readonly AiUsageExecutionIdentity[],
+  executionIds: readonly string[],
   rows: readonly AiUsageRow[]
 ): readonly AiUsageExecutionSummary[] {
-  const usageByExecution = new Map<string, AiModelCallUsageInput[]>()
-  for (const execution of executions) usageByExecution.set(executionKey(execution), [])
+  const usageByExecutionId = new Map<string, AiModelCallUsageInput[]>()
+  for (const executionId of executionIds) usageByExecutionId.set(executionId, [])
   for (const row of rows) {
-    usageByExecution.get(executionKey(executionFromRow(row)))?.push(usageFromRow(row))
+    usageByExecutionId.get(row.execution_id)?.push(usageFromRow(row))
   }
-  return executions.map((execution) => {
-    const usages = usageByExecution.get(executionKey(execution)) ?? []
+  return executionIds.map((executionId) => {
+    const usages = usageByExecutionId.get(executionId) ?? []
     return {
       modelCallCount: usages.length,
       usage: aggregateAiModelCallUsage(usages),
     }
   })
-}
-
-function executionKey(execution: AiUsageExecutionIdentity): string {
-  return execution.kind === "agentRun"
-    ? JSON.stringify([execution.kind, execution.runId])
-    : JSON.stringify([execution.kind, execution.workflowRunId, execution.nodeRunId])
 }
 
 function usageFromRow(row: AiUsageRow): AiModelCallUsageInput {
@@ -375,38 +315,6 @@ function usageFromRow(row: AiUsageRow): AiModelCallUsageInput {
       ? {}
       : { reasoningOutputTokens: row.reasoning_output_tokens }),
   }
-}
-
-function executionColumns(execution: AiUsageExecutionIdentity): {
-  readonly agentRunId: string | null
-  readonly workflowRunId: string | null
-  readonly workflowNodeRunId: string | null
-} {
-  return execution.kind === "agentRun"
-    ? { agentRunId: execution.runId, workflowRunId: null, workflowNodeRunId: null }
-    : {
-        agentRunId: null,
-        workflowRunId: execution.workflowRunId,
-        workflowNodeRunId: execution.nodeRunId,
-      }
-}
-
-function executionFromRow(row: AiUsageRow): AiUsageExecutionIdentity {
-  if (row.execution_kind === "agentRun" && row.agent_run_id) {
-    return { kind: "agentRun", runId: row.agent_run_id }
-  }
-  if (
-    row.execution_kind === "workflowAgentNode" &&
-    row.workflow_run_id &&
-    row.workflow_node_run_id
-  ) {
-    return {
-      kind: "workflowAgentNode",
-      workflowRunId: row.workflow_run_id,
-      nodeRunId: row.workflow_node_run_id,
-    }
-  }
-  throw new Error(`[SixbSqlite] AI usage record '${row.id}' has an invalid execution identity.`)
 }
 
 function assertNonBlankProjectId(projectId: string): void {

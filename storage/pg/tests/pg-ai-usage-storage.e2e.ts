@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import type { AiUsageStorage, RecordAiModelCallInput } from "@sixb/core/storage"
-import { runAiUsageStorageContractSuite } from "@sixb/core/testing"
+import {
+  runAiUsageStorageContractSuite,
+  seedAiUsageStorageContractExecutions,
+} from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
 
@@ -11,6 +14,11 @@ runAiUsageStorageContractSuite("PgAiUsageStorage", {
     const { storage } = await createTestStorage()
     bundles.set(storage.aiUsage, storage)
     return storage.aiUsage
+  },
+  setup: async (aiUsage) => {
+    const storage = bundles.get(aiUsage)
+    if (!storage) throw new Error("Expected PostgreSQL storage bundle")
+    await seedAiUsageStorageContractExecutions(storage.executions)
   },
   cleanup: async (aiUsage) => {
     const storage = bundles.get(aiUsage)
@@ -28,6 +36,7 @@ describe("PostgresStorage AI usage", () => {
 
     try {
       expect(storage.aiUsage).toBeDefined()
+      await seedAiUsageStorageContractExecutions(storage.executions)
       await expect(
         storage.transaction(async (tx) => {
           await requireAiUsage(tx.aiUsage).recordModelCall(modelCallInput())
@@ -52,11 +61,10 @@ describe("PostgresStorage AI usage", () => {
 function modelCallInput(): RecordAiModelCallInput {
   return {
     id: "usage_1",
-    projectId: "project_1",
-    execution: { kind: "agentRun", runId: "run_1" },
+    projectId: "contract-project",
+    executionId: "exec_agent_1",
     attempt: 1,
     callId: "call_1",
-    requesterPrincipal: { type: "user", id: "usr_1" },
     requesterGroupIds: ["engineering", "support"],
     providerId: "gateway",
     requestedModelId: "openai/gpt-5",
@@ -69,8 +77,8 @@ function modelCallInput(): RecordAiModelCallInput {
 
 function summaryInput() {
   return {
-    projectId: "project_1",
-    execution: { kind: "agentRun", runId: "run_1" },
+    projectId: "contract-project",
+    executionId: "exec_agent_1",
   } as const
 }
 

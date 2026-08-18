@@ -747,12 +747,14 @@ describe("agent routes", () => {
     const request = (await messageResponse.json()) as {
       run: { id: string; threadId: string; triggerMessageId: string }
     }
-    await expect(
-      storage.agents.runs.getById({ projectId: sixb.id, id: request.run.id })
-    ).resolves.toMatchObject({
-      requestedByPrincipal: { type: "user", id: "usr_retry" },
-      requesterGroupIds: ["admins", "support-users"],
+    const originalRun = await storage.agents.runs.getById({
+      projectId: sixb.id,
+      id: request.run.id,
     })
+    expect(originalRun).toMatchObject({ requesterGroupIds: ["admins", "support-users"] })
+    await expect(
+      storage.executions.getById({ projectId: sixb.id, id: originalRun?.executionId ?? "" })
+    ).resolves.toMatchObject({ requestedBy: { type: "user", id: "usr_retry" } })
     await storage.agents.runs.finishQueued({
       id: request.run.id,
       projectId: sixb.id,
@@ -789,12 +791,11 @@ describe("agent routes", () => {
       triggerMessageId: request.run.triggerMessageId,
     })
     expect(body.run.id).not.toBe(request.run.id)
+    const retriedRun = await storage.agents.runs.getById({ projectId: sixb.id, id: body.run.id })
+    expect(retriedRun).toMatchObject({ requesterGroupIds: ["ops-users", "support-users"] })
     await expect(
-      storage.agents.runs.getById({ projectId: sixb.id, id: body.run.id })
-    ).resolves.toMatchObject({
-      requestedByPrincipal: { type: "user", id: "usr_retry" },
-      requesterGroupIds: ["ops-users", "support-users"],
-    })
+      storage.executions.getById({ projectId: sixb.id, id: retriedRun?.executionId ?? "" })
+    ).resolves.toMatchObject({ requestedBy: { type: "user", id: "usr_retry" } })
 
     await expect(
       storage.agents.messages.list({ projectId: sixb.id, threadId: request.run.threadId })
