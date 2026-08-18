@@ -1,13 +1,12 @@
-import type { Principal, ReadonlyJsonObject } from "@sixb/core/storage"
+import type { ReadonlyJsonObject } from "@sixb/core/storage"
 import {
   type AiModelCallUsageInput,
   type AiModelCallUsageRecord,
-  type AiUsageExecutionIdentity,
   type AiUsageExecutionSummary,
   type AiUsageStorage,
   AiUsageStorageError,
   aggregateAiModelCallUsage,
-  assertAiUsageExecution,
+  assertAiUsageExecutionId,
   normalizeAiModelCallRecord,
   type RecordAiModelCallInput,
   type RecordAiModelCallResult,
@@ -26,20 +25,15 @@ export class PgAiUsageStorage implements AiUsageStorage {
     return runPgTransaction(this.sql, async (tx) => {
       const existing = await this.findByIdempotencyKey(tx, record)
       if (existing) return { record: existing, created: false }
+      await this.assertExecutionExists(tx, record.projectId, record.executionId)
 
-      const execution = executionColumns(record.execution)
       const inserted = await tx<{ id: string }[]>`
         INSERT INTO ai_model_call_usage (
           project_id,
           id,
-          execution_kind,
-          agent_run_id,
-          workflow_run_id,
-          workflow_node_run_id,
+          execution_id,
           attempt,
           call_id,
-          requester_principal_type,
-          requester_principal_id,
           provider_id,
           requested_model_id,
           response_model_id,
@@ -59,14 +53,9 @@ export class PgAiUsageStorage implements AiUsageStorage {
         ) VALUES (
           ${record.projectId},
           ${record.id},
-          ${record.execution.kind},
-          ${execution.agentRunId},
-          ${execution.workflowRunId},
-          ${execution.workflowNodeRunId},
+          ${record.executionId},
           ${record.attempt},
           ${record.callId},
-          ${record.requesterPrincipal.type},
-          ${record.requesterPrincipal.id},
           ${record.providerId},
           ${record.requestedModelId},
           ${record.responseModelId ?? null},
@@ -116,7 +105,7 @@ export class PgAiUsageStorage implements AiUsageStorage {
   ): Promise<AiUsageExecutionSummary> {
     const [summary] = await this.summarizeExecutions({
       projectId: input.projectId,
-      executions: [input.execution],
+      executionIds: [input.executionId],
     })
     return summary!
   }
@@ -125,41 +114,28 @@ export class PgAiUsageStorage implements AiUsageStorage {
     input: SummarizeAiUsageExecutionsInput
   ): Promise<readonly AiUsageExecutionSummary[]> {
     assertNonBlankProjectId(input.projectId)
-    for (const execution of input.executions) assertAiUsageExecution(execution)
-    if (input.executions.length === 0) return []
+    for (const executionId of input.executionIds) assertAiUsageExecutionId(executionId)
+    if (input.executionIds.length === 0) return []
 
     const rows = await this.executionRows(this.sql, input)
-    return aggregateExecutionRows(input.executions, rows)
+    return aggregateExecutionRows(input.executionIds, rows)
   }
 
   private async findByIdempotencyKey(
     sql: PgStoreClient,
     record: Pick<
       AiModelCallUsageRecord,
-      "projectId" | "execution" | "attempt" | "callId" | "responseId"
+      "projectId" | "executionId" | "attempt" | "callId" | "responseId"
     >
   ): Promise<AiModelCallUsageRecord | null> {
-    const rows =
-      record.execution.kind === "agentRun"
-        ? await sql<AiUsageRow[]>`
-            SELECT * FROM ai_model_call_usage
-            WHERE project_id = ${record.projectId}
-              AND execution_kind = ${"agentRun"}
-              AND agent_run_id = ${record.execution.runId}
-              AND attempt = ${record.attempt}
-              AND call_id = ${record.callId}
-              AND response_id = ${record.responseId}
-          `
-        : await sql<AiUsageRow[]>`
-            SELECT * FROM ai_model_call_usage
-            WHERE project_id = ${record.projectId}
-              AND execution_kind = ${"workflowAgentNode"}
-              AND workflow_run_id = ${record.execution.workflowRunId}
-              AND workflow_node_run_id = ${record.execution.nodeRunId}
-              AND attempt = ${record.attempt}
-              AND call_id = ${record.callId}
-              AND response_id = ${record.responseId}
-          `
+    const rows = await sql<AiUsageRow[]>`
+      SELECT * FROM ai_model_call_usage
+      WHERE project_id = ${record.projectId}
+        AND execution_id = ${record.executionId}
+        AND attempt = ${record.attempt}
+        AND call_id = ${record.callId}
+        AND response_id = ${record.responseId}
+    `
     return rows[0] ? this.rowToRecord(sql, rows[0]) : null
   }
 
@@ -185,13 +161,9 @@ export class PgAiUsageStorage implements AiUsageStorage {
     return {
       id: row.id,
       projectId: row.project_id,
-      execution: executionFromRow(row),
+      executionId: row.execution_id,
       attempt: Number(row.attempt),
       callId: row.call_id,
-      requesterPrincipal: {
-        type: row.requester_principal_type,
-        id: row.requester_principal_id,
-      },
       requesterGroupIds: groupRows.map((group) => group.group_id),
       providerId: row.provider_id,
       requestedModelId: row.requested_model_id,
@@ -212,57 +184,43 @@ export class PgAiUsageStorage implements AiUsageStorage {
     sql: PgStoreClient,
     input: SummarizeAiUsageExecutionsInput
   ): Promise<AiUsageRow[]> {
-    const uniqueExecutions = new Map(
-      input.executions.map((execution) => [executionKey(execution), execution])
-    )
-    const agentRunIds: string[] = []
-    const workflowRunIds: string[] = []
-    const workflowNodeRunIds: string[] = []
-    for (const execution of uniqueExecutions.values()) {
-      if (execution.kind === "agentRun") {
-        agentRunIds.push(execution.runId)
-      } else {
-        workflowRunIds.push(execution.workflowRunId)
-        workflowNodeRunIds.push(execution.nodeRunId)
-      }
-    }
+    const executionIds = [...new Set(input.executionIds)]
 
     return sql<AiUsageRow[]>`
-      WITH requested_agent_runs(run_id) AS (
-        SELECT * FROM unnest(${sql.array(agentRunIds)}::text[])
-      ), requested_workflow_nodes(workflow_run_id, node_run_id) AS (
-        SELECT * FROM unnest(
-          ${sql.array(workflowRunIds)}::text[],
-          ${sql.array(workflowNodeRunIds)}::text[]
-        )
+      WITH requested(execution_id) AS (
+        SELECT * FROM unnest(${sql.array(executionIds)}::text[])
       )
-      SELECT usage.* FROM requested_agent_runs AS requested
+      SELECT usage.* FROM requested
       JOIN ai_model_call_usage AS usage
         ON usage.project_id = ${input.projectId}
-        AND usage.execution_kind = ${"agentRun"}
-        AND usage.agent_run_id = requested.run_id
-      UNION ALL
-      SELECT usage.* FROM requested_workflow_nodes AS requested
-      JOIN ai_model_call_usage AS usage
-        ON usage.project_id = ${input.projectId}
-        AND usage.execution_kind = ${"workflowAgentNode"}
-        AND usage.workflow_run_id = requested.workflow_run_id
-        AND usage.workflow_node_run_id = requested.node_run_id
+        AND usage.execution_id = requested.execution_id
     `
+  }
+
+  private async assertExecutionExists(
+    sql: PgStoreClient,
+    projectId: string,
+    executionId: string
+  ): Promise<void> {
+    const [execution] = await sql<{ exists: boolean }[]>`
+      SELECT EXISTS (
+        SELECT 1 FROM executions WHERE project_id = ${projectId} AND id = ${executionId}
+      ) AS exists
+    `
+    if (execution?.exists) return
+    throw new AiUsageStorageError(
+      "missing_execution",
+      `[SixbPg] AI usage execution '${executionId}' does not exist in project '${projectId}'.`
+    )
   }
 }
 
 interface AiUsageRow {
   readonly project_id: string
   readonly id: string
-  readonly execution_kind: AiUsageExecutionIdentity["kind"]
-  readonly agent_run_id: string | null
-  readonly workflow_run_id: string | null
-  readonly workflow_node_run_id: string | null
+  readonly execution_id: string
   readonly attempt: number | string
   readonly call_id: string
-  readonly requester_principal_type: Principal["type"]
-  readonly requester_principal_id: string
   readonly provider_id: string
   readonly requested_model_id: string
   readonly response_model_id: string | null
@@ -282,27 +240,21 @@ interface AiUsageRow {
 }
 
 function aggregateExecutionRows(
-  executions: readonly AiUsageExecutionIdentity[],
+  executionIds: readonly string[],
   rows: readonly AiUsageRow[]
 ): readonly AiUsageExecutionSummary[] {
-  const usageByExecution = new Map<string, AiModelCallUsageInput[]>()
-  for (const execution of executions) usageByExecution.set(executionKey(execution), [])
+  const usageByExecutionId = new Map<string, AiModelCallUsageInput[]>()
+  for (const executionId of executionIds) usageByExecutionId.set(executionId, [])
   for (const row of rows) {
-    usageByExecution.get(executionKey(executionFromRow(row)))?.push(usageFromRow(row))
+    usageByExecutionId.get(row.execution_id)?.push(usageFromRow(row))
   }
-  return executions.map((execution) => {
-    const usages = usageByExecution.get(executionKey(execution)) ?? []
+  return executionIds.map((executionId) => {
+    const usages = usageByExecutionId.get(executionId) ?? []
     return {
       modelCallCount: usages.length,
       usage: aggregateAiModelCallUsage(usages),
     }
   })
-}
-
-function executionKey(execution: AiUsageExecutionIdentity): string {
-  return execution.kind === "agentRun"
-    ? JSON.stringify([execution.kind, execution.runId])
-    : JSON.stringify([execution.kind, execution.workflowRunId, execution.nodeRunId])
 }
 
 function usageFromRow(row: AiUsageRow): AiModelCallUsageInput {
@@ -325,38 +277,6 @@ function usageFromRow(row: AiUsageRow): AiModelCallUsageInput {
       ? {}
       : { reasoningOutputTokens: Number(row.reasoning_output_tokens) }),
   }
-}
-
-function executionColumns(execution: AiUsageExecutionIdentity): {
-  readonly agentRunId: string | null
-  readonly workflowRunId: string | null
-  readonly workflowNodeRunId: string | null
-} {
-  return execution.kind === "agentRun"
-    ? { agentRunId: execution.runId, workflowRunId: null, workflowNodeRunId: null }
-    : {
-        agentRunId: null,
-        workflowRunId: execution.workflowRunId,
-        workflowNodeRunId: execution.nodeRunId,
-      }
-}
-
-function executionFromRow(row: AiUsageRow): AiUsageExecutionIdentity {
-  if (row.execution_kind === "agentRun" && row.agent_run_id) {
-    return { kind: "agentRun", runId: row.agent_run_id }
-  }
-  if (
-    row.execution_kind === "workflowAgentNode" &&
-    row.workflow_run_id &&
-    row.workflow_node_run_id
-  ) {
-    return {
-      kind: "workflowAgentNode",
-      workflowRunId: row.workflow_run_id,
-      nodeRunId: row.workflow_node_run_id,
-    }
-  }
-  throw new Error(`[SixbPg] AI usage record '${row.id}' has an invalid execution identity.`)
 }
 
 function rawUsageFromRow(value: Exclude<AiUsageRow["raw_usage"], null>): ReadonlyJsonObject {

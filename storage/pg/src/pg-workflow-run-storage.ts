@@ -1,3 +1,4 @@
+import { normalizeRequesterGroupIds } from "@sixb/core/internal/auth"
 import {
   assertWorkflowAgentNodeRunExecution,
   assertWorkflowRunExecution,
@@ -87,7 +88,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
           ${serializeRecord(input.input)}::text::jsonb,
           ${queuedAt},
           ${queuedAt},
-          ${JSON.stringify(input.requesterGroupIds)}::text::jsonb,
+          ${JSON.stringify(normalizeRequesterGroupIds(input.requesterGroupIds))}::text::jsonb,
           ${0}
         )
         RETURNING *

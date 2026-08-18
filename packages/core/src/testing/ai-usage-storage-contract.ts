@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import type { Principal } from "../auth"
 import {
   type AiUsageStorage,
   AiUsageStorageError,
   type RecordAiModelCallInput,
 } from "../storage/ai-usage"
+import type { ExecutionStorage } from "../storage/executions"
 
 export interface AiUsageStorageContractSuiteOptions<
   TStorage extends AiUsageStorage = AiUsageStorage,
@@ -16,8 +16,9 @@ export interface AiUsageStorageContractSuiteOptions<
 }
 
 const projectId = "contract-project"
-const requester: Principal = { type: "user", id: "usr_1" }
-const agentExecution = { kind: "agentRun", runId: "run_1" } as const
+const agentExecutionId = "exec_agent_1"
+const otherAgentExecutionId = "exec_agent_2"
+const workflowExecutionId = "exec_workflow_1"
 
 function at(value: string): Date {
   return new Date(value)
@@ -27,10 +28,9 @@ function modelCallInput(overrides: Partial<RecordAiModelCallInput> = {}): Record
   return {
     id: "usage_1",
     projectId,
-    execution: agentExecution,
+    executionId: agentExecutionId,
     attempt: 1,
     callId: "call_1",
-    requesterPrincipal: requester,
     requesterGroupIds: ["support", "engineering"],
     providerId: "gateway",
     requestedModelId: "openai/gpt-5",
@@ -127,7 +127,7 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
         )
 
         await expect(
-          storage.summarizeExecution({ projectId, execution: agentExecution })
+          storage.summarizeExecution({ projectId, executionId: agentExecutionId })
         ).resolves.toEqual({
           modelCallCount: 2,
           usage: {
@@ -167,7 +167,7 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
         )
 
         await expect(
-          storage.summarizeExecution({ projectId, execution: agentExecution })
+          storage.summarizeExecution({ projectId, executionId: agentExecutionId })
         ).resolves.toEqual({
           modelCallCount: 2,
           usage: {
@@ -194,7 +194,7 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
 
         expect(results.map((result) => result.created).sort()).toEqual([false, true])
         await expect(
-          storage.summarizeExecution({ projectId, execution: agentExecution })
+          storage.summarizeExecution({ projectId, executionId: agentExecutionId })
         ).resolves.toEqual({
           modelCallCount: 1,
           usage: {
@@ -214,15 +214,10 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
 
     test("keeps projects and workflow executions isolated", async () => {
       await withStorage(async (storage) => {
-        const workflowExecution = {
-          kind: "workflowAgentNode",
-          workflowRunId: "workflow_run_1",
-          nodeRunId: "node_run_1",
-        } as const
         await storage.recordModelCall(
           modelCallInput({
             id: "usage_workflow",
-            execution: workflowExecution,
+            executionId: workflowExecutionId,
             usage: { inputTokens: 5, outputTokens: 3 },
           })
         )
@@ -230,13 +225,13 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
           modelCallInput({
             id: "usage_other_project",
             projectId: "other-project",
-            execution: workflowExecution,
+            executionId: workflowExecutionId,
             usage: { inputTokens: 100, outputTokens: 100 },
           })
         )
 
         await expect(
-          storage.summarizeExecution({ projectId, execution: workflowExecution })
+          storage.summarizeExecution({ projectId, executionId: workflowExecutionId })
         ).resolves.toEqual({
           modelCallCount: 1,
           usage: {
@@ -247,7 +242,7 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
           },
         })
         await expect(
-          storage.summarizeExecution({ projectId, execution: agentExecution })
+          storage.summarizeExecution({ projectId, executionId: agentExecutionId })
         ).resolves.toEqual({
           modelCallCount: 0,
           usage: { reportingStatus: "unavailable" },
@@ -255,7 +250,7 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
         await expect(
           storage.summarizeExecution({
             projectId,
-            execution: { ...workflowExecution, workflowRunId: "workflow_run_2" },
+            executionId: "exec_workflow_2",
           })
         ).resolves.toEqual({
           modelCallCount: 0,
@@ -266,21 +261,15 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
 
     test("summarizes multiple executions in input order with one zero-call entry per miss", async () => {
       await withStorage(async (storage) => {
-        await expect(storage.summarizeExecutions({ projectId, executions: [] })).resolves.toEqual(
+        await expect(storage.summarizeExecutions({ projectId, executionIds: [] })).resolves.toEqual(
           []
         )
 
-        const otherAgentExecution = { kind: "agentRun", runId: "run_2" } as const
-        const workflowExecution = {
-          kind: "workflowAgentNode",
-          workflowRunId: "workflow_run_1",
-          nodeRunId: "node_run_1",
-        } as const
         await storage.recordModelCall(modelCallInput())
         await storage.recordModelCall(
           modelCallInput({
             id: "usage_agent_2",
-            execution: otherAgentExecution,
+            executionId: otherAgentExecutionId,
             callId: "call_agent_2",
             responseId: "response_agent_2",
             usage: { inputTokens: 4, outputTokens: 6 },
@@ -289,7 +278,7 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
         await storage.recordModelCall(
           modelCallInput({
             id: "usage_workflow",
-            execution: workflowExecution,
+            executionId: workflowExecutionId,
             callId: "call_workflow",
             responseId: "response_workflow",
             usage: { inputTokens: 5, outputTokens: 3 },
@@ -299,12 +288,12 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
         await expect(
           storage.summarizeExecutions({
             projectId,
-            executions: [
-              otherAgentExecution,
-              { kind: "agentRun", runId: "missing" },
-              workflowExecution,
-              agentExecution,
-              otherAgentExecution,
+            executionIds: [
+              otherAgentExecutionId,
+              "missing",
+              workflowExecutionId,
+              agentExecutionId,
+              otherAgentExecutionId,
             ],
           })
         ).resolves.toEqual([
@@ -359,7 +348,7 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
       // complete zero-token report instead of an unavailable one.
       await withStorage(async (storage) => {
         await expect(
-          storage.summarizeExecution({ projectId, execution: agentExecution })
+          storage.summarizeExecution({ projectId, executionId: agentExecutionId })
         ).resolves.toEqual({
           modelCallCount: 0,
           usage: { reportingStatus: "unavailable" },
@@ -372,7 +361,7 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
         expect(result.record.usage).toEqual({ reportingStatus: "unavailable" })
         expect(result.record.rawUsage).toBeUndefined()
         await expect(
-          storage.summarizeExecution({ projectId, execution: agentExecution })
+          storage.summarizeExecution({ projectId, executionId: agentExecutionId })
         ).resolves.toEqual({
           modelCallCount: 1,
           usage: { reportingStatus: "unavailable" },
@@ -411,7 +400,7 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
         )
 
         await expect(
-          storage.summarizeExecution({ projectId, execution: agentExecution })
+          storage.summarizeExecution({ projectId, executionId: agentExecutionId })
         ).resolves.toEqual({
           modelCallCount: 2,
           usage: {
@@ -457,7 +446,7 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
         await expect(error).rejects.toBeInstanceOf(AiUsageStorageError)
         await expect(error).rejects.toMatchObject({ code: "duplicate_id" })
         await expect(
-          storage.summarizeExecution({ projectId, execution: agentExecution })
+          storage.summarizeExecution({ projectId, executionId: agentExecutionId })
         ).resolves.toMatchObject({
           modelCallCount: 1,
           usage: { inputTokens: 12, outputTokens: 8, totalTokens: 20 },
@@ -465,7 +454,17 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
       })
     })
 
-    test("rejects invalid identity, usage, dates, groups, and raw JSON", async () => {
+    test("rejects a model call whose durable execution does not exist", async () => {
+      await withStorage(async (storage) => {
+        const error = storage.recordModelCall(
+          modelCallInput({ id: "usage_missing", executionId: "exec_missing" })
+        )
+        await expect(error).rejects.toBeInstanceOf(AiUsageStorageError)
+        await expect(error).rejects.toMatchObject({ code: "missing_execution" })
+      })
+    })
+
+    test("rejects invalid execution IDs, usage, dates, groups, and raw JSON", async () => {
       await withStorage(async (storage) => {
         const invalidInputs: RecordAiModelCallInput[] = [
           modelCallInput({ attempt: 0 }),
@@ -474,7 +473,7 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
           modelCallInput({ usage: { inputTokens: -1 } }),
           modelCallInput({ occurredAt: new Date(Number.NaN) }),
           modelCallInput({ rawUsage: { invalid: undefined } as never }),
-          modelCallInput({ execution: { kind: "agentRun", runId: "" } }),
+          modelCallInput({ executionId: "" }),
         ]
 
         for (const input of invalidInputs) {
@@ -483,11 +482,11 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
         await expect(
           storage.summarizeExecutions({
             projectId,
-            executions: [{ kind: "agentRun", runId: "" }],
+            executionIds: [""],
           })
         ).rejects.toThrow()
         await expect(
-          storage.summarizeExecution({ projectId, execution: agentExecution })
+          storage.summarizeExecution({ projectId, executionId: agentExecutionId })
         ).resolves.toEqual({
           modelCallCount: 0,
           usage: { reportingStatus: "unavailable" },
@@ -495,4 +494,35 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
       })
     })
   })
+}
+
+/** Seed the immutable execution references used by the provider-neutral AI usage contract. */
+export async function seedAiUsageStorageContractExecutions(
+  executions: ExecutionStorage
+): Promise<void> {
+  for (const fixture of [
+    { projectId, executionId: agentExecutionId },
+    { projectId, executionId: otherAgentExecutionId },
+    { projectId, executionId: workflowExecutionId },
+    { projectId: "other-project", executionId: workflowExecutionId },
+  ]) {
+    const existing = await executions.getById({
+      projectId: fixture.projectId,
+      id: fixture.executionId,
+    })
+    if (existing) continue
+    const primitive = {
+      kind: "workflow" as const,
+      id: "ai-usage-contract",
+      runId: fixture.executionId,
+    }
+    await executions.create({
+      id: fixture.executionId,
+      projectId: fixture.projectId,
+      executor: { type: "primitive", kind: primitive.kind, runId: primitive.runId },
+      source: { type: "event", eventId: `test_event:${fixture.executionId}` },
+      correlationId: `test_correlation:${fixture.executionId}`,
+      authorizationRef: { type: "trustedPrimitive", primitive },
+    })
+  }
 }

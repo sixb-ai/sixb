@@ -19,6 +19,7 @@ import {
   createWorkflowRunOperationScope,
 } from "@sixb/core/internal/storage-operation-scope"
 import {
+  type AiUsageStorage,
   createTransactionStorageProxy,
   type ObjectStorage,
   StorageTransactionError,
@@ -132,7 +133,7 @@ export class PostgresStorage implements MigrationCapableStorage {
   readonly auth: PgAuthStorage
   readonly executions: PgExecutionStorage
   readonly agents: PgAgentStorage
-  readonly aiUsage: PgAiUsageStorage
+  readonly aiUsage: AiUsageStorage
   readonly actionRuns: PgActionRunStorage
   readonly pipelineRuns: PgPipelineRunStorage
   readonly workflowRuns: PgWorkflowRunStorage

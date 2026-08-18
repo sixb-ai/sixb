@@ -1,4 +1,5 @@
 import { assertAgentRunExecution } from "@sixb/core/internal/agent-run-storage-provider"
+import { normalizeRequesterGroupIds } from "@sixb/core/internal/auth"
 import {
   type AgentRunRecord,
   type AgentRunStore,
@@ -78,7 +79,7 @@ export class PgAgentRunStore implements AgentRunStore {
             ${input.threadId},
             ${input.agentId},
             ${input.triggerMessageId},
-            ${JSON.stringify(input.requesterGroupIds)}::text::jsonb,
+            ${JSON.stringify(normalizeRequesterGroupIds(input.requesterGroupIds))}::text::jsonb,
             ${"queued"},
             ${0},
             ${createdAt}

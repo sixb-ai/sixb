@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite"
+import { normalizeRequesterGroupIds } from "@sixb/core/internal/auth"
 import {
   assertWorkflowAgentNodeRunExecution,
   assertWorkflowRunExecution,
@@ -120,7 +121,7 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
           serializeRecord(input.input),
           queuedAt.toISOString(),
           queuedAt.toISOString(),
-          JSON.stringify(input.requesterGroupIds),
+          JSON.stringify(normalizeRequesterGroupIds(input.requesterGroupIds)),
           0
         )
     } catch (error) {

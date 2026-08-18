@@ -1,5 +1,6 @@
 import { AGENT_MESSAGE_CONTENT_VERSION } from "../../agents/message"
 import { principalsEqual } from "../../auth"
+import { normalizeRequesterGroupIds } from "../../auth/attribution"
 import type { ExecutionStorage } from "../executions"
 import { AgentStorageError } from "./errors"
 import { assertAgentRunExecution } from "./provider"
@@ -207,7 +208,7 @@ class InMemoryAgentRunStore implements AgentRunStore {
       threadId: input.threadId,
       agentId: input.agentId,
       triggerMessageId: input.triggerMessageId,
-      requesterGroupIds: clone(input.requesterGroupIds),
+      requesterGroupIds: normalizeRequesterGroupIds(input.requesterGroupIds),
       status: "queued",
       attempt: 0,
       createdAt,

@@ -1,4 +1,3 @@
-import type { Principal } from "../../auth"
 import type { ReadonlyJsonObject } from "../../json"
 
 /** How much normalized token usage a provider reported for one model call. */
@@ -30,29 +29,20 @@ export interface AiUsageExecutionSummary {
   readonly usage: AiModelCallUsage
 }
 
-/** The durable execution that owns a model call. */
-export type AiUsageExecutionIdentity =
-  | {
-      readonly kind: "agentRun"
-      readonly runId: string
-    }
-  | {
-      readonly kind: "workflowAgentNode"
-      readonly workflowRunId: string
-      readonly nodeRunId: string
-    }
-
 /** Input for an idempotent model-call ledger append. */
 export interface RecordAiModelCallInput {
   readonly id: string
   readonly projectId: string
-  readonly execution: AiUsageExecutionIdentity
+  /** Immutable execution-ledger record that owns this provider call. */
+  readonly executionId: string
   /** Queue delivery attempt that made the provider call. */
   readonly attempt: number
   /** AI SDK generation ID. Tool-loop model calls share it and are distinguished by responseId. */
   readonly callId: string
-  readonly requesterPrincipal: Principal
-  /** Durable group memberships snapshotted when the parent run was admitted. */
+  /**
+   * Durable group memberships snapshotted when the parent run was admitted. The requester itself
+   * is read from the immutable execution record.
+   */
   readonly requesterGroupIds: readonly string[]
   /** AI SDK provider that handled the call, such as `openai`, `anthropic`, or `gateway`. */
   readonly providerId: string
@@ -82,18 +72,18 @@ export interface RecordAiModelCallResult {
 
 export interface SummarizeAiUsageExecutionInput {
   readonly projectId: string
-  readonly execution: AiUsageExecutionIdentity
+  readonly executionId: string
 }
 
 export interface SummarizeAiUsageExecutionsInput {
   readonly projectId: string
-  readonly executions: readonly AiUsageExecutionIdentity[]
+  readonly executionIds: readonly string[]
 }
 
 /** Durable, provider-neutral accounting for completed language-model calls. */
 export interface AiUsageStorage {
   /**
-   * Append one model-call record idempotently. The identity is project, execution, attempt, call
+   * Append one model-call record idempotently. The identity is project, execution ID, attempt, call
    * ID, and response ID; retrying that identity returns the existing record with `created: false`.
    */
   recordModelCall(input: RecordAiModelCallInput): Promise<RecordAiModelCallResult>
@@ -103,7 +93,7 @@ export interface AiUsageStorage {
 
   /**
    * Aggregate multiple executions in one storage read. Results have the same length and order as
-   * `executions`. Executions without ledger records have a zero model-call count and unavailable
+   * `executionIds`. Executions without ledger records have a zero model-call count and unavailable
    * usage.
    */
   summarizeExecutions(

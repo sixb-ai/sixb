@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite"
 import { assertAgentRunExecution } from "@sixb/core/internal/agent-run-storage-provider"
+import { normalizeRequesterGroupIds } from "@sixb/core/internal/auth"
 import {
   type AgentRunRecord,
   type AgentRunStore,
@@ -85,7 +86,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
             input.threadId,
             input.agentId,
             input.triggerMessageId,
-            JSON.stringify(input.requesterGroupIds),
+            JSON.stringify(normalizeRequesterGroupIds(input.requesterGroupIds)),
             createdAt.toISOString()
           )
       } catch (error) {

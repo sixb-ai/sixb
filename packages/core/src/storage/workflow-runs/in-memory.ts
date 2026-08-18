@@ -1,3 +1,4 @@
+import { normalizeRequesterGroupIds } from "../../auth/attribution"
 import type { ExecutionStorage } from "../executions"
 import {
   cloneRecord,
@@ -124,7 +125,7 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
       queuedAt,
       startedAt: queuedAt,
       attempt: 0,
-      requesterGroupIds: cloneRecord(input.requesterGroupIds),
+      requesterGroupIds: normalizeRequesterGroupIds(input.requesterGroupIds),
     }
 
     this.runs.set(key, cloneRecord(record))

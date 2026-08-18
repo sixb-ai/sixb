@@ -106,7 +106,7 @@ describe("PgWorkflowRunStorage", () => {
       projectId: "my-app",
       workflowId: "reconcile-transaction",
       input: {},
-      requesterGroupIds: [],
+      requesterGroupIds: ["support", "engineering", "support"],
     })
 
     const results = await Promise.allSettled([
@@ -126,6 +126,9 @@ describe("PgWorkflowRunStorage", () => {
 
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1)
     expect(results.filter((result) => result.status === "rejected")).toHaveLength(1)
+    await expect(
+      storage.workflowRuns.getById({ projectId: "my-app", id: "wf-run-claim" })
+    ).resolves.toMatchObject({ requesterGroupIds: ["engineering", "support"] })
   })
 
   test("waits and resumes workflow and intervention node runs", async () => {

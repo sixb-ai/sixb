@@ -89,7 +89,6 @@ export type {
   AiModelCallUsage,
   AiModelCallUsageInput,
   AiModelCallUsageRecord,
-  AiUsageExecutionIdentity,
   AiUsageExecutionSummary,
   AiUsageReportingStatus,
   AiUsageStorage,
@@ -104,7 +103,7 @@ export type {
 export {
   AiUsageStorageError,
   aggregateAiModelCallUsage,
-  assertAiUsageExecution,
+  assertAiUsageExecutionId,
   InMemoryAiUsageStorage,
   normalizeAiModelCallRecord,
   normalizeAiModelCallUsage,

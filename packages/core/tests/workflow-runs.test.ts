@@ -209,7 +209,7 @@ describe("InMemoryWorkflowRunStorage", () => {
       workflowId: "reconcile-transaction",
       input: { transactionId: "txn_123" },
       queuedAt,
-      requesterGroupIds: ["engineering", "support"],
+      requesterGroupIds: ["support", "engineering", "support"],
     })
 
     const running = await storage.start({

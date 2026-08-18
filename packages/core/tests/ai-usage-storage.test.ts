@@ -5,15 +5,34 @@ import {
   InMemoryAiUsageStorage,
   type RecordAiModelCallInput,
 } from "../src/storage"
-import { runAiUsageStorageContractSuite } from "../src/testing"
+import {
+  runAiUsageStorageContractSuite,
+  seedAiUsageStorageContractExecutions,
+} from "../src/testing"
 
+const contractBundles = new Map<AiUsageStorage, InMemoryStorage>()
 runAiUsageStorageContractSuite("InMemoryAiUsageStorage", {
-  createStorage: () => new InMemoryAiUsageStorage(),
+  createStorage: () => {
+    const bundle = new InMemoryStorage()
+    const storage = new InMemoryAiUsageStorage(bundle.executions)
+    contractBundles.set(storage, bundle)
+    return storage
+  },
+  setup: async (storage) => {
+    const bundle = contractBundles.get(storage)
+    if (!bundle) throw new Error("Expected in-memory storage bundle")
+    await seedAiUsageStorageContractExecutions(bundle.executions)
+  },
+  cleanup: (storage) => {
+    contractBundles.delete(storage)
+  },
 })
 
 describe("InMemoryAiUsageStorage", () => {
   test("snapshots model-call records, idempotency keys, and group rows", async () => {
-    const storage = new InMemoryAiUsageStorage()
+    const bundle = new InMemoryStorage()
+    const storage = new InMemoryAiUsageStorage(bundle.executions)
+    await createExecution(bundle, "project_1", "exec_1")
     const empty = storage.snapshot()
 
     await storage.recordModelCall(modelCallInput())
@@ -54,6 +73,7 @@ describe("InMemoryStorage AI usage", () => {
 
   test("rolls back ledger records, idempotency keys, and group rows", async () => {
     const storage = new InMemoryStorage()
+    await createExecution(storage, "project_1", "exec_1")
 
     await expect(
       storage.transaction(async (tx) => {
@@ -73,6 +93,7 @@ describe("InMemoryStorage AI usage", () => {
 
   test("commits ledger records through the transaction facade", async () => {
     const storage = new InMemoryStorage()
+    await createExecution(storage, "project_1", "exec_1")
 
     await storage.transaction(async (tx) => {
       await requireAiUsage(tx).recordModelCall(modelCallInput())
@@ -96,10 +117,9 @@ function modelCallInput(): RecordAiModelCallInput {
   return {
     id: "usage_1",
     projectId: "project_1",
-    execution: { kind: "agentRun", runId: "run_1" },
+    executionId: "exec_1",
     attempt: 1,
     callId: "call_1",
-    requesterPrincipal: { type: "user", id: "usr_1" },
     requesterGroupIds: ["support", "engineering", "support"],
     providerId: "gateway",
     requestedModelId: "openai/gpt-5",
@@ -114,8 +134,24 @@ function modelCallInput(): RecordAiModelCallInput {
 function executionSummaryInput() {
   return {
     projectId: "project_1",
-    execution: { kind: "agentRun", runId: "run_1" },
+    executionId: "exec_1",
   } as const
+}
+
+async function createExecution(
+  storage: InMemoryStorage,
+  projectId: string,
+  executionId: string
+): Promise<void> {
+  const primitive = { kind: "workflow" as const, id: "ai-usage-test", runId: executionId }
+  await storage.executions.create({
+    id: executionId,
+    projectId,
+    executor: { type: "primitive", kind: primitive.kind, runId: primitive.runId },
+    source: { type: "event", eventId: `event:${executionId}` },
+    correlationId: `correlation:${executionId}`,
+    authorizationRef: { type: "trustedPrimitive", primitive },
+  })
 }
 
 function requireAiUsage(storage: Storage): AiUsageStorage {

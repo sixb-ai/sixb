@@ -1,19 +1,15 @@
-import { assertJsonValue, compareStrings, isPlainRecord } from "../../json"
-import type {
-  AiModelCallUsageRecord,
-  AiUsageExecutionIdentity,
-  RecordAiModelCallInput,
-} from "./types"
+import { normalizeRequesterGroupIds } from "../../auth/attribution"
+import { assertJsonValue, isPlainRecord } from "../../json"
+import type { AiModelCallUsageRecord, RecordAiModelCallInput } from "./types"
 import { normalizeAiModelCallUsage } from "./usage"
 
 /** Validate and defensively snapshot one provider-neutral model-call ledger input. */
 export function normalizeAiModelCallRecord(input: RecordAiModelCallInput): AiModelCallUsageRecord {
   assertNonBlank(input.id, "id")
   assertNonBlank(input.projectId, "projectId")
-  assertAiUsageExecution(input.execution)
+  assertAiUsageExecutionId(input.executionId)
   assertPositiveSafeInteger(input.attempt, "attempt")
   assertNonBlank(input.callId, "callId")
-  assertPrincipal(input.requesterPrincipal)
   assertNonBlank(input.providerId, "providerId")
   assertNonBlank(input.requestedModelId, "requestedModelId")
   if (input.responseModelId !== undefined) {
@@ -23,16 +19,15 @@ export function normalizeAiModelCallRecord(input: RecordAiModelCallInput): AiMod
 
   const occurredAt = cloneValidDate(input.occurredAt, "occurredAt")
   const recordedAt = cloneValidDate(input.recordedAt ?? new Date(), "recordedAt")
-  const requesterGroupIds = normalizeGroupIds(input.requesterGroupIds)
+  const requesterGroupIds = normalizeRequesterGroupIds(input.requesterGroupIds)
   const rawUsage = cloneRawUsage(input.rawUsage)
 
   return {
     id: input.id,
     projectId: input.projectId,
-    execution: structuredClone(input.execution),
+    executionId: input.executionId,
     attempt: input.attempt,
     callId: input.callId,
-    requesterPrincipal: structuredClone(input.requesterPrincipal),
     requesterGroupIds,
     providerId: input.providerId,
     requestedModelId: input.requestedModelId,
@@ -45,27 +40,9 @@ export function normalizeAiModelCallRecord(input: RecordAiModelCallInput): AiMod
   }
 }
 
-/** Validate a durable execution identity at storage and query boundaries. */
-export function assertAiUsageExecution(execution: AiUsageExecutionIdentity): void {
-  if (execution.kind === "agentRun") {
-    assertNonBlank(execution.runId, "execution.runId")
-    return
-  }
-  if (execution.kind === "workflowAgentNode") {
-    assertNonBlank(execution.workflowRunId, "execution.workflowRunId")
-    assertNonBlank(execution.nodeRunId, "execution.nodeRunId")
-    return
-  }
-  throw new TypeError("[Sixb] AI usage execution kind is invalid.")
-}
-
-function normalizeGroupIds(groupIds: readonly string[]): readonly string[] {
-  const unique = new Set<string>()
-  for (const groupId of groupIds) {
-    assertNonBlank(groupId, "requesterGroupIds[]")
-    unique.add(groupId)
-  }
-  return [...unique].sort(compareStrings)
+/** Validate a durable execution reference at storage and query boundaries. */
+export function assertAiUsageExecutionId(executionId: string): void {
+  assertNonBlank(executionId, "executionId")
 }
 
 function cloneRawUsage(rawUsage: RecordAiModelCallInput["rawUsage"]) {
@@ -75,17 +52,6 @@ function cloneRawUsage(rawUsage: RecordAiModelCallInput["rawUsage"]) {
   }
   assertJsonValue(rawUsage, "AI usage rawUsage")
   return structuredClone(rawUsage)
-}
-
-function assertPrincipal(principal: RecordAiModelCallInput["requesterPrincipal"]): void {
-  if (
-    principal.type !== "user" &&
-    principal.type !== "serviceAccount" &&
-    principal.type !== "system"
-  ) {
-    throw new TypeError("[Sixb] AI usage requesterPrincipal.type is invalid.")
-  }
-  assertNonBlank(principal.id, "requesterPrincipal.id")
 }
 
 function assertNonBlank(value: string, field: string): void {

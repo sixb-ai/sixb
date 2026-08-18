@@ -10,6 +10,7 @@ export {
 export {
   type AiUsageStorageContractSuiteOptions,
   runAiUsageStorageContractSuite,
+  seedAiUsageStorageContractExecutions,
 } from "./ai-usage-storage-contract"
 export {
   type AuthStorageContractSuiteOptions,

@@ -11,24 +11,17 @@ ALTER TABLE workflow_runs
   CHECK (jsonb_typeof(requester_group_ids) = 'array');
 
 CREATE TABLE ai_model_call_usage (
-  project_id TEXT NOT NULL,
-  id TEXT NOT NULL,
-  execution_kind TEXT NOT NULL CHECK (
-    execution_kind IN ('agentRun', 'workflowAgentNode')
-  ),
-  agent_run_id TEXT,
-  workflow_run_id TEXT,
-  workflow_node_run_id TEXT,
+  project_id TEXT NOT NULL CHECK (length(trim(project_id)) > 0),
+  id TEXT NOT NULL CHECK (length(trim(id)) > 0),
+  execution_id TEXT NOT NULL CHECK (length(trim(execution_id)) > 0),
   attempt BIGINT NOT NULL CHECK (attempt >= 1),
-  call_id TEXT NOT NULL,
-  requester_principal_type TEXT NOT NULL CHECK (
-    requester_principal_type IN ('user', 'serviceAccount', 'system')
+  call_id TEXT NOT NULL CHECK (length(trim(call_id)) > 0),
+  provider_id TEXT NOT NULL CHECK (length(trim(provider_id)) > 0),
+  requested_model_id TEXT NOT NULL CHECK (length(trim(requested_model_id)) > 0),
+  response_model_id TEXT CHECK (
+    response_model_id IS NULL OR length(trim(response_model_id)) > 0
   ),
-  requester_principal_id TEXT NOT NULL,
-  provider_id TEXT NOT NULL,
-  requested_model_id TEXT NOT NULL,
-  response_model_id TEXT,
-  response_id TEXT NOT NULL,
+  response_id TEXT NOT NULL CHECK (length(trim(response_id)) > 0),
   input_tokens BIGINT CHECK (input_tokens IS NULL OR input_tokens >= 0),
   output_tokens BIGINT CHECK (output_tokens IS NULL OR output_tokens >= 0),
   total_tokens BIGINT CHECK (total_tokens IS NULL OR total_tokens >= 0),
@@ -50,60 +43,21 @@ CREATE TABLE ai_model_call_usage (
   reporting_status TEXT NOT NULL CHECK (
     reporting_status IN ('complete', 'partial', 'unavailable')
   ),
-  raw_usage JSONB,
+  raw_usage JSONB CHECK (raw_usage IS NULL OR jsonb_typeof(raw_usage) = 'object'),
   occurred_at TIMESTAMPTZ NOT NULL,
   recorded_at TIMESTAMPTZ NOT NULL,
   PRIMARY KEY (project_id, id),
-  CHECK (
-    (
-      execution_kind = 'agentRun'
-      AND agent_run_id IS NOT NULL
-      AND workflow_run_id IS NULL
-      AND workflow_node_run_id IS NULL
-    ) OR (
-      execution_kind = 'workflowAgentNode'
-      AND agent_run_id IS NULL
-      AND workflow_run_id IS NOT NULL
-      AND workflow_node_run_id IS NOT NULL
-    )
-  )
+  FOREIGN KEY (project_id, execution_id)
+    REFERENCES executions(project_id, id)
+    ON DELETE RESTRICT
 );
 
-CREATE UNIQUE INDEX idx_ai_model_call_usage_agent_idempotency
-  ON ai_model_call_usage (project_id, agent_run_id, attempt, call_id, response_id)
-  WHERE execution_kind = 'agentRun';
-CREATE UNIQUE INDEX idx_ai_model_call_usage_workflow_idempotency
-  ON ai_model_call_usage (
-    project_id,
-    workflow_run_id,
-    workflow_node_run_id,
-    attempt,
-    call_id,
-    response_id
-  )
-  WHERE execution_kind = 'workflowAgentNode';
-CREATE INDEX idx_ai_model_call_usage_agent_execution
-  ON ai_model_call_usage (project_id, agent_run_id, occurred_at, id)
-  WHERE execution_kind = 'agentRun';
-CREATE INDEX idx_ai_model_call_usage_workflow_execution
-  ON ai_model_call_usage (
-    project_id,
-    workflow_run_id,
-    workflow_node_run_id,
-    occurred_at,
-    id
-  )
-  WHERE execution_kind = 'workflowAgentNode';
+CREATE UNIQUE INDEX idx_ai_model_call_usage_idempotency
+  ON ai_model_call_usage (project_id, execution_id, attempt, call_id, response_id);
+CREATE INDEX idx_ai_model_call_usage_execution
+  ON ai_model_call_usage (project_id, execution_id, occurred_at, id);
 CREATE INDEX idx_ai_model_call_usage_project_time
   ON ai_model_call_usage (project_id, occurred_at, id);
-CREATE INDEX idx_ai_model_call_usage_principal_time
-  ON ai_model_call_usage (
-    project_id,
-    requester_principal_type,
-    requester_principal_id,
-    occurred_at,
-    id
-  );
 CREATE INDEX idx_ai_model_call_usage_provider_response
   ON ai_model_call_usage (project_id, provider_id, response_id);
 

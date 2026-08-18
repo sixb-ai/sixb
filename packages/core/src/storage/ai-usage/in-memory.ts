@@ -1,8 +1,8 @@
+import type { ExecutionStorage } from "../executions"
 import { AiUsageStorageError } from "./errors"
-import { assertAiUsageExecution, normalizeAiModelCallRecord } from "./record"
+import { assertAiUsageExecutionId, normalizeAiModelCallRecord } from "./record"
 import type {
   AiModelCallUsageRecord,
-  AiUsageExecutionIdentity,
   AiUsageExecutionSummary,
   AiUsageStorage,
   RecordAiModelCallInput,
@@ -31,8 +31,11 @@ export class InMemoryAiUsageStorage implements AiUsageStorage {
   private readonly recordKeysByIdempotencyKey = new Map<string, string>()
   private readonly groupRows = new Map<string, InMemoryAiUsageGroupRow>()
 
+  constructor(private readonly executions: Pick<ExecutionStorage, "getById">) {}
+
   async recordModelCall(input: RecordAiModelCallInput): Promise<RecordAiModelCallResult> {
     const record = normalizeAiModelCallRecord(input)
+    await this.assertExecutionExists(record.projectId, record.executionId)
     const idempotencyKey = modelCallIdempotencyKey(record)
     const existingRecordKey = this.recordKeysByIdempotencyKey.get(idempotencyKey)
     if (existingRecordKey !== undefined) {
@@ -71,7 +74,7 @@ export class InMemoryAiUsageStorage implements AiUsageStorage {
   ): Promise<AiUsageExecutionSummary> {
     const [summary] = await this.summarizeExecutions({
       projectId: input.projectId,
-      executions: [input.execution],
+      executionIds: [input.executionId],
     })
     return summary!
   }
@@ -83,20 +86,20 @@ export class InMemoryAiUsageStorage implements AiUsageStorage {
       throw new TypeError("[Sixb] AI usage projectId must be nonblank.")
     }
 
-    const usageByExecution = new Map<string, AiModelCallUsageRecord["usage"][]>()
-    for (const execution of input.executions) {
-      assertAiUsageExecution(execution)
-      usageByExecution.set(executionKey(execution), [])
+    const usageByExecutionId = new Map<string, AiModelCallUsageRecord["usage"][]>()
+    for (const executionId of input.executionIds) {
+      assertAiUsageExecutionId(executionId)
+      usageByExecutionId.set(executionId, [])
     }
-    if (usageByExecution.size === 0) return []
+    if (usageByExecutionId.size === 0) return []
 
     for (const record of this.records.values()) {
       if (record.projectId !== input.projectId) continue
-      usageByExecution.get(executionKey(record.execution))?.push(record.usage)
+      usageByExecutionId.get(record.executionId)?.push(record.usage)
     }
 
-    return input.executions.map((execution) => {
-      const usages = usageByExecution.get(executionKey(execution)) ?? []
+    return input.executionIds.map((executionId) => {
+      const usages = usageByExecutionId.get(executionId) ?? []
       return {
         modelCallCount: usages.length,
         usage: aggregateAiModelCallUsage(usages),
@@ -117,6 +120,15 @@ export class InMemoryAiUsageStorage implements AiUsageStorage {
     replaceMap(this.recordKeysByIdempotencyKey, snapshot.recordKeysByIdempotencyKey)
     replaceMap(this.groupRows, snapshot.groupRows)
   }
+
+  private async assertExecutionExists(projectId: string, executionId: string): Promise<void> {
+    const execution = await this.executions.getById({ projectId, id: executionId })
+    if (execution) return
+    throw new AiUsageStorageError(
+      "missing_execution",
+      `[Sixb] AI usage execution '${executionId}' does not exist in project '${projectId}'.`
+    )
+  }
 }
 
 function modelCallRecordKey(projectId: string, id: string): string {
@@ -126,26 +138,16 @@ function modelCallRecordKey(projectId: string, id: string): string {
 function modelCallIdempotencyKey(
   record: Pick<
     AiModelCallUsageRecord,
-    "projectId" | "execution" | "attempt" | "callId" | "responseId"
+    "projectId" | "executionId" | "attempt" | "callId" | "responseId"
   >
 ): string {
   return JSON.stringify([
     record.projectId,
-    ...executionKeyParts(record.execution),
+    record.executionId,
     record.attempt,
     record.callId,
     record.responseId,
   ])
-}
-
-function executionKeyParts(execution: AiUsageExecutionIdentity): readonly string[] {
-  return execution.kind === "agentRun"
-    ? [execution.kind, execution.runId]
-    : [execution.kind, execution.workflowRunId, execution.nodeRunId]
-}
-
-function executionKey(execution: AiUsageExecutionIdentity): string {
-  return JSON.stringify(executionKeyParts(execution))
 }
 
 function groupRowKey(row: InMemoryAiUsageGroupRow): string {

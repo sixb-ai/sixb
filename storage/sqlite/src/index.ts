@@ -19,6 +19,7 @@ import {
   createWorkflowRunOperationScope,
 } from "@sixb/core/internal/storage-operation-scope"
 import {
+  type AiUsageStorage,
   createTransactionStorageProxy,
   StorageTransactionError,
   throwNestedStorageTransaction,
@@ -78,7 +79,7 @@ export class SqliteStorage implements MigrationCapableStorage {
   readonly auth: SqliteAuthStorage
   readonly executions: SqliteExecutionStorage
   readonly agents: SqliteAgentStorage
-  readonly aiUsage: SqliteAiUsageStorage
+  readonly aiUsage: AiUsageStorage
   readonly actionRuns: SqliteActionRunStorage
   readonly pipelineRuns: SqlitePipelineRunStorage
   readonly syncRuns: SqliteSyncRunStorage
