@@ -45,7 +45,7 @@ Usage writes are intentionally not fenced: a stale worker cannot finalize the ex
 provider call it completed remains billable.
 
 The AI SDK swallows lifecycle callback errors, so the worker retries the idempotent append and hands any persistent infrastructure failure to a durable job in `queues.agents`. Recovery retries with bounded backoff and cannot trigger another provider call. Once an append is deferred, `prepareStep`
-blocks the next model step and the run fails closed while accounting recovery continues independently. If the durable handoff also fails, the same stop prevents silent usage loss. This local path cannot close a process-crash window before lifecycle delivery; provider-side reconciliation is the appropriate later layer for that guarantee.
+blocks the next model step and the owning Agent run or workflow fails closed while accounting recovery continues independently. If the durable handoff also fails, the same stop prevents silent usage loss. This local path cannot close a process-crash window before lifecycle delivery; provider-side reconciliation is the appropriate later layer for that guarantee.
 
 During the staged rollout, the existing run aggregate remains for display; the model-call ledger is the accounting authority and a later stack PR removes the projection.
 
