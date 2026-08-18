@@ -189,6 +189,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 23,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "024-ontology-commit-executions",
+    status: "applied",
+    version: 24,
+  },
 ]
 
 afterEach(async () => {
@@ -1502,6 +1509,65 @@ describe("SQLite storage migrations", () => {
           ["project_id", "connector_id", "webhook_id", "idempotency_key"],
         ])
       )
+    } finally {
+      db.close()
+    }
+  })
+
+  test("rejects legacy ontology commits instead of inventing execution authority", () => {
+    const db = new Database(":memory:")
+    try {
+      const migrationIndex = sqliteStorageMigrations.steps.findIndex(
+        (migration) => migration.id === "024-ontology-commit-executions"
+      )
+      const migration = sqliteStorageMigrations.steps[migrationIndex]
+      if (!migration) throw new Error("SQLite ontology-commit execution migration is missing.")
+      for (const previous of sqliteStorageMigrations.steps.slice(0, migrationIndex)) {
+        previous.up(db)
+      }
+      db.query(`
+        INSERT INTO ontology_commits (
+          project_id, id, idempotency_key, request_hash, origin_kind, origin,
+          ontology_revision, intent, result, committed_at
+        ) VALUES (?, ?, ?, ?, 'runtime', json(?), ?, json(?), json(?), ?)
+      `).run(
+        "project-a",
+        "legacy-commit",
+        "runtime:legacy-commit",
+        "legacy-hash",
+        JSON.stringify({ kind: "runtime", requestId: "legacy-request" }),
+        "ontology-1",
+        JSON.stringify({ kind: "edit", mode: "atomic", operationCount: 0 }),
+        JSON.stringify({
+          kind: "edit",
+          commitId: "legacy-commit",
+          created: true,
+          eventCount: 0,
+          committedAt: "2026-01-01T00:00:00.000Z",
+          outcomes: [],
+          changes: { objects: [], links: [] },
+        }),
+        "2026-01-01T00:00:00.000Z"
+      )
+
+      expect(() => db.transaction(() => migration.up(db))()).toThrow("unknown authority")
+      expect(readMemoryTableColumns(db, "ontology_commits")).not.toContain("execution_id")
+    } finally {
+      db.close()
+    }
+  })
+
+  test("requires every ontology commit to reference a durable execution", () => {
+    const db = new Database(":memory:")
+    try {
+      for (const migration of sqliteStorageMigrations.steps) migration.up(db)
+
+      expect(readMemoryColumn(db, "ontology_commits", "execution_id")?.notnull).toBe(1)
+      expect(readMemoryForeignKeyTables(db, "ontology_commits")).toContain("executions")
+      expect(readMemoryIndexColumns(db, "idx_ontology_commits_execution")).toEqual([
+        "project_id",
+        "execution_id",
+      ])
     } finally {
       db.close()
     }

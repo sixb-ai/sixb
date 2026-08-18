@@ -837,12 +837,13 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
     const actor = commit.actor === undefined ? null : jsonParameter(this.sql, commit.actor)
     const rows = await this.sql<PgOntologyCommitRow[]>`
       INSERT INTO ontology_commits (
-        project_id, id, idempotency_key, request_hash,
+        project_id, id, idempotency_key, request_hash, execution_id,
         origin_kind, origin_run_id, origin_batch_ordinal, origin, actor,
         ontology_revision, projection_revision, ownership_hash,
         intent, result, committed_at
       ) VALUES (
         ${commit.projectId}, ${commit.id}, ${commit.idempotencyKey}, ${commit.requestHash},
+        ${commit.executionId},
         ${origin.kind}, ${origin.runId}, ${origin.batchOrdinal},
         ${jsonParameter(this.sql, commit.origin)}, ${actor}, ${commit.ontologyRevision},
         ${commit.projectionRevision ?? null}, ${commit.ownershipHash ?? null},

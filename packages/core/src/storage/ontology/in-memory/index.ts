@@ -26,6 +26,7 @@ interface InMemoryOntologyStorageOptions {
   readonly getTransactionToken: () => object | null
   readonly getMaterializationLifecycle: () => ProviderMaterializationTransactionLifecycle | null
   readonly assertSourceMaterializationExecution: AssertSourceMaterializationExecution
+  readonly executionExists: (projectId: string, executionId: string) => Promise<boolean>
 }
 
 export class InMemoryOntologyStorage implements OntologyStorage {
@@ -58,6 +59,7 @@ export class InMemoryOntologyStorage implements OntologyStorage {
       timeseries,
       options.getTransactionToken,
       options.getMaterializationLifecycle,
+      options.executionExists,
       {
         beforeRead: (boundary) => this.testHooks.beforeRead?.(boundary),
         beforeWrite: (boundary, ordinal) => this.testHooks.beforeWrite?.(boundary, ordinal),

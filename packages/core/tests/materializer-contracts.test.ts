@@ -287,36 +287,6 @@ describe("materializer canonical contracts", () => {
     ).toThrow("exactly its matching link assertion")
   })
 
-  test("normalizes actors to the exact persisted shape", () => {
-    const normalized = normalizeOntologyEditCommit({
-      mode: "continue",
-      source: { kind: "runtime", requestId: "request-1" },
-      actor: { type: "serviceAccount", id: "service-1", ignored: true },
-      operations: [],
-    } as Parameters<typeof normalizeOntologyEditCommit>[0] & {
-      actor: { type: "serviceAccount"; id: string; ignored: boolean }
-    })
-    expect(normalized.actor).toEqual({ type: "serviceAccount", id: "service-1" })
-    expect(Object.keys(normalized.actor ?? {})).toEqual(["type", "id"])
-
-    expect(() =>
-      normalizeOntologyEditCommit({
-        mode: "continue",
-        source: { kind: "runtime", requestId: "request-1" },
-        actor: { type: "robot", id: "service-1" },
-        operations: [],
-      } as unknown as Parameters<typeof normalizeOntologyEditCommit>[0])
-    ).toThrow("Event actor type")
-    expect(() =>
-      normalizeOntologyEditCommit({
-        mode: "continue",
-        source: { kind: "runtime", requestId: "request-1" },
-        actor: { type: "system", id: "  " },
-        operations: [],
-      })
-    ).toThrow("Event actor id must be a nonblank string")
-  })
-
   test("collapses equal telemetry duplicates and rejects conflicting points", () => {
     const point = {
       series: { object: leftObject, propertyId: "temperature" },
@@ -404,6 +374,7 @@ describe("materializer canonical contracts", () => {
         id: "commit-1",
         idempotencyKey: "runtime:request-1",
         requestHash: "request-hash",
+        executionId: "execution-1",
         origin: { kind: "runtime", requestId: "request-1" },
         ontologyRevision: "ontology-revision",
         intent: { kind: "edit", mode: "atomic", operationCount: 0 },
@@ -446,6 +417,7 @@ describe("materializer canonical contracts", () => {
       id: "commit-1",
       idempotencyKey: "runtime:request-1",
       requestHash: "request-hash",
+      executionId: "execution-1",
       origin: { kind: "runtime", requestId: "request-1" },
       ontologyRevision: "ontology-revision",
       intent: { kind: "edit", mode: "atomic", operationCount: 0 },
@@ -491,6 +463,7 @@ describe("materializer canonical contracts", () => {
       schemaVersion: 1,
       projectId: "project",
       occurredAt: "2026-01-02T03:04:05.000Z",
+      correlationId: "correlation-1",
       origin: { kind: "runtime", requestId: "request-1" },
       commitId: "commit-1",
       commitOrdinal: 0,
@@ -542,11 +515,12 @@ describe("materializer canonical contracts", () => {
   })
 
   test("freezes persisted event ordering, origin, and commit ordinal", () => {
-    const event: OntologyMaterializationEvent = {
+    const event = {
       id: "event-1",
       schemaVersion: 1,
       projectId: "project",
       occurredAt: "2026-01-02T03:04:05.000Z",
+      correlationId: "correlation-1",
       origin: { kind: "runtime", requestId: "request-1" },
       commitId: "commit-1",
       commitOrdinal: 0,
@@ -561,7 +535,7 @@ describe("materializer canonical contracts", () => {
           obsolete: { operation: "cleared", before: "old", after: null },
         },
       },
-    }
+    } satisfies OntologyMaterializationEvent
 
     expect(event.payload.propertyChanges.obsolete?.operation).toBe("cleared")
     expect(ONTOLOGY_MATERIALIZATION_EVENT_KIND_ORDER).toEqual([

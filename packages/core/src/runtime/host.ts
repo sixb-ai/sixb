@@ -29,10 +29,7 @@ import {
   type DomainEventService,
   OntologyOutboxDispatcher,
 } from "../events"
-import {
-  assertExecutionScopeProject,
-  resolveRuntimeAuthorization,
-} from "../execution/authorization"
+import { resolveExecutionScopeAuthorization } from "../execution/authorization"
 import type { ExecutionScope } from "../execution/types"
 import type { LakeStorage } from "../lake-storage"
 import { type LoggerProvider, LoggingService, type ObservabilityOptions } from "../logging"
@@ -43,7 +40,7 @@ import {
   type OntologyOperationalStatus,
   type SixbReadiness,
 } from "../maintenance"
-import { createOntologyMaterializer } from "../materializer"
+import { createOntologyMaterializer, type OntologyMaterializerContract } from "../materializer"
 import type { PipelineDefinition } from "../pipelines/types"
 import { registerProjectionRegistry } from "../projections/internal"
 import type { ProjectionDefinition } from "../projections/types"
@@ -119,6 +116,7 @@ export class SixbHost<
   private readonly ontologyMaintenance: OntologyMaintenance
   private readonly storageReadiness: StorageReadiness
   private readonly connectorService: ConnectorService
+  private readonly materializer: OntologyMaterializerContract
   readonly definitions: SixbDefinitions
   readonly broker: Broker
   readonly events: DomainEventLog
@@ -172,7 +170,7 @@ export class SixbHost<
     assertWebhookRunStorage(connectors, this.storage)
     this.webhookRegistry = new WebhookRegistry({ connectors })
 
-    const materializer = createOntologyMaterializer({
+    this.materializer = createOntologyMaterializer({
       projectId: this.projectId,
       ontology: definitions.ontology,
       projections: definitions.projections,
@@ -204,12 +202,6 @@ export class SixbHost<
       queues: this.queues,
     }
     registerProjectionRegistry(this.hostContext, definitions.projections)
-    const ontologyMutations = createOntologyMutationRuntime({
-      materializer,
-      notifyCommittedFacts: () => this.committedFacts.notify(),
-    })
-    registerOntologyMutationRuntime(this, ontologyMutations)
-    registerOntologyMutationRuntime(this.hostContext, ontologyMutations)
     shareSixbErrorReporter(this, this.hostContext)
     this.scheduler = new SchedulerRuntime({
       schedules: definitions.schedules.list(),
@@ -219,11 +211,7 @@ export class SixbHost<
 
   /** Bind an existing opaque scope. This method never creates or escalates authority. */
   withScope(scope: ExecutionScope): Sixb<TOntologySources> {
-    assertExecutionScopeProject(this.projectId, scope)
-    const authorization = resolveRuntimeAuthorization(scope.authorization)
-    if (authorization.type === "denied") {
-      throw new Error("[Sixb] Execution scope carries unregistered runtime authorization.")
-    }
+    const authorization = resolveExecutionScopeAuthorization(this.projectId, scope)
     if (authorization.ref.type === "kernel") {
       throw new Error("[Sixb] Kernel authority cannot be bound to the domain SDK.")
     }
@@ -233,6 +221,13 @@ export class SixbHost<
       runtimeAuthorization: scope.authorization,
       ...(authorization.type === "principal" ? { authorization: authorization.context } : {}),
     }
+    registerOntologyMutationRuntime(
+      runtime,
+      createOntologyMutationRuntime({
+        materializer: this.materializer.withScope(scope),
+        notifyCommittedFacts: () => this.committedFacts.notify(),
+      })
+    )
     return createBoundSixb<TOntologySources>(runtime, this.sixbDependencies(), scope.execution)
   }
 

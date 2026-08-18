@@ -1,9 +1,12 @@
+import type { ExecutionScope } from "../execution"
 import type {
+  EditCommitResult,
   OntologyEditCommit,
-  OntologyMaterializer as OntologyMaterializerContract,
+  ProjectionCommitResult,
   ProjectionRunFinishInput,
   ProjectionSourceReplacement,
   TelemetryAppend,
+  TelemetryCommitResult,
 } from "../materialization/model"
 import type { OntologyRegistry } from "../ontology"
 import type { ProjectionRegistry } from "../projections/registry"
@@ -20,13 +23,72 @@ import { appendTelemetry } from "./telemetry/append"
 
 export type { MaterializerStorage, OntologyMaterializerDependencies } from "./context"
 
-export class OntologyMaterializer implements OntologyMaterializerContract {
-  readonly edits = { commit: (input: OntologyEditCommit) => commitEdits(this.context, input) }
-  readonly projections = {
-    replace: (input: ProjectionSourceReplacement) => replaceProjection(this.context, input),
-    finishRun: (input: ProjectionRunFinishInput) => finishProjectionRun(this.context, input),
+export interface MaterializerCommand<TInput> {
+  readonly scope: ExecutionScope
+  readonly input: TInput
+}
+
+export interface OntologyMaterializerContract {
+  withScope(scope: ExecutionScope): BoundOntologyMaterializer
+  readonly edits: {
+    commit(input: MaterializerCommand<OntologyEditCommit>): Promise<EditCommitResult>
   }
-  readonly telemetry = { append: (input: TelemetryAppend) => appendTelemetry(this.context, input) }
+  readonly projections: {
+    replace(
+      input: MaterializerCommand<ProjectionSourceReplacement>
+    ): Promise<ProjectionCommitResult>
+    finishRun(input: MaterializerCommand<ProjectionRunFinishInput>): Promise<void>
+  }
+  readonly telemetry: {
+    append(input: MaterializerCommand<TelemetryAppend>): Promise<TelemetryCommitResult>
+  }
+}
+
+/** Materializer facade closed over one explicit execution scope. */
+export interface BoundOntologyMaterializer {
+  readonly edits: {
+    commit(input: OntologyEditCommit): Promise<EditCommitResult>
+  }
+  readonly projections: {
+    replace(input: ProjectionSourceReplacement): Promise<ProjectionCommitResult>
+    finishRun(input: ProjectionRunFinishInput): Promise<void>
+  }
+  readonly telemetry: {
+    append(input: TelemetryAppend): Promise<TelemetryCommitResult>
+  }
+}
+
+export class OntologyMaterializer implements OntologyMaterializerContract {
+  readonly edits = {
+    commit: (command: MaterializerCommand<OntologyEditCommit>) =>
+      commitEdits(this.context, command),
+  }
+  readonly projections = {
+    replace: (command: MaterializerCommand<ProjectionSourceReplacement>) =>
+      replaceProjection(this.context, command),
+    finishRun: (command: MaterializerCommand<ProjectionRunFinishInput>) =>
+      finishProjectionRun(this.context, command),
+  }
+  readonly telemetry = {
+    append: (command: MaterializerCommand<TelemetryAppend>) =>
+      appendTelemetry(this.context, command),
+  }
+
+  withScope(scope: ExecutionScope): BoundOntologyMaterializer {
+    return Object.freeze({
+      edits: Object.freeze({
+        commit: (input: OntologyEditCommit) => this.edits.commit({ scope, input }),
+      }),
+      projections: Object.freeze({
+        replace: (input: ProjectionSourceReplacement) => this.projections.replace({ scope, input }),
+        finishRun: (input: ProjectionRunFinishInput) =>
+          this.projections.finishRun({ scope, input }),
+      }),
+      telemetry: Object.freeze({
+        append: (input: TelemetryAppend) => this.telemetry.append({ scope, input }),
+      }),
+    })
+  }
 
   private readonly context: MaterializerContext
 

@@ -55,7 +55,7 @@ event's `type`, `topic`, `partitionKey`, `payload`, and a broker `cursor`.
 | `schemaVersion` | `1` | Envelope schema version |
 | `projectId` | `string` | Owning project |
 | `occurredAt` | `string` | ISO timestamp |
-| `correlationId` | `string?` | Groups related events |
+| `correlationId` | `string?` | Groups related events. Required on ontology facts and copied from their execution |
 | `causationId` | `string?` | The event that caused this one |
 | `idempotencyKey` | `string?` | De-duplicates appends |
 | `actor` | `{ type, id }?` | Who made the write: `user`, `serviceAccount`, or `system`. Absent for trusted internal or explicitly auth-disabled executions |
@@ -73,7 +73,7 @@ consumer that may see an event twice can de-duplicate on it.
 
 | `origin.kind` | `actor` | The write was |
 | --- | --- | --- |
-| `action` | the requester | governed — validated, and recorded as a run |
+| `action` | absent | governed by a trusted Action execution; the original requester remains on that execution |
 | `runtime` | the principal | a direct write through `edit:object` or `append:telemetry` |
 | `runtime` | absent | system code: a worker, a sync, startup |
 | `projection` | absent | derived from a dataset |

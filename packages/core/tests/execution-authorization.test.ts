@@ -8,6 +8,7 @@ import {
   createPrincipalRuntimeAuthorization,
   createTrustedPrimitiveRuntimeAuthorization,
   getAuthorizationRef,
+  resolveExecutionScopeAuthorization,
   resolveRuntimeAuthorization,
 } from "../src/execution/authorization"
 import {
@@ -125,6 +126,22 @@ describe("runtime authorization capabilities", () => {
 })
 
 describe("execution scopes", () => {
+  test("rejects mixing an execution with authority from another scope", () => {
+    const principalScope = createTestingScope({
+      projectId: "project-1",
+      context: authorizationContext({ type: "user", id: "user-1" }),
+    })
+    const disabledScope = createTestingScope({ projectId: "project-1" })
+
+    expect(() => resolveExecutionScopeAuthorization("project-1", principalScope)).not.toThrow()
+    expect(() =>
+      resolveExecutionScopeAuthorization("project-1", {
+        execution: principalScope.execution,
+        authorization: disabledScope.authorization,
+      })
+    ).toThrow("incompatible with its authority")
+  })
+
   test("creates a principal request scope with explicit request provenance", () => {
     const scope = createPrincipalRequestScope({
       projectId: "project-1",

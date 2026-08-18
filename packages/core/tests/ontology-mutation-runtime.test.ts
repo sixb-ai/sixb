@@ -1,9 +1,8 @@
 import { describe, expect, spyOn, test } from "bun:test"
+import type { BoundOntologyMaterializer } from "../src/materializer"
 import { createOntologyMutationRuntime } from "../src/runtime/internal"
 
-type Materializer = Parameters<typeof createOntologyMutationRuntime>[0]["materializer"]
-
-function materializerWithEventCount(eventCount: number): Materializer {
+function materializerWithEventCount(eventCount: number): BoundOntologyMaterializer {
   const result = { eventCount } as never
   return {
     edits: { commit: async () => result },
@@ -18,8 +17,9 @@ function materializerWithEventCount(eventCount: number): Materializer {
 describe("ontology mutation runtime", () => {
   test("wakes the outbox once after each commit that created facts", async () => {
     let wakes = 0
+    const bound = materializerWithEventCount(2)
     const runtime = createOntologyMutationRuntime({
-      materializer: materializerWithEventCount(2),
+      materializer: bound,
       notifyCommittedFacts: () => {
         wakes += 1
       },
@@ -35,8 +35,9 @@ describe("ontology mutation runtime", () => {
 
   test("does not wake for an empty commit or let wake-up failure reject a durable commit", async () => {
     let wakes = 0
+    const emptyBound = materializerWithEventCount(0)
     const empty = createOntologyMutationRuntime({
-      materializer: materializerWithEventCount(0),
+      materializer: emptyBound,
       notifyCommittedFacts: () => {
         wakes += 1
       },
@@ -44,8 +45,9 @@ describe("ontology mutation runtime", () => {
     await empty.commitEdits({} as never)
     expect(wakes).toBe(0)
 
+    const committedBound = materializerWithEventCount(1)
     const committed = createOntologyMutationRuntime({
-      materializer: materializerWithEventCount(1),
+      materializer: committedBound,
       notifyCommittedFacts: () => {
         throw new Error("wake failed")
       },
