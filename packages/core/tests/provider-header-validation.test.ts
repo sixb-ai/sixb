@@ -23,6 +23,7 @@ function projectionHeader(originProjectionId = "devices"): MaterializationPlanHe
       id: "projection-commit",
       idempotencyKey: "projection:run",
       requestHash: "projection-request",
+      executionId: "projection-execution",
       origin: {
         kind: "projection",
         projectionId: originProjectionId,
@@ -59,6 +60,7 @@ function telemetryHeader(input?: {
       id: "telemetry-commit",
       idempotencyKey: "projection:run:batch:0",
       requestHash: "telemetry-request",
+      executionId: "projection-execution",
       origin: {
         kind: "telemetry",
         source: {

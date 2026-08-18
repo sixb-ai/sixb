@@ -463,7 +463,7 @@ describe("ontology materializer telemetry", () => {
     ).toHaveLength(2)
   })
 
-  test("uses one fenced transaction per projection batch and keeps runtime replay cheap", async () => {
+  test("uses one fenced transaction for projection batches and durable runtime replay", async () => {
     class TransactionCountingStorage extends InMemoryStorage {
       transactions: (StorageTransactionOptions | undefined)[] = []
 
@@ -533,7 +533,7 @@ describe("ontology materializer telemetry", () => {
     await expect(materializer.telemetry.append(runtimeAppend)).resolves.toMatchObject({
       created: false,
     })
-    expect(storage.transactions).toEqual([])
+    expect(storage.transactions).toEqual([{ isolation: "serializable" }])
   })
 
   test("uses physical input size for telemetry batch continuation after equal deduplication", async () => {

@@ -105,6 +105,7 @@ function makeInvoiceUpdatedEvent(
     schemaVersion: 1,
     projectId,
     occurredAt: "2026-04-18T02:00:00.000Z",
+    correlationId: `correlation-${amountBefore}-${amountAfter}`,
     origin: { kind: "runtime", requestId: `request-${amountBefore}-${amountAfter}` },
     commitId: `commit-${amountBefore}-${amountAfter}`,
     commitOrdinal: 0,
@@ -377,7 +378,7 @@ describe("OrchestratorWorker", () => {
         input: {},
         scheduleId: daily.id,
         source: { type: "schedule", eventId: sourceEvent!.id },
-        correlationId: sourceEvent!.id,
+        correlationId: sourceEvent!.correlationId ?? sourceEvent!.id,
       }),
     ])
   })
@@ -415,7 +416,7 @@ describe("OrchestratorWorker", () => {
           input: { invoiceId: "inv-1", amount: 700 },
           scheduleId: highValueInvoice.id,
           source: { type: "event", eventId: sourceEvent!.id },
-          correlationId: sourceEvent!.id,
+          correlationId: sourceEvent!.correlationId ?? sourceEvent!.id,
         }),
       ])
       return true

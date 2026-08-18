@@ -9,6 +9,9 @@ import {
   OntologyRegistry,
   prop,
 } from "../src"
+import { restoreTrustedPrimitiveExecutionScope } from "../src/execution/durable"
+import { createTestingScope } from "../src/execution/scopes"
+import type { ExecutionScope } from "../src/execution/types"
 import {
   createOntologyMaterializer,
   type OntologyMaterializerDependencies,
@@ -19,7 +22,7 @@ import {
   type ProjectionSourceReplacement,
   type TelemetryAppend,
 } from "../src/materializer"
-import { claimTestProjectionRun } from "../src/testing"
+import { claimTestProjectionRun, createTestActionExecution } from "../src/testing"
 
 export const Device = defineObjectType({
   id: "Device",
@@ -62,6 +65,7 @@ export function createMaterializerFixture(
   input: {
     readonly dependencies?: OntologyMaterializerDependencies
     readonly storage?: InMemoryStorage
+    readonly scope?: ExecutionScope
   } = {}
 ) {
   const ontology = new OntologyRegistry({ sources: [Device] })
@@ -85,8 +89,23 @@ export function createMaterializerFixture(
       ...input.dependencies,
     },
   })
+  const runtimeMaterializer = baseMaterializer.withScope(
+    input.scope ??
+      createTestingScope({
+        projectId: "project",
+        executionId: "materializer-fixture-runtime-execution",
+        requestId: "materializer-fixture-runtime-request",
+        correlationId: "materializer-fixture-runtime-correlation",
+      })
+  )
   const materializer = {
-    edits: baseMaterializer.edits,
+    edits: {
+      async commit(request: Parameters<typeof runtimeMaterializer.edits.commit>[0]) {
+        if (request.source.kind !== "action") return runtimeMaterializer.edits.commit(request)
+        const scope = await actionScope(storage, request.source.actionId, request.source.runId)
+        return baseMaterializer.withScope(scope).edits.commit(request)
+      },
+    },
     projections: {
       async replace(request: ProjectionSourceReplacement) {
         const execution = await resolveFixtureExecution(storage, projections, request.execution, {
@@ -94,17 +113,34 @@ export function createMaterializerFixture(
           protocol: "replacement",
           datasetVersion: request.datasetVersion,
         })
-        return baseMaterializer.projections.replace({ ...request, execution })
+        const scope = await projectionScope(storage, {
+          projectId: "project",
+          projectionId: request.source.projectionId,
+          runId: execution.projectionRunId,
+        })
+        return baseMaterializer.withScope(scope).projections.replace({ ...request, execution })
       },
-      finishRun: baseMaterializer.projections.finishRun,
+      async finishRun(request: Parameters<typeof runtimeMaterializer.projections.finishRun>[0]) {
+        const scope = await projectionScope(storage, {
+          projectId: "project",
+          projectionId: request.source.projectionId,
+          runId: request.execution.projectionRunId,
+        })
+        return baseMaterializer.withScope(scope).projections.finishRun(request)
+      },
     },
     telemetry: {
       async append(request: TelemetryAppend) {
-        if (
-          request.source.kind !== "projection" ||
-          request.source.execution.executionToken !== FIXTURE_EXECUTION_TOKEN
-        ) {
-          return baseMaterializer.telemetry.append(request)
+        if (request.source.kind !== "projection") {
+          return runtimeMaterializer.telemetry.append(request)
+        }
+        if (request.source.execution.executionToken !== FIXTURE_EXECUTION_TOKEN) {
+          const scope = await projectionScope(storage, {
+            projectId: "project",
+            projectionId: request.source.projection.projectionId,
+            runId: request.source.execution.projectionRunId,
+          })
+          return baseMaterializer.withScope(scope).telemetry.append(request)
         }
         const execution = await claimProjectionExecution(storage, projections, {
           runId: request.source.execution.projectionRunId,
@@ -113,7 +149,12 @@ export function createMaterializerFixture(
           datasetVersion: request.source.datasetVersion,
           fixedBatchSize: request.source.sourceRowCount,
         })
-        return baseMaterializer.telemetry.append({
+        const scope = await projectionScope(storage, {
+          projectId: "project",
+          projectionId: request.source.projection.projectionId,
+          runId: execution.projectionRunId,
+        })
+        return baseMaterializer.withScope(scope).telemetry.append({
           ...request,
           source: { ...request.source, execution },
         })
@@ -121,6 +162,51 @@ export function createMaterializerFixture(
     },
   }
   return { materializer, storage, ontology, projections }
+}
+
+async function actionScope(
+  storage: InMemoryStorage,
+  actionId: string,
+  runId: string
+): Promise<ExecutionScope> {
+  const run = await storage.actionRuns?.getById({ projectId: "project", id: runId })
+  const executionId =
+    run?.executionId ??
+    (await createTestActionExecution(storage.executions, {
+      projectId: "project",
+      actionId,
+      runId,
+    }))
+  const execution = await storage.executions.getById({ projectId: "project", id: executionId })
+  if (!execution) throw new Error(`Action execution '${executionId}' is missing.`)
+  return restoreTrustedPrimitiveExecutionScope({
+    execution,
+    primitive: { kind: "action", id: actionId, runId },
+  })
+}
+
+export async function projectionScope(
+  storage: InMemoryStorage,
+  input: {
+    readonly projectId: string
+    readonly projectionId: string
+    readonly runId: string
+  }
+): Promise<ExecutionScope> {
+  const run = await storage.projectionRuns?.getById({
+    projectId: input.projectId,
+    id: input.runId,
+  })
+  if (!run) throw new Error(`Projection run '${input.runId}' is not available in the fixture.`)
+  const execution = await storage.executions.getById({
+    projectId: input.projectId,
+    id: run.executionId,
+  })
+  if (!execution) throw new Error(`Projection execution '${run.executionId}' is missing.`)
+  return restoreTrustedPrimitiveExecutionScope({
+    execution,
+    primitive: { kind: "projection", id: input.projectionId, runId: input.runId },
+  })
 }
 
 export function sourceEntry(id: string, name: string, note?: string | null): ProjectionSourceEntry {
