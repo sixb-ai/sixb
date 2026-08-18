@@ -23,6 +23,11 @@ import {
 } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
 import { finishRunOrThrow } from "./finalize"
+import {
+  enqueueAiModelCallRecovery,
+  isPermanentAiUsageRecoveryError,
+  recordRecoveredAiModelCall,
+} from "./model-call-recovery"
 import { DEFAULT_MAX_STEPS, runAgentTurn } from "./run-agent-turn"
 import {
   type AgentExecutionEnvironment,
@@ -47,6 +52,8 @@ const MAX_AGENT_DISPATCH_BACKOFF_MS = 30_000
 /** Backoff before redelivering a job whose run could not be finalized (storage was unavailable). */
 const FINALIZE_RETRY_BACKOFF_MS = 5_000
 const PRESTART_RETRY_BACKOFF_MS = 5_000
+const AI_USAGE_RECOVERY_INITIAL_BACKOFF_MS = 5_000
+const AI_USAGE_RECOVERY_MAX_BACKOFF_MS = 5 * 60_000
 /** Cap retries for persistent setup or finalization failures so jobs cannot churn forever. */
 const MAX_AGENT_DELIVERY_ATTEMPTS = 10
 
@@ -142,6 +149,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
   ): Promise<void> {
     const context = this.requireContext()
     const { job } = claimed
+    if (job.type === "agent.ai-usage.record.requested") {
+      await recordRecoveredAiModelCall(context.storage.aiUsage, job)
+      return
+    }
     if (job.type === "agent.workflow-node.requested") {
       await executeWorkflowAgentNode({
         context,
@@ -313,6 +324,14 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
     claimed: ClaimedQueueJob<AgentQueueJob>,
     error: unknown
   ): Promise<QueueWorkerFailureDecision> {
+    if (claimed.job.type === "agent.ai-usage.record.requested") {
+      return isPermanentAiUsageRecoveryError(error)
+        ? { kind: "fail" }
+        : {
+            kind: "retry",
+            availableAt: backoff(aiUsageRecoveryBackoffMs(claimed.job.attempt)),
+          }
+    }
     // We could not finalize the run (storage unavailable). Redeliver so a later delivery records the
     // fate — but cap the redeliveries so a persistent failure dead-letters instead of churning.
     if (error instanceof AgentFinalizationError) {
@@ -357,6 +376,12 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
     claimed: ClaimedQueueJob<AgentQueueJob>,
     error: unknown
   ): QueueWorkerFailureDecision {
+    if (claimed.job.type === "agent.ai-usage.record.requested") {
+      return {
+        kind: "retry",
+        availableAt: backoff(aiUsageRecoveryBackoffMs(claimed.job.attempt)),
+      }
+    }
     if (claimed.job.type === "agent.workflow-node.requested") {
       return { kind: "retry", availableAt: backoff(FINALIZE_RETRY_BACKOFF_MS) }
     }
@@ -604,6 +629,7 @@ function buildAgentContext(host: AgentWorkerHost, options: AgentWorkerOptions): 
     streamSink: isolateStreamSink(
       options.streamSink ?? createBrokerStreamSink({ broker: host.broker, projectId: host.id })
     ),
+    recoverAiModelCall: (record) => enqueueAiModelCallRecovery(host.queues.agents, record),
     agentSkills,
     defaultMaxSteps: options.defaultMaxSteps ?? DEFAULT_MAX_STEPS,
     turnTimeoutMs: options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
@@ -642,6 +668,14 @@ function isExecutionGone(error: unknown): boolean {
 
 function backoff(ms: number): string {
   return new Date(Date.now() + ms).toISOString()
+}
+
+function aiUsageRecoveryBackoffMs(attempt: number): number {
+  const exponent = Math.max(0, Math.min(attempt - 1, 10))
+  return Math.min(
+    AI_USAGE_RECOVERY_INITIAL_BACKOFF_MS * 2 ** exponent,
+    AI_USAGE_RECOVERY_MAX_BACKOFF_MS
+  )
 }
 
 function toErrorMessage(error: unknown): string {

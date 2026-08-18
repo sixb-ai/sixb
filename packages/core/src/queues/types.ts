@@ -1,6 +1,7 @@
 import type { JsonValue } from "../json"
 import type { ProjectionMaterializationIdentity } from "../materialization/model"
 import type { ProviderScope } from "../provider-scope"
+import type { RecordAiModelCallInput } from "../storage/ai-usage"
 
 export interface QueueJobEnvelope {
   readonly id: string
@@ -185,7 +186,29 @@ export interface AgentWorkflowNodeRequestedQueueJob
     }
   > {}
 
-export type AgentQueueJob = AgentRunRequestedQueueJob | AgentWorkflowNodeRequestedQueueJob
+/** JSON-safe representation of one model-call ledger append awaiting durable recovery. */
+export type AgentAiUsageRecordPayload = Omit<
+  RecordAiModelCallInput,
+  "projectId" | "usage" | "occurredAt" | "recordedAt"
+> & {
+  readonly usage: {
+    readonly [Field in keyof RecordAiModelCallInput["usage"]]: RecordAiModelCallInput["usage"][Field]
+  }
+  readonly occurredAt: string
+}
+
+export interface AgentAiUsageRecordRequestedQueueJob
+  extends QueueJob<
+    "agent.ai-usage.record.requested",
+    {
+      readonly record: AgentAiUsageRecordPayload
+    }
+  > {}
+
+export type AgentQueueJob =
+  | AgentRunRequestedQueueJob
+  | AgentWorkflowNodeRequestedQueueJob
+  | AgentAiUsageRecordRequestedQueueJob
 
 export interface Queues {
   readonly syncRuns: Queue<SyncRunRequestedQueueJob>

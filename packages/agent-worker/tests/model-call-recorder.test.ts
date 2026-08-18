@@ -4,12 +4,19 @@ import type {
   AiUsageStorage,
   RecordAiModelCallInput,
 } from "@sixb/core/storage"
-import { InMemoryAiUsageStorage, normalizeAiModelCallRecord } from "@sixb/core/storage"
+import {
+  AiUsageStorageError,
+  InMemoryAiUsageStorage,
+  InMemoryStorage,
+  normalizeAiModelCallRecord,
+} from "@sixb/core/storage"
+import { createTestAgentExecution } from "@sixb/core/testing"
 import type { LanguageModelCallEndEvent } from "ai"
 import { AgentUsageRecordingError } from "../src/errors"
 import { AiModelCallRecorder } from "../src/model-call-recorder"
 
 const occurredAt = new Date("2026-07-01T12:00:00.000Z")
+const executionId = "test_agent_execution:run_1"
 const emptySummary: AiUsageExecutionSummary = {
   modelCallCount: 0,
   usage: { reportingStatus: "unavailable" },
@@ -56,20 +63,34 @@ function callEndEvent(): LanguageModelCallEndEvent {
 
 function recorder(
   storage: AiUsageStorage,
-  internals: ConstructorParameters<typeof AiModelCallRecorder>[1] = {}
+  internals: ConstructorParameters<typeof AiModelCallRecorder>[1] = {},
+  recoverAiModelCall: (record: RecordAiModelCallInput) => Promise<void> = async () => {
+    throw new Error("Unexpected AI usage recovery handoff.")
+  }
 ): AiModelCallRecorder {
   return new AiModelCallRecorder(
     {
       storage,
       projectId: "project_1",
-      execution: { kind: "agentRun", runId: "run_1" },
+      executionId,
       attempt: 2,
-      requesterPrincipal: { type: "user", id: "usr_1" },
       requesterGroupIds: ["support", "engineering"],
+      recoverAiModelCall,
       errorRunId: "run_1",
     },
     internals
   )
+}
+
+async function createInMemoryUsageStorage(): Promise<InMemoryAiUsageStorage> {
+  const bundle = new InMemoryStorage()
+  await createTestAgentExecution(bundle, {
+    projectId: "project_1",
+    agentId: "assistant",
+    runId: "run_1",
+    executionId,
+  })
+  return new InMemoryAiUsageStorage(bundle.executions)
 }
 
 describe("AiModelCallRecorder", () => {
@@ -107,10 +128,9 @@ describe("AiModelCallRecorder", () => {
     expect(inputs[0]).toEqual({
       id: "usage_1",
       projectId: "project_1",
-      execution: { kind: "agentRun", runId: "run_1" },
+      executionId,
       attempt: 2,
       callId: "call_1",
-      requesterPrincipal: { type: "user", id: "usr_1" },
       requesterGroupIds: ["support", "engineering"],
       providerId: "gateway",
       requestedModelId: "openai/gpt-5",
@@ -135,7 +155,7 @@ describe("AiModelCallRecorder", () => {
   test("deduplicates a repeated lifecycle callback without double-counting usage", async () => {
     // The recorder deliberately generates a fresh row ID for each callback. Removing the storage
     // idempotency lookup makes this exact callback replay produce two records and double the total.
-    const storage = new InMemoryAiUsageStorage()
+    const storage = await createInMemoryUsageStorage()
     let nextId = 0
     const usage = recorder(storage, {
       generateId: () => `usage_${++nextId}`,
@@ -151,7 +171,7 @@ describe("AiModelCallRecorder", () => {
     await expect(
       storage.summarizeExecution({
         projectId: "project_1",
-        execution: { kind: "agentRun", runId: "run_1" },
+        executionId,
       })
     ).resolves.toMatchObject({
       modelCallCount: 1,
@@ -161,7 +181,7 @@ describe("AiModelCallRecorder", () => {
 
   test("preserves entirely missing callback usage without inventing zeroes", async () => {
     // Default any omitted SDK count to zero in the adapter and both assertions below fail.
-    const storage = new InMemoryAiUsageStorage()
+    const storage = await createInMemoryUsageStorage()
     const usage = recorder(storage, {
       generateId: () => "usage_missing",
       now: () => occurredAt,
@@ -193,7 +213,7 @@ describe("AiModelCallRecorder", () => {
     await expect(
       storage.summarizeExecution({
         projectId: "project_1",
-        execution: { kind: "agentRun", runId: "run_1" },
+        executionId,
       })
     ).resolves.toEqual({
       modelCallCount: 1,
@@ -201,8 +221,9 @@ describe("AiModelCallRecorder", () => {
     })
   })
 
-  test("retains a swallowed callback failure and blocks the next model step", async () => {
+  test("hands a persistent storage failure to durable recovery and blocks the next step", async () => {
     let attempts = 0
+    const recovered: RecordAiModelCallInput[] = []
     const storage: AiUsageStorage = {
       async recordModelCall() {
         attempts += 1
@@ -215,14 +236,105 @@ describe("AiModelCallRecorder", () => {
         return []
       },
     }
-    const usage = recorder(storage, {
-      retryDelaysMs: [10, 20],
-      sleep: async () => undefined,
-    })
+    const usage = recorder(
+      storage,
+      {
+        retryDelaysMs: [10, 20],
+        sleep: async () => undefined,
+      },
+      async (record) => {
+        recovered.push(structuredClone(record))
+      }
+    )
 
     await expect(usage.onLanguageModelCallEnd(callEndEvent())).resolves.toBeUndefined()
     expect(attempts).toBe(3)
-    expect(() => usage.prepareStep()).toThrow(AgentUsageRecordingError)
+    expect(recovered).toHaveLength(1)
+    expect(recovered[0]).toMatchObject({ executionId, callId: "call_1" })
+    let failure: unknown
+    try {
+      usage.prepareStep()
+    } catch (error) {
+      failure = error
+    }
+    expect(failure).toBeInstanceOf(AgentUsageRecordingError)
+    expect(failure).toMatchObject({ recoveryScheduled: true })
+  })
+
+  test("blocks the next model step when storage and durable recovery both fail", async () => {
+    let storageAttempts = 0
+    let recoveryAttempts = 0
+    const storage: AiUsageStorage = {
+      async recordModelCall() {
+        storageAttempts += 1
+        throw new Error("storage unavailable")
+      },
+      async summarizeExecution(): Promise<AiUsageExecutionSummary> {
+        return emptySummary
+      },
+      async summarizeExecutions() {
+        return []
+      },
+    }
+    const usage = recorder(
+      storage,
+      {
+        retryDelaysMs: [10, 20],
+        sleep: async () => undefined,
+      },
+      async () => {
+        recoveryAttempts += 1
+        throw new Error("queue unavailable")
+      }
+    )
+
+    await expect(usage.onLanguageModelCallEnd(callEndEvent())).resolves.toBeUndefined()
+    expect(storageAttempts).toBe(3)
+    expect(recoveryAttempts).toBe(3)
+    let failure: unknown
+    try {
+      usage.prepareStep()
+    } catch (error) {
+      failure = error
+    }
+    expect(failure).toBeInstanceOf(AgentUsageRecordingError)
+    expect(failure).toMatchObject({ recoveryScheduled: false })
+  })
+
+  test("does not retry or enqueue a permanently invalid ledger append", async () => {
+    let storageAttempts = 0
+    let recoveryAttempts = 0
+    const storage: AiUsageStorage = {
+      async recordModelCall() {
+        storageAttempts += 1
+        throw new AiUsageStorageError("missing_execution", "missing execution")
+      },
+      async summarizeExecution(): Promise<AiUsageExecutionSummary> {
+        return emptySummary
+      },
+      async summarizeExecutions() {
+        return []
+      },
+    }
+    const usage = recorder(
+      storage,
+      { retryDelaysMs: [10, 20], sleep: async () => undefined },
+      async () => {
+        recoveryAttempts += 1
+      }
+    )
+
+    await usage.onLanguageModelCallEnd(callEndEvent())
+    expect(storageAttempts).toBe(1)
+    expect(recoveryAttempts).toBe(0)
+    let failure: unknown
+    try {
+      usage.prepareStep()
+    } catch (error) {
+      failure = error
+    }
+    expect(failure).toBeInstanceOf(AgentUsageRecordingError)
+    expect(failure).toMatchObject({ recoveryScheduled: false })
   })
 
   test("retains failures raised while constructing the callback record", async () => {

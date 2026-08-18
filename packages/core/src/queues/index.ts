@@ -3,6 +3,8 @@ export { QueueError } from "./errors"
 export { InMemoryQueues } from "./in-memory"
 export type {
   ActionRunRequestedQueueJob,
+  AgentAiUsageRecordPayload,
+  AgentAiUsageRecordRequestedQueueJob,
   AgentQueueJob,
   AgentRunRequestedQueueJob,
   AgentWorkflowNodeRequestedQueueJob,

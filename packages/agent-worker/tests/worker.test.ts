@@ -69,6 +69,7 @@ import { normalizeApiBaseUrl } from "../src/api-url"
 import { prepareAgentAttachments } from "../src/attachments"
 import { AgentExecutionLostError, AgentFinalizationError, AgentWorkerError } from "../src/errors"
 import { finishRunOrThrow } from "../src/finalize"
+import { enqueueAiModelCallRecovery } from "../src/model-call-recovery"
 import { runAgentTurn } from "../src/run-agent-turn"
 import { createConversationAgentEnvironment } from "../src/run-environment"
 import { createBrokerStreamSink, NOOP_STREAM_SINK } from "../src/stream-sink"
@@ -861,6 +862,11 @@ function aiUsageStorageOf(sixb: TestSixb): AiUsageStorage {
   return storage
 }
 
+function recoverAiModelCall(sixb: TestSixb) {
+  return (record: Parameters<typeof enqueueAiModelCallRecovery>[1]) =>
+    enqueueAiModelCallRecovery(sixb.queues.agents, record)
+}
+
 function workerStorageOf(storage: Storage): AgentWorkerStorage {
   if (!storage.agents) {
     throw new Error("expected agent storage")
@@ -890,6 +896,7 @@ async function buildAgentWorkerContext(
     // Mirror the production boundary (worker.ts buildAgentContext): normalize the server base once.
     apiBaseUrl: normalizeApiBaseUrl(input.apiBaseUrl ?? TEST_AGENT_API_BASE_URL),
     streamSink: NOOP_STREAM_SINK,
+    recoverAiModelCall: recoverAiModelCall(sixb),
     agentSkills: loadAgentSkills({ projectSkillsDir: false }),
     defaultMaxSteps: 4,
     turnTimeoutMs: 60_000,
@@ -2414,7 +2421,7 @@ describe("AgentWorker", () => {
       await expect(
         aiUsageStorageOf(sixb).summarizeExecution({
           projectId: PROJECT_ID,
-          execution: { kind: "agentRun", runId },
+          executionId: run.executionId,
         })
       ).resolves.toEqual({
         modelCallCount: 2,
@@ -2512,7 +2519,7 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("fails the run and blocks another provider call when usage recording stays unavailable", async () => {
+  test("hands a failed usage append to the queue and fails closed before another provider call", async () => {
     let modelCalls = 0
     const model = new MockLanguageModelV4({
       modelId: "mock-model",
@@ -2542,10 +2549,27 @@ describe("AgentWorker", () => {
     const sixb = buildSixbWithEchoTool(model)
     const storage = agentStorageOf(sixb)
     const aiUsage = aiUsageStorageOf(sixb)
+    const recordModelCall = aiUsage.recordModelCall.bind(aiUsage)
+    const queue = sixb.queues.agents
+    const enqueue = queue.enqueue.bind(queue)
+    let storageAvailable = false
     let appendAttempts = 0
-    aiUsage.recordModelCall = async () => {
+    let recoveryJobs = 0
+    aiUsage.recordModelCall = async (input) => {
+      if (storageAvailable) return recordModelCall(input)
       appendAttempts += 1
       throw new Error("usage storage unavailable")
+    }
+    queue.enqueue = async (params) => {
+      const jobs = await enqueue(params)
+      const handedOff = params.jobs.filter(
+        (job) => job.type === "agent.ai-usage.record.requested"
+      ).length
+      if (handedOff > 0) {
+        recoveryJobs += handedOff
+        storageAvailable = true
+      }
+      return jobs
     }
 
     const worker = new AgentWorker(sixb, workerOptions())
@@ -2560,13 +2584,151 @@ describe("AgentWorker", () => {
           })
           return record && record.status !== "queued" && record.status !== "running" ? record : null
         },
-        { label: "usage recording failure" }
+        { label: "usage recovery run terminal" }
       )
 
       expect(run.status).toBe("failed")
-      expect(run.error).toContain("Could not record AI usage")
+      expect(run.error).toContain("deferred to durable recovery")
+      const summary = await waitFor(
+        async () => {
+          const value = await aiUsage.summarizeExecution({
+            projectId: PROJECT_ID,
+            executionId: run.executionId,
+          })
+          return value.modelCallCount === 1 ? value : null
+        },
+        { label: "queued AI usage recovery" }
+      )
+      expect(summary.modelCallCount).toBe(1)
       expect(modelCalls).toBe(1)
       expect(appendAttempts).toBe(4)
+      expect(recoveryJobs).toBe(1)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("redelivers a recovery job until its idempotent ledger append succeeds", async () => {
+    const sixb = buildSixb(answerModel())
+    const executionId = await createTestAgentExecution(sixb.storage, {
+      projectId: PROJECT_ID,
+      agentId: "assistant",
+      runId: "usage-recovery",
+    })
+    const aiUsage = aiUsageStorageOf(sixb)
+    const recordModelCall = aiUsage.recordModelCall.bind(aiUsage)
+    let appendAttempts = 0
+    aiUsage.recordModelCall = async (input) => {
+      appendAttempts += 1
+      if (appendAttempts === 1) throw new Error("temporary usage storage failure")
+      return recordModelCall(input)
+    }
+
+    const queue = sixb.queues.agents
+    const retry = queue.retry.bind(queue)
+    let retryRequests = 0
+    queue.retry = async (params) => {
+      retryRequests += 1
+      expect(new Date(params.availableAt ?? 0).getTime()).toBeGreaterThan(Date.now())
+      return retry({ ...params, availableAt: new Date(0).toISOString() })
+    }
+    await enqueueAiModelCallRecovery(queue, {
+      id: "usage_recovery_1",
+      projectId: PROJECT_ID,
+      executionId,
+      attempt: 1,
+      callId: "call_recovery_1",
+      requesterGroupIds: ["support"],
+      providerId: "gateway",
+      requestedModelId: "mock-model",
+      responseId: "response_recovery_1",
+      usage: { inputTokens: 12, outputTokens: 8 },
+      occurredAt: new Date("2026-07-01T12:00:00.000Z"),
+    })
+
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      await waitFor(
+        async () => {
+          const summary = await aiUsage.summarizeExecution({ projectId: PROJECT_ID, executionId })
+          return summary.modelCallCount === 1 ? summary : null
+        },
+        { label: "redelivered AI usage recovery" }
+      )
+      expect(appendAttempts).toBe(2)
+      expect(retryRequests).toBe(1)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("fails the run before another provider call when storage and recovery queue fail", async () => {
+    let modelCalls = 0
+    const model = new MockLanguageModelV4({
+      modelId: "mock-model",
+      doStream: async () => {
+        modelCalls += 1
+        if (modelCalls === 1) {
+          return stream([
+            { type: "stream-start", warnings: [] },
+            {
+              type: "tool-call",
+              toolCallId: "c1",
+              toolName: "echo",
+              input: JSON.stringify({ value: "hi" }),
+            },
+            finish("tool-calls"),
+          ])
+        }
+        return stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "answer" },
+          { type: "text-delta", id: "answer", delta: "should not run" },
+          { type: "text-end", id: "answer" },
+          finish("stop"),
+        ])
+      },
+    })
+    const sixb = buildSixbWithEchoTool(model)
+    const storage = agentStorageOf(sixb)
+    const aiUsage = aiUsageStorageOf(sixb)
+    const queue = sixb.queues.agents
+    const enqueue = queue.enqueue.bind(queue)
+    let appendAttempts = 0
+    let recoveryAttempts = 0
+    aiUsage.recordModelCall = async () => {
+      appendAttempts += 1
+      throw new Error("usage storage unavailable")
+    }
+    queue.enqueue = async (params) => {
+      if (params.jobs.some((job) => job.type === "agent.ai-usage.record.requested")) {
+        recoveryAttempts += 1
+        throw new Error("agent queue unavailable")
+      }
+      return enqueue(params)
+    }
+
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgent(sixb, { agentId: "assistant", text: "echo hi" })
+      const run = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({
+            projectId: PROJECT_ID,
+            id: request.run.id,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "usage recording and recovery failure" }
+      )
+
+      expect(run.status).toBe("failed")
+      expect(run.error).toContain("Could not preserve AI usage")
+      expect(modelCalls).toBe(1)
+      expect(appendAttempts).toBe(4)
+      expect(recoveryAttempts).toBe(4)
     } finally {
       await worker.stop()
     }
@@ -2900,7 +3062,7 @@ describe("AgentWorker", () => {
       await expect(
         aiUsageStorageOf(sixb).summarizeExecution({
           projectId: PROJECT_ID,
-          execution: { kind: "agentRun", runId: run.id },
+          executionId: run.executionId,
         })
       ).resolves.toMatchObject({
         modelCallCount: 2,
@@ -3772,6 +3934,7 @@ describe("AgentWorker", () => {
         blobStorage: sixb.blobStorage,
         tools: echoTool,
         streamSink: NOOP_STREAM_SINK,
+        recoverAiModelCall: recoverAiModelCall(sixb),
         defaultMaxSteps: 4,
         turnTimeoutMs: 60_000,
       },
@@ -3790,7 +3953,7 @@ describe("AgentWorker", () => {
     await expect(
       aiUsageStorageOf(sixb).summarizeExecution({
         projectId: PROJECT_ID,
-        execution: { kind: "agentRun", runId },
+        executionId: staleRun.executionId,
       })
     ).resolves.toMatchObject({
       modelCallCount: 2,
@@ -3826,6 +3989,7 @@ describe("AgentWorker", () => {
         tools: {},
         systemAddendum: "Extra sandbox context.",
         streamSink: NOOP_STREAM_SINK,
+        recoverAiModelCall: recoverAiModelCall(sixb),
         defaultMaxSteps: 4,
         turnTimeoutMs: 60_000,
       },
@@ -3881,6 +4045,7 @@ describe("AgentWorker", () => {
         blobStorage: sixb.blobStorage,
         tools: {},
         streamSink: NOOP_STREAM_SINK,
+        recoverAiModelCall: recoverAiModelCall(sixb),
         defaultMaxSteps: 4,
         turnTimeoutMs: 60_000,
       },
@@ -4119,6 +4284,7 @@ describe("AgentWorker", () => {
             broker: sixb.broker,
             projectId: PROJECT_ID,
           }),
+          recoverAiModelCall: recoverAiModelCall(sixb),
           defaultMaxSteps: 4,
           turnTimeoutMs: 60_000,
         },
@@ -4156,6 +4322,7 @@ describe("AgentWorker", () => {
           broker: sixb.broker,
           projectId: PROJECT_ID,
         }),
+        recoverAiModelCall: recoverAiModelCall(sixb),
         defaultMaxSteps: 4,
         turnTimeoutMs: 60_000,
       },
