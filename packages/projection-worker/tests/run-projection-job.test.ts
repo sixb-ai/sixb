@@ -48,6 +48,7 @@ import type {
 import type {
   AbandonSourceMaterializationCandidateInput,
   OntologySourceRecord,
+  ProjectionRunRecord,
   ProjectionRunStorage,
   ReclaimSourceMaterializationInput,
 } from "@sixb/core/storage"
@@ -298,10 +299,6 @@ interface TestProjectionWorkerContext extends ProjectionWorkerContext {
 
 function createRuntime(
   host: ProjectionWorkerHost,
-  primitive: { readonly id: string; readonly runId: string } = {
-    id: host.definitions.projections.list()[0]?.id ?? "direct-projection-test",
-    runId: "direct-projection-job-test",
-  },
   catalogs: Partial<Pick<ProjectionWorkerContext, "datasets" | "projections">> = {}
 ): TestProjectionWorkerContext {
   const runtime = {
@@ -313,26 +310,34 @@ function createRuntime(
     datasets: catalogs.datasets ?? host.definitions.datasets,
     projections: catalogs.projections ?? host.definitions.projections,
   } satisfies TestProjectionWorkerContext
-  const trustedPrimitive = { kind: "projection" as const, ...primitive }
-  const execution = bindDurablePrimitiveExecution(host, {
-    execution: {
-      id: `direct-projection-execution-test:${primitive.runId}`,
-      projectId: host.id,
-      executor: {
-        type: "primitive",
-        kind: trustedPrimitive.kind,
-        runId: trustedPrimitive.runId,
-      },
-      source: { type: "event", eventId: `direct-projection-event-test:${primitive.runId}` },
-      correlationId: `direct-projection-correlation-test:${primitive.runId}`,
-      authorizationRef: { type: "trustedPrimitive", primitive: trustedPrimitive },
-      createdAt: new Date("2026-01-01T00:00:00.000Z"),
-    },
-    primitive: trustedPrimitive,
-  })
-  registerOntologyMutationRuntime(runtime, execution.ontologyMutations)
   shareProjectionRegistry(host, runtime)
   return runtime
+}
+
+async function bindRuntimeToRun(
+  runtime: TestProjectionWorkerContext,
+  run: ProjectionRunRecord
+): Promise<TestProjectionWorkerContext> {
+  const durableExecution = await runtime.host.storage.executions.getById({
+    projectId: runtime.projectId,
+    id: run.executionId,
+  })
+  if (!durableExecution) {
+    throw new Error(`Projection run '${run.id}' references missing execution '${run.executionId}'.`)
+  }
+  const trustedPrimitive = {
+    kind: "projection" as const,
+    id: run.identity.projectionId,
+    runId: run.id,
+  }
+  const execution = bindDurablePrimitiveExecution(runtime.host, {
+    execution: durableExecution,
+    primitive: trustedPrimitive,
+  })
+  const bound = { ...runtime }
+  registerOntologyMutationRuntime(bound, execution.ontologyMutations)
+  shareProjectionRegistry(runtime.host, bound)
+  return bound
 }
 
 interface LegacyTestProjectionJob {
@@ -352,17 +357,7 @@ async function runProjectionJob(
     readonly batchSize?: number
   }
 ): Promise<ProjectionJobResult> {
-  const runtime = createRuntime(
-    input.runtime.host,
-    {
-      id: input.job.projectionId,
-      runId: input.job.id,
-    },
-    {
-      datasets: input.runtime.datasets,
-      projections: input.runtime.projections,
-    }
-  )
+  const runtime = input.runtime
   const registry = getProjectionRegistry(runtime)
   const version = await runtime.lakeStorage.getVersion(input.job.datasetId, input.job.versionId)
   let descriptor: ProjectionDispatchDescriptor
@@ -416,9 +411,11 @@ async function runProjectionJob(
       await queueTestProjectionRun(runtime.host.storage, { ...common, identity, target })
     }
   }
+  const run = await runtime.projectionRunsStorage.getById({ projectId: runtime.projectId, id })
+  if (!run) throw new Error(`Projection run '${id}' was not queued.`)
   return runCanonicalProjectionJob({
     ...canonicalInput,
-    runtime,
+    runtime: await bindRuntimeToRun(runtime, run),
     job: { id, ...identity },
     ...(batchSize === undefined ? {} : { telemetryBatchSize: batchSize }),
   })
@@ -955,14 +952,20 @@ describe("runProjectionJob", () => {
       identity,
       target: { objectTypeId: Room.id },
     })
-    await runCanonicalProjectionJob({ runtime, job })
+    const run = await runtime.projectionRunsStorage.getById({
+      projectId: runtime.projectId,
+      id: job.id,
+    })
+    if (!run) throw new Error(`Projection run '${job.id}' was not queued.`)
+    const boundRuntime = await bindRuntimeToRun(runtime, run)
+    await runCanonicalProjectionJob({ runtime: boundRuntime, job })
 
     const unavailable = () => {
       throw new Error("terminal replay accessed current configuration or lake state")
     }
     const replayRuntime: ProjectionWorkerContext = {
-      ...runtime,
-      lakeStorage: new Proxy(runtime.lakeStorage, { get: unavailable }),
+      ...boundRuntime,
+      lakeStorage: new Proxy(boundRuntime.lakeStorage, { get: unavailable }),
       datasets: { getById: unavailable },
       projections: { getById: unavailable },
     }
@@ -2928,7 +2931,7 @@ describe("runProjectionJob", () => {
     const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
       { room_id: "r1", room_name: "Kitchen", building_ref: null },
     ])
-    const runtime = createRuntime(sixb, undefined, {
+    const runtime = createRuntime(sixb, {
       datasets: {
         getById: () => null,
       },

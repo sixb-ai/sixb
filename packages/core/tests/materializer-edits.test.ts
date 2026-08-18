@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test"
+import { emptyGrantIndex } from "../src"
+import { createTestingScope } from "../src/execution/scopes"
 import { createEventId, MaterializationConflictError } from "../src/materializer"
 import { InMemoryStorage, type Storage, type StoredLinkSlotOverride } from "../src/storage"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
@@ -15,6 +17,81 @@ import {
 const ref = (primaryId: string) => ({ objectTypeId: "Device", primaryId })
 
 describe("ontology materializer edits", () => {
+  test("derives durable provenance and event actor from the bound principal scope", async () => {
+    const storage = new InMemoryStorage()
+    await storage.auth.users.create({
+      projectId: "project",
+      id: "user-1",
+      email: "user-1@example.com",
+    })
+    const scope = createTestingScope({
+      projectId: "project",
+      executionId: "principal-execution",
+      requestId: "principal-request",
+      correlationId: "principal-correlation",
+      context: {
+        principal: { type: "user", id: "user-1" },
+        groupIds: [],
+        roleIds: [],
+        grants: emptyGrantIndex(),
+      },
+    })
+    const { materializer } = createMaterializerFixture({ storage, scope })
+
+    const result = await materializer.edits.commit(
+      atomic("principal-write", [
+        {
+          id: "create",
+          kind: "object.create",
+          ref: ref("principal-object"),
+          properties: { name: "Principal object" },
+        },
+      ])
+    )
+    await expect(
+      storage.executions.getById({ projectId: "project", id: scope.execution.id })
+    ).resolves.toMatchObject({
+      requestedBy: { type: "user", id: "user-1" },
+      authorizationRef: { type: "principal", principal: { type: "user", id: "user-1" } },
+    })
+    await expect(
+      storage.ontology.commits.getById({ projectId: "project", id: result.commitId })
+    ).resolves.toMatchObject({
+      executionId: "principal-execution",
+      actor: { type: "user", id: "user-1" },
+    })
+    const [event] = await storage.ontology.outbox.claim({
+      projectId: "project",
+      now: "2027-01-01T00:00:00.000Z",
+      limit: 10,
+      leaseId: "principal-events",
+      leaseExpiresAt: "2027-01-01T01:00:00.000Z",
+    })
+    expect(event.envelope).toMatchObject({
+      correlationId: "principal-correlation",
+      actor: { type: "user", id: "user-1" },
+    })
+  })
+
+  test("rejects replaying one request id from a different execution", async () => {
+    const storage = new InMemoryStorage()
+    const materializerFor = (executionId: string) =>
+      createMaterializerFixture({
+        storage,
+        scope: createTestingScope({
+          projectId: "project",
+          executionId,
+          requestId: "shared-request",
+          correlationId: `correlation:${executionId}`,
+        }),
+      }).materializer
+
+    await materializerFor("execution-1").edits.commit(atomic("shared-request", []))
+    await expect(
+      materializerFor("execution-2").edits.commit(atomic("shared-request", []))
+    ).rejects.toThrow("belongs to execution 'execution-1', not 'execution-2'")
+  })
+
   test("rejects an Action commit before mutation when strict run capabilities are absent", async () => {
     class StorageWithoutActionFence extends InMemoryStorage {
       private readonly missingActionRuns: Storage["actionRuns"] = undefined
@@ -46,7 +123,12 @@ describe("ontology materializer edits", () => {
   test("rejects invalid Action runs before ontology reads, staging, or mutation", async () => {
     const scenarios = [
       { kind: "absent", storedActionId: null, start: false, error: "not found" },
-      { kind: "wrong-action", storedActionId: "other", start: true, error: "does not belong" },
+      {
+        kind: "wrong-action",
+        storedActionId: "other",
+        start: true,
+        error: "does not authorize",
+      },
       { kind: "not-running", storedActionId: "approve", start: false, error: "status 'queued'" },
     ] as const
 

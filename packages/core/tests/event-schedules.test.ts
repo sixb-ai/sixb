@@ -112,6 +112,7 @@ function objectUpdatedFact(
     schemaVersion: 1,
     projectId: "test",
     occurredAt: "2026-01-01T00:00:00.000Z",
+    correlationId: `correlation-${id}`,
     origin: { kind: "runtime", requestId: id },
     commitId: `commit-${id}`,
     commitOrdinal: 0,

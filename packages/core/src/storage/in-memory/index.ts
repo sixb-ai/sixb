@@ -110,6 +110,8 @@ export class InMemoryStorage implements Storage {
       getMaterializationLifecycle: () => this.getActiveMaterializationLifecycle(),
       assertSourceMaterializationExecution: (input) =>
         this.projectionRunStorage.assertSourceMaterializationExecutionUnlocked(input),
+      executionExists: async (projectId, executionId) =>
+        (await this.executionStorage.getById({ projectId, id: executionId })) !== null,
     })
     this.ontology = createOntologyOperationScope(this.ontologyStorage, scope)
     this.ontologyStorage.registerTestingAlias(this.ontology)

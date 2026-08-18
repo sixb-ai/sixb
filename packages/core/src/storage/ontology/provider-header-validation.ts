@@ -35,6 +35,7 @@ function assertCommitEnvelope(commit: OntologyCommitWrite): void {
   assertNonblank(commit.id, "Materialization commit id")
   assertNonblank(commit.idempotencyKey, "Materialization idempotency key")
   assertNonblank(commit.requestHash, "Materialization request hash")
+  assertNonblank(commit.executionId, "Materialization execution id")
   assertNonblank(commit.ontologyRevision, "Materialization ontology revision")
   assertTimestamp(commit.committedAt, "Materialization commit time")
 }

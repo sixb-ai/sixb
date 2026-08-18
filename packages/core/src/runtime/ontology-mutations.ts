@@ -1,13 +1,13 @@
 import type {
   EditCommitResult,
   OntologyEditCommit,
-  OntologyMaterializer,
   ProjectionCommitResult,
   ProjectionRunFinishInput,
   ProjectionSourceReplacement,
   TelemetryAppend,
   TelemetryCommitResult,
 } from "../materialization/model"
+import type { BoundOntologyMaterializer } from "../materializer"
 
 export interface OntologyMutationRuntime {
   commitEdits(input: OntologyEditCommit): Promise<EditCommitResult>
@@ -49,11 +49,12 @@ export function shareOntologyMutationRuntime(source: object, target: object): vo
   registerOntologyMutationRuntime(target, getOntologyMutationRuntime(source))
 }
 
+/** Adapt an already-bound Materializer to the internal ontology mutation runtime. */
 export function createOntologyMutationRuntime(input: {
-  readonly materializer: OntologyMaterializer
+  readonly materializer: BoundOntologyMaterializer
   readonly notifyCommittedFacts: () => void
 }): OntologyMutationRuntime {
-  return {
+  const runtime: OntologyMutationRuntime = {
     commitEdits: (command) =>
       commitAndNotify(() => input.materializer.edits.commit(command), input.notifyCommittedFacts),
     replaceProjection: (command) =>
@@ -68,6 +69,7 @@ export function createOntologyMutationRuntime(input: {
         input.notifyCommittedFacts
       ),
   }
+  return Object.freeze(runtime)
 }
 
 async function commitAndNotify<TResult extends { readonly eventCount: number }>(

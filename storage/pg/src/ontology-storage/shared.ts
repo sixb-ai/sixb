@@ -34,6 +34,7 @@ export interface PgOntologyCommitRow {
   readonly id: string
   readonly idempotency_key: string
   readonly request_hash: string
+  readonly execution_id: string
   readonly origin_kind: string
   readonly origin_run_id: string | null
   readonly origin_batch_ordinal: number | string | null
@@ -174,6 +175,7 @@ export function commitRecord(row: PgOntologyCommitRow): OntologyCommitRecord {
     id: row.id,
     idempotencyKey: row.idempotency_key,
     requestHash: row.request_hash,
+    executionId: row.execution_id,
     origin: structuredClone(row.origin) as OntologyCommitWrite["origin"],
     ...(row.actor === null
       ? {}

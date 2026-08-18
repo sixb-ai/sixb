@@ -166,6 +166,106 @@ export function assertExecutionScopeProject(projectId: string, scope: ExecutionS
   }
 }
 
+/** Validate that one registered authority belongs to the exact execution it accompanies. */
+export function resolveExecutionScopeAuthorization(
+  projectId: string,
+  scope: ExecutionScope
+): RegisteredRuntimeAuthorization {
+  assertExecutionScopeProject(projectId, scope)
+  const resolved = resolveRuntimeAuthorization(scope.authorization)
+  if (resolved.type === "denied") {
+    throw new Error("[Sixb] Execution scope carries unregistered runtime authorization.")
+  }
+
+  const { execution } = scope
+  switch (execution.executor.type) {
+    case "request":
+      if (
+        execution.source.type !== "http" ||
+        execution.source.requestId !== execution.executor.requestId
+      ) {
+        throw invalidExecutionAuthority(execution.id, "request source does not match its executor")
+      }
+      if (resolved.ref.type === "principal") {
+        if (
+          resolved.type !== "principal" ||
+          resolved.executionBinding !== undefined ||
+          !principalsEqual(execution.requestedBy, resolved.ref.principal)
+        ) {
+          throw invalidExecutionAuthority(
+            execution.id,
+            "request authority does not match its requested-by principal"
+          )
+        }
+        return resolved
+      }
+      if (resolved.ref.type === "disabled" && execution.requestedBy === undefined) return resolved
+      throw invalidExecutionAuthority(
+        execution.id,
+        "request execution requires principal or explicitly disabled authority"
+      )
+
+    case "primitive":
+      if (
+        resolved.ref.type !== "trustedPrimitive" ||
+        resolved.ref.primitive.kind !== execution.executor.kind ||
+        resolved.ref.primitive.id !== execution.executor.id ||
+        resolved.ref.primitive.runId !== execution.executor.runId
+      ) {
+        throw invalidExecutionAuthority(
+          execution.id,
+          "trusted primitive authority does not match its executor"
+        )
+      }
+      return resolved
+
+    case "agent":
+      if (
+        resolved.type !== "principal" ||
+        resolved.ref.type !== "principal" ||
+        resolved.ref.principal.type !== "serviceAccount" ||
+        resolved.ref.credential !== undefined ||
+        resolved.executionBinding?.type !== "agent" ||
+        resolved.executionBinding.executionId !== execution.id ||
+        resolved.executionBinding.agentId !== execution.executor.agentId ||
+        resolved.executionBinding.runId !== execution.executor.runId
+      ) {
+        throw invalidExecutionAuthority(
+          execution.id,
+          "agent authority does not match its execution binding"
+        )
+      }
+      return resolved
+
+    case "kernel":
+      if (
+        resolved.ref.type !== "kernel" ||
+        execution.requestedBy !== undefined ||
+        resolved.ref.operation.type !== execution.executor.operation.type ||
+        resolved.ref.operation.recoveryId !== execution.executor.operation.recoveryId
+      ) {
+        throw invalidExecutionAuthority(
+          execution.id,
+          "kernel authority does not match its executor"
+        )
+      }
+      return resolved
+  }
+}
+
+function principalsEqual(
+  left: AuthorizablePrincipal | undefined,
+  right: AuthorizablePrincipal | undefined
+): boolean {
+  return left?.type === right?.type && left?.id === right?.id
+}
+
+function invalidExecutionAuthority(executionId: string, reason: string): Error {
+  return new Error(
+    `[Sixb] Execution '${executionId}' is incompatible with its authority: ${reason}.`
+  )
+}
+
 function register(input: RegisteredRuntimeAuthorization): RuntimeAuthorization {
   assertNonEmpty(input.projectId, "Authorization project id")
   const authorization = createRuntimeAuthorizationCapability()

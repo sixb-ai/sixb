@@ -57,6 +57,9 @@ import projectionExecutionsSql from "./migrations/021-projection-executions.sql"
   type: "text",
 }
 import webhookExecutionsSql from "./migrations/022-webhook-executions.sql" with { type: "text" }
+import ontologyCommitExecutionsSql from "./migrations/023-ontology-commit-executions.sql" with {
+  type: "text",
+}
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -332,6 +335,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("020-sync-pipeline-executions", syncPipelineExecutionsSql),
     pgSql("021-projection-executions", projectionExecutionsSql),
     pgSql("022-webhook-executions", webhookExecutionsSql),
+    pgSql("023-ontology-commit-executions", ontologyCommitExecutionsSql),
   ],
 })
 

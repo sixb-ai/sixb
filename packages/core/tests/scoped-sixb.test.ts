@@ -302,6 +302,19 @@ async function seedRequesterMemberships(
   }
 }
 
+async function seedServiceAccount(
+  host: TestExecutionHost & { readonly storage: Pick<Storage, "auth"> },
+  id: string
+): Promise<void> {
+  const auth = host.storage.auth
+  if (!auth) throw new Error("Test runtime requires auth storage.")
+  await auth.serviceAccounts.create({
+    projectId: host.id,
+    id,
+    name: "Test service account",
+  })
+}
+
 describe("bound Sixb object reads", () => {
   test("granted types support get, list, byId.get, and query", async () => {
     const host = createRuntime()
@@ -774,6 +787,7 @@ describe("bound Sixb object writes", () => {
 
   test("view plus edit writes, and the write is readable back", async () => {
     const host = createRuntime()
+    await seedPrincipal(host)
     const _sixb = createTestSixb(host)
     const scoped = bindPrincipal(host, contextFor(host, ["editors"]))
 
@@ -793,6 +807,7 @@ describe("bound Sixb object writes", () => {
 
   test("delete and restore ride on the same edit grant", async () => {
     const host = createRuntime()
+    await seedPrincipal(host)
     const sixb = createTestSixb(host)
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
 
@@ -829,6 +844,7 @@ describe("bound Sixb object writes", () => {
 describe("bound Sixb link writes", () => {
   test("edit on the source and view on the target links", async () => {
     const host = createRuntime()
+    await seedPrincipal(host)
     const sixb = createTestSixb(host)
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
     await sixb.objects(Invoice).upsert({ properties: { id: "i1" } })
@@ -907,6 +923,7 @@ describe("bound Sixb telemetry appends", () => {
 
   test("append works without view — the write-only ingest principal", async () => {
     const host = createRuntime()
+    await seedPrincipal(host)
     const sixb = createTestSixb(host)
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
     const scoped = bindPrincipal(host, contextFor(host, ["ingest"]))
@@ -967,6 +984,7 @@ describe("direct writes are attributable", () => {
 
   test("a principal write names its actor, an auth-disabled one names nobody", async () => {
     const host = createRuntime()
+    await seedPrincipal(host)
     const sixb = createTestSixb(host)
 
     // Auth-disabled execution: no authorization context, so no actor. The absence is the signal —
@@ -987,6 +1005,7 @@ describe("direct writes are attributable", () => {
 
   test("a service account is recorded as a service actor", async () => {
     const host = createRuntime()
+    await seedServiceAccount(host, "svc_ingest")
     const sixb = createTestSixb(host)
     const serviceContext = resolveAuthorizationContext({
       principal: { type: "serviceAccount", id: "svc_ingest" },
@@ -1068,21 +1087,22 @@ describe("bound Sixb fails closed on ungranted surfaces", () => {
     expect(await agentSixb.blobs.stat(file.blobId)).not.toBeNull()
     expect(await agentSixb.connector(sourceConnector)).toEqual({})
 
-    const mismatchedRun = host.withScope({
-      authorization: scope.authorization,
-      execution: {
-        ...scope.execution,
-        executor: { type: "agent", agentId: "contract-agent", runId: "agent-run-2" },
-      },
-    })
-    expect(() => mismatchedRun.blobs.stat(file.blobId)).toThrow(AuthorizationError)
-    expect(() => mismatchedRun.connector(sourceConnector)).toThrow(AuthorizationError)
+    expect(() =>
+      host.withScope({
+        authorization: scope.authorization,
+        execution: {
+          ...scope.execution,
+          executor: { type: "agent", agentId: "contract-agent", runId: "agent-run-2" },
+        },
+      })
+    ).toThrow("agent authority does not match its execution binding")
 
-    const forgedProvenance = host.withScope({
-      authorization: scope.authorization,
-      execution: { ...scope.execution, id: "exec_forged" },
-    })
-    expect(() => forgedProvenance.blobs.stat(file.blobId)).toThrow(AuthorizationError)
+    expect(() =>
+      host.withScope({
+        authorization: scope.authorization,
+        execution: { ...scope.execution, id: "exec_forged" },
+      })
+    ).toThrow("agent authority does not match its execution binding")
   })
 })
 

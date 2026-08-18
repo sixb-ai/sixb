@@ -16,6 +16,7 @@ import {
   commitExactObject,
   contractEditHeader,
   contractEditResult,
+  ensureContractExecution,
   type OntologyContractStorage,
 } from "./ontology-contract-fixture"
 import { startTestProjectionRun } from "./projection-execution"
@@ -71,6 +72,7 @@ interface ReadyCandidate {
   readonly execution: ProjectionExecution
   readonly materializationId: string
   readonly source: { readonly projectionId: string }
+  readonly executionId: string
 }
 
 function ontologyOutboxFailure(message: string): OntologyOutboxFailure {
@@ -131,6 +133,7 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
         ;(divergent.commit as { requestHash: string }).requestHash = "different-hash"
         await expect(
           storage.transaction(async (tx) => {
+            await ensureContractExecution(tx, divergent)
             await tx.ontology.materializations.begin(divergent)
           })
         ).rejects.toMatchObject({ kind: "idempotency" })
@@ -142,6 +145,30 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
         })
         expect(list).toMatchObject({ total: 1, hasMore: false })
         expect(list.commits.map((commit) => commit.id)).toEqual(["commit-one"])
+      })
+    })
+
+    test("rejects an ontology commit whose execution does not exist", async () => {
+      await withStorage(async (storage) => {
+        const header = contractEditHeader("missing-execution")
+        await expect(
+          storage.transaction(async (tx) => {
+            const session = await tx.ontology.materializations.begin(header)
+            await tx.ontology.materializations.finalize({
+              session,
+              finalization: {
+                sourceActivations: [],
+                result: contractEditResult(header.commit.id),
+              },
+            })
+          })
+        ).rejects.toThrow()
+        await expect(
+          storage.ontology.commits.getById({
+            projectId: header.commit.projectId,
+            id: header.commit.id,
+          })
+        ).resolves.toBeNull()
       })
     })
 
@@ -181,9 +208,9 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
         let leakedSession: MaterializationSession | undefined
         await expect(
           storage.transaction(async (tx) => {
-            leakedSession = await tx.ontology.materializations.begin(
-              contractEditHeader("leaked-session")
-            )
+            const leakedHeader = contractEditHeader("leaked-session")
+            await ensureContractExecution(tx, leakedHeader)
+            leakedSession = await tx.ontology.materializations.begin(leakedHeader)
           })
         ).rejects.toThrow("unfinished materialization session")
         if (!leakedSession) throw new Error("Expected an unfinished session handle")
@@ -715,7 +742,7 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
             if (!tx.projectionRuns) {
               throw new Error("Contract transaction omitted required storage facades.")
             }
-            const header = telemetryHeader(identity, run.run.id)
+            const header = telemetryHeader(identity, run.run.id, run.run.executionId)
             const session = await tx.ontology.materializations.begin(header)
             await tx.ontology.materializations.finalize({
               session,
@@ -815,7 +842,7 @@ async function createReadyEmptyCandidate(
     assertionCount: 0,
     readyAt: new Date(Date.parse(identity.datasetVersion.createdAt) + 1_000).toISOString(),
   })
-  return { identity, execution, materializationId, source }
+  return { identity, execution, materializationId, source, executionId: run.run.executionId }
 }
 
 async function activateEmptyCandidate(
@@ -836,6 +863,7 @@ async function activateEmptyCandidate(
       id: commitId,
       idempotencyKey: `projection:${commitId}`,
       requestHash: `hash:${commitId}`,
+      executionId: candidate.executionId,
       origin: {
         kind: "projection",
         projectionId: candidate.source.projectionId,
@@ -909,7 +937,8 @@ async function activateEmptyCandidate(
 
 function telemetryHeader(
   identity: ProjectionMaterializationIdentity,
-  projectionRunId: string
+  projectionRunId: string,
+  executionId: string
 ): MaterializationPlanHeader {
   if (identity.protocol !== "telemetry") throw new Error("Expected telemetry identity")
   return {
@@ -918,6 +947,7 @@ function telemetryHeader(
       id: "telemetry-commit",
       idempotencyKey: "telemetry:telemetry-run:0",
       requestHash: "hash:telemetry-run:0",
+      executionId,
       origin: {
         kind: "telemetry",
         source: {

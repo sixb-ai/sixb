@@ -525,6 +525,7 @@ function objectCreatedEnvelope(id: string): OntologyMaterializationEvent {
     schemaVersion: 1,
     projectId: "project",
     occurredAt: NOW.toISOString(),
+    correlationId: "correlation-1",
     origin: { kind: "runtime", requestId: "request-1" },
     commitId: "commit-1",
     commitOrdinal: 0,

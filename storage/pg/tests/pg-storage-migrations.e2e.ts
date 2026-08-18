@@ -74,6 +74,7 @@ describe("Postgres storage migrations", () => {
             "020-sync-pipeline-executions",
             "021-projection-executions",
             "022-webhook-executions",
+            "023-ontology-commit-executions",
           ],
         },
       ])
@@ -231,6 +232,13 @@ describe("Postgres storage migrations", () => {
           id: "022-webhook-executions",
           status: "applied",
           version: 22,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "023-ontology-commit-executions",
+          status: "applied",
+          version: 23,
         },
       ])
     })
@@ -691,6 +699,7 @@ describe("Postgres storage migrations", () => {
       expect(await readTableColumns(schemaName, "objects")).toContain("last_commit_id")
       expect(await readTableColumns(schemaName, "links")).toContain("last_commit_id")
       expect(await readTableColumns(schemaName, "timeseries")).toContain("last_commit_id")
+      expect(await readTableColumns(schemaName, "ontology_commits")).toContain("execution_id")
       expect(await readTableColumns(schemaName, "objects")).not.toContain("source_event_id")
       expect(await readTableColumns(schemaName, "links")).not.toContain("source_event_id")
       expect(await readTableColumns(schemaName, "timeseries")).not.toContain("source_event_id")
@@ -700,6 +709,9 @@ describe("Postgres storage migrations", () => {
       await expect(readColumnNullable(schemaName, "timeseries", "last_commit_id")).resolves.toBe(
         "NO"
       )
+      await expect(
+        readColumnNullable(schemaName, "ontology_commits", "execution_id")
+      ).resolves.toBe("NO")
       expect(await readTableColumns(schemaName, "timeseries_latest")).toEqual(
         expect.arrayContaining([
           "object_type_id",
@@ -1085,6 +1097,47 @@ describe("Postgres storage migrations", () => {
     }
   })
 
+  test("rejects legacy ontology commits instead of inventing execution authority", async () => {
+    const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    await withSql(async (sql) => {
+      const schema = quoteIdent(schemaName)
+      const context = { exec: (sqlText: string) => sql.unsafe(sqlText).then(() => undefined) }
+
+      try {
+        await sql.unsafe(`CREATE SCHEMA ${schema}`)
+        await sql.unsafe(`SET search_path TO ${schema}`)
+        const migrationIndex = postgresStorageMigrations.steps.findIndex(
+          (migration) => migration.id === "023-ontology-commit-executions"
+        )
+        const migration = postgresStorageMigrations.steps[migrationIndex]
+        if (!migration) {
+          throw new Error("PostgreSQL ontology-commit execution migration is missing.")
+        }
+        for (const previous of postgresStorageMigrations.steps.slice(0, migrationIndex)) {
+          await previous.up(context)
+        }
+        await sql.unsafe(`
+          INSERT INTO ontology_commits (
+            project_id, id, idempotency_key, request_hash, origin_kind, origin,
+            ontology_revision, intent, result, committed_at
+          ) VALUES (
+            'project-a', 'legacy-commit', 'runtime:legacy-commit', 'legacy-hash', 'runtime',
+            '{"kind":"runtime","requestId":"legacy-request"}', 'ontology-1',
+            '{"kind":"edit","mode":"atomic","operationCount":0}',
+            '{"kind":"edit","commitId":"legacy-commit","created":true,"eventCount":0,"committedAt":"2026-01-01T00:00:00.000Z","outcomes":[],"changes":{"objects":[],"links":[]}}',
+            '2026-01-01T00:00:00.000Z'
+          )
+        `)
+
+        await expect(migration.up(context)).rejects.toThrow()
+        expect(await readTableColumns(schemaName, "ontology_commits")).not.toContain("execution_id")
+      } finally {
+        await sql.unsafe("RESET search_path")
+        await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
+      }
+    })
+  })
+
   test("untracked existing schema collides and rolls back without conversion", async () => {
     await withStorage(false, async (storage, schemaName) => {
       await migrateStorage(storage)
@@ -1411,6 +1464,13 @@ describe("Postgres storage migrations", () => {
           id: "022-webhook-executions",
           status: "applied",
           version: 22,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "023-ontology-commit-executions",
+          status: "applied",
+          version: 23,
         },
       ])
     } finally {
