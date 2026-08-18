@@ -1,9 +1,4 @@
-import {
-  type AgentDefinition,
-  SYSTEM_PRINCIPAL,
-  type ValueType,
-  type WorkflowDefinition,
-} from "@sixb/core"
+import type { AgentDefinition, ValueType, WorkflowDefinition } from "@sixb/core"
 import {
   createAgentRunExecutionToken,
   resolveAgentExecutionAuthorization,
@@ -21,7 +16,7 @@ import type {
   WorkflowRunRecord,
   WorkflowRunStorage,
 } from "@sixb/core/storage"
-import { AgentFinalizationError, AgentUsageRecordingError, AgentWorkerError } from "./errors"
+import { AgentUsageRecordingError, AgentWorkerError } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
 import { AiModelCallRecorder } from "./model-call-recorder"
 import {
@@ -101,18 +96,13 @@ export async function executeWorkflowAgentNode(
   if (!executionToken) {
     throw new AgentWorkerError(`Agent workflow node '${nodeRun.id}' has no execution token.`)
   }
-  const usageExecution = {
-    kind: "workflowAgentNode" as const,
-    workflowRunId: workflowRun.id,
-    nodeRunId: nodeRun.id,
-  }
   const usageRecorder = new AiModelCallRecorder({
     storage: context.storage.aiUsage,
     projectId: context.id,
-    execution: usageExecution,
+    executionId: executionRecord.executionId,
     attempt: reserved.attempt,
-    requesterPrincipal: durableExecution.requestedBy ?? SYSTEM_PRINCIPAL,
     requesterGroupIds: workflowRun.requesterGroupIds,
+    recoverAiModelCall: context.recoverAiModelCall,
     errorRunId: nodeRun.id,
   })
 
@@ -176,11 +166,10 @@ export async function executeWorkflowAgentNode(
       executionError = recordingError
     }
 
-    if (executionError instanceof AgentFinalizationError) throw executionError
     if (signal.aborted) throw executionError
     if (cancel.signal.aborted && (await isAlreadyCancelled(runs, context.id, nodeRun.id))) {
       // The cancellation endpoint has already made the execution terminal, so it cannot be fenced
-      // again. Still surface a lost accounting append to the queue instead of acknowledging it.
+      // again. Still surface an accounting failure instead of silently acknowledging it.
       if (executionError instanceof AgentUsageRecordingError) throw executionError
       return
     }
