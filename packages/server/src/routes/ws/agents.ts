@@ -2,7 +2,6 @@ import type { OntologySource } from "@sixb/core"
 import { agentRunStreamDefinition, agentRunStreamId } from "@sixb/core/agents/streams"
 import type { BrokerRecord } from "@sixb/core/broker"
 import type { Sixb } from "@sixb/core/internal/request-execution"
-import type { AiUsageStorage } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { z } from "zod"
 import type { SixbServer } from "../../server"
@@ -176,7 +175,7 @@ async function subscribeAgentStream(
     afterCursor: message.afterCursor ?? null,
   })
   sendRecords(ws, buffered.splice(0))
-  if (!(await sendRunSnapshot(sixb, host.storage.aiUsage, ws, message.runId))) {
+  if (!(await sendRunSnapshot(sixb, ws, message.runId))) {
     stopSubscription(state)
     return
   }
@@ -220,7 +219,7 @@ async function replayAgentStream(
       afterCursor: page.cursor ?? message.afterCursor ?? null,
       count: page.records.length,
     })
-    await sendRunSnapshot(sixb, host.storage.aiUsage, ws, message.runId)
+    await sendRunSnapshot(sixb, ws, message.runId)
   } catch (error) {
     safeSend(ws, { type: "error", message: errorMessage(error) })
   }
@@ -255,7 +254,6 @@ function stopSubscription(state: AgentStreamSubscriptionState | undefined): void
 
 async function sendRunSnapshot(
   sixb: Sixb<readonly OntologySource[]>,
-  aiUsage: AiUsageStorage | undefined,
   ws: { send: (message: string) => void },
   runId: string
 ): Promise<boolean> {
@@ -267,7 +265,7 @@ async function sendRunSnapshot(
     }
     safeSend(ws, {
       type: "run.snapshot",
-      run: await serializeAgentRun(run, aiUsage),
+      run: serializeAgentRun(run),
     })
     return true
   } catch (error) {
