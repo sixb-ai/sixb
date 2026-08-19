@@ -24,7 +24,7 @@ import type {
 import { AGENT_RUN_FAILURE_CODES, WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { z } from "zod"
-import { resolveAiUsageSummary } from "../ai-usage"
+import { resolveAiUsageSummaries, resolveAiUsageSummary } from "../ai-usage"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState, requireRequestSixb } from "../auth/scope"
 import {
@@ -175,30 +175,45 @@ function serializeWorkflowAgentExecution(
   }
 }
 
-async function serializeWorkflowNodeWithExecution(
+async function serializeWorkflowNodesWithExecutions(
   storage: WorkflowRunStorage,
   aiUsage: AiUsageStorage | undefined,
-  node: WorkflowNodeRunRecord
+  nodes: readonly WorkflowNodeRunRecord[]
 ) {
-  const execution =
-    node.nodeType === "agent"
-      ? await storage.agentNodes.getByNodeRunId({
-          projectId: node.projectId,
-          nodeRunId: node.id,
-        })
-      : null
-  const usage = execution
-    ? await resolveAiUsageSummary({
-        storage: aiUsage,
-        projectId: node.projectId,
-        execution: {
-          kind: "workflowAgentNode",
-          workflowRunId: node.workflowRunId,
-          nodeRunId: node.id,
-        },
-      })
-    : undefined
-  return serializeWorkflowNodeRun(node, execution, usage)
+  const executions = await Promise.all(
+    nodes.map((node) =>
+      node.nodeType === "agent"
+        ? storage.agentNodes.getByNodeRunId({
+            projectId: node.projectId,
+            nodeRunId: node.id,
+          })
+        : null
+    )
+  )
+  const existingExecutions = executions.filter(
+    (execution): execution is WorkflowAgentNodeRunRecord => execution !== null
+  )
+  const [firstExecution] = existingExecutions
+  if (!firstExecution) {
+    return nodes.map((node) => serializeWorkflowNodeRun(node))
+  }
+  const usages = await resolveAiUsageSummaries({
+    storage: aiUsage,
+    projectId: firstExecution.projectId,
+    executionIds: existingExecutions.map((execution) => execution.executionId),
+  })
+  const usageByExecutionId = new Map(
+    existingExecutions.map((execution, index) => [execution.executionId, usages[index]] as const)
+  )
+
+  return nodes.map((node, index) => {
+    const execution = executions[index]
+    return serializeWorkflowNodeRun(
+      node,
+      execution,
+      execution ? usageByExecutionId.get(execution.executionId) : undefined
+    )
+  })
 }
 
 function principalForExecution(sixb: Sixb<readonly OntologySource[]>): Principal {
@@ -1016,10 +1031,10 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
 
           return WorkflowRunDetailResponseSchema.parse({
             run: serializedRun,
-            nodes: await Promise.all(
-              nodes.nodes.map((node) =>
-                serializeWorkflowNodeWithExecution(storage, host.storage.aiUsage, node)
-              )
+            nodes: await serializeWorkflowNodesWithExecutions(
+              storage,
+              host.storage.aiUsage,
+              nodes.nodes
             ),
           })
         } catch (error) {
@@ -1080,11 +1095,7 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
           const usage = await resolveAiUsageSummary({
             storage: host.storage.aiUsage,
             projectId: host.id,
-            execution: {
-              kind: "workflowAgentNode",
-              workflowRunId: run.id,
-              nodeRunId: node.id,
-            },
+            executionId: execution.executionId,
           })
           return WorkflowAgentNodeExecutionSchema.parse(
             serializeWorkflowAgentExecution(execution, usage)
@@ -1138,10 +1149,10 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
           if (existing.status === "cancelled") {
             return CancelWorkflowRunResponseSchema.parse({
               run: serializeWorkflowRunDetail(existing),
-              nodes: await Promise.all(
-                listed.nodes.map((node) =>
-                  serializeWorkflowNodeWithExecution(storage, host.storage.aiUsage, node)
-                )
+              nodes: await serializeWorkflowNodesWithExecutions(
+                storage,
+                host.storage.aiUsage,
+                listed.nodes
               ),
             })
           }
@@ -1258,10 +1269,10 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
               ...result.run,
               ...(existing.requestedBy === undefined ? {} : { requestedBy: existing.requestedBy }),
             }),
-            nodes: await Promise.all(
-              nodes.nodes.map((node) =>
-                serializeWorkflowNodeWithExecution(storage, host.storage.aiUsage, node)
-              )
+            nodes: await serializeWorkflowNodesWithExecutions(
+              storage,
+              host.storage.aiUsage,
+              nodes.nodes
             ),
           })
         } catch (error) {

@@ -329,7 +329,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         (signal.aborted || cancel.signal.aborted || isAbortError(error))
       const finalized = await this.recordFate(
         context,
-        run,
+        run.id,
         executionToken,
         aborted ? "cancelled" : "failed",
         error
@@ -626,7 +626,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
 
   private async recordFate(
     context: AgentWorkerContext,
-    run: AgentRunRecord,
+    runId: string,
     executionToken: string,
     status: "failed" | "cancelled",
     error: unknown
@@ -640,7 +640,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       })
       const finalized = await finishRunOrThrow(context.storage.agents, {
         projectId: context.id,
-        id: run.id,
+        id: runId,
         executionToken,
         status,
         error: failure,

@@ -89,11 +89,6 @@ model-call ledger and includes input/output totals plus any reported cache, text
 breakdowns. It summarizes every completed provider call, including calls completed before a later
 failure or cancellation.
 
-Usage is available only for calls captured by the model-call ledger. The earlier run-row aggregate
-was removed rather than converted: one coarse total cannot be faithfully decomposed into actual
-provider calls, identities, raw meters, or occurrence times. Runs completed before the ledger
-therefore have no usage summary.
-
 Cancel a queued or running run with `POST /api/agent-threads/:threadId/cancel` (body `{ runId }`);
 it ends as `cancelled`.
 

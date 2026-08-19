@@ -1,19 +1,27 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryAiUsageStorage } from "@sixb/core/storage"
+import { InMemoryStorage } from "@sixb/core"
+import { createTestAgentExecution } from "@sixb/core/testing"
 import { resolveAiUsageSummaries, resolveAiUsageSummary } from "../src/ai-usage"
 
-const execution = { kind: "agentRun", runId: "run_1" } as const
+async function createUsageStorage(runId = "run_1") {
+  const storage = new InMemoryStorage()
+  const executionId = await createTestAgentExecution(storage, {
+    projectId: "project_1",
+    agentId: "assistant",
+    runId,
+  })
+  return { storage: storage.aiUsage, executionId }
+}
 
 describe("resolveAiUsageSummary", () => {
   test("returns the complete provider-neutral ledger summary", async () => {
-    const storage = new InMemoryAiUsageStorage()
+    const { storage, executionId } = await createUsageStorage()
     await storage.recordModelCall({
       id: "usage_1",
       projectId: "project_1",
-      execution,
+      executionId,
       attempt: 1,
       callId: "call_1",
-      requesterPrincipal: { type: "user", id: "usr_1" },
       requesterGroupIds: [],
       providerId: "gateway",
       requestedModelId: "openai/gpt-5",
@@ -31,7 +39,7 @@ describe("resolveAiUsageSummary", () => {
     })
 
     await expect(
-      resolveAiUsageSummary({ storage, projectId: "project_1", execution })
+      resolveAiUsageSummary({ storage, projectId: "project_1", executionId })
     ).resolves.toEqual({
       inputTokens: 12,
       outputTokens: 8,
@@ -46,14 +54,13 @@ describe("resolveAiUsageSummary", () => {
   })
 
   test("resolves a batch in input order and omits unavailable summaries", async () => {
-    const storage = new InMemoryAiUsageStorage()
+    const { storage, executionId } = await createUsageStorage()
     await storage.recordModelCall({
       id: "usage_batch",
       projectId: "project_1",
-      execution,
+      executionId,
       attempt: 1,
       callId: "call_batch",
-      requesterPrincipal: { type: "user", id: "usr_1" },
       requesterGroupIds: [],
       providerId: "gateway",
       requestedModelId: "openai/gpt-5",
@@ -66,7 +73,7 @@ describe("resolveAiUsageSummary", () => {
       resolveAiUsageSummaries({
         storage,
         projectId: "project_1",
-        executions: [{ kind: "agentRun", runId: "missing" }, execution],
+        executionIds: ["missing_execution", executionId],
       })
     ).resolves.toEqual([
       undefined,
@@ -74,25 +81,35 @@ describe("resolveAiUsageSummary", () => {
     ])
   })
 
+  test("preserves batch shape when AI usage storage is unavailable", async () => {
+    await expect(
+      resolveAiUsageSummaries({
+        storage: undefined,
+        projectId: "project_1",
+        executionIds: ["execution_1", "execution_2"],
+      })
+    ).resolves.toEqual([undefined, undefined])
+  })
+
   test("omits usage when the ledger has no model calls", async () => {
+    const { storage, executionId } = await createUsageStorage()
     await expect(
       resolveAiUsageSummary({
-        storage: new InMemoryAiUsageStorage(),
+        storage,
         projectId: "project_1",
-        execution,
+        executionId,
       })
     ).resolves.toBeUndefined()
   })
 
   test("preserves unavailable usage when a model call was recorded", async () => {
-    const storage = new InMemoryAiUsageStorage()
+    const { storage, executionId } = await createUsageStorage()
     await storage.recordModelCall({
       id: "usage_unavailable",
       projectId: "project_1",
-      execution,
+      executionId,
       attempt: 1,
       callId: "call_unavailable",
-      requesterPrincipal: { type: "user", id: "usr_1" },
       requesterGroupIds: [],
       providerId: "gateway",
       requestedModelId: "openai/gpt-5",
@@ -102,7 +119,7 @@ describe("resolveAiUsageSummary", () => {
     })
 
     await expect(
-      resolveAiUsageSummary({ storage, projectId: "project_1", execution })
+      resolveAiUsageSummary({ storage, projectId: "project_1", executionId })
     ).resolves.toEqual({ reportingStatus: "unavailable" })
   })
 })

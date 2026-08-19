@@ -1389,7 +1389,12 @@ describe("SQLite storage migrations", () => {
     // projection column behind; deleting the run rows instead breaks the preservation assertions.
     const db = new Database(":memory:")
     try {
-      for (const migration of sqliteStorageMigrations.steps.slice(0, 10)) {
+      const cleanupIndex = sqliteStorageMigrations.steps.findIndex(
+        (migration) => migration.id === "011-drop-run-usage-projections"
+      )
+      const cleanup = sqliteStorageMigrations.steps[cleanupIndex]
+      if (!cleanup) throw new Error("expected run usage cleanup migration")
+      for (const migration of sqliteStorageMigrations.steps.slice(0, cleanupIndex)) {
         const applied = migration.up(db)
         if (applied instanceof Promise) throw new Error("expected synchronous SQLite migration")
       }
@@ -1411,9 +1416,7 @@ describe("SQLite storage migrations", () => {
         )
       `)
 
-      const migration = sqliteStorageMigrations.steps[10]
-      if (!migration) throw new Error("expected run usage cleanup migration")
-      const applied = migration.up(db)
+      const applied = cleanup.up(db)
       if (applied instanceof Promise) throw new Error("expected synchronous SQLite migration")
 
       const agentColumns = tableColumns(db, "agent_runs")
