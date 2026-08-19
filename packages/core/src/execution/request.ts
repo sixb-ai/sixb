@@ -7,7 +7,9 @@ import type { AuthorizationRef, ExecutionScope } from "./types"
 
 export type { ActionRunsRuntime, ActionsRuntime } from "../actions/execution"
 export type {
+  AgentRunListResult,
   AgentRunsRuntime,
+  AgentRunView,
   AgentsRuntime,
   AgentThreadsRuntime,
   CreateExecutionAgentThreadInput,
@@ -36,7 +38,11 @@ export type { Sixb } from "../runtime/sixb"
 export type { SyncRunsRuntime, SyncsRuntime } from "../syncs/execution"
 export type {
   LatestWorkflowRunListResult,
+  ListWorkflowRunNodesInput,
+  WorkflowAgentNodeRunView,
   WorkflowInterventionsRuntime,
+  WorkflowNodeRunListResult,
+  WorkflowNodeRunView,
   WorkflowRunListResult,
   WorkflowRunsRuntime,
   WorkflowRunView,

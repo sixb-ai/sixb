@@ -1,3 +1,4 @@
+import type { AgentRunView, WorkflowAgentNodeRunView } from "@sixb/core"
 import type {
   AgentRunRecord,
   AiModelCallUsageRecord,
@@ -52,13 +53,21 @@ const provider = {
 } satisfies AiUsageStorage
 
 declare const agentRun: AgentRunRecord
+declare const agentRunView: AgentRunView
 declare const workflowAgentNode: WorkflowAgentNodeRunRecord
+declare const workflowAgentNodeView: WorkflowAgentNodeRunView
 
 // Run rows must never grow a second accounting authority beside the model-call ledger.
 // @ts-expect-error usage exists only through AiUsageStorage
 agentRun.usage
 // @ts-expect-error usage exists only through AiUsageStorage
 workflowAgentNode.usage
+
+// Runtime views may expose the ledger-derived summary without mutating storage records.
+agentRunView.usage
+workflowAgentNodeView.usage
+// @ts-expect-error execution ownership stays private to the storage contract
+workflowAgentNodeView.execution
 
 void input
 void provider

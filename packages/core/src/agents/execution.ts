@@ -1,6 +1,7 @@
 import { principalsEqual, SYSTEM_PRINCIPAL } from "../auth"
 import { assertAuthorized, isAllowed } from "../authorization"
 import type { AuthorizablePrincipal, ExecutionContext } from "../execution"
+import { resolveExecutionUsage } from "../runtime/ai-usage"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { SecurityDefinitionCatalog } from "../security"
 import type {
@@ -11,6 +12,7 @@ import type {
   ListAgentThreadsInput,
   ListAgentThreadsResult,
 } from "../storage/agents"
+import type { AiModelCallUsage } from "../storage/ai-usage"
 import { AgentRequestError } from "./errors"
 import { createAgentThreadId } from "./ids"
 import {
@@ -52,6 +54,8 @@ export interface AgentRunsRuntime {
 /** Execution-facing run view with provenance resolved from the immutable execution ledger. */
 export interface AgentRunView extends AgentRunRecord {
   readonly requestedBy?: AuthorizablePrincipal
+  /** Derived from the model-call ledger; never persisted on the Agent run row. */
+  readonly usage?: AiModelCallUsage
 }
 
 export interface AgentRunListResult extends Omit<ListAgentRunsResult, "runs"> {
@@ -96,7 +100,7 @@ export function createAgentsRuntime(
     return agent && allowed(agentId) ? agent : null
   }
 
-  const getRun = async (runId: string): Promise<AgentRunView | null> => {
+  const getVisibleRunRecord = async (runId: string): Promise<AgentRunRecord | null> => {
     const run =
       (await runtime.storage.agents?.runs.getById({
         projectId: runtime.projectId,
@@ -104,7 +108,12 @@ export function createAgentsRuntime(
       })) ?? null
     if (!run) return null
     const thread = await getThread(run.threadId)
-    return thread?.agentId === run.agentId ? attachRequestedBy(runtime, run) : null
+    return thread?.agentId === run.agentId ? run : null
+  }
+
+  const getRun = async (runId: string): Promise<AgentRunView | null> => {
+    const run = await getVisibleRunRecord(runId)
+    return run ? attachRunView(runtime, run) : null
   }
 
   return {
@@ -162,10 +171,10 @@ export function createAgentsRuntime(
           ...input,
           principal,
         })
-        return { ...result, run: await attachRequestedBy(runtime, result.run) }
+        return { ...result, run: await attachRunView(runtime, result.run) }
       },
       retry: async (runId) => {
-        const failedRun = await getRun(runId)
+        const failedRun = await getVisibleRunRecord(runId)
         if (!failedRun) {
           throw new AgentRequestError("run_not_found", `[Sixb] Agent run '${runId}' was not found.`)
         }
@@ -177,7 +186,7 @@ export function createAgentsRuntime(
           )
         }
         const result = await retryAgentRun(runtime, execution, security, agent, failedRun)
-        return { ...result, run: await attachRequestedBy(runtime, result.run) }
+        return { ...result, run: await attachRunView(runtime, result.run) }
       },
       getById: getRun,
       listForThread: async (threadId, input = {}) => {
@@ -190,30 +199,56 @@ export function createAgentsRuntime(
         })
         return {
           ...result,
-          runs: await Promise.all(result.runs.map((run) => attachRequestedBy(runtime, run))),
+          runs: await attachRunViews(runtime, result.runs),
         }
       },
     },
   }
 }
 
-async function attachRequestedBy(
+async function attachRunView(
   runtime: SixbRuntimeContext,
   run: AgentRunRecord
 ): Promise<AgentRunView> {
-  const execution = await runtime.storage.executions.getById({
-    projectId: runtime.projectId,
-    id: run.executionId,
+  const [view] = await attachRunViews(runtime, [run])
+  if (!view) throw new Error(`[Sixb] Could not build Agent run '${run.id}' view.`)
+  return view
+}
+
+async function attachRunViews(
+  runtime: SixbRuntimeContext,
+  runs: readonly AgentRunRecord[]
+): Promise<readonly AgentRunView[]> {
+  const [executions, usages] = await Promise.all([
+    Promise.all(
+      runs.map((run) =>
+        runtime.storage.executions.getById({
+          projectId: runtime.projectId,
+          id: run.executionId,
+        })
+      )
+    ),
+    resolveExecutionUsage({
+      storage: runtime.storage.aiUsage,
+      projectId: runtime.projectId,
+      executionIds: runs.map((run) => run.executionId),
+    }),
+  ])
+
+  return runs.map((run, index) => {
+    const execution = executions[index]
+    if (!execution) {
+      throw new Error(
+        `[Sixb] Agent run '${run.id}' references missing execution '${run.executionId}'.`
+      )
+    }
+    const usage = usages[index]
+    return {
+      ...run,
+      ...(execution.requestedBy === undefined
+        ? {}
+        : { requestedBy: structuredClone(execution.requestedBy) }),
+      ...(usage === undefined ? {} : { usage }),
+    }
   })
-  if (!execution) {
-    throw new Error(
-      `[Sixb] Agent run '${run.id}' references missing execution '${run.executionId}'.`
-    )
-  }
-  return {
-    ...run,
-    ...(execution.requestedBy === undefined
-      ? {}
-      : { requestedBy: structuredClone(execution.requestedBy) }),
-  }
 }
