@@ -1,13 +1,13 @@
 # Sandboxes
 
-A sandbox is an isolated environment where an agent runs bash commands. Reach for one whenever an
-[agent](../agents/overview.md) needs a shell: file work, scripts, `curl` against the sixb API
-gateway. The sandbox keeps that work off your host — its filesystem, network, and processes are
-walled off from the machine the runtime runs on.
+A sandbox is an isolated environment where an agent reads files and runs bash commands. Reach for
+one whenever an [agent](../agents/overview.md) needs file work, scripts, or `curl` against the sixb
+API gateway. The sandbox keeps that work off your host — its filesystem, network, and processes
+are walled off from the machine the runtime runs on.
 
 You pick a provider once and wire it into `createSixb`. Everything above the sandbox — the agent,
-its bash tool, its run lifecycle — is written against one provider-agnostic contract, so swapping
-providers never touches agent code.
+its sandbox tools, its run lifecycle — is written against one provider-agnostic contract, so
+swapping providers never touches agent code.
 
 ## The contract
 
@@ -73,6 +73,20 @@ command is data, not an exception:
 
 `CreateSandboxOptions` sets the per-run defaults at `create()` time: `workingDirectory`, `env`,
 `timeout`, and `network`.
+
+### Agent image requirements
+
+The `Sandbox` contract is command-agnostic, but an image used by the Sixb agent worker must provide
+the commands used by its built-in tools:
+
+- `bash` runs both built-in sandbox tools.
+- `curl` lets the agent call the scoped Sixb API gateway.
+- `realpath`, `tail`, `head`, and `base64` power the bounded, binary-safe `read` implementation.
+
+Stock or canonical provider images include these commands; the local provider uses the copies on
+the host's `PATH`. Bake them into custom images and snapshots rather than installing them on each
+run. The `read` tool probes its four supporting commands and returns a clear error naming a missing
+command.
 
 ## Wiring
 
@@ -141,9 +155,10 @@ You rarely call `runCommand` yourself. The agent worker does it:
 1. When a run starts, the worker calls `factory.create(...)` with a **restricted** network policy
    whose only allowed origin is the sixb API gateway. The agent can reach the gateway and nothing
    else.
-2. Sandbox boot overlaps the model's first response — it is provisioned concurrently and the bash
-   tool awaits it lazily on the first command, so boot latency does not block the turn.
-3. Each `bash` tool call becomes `runCommand("bash", ["-lc", script], ...)`.
+2. Sandbox boot overlaps the model's first response — it is provisioned concurrently and each
+   sandbox tool awaits it lazily on first use, so boot latency does not block the turn.
+3. Each `read` call runs a fixed, bounded script with model input passed as command arguments. Each
+   `bash` call becomes `runCommand("bash", ["-lc", script], ...)`.
 4. On run teardown the worker calls `destroy()`.
 
 Because egress is locked to the gateway, the agent's only way to read or write app data is through
@@ -171,4 +186,5 @@ Vercel gives you remote managed microVMs, but the Sixb API gateway must be reach
 - [Apple Container sandbox](./apple-container.md) — local Apple Container-backed sandboxes
 - [smolvm sandbox](./smolvm.md) — hardware-isolated microVMs
 - [Vercel sandbox](./vercel.md) — managed Vercel-hosted microVMs
-- [Agent tools and the gateway](../agents/tools-and-gateway.md) — what the bash tool can reach
+- [Agent tools and the gateway](../agents/tools-and-gateway.md) — how sandbox tools reach files
+  and the API gateway

@@ -11,6 +11,7 @@ import {
   prepareAgentAttachments,
 } from "./attachments"
 import { type BashSandboxHandle, createBashTool } from "./bash-tool"
+import { createReadTool } from "./read-tool"
 import { prepareAgentSandboxApiContext } from "./sandbox-api-context"
 import type { AgentExecutionContext, AgentTurnContext, AgentWorkerContext } from "./types"
 import { prepareWorkflowInputAttachments } from "./workflow-input-attachments"
@@ -130,7 +131,7 @@ interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
 
 /**
  * Start the shared tools, sandbox, and teardown lifecycle after source-specific preparation.
- * Sandbox boot stays concurrent with the model call; the bash tool awaits it only when used.
+ * Sandbox boot stays concurrent with the model call; sandbox tools await it only when used.
  */
 function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvironment {
   const { mode, context, agent, runId, threadId, apiBaseUrl, attachmentContext, skills } = input
@@ -157,10 +158,12 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
 
   let sandboxWasUsed = false
   let ready: Promise<BashSandboxHandle>
-  tools.bash = createBashTool(() => {
+  const resolveSandbox = () => {
     sandboxWasUsed = true
     return ready
-  })
+  }
+  tools.read = createReadTool(resolveSandbox)
+  tools.bash = createBashTool(resolveSandbox)
 
   ready = provisionSandbox({
     context,
@@ -171,7 +174,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
     attachmentContext,
     skills,
   })
-  // Creation failure is surfaced where it is awaited (turn / bash tool / dispose); attach a no-op
+  // Creation failure is surfaced where it is awaited (turn / sandbox tool / dispose); attach a no-op
   // catch so a rejection observed by none of them is not reported as unhandled.
   ready.catch(() => {})
   // Track settlement so dispose() can avoid blocking teardown on a boot still in flight.

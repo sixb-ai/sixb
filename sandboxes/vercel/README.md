@@ -1,6 +1,6 @@
 # @sixb/sandboxes-vercel
 
-Runs each agent's bash inside a managed [Vercel Sandbox](https://vercel.com/docs/sandbox)
+Runs each agent's sandbox tools inside a managed [Vercel Sandbox](https://vercel.com/docs/sandbox)
 Firecracker microVM. Drop-in `Sandbox` provider — wire it once into `createSixb({ sandboxes })`;
 agent code still uses the provider-neutral Sixb sandbox contract.
 
@@ -63,8 +63,9 @@ For production, expose the Sixb API gateway at a public HTTPS origin reachable f
 
 ## Runtime and dependencies
 
-By default, Vercel boots its stock `node24` runtime. Sixb's built-in bash tool expects at least
-`bash` and `curl`. The stock runtimes are usually enough for API-oriented agent work.
+By default, Vercel boots its stock `node24` runtime. Custom images and snapshots used by agents must
+provide `bash`, `curl`, `realpath`, `tail`, `head`, and `base64`. The stock runtimes include these
+commands and are usually enough for API-oriented agent work.
 
 For additional tools, prefer one of these setup strategies:
 

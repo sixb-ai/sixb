@@ -45,9 +45,9 @@ export interface VercelSnapshotRetentionPolicy {
 export interface VercelSandboxFactoryOptions {
   /** Stock Vercel runtime. Ignored when `image` or `snapshotId` is set. Defaults to Vercel's node24. */
   readonly runtime?: VercelSandboxRuntime | (string & {})
-  /** Vercel Container Registry image reference. Mutually exclusive with `snapshotId`. */
+  /** VCR image reference; agent images need bash, curl, realpath, tail, head, and base64. */
   readonly image?: string
-  /** Existing Vercel Sandbox snapshot id to boot from. Mutually exclusive with `image` and `source`. */
+  /** Existing snapshot; agent snapshots need the same commands. Exclusive with `image`/`source`. */
   readonly snapshotId?: string
   /** Optional git/tarball source cloned or mounted by Vercel at sandbox creation. */
   readonly source?: VercelSandboxSource

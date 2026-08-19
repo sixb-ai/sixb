@@ -1,6 +1,6 @@
 # Apple Container sandbox
 
-`@sixb/sandboxes-apple-container` runs each agent's bash inside a local
+`@sixb/sandboxes-apple-container` runs each agent's sandbox tools inside a local
 [Apple Container](https://github.com/apple/container) container. Use it for local Mac testing when
 you want container isolation without building a smolvm image.
 
@@ -22,8 +22,10 @@ Install Apple Container on an Apple silicon Mac running macOS 26 or newer, then 
 container system start
 ```
 
-The default image is `node:22-bookworm`. Custom images should include `bash`, `/bin/sh`, and `curl`
-for the built-in agent tools.
+The default image is `node:22-bookworm`. Custom images should include `/bin/sh`, `bash`, `curl`,
+`realpath`, `tail`, `head`, and `base64` for the provider and built-in agent tools. The provider's
+file materialization also uses `mkdir`, `dirname`, `cat`, and optionally `chmod`. Debian
+`coreutils` or BusyBox supplies these standard file utilities.
 
 ## Network policy
 

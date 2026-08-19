@@ -16,7 +16,7 @@ import {
 import { type AppleContainerProbe, probeAppleContainer } from "./preflight"
 
 export interface AppleContainerSandboxFactoryOptions {
-  /** OCI image used for each sandbox. Must include bash and curl for Sixb agents. */
+  /** Agent images need /bin/sh, bash, curl, realpath, tail, head, and base64. */
   readonly image?: string
   /** Apple Container CLI binary name or absolute path. Defaults to "container". */
   readonly bin?: string
