@@ -81,7 +81,7 @@ export interface AgentTurnContext {
   readonly attachmentContext?: PreparedAgentAttachmentContext
   /**
    * The concurrently provisioning sandbox, exposed so the turn can fail if it rejects. Resolved
-   * value is irrelevant here (the bash tool consumes the handle); only its rejection matters.
+   * value is irrelevant here (the sandbox tools consume the handle); only its rejection matters.
    */
   readonly sandboxReady?: Promise<BashSandboxHandle>
   readonly sandboxWasUsed?: () => boolean

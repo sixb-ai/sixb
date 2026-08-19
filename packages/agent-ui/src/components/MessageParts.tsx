@@ -4,6 +4,7 @@ import { ChevronRight, Wrench } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { BashToolView } from "../bash/BashToolView"
 import type { NormalizedPart, NormalizedTool } from "../parts"
+import { ReadToolView } from "../read/ReadToolView"
 import { FileAttachmentCard } from "./FileAttachmentCard"
 
 /**
@@ -151,8 +152,8 @@ function GroupReasoning({ text, streaming }: { text: string; streaming: boolean 
 }
 
 /**
- * A single tool call within a work group. `bash` — the agent's one tool — renders through its
- * intent-aware view; anything else falls back to the generic inspector. Both keep their bodies
+ * A single tool call within a work group. Framework tools render through purpose-built views;
+ * project tools fall back to the generic inspector. Both keep their bodies
  * borderless and inline so an expanded result flows within the group rather than reading as a
  * nested dropdown.
  */
@@ -170,6 +171,7 @@ function ToolCallRow({ tool }: { tool: NormalizedTool }) {
       />
     )
   }
+  if (tool.toolName === "read") return <ReadToolView tool={tool} />
 
   const isError = tool.state === "output-error"
   const hasInput = tool.input !== undefined || Boolean(tool.inputText)

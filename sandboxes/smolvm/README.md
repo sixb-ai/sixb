@@ -1,6 +1,8 @@
 # @sixb/sandboxes-smolvm
 
-Runs each agent's bash inside a hardware-isolated [smolvm](https://github.com/smol-machines/smolvm) microVM. Drop-in `Sandbox` provider — wire it once into `createSixb({ sandboxes })`; nothing else changes.
+Runs each agent's sandbox tools inside a hardware-isolated
+[smolvm](https://github.com/smol-machines/smolvm) microVM. Drop-in `Sandbox` provider — wire it once
+into `createSixb({ sandboxes })`; nothing else changes.
 
 ## Setup
 
@@ -18,7 +20,10 @@ curl -sSL https://smolmachines.com/install.sh | bash
 bun run agent:image
 ```
 
-This builds [`agent-image/Dockerfile`](./agent-image/Dockerfile) — alpine + `bash curl jq git ripgrep python3`, ~73 MB — and caches it at `~/.cache/sixb/smolvm/sixb-agent.tar`.
+This builds [`agent-image/Dockerfile`](./agent-image/Dockerfile) — alpine plus
+`bash curl jq git ripgrep python3`, about 73 MB — and caches it at
+`~/.cache/sixb/smolvm/sixb-agent.tar`. Alpine's BusyBox base supplies `realpath`, `tail`, `head`, and
+`base64` for `read`.
 
 ## Use
 
@@ -29,11 +34,16 @@ import { SmolvmSandboxFactory } from "@sixb/sandboxes-smolvm"
 createSixb({ sandboxes: new SmolvmSandboxFactory() })
 ```
 
-Each run boots a microVM from the cached image, runs the agent's bash, and destroys it. Networking is locked to the sixb gateway — no open internet. Boot (~0.7 s) overlaps the model's first response, so it's effectively instant. If a setup step is missing, `create()` throws a message telling you exactly what to run.
+Each run boots a microVM from the cached image, runs the agent's sandbox tools, and destroys it.
+Networking is locked to the sixb gateway — no open internet. Boot (~0.7 s) overlaps the model's
+first response, so it's effectively instant. If a setup step is missing, `create()` throws a message
+telling you exactly what to run.
 
 ## Custom tools
 
-Edit the Dockerfile and rebuild. Keep it lean — boot time scales with image size, and run-time installs won't work (egress is locked down).
+Edit the Dockerfile and rebuild. Custom agent images must provide `bash`, `curl`, `realpath`, `tail`,
+`head`, and `base64`. Keep it lean — boot time scales with image size, and run-time installs won't
+work (egress is locked down).
 
 ```bash
 # edit agent-image/Dockerfile, then:

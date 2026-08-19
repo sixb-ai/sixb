@@ -16,7 +16,7 @@ export interface BashToolOutput extends CommandResult {
   readonly stderrTruncated: boolean
 }
 
-/** The sandbox plus its run-scoped env, resolved lazily on first bash use. */
+/** The sandbox plus its run-scoped env, resolved lazily on first sandbox tool use. */
 export interface BashSandboxHandle {
   readonly sandbox: Sandbox
   readonly env?: Readonly<Record<string, string>>
