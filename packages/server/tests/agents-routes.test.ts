@@ -854,10 +854,9 @@ describe("agent routes", () => {
     await storage.aiUsage.recordModelCall({
       id: "usage-readable",
       projectId: sixb.id,
-      execution: { kind: "agentRun", runId: run.id },
+      executionId: run.executionId,
       attempt: 1,
       callId: "call-readable",
-      requesterPrincipal: { type: "system", id: "system" },
       requesterGroupIds: [],
       providerId: "test",
       requestedModelId: "test-model",
@@ -964,10 +963,7 @@ describe("agent routes", () => {
     expect(summaryInputs).toEqual([
       {
         projectId: sixb.id,
-        executions: [
-          { kind: "agentRun", runId: "run-list-2" },
-          { kind: "agentRun", runId: "run-list-1" },
-        ],
+        executionIds: [secondExecutionId, firstExecutionId],
       },
     ])
   })

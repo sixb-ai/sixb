@@ -957,6 +957,118 @@ describe("Postgres storage migrations", () => {
     })
   })
 
+  test("drops only obsolete run usage projections from an existing schema", async () => {
+    // Regression guard: remove migration 011 (or any one DROP COLUMN) and this leaves the old
+    // projection column behind; deleting the run rows instead breaks the preservation assertions.
+    const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    await withSql(async (sql) => {
+      const schema = quoteIdent(schemaName)
+      const context = { exec: (sqlText: string) => sql.unsafe(sqlText).then(() => undefined) }
+      const cleanupIndex = postgresStorageMigrations.steps.findIndex(
+        (migration) => migration.id === "011-drop-run-usage-projections"
+      )
+      const cleanup = postgresStorageMigrations.steps[cleanupIndex]
+      if (!cleanup) throw new Error("PostgreSQL run usage cleanup migration is missing.")
+
+      try {
+        await sql.unsafe(`CREATE SCHEMA ${schema}`)
+        await sql.unsafe(`SET search_path TO ${schema}`)
+        for (const migration of postgresStorageMigrations.steps.slice(0, cleanupIndex)) {
+          await migration.up(context)
+        }
+        await sql.unsafe(`
+          INSERT INTO auth_service_accounts (
+            project_id, id, name, status, created_by_system_id, created_at, updated_at
+          ) VALUES (
+            'project-a', 'agent:sales', 'Sales Agent', 'active', 'test',
+            '2026-07-01T11:55:00.000Z', '2026-07-01T11:55:00.000Z'
+          );
+
+          INSERT INTO executions (
+            project_id, id, executor_kind, executor_id, source_kind, source_id,
+            correlation_id, authority_kind, authority_primitive_kind, authority_primitive_id,
+            created_at
+          ) VALUES
+            (
+              'project-a', 'request-execution-1', 'request', 'request-1', 'http', 'request-1',
+              'correlation-1', 'disabled', NULL, NULL, '2026-07-01T11:56:00.000Z'
+            ),
+            (
+              'project-a', 'workflow-execution-1', 'workflow', 'workflow-run-1', 'event',
+              'event-1', 'correlation-2', 'trustedPrimitive', 'workflow', 'resolve-transaction',
+              '2026-07-01T11:56:00.000Z'
+            );
+
+          INSERT INTO executions (
+            project_id, id, executor_kind, executor_id, source_kind, source_id,
+            correlation_id, parent_execution_id, authority_kind,
+            authority_service_account_id, created_at
+          ) VALUES
+            (
+              'project-a', 'agent-execution-1', 'agent', 'run-1', 'execution',
+              'request-execution-1', 'correlation-1', 'request-execution-1', 'principal',
+              'agent:sales', '2026-07-01T11:57:00.000Z'
+            ),
+            (
+              'project-a', 'node-execution-1', 'agent', 'node-1', 'execution',
+              'workflow-execution-1', 'correlation-2', 'workflow-execution-1', 'principal',
+              'agent:sales', '2026-07-01T11:57:00.000Z'
+            );
+
+          INSERT INTO agent_runs (
+            project_id, id, execution_id, thread_id, agent_id, trigger_message_id, status,
+            usage_input_tokens, usage_output_tokens, usage_total_tokens, created_at
+          ) VALUES (
+            'project-a', 'run-1', 'agent-execution-1', 'thread-1', 'sales', 'message-1',
+            'succeeded', 12, 8, 20, '2026-07-01T12:00:00.000Z'
+          );
+
+          INSERT INTO workflow_runs (
+            project_id, id, execution_id, workflow_id, status, input, started_at
+          ) VALUES (
+            'project-a', 'workflow-run-1', 'workflow-execution-1', 'resolve-transaction',
+            'succeeded', '{}', '2026-07-01T12:00:00.000Z'
+          );
+          INSERT INTO workflow_node_runs (
+            project_id, id, workflow_run_id, workflow_id, node_index, node_type, node_id,
+            node_key, status, input, started_at
+          ) VALUES (
+            'project-a', 'node-1', 'workflow-run-1', 'resolve-transaction', 0, 'agent',
+            'resolve-agent', 'resolveAgent', 'succeeded', '{}', '2026-07-01T12:00:00.000Z'
+          );
+          INSERT INTO workflow_agent_node_runs (
+            project_id, node_run_id, execution_id, agent_id, status, prompt, usage, created_at
+          ) VALUES (
+            'project-a', 'node-1', 'node-execution-1', 'sales', 'succeeded', 'Resolve it',
+            '{"inputTokens":12,"outputTokens":8}', '2026-07-01T12:00:00.000Z'
+          );
+        `)
+
+        await cleanup.up(context)
+
+        const agentColumns = await readTableColumns(schemaName, "agent_runs")
+        const workflowColumns = await readTableColumns(schemaName, "workflow_agent_node_runs")
+        expect(agentColumns.some((column) => column.startsWith("usage_"))).toBe(false)
+        expect(workflowColumns).not.toContain("usage")
+        expect(
+          await sql.unsafe<Array<{ id: string; execution_id: string; status: string }>>(
+            "SELECT id, execution_id, status FROM agent_runs WHERE id = 'run-1'"
+          )
+        ).toEqual([{ id: "run-1", execution_id: "agent-execution-1", status: "succeeded" }])
+        expect(
+          await sql.unsafe<Array<{ node_run_id: string; execution_id: string; status: string }>>(
+            "SELECT node_run_id, execution_id, status FROM workflow_agent_node_runs WHERE node_run_id = 'node-1'"
+          )
+        ).toEqual([
+          { node_run_id: "node-1", execution_id: "node-execution-1", status: "succeeded" },
+        ])
+      } finally {
+        await sql.unsafe("RESET search_path")
+        await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
+      }
+    })
+  })
+
   test("dirty migration history blocks storage migrations", async () => {
     await withStorage(false, async (storage, schemaName) => {
       // Migrate first, then plant a started row above the applied ones: a dirty history

@@ -125,7 +125,7 @@ export async function serializeAgentRun(
   const usage = await resolveAiUsageSummary({
     storage: aiUsage,
     projectId: run.projectId,
-    execution: { kind: "agentRun", runId: run.id },
+    executionId: run.executionId,
   })
   return serializeAgentRunWithUsage(run, usage)
 }
@@ -788,7 +788,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           const usages = await resolveAiUsageSummaries({
             storage: host.storage.aiUsage,
             projectId: host.id,
-            executions: result.runs.map((run) => ({ kind: "agentRun", runId: run.id })),
+            executionIds: result.runs.map((run) => run.executionId),
           })
           return AgentRunListResponseSchema.parse({
             runs: result.runs.map((run, index) => serializeAgentRunWithUsage(run, usages[index])),
