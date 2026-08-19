@@ -3,7 +3,17 @@ import { RedisBrokerError } from "./errors"
 
 export interface RedisBrokerConnectionOptions extends RedisOptions {
   readonly url?: string
+  /**
+   * Bound on one operation through the shared client. Defaults to 30 seconds.
+   *
+   * Bun bounds connecting with `connectionTimeout` and an idle socket with `idleTimeout`, but
+   * neither bounds a command that was sent and never answered. An operation can be more than one
+   * round trip: an append also trims retention, and a read also enforces age retention.
+   */
+  readonly commandTimeoutMs?: number
 }
+
+const DEFAULT_COMMAND_TIMEOUT_MS = 30_000
 
 export interface RedisBrokerClient {
   connect(): Promise<void>
@@ -31,6 +41,7 @@ export class RedisConnectionManager {
   private readonly controller = new AbortController()
   private readonly url: string | undefined
   private readonly options: RedisOptions | undefined
+  private readonly commandTimeoutMs: number
   private connectPromise: Promise<RedisBrokerClient> | undefined
   private client: RedisBrokerClient | undefined
   private commandQueue: Promise<void> = Promise.resolve()
@@ -40,8 +51,9 @@ export class RedisConnectionManager {
     options: RedisBrokerConnectionOptions = {},
     private readonly clientFactory: RedisBrokerClientFactory = createRedisBrokerClient
   ) {
-    const { url, ...redisOptions } = options
+    const { url, commandTimeoutMs, ...redisOptions } = options
     this.url = url
+    this.commandTimeoutMs = commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS
     this.options = Object.keys(redisOptions).length === 0 ? undefined : redisOptions
   }
 
@@ -117,10 +129,51 @@ export class RedisConnectionManager {
     try {
       this.assertOpen()
       const client = await this.connect()
-      return await operation(client)
+      return await this.runWithCommandTimeout(client, operation)
     } finally {
       release()
     }
+  }
+
+  /**
+   * Bounds one operation so a reply that never arrives cannot hold the shared queue forever.
+   *
+   * Every append and read shares `commandQueue`, and `release()` only runs once the awaited
+   * operation settles. An unanswered command therefore stopped all further event publication and
+   * left `close()` waiting on the same queue. The timed-out client is discarded rather than
+   * reused: its missing reply may still arrive, and a late reply on a shared connection can be
+   * matched to the wrong command.
+   */
+  private async runWithCommandTimeout<T>(
+    client: RedisBrokerClient,
+    operation: (client: RedisBrokerClient) => Promise<T>
+  ): Promise<T> {
+    const timeoutMs = this.commandTimeoutMs
+    const pending = operation(client)
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      return await Promise.race([
+        pending,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => {
+            this.discardCommandClient(client)
+            reportAbandonedCommand(pending, timeoutMs)
+            reject(new RedisBrokerError(`Redis command did not respond within ${timeoutMs}ms`))
+          }, timeoutMs)
+        }),
+      ])
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  /** Drops the main client after a timeout so the next command connects a fresh one. */
+  private discardCommandClient(client: RedisBrokerClient): void {
+    if (this.client !== client) {
+      return
+    }
+    this.client = undefined
+    this.closeClient(client)
   }
 
   async close(): Promise<void> {
@@ -198,6 +251,29 @@ export class RedisConnectionManager {
       throw new RedisBrokerError("broker connection has been closed")
     }
   }
+}
+
+/**
+ * Reports how an abandoned operation ended, once its caller has already been failed.
+ *
+ * A late success is the case an operator most needs: Redis applied the command after all, so a
+ * retry without an `idempotencyKey` can duplicate it. A late failure is reported too, but it is
+ * usually caused by the client this timeout just closed rather than by the original fault.
+ */
+function reportAbandonedCommand(pending: Promise<unknown>, timeoutMs: number): void {
+  pending.then(
+    () => {
+      console.error(
+        `[RedisBroker] An operation abandoned after ${timeoutMs}ms succeeded afterwards. Redis applied it, but its caller was already failed.`
+      )
+    },
+    (error: unknown) => {
+      console.error(
+        `[RedisBroker] An operation abandoned after ${timeoutMs}ms then failed. The bound closed its client, so this may report that close rather than the original fault.`,
+        error
+      )
+    }
+  )
 }
 
 function redisUrlFromEnvironment(): string | undefined {
