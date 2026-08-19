@@ -248,10 +248,26 @@ export async function waitForActionRun(
         }
       })
       .then((unsubscribeEvents) => {
+        // The wait can settle before the subscription resolves, on timeout or on abort.
+        // `cleanup()` has run by then and saw no unsubscribe, so releasing it here is the only
+        // chance to release it at all.
+        if (settled) {
+          unsubscribeEvents()
+          return
+        }
         unsubscribe = unsubscribeEvents
         void check()
       })
-      .catch(rejectWith)
+      .catch((error: unknown) => {
+        // Once the wait has settled both halves of `rejectWith` are inert: `cleanup()` returns
+        // early and `reject()` no longer changes the promise. Reporting a failed subscribe, or a
+        // release that threw, is all that is left to do with it.
+        if (settled) {
+          console.error("[Sixb] Action run wait could not release its subscription.", error)
+          return
+        }
+        rejectWith(error)
+      })
   })
 }
 
