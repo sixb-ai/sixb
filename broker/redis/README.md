@@ -40,7 +40,7 @@ default Redis URL.
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
-| `connection` | `RedisBrokerConnectionOptions` | `undefined` | Bun Redis URL/options. Supports `url`, `connectionTimeout`, `idleTimeout`, `autoReconnect`, `maxRetries`, `enableOfflineQueue`, `enableAutoPipelining`, and `tls`. |
+| `connection` | `RedisBrokerConnectionOptions` | `undefined` | Bun Redis URL/options. Supports `url`, `commandTimeoutMs`, `connectionTimeout`, `idleTimeout`, `autoReconnect`, `maxRetries`, `enableOfflineQueue`, `enableAutoPipelining`, and `tls`. |
 | `prefix` | `string` | `"sixb:broker"` | Redis key prefix. |
 | `dedupeTtlMs` | `number` | `120000` | Retry dedupe window for `idempotencyKey`. |
 | `readBatchSize` | `number` | `1000` | `XRANGE COUNT` page size for retained reads. |
@@ -92,6 +92,24 @@ retry dedupe, retention trimming, and retained-range metadata updates.
 For retryable writes, pass a stable `idempotencyKey`. The provider maps it to a
 short-lived Redis key and returns the original retained record when the same key
 is retried within `dedupeTtlMs`.
+
+Appends, reads, and retention commands share one Redis client, and each such
+operation is bounded by `connection.commandTimeoutMs` (30 seconds by default,
+and a positive integer). Bun's `connectionTimeout` covers connecting and
+`idleTimeout` covers an idle socket; neither bounds a command that was sent and
+never answered, and one unanswered command on the shared client would otherwise
+stop every later append and read. Note that one operation can be more than one
+round trip: an append also trims retention, and a read also enforces age
+retention.
+
+An operation that passes the bound fails with a `RedisBrokerError`, and its
+client is discarded rather than reused, because the missing reply may still
+arrive and a late reply on a shared connection can be matched to the wrong
+command. Two consequences are worth planning for. A timeout is **indeterminate**:
+Redis may still apply the command afterwards, so pass an `idempotencyKey` to
+make a retry safe -- the retained record is returned instead of a second append.
+And a Redis failover longer than the bound no longer completes transparently
+through Bun's reconnect and offline queue; it surfaces as a failed operation.
 
 ### Subscribe
 

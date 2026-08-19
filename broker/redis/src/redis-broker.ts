@@ -83,6 +83,9 @@ export class RedisBroker implements Broker {
     const prefix = options.prefix ?? DEFAULT_PREFIX
     assertPrefix(prefix)
 
+    if (options.connection?.commandTimeoutMs !== undefined) {
+      positiveInteger(options.connection.commandTimeoutMs)
+    }
     this.connectionManager = new RedisConnectionManager(options.connection)
     this.streamManager = new StreamManager({ connectionManager: this.connectionManager, prefix })
     this.dedupeTtlMs = positiveInteger(options.dedupeTtlMs ?? DEFAULT_DEDUPE_TTL_MS)
