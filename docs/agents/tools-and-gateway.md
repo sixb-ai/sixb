@@ -1,7 +1,23 @@
 # Tools and gateway
 
-Every agent run gets a sandboxed `bash` tool and scoped access to the Sixb API. Agents may also
-receive explicitly selected tools that run in the agent worker.
+Every agent run gets sandboxed `read` and `bash` tools plus scoped access to the Sixb API. Agents
+may also receive explicitly selected tools that run in the agent worker.
+
+## The read tool
+
+The `read` tool opens UTF-8 text files relative to the sandbox working directory. It rejects
+absolute paths, paths that resolve outside that directory, directories, unreadable files, and binary
+content.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `path` | `string` | — | Path relative to the sandbox working directory. |
+| `offset` | `number` | 1 | One-based line to start at. |
+| `limit` | `number` | 2,000 | Requested line count, capped at 2,000. |
+
+Each call returns at most 2,000 lines or 50 KiB, whichever comes first. The result includes the
+`startLine`, `endLine`, and `truncated` fields; when more content exists, `nextOffset` is the line to
+use in the next call.
 
 ## The bash tool
 
@@ -16,11 +32,12 @@ that the worker provisions for the turn and destroys when it ends.
 
 It returns the command result with `stdoutTruncated` / `stderrTruncated` flags; output is capped so a
 runaway command cannot flood the turn. The sandbox boots concurrently with the turn, so if the
-model never calls `bash` the boot cost never lands on the user.
+model never calls a sandbox tool the boot cost never lands on the user.
 
 ### A sandbox is required
 
-The `bash` tool always runs in a sandbox, so the agent worker will not start without a factory:
+The `read` and `bash` tools always run in a sandbox, so the agent worker will not start without a
+factory:
 
 ```ts
 import { createSixb } from "@sixb/core"
@@ -68,8 +85,8 @@ Tool definitions are not auto-discovered. Grant them through the agent definitio
 tools: [searchKnowledge]
 ```
 
-Names must be unique within one agent, and `bash` is reserved. Conversation, workflow, and
-CLI-managed agent runs use the same selected tools.
+Names must be unique within one agent, and `read` and `bash` are reserved. Conversation, workflow,
+and CLI-managed agent runs use the same selected tools.
 
 ### Exa web tools
 
@@ -190,9 +207,10 @@ skills/acme-writing-style/
 ```
 
 `SKILL.md` starts with `name` and `description` frontmatter. Only those metadata fields are listed in
-the model's always-on catalog; the agent reads the full `SKILL.md` and any referenced files from
-`$SIXB_SKILLS_DIR/<name>` only when the task matches. Use skills for company standards, examples,
-templates, and multi-step procedures that should not live in every agent's base prompt.
+the model's always-on catalog. When a task matches, the agent can use `read` with a path such as
+`.sixb/agent/skills/<name>/SKILL.md`; `$SIXB_SKILLS_DIR/<name>` is the equivalent absolute path for
+commands run through `bash`. Use skills for company standards, examples, templates, and multi-step
+procedures that should not live in every agent's base prompt.
 
 ## Related
 

@@ -74,8 +74,8 @@ export function renderAgentSkillCatalog(
     "Message attachments, when present, are listed in $SIXB_ATTACHMENTS and materialized under $SIXB_ATTACHMENT_DIR when size limits allow.",
     "Prepare user-facing files under $SIXB_OUTPUT_STAGING_DIR, then atomically publish each complete file or directory with mv into $SIXB_OUTPUT_DIR. Only files under $SIXB_OUTPUT_DIR are attached to the final chat message when size limits allow.",
     "Never write a file directly in $SIXB_OUTPUT_DIR and never modify it after publication; publish only complete outputs.",
-    "Use $SIXB_SKILLS_DIR and attachment/output env vars to reference file paths; do not hardcode sandbox directory paths.",
-    "Before applying a matching skill, read that skill's SKILL.md with bash/cat.",
+    "Use environment variables with bash. With read, use relative paths from this catalog or sandboxPath values.",
+    "Before applying a matching skill, read its SKILL.md with the read tool.",
     "Load referenced files only when needed.",
     "Use live ontology and object APIs rather than guessing schema or relying on stale context.",
     "Do not add Authorization or Cookie headers. The gateway authenticates allowed requests.",
@@ -86,7 +86,8 @@ export function renderAgentSkillCatalog(
     "",
     "Available Agent Skills:",
     ...skills.map(
-      (skill) => `- ${skill.name}: ${skill.description} Path: $SIXB_SKILLS_DIR/${skill.name}`
+      (skill) =>
+        `- ${skill.name}: ${skill.description} Path: .sixb/agent/skills/${skill.name}/SKILL.md`
     ),
   ].join("\n")
 }

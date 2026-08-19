@@ -156,7 +156,9 @@ describe("defineAgentTool", () => {
     for (const name of ["", "1search", "search knowledge", "a".repeat(65)]) {
       expect(() => validateName(name)).toThrow(AgentDefinitionError)
     }
-    expect(() => validateName("bash")).toThrow("reserved by the framework")
+    for (const name of ["bash", "read"]) {
+      expect(() => validateName(name)).toThrow("reserved by the framework")
+    }
   })
 
   test("rejects empty descriptions, invalid schemas, and missing handlers", () => {

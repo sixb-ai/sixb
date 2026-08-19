@@ -664,7 +664,7 @@ function buildAgentContext(host: AgentWorkerHost, options: AgentWorkerOptions): 
   if (!host.sandboxes) {
     throw createSixbError(
       "internal.unexpected",
-      "[SixbAgentWorker] Agent workers require createSixb({ sandboxes }) for the built-in bash tool."
+      "[SixbAgentWorker] Agent workers require createSixb({ sandboxes }) for the built-in read and bash tools."
     )
   }
   const agentSkills = loadAgentSkills({

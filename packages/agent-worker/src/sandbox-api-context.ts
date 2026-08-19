@@ -50,7 +50,7 @@ export async function prepareAgentSandboxApiContext(
 
   // Materialize skills + run context through the sandbox capability rather than the host
   // filesystem, so any provider (including non-host-path ones like smolvm) places the bytes in the
-  // guest. Awaited before the bash tool runs, so the agent never sees an un-provisioned sandbox.
+  // guest. Awaited before sandbox tools run, so the agent never sees an un-provisioned sandbox.
   await input.sandbox.writeFiles([
     ...buildAgentSkillFiles(skillsDir, input.skills),
     { path: runContextPath, contents: runContext },
