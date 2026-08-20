@@ -32,10 +32,6 @@ export function trackRecentObject(projectName: string, objectId: string) {
   writeStringArray(recentsKey(projectName), next)
 }
 
-export function getRecentObjectIds(projectName: string, limit = 5): string[] {
-  return readStringArray(recentsKey(projectName)).slice(0, limit)
-}
-
 const viewStyleKey = "sixb:asset-view-style"
 const objectSortKey = "sixb:object-sort"
 const collectionViewStylePrefix = "sixb:collection-view-style:"

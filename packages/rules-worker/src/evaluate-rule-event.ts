@@ -8,7 +8,6 @@ import { deriveRuleEventDependencies } from "@sixb/core/internal/rules"
 import type { ObjectLinkRow, RulesStorage } from "@sixb/core/storage"
 import { evaluateRulePredicate } from "./evaluate-predicate"
 import type {
-  EvaluateRuleEventInput,
   EvaluateRuleEventResult,
   EvaluateRuleEventsInput,
   EvaluateRuleForSubjectInput,
@@ -90,18 +89,6 @@ export function matchRuleEvents(input: {
   }
 
   return [...candidates.values()]
-}
-
-export async function evaluateRuleEvent(
-  input: EvaluateRuleEventInput
-): Promise<EvaluateRuleEventResult> {
-  return evaluateRuleEvents({
-    runtime: input.runtime,
-    rules: input.rules,
-    index: input.index,
-    events: [input.event],
-    evaluatedAt: input.evaluatedAt,
-  })
 }
 
 /** Evaluate every deduped rule/subject candidate affected by one event batch. */

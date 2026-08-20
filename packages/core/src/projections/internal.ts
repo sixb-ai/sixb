@@ -65,9 +65,6 @@ export function createProjectionRunId(
  * `projectionTargetOf` derives the object types a projection writes, to record them on the run.
  * `validateTelemetryProjectionFieldMapping` re-checks a telemetry mapping against the dataset schema
  * before writing. Both are plumbing, so they live here instead of on the `@sixb/core` root.
- *
- * `projectionKindOf` deliberately does not follow: nothing outside `packages/core` calls it, and a
- * subpath export with no importer is the dead surface this curation removes.
  */
 export { projectionTargetOf } from "./builders"
 export { validateTelemetryProjectionFieldMapping } from "./validation"

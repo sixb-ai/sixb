@@ -26,10 +26,6 @@ export function cloneJsonValue(value: ReadonlyJsonValue, label = "value"): JsonV
   return JSON.parse(JSON.stringify(value)) as JsonValue
 }
 
-export function jsonValuesEqual(left: unknown, right: unknown): boolean {
-  return stableJsonStringify(left) === stableJsonStringify(right)
-}
-
 export function stableJsonStringify(value: unknown): string {
   if (value === undefined) return "undefined"
   if (value === null || typeof value !== "object") return JSON.stringify(value)

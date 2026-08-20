@@ -35,27 +35,9 @@ export interface BuiltInUiShellConfig extends BuiltInUiRuntimeConfig {
  */
 const BUNDLE_TIMEOUT_MS = 120_000
 
-let readyBundle: Promise<BuiltInUiBundle> | null = null
 const packageRoot = join(import.meta.dir, "..")
 const sourceDir = join(packageRoot, "src")
 const generatedDir = join(packageRoot, ".sixb")
-
-export async function ensureBuiltInUiBundle(
-  options: BuiltInUiBundleOptions = {}
-): Promise<BuiltInUiBundle> {
-  if (readyBundle) {
-    return await readyBundle
-  }
-
-  readyBundle = buildBuiltInUiBundle(options)
-
-  try {
-    return await readyBundle
-  } catch (error) {
-    readyBundle = null
-    throw error
-  }
-}
 
 export async function ensureBuiltInUiDevBundle(): Promise<BuiltInUiDevBundle> {
   const htmlPath = join(sourceDir, "index.html")
