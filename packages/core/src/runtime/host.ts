@@ -17,10 +17,10 @@ import {
 } from "../auth"
 import type { BlobStorage } from "../blob-storage"
 import type { Broker } from "../broker"
-import type { ConnectorCredentialProtector } from "../connectors/credentials"
+import { createConnectorCredentialProtectorFromKey } from "../connectors/credentials"
 import { ConnectorError } from "../connectors/errors"
 import { ConnectorService } from "../connectors/service"
-import { type ConnectorDefinition, isManagedConnectorDefinition } from "../connectors/types"
+import { type ConnectorDefinition, isOAuthConnectorDefinition } from "../connectors/types"
 import type { DatasetDefinition } from "../datasets/types"
 import { attachSixbErrorReporter, shareSixbErrorReporter } from "../error-reporting/capability"
 import { reportEventDeliveryFailure } from "../error-reporting/reports"
@@ -97,9 +97,10 @@ export interface SixbHostOptions<TOntologySources extends readonly OntologySourc
   datasets?: readonly DatasetDefinition[]
   /** Connector definitions registered with this host. */
   connectors?: readonly ConnectorDefinition[]
-  /** At-rest protection for managed connector credentials. Required by durable storage. */
-  connectorCredentials?: {
-    readonly protector?: ConnectorCredentialProtector
+  /** Persistent connector connection settings. Required for OAuth with durable storage. */
+  connectorConnections?: {
+    /** Canonical base64url encoding of exactly 32 random bytes. */
+    readonly encryptionKey: string
   }
   schedules?: readonly ScheduleDefinition[]
   syncs?: readonly SyncDefinition[]
@@ -174,10 +175,15 @@ export class SixbHost<
     })
     validateAuthStrategySecurityReferences(this.auth.getStrategy(), definitions.security)
     const connectors = definitions.connectors.list()
-    assertManagedConnectorSurfaces(connectors, definitions.syncs.list())
+    assertConnectorConnectionSurfaces(connectors, definitions.syncs.list())
+    const hasOAuthConnectors = connectors.some(isOAuthConnectorDefinition)
+    const credentialProtector =
+      hasOAuthConnectors && options.connectorConnections?.encryptionKey !== undefined
+        ? createConnectorCredentialProtectorFromKey(options.connectorConnections.encryptionKey)
+        : undefined
     this.connectorService = new ConnectorService(this.projectId, connectors, {
       storage: this.storage.connectorConnections,
-      credentialProtector: options.connectorCredentials?.protector,
+      credentialProtector,
     })
     assertWebhookDeliveryStorage(connectors, this.storage)
     this.webhookRegistry = new WebhookRegistry({ connectors })
@@ -355,23 +361,23 @@ function assertWebhookDeliveryStorage(
   }
 }
 
-function assertManagedConnectorSurfaces(
+function assertConnectorConnectionSurfaces(
   connectors: readonly ConnectorDefinition[],
   syncs: readonly SyncDefinition[]
 ): void {
   for (const connector of connectors) {
-    if (!isManagedConnectorDefinition(connector)) continue
+    if (!isOAuthConnectorDefinition(connector)) continue
     if ((connector.adapter as { readonly webhooks?: unknown }).webhooks !== undefined) {
       throw new ConnectorError(
-        `Managed connector '${connector.id}' cannot register webhooks until connection routing is defined.`
+        `OAuth connector '${connector.id}' cannot register webhooks until connection routing is defined.`
       )
     }
   }
 
   for (const sync of syncs) {
-    if (isManagedConnectorDefinition(sync.connector as ConnectorDefinition)) {
+    if (isOAuthConnectorDefinition(sync.connector as ConnectorDefinition)) {
       throw new ConnectorError(
-        `Sync '${sync.id}' cannot use managed connector '${sync.connector.id}' until connection fan-out is defined.`
+        `Sync '${sync.id}' cannot use OAuth connector '${sync.connector.id}' until connection fan-out is defined.`
       )
     }
   }

@@ -12,11 +12,6 @@ import type {
   ConnectorConnectionStorage,
 } from "../storage"
 import {
-  type ConnectorCredentialProtector,
-  createEphemeralConnectorCredentialProtector,
-} from "./credentials"
-import { ConnectorError, ConnectorNotFoundError, ConnectorOAuthError } from "./errors"
-import {
   assertAuthorizationUrlParameters,
   delay,
   hashSecret,
@@ -32,16 +27,21 @@ import {
   tokenView,
   validateAccounts,
   validateCredentials,
-} from "./managed-validation"
+} from "./connection-validation"
+import {
+  type ConnectorCredentialProtector,
+  createEphemeralConnectorCredentialProtector,
+} from "./credentials"
+import { ConnectorError, ConnectorNotFoundError, ConnectorOAuthError } from "./errors"
 import type {
   ConnectorAccountCandidate,
   ConnectorClient,
   ConnectorConnectionSelector,
   ConnectorDefinition,
   ConnectorOAuthCredentials,
-  ManagedConnectorAdapter,
+  OAuthConnectorAdapter,
 } from "./types"
-import { isManagedConnectorDefinition } from "./types"
+import { isOAuthConnectorDefinition } from "./types"
 
 const DEFAULT_ATTEMPT_TTL_MS = 10 * 60_000
 const DEFAULT_REFRESH_LEASE_MS = 30_000
@@ -56,7 +56,7 @@ export interface ConnectorManagementRuntime {
   readonly authorization?: AuthorizationContext
 }
 
-export interface ManagedConnectorServiceOptions {
+export interface ConnectorConnectionServiceOptions {
   readonly storage?: ConnectorConnectionStorage
   readonly credentialProtector?: ConnectorCredentialProtector
   readonly authorizationAttemptTtlMs?: number
@@ -104,11 +104,11 @@ export interface RevokeConnectorAuthorizationResult {
   readonly affectedConnections: readonly ConnectorConnectionView[]
 }
 
-/** Framework-owned OAuth lifecycle for managed connector definitions. */
-export class ManagedConnectorService {
+/** Framework-owned OAuth lifecycle for connector connection definitions. */
+export class ConnectorConnectionService {
   private readonly definitionsById: ReadonlyMap<string, ConnectorDefinition>
   private abortController = new AbortController()
-  private readonly managedStorage: ConnectorConnectionStorage
+  private readonly connectionStorage: ConnectorConnectionStorage
   private readonly credentialProtector: ConnectorCredentialProtector
   private readonly authorizationAttemptTtlMs: number
   private readonly refreshLeaseMs: number
@@ -120,7 +120,7 @@ export class ManagedConnectorService {
   constructor(
     private readonly projectId: string,
     definitions: readonly ConnectorDefinition[],
-    options: ManagedConnectorServiceOptions = {}
+    options: ConnectorConnectionServiceOptions = {}
   ) {
     this.definitionsById = new Map(definitions.map((definition) => [definition.id, definition]))
     this.authorizationAttemptTtlMs = positiveDuration(
@@ -139,31 +139,31 @@ export class ManagedConnectorService {
 
     if (!options.storage) {
       throw new ConnectorError(
-        "Managed connectors require storage.connectorConnections to be configured."
+        "OAuth connectors require storage.connectorConnections to be configured."
       )
     }
     if (options.storage.durability !== "ephemeral" && options.storage.durability !== "durable") {
       throw new ConnectorError(
-        "Managed connector storage must declare 'ephemeral' or 'durable' durability."
+        "Connector connection storage must declare 'ephemeral' or 'durable' durability."
       )
     }
     if (options.storage.durability === "durable" && !options.credentialProtector) {
       throw new ConnectorError(
-        "Durable managed connector storage requires connectorCredentials.protector to be configured."
+        "Durable connector connection storage requires connectorConnections.encryptionKey to be configured."
       )
     }
-    this.managedStorage = options.storage
+    this.connectionStorage = options.storage
     this.credentialProtector =
       options.credentialProtector ?? createEphemeralConnectorCredentialProtector()
   }
 
-  async connectManaged<TAdapter extends ManagedConnectorAdapter>(
+  async connectConnection<TAdapter extends OAuthConnectorAdapter>(
     definition: ConnectorDefinition<string, TAdapter>,
     selector: ConnectorConnectionSelector
   ): Promise<ConnectorClient<TAdapter>> {
-    this.assertManagedRegistered(definition)
+    this.assertOAuthRegistered(definition)
     assertSelector(selector)
-    const storage = this.requireManagedStorage()
+    const storage = this.requireConnectionStorage()
     const connection = await storage.getConnection({
       projectId: this.projectId,
       connectorId: definition.id,
@@ -171,14 +171,14 @@ export class ManagedConnectorService {
     })
     if (!connection) {
       throw new ConnectorError(
-        `Managed connector '${definition.id}' has no connection for project slot '${selector.slot}'.`
+        `Connector '${definition.id}' has no connection for project slot '${selector.slot}'.`
       )
     }
     const authorization = await this.requireActiveAuthorization(
       definition.id,
       connection.authorizationId
     )
-    const tokenSource = new ManagedConnectorTokenSource(this, definition, authorization.id)
+    const tokenSource = new ConnectorConnectionTokenSource(this, definition, authorization.id)
     try {
       return (await definition.adapter.connect({
         projectId: this.projectId,
@@ -189,20 +189,20 @@ export class ManagedConnectorService {
         signal: this.abortController.signal,
       })) as ConnectorClient<TAdapter>
     } catch {
-      throw new ConnectorError("Managed connector client creation failed.")
+      throw new ConnectorError("Connector connection client creation failed.")
     }
   }
 
-  async startAuthorization<TAdapter extends ManagedConnectorAdapter>(
+  async startAuthorization<TAdapter extends OAuthConnectorAdapter>(
     runtime: ConnectorManagementRuntime,
     definition: ConnectorDefinition<string, TAdapter>,
     input: StartConnectorAuthorizationInput
   ): Promise<StartConnectorAuthorizationResult> {
-    this.assertManagedRegistered(definition)
+    this.assertOAuthRegistered(definition)
     const actor = this.managementActor(runtime, definition.id)
     assertSelector(input)
     const redirectUri = normalizedHttpUrl(input.redirectUri, "OAuth callback URL")
-    const storage = this.requireManagedStorage()
+    const storage = this.requireConnectionStorage()
     const protector = this.requireCredentialProtector()
     let affectedConnections: readonly ConnectorConnectionView[] = []
     let reauthorizationConnectionIds: readonly string[] | undefined
@@ -234,13 +234,13 @@ export class ManagedConnectorService {
     }
     let authorizationUrlInput: string | URL
     try {
-      authorizationUrlInput = await definition.adapter.authorizationUrl(context, {
+      authorizationUrlInput = await definition.adapter.authentication.authorizationUrl(context, {
         state,
         codeChallenge,
         codeChallengeMethod: "S256",
       })
     } catch {
-      throw new ConnectorError("Managed connector authorization could not be started.")
+      throw new ConnectorError("Connector authorization could not be started.")
     }
     const authorizationUrl = normalizedHttpUrl(authorizationUrlInput, "provider authorization URL")
     assertAuthorizationUrlParameters(authorizationUrl, { state, codeChallenge })
@@ -273,18 +273,18 @@ export class ManagedConnectorService {
     return { authorizationUrl, affectedConnections }
   }
 
-  async completeAuthorization<TAdapter extends ManagedConnectorAdapter>(
+  async completeAuthorization<TAdapter extends OAuthConnectorAdapter>(
     runtime: ConnectorManagementRuntime,
     definition: ConnectorDefinition<string, TAdapter>,
     input: CompleteConnectorAuthorizationInput
   ): Promise<CompleteConnectorAuthorizationResult> {
-    this.assertManagedRegistered(definition)
+    this.assertOAuthRegistered(definition)
     const actor = this.managementActor(runtime, definition.id)
     const state = nonblank(input.state, "OAuth state")
     const attemptId = parseAttemptId(state)
     const code = nonblank(input.code, "OAuth authorization code")
     const redirectUri = normalizedHttpUrl(input.redirectUri, "OAuth callback URL")
-    const storage = this.requireManagedStorage()
+    const storage = this.requireConnectionStorage()
     const protector = this.requireCredentialProtector()
     const attempt = await storage.consumeAuthorizationAttempt({
       id: attemptId,
@@ -326,19 +326,19 @@ export class ManagedConnectorService {
     }
     let exchangedCredentials: ConnectorOAuthCredentials
     try {
-      exchangedCredentials = await definition.adapter.exchangeCode(context, {
+      exchangedCredentials = await definition.adapter.authentication.exchangeCode(context, {
         code,
         codeVerifier: textDecoder.decode(verifierBytes),
       })
     } catch {
-      throw new ConnectorError("Managed connector authorization code exchange failed.")
+      throw new ConnectorError("Connector authorization code exchange failed.")
     }
     const credentials = validateCredentials(exchangedCredentials)
     let discoveredAccounts: readonly ConnectorAccountCandidate[]
     try {
       discoveredAccounts = await definition.adapter.discoverAccounts(context, credentials)
     } catch {
-      throw new ConnectorError("Managed connector account discovery failed.")
+      throw new ConnectorError("Connector account discovery failed.")
     }
     const accounts = validateAccounts(discoveredAccounts)
     const authorizationId = attempt.reauthorizationId ?? `cau_${randomUUID()}`
@@ -387,12 +387,12 @@ export class ManagedConnectorService {
     }
   }
 
-  async selectAccount<TAdapter extends ManagedConnectorAdapter>(
+  async selectAccount<TAdapter extends OAuthConnectorAdapter>(
     runtime: ConnectorManagementRuntime,
     definition: ConnectorDefinition<string, TAdapter>,
     input: SelectConnectorAccountInput
   ): Promise<ConnectorConnectionView> {
-    this.assertManagedRegistered(definition)
+    this.assertOAuthRegistered(definition)
     const actor = this.managementActor(runtime, definition.id)
     assertSelector(input)
     const authorization = await this.requireActiveAuthorization(
@@ -406,7 +406,7 @@ export class ManagedConnectorService {
         `Account '${input.accountId}' is not exposed by this connector authorization.`
       )
     }
-    const result = await this.requireManagedStorage().putConnection({
+    const result = await this.requireConnectionStorage().putConnection({
       id: `ccn_${randomUUID()}`,
       projectId: this.projectId,
       connectorId: definition.id,
@@ -420,14 +420,14 @@ export class ManagedConnectorService {
     return connectionView(result.connection, authorization.status)
   }
 
-  async disconnect<TAdapter extends ManagedConnectorAdapter>(
+  async disconnect<TAdapter extends OAuthConnectorAdapter>(
     runtime: ConnectorManagementRuntime,
     definition: ConnectorDefinition<string, TAdapter>,
     connectionId: string
   ): Promise<ConnectorConnectionView | null> {
-    this.assertManagedRegistered(definition)
+    this.assertOAuthRegistered(definition)
     this.managementActor(runtime, definition.id)
-    const storage = this.requireManagedStorage()
+    const storage = this.requireConnectionStorage()
     const connection = await storage.getConnectionById(nonblank(connectionId, "connection id"))
     if (
       !connection ||
@@ -447,19 +447,19 @@ export class ManagedConnectorService {
       : null
   }
 
-  async revokeAuthorization<TAdapter extends ManagedConnectorAdapter>(
+  async revokeAuthorization<TAdapter extends OAuthConnectorAdapter>(
     runtime: ConnectorManagementRuntime,
     definition: ConnectorDefinition<string, TAdapter>,
     authorizationId: string
   ): Promise<RevokeConnectorAuthorizationResult> {
-    this.assertManagedRegistered(definition)
+    this.assertOAuthRegistered(definition)
     const actor = this.managementActor(runtime, definition.id)
     const authorization = await this.requireAuthorization(
       definition.id,
       nonblank(authorizationId, "authorization id")
     )
     assertAuthorizationActor(authorization, actor.principal)
-    const result = await this.requireManagedStorage().revokeAuthorization({
+    const result = await this.requireConnectionStorage().revokeAuthorization({
       projectId: this.projectId,
       connectorId: definition.id,
       authorizationId: authorization.id,
@@ -470,10 +470,13 @@ export class ManagedConnectorService {
       throw new ConnectorError("Connector authorization changed; retry the revocation.")
     }
 
-    if (definition.adapter.revoke) {
+    if (definition.adapter.authentication.revoke) {
       try {
         const credentials = await this.openCredentials(definition.id, result.authorization)
-        await definition.adapter.revoke(this.adapterContext(definition.id), credentials)
+        await definition.adapter.authentication.revoke(
+          this.adapterContext(definition.id),
+          credentials
+        )
       } catch {
         throw new ConnectorError(
           "Connector authorization was revoked locally, but provider revocation failed."
@@ -492,7 +495,7 @@ export class ManagedConnectorService {
     this.abortController = new AbortController()
   }
 
-  async getAccessToken<TAdapter extends ManagedConnectorAdapter>(
+  async getAccessToken<TAdapter extends OAuthConnectorAdapter>(
     definition: ConnectorDefinition<string, TAdapter>,
     authorizationId: string,
     forceRefresh: boolean
@@ -507,7 +510,7 @@ export class ManagedConnectorService {
     return tokenView(credentials)
   }
 
-  private async refreshAuthorization<TAdapter extends ManagedConnectorAdapter>(
+  private async refreshAuthorization<TAdapter extends OAuthConnectorAdapter>(
     definition: ConnectorDefinition<string, TAdapter>,
     authorization: ConnectorAuthorizationRecord
   ): Promise<ConnectorAuthorizationRecord> {
@@ -520,11 +523,11 @@ export class ManagedConnectorService {
     return refresh
   }
 
-  private async performRefresh<TAdapter extends ManagedConnectorAdapter>(
+  private async performRefresh<TAdapter extends OAuthConnectorAdapter>(
     definition: ConnectorDefinition<string, TAdapter>,
     initial: ConnectorAuthorizationRecord
   ): Promise<ConnectorAuthorizationRecord> {
-    const storage = this.requireManagedStorage()
+    const storage = this.requireConnectionStorage()
     let authorization = initial
     const waitDeadline = Date.now() + REFRESH_WAIT_MS
     while (true) {
@@ -550,12 +553,12 @@ export class ManagedConnectorService {
     }
   }
 
-  private async refreshWithLease<TAdapter extends ManagedConnectorAdapter>(
+  private async refreshWithLease<TAdapter extends OAuthConnectorAdapter>(
     definition: ConnectorDefinition<string, TAdapter>,
     authorization: ConnectorAuthorizationRecord,
     leaseId: string
   ): Promise<ConnectorAuthorizationRecord> {
-    const storage = this.requireManagedStorage()
+    const storage = this.requireConnectionStorage()
     let current: ConnectorOAuthCredentials
     try {
       current = await this.openCredentials(definition.id, authorization)
@@ -585,7 +588,7 @@ export class ManagedConnectorService {
     let refreshed: ConnectorOAuthCredentials
     try {
       refreshed = validateCredentials(
-        await definition.adapter.refresh(this.adapterContext(definition.id), current)
+        await definition.adapter.authentication.refresh(this.adapterContext(definition.id), current)
       )
     } catch (error) {
       if (error instanceof ConnectorOAuthError && error.kind === "terminal") {
@@ -615,7 +618,7 @@ export class ManagedConnectorService {
       ...refreshed,
       ...(refreshed.refreshToken === undefined ? { refreshToken: current.refreshToken } : {}),
     }
-    let envelope: Awaited<ReturnType<ManagedConnectorService["sealCredentials"]>>
+    let envelope: Awaited<ReturnType<ConnectorConnectionService["sealCredentials"]>>
     try {
       envelope = await this.sealCredentials(definition.id, authorization.id, normalized)
     } catch {
@@ -666,7 +669,7 @@ export class ManagedConnectorService {
     connectorId: string,
     authorizationId: string
   ): Promise<ConnectorAuthorizationRecord> {
-    const authorization = await this.requireManagedStorage().getAuthorization(authorizationId)
+    const authorization = await this.requireConnectionStorage().getAuthorization(authorizationId)
     if (
       !authorization ||
       authorization.projectId !== this.projectId ||
@@ -739,36 +742,36 @@ export class ManagedConnectorService {
     }
   }
 
-  private assertManagedRegistered(
+  private assertOAuthRegistered(
     definition: ConnectorDefinition
-  ): asserts definition is ConnectorDefinition<string, ManagedConnectorAdapter> {
+  ): asserts definition is ConnectorDefinition<string, OAuthConnectorAdapter> {
     this.assertRegistered(definition)
-    if (!isManagedConnectorDefinition(definition)) {
-      throw new ConnectorError(`Connector '${definition.id}' is not a managed connector.`)
+    if (!isOAuthConnectorDefinition(definition)) {
+      throw new ConnectorError(`Connector '${definition.id}' does not use OAuth authentication.`)
     }
   }
 
-  private requireManagedStorage(): ConnectorConnectionStorage {
-    if (!this.managedStorage) {
-      throw new ConnectorError("Managed connector storage is not configured.")
+  private requireConnectionStorage(): ConnectorConnectionStorage {
+    if (!this.connectionStorage) {
+      throw new ConnectorError("Connector connection storage is not configured.")
     }
-    return this.managedStorage
+    return this.connectionStorage
   }
 
   private requireCredentialProtector(): ConnectorCredentialProtector {
     if (!this.credentialProtector) {
-      throw new ConnectorError("Managed connector credential protection is not configured.")
+      throw new ConnectorError("Connector credential protection is not configured.")
     }
     return this.credentialProtector
   }
 }
 
-class ManagedConnectorTokenSource {
+class ConnectorConnectionTokenSource {
   private invalidated = false
 
   constructor(
-    private readonly service: ManagedConnectorService,
-    private readonly definition: ConnectorDefinition<string, ManagedConnectorAdapter>,
+    private readonly service: ConnectorConnectionService,
+    private readonly definition: ConnectorDefinition<string, OAuthConnectorAdapter>,
     private readonly authorizationId: string
   ) {}
 
@@ -789,7 +792,7 @@ class ManagedConnectorTokenSource {
 
 function assertSelector(selector: ConnectorConnectionSelector): void {
   if (selector.owner.type !== "project") {
-    throw new ConnectorError("Managed connector V1 only supports project-owned connections.")
+    throw new ConnectorError("Connector connections only support project ownership in V1.")
   }
   nonblank(selector.slot, "connection slot")
 }

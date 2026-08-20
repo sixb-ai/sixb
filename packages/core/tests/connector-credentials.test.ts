@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test"
+import { InMemoryStorage } from "../src"
 import {
   type ConnectorCredentialContext,
-  createAesGcmConnectorCredentialProtector,
-  InMemoryStorage,
-} from "../src"
+  createConnectorCredentialProtectorFromKey,
+} from "../src/connectors/credentials"
 import { InMemoryConnectorConnectionStorage } from "../src/storage/connector-connections"
 
 const context: ConnectorCredentialContext = {
@@ -13,38 +13,42 @@ const context: ConnectorCredentialContext = {
   purpose: "oauth-authorization",
 }
 
+function protector(fill: number) {
+  const key = Buffer.from(new Uint8Array(32).fill(fill)).toString("base64url")
+  return createConnectorCredentialProtectorFromKey(key)
+}
+
 describe("connector credential protection", () => {
-  test("authenticates immutable context and supports decrypt-only rotation keys", async () => {
-    const oldKey = new Uint8Array(32).fill(1)
-    const newKey = new Uint8Array(32).fill(2)
-    const oldProtector = createAesGcmConnectorCredentialProtector({
-      activeKeyId: "old",
-      keys: { old: oldKey },
-    })
-    const envelope = await oldProtector.seal(new TextEncoder().encode("secret"), context)
+  test("authenticates immutable context", async () => {
+    const credentialProtector = protector(1)
+    const envelope = await credentialProtector.seal(new TextEncoder().encode("secret"), context)
 
     await expect(
-      oldProtector.open(envelope, { ...context, recordId: "authorization-b" })
+      credentialProtector.open(envelope, { ...context, recordId: "authorization-b" })
     ).rejects.toThrow("authentication failed")
-    await expect(oldProtector.open({ ...envelope, ciphertext: "*" }, context)).rejects.toThrow(
-      "authentication failed"
+    await expect(
+      credentialProtector.open({ ...envelope, ciphertext: "*" }, context)
+    ).rejects.toThrow("authentication failed")
+    expect(new TextDecoder().decode(await credentialProtector.open(envelope, context))).toBe(
+      "secret"
     )
+  })
 
-    const rotatedProtector = createAesGcmConnectorCredentialProtector({
-      activeKeyId: "new",
-      keys: { old: oldKey, new: newKey },
-    })
-    expect(new TextDecoder().decode(await rotatedProtector.open(envelope, context))).toBe("secret")
-    expect((await rotatedProtector.seal(new Uint8Array([1]), context)).keyId).toBe("new")
+  test("requires one canonical base64url key containing exactly 32 bytes", () => {
+    expect(() => createConnectorCredentialProtectorFromKey("not+/base64")).toThrow(
+      "canonical base64url"
+    )
+    expect(() =>
+      createConnectorCredentialProtectorFromKey(
+        Buffer.from(new Uint8Array(31)).toString("base64url")
+      )
+    ).toThrow("exactly 32 random bytes")
   })
 
   test("includes connector state in in-memory transaction rollback", async () => {
     const storage = new InMemoryStorage()
-    const protector = createAesGcmConnectorCredentialProtector({
-      activeKeyId: "test",
-      keys: { test: new Uint8Array(32).fill(3) },
-    })
-    const credentials = await protector.seal(new TextEncoder().encode("secret"), context)
+    const credentialProtector = protector(3)
+    const credentials = await credentialProtector.seal(new TextEncoder().encode("secret"), context)
 
     await expect(
       storage.transaction(async (tx) => {
@@ -69,11 +73,8 @@ describe("connector credential protection", () => {
 describe("connector connection storage", () => {
   test("only persists canonical accounts exposed by the authorization", async () => {
     const storage = new InMemoryStorage().connectorConnections
-    const protector = createAesGcmConnectorCredentialProtector({
-      activeKeyId: "test",
-      keys: { test: new Uint8Array(32).fill(4) },
-    })
-    const credentials = await protector.seal(new TextEncoder().encode("secret"), context)
+    const credentialProtector = protector(4)
+    const credentials = await credentialProtector.seal(new TextEncoder().encode("secret"), context)
     await storage.createAuthorization({
       id: context.recordId,
       projectId: context.projectId,
@@ -116,11 +117,8 @@ describe("connector connection storage", () => {
   test("uses the storage clock to expire refresh leases", async () => {
     let now = new Date("2026-08-19T12:00:00.000Z")
     const storage = new InMemoryConnectorConnectionStorage({ now: () => new Date(now) })
-    const protector = createAesGcmConnectorCredentialProtector({
-      activeKeyId: "test",
-      keys: { test: new Uint8Array(32).fill(5) },
-    })
-    const credentials = await protector.seal(new TextEncoder().encode("secret"), context)
+    const credentialProtector = protector(5)
+    const credentials = await credentialProtector.seal(new TextEncoder().encode("secret"), context)
     await storage.createAuthorization({
       id: context.recordId,
       projectId: context.projectId,

@@ -15,7 +15,6 @@ export interface ConnectorCredentialContext {
 export interface SealedConnectorCredential {
   readonly version: 1
   readonly algorithm: "A256GCM"
-  readonly keyId: string
   readonly nonce: string
   readonly ciphertext: string
   readonly tag: string
@@ -33,38 +32,38 @@ export interface ConnectorCredentialProtector {
   ): Promise<Uint8Array>
 }
 
-export interface AesGcmConnectorCredentialProtectorOptions {
-  readonly activeKeyId: string
-  /** AES-256 keys indexed by stable rotation id. Every key must contain exactly 32 bytes. */
-  readonly keys: Readonly<Record<string, Uint8Array>>
-}
-
-/** Create a versioned AES-256-GCM credential protector with decrypt-only support for old keys. */
-export function createAesGcmConnectorCredentialProtector(
-  options: AesGcmConnectorCredentialProtectorOptions
+/** Create credential protection from the base64url key exposed by Sixb configuration. */
+export function createConnectorCredentialProtectorFromKey(
+  encodedKey: string
 ): ConnectorCredentialProtector {
-  const activeKeyId = assertNonblank(options.activeKeyId, "active key id")
-  const keys = new Map<string, Buffer>()
-  for (const [keyId, key] of Object.entries(options.keys)) {
-    const normalizedKeyId = assertNonblank(keyId, "key id")
-    if (key.byteLength !== 32) {
-      throw new ConnectorError(
-        `Connector credential key '${normalizedKeyId}' must contain exactly 32 bytes.`
-      )
-    }
-    keys.set(normalizedKeyId, Buffer.from(key))
-  }
-
-  if (!keys.has(activeKeyId)) {
+  let key: Buffer
+  try {
+    key = decodeBase64Url(encodedKey)
+  } catch (error) {
     throw new ConnectorError(
-      `Connector credential active key '${activeKeyId}' is missing from the key ring.`
+      "connectorConnections.encryptionKey must be canonical base64url encoding.",
+      { cause: error }
     )
   }
+  if (key.byteLength !== 32) {
+    throw new ConnectorError(
+      "connectorConnections.encryptionKey must encode exactly 32 random bytes."
+    )
+  }
+  return createAesGcmConnectorCredentialProtector(key)
+}
+
+function createAesGcmConnectorCredentialProtector(
+  encryptionKey: Uint8Array
+): ConnectorCredentialProtector {
+  if (encryptionKey.byteLength !== 32) {
+    throw new ConnectorError("Connector credential encryption key must contain exactly 32 bytes.")
+  }
+  const key = Buffer.from(encryptionKey)
 
   return {
     async seal(plaintext, context) {
       assertCredentialContext(context)
-      const key = keys.get(activeKeyId)!
       const nonce = randomBytes(12)
       const cipher = createCipheriv("aes-256-gcm", key, nonce)
       cipher.setAAD(credentialAad(context))
@@ -72,7 +71,6 @@ export function createAesGcmConnectorCredentialProtector(
       return {
         version: 1,
         algorithm: "A256GCM",
-        keyId: activeKeyId,
         nonce: nonce.toString("base64url"),
         ciphertext: ciphertext.toString("base64url"),
         tag: cipher.getAuthTag().toString("base64url"),
@@ -83,11 +81,6 @@ export function createAesGcmConnectorCredentialProtector(
       if (envelope.version !== 1 || envelope.algorithm !== "A256GCM") {
         throw new ConnectorError("Connector credential envelope format is not supported.")
       }
-      const key = keys.get(envelope.keyId)
-      if (!key) {
-        throw new ConnectorError(`Connector credential key '${envelope.keyId}' is not configured.`)
-      }
-
       try {
         const nonce = decodeBase64Url(envelope.nonce)
         const ciphertext = decodeBase64Url(envelope.ciphertext)
@@ -114,10 +107,7 @@ function decodeBase64Url(value: string): Buffer {
 }
 
 export function createEphemeralConnectorCredentialProtector(): ConnectorCredentialProtector {
-  return createAesGcmConnectorCredentialProtector({
-    activeKeyId: "ephemeral",
-    keys: { ephemeral: randomBytes(32) },
-  })
+  return createAesGcmConnectorCredentialProtector(randomBytes(32))
 }
 
 function credentialAad(context: ConnectorCredentialContext): Buffer {

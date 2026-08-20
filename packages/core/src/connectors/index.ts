@@ -1,12 +1,5 @@
 export { defineConnector } from "./builders"
-export type {
-  AesGcmConnectorCredentialProtectorOptions,
-  ConnectorCredentialContext,
-  ConnectorCredentialProtector,
-  ConnectorCredentialPurpose,
-  SealedConnectorCredential,
-} from "./credentials"
-export { createAesGcmConnectorCredentialProtector } from "./credentials"
+export type { SealedConnectorCredential } from "./credentials"
 export type { ConnectorOAuthErrorKind } from "./errors"
 export { ConnectorError, ConnectorNotFoundError, ConnectorOAuthError } from "./errors"
 export type { ConnectorRuntime } from "./execution"
@@ -15,23 +8,24 @@ export type {
   ConnectorAccountCandidate,
   ConnectorAdapter,
   ConnectorClient,
+  ConnectorConnectionClientContext,
   ConnectorConnectionOwner,
   ConnectorConnectionSelector,
   ConnectorContext,
   ConnectorDefinition,
+  ConnectorOAuth2Authentication,
   ConnectorOAuthCredentials,
   ConnectorTokenSource,
-  ManagedConnectorAdapter,
-  ManagedConnectorAuthorizationContext,
-  ManagedConnectorAuthorizationUrlInput,
-  ManagedConnectorClientContext,
-  ManagedConnectorCodeExchangeInput,
+  OAuthConnectorAdapter,
+  OAuthConnectorAuthorizationContext,
+  OAuthConnectorAuthorizationUrlInput,
+  OAuthConnectorCodeExchangeInput,
   ProjectConnectorConnectionOwner,
   StaticConnectorDefinition,
 } from "./types"
 export {
   isConnectorDefinition,
-  isManagedConnectorAdapter,
-  isManagedConnectorDefinition,
+  isOAuthConnectorAdapter,
+  isOAuthConnectorDefinition,
   isStaticConnectorDefinition,
 } from "./types"

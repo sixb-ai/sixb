@@ -3,8 +3,9 @@ import type {
   AnyConnectorAdapter,
   ConnectorAdapter,
   ConnectorDefinition,
-  ManagedConnectorAdapter,
+  OAuthConnectorAdapter,
 } from "./types"
+import { isOAuthConnectorAdapter } from "./types"
 
 function assertNonEmpty(value: string, field: string): void {
   if (!value.trim()) {
@@ -19,7 +20,7 @@ function assertNonEmpty(value: string, field: string): void {
  * `connectors/` module. Use `await sixb.connector(definition)` at runtime to
  * resolve it to a connected client.
  */
-export function defineConnector<TId extends string, TAdapter extends ManagedConnectorAdapter>(
+export function defineConnector<TId extends string, TAdapter extends OAuthConnectorAdapter>(
   id: TId,
   adapter: TAdapter
 ): ConnectorDefinition<TId, TAdapter>
@@ -38,29 +39,21 @@ export function defineConnector<TId extends string, TAdapter extends AnyConnecto
     throw new ConnectorError("Connector adapter connect must be a function.")
   }
 
-  if (
-    "mode" in adapter &&
-    adapter.mode !== undefined &&
-    adapter.mode !== "static" &&
-    adapter.mode !== "managed"
-  ) {
-    throw new ConnectorError("Connector adapter mode must be 'static' or 'managed'.")
-  }
-
-  if ("mode" in adapter && adapter.mode === "managed") {
+  if (adapter.authentication !== undefined) {
     if (
-      typeof adapter.authorizationUrl !== "function" ||
-      typeof adapter.exchangeCode !== "function" ||
-      typeof adapter.refresh !== "function" ||
+      !isOAuthConnectorAdapter(adapter) ||
+      typeof adapter.authentication.authorizationUrl !== "function" ||
+      typeof adapter.authentication.exchangeCode !== "function" ||
+      typeof adapter.authentication.refresh !== "function" ||
       typeof adapter.discoverAccounts !== "function"
     ) {
       throw new ConnectorError(
-        "Managed connector adapters must implement authorizationUrl, exchangeCode, refresh, and discoverAccounts."
+        "OAuth connector adapters must define oauth2 authentication and implement authorizationUrl, exchangeCode, refresh, and discoverAccounts."
       )
     }
-    if ((adapter as { readonly webhooks?: unknown }).webhooks !== undefined) {
+    if (adapter.webhooks !== undefined) {
       throw new ConnectorError(
-        "Managed connector adapters cannot register webhooks until connection routing is defined."
+        "OAuth connector adapters cannot register webhooks until connection routing is defined."
       )
     }
   }

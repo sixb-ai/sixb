@@ -19,14 +19,14 @@ export interface ConnectorContext {
  * external system. They should return the client shape that feels natural for that system.
  */
 export interface ConnectorAdapter<TType extends string = string, TClient = unknown> {
-  readonly mode?: "static"
   readonly type: TType
+  readonly authentication?: never
   readonly webhooks?: readonly WebhookDefinition<unknown, TClient>[]
   connect(context: ConnectorContext): Promise<TClient> | TClient
   disconnect?(client: TClient): Promise<void> | void
 }
 
-/** One OAuth token set normalized by a managed connector adapter. */
+/** One OAuth token set normalized by an OAuth connector adapter. */
 export interface ConnectorOAuthCredentials {
   readonly accessToken: string
   readonly refreshToken?: string
@@ -43,35 +43,35 @@ export interface ConnectorAccountCandidate {
   readonly avatarUrl?: string
 }
 
-/** V1 intentionally supports project-owned managed connections only. */
+/** V1 intentionally supports project-owned connector connections only. */
 export interface ProjectConnectorConnectionOwner {
   readonly type: "project"
 }
 
 export type ConnectorConnectionOwner = ProjectConnectorConnectionOwner
 
-/** Stable application-defined lookup key for one managed connection. */
+/** Stable application-defined lookup key for one connector connection. */
 export interface ConnectorConnectionSelector {
   readonly owner: ConnectorConnectionOwner
   readonly slot: string
 }
 
-export interface ManagedConnectorAuthorizationContext extends ConnectorContext {
+export interface OAuthConnectorAuthorizationContext extends ConnectorContext {
   readonly redirectUri: string
 }
 
-export interface ManagedConnectorAuthorizationUrlInput {
+export interface OAuthConnectorAuthorizationUrlInput {
   readonly state: string
   readonly codeChallenge: string
   readonly codeChallengeMethod: "S256"
 }
 
-export interface ManagedConnectorCodeExchangeInput {
+export interface OAuthConnectorCodeExchangeInput {
   readonly code: string
   readonly codeVerifier: string
 }
 
-export interface ManagedConnectorClientContext extends ConnectorContext {
+export interface ConnectorConnectionClientContext extends ConnectorContext {
   readonly connectionId: string
   readonly account: ConnectorAccountCandidate
   readonly tokenSource: ConnectorTokenSource
@@ -87,31 +87,35 @@ export interface ConnectorTokenSource {
  * OAuth-backed connector adapter. Sixb owns persistence, OAuth state, refresh coordination and UI;
  * the adapter owns provider protocol details and typed client creation.
  */
-export interface ManagedConnectorAdapter<TType extends string = string, TClient = unknown> {
-  readonly mode: "managed"
-  readonly type: TType
-  readonly webhooks?: undefined
+export interface ConnectorOAuth2Authentication {
+  readonly type: "oauth2"
   authorizationUrl(
-    context: ManagedConnectorAuthorizationContext,
-    input: ManagedConnectorAuthorizationUrlInput
+    context: OAuthConnectorAuthorizationContext,
+    input: OAuthConnectorAuthorizationUrlInput
   ): Promise<string | URL> | string | URL
   exchangeCode(
-    context: ManagedConnectorAuthorizationContext,
-    input: ManagedConnectorCodeExchangeInput
+    context: OAuthConnectorAuthorizationContext,
+    input: OAuthConnectorCodeExchangeInput
   ): Promise<ConnectorOAuthCredentials> | ConnectorOAuthCredentials
   refresh(
     context: ConnectorContext,
     credentials: ConnectorOAuthCredentials
   ): Promise<ConnectorOAuthCredentials> | ConnectorOAuthCredentials
   revoke?(context: ConnectorContext, credentials: ConnectorOAuthCredentials): Promise<void> | void
+}
+
+export interface OAuthConnectorAdapter<TType extends string = string, TClient = unknown> {
+  readonly type: TType
+  readonly authentication: ConnectorOAuth2Authentication
+  readonly webhooks?: undefined
   discoverAccounts(
     context: ConnectorContext,
     credentials: ConnectorOAuthCredentials
   ): Promise<readonly ConnectorAccountCandidate[]> | readonly ConnectorAccountCandidate[]
-  connect(context: ManagedConnectorClientContext): Promise<TClient> | TClient
+  connect(context: ConnectorConnectionClientContext): Promise<TClient> | TClient
 }
 
-export type AnyConnectorAdapter = ConnectorAdapter | ManagedConnectorAdapter
+export type AnyConnectorAdapter = ConnectorAdapter | OAuthConnectorAdapter
 
 /**
  * Inert connector definition registered with Sixb.
@@ -135,22 +139,22 @@ export type ConnectorClient<TAdapter extends AnyConnectorAdapter> = Awaited<
   ReturnType<TAdapter["connect"]>
 >
 
-export function isManagedConnectorAdapter(
+export function isOAuthConnectorAdapter(
   value: AnyConnectorAdapter
-): value is ManagedConnectorAdapter {
-  return "mode" in value && value.mode === "managed"
+): value is OAuthConnectorAdapter {
+  return "authentication" in value && value.authentication?.type === "oauth2"
 }
 
-export function isManagedConnectorDefinition(
+export function isOAuthConnectorDefinition(
   value: ConnectorDefinition
-): value is ConnectorDefinition<string, ManagedConnectorAdapter> {
-  return isManagedConnectorAdapter(value.adapter)
+): value is ConnectorDefinition<string, OAuthConnectorAdapter> {
+  return isOAuthConnectorAdapter(value.adapter)
 }
 
 export function isStaticConnectorDefinition(
   value: ConnectorDefinition
 ): value is StaticConnectorDefinition {
-  return !isManagedConnectorDefinition(value)
+  return !isOAuthConnectorDefinition(value)
 }
 
 export function isConnectorDefinition(value: unknown): value is ConnectorDefinition {
@@ -166,14 +170,13 @@ export function isConnectorDefinition(value: unknown): value is ConnectorDefinit
     typeof adapter.type === "string" &&
     typeof adapter.connect === "function"
   ) {
-    if (adapter.mode !== undefined && adapter.mode !== "static" && adapter.mode !== "managed") {
-      return false
-    }
-    if (adapter.mode !== "managed") return true
+    if (adapter.authentication === undefined) return true
+    const authentication = adapter.authentication
+    if (!isRecord(authentication) || authentication.type !== "oauth2") return false
     return (
-      typeof adapter.authorizationUrl === "function" &&
-      typeof adapter.exchangeCode === "function" &&
-      typeof adapter.refresh === "function" &&
+      typeof authentication.authorizationUrl === "function" &&
+      typeof authentication.exchangeCode === "function" &&
+      typeof authentication.refresh === "function" &&
       typeof adapter.discoverAccounts === "function"
     )
   }

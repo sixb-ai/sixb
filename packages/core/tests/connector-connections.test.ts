@@ -5,7 +5,6 @@ import {
   AuthorizationError,
   ConnectorOAuthError,
   col,
-  createAesGcmConnectorCredentialProtector,
   defineConnector,
   defineDataset,
   defineSync,
@@ -13,6 +12,7 @@ import {
   SixbHost,
   type SyncDefinition,
 } from "../src"
+import { createConnectorCredentialProtectorFromKey } from "../src/connectors/credentials"
 import { ConnectorService } from "../src/connectors/service"
 import {
   createAgentScope,
@@ -24,6 +24,7 @@ import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const callbackUrl = "https://app.test/api/connectors/callback"
 const projectOwner = { type: "project" } as const
+const encryptionKey = Buffer.from(new Uint8Array(32).fill(7)).toString("base64url")
 
 function createHarness() {
   let now = new Date("2026-08-19T12:00:00.000Z")
@@ -35,40 +36,42 @@ function createHarness() {
   const exchangedVerifiers: string[] = []
 
   const connector = defineConnector("social", {
-    mode: "managed",
     type: "fake-oauth",
-    authorizationUrl(_context, input) {
-      const url = new URL("https://provider.test/oauth/authorize")
-      url.searchParams.set("state", input.state)
-      url.searchParams.set("code_challenge", input.codeChallenge)
-      url.searchParams.set("code_challenge_method", input.codeChallengeMethod)
-      return url
-    },
-    exchangeCode(_context, input) {
-      exchangedVerifiers.push(input.codeVerifier)
-      exchangeCount += 1
-      return {
-        accessToken: `access-secret-${exchangeCount}`,
-        refreshToken: `refresh-secret-${exchangeCount}`,
-        tokenType: "Bearer",
-        scopes: ["accounts.read"],
-        expiresAt: new Date(now.getTime() + 30_000),
-      }
-    },
-    async refresh(_context, credentials) {
-      refreshCount += 1
-      await refreshGate
-      if (refreshError) throw refreshError
-      return {
-        accessToken: `rotated-access-${refreshCount}`,
-        refreshToken: `rotated-refresh-${refreshCount}`,
-        tokenType: credentials.tokenType,
-        scopes: credentials.scopes,
-        expiresAt: new Date(now.getTime() + 60 * 60_000),
-      }
-    },
-    revoke() {
-      revokeCount += 1
+    authentication: {
+      type: "oauth2",
+      authorizationUrl(_context, input) {
+        const url = new URL("https://provider.test/oauth/authorize")
+        url.searchParams.set("state", input.state)
+        url.searchParams.set("code_challenge", input.codeChallenge)
+        url.searchParams.set("code_challenge_method", input.codeChallengeMethod)
+        return url
+      },
+      exchangeCode(_context, input) {
+        exchangedVerifiers.push(input.codeVerifier)
+        exchangeCount += 1
+        return {
+          accessToken: `access-secret-${exchangeCount}`,
+          refreshToken: `refresh-secret-${exchangeCount}`,
+          tokenType: "Bearer",
+          scopes: ["accounts.read"],
+          expiresAt: new Date(now.getTime() + 30_000),
+        }
+      },
+      async refresh(_context, credentials) {
+        refreshCount += 1
+        await refreshGate
+        if (refreshError) throw refreshError
+        return {
+          accessToken: `rotated-access-${refreshCount}`,
+          refreshToken: `rotated-refresh-${refreshCount}`,
+          tokenType: credentials.tokenType,
+          scopes: credentials.scopes,
+          expiresAt: new Date(now.getTime() + 60 * 60_000),
+        }
+      },
+      revoke() {
+        revokeCount += 1
+      },
     },
     discoverAccounts() {
       return [
@@ -87,10 +90,7 @@ function createHarness() {
   })
 
   const storage = new InMemoryConnectorConnectionStorage()
-  const protector = createAesGcmConnectorCredentialProtector({
-    activeKeyId: "test-key",
-    keys: { "test-key": new Uint8Array(32).fill(7) },
-  })
+  const protector = createConnectorCredentialProtectorFromKey(encryptionKey)
   const service = new ConnectorService("project", [connector], {
     storage,
     credentialProtector: protector,
@@ -191,7 +191,7 @@ function serializedSnapshot(storage: InMemoryConnectorConnectionStorage): string
   })
 }
 
-describe("managed connector OAuth lifecycle", () => {
+describe("connector OAuth lifecycle", () => {
   test("binds a short-lived, one-use state to session, callback and PKCE S256", async () => {
     const harness = createHarness()
     const started = await startAuthorization(harness)
@@ -271,8 +271,11 @@ describe("managed connector OAuth lifecycle", () => {
     const harness = createHarness()
     const connector = defineConnector("social", {
       ...harness.connector.adapter,
-      authorizationUrl() {
-        return "https://provider.test/oauth/authorize"
+      authentication: {
+        ...harness.connector.adapter.authentication,
+        authorizationUrl() {
+          return "https://provider.test/oauth/authorize"
+        },
       },
     })
     const service = new ConnectorService("project", [connector], {
@@ -303,7 +306,7 @@ describe("managed connector OAuth lifecycle", () => {
   })
 })
 
-describe("managed connector connection lifecycle", () => {
+describe("connector connection lifecycle", () => {
   test("shares one authorization, disconnects one connection, and revokes all remaining", async () => {
     const harness = createHarness()
     const authorization = await authorize(harness)
@@ -508,8 +511,8 @@ describe("managed connector connection lifecycle", () => {
   })
 })
 
-describe("managed connector refresh", () => {
-  test("coordinates concurrent token rotation by authorization", async () => {
+describe("connector credential refresh", () => {
+  test("coordinates concurrent OAuth token refresh by authorization", async () => {
     const harness = createHarness()
     let releaseRefresh!: () => void
     harness.setRefreshGate(new Promise<void>((resolve) => (releaseRefresh = resolve)))
@@ -525,11 +528,11 @@ describe("managed connector refresh", () => {
       credentialProtector: harness.protector,
       now: harness.now,
     })
-    const first = await harness.service.connectManaged(harness.connector, {
+    const first = await harness.service.connectConnection(harness.connector, {
       owner: projectOwner,
       slot: "social",
     })
-    const second = await secondService.connectManaged(harness.connector, {
+    const second = await secondService.connectConnection(harness.connector, {
       owner: projectOwner,
       slot: "social",
     })
@@ -557,7 +560,7 @@ describe("managed connector refresh", () => {
       owner: projectOwner,
       slot: "social",
     })
-    const client = await harness.service.connectManaged(harness.connector, {
+    const client = await harness.service.connectConnection(harness.connector, {
       owner: projectOwner,
       slot: "social",
     })
@@ -580,7 +583,7 @@ describe("managed connector refresh", () => {
       owner: projectOwner,
       slot: "social",
     })
-    const client = await harness.service.connectManaged(harness.connector, {
+    const client = await harness.service.connectConnection(harness.connector, {
       owner: projectOwner,
       slot: "social",
     })
@@ -601,7 +604,7 @@ describe("managed connector refresh", () => {
   })
 })
 
-describe("managed connector execution boundary", () => {
+describe("connector connection execution boundary", () => {
   test("allows trusted primitives and denies agents", async () => {
     const harness = createHarness()
     const dependencies = createTestRuntimeDeps()
@@ -652,7 +655,7 @@ describe("managed connector execution boundary", () => {
     const host = new SixbHost({
       ontology: [],
       connectors: [harness.connector],
-      connectorCredentials: { protector: harness.protector },
+      connectorConnections: { encryptionKey },
       ...dependencies,
     })
     const trusted = host.withScope(
@@ -698,12 +701,18 @@ describe("managed connector execution boundary", () => {
   })
 })
 
-describe("managed connector startup validation", () => {
+describe("connector connection startup validation", () => {
   test("requires connection storage and explicit protection for durable providers", () => {
     const harness = createHarness()
     expect(() => new ConnectorService("project", [harness.connector])).toThrow(
       "storage.connectorConnections"
     )
+    expect(
+      () =>
+        new ConnectorService("project", [harness.connector], {
+          storage: new InMemoryConnectorConnectionStorage(),
+        })
+    ).not.toThrow()
 
     const durable =
       new InMemoryConnectorConnectionStorage() as InMemoryConnectorConnectionStorage & {
@@ -712,10 +721,41 @@ describe("managed connector startup validation", () => {
     Object.defineProperty(durable, "durability", { value: "durable" })
     expect(
       () => new ConnectorService("project", [harness.connector], { storage: durable })
-    ).toThrow("connectorCredentials.protector")
+    ).toThrow("connectorConnections.encryptionKey")
   })
 
-  test("rejects managed sync and webhook surfaces explicitly", () => {
+  test("validates encryption only when OAuth connections need it", () => {
+    const harness = createHarness()
+    expect(
+      () =>
+        new SixbHost<readonly []>({
+          ontology: [],
+          connectors: [harness.connector],
+          connectorConnections: {
+            encryptionKey: Buffer.from(new Uint8Array(31)).toString("base64url"),
+          },
+          ...createTestRuntimeDeps(),
+        })
+    ).toThrow("exactly 32 random bytes")
+
+    const staticConnector = defineConnector("static", {
+      type: "static",
+      connect() {
+        return {}
+      },
+    })
+    expect(
+      () =>
+        new SixbHost<readonly []>({
+          ontology: [],
+          connectors: [staticConnector],
+          connectorConnections: { encryptionKey: "unused" },
+          ...createTestRuntimeDeps(),
+        })
+    ).not.toThrow()
+  })
+
+  test("rejects OAuth sync and webhook surfaces explicitly", () => {
     const harness = createHarness()
     const dataset = defineDataset("accounts", { schema: [col("id", "string")] })
     const staticConnector = defineConnector("static", {
@@ -728,7 +768,7 @@ describe("managed connector startup validation", () => {
       .from(staticConnector)
       .read(() => [])
       .intoDataset(dataset)
-    const managedSync = { ...sync, connector: harness.connector } as unknown as SyncDefinition
+    const oauthSync = { ...sync, connector: harness.connector } as unknown as SyncDefinition
 
     expect(
       () =>
@@ -736,11 +776,11 @@ describe("managed connector startup validation", () => {
           ontology: [],
           connectors: [harness.connector],
           datasets: [dataset],
-          syncs: [managedSync],
-          connectorCredentials: { protector: harness.protector },
+          syncs: [oauthSync],
+          connectorConnections: { encryptionKey },
           ...createTestRuntimeDeps(),
         })
-    ).toThrow("cannot use managed connector")
+    ).toThrow("cannot use OAuth connector")
 
     Object.defineProperty(harness.connector.adapter, "webhooks", { value: [] })
     expect(
@@ -748,7 +788,7 @@ describe("managed connector startup validation", () => {
         new SixbHost<readonly []>({
           ontology: [],
           connectors: [harness.connector],
-          connectorCredentials: { protector: harness.protector },
+          connectorConnections: { encryptionKey },
           ...createTestRuntimeDeps(),
         })
     ).toThrow("cannot register webhooks")

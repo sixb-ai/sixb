@@ -597,35 +597,28 @@ export {
 // ── Connectors ─────────────────────────────────────────────
 
 export type {
-  AesGcmConnectorCredentialProtectorOptions,
   AnyConnectorAdapter,
   ConnectorAccountCandidate,
   ConnectorAdapter,
   ConnectorClient,
+  ConnectorConnectionClientContext,
   ConnectorConnectionOwner,
   ConnectorConnectionSelector,
   ConnectorContext,
-  ConnectorCredentialContext,
-  ConnectorCredentialProtector,
-  ConnectorCredentialPurpose,
   ConnectorDefinition,
+  ConnectorOAuth2Authentication,
   ConnectorOAuthCredentials,
   ConnectorOAuthErrorKind,
   ConnectorTokenSource,
-  ManagedConnectorAdapter,
-  ManagedConnectorAuthorizationContext,
-  ManagedConnectorAuthorizationUrlInput,
-  ManagedConnectorClientContext,
-  ManagedConnectorCodeExchangeInput,
+  OAuthConnectorAdapter,
+  OAuthConnectorAuthorizationContext,
+  OAuthConnectorAuthorizationUrlInput,
+  OAuthConnectorCodeExchangeInput,
   ProjectConnectorConnectionOwner,
   SealedConnectorCredential,
   StaticConnectorDefinition,
 } from "./connectors"
-export {
-  ConnectorOAuthError,
-  createAesGcmConnectorCredentialProtector,
-  defineConnector,
-} from "./connectors"
+export { ConnectorOAuthError, defineConnector } from "./connectors"
 
 // ── Webhooks ───────────────────────────────────────────────
 

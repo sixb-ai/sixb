@@ -8,16 +8,16 @@ import type {
   ConnectorClient,
   ConnectorConnectionSelector,
   ConnectorDefinition,
-  ManagedConnectorAdapter,
+  OAuthConnectorAdapter,
 } from "./types"
-import { isManagedConnectorDefinition } from "./types"
+import { isOAuthConnectorDefinition } from "./types"
 
 /** Resolve a registered connector through one authorized execution. */
 export interface ConnectorRuntime {
   <TAdapter extends ConnectorAdapter>(
     definition: ConnectorDefinition<string, TAdapter>
   ): Promise<ConnectorClient<TAdapter>>
-  <TAdapter extends ManagedConnectorAdapter>(
+  <TAdapter extends OAuthConnectorAdapter>(
     definition: ConnectorDefinition<string, TAdapter>,
     selector: ConnectorConnectionSelector
   ): Promise<ConnectorClient<TAdapter>>
@@ -29,14 +29,14 @@ export function createConnectorRuntime(
   service: ConnectorService
 ): ConnectorRuntime {
   return ((definition: ConnectorDefinition, selector?: ConnectorConnectionSelector) => {
-    if (isManagedConnectorDefinition(definition)) {
-      assertManagedConnectorAccess(runtime)
+    if (isOAuthConnectorDefinition(definition)) {
+      assertConnectorConnectionAccess(runtime)
       if (!selector) {
         throw new Error(
-          `[Sixb] Managed connector '${definition.id}' requires an explicit owner and slot.`
+          `[Sixb] Connector '${definition.id}' uses persistent connections and requires an explicit owner and slot.`
         )
       }
-      return service.connectManaged(definition, selector)
+      return service.connectConnection(definition, selector)
     }
     if (selector) {
       throw new Error(`[Sixb] Static connector '${definition.id}' does not accept a connection.`)
@@ -46,11 +46,11 @@ export function createConnectorRuntime(
   }) as ConnectorRuntime
 }
 
-function assertManagedConnectorAccess(runtime: SixbRuntimeContext): void {
+function assertConnectorConnectionAccess(runtime: SixbRuntimeContext): void {
   const resolved = assertRuntimeAuthorizationBound(runtime)
   if (resolved.type === "unrestricted" && resolved.ref.type === "trustedPrimitive") return
   throw new AuthorizationError(
-    "privileged:managed-connector.connect",
-    "[Sixb] Managed connector clients are restricted to trusted primitive executions."
+    "privileged:connector-connection.connect",
+    "[Sixb] Connector connection clients are restricted to trusted primitive executions."
   )
 }

@@ -7,51 +7,60 @@ export function validateCredentials(
   credentials: ConnectorOAuthCredentials
 ): ConnectorOAuthCredentials {
   if (!isRecord(credentials)) {
-    throw new ConnectorError("Managed connector adapter returned invalid OAuth credentials.")
+    throw new ConnectorError("OAuth connector adapter returned invalid credentials.")
   }
-  const accessToken = nonblank(credentials.accessToken, "provider access token")
-  const refreshToken =
-    credentials.refreshToken === undefined
-      ? undefined
-      : nonblank(credentials.refreshToken, "provider refresh token")
-  const tokenType =
-    credentials.tokenType === undefined
-      ? undefined
-      : nonblank(credentials.tokenType, "provider token type")
-  const expiresAt = credentials.expiresAt
-  if (
-    expiresAt !== undefined &&
-    (!(expiresAt instanceof Date) || Number.isNaN(expiresAt.getTime()))
-  ) {
-    throw new ConnectorError("Managed connector adapter returned an invalid token expiry.")
+
+  const normalized: {
+    accessToken: string
+    refreshToken?: string
+    tokenType?: string
+    scopes?: string[]
+    expiresAt?: Date
+  } = {
+    accessToken: nonblank(credentials.accessToken, "provider access token"),
   }
-  if (credentials.scopes !== undefined && !Array.isArray(credentials.scopes)) {
-    throw new ConnectorError("Managed connector adapter returned invalid OAuth scopes.")
+
+  if (credentials.refreshToken !== undefined) {
+    normalized.refreshToken = nonblank(credentials.refreshToken, "provider refresh token")
   }
-  const scopes = credentials.scopes?.map((scope) => nonblank(scope, "provider scope"))
-  return {
-    accessToken,
-    ...(refreshToken === undefined ? {} : { refreshToken }),
-    ...(tokenType === undefined ? {} : { tokenType }),
-    ...(scopes === undefined ? {} : { scopes: [...new Set(scopes)] }),
-    ...(expiresAt === undefined ? {} : { expiresAt: new Date(expiresAt) }),
+
+  if (credentials.tokenType !== undefined) {
+    normalized.tokenType = nonblank(credentials.tokenType, "provider token type")
   }
+
+  if (credentials.scopes !== undefined) {
+    if (!Array.isArray(credentials.scopes)) {
+      throw new ConnectorError("OAuth connector adapter returned invalid scopes.")
+    }
+    normalized.scopes = [
+      ...new Set(credentials.scopes.map((scope) => nonblank(scope, "provider scope"))),
+    ]
+  }
+
+  if (credentials.expiresAt !== undefined) {
+    if (!(credentials.expiresAt instanceof Date) || Number.isNaN(credentials.expiresAt.getTime())) {
+      throw new ConnectorError("OAuth connector adapter returned an invalid token expiry.")
+    }
+    normalized.expiresAt = new Date(credentials.expiresAt)
+  }
+
+  return normalized
 }
 
 export function validateAccounts(
   accounts: readonly ConnectorAccountCandidate[]
 ): readonly ConnectorAccountCandidate[] {
   if (!Array.isArray(accounts)) {
-    throw new ConnectorError("Managed connector adapter returned an invalid account list.")
+    throw new ConnectorError("OAuth connector adapter returned an invalid account list.")
   }
   const ids = new Set<string>()
   return accounts.map((account) => {
     if (!isRecord(account)) {
-      throw new ConnectorError("Managed connector adapter returned an invalid account.")
+      throw new ConnectorError("OAuth connector adapter returned an invalid account.")
     }
     const id = nonblank(account.id, "external account id")
     if (ids.has(id)) {
-      throw new ConnectorError(`Managed connector adapter returned duplicate account '${id}'.`)
+      throw new ConnectorError(`OAuth connector adapter returned duplicate account '${id}'.`)
     }
     ids.add(id)
     const description =
@@ -174,7 +183,7 @@ export function assertAuthorizationUrlParameters(
     !sameSingleParameter(parameters, "code_challenge_method", "S256")
   ) {
     throw new ConnectorError(
-      "Managed connector authorization URL must preserve the framework-provided state and PKCE S256 parameters."
+      "OAuth connector authorization URL must preserve the framework-provided state and PKCE S256 parameters."
     )
   }
 }

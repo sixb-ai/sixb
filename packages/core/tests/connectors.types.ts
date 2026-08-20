@@ -1,4 +1,4 @@
-import { defineConnector, defineObjectType } from "../src"
+import { defineConnector, defineObjectType, type OAuthConnectorAdapter } from "../src"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -27,41 +27,50 @@ const sixb = createTestSixb({
 const db = await sixb.connector(erpDb)
 const _queryResult: string = db.query("select 1")
 
+// @ts-expect-error static connectors do not accept a persistent connection selector
+await sixb.connector(erpDb, { owner: { type: "project" }, slot: "primary" })
+
 // @ts-expect-error connector clients are typed from the registered connector definition
 db.nonexistent()
 
 void sixb
 
-const managed = defineConnector("managed", {
-  mode: "managed",
-  type: "oauth",
-  authorizationUrl() {
-    return "https://provider.test/oauth"
-  },
-  exchangeCode() {
-    return { accessToken: "access" }
-  },
-  refresh() {
-    return { accessToken: "refreshed" }
-  },
-  discoverAccounts() {
-    return [{ id: "account", label: "Account" }]
-  },
-  connect(context) {
-    return { accountId: context.account.id }
-  },
-})
+function oauthAccounts() {
+  return {
+    type: "oauth",
+    authentication: {
+      type: "oauth2",
+      authorizationUrl() {
+        return "https://provider.test/oauth"
+      },
+      exchangeCode() {
+        return { accessToken: "access" }
+      },
+      refresh() {
+        return { accessToken: "refreshed" }
+      },
+    },
+    discoverAccounts() {
+      return [{ id: "account", label: "Account" }]
+    },
+    connect(context) {
+      return { accountId: context.account.id }
+    },
+  } satisfies OAuthConnectorAdapter
+}
 
-const managedSixb = createTestSixb({
+const oauth = defineConnector("oauth", oauthAccounts())
+
+const oauthSixb = createTestSixb({
   ontology: [Room],
-  connectors: [managed],
+  connectors: [oauth],
   ...createTestRuntimeDeps(),
 })
 
-// @ts-expect-error managed connectors never select an implicit default connection
-await managedSixb.connector(managed)
-const managedClient = await managedSixb.connector(managed, {
+// @ts-expect-error OAuth connectors never select an implicit default connection
+await oauthSixb.connector(oauth)
+const oauthClient = await oauthSixb.connector(oauth, {
   owner: { type: "project" },
   slot: "social",
 })
-const _managedAccountId: string = managedClient.accountId
+const _oauthAccountId: string = oauthClient.accountId
