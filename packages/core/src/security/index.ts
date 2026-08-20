@@ -37,6 +37,7 @@ export type {
   RunGrant,
   RunGrantTarget,
   Selection,
+  ShareGrant,
   ViewGrant,
   ViewGrantTarget,
 } from "./types"

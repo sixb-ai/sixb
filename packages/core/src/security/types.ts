@@ -86,6 +86,12 @@ export interface ApplyGrant {
   readonly selection: Selection
 }
 
+export interface ShareGrant {
+  readonly kind: "grant"
+  readonly capability: "share"
+  readonly selection: Selection
+}
+
 export type RunGrantTarget = "workflow" | "sync" | "pipeline" | "agent"
 
 export interface RunGrant<TTarget extends RunGrantTarget = RunGrantTarget> {
@@ -110,6 +116,7 @@ export type GrantDefinition =
   | EditGrant
   | AppendGrant
   | ApplyGrant
+  | ShareGrant
   | RunGrant
   | ObserveGrant
 

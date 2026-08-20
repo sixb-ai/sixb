@@ -39,6 +39,7 @@ import { SqliteOntologyStorage, type SqliteOntologyTransactionContext } from "./
 import { SqlitePipelineRunStorage } from "./pipeline-run-storage"
 import { SqliteProjectionRunStorage } from "./projection-run-storage"
 import { SqliteRulesStorage } from "./rules-storage"
+import { SqliteShareGrantStorage } from "./share-grant-storage"
 import { SqliteSyncRunStorage } from "./sync-run-storage"
 import { SqliteTimeseriesStorage } from "./timeseries-storage"
 import {
@@ -90,6 +91,7 @@ export class SqliteStorage implements MigrationCapableStorage {
   readonly webhookDeliveries: SqliteWebhookDeliveryStorage
   readonly webhookRuns: SqliteWebhookRunStorage
   readonly rules: SqliteRulesStorage
+  readonly shareGrants: SqliteShareGrantStorage
   readonly migrators: readonly StorageMigrator[]
 
   private readonly connection: SqliteStoreConnection
@@ -152,6 +154,7 @@ export class SqliteStorage implements MigrationCapableStorage {
     this.webhookDeliveries = createOperationScopedFacade(stores.webhookDeliveries, scope)
     this.webhookRuns = createOperationScopedFacade(stores.webhookRuns, scope)
     this.rules = createOperationScopedFacade(stores.rules, scope)
+    this.shareGrants = createOperationScopedFacade(stores.shareGrants, scope)
     this.migrators = options.path ? createSqliteStorageMigrators(options.path) : []
   }
 
@@ -304,6 +307,7 @@ function createSqliteStores(
     webhookDeliveries: new SqliteWebhookDeliveryStorage({ connection }),
     webhookRuns: new SqliteWebhookRunStorage({ connection }),
     rules: new SqliteRulesStorage({ connection }),
+    shareGrants: new SqliteShareGrantStorage({ connection }),
   }
 }
 
@@ -324,6 +328,7 @@ interface SqliteStoreSet {
   readonly webhookDeliveries: SqliteWebhookDeliveryStorage
   readonly webhookRuns: SqliteWebhookRunStorage
   readonly rules: SqliteRulesStorage
+  readonly shareGrants: SqliteShareGrantStorage
 }
 
 export { migrateSqliteStorage } from "./migrations"

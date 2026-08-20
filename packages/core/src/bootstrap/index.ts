@@ -11,6 +11,7 @@ export {
   discoverRoles,
   discoverRules,
   discoverSchedules,
+  discoverShares,
   discoverSyncs,
   discoverWorkflows,
 } from "./discovery"

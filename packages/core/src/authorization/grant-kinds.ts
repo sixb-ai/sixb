@@ -17,6 +17,7 @@ export type GrantKind =
   | "edit:object"
   | "append:telemetry"
   | "apply:action"
+  | "share:share"
   | "run:workflow"
   | "run:sync"
   | "run:pipeline"
@@ -29,6 +30,7 @@ export interface GrantUniverse {
   readonly objectTypeIds: ReadonlySet<string>
   readonly datasetIds: ReadonlySet<string>
   readonly actionIds: ReadonlySet<string>
+  readonly shareTypeIds: ReadonlySet<string>
   readonly workflowIds: ReadonlySet<string>
   readonly syncIds: ReadonlySet<string>
   readonly pipelineIds: ReadonlySet<string>
@@ -90,6 +92,11 @@ export const GRANT_KINDS: Record<GrantKind, GrantKindSpec> = {
     subject: "action",
     fix: "Add it to 'actions/' or pass it to createSixb({ actions }).",
   },
+  "share:share": {
+    universeKey: "shareTypeIds",
+    subject: "share type",
+    fix: "Add it to 'shares/' or pass it to createSixb({ shares }).",
+  },
   "run:workflow": {
     universeKey: "workflowIds",
     subject: "workflow",
@@ -132,6 +139,8 @@ export function grantKindOf(grant: GrantDefinition): GrantKind {
       return "append:telemetry"
     case "apply":
       return "apply:action"
+    case "share":
+      return "share:share"
     case "run":
       return `run:${grant.target}`
     case "observe":

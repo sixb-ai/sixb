@@ -16,13 +16,18 @@ import { registerPipelineRoutes } from "./routes/pipelines"
 import { registerProjectRoutes } from "./routes/project"
 import { registerProjectionRoutes } from "./routes/projections"
 import { registerRuleRoutes } from "./routes/rules"
+import { registerShareGrantRoutes, type ShareGrantRouteOptions } from "./routes/share-grants"
 import { registerStatusRoutes } from "./routes/status"
 import { registerSyncRoutes } from "./routes/syncs"
 import { registerTelemetryRoutes } from "./routes/telemetry"
 import { registerWebhookRunRoutes } from "./routes/webhook-runs"
 import { registerWorkflowRoutes } from "./routes/workflows"
 
-export function registerHttpRoutes(app: Elysia, host: SixbHostView) {
+export function registerHttpRoutes(
+  app: Elysia,
+  host: SixbHostView,
+  options: ShareGrantRouteOptions
+) {
   registerAgentApiGatewayRoutes(app, host)
   registerProjectRoutes(app, host)
   registerStatusRoutes(app, host)
@@ -44,6 +49,7 @@ export function registerHttpRoutes(app: Elysia, host: SixbHostView) {
   registerLogRoutes(app, host)
   registerProjectionRoutes(app, host)
   registerWebhookRunRoutes(app, host)
+  registerShareGrantRoutes(app, host, options)
 
   return app
 }

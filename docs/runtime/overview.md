@@ -177,6 +177,7 @@ type is required.
 | `datasets/`, `connectors/`, `syncs/`, `pipelines/`, `projections/` | Data integration |
 | `rules/`, `workflows/` | Business logic |
 | `agents/` | Agent definitions |
+| `shares/` | Shared-access type definitions |
 | `security/groups/`, `security/roles/`, `security/policies/` | Authorization |
 
 `app/` is **not** discovered — the app is served separately. See

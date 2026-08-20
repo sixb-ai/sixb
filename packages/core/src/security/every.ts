@@ -16,6 +16,7 @@ import type { AgentDefinition } from "../agents/types"
 import type { DatasetDefinition } from "../datasets"
 import type { ObjectType } from "../ontology"
 import type { PipelineDefinition } from "../pipelines"
+import type { ShareTypeDefinition } from "../shares"
 import type { SyncDefinition } from "../syncs"
 import type { WorkflowDefinition } from "../workflows/types"
 import { SecurityValidationError } from "./errors"
@@ -31,6 +32,7 @@ export const BREADTH_TARGETS = [
   "pipeline",
   "agent",
   "application",
+  "share",
 ] as const
 
 export type BreadthTarget = (typeof BREADTH_TARGETS)[number]
@@ -44,6 +46,7 @@ interface BreadthTargetInput {
   pipeline: PipelineDefinition
   agent: AgentDefinition
   application: ApplicationDefinition
+  share: ShareTypeDefinition
 }
 
 /**
@@ -105,4 +108,5 @@ export const every = {
   pipeline: (): BreadthSelector<"pipeline"> => all("pipeline"),
   agent: (): BreadthSelector<"agent"> => all("agent"),
   application: (): BreadthSelector<"application"> => all("application"),
+  share: (): BreadthSelector<"share"> => all("share"),
 }

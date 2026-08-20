@@ -161,6 +161,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 19,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "020-shared-access-grants",
+    status: "applied",
+    version: 20,
+  },
 ]
 
 afterEach(async () => {

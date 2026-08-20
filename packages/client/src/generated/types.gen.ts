@@ -10201,3 +10201,272 @@ export type ListWebhookRunsResponses = {
 }
 
 export type ListWebhookRunsResponse = ListWebhookRunsResponses[keyof ListWebhookRunsResponses]
+
+export type ListSharedAccessGrantsData = {
+  body?: never
+  path?: never
+  query: {
+    shareTypeId: string
+    objectTypeId: string
+    primaryId: string
+    includeRevoked?: "true" | "false"
+    includeExpired?: "true" | "false"
+  }
+  url: "/api/share-grants"
+}
+
+export type ListSharedAccessGrantsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type ListSharedAccessGrantsError =
+  ListSharedAccessGrantsErrors[keyof ListSharedAccessGrantsErrors]
+
+export type ListSharedAccessGrantsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    grants: Array<{
+      id: string
+      shareTypeId: string
+      target: {
+        objectTypeId: string
+        primaryId: string
+      }
+      issuedBy: {
+        type: "user" | "serviceAccount"
+        id: string
+      }
+      grants: Array<
+        | {
+            capability: "view"
+            objectTypeId: string
+          }
+        | {
+            capability: "apply"
+            actionId: string
+          }
+      >
+      createdAt: string
+      expiresAt: string
+      revokedAt?: string
+      revokedBy?: {
+        type: "user" | "serviceAccount"
+        id: string
+      }
+    }>
+  }
+}
+
+export type ListSharedAccessGrantsResponse =
+  ListSharedAccessGrantsResponses[keyof ListSharedAccessGrantsResponses]
+
+export type IssueSharedAccessGrantData = {
+  body: {
+    shareTypeId: string
+    target: {
+      objectTypeId: string
+      primaryId: string
+    }
+    expiresAt: string
+  }
+  path?: never
+  query?: never
+  url: "/api/share-grants"
+}
+
+export type IssueSharedAccessGrantErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+  /**
+   * Response for status 503
+   */
+  503: {
+    error: string
+  }
+}
+
+export type IssueSharedAccessGrantError =
+  IssueSharedAccessGrantErrors[keyof IssueSharedAccessGrantErrors]
+
+export type IssueSharedAccessGrantResponses = {
+  /**
+   * Response for status 201
+   */
+  201: {
+    grant: {
+      id: string
+      shareTypeId: string
+      target: {
+        objectTypeId: string
+        primaryId: string
+      }
+      issuedBy: {
+        type: "user" | "serviceAccount"
+        id: string
+      }
+      grants: Array<
+        | {
+            capability: "view"
+            objectTypeId: string
+          }
+        | {
+            capability: "apply"
+            actionId: string
+          }
+      >
+      createdAt: string
+      expiresAt: string
+      revokedAt?: string
+      revokedBy?: {
+        type: "user" | "serviceAccount"
+        id: string
+      }
+    }
+    url: string
+  }
+}
+
+export type IssueSharedAccessGrantResponse =
+  IssueSharedAccessGrantResponses[keyof IssueSharedAccessGrantResponses]
+
+export type RevokeSharedAccessGrantData = {
+  body?: never
+  path: {
+    grantId: string
+  }
+  query?: never
+  url: "/api/share-grants/{grantId}"
+}
+
+export type RevokeSharedAccessGrantErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type RevokeSharedAccessGrantError =
+  RevokeSharedAccessGrantErrors[keyof RevokeSharedAccessGrantErrors]
+
+export type RevokeSharedAccessGrantResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    id: string
+    shareTypeId: string
+    target: {
+      objectTypeId: string
+      primaryId: string
+    }
+    issuedBy: {
+      type: "user" | "serviceAccount"
+      id: string
+    }
+    grants: Array<
+      | {
+          capability: "view"
+          objectTypeId: string
+        }
+      | {
+          capability: "apply"
+          actionId: string
+        }
+    >
+    createdAt: string
+    expiresAt: string
+    revokedAt?: string
+    revokedBy?: {
+      type: "user" | "serviceAccount"
+      id: string
+    }
+  }
+}
+
+export type RevokeSharedAccessGrantResponse =
+  RevokeSharedAccessGrantResponses[keyof RevokeSharedAccessGrantResponses]

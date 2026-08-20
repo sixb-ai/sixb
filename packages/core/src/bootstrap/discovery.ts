@@ -31,6 +31,8 @@ import type { ScheduleDefinition } from "../schedules"
 import { isScheduleDefinition } from "../schedules"
 import type { GroupDefinition, MembershipPolicyDefinition, RoleDefinition } from "../security"
 import { isGroupDefinition, isMembershipPolicyDefinition, isRoleDefinition } from "../security"
+import type { ShareTypeDefinition } from "../shares"
+import { isShareTypeDefinition } from "../shares"
 import type { SyncDefinition } from "../syncs"
 import { isSyncDefinition } from "../syncs"
 import type { WorkflowDefinition } from "../workflows"
@@ -343,6 +345,22 @@ export async function discoverAgents(projectRoot: string): Promise<readonly Agen
   return agents
 }
 
+export async function discoverShares(projectRoot: string): Promise<readonly ShareTypeDefinition[]> {
+  const sharesDir = join(projectRoot, "shares")
+  const modulePaths = await listModuleFiles(sharesDir)
+  const exportedCandidates = await loadModuleExports({
+    modulePaths,
+    projectRoot,
+    kind: "share",
+  })
+
+  const shares: ShareTypeDefinition[] = []
+  for (const candidate of exportedCandidates) {
+    if (isShareTypeDefinition(candidate)) shares.push(candidate)
+  }
+  return shares
+}
+
 // ── Internal helpers ────────────────────────────────────────
 
 async function loadModuleExports(options: {
@@ -365,6 +383,7 @@ async function loadModuleExports(options: {
     | "role"
     | "membershipPolicy"
     | "workflow"
+    | "share"
 }): Promise<unknown[]> {
   const exportedCandidates: unknown[] = []
   const seen = new Set<unknown>()

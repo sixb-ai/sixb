@@ -12,6 +12,7 @@ import type { AgentDefinition } from "../agents/types"
 import type { DatasetDefinition } from "../datasets"
 import type { ObjectType } from "../ontology"
 import type { PipelineDefinition } from "../pipelines"
+import type { ShareTypeDefinition } from "../shares"
 import type { SyncDefinition } from "../syncs"
 import type { WorkflowDefinition } from "../workflows/types"
 import { SecurityValidationError } from "./errors"
@@ -30,6 +31,7 @@ import type {
   ObserveGrant,
   RunGrant,
   Selection,
+  ShareGrant,
   ViewGrant,
 } from "./types"
 
@@ -42,7 +44,7 @@ const VIEW_TARGETS = ["object", "dataset"] as const
 const RUN_TARGETS = ["workflow", "sync", "pipeline", "agent"] as const
 
 /**
- * Six of the eight targets carry a `kind` discriminant naming themselves. The other two — an
+ * Seven of the nine targets carry a `kind` discriminant naming themselves. The other two — an
  * `ObjectType` and an `ActionDefinition` — carry none, and each appears in exactly one builder that
  * allows no other undiscriminated target, so the allowed set names them unambiguously.
  */
@@ -53,6 +55,7 @@ const TARGET_BY_DEFINITION_KIND: Readonly<Partial<Record<string, BreadthTarget>>
   agent: "agent",
   workflow: "workflow",
   application: "application",
+  share: "share",
 }
 
 const UNDISCRIMINATED_TARGETS: readonly BreadthTarget[] = ["object", "action"]
@@ -69,7 +72,7 @@ function targetOfDefinition<TTarget extends BreadthTarget>(
   // `spec.universeKey` with a `TypeError` naming neither the role nor the definition.
   if (discriminated) {
     if (!isAllowedTarget(discriminated, allowedTargets)) {
-      // "one targeting x", not "a x definition": four of the eight targets start with a vowel, and
+      // "one targeting x", not "a x definition": four of the nine targets start with a vowel, and
       // this string ships in a release. Same reason the selector branch below writes no article.
       throw new SecurityValidationError(
         `[Sixb] ${label} accepts ${allowedTargets.join(" or ")} definitions, but received one targeting ${discriminated}.`
@@ -181,6 +184,14 @@ function apply(input: GrantInput<ActionDefinition, "action">): ApplyGrant {
   }
 }
 
+function share(input: GrantInput<ShareTypeDefinition, "share">): ShareGrant {
+  return {
+    kind: "grant",
+    capability: "share",
+    selection: resolveGrant(input, "can.share", ["share"]).selection,
+  }
+}
+
 function run(input: GrantInput<WorkflowDefinition, "workflow">): RunGrant<"workflow">
 function run(input: GrantInput<SyncDefinition, "sync">): RunGrant<"sync">
 function run(input: GrantInput<PipelineDefinition, "pipeline">): RunGrant<"pipeline">
@@ -210,6 +221,7 @@ export const can = {
   edit,
   append,
   apply,
+  share,
   run,
   observe,
 }

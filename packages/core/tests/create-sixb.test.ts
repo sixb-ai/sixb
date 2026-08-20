@@ -51,7 +51,7 @@ afterEach(async () => {
 })
 
 describe("createSixb", () => {
-  test("discovers ontology, actions, syncs, and connectors from project folders", async () => {
+  test("discovers ontology, actions, shares, syncs, and connectors from project folders", async () => {
     const projectRoot = await createTempProjectRoot()
 
     await writeProjectFile(
@@ -82,6 +82,21 @@ export const setTemperature = defineAction("setTemperature")
   .on(Room)
   .params({ target: param("double") })
   .writeback(async () => {})
+`
+    )
+
+    await writeProjectFile(
+      projectRoot,
+      "shares/room.ts",
+      `import { can, defineShareType } from "${coreModuleUrl}"
+import { Room } from "../ontology/room"
+import { setTemperature } from "../actions/setTemperature"
+
+export const RoomShare = defineShareType({
+  id: "room",
+  target: Room,
+  grants: [can.view(Room), can.apply(setTemperature)],
+})
 `
     )
 
@@ -134,6 +149,7 @@ export const syncOrders = defineSync("sync-orders")
     const client = await createTestSixb(sixb).connector(erpDb)
 
     expect(sixb.definitions.actions.list().map((action) => action.id)).toEqual(["setTemperature"])
+    expect(sixb.definitions.shares.list().map((share) => share.id)).toEqual(["room"])
     expect(
       sixb.definitions.actions
         .listForType(sixb.definitions.ontology.listObjectTypes()[0])

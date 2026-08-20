@@ -2,6 +2,7 @@ import {
   AuthorizationError,
   OntologyNotFoundError,
   OntologyValidationError,
+  ShareError,
   type SixbErrorCode,
 } from "@sixb/core"
 import { isSixbError } from "@sixb/core/internal/errors"
@@ -89,6 +90,18 @@ export function handleRouteError(
 
   if (error instanceof RequestBodyTooLargeError) {
     set.status = 413
+    return { error: error.message }
+  }
+
+  if (error instanceof ShareError) {
+    set.status =
+      error.reason === "unauthenticated"
+        ? 401
+        : error.reason === "not_found"
+          ? 404
+          : error.reason === "storage_unavailable"
+            ? 501
+            : 400
     return { error: error.message }
   }
 

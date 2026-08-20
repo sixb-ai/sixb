@@ -17,6 +17,8 @@ import {
   type RoleDefinition,
   SecurityRegistry,
 } from "../security"
+import type { ShareTypeDefinition } from "../shares"
+import { validateShareTypesAtStartup } from "../shares"
 import type { SyncDefinition } from "../syncs"
 import {
   validateKeyedDatasetWriterTopology,
@@ -43,6 +45,7 @@ interface DefinitionOptions {
   readonly groups?: readonly GroupDefinition[]
   readonly roles?: readonly RoleDefinition[]
   readonly membershipPolicies?: readonly MembershipPolicyDefinition[]
+  readonly shares?: readonly ShareTypeDefinition[]
 }
 
 interface ResolvedDefinitions extends SixbDefinitions {
@@ -126,6 +129,12 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
   })
   const workflowsById = indexUniqueDefinitions("workflow", workflows)
 
+  const sharesById = validateShareTypesAtStartup({
+    shares: options.shares ?? [],
+    ontology,
+    actions: actionRegistry,
+  })
+
   const security = new SecurityRegistry({
     groups: options.groups ?? [],
     roles: options.roles ?? [],
@@ -133,6 +142,7 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
     objectTypeIds: new Set(ontology.getObjectTypesById().keys()),
     datasetIds: new Set(datasetsById.keys()),
     actionIds: registeredActionIds,
+    shareTypeIds: new Set(sharesById.keys()),
     workflowIds: new Set(workflowsById.keys()),
     syncIds: new Set(syncsById.keys()),
     pipelineIds: new Set(pipelinesById.keys()),
@@ -162,6 +172,7 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
     rules: createDefinitionCatalog(rulesById),
     schedules: createDefinitionCatalog(schedulesById),
     security,
+    shares: createDefinitionCatalog(sharesById),
     syncs: createDefinitionCatalog(syncsById),
     workflows: createDefinitionCatalog(workflowsById),
   })

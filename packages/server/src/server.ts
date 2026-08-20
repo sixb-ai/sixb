@@ -307,7 +307,10 @@ export function createSixbApi(server: SixbServer) {
     resolveInvitationRedirectContext: (request, input) =>
       server.resolveInvitationRedirectContext(request, input),
   })
-  registerHttpRoutes(app, host)
+  registerHttpRoutes(app, host, {
+    sharedApplicationOrigin:
+      apiBrowserPolicy.allowedOrigins.find((entry) => entry.audience === "app")?.origin ?? null,
+  })
   registerWebhookRoutes(app, host)
   registerWebSocketRoutes(app, server)
 

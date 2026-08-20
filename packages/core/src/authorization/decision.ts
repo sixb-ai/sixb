@@ -28,6 +28,7 @@ export type AuthzRequest =
   | { readonly kind: "object.edit"; readonly objectTypeId: string }
   | { readonly kind: "telemetry.append"; readonly objectTypeId: string }
   | { readonly kind: "action.apply"; readonly actionId: string }
+  | { readonly kind: "share.manage"; readonly shareTypeId: string }
   | { readonly kind: "workflow.run"; readonly workflowId: string }
   | { readonly kind: "sync.run"; readonly syncId: string }
   | { readonly kind: "pipeline.run"; readonly pipelineId: string }
@@ -71,6 +72,8 @@ function atomsFor(request: AuthzRequest): readonly Atom[] {
       return [{ kind: "append:telemetry", id: request.objectTypeId }]
     case "action.apply":
       return [{ kind: "apply:action", id: request.actionId }]
+    case "share.manage":
+      return [{ kind: "share:share", id: request.shareTypeId }]
     case "workflow.run":
       return [{ kind: "run:workflow", id: request.workflowId }]
     case "sync.run":
@@ -245,6 +248,8 @@ function deniedMessage(
       return `[Sixb] Principal '${principalId}' is not allowed to append telemetry for object type '${request.objectTypeId}'.`
     case "action.apply":
       return `[Sixb] Principal '${principalId}' is not allowed to apply action '${request.actionId}'.`
+    case "share.manage":
+      return `[Sixb] Principal '${principalId}' is not allowed to manage share type '${request.shareTypeId}'.`
     case "workflow.run":
       return `[Sixb] Principal '${principalId}' is not allowed to run workflow '${request.workflowId}'.`
     case "sync.run":
