@@ -1,11 +1,24 @@
-import { rest } from "@sixb/connector-rest"
+import {
+  type RestRetryContext,
+  type RestRetryPolicy,
+  rest,
+  shouldRetryRestRequest,
+} from "@sixb/connector-rest"
 import type { ConnectorAdapter } from "@sixb/core"
 import { createAceIotClient } from "./client"
 import { AceIotConfigurationError } from "./errors"
 import { createAceIotHttp } from "./http"
-import type { AceIotApiKeyResolver, AceIotClient, AceIotConnectorOptions } from "./types"
+import type {
+  AceIotApiKeyResolver,
+  AceIotClient,
+  AceIotConnectorOptions,
+  AceIotRequestMethod,
+  AceIotRetryContext,
+  AceIotRetryPolicy,
+} from "./types"
 
 const DEFAULT_BASE_URL = "https://flightdeck.aceiot.cloud/api/"
+const DEFAULT_MAX_RETRIES = 2
 
 export type AceIotConnector = ConnectorAdapter<"ace-iot", AceIotClient>
 
@@ -21,22 +34,59 @@ export function aceIot(options: AceIotConnectorOptions): AceIotConnector {
       Accept: "application/json",
     }),
     timeoutMs: options.timeoutMs,
-    // Retries are method-aware in the ACE HTTP layer.
-    retry: { maxRetries: 0 },
+    minDelayMs: options.minDelayMs,
+    retry: toRestRetryPolicy(options.retry),
   })
 
   return {
     type: "ace-iot",
     async connect(context) {
+      assertReliabilityOptions(options)
       const restClient = await restAdapter.connect(context)
-      return createAceIotClient(
-        createAceIotHttp(restClient, {
-          minDelayMs: options.minDelayMs,
-          retry: options.retry,
-          signal: context.signal,
-        })
+      return createAceIotClient(createAceIotHttp(restClient))
+    },
+  }
+}
+
+function toRestRetryPolicy(policy: AceIotRetryPolicy | undefined): RestRetryPolicy {
+  return {
+    maxRetries: policy?.maxRetries ?? DEFAULT_MAX_RETRIES,
+    shouldRetry(context) {
+      const aceContext = toAceIotRetryContext(context)
+      return (
+        policy?.shouldRetry?.(aceContext) ??
+        (!(context.error instanceof AceIotConfigurationError) && shouldRetryRestRequest(context))
       )
     },
+    ...(policy?.delayMs
+      ? {
+          delayMs: (context: RestRetryContext) =>
+            policy.delayMs?.(toAceIotRetryContext(context)) ?? 0,
+        }
+      : {}),
+  }
+}
+
+function toAceIotRetryContext(context: RestRetryContext): AceIotRetryContext {
+  return {
+    attempt: context.attempt,
+    method: context.method as AceIotRequestMethod,
+    idempotent: context.idempotent,
+    response: context.response,
+    error: context.error,
+  }
+}
+
+function assertReliabilityOptions(options: AceIotConnectorOptions): void {
+  const maxRetries = options.retry?.maxRetries ?? DEFAULT_MAX_RETRIES
+  if (!Number.isInteger(maxRetries) || maxRetries < 0) {
+    throw new Error("[SixbAceIot] retry.maxRetries must be a non-negative integer.")
+  }
+  if (
+    options.minDelayMs !== undefined &&
+    (!Number.isFinite(options.minDelayMs) || options.minDelayMs < 0)
+  ) {
+    throw new Error("[SixbAceIot] minDelayMs must be a non-negative finite number.")
   }
 }
 
