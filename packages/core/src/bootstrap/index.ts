@@ -1,18 +1,7 @@
+export type { DiscoveredProjectDefinitions } from "./discovery"
 export {
-  discoverActions,
-  discoverAgents,
-  discoverConnectors,
-  discoverDatasets,
-  discoverGroups,
-  discoverMembershipPolicies,
   discoverOntologySources,
-  discoverPipelines,
-  discoverProjections,
-  discoverRoles,
-  discoverRules,
-  discoverSchedules,
-  discoverSyncs,
-  discoverWorkflows,
+  discoverProjectDefinitions,
 } from "./discovery"
 export type {
   GenerateOntologyTypeManifestOptions,
