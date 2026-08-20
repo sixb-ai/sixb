@@ -3,22 +3,7 @@ import type { ActionDefinition } from "../actions"
 import type { AgentDefinition } from "../agents"
 import type { SixbAuthConfig } from "../auth"
 import type { BlobStorage } from "../blob-storage"
-import {
-  discoverActions,
-  discoverAgents,
-  discoverConnectors,
-  discoverDatasets,
-  discoverGroups,
-  discoverMembershipPolicies,
-  discoverOntologySources,
-  discoverPipelines,
-  discoverProjections,
-  discoverRoles,
-  discoverRules,
-  discoverSchedules,
-  discoverSyncs,
-  discoverWorkflows,
-} from "../bootstrap"
+import { discoverOntologySources, discoverProjectDefinitions } from "../bootstrap"
 import type { Broker } from "../broker"
 import type { ConnectorDefinition } from "../connectors/types"
 import type { DatasetDefinition } from "../datasets"
@@ -89,8 +74,8 @@ export async function createSixb(
 ): Promise<SixbHost<readonly OntologySource[]>> {
   const projectRoot = resolve(options.projectRoot ?? process.cwd())
 
-  const discovered = await discoverOntologySources(projectRoot)
-  const allSources = [...(options.ontologies ?? []), ...discovered]
+  const discoveredOntology = await discoverOntologySources(projectRoot)
+  const allSources = [...(options.ontologies ?? []), ...discoveredOntology]
 
   if (allSources.length === 0) {
     throw new RuntimeError(
@@ -98,35 +83,7 @@ export async function createSixb(
     )
   }
 
-  const [
-    actions,
-    projections,
-    schedules,
-    syncs,
-    connectors,
-    pipelines,
-    datasets,
-    rules,
-    workflows,
-    groups,
-    roles,
-    membershipPolicies,
-    agents,
-  ] = await Promise.all([
-    discoverActions(projectRoot),
-    discoverProjections(projectRoot),
-    discoverSchedules(projectRoot),
-    discoverSyncs(projectRoot),
-    discoverConnectors(projectRoot),
-    discoverPipelines(projectRoot),
-    discoverDatasets(projectRoot),
-    discoverRules(projectRoot),
-    discoverWorkflows(projectRoot),
-    discoverGroups(projectRoot),
-    discoverRoles(projectRoot),
-    discoverMembershipPolicies(projectRoot),
-    discoverAgents(projectRoot),
-  ])
+  const definitions = await discoverProjectDefinitions(projectRoot)
 
   // Explicit definitions come first so local setup can override ordering while duplicate ids are
   // still rejected by the SixbHost constructor. Every family merges — `actions` and `projections`
@@ -145,19 +102,19 @@ export async function createSixb(
     onError: options.onError,
     ontologyMaintenance: options.ontologyMaintenance,
     projectRoot,
-    actions: [...(options.actions ?? []), ...actions],
-    datasets: [...(options.datasets ?? []), ...datasets],
-    connectors: [...(options.connectors ?? []), ...connectors],
-    schedules: [...(options.schedules ?? []), ...schedules],
-    syncs: [...(options.syncs ?? []), ...syncs],
-    pipelines: [...(options.pipelines ?? []), ...pipelines],
-    projections: [...(options.projections ?? []), ...projections],
-    rules: [...(options.rules ?? []), ...rules],
-    workflows: [...(options.workflows ?? []), ...workflows],
-    groups: [...(options.groups ?? []), ...groups],
-    roles: [...(options.roles ?? []), ...roles],
-    membershipPolicies: [...(options.membershipPolicies ?? []), ...membershipPolicies],
-    agents: [...(options.agents ?? []), ...agents],
+    actions: [...(options.actions ?? []), ...definitions.actions],
+    datasets: [...(options.datasets ?? []), ...definitions.datasets],
+    connectors: [...(options.connectors ?? []), ...definitions.connectors],
+    schedules: [...(options.schedules ?? []), ...definitions.schedules],
+    syncs: [...(options.syncs ?? []), ...definitions.syncs],
+    pipelines: [...(options.pipelines ?? []), ...definitions.pipelines],
+    projections: [...(options.projections ?? []), ...definitions.projections],
+    rules: [...(options.rules ?? []), ...definitions.rules],
+    workflows: [...(options.workflows ?? []), ...definitions.workflows],
+    groups: [...(options.groups ?? []), ...definitions.groups],
+    roles: [...(options.roles ?? []), ...definitions.roles],
+    membershipPolicies: [...(options.membershipPolicies ?? []), ...definitions.membershipPolicies],
+    agents: [...(options.agents ?? []), ...definitions.agents],
     auth: options.auth,
   })
 }
