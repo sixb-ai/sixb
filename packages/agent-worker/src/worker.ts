@@ -606,7 +606,7 @@ function buildAgentContext(host: AgentWorkerHost, options: AgentWorkerOptions): 
   assertAgentWorkerStorage(storage)
   if (!host.sandboxes) {
     throw new AgentWorkerError(
-      "Agent workers require createSixb({ sandboxes }) for the built-in bash tool."
+      "Agent workers require createSixb({ sandboxes }) for the built-in read and bash tools."
     )
   }
   const agentSkills = loadAgentSkills({

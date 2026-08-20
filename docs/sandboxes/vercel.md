@@ -1,7 +1,7 @@
 # Vercel sandbox
 
-Use `@sixb/sandboxes-vercel` to run the agent `bash` tool in managed Vercel Sandbox
-microVMs. It is a drop-in sandbox provider for `createSixb({ sandboxes })`.
+Use `@sixb/sandboxes-vercel` to run the agent's sandbox tools in managed Vercel Sandbox microVMs.
+It is a drop-in sandbox provider for `createSixb({ sandboxes })`.
 
 Choose this provider when you want strong hosted isolation and do not want to install a local
 hypervisor or build a smolvm image on your worker host.
@@ -30,7 +30,7 @@ export const sixb = createSixb({
 ```
 
 That is all the Sixb code you need. The agent worker will create one Vercel sandbox per agent run,
-write the run context into it, run `bash -lc ...`, and delete the sandbox on teardown.
+write the run context into it, execute its sandbox tools, and delete the sandbox on teardown.
 
 ## Required: a Vercel project
 
@@ -105,8 +105,9 @@ new VercelSandboxFactory({
 })
 ```
 
-The stock Vercel runtimes include common development tools. Sixb's built-in bash tool needs `bash`
-and `curl`. If you use a custom image, make sure both are installed.
+The stock Vercel runtimes include the commands used by Sixb's built-in agent tools. A custom image
+or snapshot must provide `bash`, `curl`, `realpath`, `tail`, `head`, and `base64`. On a
+Debian-compatible image, the last four come from `coreutils`.
 
 For heavier setup, prefer a snapshot or Vercel Container Registry image instead of installing
 packages on every agent run:

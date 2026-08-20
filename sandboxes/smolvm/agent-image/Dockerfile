@@ -4,6 +4,7 @@
 # actually uses through the API gateway:
 #   bash            the agent bash tool runs `bash -lc`
 #   curl, jq        the gateway is HTTP + JSON
+#   busybox tools   read uses realpath, tail, head, and base64
 #   git, ripgrep    common agent file/repo work
 #   python3         scripting beyond jq (stdlib only — no pip; PyPI is
 #                   unreachable under the sandbox's gateway-only egress)

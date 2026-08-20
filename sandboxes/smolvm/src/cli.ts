@@ -10,8 +10,8 @@ export interface SmolvmCliConfig {
   /** Resolved smolvm binary name or absolute path. */
   readonly bin: string
   /**
-   * OCI image the VM boots from. Must contain a POSIX shell (the bash tool runs
-   * `bash -lc`) and any tooling the agent needs (e.g. curl).
+   * OCI image the VM boots from. Sixb agent images need bash, curl, realpath,
+   * tail, head, and base64.
    *
    * IMPORTANT: smolvm pulls the image at `start` from inside the guest, so an
    * image machine needs guest network reachability to its registry. With a
