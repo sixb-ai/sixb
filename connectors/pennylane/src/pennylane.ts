@@ -1,4 +1,4 @@
-import { rest } from "@sixb/connector-rest"
+import { type RestRetryContext, type RestRetryPolicy, rest } from "@sixb/connector-rest"
 import type { ConnectorAdapter } from "@sixb/core"
 import { createPennylaneClient } from "./client"
 import { createPennylaneHttp } from "./http"
@@ -6,10 +6,14 @@ import type {
   PennylaneAccessTokenResolver,
   PennylaneClient,
   PennylaneConnectorOptions,
+  PennylaneRequestMethod,
+  PennylaneRetryContext,
+  PennylaneRetryPolicy,
 } from "./types"
 
 const DEFAULT_BASE_URL = "https://app.pennylane.com/api/external/v2/"
 const DEFAULT_MIN_DELAY_MS = 200
+const DEFAULT_MAX_RETRIES = 2
 
 export type PennylaneConnector = ConnectorAdapter<"pennylane", PennylaneClient>
 
@@ -23,22 +27,55 @@ export function pennylane(options: PennylaneConnectorOptions): PennylaneConnecto
       Accept: "application/json",
     }),
     timeoutMs: options.timeoutMs,
-    // Retries are method-aware in the Pennylane HTTP layer.
-    retry: { maxRetries: 0 },
+    minDelayMs: options.minDelayMs ?? DEFAULT_MIN_DELAY_MS,
+    retry: toRestRetryPolicy(options.retry),
   })
 
   return {
     type: "pennylane",
     async connect(context) {
+      assertReliabilityOptions(options)
       const restClient = await restAdapter.connect(context)
-      return createPennylaneClient(
-        createPennylaneHttp(restClient, {
-          minDelayMs: options.minDelayMs ?? DEFAULT_MIN_DELAY_MS,
-          retry: options.retry,
-          signal: context.signal,
-        })
-      )
+      return createPennylaneClient(createPennylaneHttp(restClient))
     },
+  }
+}
+
+function toRestRetryPolicy(policy: PennylaneRetryPolicy | undefined): RestRetryPolicy {
+  return {
+    maxRetries: policy?.maxRetries ?? DEFAULT_MAX_RETRIES,
+    ...(policy?.shouldRetry
+      ? {
+          shouldRetry: (context: RestRetryContext) =>
+            policy.shouldRetry?.(toPennylaneRetryContext(context)) ?? false,
+        }
+      : {}),
+    ...(policy?.delayMs
+      ? {
+          delayMs: (context: RestRetryContext) =>
+            policy.delayMs?.(toPennylaneRetryContext(context)) ?? 0,
+        }
+      : {}),
+  }
+}
+
+function toPennylaneRetryContext(context: RestRetryContext): PennylaneRetryContext {
+  return {
+    attempt: context.attempt,
+    method: context.method as PennylaneRequestMethod,
+    response: context.response,
+    error: context.error,
+  }
+}
+
+function assertReliabilityOptions(options: PennylaneConnectorOptions): void {
+  const maxRetries = options.retry?.maxRetries ?? DEFAULT_MAX_RETRIES
+  if (!Number.isInteger(maxRetries) || maxRetries < 0) {
+    throw new Error("[SixbPennylane] retry.maxRetries must be a non-negative integer.")
+  }
+  const minDelayMs = options.minDelayMs ?? DEFAULT_MIN_DELAY_MS
+  if (!Number.isFinite(minDelayMs) || minDelayMs < 0) {
+    throw new Error("[SixbPennylane] minDelayMs must be a non-negative finite number.")
   }
 }
 

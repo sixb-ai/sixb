@@ -43,3 +43,21 @@ how to read the body.
 
 `headers` being a resolver rather than a value is the part worth remembering: it is what lets a
 connector hold a short-lived credential without reconstructing the connector.
+
+## Reliability contract
+
+The default retry policy only replays idempotent methods (`GET`, `HEAD`, and `OPTIONS`) after a
+network error, 429, or 5xx response. A request body must also be mechanically replayable: stream
+bodies are never retried. Caller aborts stop both queued pacing and retry backoff immediately.
+
+Mark a semantically read-only write explicitly, or disable retries even when a custom policy is
+configured:
+
+```ts
+await client.post("reports/query", query, undefined, { idempotent: true })
+await client.get("volatile-snapshot", undefined, { retryable: false })
+```
+
+`onUnauthorized` follows the same rules: only an idempotent request with a replayable body is sent
+again after credentials are refreshed. The helpers `withQuery`, `readResponseBody`, and
+`parseRetryAfter` are exported for typed vendor connectors built on this transport.

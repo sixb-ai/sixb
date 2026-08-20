@@ -1,47 +1,24 @@
 import type { ConnectorContext } from "@sixb/core"
+import { isAbortError, restRetryDelayMs, shouldRetryRestRequest } from "./helpers"
 import type {
   RestClient,
   RestConnector,
   RestConnectorOptions,
   RestHeadersResolver,
   RestRequestContext,
+  RestRequestInit,
+  RestRequestOptions,
   RestRetryContext,
-  RestRetryPolicy,
 } from "./types"
 
-const defaultRetryPolicy: Required<Pick<RestRetryPolicy, "maxRetries">> &
-  Pick<RestRetryPolicy, "shouldRetry" | "delayMs"> = {
-  maxRetries: 0,
-  shouldRetry(context) {
-    if (context.error) {
-      return true
-    }
-
-    if (!context.response) {
-      return false
-    }
-
-    return context.response.status === 429 || context.response.status >= 500
-  },
-  delayMs(context) {
-    const retryAfter = context.response?.headers.get("Retry-After")
-    if (retryAfter) {
-      const seconds = Number.parseInt(retryAfter, 10)
-      if (Number.isFinite(seconds)) {
-        return Math.max(seconds, 0) * 1000
-      }
-    }
-
-    return Math.min(1000 * 2 ** context.attempt, 30_000)
-  },
-}
+const safeMethods = new Set(["GET", "HEAD", "OPTIONS"])
 
 /**
  * Create a REST connector backed by the platform `fetch` implementation.
  *
- * The connected client stays close to native fetch while handling a few runtime
- * concerns centrally: base URL resolution, async headers, optional throttling,
- * timeout, retry, and one-time 401 refresh.
+ * The connected client stays close to native fetch while handling runtime concerns centrally:
+ * base URL resolution, async headers, serialized pacing, timeout, method-aware retry, response
+ * cleanup, body replay safety, and one-time 401 refresh.
  */
 export function rest(options: RestConnectorOptions): RestConnector {
   assertNonEmpty(options.baseUrl, "baseUrl")
@@ -56,102 +33,127 @@ export function rest(options: RestConnectorOptions): RestConnector {
 }
 
 function createRestClient(options: RestConnectorOptions, context: ConnectorContext): RestClient {
-  const retryPolicy = {
-    ...defaultRetryPolicy,
-    ...options.retry,
-  }
-  let lastRequestAt = 0
+  const maxRetries = options.retry?.maxRetries ?? 0
+  assertMaxRetries(maxRetries)
+  const shouldRetry = options.retry?.shouldRetry ?? shouldRetryRestRequest
+  const delayMs = options.retry?.delayMs ?? restRetryDelayMs
+  const schedule = createRequestScheduler(options.minDelayMs ?? 0)
 
-  const request = async (path: string, init: RequestInit = {}): Promise<Response> => {
+  const request = async (
+    path: string,
+    init: RestRequestInit = {},
+    requestOptions: RestRequestOptions = {}
+  ): Promise<Response> => {
+    const preparedInit = prepareRequestInit(init)
+    const method = (preparedInit.method ?? "GET").toUpperCase()
+    const idempotent = requestOptions.idempotent ?? safeMethods.has(method)
+    const retryable = requestOptions.retryable !== false
+    const bodyReplayable = !(preparedInit.body instanceof ReadableStream)
+    const requestSignal = combineSignals(context.signal, preparedInit.signal)
     const baseRequestContext: RestRequestContext = {
       projectId: context.projectId,
       connectorId: context.connectorId,
       path,
-      init,
+      init: { ...preparedInit, signal: requestSignal },
+      method,
+      idempotent,
+      bodyReplayable,
     }
 
     let unauthorizedRetried = false
-    // A stream body is consumed by the first attempt and can never be replayed,
-    // so neither the 401 refresh nor the retry policy may re-send this request —
-    // retrying would only mask the real failure behind a "stream already used" error.
-    const replayable = !(init.body instanceof ReadableStream)
 
-    for (let attempt = 0; ; attempt++) {
-      // Apply the same pacing to retries as the initial request.
-      await applyMinDelay(
-        options.minDelayMs,
-        () => lastRequestAt,
-        (value) => {
-          lastRequestAt = value
-        }
-      )
-
-      const resolvedInit = await resolveRequestInit(
-        init,
-        options.headers,
-        options.timeoutMs,
-        baseRequestContext
-      )
-
+    for (let attempt = 0; ; attempt += 1) {
       let response: Response | null = null
       let error: unknown = null
 
       try {
+        // The queue reserves a distinct start slot for every initial request and retry.
+        await schedule(requestSignal)
+        const resolvedInit = await resolveRequestInit(
+          baseRequestContext.init,
+          options.headers,
+          options.timeoutMs,
+          baseRequestContext
+        )
         response = await fetch(new URL(path, options.baseUrl), resolvedInit)
       } catch (caughtError) {
         error = caughtError
       }
 
-      // Refresh auth at most once per request to avoid retry loops on bad credentials.
+      const retryContext: RestRetryContext = {
+        ...baseRequestContext,
+        attempt,
+        response,
+        error,
+      }
+
+      // Authentication refresh is also a replay, so it follows the same semantic and mechanical
+      // safety gates as an ordinary retry. Refresh at most once to avoid bad-credential loops.
       if (
         response?.status === 401 &&
         !unauthorizedRetried &&
         options.onUnauthorized &&
-        replayable
+        retryable &&
+        idempotent &&
+        bodyReplayable
       ) {
         unauthorizedRetried = true
+        await cancelResponseBody(response)
         await options.onUnauthorized(baseRequestContext)
         continue
       }
 
-      const retryContext: RestRetryContext = { attempt, response, error }
       const canRetry =
-        replayable &&
-        attempt < retryPolicy.maxRetries &&
-        retryPolicy.shouldRetry?.(retryContext) === true
+        retryable &&
+        bodyReplayable &&
+        !isAbortError(error) &&
+        attempt < maxRetries &&
+        shouldRetry(retryContext)
 
       if (canRetry) {
-        await sleep(retryPolicy.delayMs?.(retryContext) ?? 0)
+        await cancelResponseBody(response)
+        await sleep(delayMs(retryContext), requestSignal)
         continue
       }
 
-      if (error) {
-        throw error
-      }
-
+      if (error) throw error
       return response as Response
     }
   }
 
   return {
     request,
-    get(path, init) {
-      return request(path, {
-        ...init,
-        method: init?.method ?? "GET",
-      })
+    get(path, init, requestOptions) {
+      return request(
+        path,
+        {
+          ...init,
+          method: init?.method ?? "GET",
+        },
+        requestOptions
+      )
     },
-    post(path, body, init) {
-      const headers = new Headers(init?.headers)
-      const requestBody = serializeBody(body, headers)
+    post(path, body, init, requestOptions) {
+      return request(
+        path,
+        {
+          ...init,
+          method: init?.method ?? "POST",
+          body,
+        },
+        requestOptions
+      )
+    },
+  }
+}
 
-      return request(path, {
-        ...init,
-        method: init?.method ?? "POST",
-        headers,
-        body: requestBody,
-      })
-    },
+function prepareRequestInit(init: RestRequestInit): RequestInit {
+  const headers = new Headers(init.headers)
+  const body = serializeBody(init.body, headers)
+  return {
+    ...init,
+    headers,
+    body,
   }
 }
 
@@ -185,41 +187,15 @@ async function resolveHeaders(
   headersResolver: RestHeadersResolver | undefined,
   context: RestRequestContext
 ): Promise<HeadersInit | undefined> {
-  if (!headersResolver) {
-    return undefined
-  }
-
+  if (!headersResolver) return undefined
   return typeof headersResolver === "function" ? headersResolver(context) : headersResolver
 }
 
-async function applyMinDelay(
-  minDelayMs: number | undefined,
-  getLastRequestAt: () => number,
-  setLastRequestAt: (value: number) => void
-): Promise<void> {
-  if (!minDelayMs || minDelayMs <= 0) {
-    setLastRequestAt(Date.now())
-    return
-  }
-
-  const now = Date.now()
-  const elapsed = now - getLastRequestAt()
-  if (elapsed < minDelayMs) {
-    await sleep(minDelayMs - elapsed)
-  }
-
-  setLastRequestAt(Date.now())
-}
-
 function serializeBody(body: unknown, headers: Headers): BodyInit | undefined {
-  if (body === undefined) {
-    return undefined
-  }
+  if (body === undefined) return undefined
 
   if (body === null) {
-    if (!headers.has("content-type")) {
-      headers.set("content-type", "application/json")
-    }
+    setJsonContentType(headers)
     return JSON.stringify(body)
   }
 
@@ -235,24 +211,102 @@ function serializeBody(body: unknown, headers: Headers): BodyInit | undefined {
     return body as BodyInit
   }
 
-  // Default plain values to JSON while leaving native fetch body types alone.
-  if (!headers.has("content-type")) {
-    headers.set("content-type", "application/json")
+  setJsonContentType(headers)
+  return JSON.stringify(body)
+}
+
+function setJsonContentType(headers: Headers): void {
+  if (!headers.has("content-type")) headers.set("content-type", "application/json")
+}
+
+function combineSignals(
+  contextSignal: AbortSignal,
+  requestSignal: AbortSignal | null | undefined
+): AbortSignal {
+  if (!requestSignal || requestSignal === contextSignal) return contextSignal
+  return AbortSignal.any([contextSignal, requestSignal])
+}
+
+function createRequestScheduler(minDelayMs: number): (signal: AbortSignal) => Promise<void> {
+  assertMinDelay(minDelayMs)
+  if (minDelayMs === 0) {
+    return (signal) => (signal.aborted ? Promise.reject(abortReason(signal)) : Promise.resolve())
   }
 
-  return JSON.stringify(body)
+  let nextAvailableAt = 0
+  let queue = Promise.resolve()
+
+  return (signal) => {
+    const scheduled = queue.then(async () => {
+      await sleep(Math.max(nextAvailableAt - Date.now(), 0), signal)
+      nextAvailableAt = Date.now() + minDelayMs
+    })
+    queue = scheduled.catch(() => undefined)
+    // A request can sit behind another request's pacing slot. Reject its caller immediately when
+    // aborted; the queued task will later observe the same signal and release the queue cleanly.
+    return abortable(scheduled, signal)
+  }
+}
+
+async function cancelResponseBody(response: Response | null): Promise<void> {
+  if (response?.body) await response.body.cancel().catch(() => undefined)
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(abortReason(signal))
+  if (ms <= 0) return Promise.resolve()
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort)
+      resolve()
+    }, ms)
+    const onAbort = () => {
+      clearTimeout(timer)
+      signal?.removeEventListener("abort", onAbort)
+      reject(abortReason(signal as AbortSignal))
+    }
+    signal?.addEventListener("abort", onAbort, { once: true })
+  })
+}
+
+function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(abortReason(signal))
+
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(abortReason(signal))
+    signal.addEventListener("abort", onAbort, { once: true })
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort)
+        resolve(value)
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort)
+        reject(error)
+      }
+    )
+  })
+}
+
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException("The operation was aborted.", "AbortError")
+}
+
+function assertMaxRetries(maxRetries: number): void {
+  if (!Number.isInteger(maxRetries) || maxRetries < 0) {
+    throw new Error("[SixbRest] retry.maxRetries must be a non-negative integer.")
+  }
+}
+
+function assertMinDelay(minDelayMs: number): void {
+  if (!Number.isFinite(minDelayMs) || minDelayMs < 0) {
+    throw new Error("[SixbRest] minDelayMs must be a non-negative finite number.")
+  }
 }
 
 function assertNonEmpty(value: string, field: string): void {
   if (!value.trim()) {
     throw new Error(`[SixbRest] ${field} must not be empty.`)
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  if (ms <= 0) {
-    return Promise.resolve()
-  }
-
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }

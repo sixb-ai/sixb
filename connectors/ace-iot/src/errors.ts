@@ -1,3 +1,5 @@
+import { parseRetryAfter } from "@sixb/connector-rest"
+
 /**
  * A problem with how the connector was configured, raised before or instead of a request.
  *
@@ -88,20 +90,6 @@ function extractMessage(value: unknown): string | null {
 
   const message = value.message
   return typeof message === "string" && message.trim() ? message : null
-}
-
-function parseRetryAfter(value: string | null): number | null {
-  if (!value) {
-    return null
-  }
-
-  const seconds = Number(value)
-  if (Number.isFinite(seconds)) {
-    return Math.max(seconds, 0) * 1000
-  }
-
-  const timestamp = Date.parse(value)
-  return Number.isNaN(timestamp) ? null : Math.max(timestamp - Date.now(), 0)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
