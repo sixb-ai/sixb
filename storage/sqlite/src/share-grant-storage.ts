@@ -4,10 +4,9 @@ import type {
   CreateSharedAccessGrantInput,
   GetSharedAccessGrantInput,
   ListSharedAccessGrantsInput,
-  ListShareGrantEvidenceInput,
+  Principal,
   RevokeSharedAccessGrantInput,
   SharedAccessGrantRecord,
-  ShareGrantEvidenceRecord,
   ShareGrantStorage,
 } from "@sixb/core/storage"
 import {
@@ -48,8 +47,8 @@ export class SqliteShareGrantStorage implements ShareGrantStorage {
             INSERT INTO share_grants (
               project_id, id, share_type_id, object_type_id, primary_id,
               issued_by_type, issued_by_id, grants, token_digest,
-              created_at, expires_at, issued_evidence_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              created_at, expires_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `
         )
         .run(
@@ -63,8 +62,7 @@ export class SqliteShareGrantStorage implements ShareGrantStorage {
           JSON.stringify(record.grants),
           record.tokenDigest,
           record.createdAt.toISOString(),
-          record.expiresAt.toISOString(),
-          record.issuedEvidenceId
+          record.expiresAt.toISOString()
         )
     } catch (error) {
       if (isUniqueConstraintError(error)) {
@@ -115,7 +113,7 @@ export class SqliteShareGrantStorage implements ShareGrantStorage {
       .query(
         `
           UPDATE share_grants
-          SET revoked_at = ?, revoked_by_type = ?, revoked_by_id = ?, revoked_evidence_id = ?
+          SET revoked_at = ?, revoked_by_type = ?, revoked_by_id = ?
           WHERE project_id = ? AND id = ? AND revoked_at IS NULL
         `
       )
@@ -123,50 +121,10 @@ export class SqliteShareGrantStorage implements ShareGrantStorage {
         input.revokedAt.toISOString(),
         input.revokedBy.type,
         input.revokedBy.id,
-        input.evidenceId,
         input.projectId,
         input.grantId
       )
     return this.require(input.projectId, input.grantId, "revoke")
-  }
-
-  async listEvidence(
-    input: ListShareGrantEvidenceInput
-  ): Promise<readonly ShareGrantEvidenceRecord[]> {
-    const exact =
-      input.grantId === undefined ? undefined : this.getRow(input.projectId, input.grantId)
-    const rows =
-      input.grantId === undefined
-        ? await this.list({
-            projectId: input.projectId,
-            includeRevoked: true,
-            includeExpired: true,
-          })
-        : exact
-          ? [exact]
-          : []
-    const evidence: ShareGrantEvidenceRecord[] = []
-    for (const row of rows) {
-      evidence.push({
-        id: row.issuedEvidenceId,
-        projectId: row.projectId,
-        grantId: row.id,
-        type: "share.grant.issued",
-        actor: row.issuedBy,
-        occurredAt: row.createdAt,
-      })
-      if (row.revokedAt && row.revokedBy && row.revokedEvidenceId) {
-        evidence.push({
-          id: row.revokedEvidenceId,
-          projectId: row.projectId,
-          grantId: row.id,
-          type: "share.grant.revoked",
-          actor: row.revokedBy,
-          occurredAt: row.revokedAt,
-        })
-      }
-    }
-    return evidence.sort((left, right) => left.occurredAt.getTime() - right.occurredAt.getTime())
   }
 
   close(): void {
@@ -202,10 +160,8 @@ interface SqliteShareGrantRow {
   readonly created_at: string
   readonly expires_at: string
   readonly revoked_at: string | null
-  readonly revoked_by_type: AuthorizablePrincipal["type"] | null
+  readonly revoked_by_type: Principal["type"] | null
   readonly revoked_by_id: string | null
-  readonly issued_evidence_id: string
-  readonly revoked_evidence_id: string | null
 }
 
 function rowToRecord(row: SqliteShareGrantRow): SharedAccessGrantRecord {
@@ -223,7 +179,5 @@ function rowToRecord(row: SqliteShareGrantRow): SharedAccessGrantRecord {
     ...(row.revoked_by_type === null || row.revoked_by_id === null
       ? {}
       : { revokedBy: { type: row.revoked_by_type, id: row.revoked_by_id } }),
-    issuedEvidenceId: row.issued_evidence_id,
-    ...(row.revoked_evidence_id === null ? {} : { revokedEvidenceId: row.revoked_evidence_id }),
   }
 }

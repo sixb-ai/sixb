@@ -3,10 +3,9 @@ import type {
   CreateSharedAccessGrantInput,
   GetSharedAccessGrantInput,
   ListSharedAccessGrantsInput,
-  ListShareGrantEvidenceInput,
+  Principal,
   RevokeSharedAccessGrantInput,
   SharedAccessGrantRecord,
-  ShareGrantEvidenceRecord,
   ShareGrantStorage,
 } from "@sixb/core/storage"
 import {
@@ -29,13 +28,13 @@ export class PgShareGrantStorage implements ShareGrantStorage {
         INSERT INTO share_grants (
           project_id, id, share_type_id, object_type_id, primary_id,
           issued_by_type, issued_by_id, grants, token_digest,
-          created_at, expires_at, issued_evidence_id
+          created_at, expires_at
         ) VALUES (
           ${record.projectId}, ${record.id}, ${record.shareTypeId},
           ${record.target.objectTypeId}, ${record.target.primaryId},
           ${record.issuedBy.type}, ${record.issuedBy.id},
           ${JSON.stringify(record.grants)}::text::jsonb, ${record.tokenDigest},
-          ${record.createdAt}, ${record.expiresAt}, ${record.issuedEvidenceId}
+          ${record.createdAt}, ${record.expiresAt}
         )
         RETURNING *
       `
@@ -94,8 +93,7 @@ export class PgShareGrantStorage implements ShareGrantStorage {
       UPDATE share_grants
       SET revoked_at = ${input.revokedAt},
           revoked_by_type = ${input.revokedBy.type},
-          revoked_by_id = ${input.revokedBy.id},
-          revoked_evidence_id = ${input.evidenceId}
+          revoked_by_id = ${input.revokedBy.id}
       WHERE project_id = ${input.projectId}
         AND id = ${input.grantId}
         AND revoked_at IS NULL
@@ -103,47 +101,6 @@ export class PgShareGrantStorage implements ShareGrantStorage {
     `
     if (updated) return rowToRecord(updated)
     return this.get(input)
-  }
-
-  async listEvidence(
-    input: ListShareGrantEvidenceInput
-  ): Promise<readonly ShareGrantEvidenceRecord[]> {
-    const exact =
-      input.grantId === undefined
-        ? undefined
-        : await this.get({ projectId: input.projectId, grantId: input.grantId })
-    const rows =
-      input.grantId === undefined
-        ? await this.list({
-            projectId: input.projectId,
-            includeRevoked: true,
-            includeExpired: true,
-          })
-        : exact
-          ? [exact]
-          : []
-    const evidence: ShareGrantEvidenceRecord[] = []
-    for (const row of rows) {
-      evidence.push({
-        id: row.issuedEvidenceId,
-        projectId: row.projectId,
-        grantId: row.id,
-        type: "share.grant.issued",
-        actor: row.issuedBy,
-        occurredAt: row.createdAt,
-      })
-      if (row.revokedAt && row.revokedBy && row.revokedEvidenceId) {
-        evidence.push({
-          id: row.revokedEvidenceId,
-          projectId: row.projectId,
-          grantId: row.id,
-          type: "share.grant.revoked",
-          actor: row.revokedBy,
-          occurredAt: row.revokedAt,
-        })
-      }
-    }
-    return evidence.sort((left, right) => left.occurredAt.getTime() - right.occurredAt.getTime())
   }
 }
 
@@ -160,10 +117,8 @@ interface PgShareGrantRow {
   readonly created_at: Date | string
   readonly expires_at: Date | string
   readonly revoked_at: Date | string | null
-  readonly revoked_by_type: AuthorizablePrincipal["type"] | null
+  readonly revoked_by_type: Principal["type"] | null
   readonly revoked_by_id: string | null
-  readonly issued_evidence_id: string
-  readonly revoked_evidence_id: string | null
 }
 
 function rowToRecord(row: PgShareGrantRow): SharedAccessGrantRecord {
@@ -181,8 +136,6 @@ function rowToRecord(row: PgShareGrantRow): SharedAccessGrantRecord {
     ...(row.revoked_by_type === null || row.revoked_by_id === null
       ? {}
       : { revokedBy: { type: row.revoked_by_type, id: row.revoked_by_id } }),
-    issuedEvidenceId: row.issued_evidence_id,
-    ...(row.revoked_evidence_id === null ? {} : { revokedEvidenceId: row.revoked_evidence_id }),
   }
 }
 

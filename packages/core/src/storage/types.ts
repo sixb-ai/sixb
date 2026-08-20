@@ -197,12 +197,9 @@ export type {
   CreateSharedAccessGrantInput,
   GetSharedAccessGrantInput,
   ListSharedAccessGrantsInput,
-  ListShareGrantEvidenceInput,
   RevokeSharedAccessGrantInput,
   SharedAccessGrantRecord,
   SharedAccessGrantRef,
-  ShareGrantEvidenceRecord,
-  ShareGrantEvidenceType,
   ShareGrantStorage,
   ShareGrantStorageErrorCode,
 } from "./share-grants"

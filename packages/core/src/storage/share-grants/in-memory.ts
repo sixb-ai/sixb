@@ -9,10 +9,8 @@ import type {
   CreateSharedAccessGrantInput,
   GetSharedAccessGrantInput,
   ListSharedAccessGrantsInput,
-  ListShareGrantEvidenceInput,
   RevokeSharedAccessGrantInput,
   SharedAccessGrantRecord,
-  ShareGrantEvidenceRecord,
   ShareGrantStorage,
 } from "./types"
 
@@ -21,9 +19,12 @@ export class InMemoryShareGrantStorage implements ShareGrantStorage {
 
   async create(input: CreateSharedAccessGrantInput): Promise<SharedAccessGrantRecord> {
     const key = rowKey(input.projectId, input.id)
-    if (this.rows.has(key)) {
+    const duplicateDigest = [...this.rows.values()].some(
+      (row) => row.projectId === input.projectId && row.tokenDigest === input.tokenDigest
+    )
+    if (this.rows.has(key) || duplicateDigest) {
       throw new ShareGrantStorageError(
-        `[Sixb] Shared access grant '${input.id}' already exists.`,
+        `[Sixb] Shared access grant '${input.id}' conflicts with an existing record.`,
         "duplicate"
       )
     }
@@ -50,7 +51,11 @@ export class InMemoryShareGrantStorage implements ShareGrantStorage {
           (input.includeRevoked === true || row.revokedAt === undefined) &&
           (input.includeExpired === true || row.expiresAt.getTime() > now.getTime())
       )
-      .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
+      .sort((left, right) => {
+        const byCreation = right.createdAt.getTime() - left.createdAt.getTime()
+        if (byCreation !== 0) return byCreation
+        return left.id < right.id ? -1 : left.id > right.id ? 1 : 0
+      })
       .map(cloneSharedAccessGrant)
   }
 
@@ -66,43 +71,9 @@ export class InMemoryShareGrantStorage implements ShareGrantStorage {
       ...current,
       revokedAt: new Date(input.revokedAt),
       revokedBy: clonePrincipal(input.revokedBy),
-      revokedEvidenceId: input.evidenceId,
     }
     this.rows.set(key, updated)
     return cloneSharedAccessGrant(updated)
-  }
-
-  async listEvidence(
-    input: ListShareGrantEvidenceInput
-  ): Promise<readonly ShareGrantEvidenceRecord[]> {
-    const evidence: ShareGrantEvidenceRecord[] = []
-    const exact =
-      input.grantId === undefined
-        ? undefined
-        : this.rows.get(rowKey(input.projectId, input.grantId))
-    const rows = input.grantId === undefined ? this.rows.values() : exact ? [exact] : []
-    for (const row of rows) {
-      if (row.projectId !== input.projectId) continue
-      evidence.push({
-        id: row.issuedEvidenceId,
-        projectId: row.projectId,
-        grantId: row.id,
-        type: "share.grant.issued",
-        actor: clonePrincipal(row.issuedBy),
-        occurredAt: new Date(row.createdAt),
-      })
-      if (row.revokedAt && row.revokedBy && row.revokedEvidenceId) {
-        evidence.push({
-          id: row.revokedEvidenceId,
-          projectId: row.projectId,
-          grantId: row.id,
-          type: "share.grant.revoked",
-          actor: clonePrincipal(row.revokedBy),
-          occurredAt: new Date(row.revokedAt),
-        })
-      }
-    }
-    return evidence.sort((left, right) => left.occurredAt.getTime() - right.occurredAt.getTime())
   }
 
   snapshot(): ReadonlyMap<string, SharedAccessGrantRecord> {

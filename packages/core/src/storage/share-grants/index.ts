@@ -11,11 +11,8 @@ export type {
   CreateSharedAccessGrantInput,
   GetSharedAccessGrantInput,
   ListSharedAccessGrantsInput,
-  ListShareGrantEvidenceInput,
   RevokeSharedAccessGrantInput,
   SharedAccessGrantRecord,
   SharedAccessGrantRef,
-  ShareGrantEvidenceRecord,
-  ShareGrantEvidenceType,
   ShareGrantStorage,
 } from "./types"

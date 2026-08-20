@@ -14,25 +14,19 @@ CREATE TABLE share_grants (
   expires_at TEXT NOT NULL,
   revoked_at TEXT,
   revoked_by_type TEXT CHECK (
-    revoked_by_type IS NULL OR revoked_by_type IN ('user', 'serviceAccount')
+    revoked_by_type IS NULL OR revoked_by_type IN ('user', 'serviceAccount', 'system')
   ),
   revoked_by_id TEXT CHECK (
     revoked_by_id IS NULL OR length(trim(revoked_by_id)) > 0
   ),
-  issued_evidence_id TEXT NOT NULL CHECK (length(trim(issued_evidence_id)) > 0),
-  revoked_evidence_id TEXT CHECK (
-    revoked_evidence_id IS NULL OR length(trim(revoked_evidence_id)) > 0
-  ),
   PRIMARY KEY (project_id, id),
   UNIQUE (project_id, token_digest),
-  UNIQUE (project_id, issued_evidence_id),
-  UNIQUE (project_id, revoked_evidence_id),
   CHECK (expires_at > created_at),
   CHECK (revoked_at IS NULL OR revoked_at >= created_at),
   CHECK (
-    (revoked_at IS NULL AND revoked_by_type IS NULL AND revoked_by_id IS NULL AND revoked_evidence_id IS NULL)
+    (revoked_at IS NULL AND revoked_by_type IS NULL AND revoked_by_id IS NULL)
     OR
-    (revoked_at IS NOT NULL AND revoked_by_type IS NOT NULL AND revoked_by_id IS NOT NULL AND revoked_evidence_id IS NOT NULL)
+    (revoked_at IS NOT NULL AND revoked_by_type IS NOT NULL AND revoked_by_id IS NOT NULL)
   )
 );
 

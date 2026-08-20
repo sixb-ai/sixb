@@ -1,3 +1,4 @@
+import type { Principal } from "../../auth"
 import type { AuthorizablePrincipal } from "../../execution"
 import { ShareGrantStorageError } from "./errors"
 import type {
@@ -15,9 +16,8 @@ export function normalizeSharedAccessGrant(
   assertNonEmpty(input.shareTypeId, "Share type id")
   assertNonEmpty(input.target.objectTypeId, "Target object type id")
   assertNonEmpty(input.target.primaryId, "Target primary id")
-  assertPrincipal(input.issuedBy, "Issuer")
+  assertAuthorizablePrincipal(input.issuedBy, "Issuer")
   assertNonEmpty(input.tokenDigest, "Token digest")
-  assertNonEmpty(input.issuedEvidenceId, "Issued evidence id")
   if (!Number.isFinite(input.createdAt.getTime()) || !Number.isFinite(input.expiresAt.getTime())) {
     throw invalid("Creation and expiry must be valid dates.")
   }
@@ -42,7 +42,6 @@ export function normalizeSharedAccessGrant(
     tokenDigest: input.tokenDigest,
     createdAt: new Date(input.createdAt),
     expiresAt: new Date(input.expiresAt),
-    issuedEvidenceId: input.issuedEvidenceId,
   }
 }
 
@@ -53,7 +52,6 @@ export function assertSharedAccessGrantRevocation(
   assertNonEmpty(input.projectId, "Project id")
   assertNonEmpty(input.grantId, "Grant id")
   assertPrincipal(input.revokedBy, "Revocation actor")
-  assertNonEmpty(input.evidenceId, "Revoked evidence id")
   if (!Number.isFinite(input.revokedAt.getTime())) throw invalid("Revocation time must be valid.")
   if (createdAt && input.revokedAt.getTime() < createdAt.getTime()) {
     throw invalid("Revocation time must not precede creation time.")
@@ -93,13 +91,26 @@ export function cloneSharedAccessGrant(input: SharedAccessGrantRecord): SharedAc
   }
 }
 
-export function clonePrincipal(principal: AuthorizablePrincipal): AuthorizablePrincipal {
+export function clonePrincipal(principal: AuthorizablePrincipal): AuthorizablePrincipal
+export function clonePrincipal(principal: Principal): Principal
+export function clonePrincipal(principal: Principal): Principal {
   return { type: principal.type, id: principal.id }
 }
 
-function assertPrincipal(principal: AuthorizablePrincipal, field: string): void {
+function assertAuthorizablePrincipal(principal: AuthorizablePrincipal, field: string): void {
   if (principal.type !== "user" && principal.type !== "serviceAccount") {
     throw invalid(`${field} must be a user or service account.`)
+  }
+  assertNonEmpty(principal.id, `${field} id`)
+}
+
+function assertPrincipal(principal: Principal, field: string): void {
+  if (
+    principal.type !== "user" &&
+    principal.type !== "serviceAccount" &&
+    principal.type !== "system"
+  ) {
+    throw invalid(`${field} must be a user, service account, or system.`)
   }
   assertNonEmpty(principal.id, `${field} id`)
 }

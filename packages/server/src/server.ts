@@ -172,6 +172,13 @@ export function createSixbApi(server: SixbServer) {
   })
   guard.assertCanServeHttp({ production: process.env.NODE_ENV === "production" })
   const apiBrowserPolicy = server.getApiBrowserPolicy()
+  const sharedApplicationOrigin =
+    apiBrowserPolicy.allowedOrigins.find((entry) => entry.audience === "app")?.origin ?? null
+  if (host.definitions.shares.list().length > 0 && !sharedApplicationOrigin) {
+    throw new Error(
+      "[SixbServer] Registered share types require an allowed browser origin for the 'app' audience."
+    )
+  }
 
   const app = new Elysia()
 
@@ -308,8 +315,7 @@ export function createSixbApi(server: SixbServer) {
       server.resolveInvitationRedirectContext(request, input),
   })
   registerHttpRoutes(app, host, {
-    sharedApplicationOrigin:
-      apiBrowserPolicy.allowedOrigins.find((entry) => entry.audience === "app")?.origin ?? null,
+    sharedApplicationOrigin,
   })
   registerWebhookRoutes(app, host)
   registerWebSocketRoutes(app, server)

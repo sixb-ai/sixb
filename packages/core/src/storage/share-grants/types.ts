@@ -1,3 +1,4 @@
+import type { Principal } from "../../auth"
 import type { AuthorizablePrincipal } from "../../execution"
 import type { ObjectRef } from "../../ontology"
 
@@ -16,26 +17,12 @@ export interface SharedAccessGrantRecord {
   readonly createdAt: Date
   readonly expiresAt: Date
   readonly revokedAt?: Date
-  readonly revokedBy?: AuthorizablePrincipal
-  readonly issuedEvidenceId: string
-  readonly revokedEvidenceId?: string
-}
-
-export type ShareGrantEvidenceType = "share.grant.issued" | "share.grant.revoked"
-
-export interface ShareGrantEvidenceRecord {
-  readonly id: string
-  readonly projectId: string
-  readonly grantId: string
-  readonly type: ShareGrantEvidenceType
-  readonly actor: AuthorizablePrincipal
-  readonly occurredAt: Date
+  readonly revokedBy?: Principal
 }
 
 export interface CreateSharedAccessGrantInput extends SharedAccessGrantRecord {
   readonly revokedAt?: never
   readonly revokedBy?: never
-  readonly revokedEvidenceId?: never
 }
 
 export interface GetSharedAccessGrantInput {
@@ -56,13 +43,7 @@ export interface RevokeSharedAccessGrantInput {
   readonly projectId: string
   readonly grantId: string
   readonly revokedAt: Date
-  readonly revokedBy: AuthorizablePrincipal
-  readonly evidenceId: string
-}
-
-export interface ListShareGrantEvidenceInput {
-  readonly projectId: string
-  readonly grantId?: string
+  readonly revokedBy: Principal
 }
 
 export interface ShareGrantStorage {
@@ -70,5 +51,4 @@ export interface ShareGrantStorage {
   get(input: GetSharedAccessGrantInput): Promise<SharedAccessGrantRecord | null>
   list(input: ListSharedAccessGrantsInput): Promise<readonly SharedAccessGrantRecord[]>
   revoke(input: RevokeSharedAccessGrantInput): Promise<SharedAccessGrantRecord | null>
-  listEvidence(input: ListShareGrantEvidenceInput): Promise<readonly ShareGrantEvidenceRecord[]>
 }

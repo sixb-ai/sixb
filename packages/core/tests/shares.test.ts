@@ -11,7 +11,9 @@ import {
   every,
   type OntologySource,
   objectRef,
+  param,
   prop,
+  ref,
   resolveAuthorizationContext,
   ShareError,
   SixbHost,
@@ -70,7 +72,7 @@ function publisherContext(roles: readonly ResolvedRole[], principalId = "usr_pub
 }
 
 describe("shared access grants", () => {
-  test("issues once, lists by exact target, and revokes with durable evidence", async () => {
+  test("issues once, lists by exact target, and preserves the first revocation", async () => {
     const host = createHost()
     const setup = createTestSixb(host)
     await setup.objects.upsert(Report.id, { id: "report-1" })
@@ -118,17 +120,9 @@ describe("shared access grants", () => {
         "usr_other_manager"
       ),
     })
-    await otherManager.shares.revoke(invitation.grant.id)
-    await otherManager.shares.revoke(invitation.grant.id)
-    const evidence = await host.storage.shareGrants?.listEvidence({
-      projectId: host.id,
-      grantId: invitation.grant.id,
-    })
-    expect(evidence?.map((item) => item.type)).toEqual([
-      "share.grant.issued",
-      "share.grant.revoked",
-    ])
-    expect(evidence?.[1]?.actor).toEqual({ type: "user", id: "usr_other_manager" })
+    const revoked = await otherManager.shares.revoke(invitation.grant.id)
+    await expect(otherManager.shares.revoke(invitation.grant.id)).resolves.toEqual(revoked)
+    expect(revoked?.revokedBy).toEqual({ type: "user", id: "usr_other_manager" })
     await expect(
       sixb.shares.list({
         type: PublishedReportShare,
@@ -203,5 +197,71 @@ describe("shared access grants", () => {
           ...createTestRuntimeDeps(),
         })
     ).toThrow("cannot use broad grants")
+  })
+
+  test("rejects unsupported share-type authority at startup", () => {
+    const globalAction = defineAction("global-action")
+      .params({})
+      .writeback(async () => {})
+    const otherAction = defineAction("other-action")
+      .on(Other)
+      .params({})
+      .writeback(async () => {})
+    const objectRefAction = defineAction("object-ref-action")
+      .on(Report)
+      .params({ related: param(ref(Other)) })
+      .writeback(async () => {})
+
+    const cases = [
+      {
+        share: defineShareType({
+          id: "global-action-share",
+          target: Report,
+          grants: [can.view(Report), can.apply(globalAction)],
+        }),
+        actions: [globalAction],
+        expected: "unknown or global action",
+      },
+      {
+        share: defineShareType({
+          id: "wrong-target-share",
+          target: Report,
+          grants: [can.view(Report), can.apply(otherAction)],
+        }),
+        actions: [otherAction],
+        expected: "does not apply to 'report'",
+      },
+      {
+        share: defineShareType({
+          id: "object-ref-share",
+          target: Report,
+          grants: [can.view(Report), can.apply(objectRefAction)],
+        }),
+        actions: [objectRefAction],
+        expected: "cannot expose objectRef parameters",
+      },
+      {
+        share: defineShareType({
+          id: "missing-view-share",
+          target: Report,
+          grants: [can.apply(acknowledge)],
+        }),
+        actions: [acknowledge],
+        expected: "must include can.view(report)",
+      },
+    ]
+
+    for (const { share, actions, expected } of cases) {
+      expect(
+        () =>
+          new SixbHost<readonly OntologySource[]>({
+            id: "project-1",
+            ontology: [Report, Other],
+            actions,
+            shares: [share],
+            ...createTestRuntimeDeps(),
+          })
+      ).toThrow(expected)
+    }
   })
 })

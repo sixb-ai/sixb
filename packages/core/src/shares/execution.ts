@@ -13,10 +13,10 @@ import { snapshotShareTypeGrants } from "./validation"
 
 export type ShareTypeReference = ShareTypeDefinition | string
 
-export type SharedAccessGrant = Omit<
-  SharedAccessGrantRecord,
-  "projectId" | "tokenDigest" | "issuedEvidenceId" | "revokedEvidenceId"
->
+type ShareTypeTargetId<TReference extends ShareTypeReference> =
+  TReference extends ShareTypeDefinition ? TReference["target"]["id"] : string
+
+export type SharedAccessGrant = Omit<SharedAccessGrantRecord, "projectId" | "tokenDigest">
 
 export interface SharedAccessInvitation {
   readonly grant: SharedAccessGrant
@@ -24,15 +24,17 @@ export interface SharedAccessInvitation {
   readonly secret: string
 }
 
-export interface IssueSharedAccessInput {
-  readonly type: ShareTypeReference
-  readonly target: ObjectRef
+export interface IssueSharedAccessInput<
+  TReference extends ShareTypeReference = ShareTypeReference,
+> {
+  readonly type: TReference
+  readonly target: ObjectRef<NoInfer<ShareTypeTargetId<TReference>>>
   readonly expiresAt: Date
 }
 
-export interface ListSharedAccessInput {
-  readonly type: ShareTypeReference
-  readonly target: ObjectRef
+export interface ListSharedAccessInput<TReference extends ShareTypeReference = ShareTypeReference> {
+  readonly type: TReference
+  readonly target: ObjectRef<NoInfer<ShareTypeTargetId<TReference>>>
   readonly includeRevoked?: boolean
   readonly includeExpired?: boolean
 }
@@ -40,8 +42,12 @@ export interface ListSharedAccessInput {
 export interface SharesRuntime {
   listTypes(): readonly ShareTypeDefinition[]
   getTypeById(shareTypeId: string): ShareTypeDefinition | null
-  issue(input: IssueSharedAccessInput): Promise<SharedAccessInvitation>
-  list(input: ListSharedAccessInput): Promise<readonly SharedAccessGrant[]>
+  issue<const TReference extends ShareTypeReference>(
+    input: IssueSharedAccessInput<TReference>
+  ): Promise<SharedAccessInvitation>
+  list<const TReference extends ShareTypeReference>(
+    input: ListSharedAccessInput<TReference>
+  ): Promise<readonly SharedAccessGrant[]>
   revoke(grantId: string): Promise<SharedAccessGrant | null>
 }
 
@@ -95,7 +101,6 @@ export function createSharesRuntime(
         tokenDigest: createHash("sha256").update(secret).digest("base64url"),
         createdAt,
         expiresAt: new Date(input.expiresAt),
-        issuedEvidenceId: `she_${randomUUID()}`,
       })
 
       return { grant: toPublicGrant(grant), secret }
@@ -133,7 +138,6 @@ export function createSharesRuntime(
         grantId,
         revokedAt: new Date(),
         revokedBy: actor,
-        evidenceId: `she_${randomUUID()}`,
       })
       return revoked ? toPublicGrant(revoked) : null
     },
@@ -234,12 +238,6 @@ function requireShareStorage(runtime: SixbRuntimeContext) {
 }
 
 function toPublicGrant(record: SharedAccessGrantRecord): SharedAccessGrant {
-  const {
-    projectId: _projectId,
-    tokenDigest: _tokenDigest,
-    issuedEvidenceId: _issued,
-    revokedEvidenceId: _revoked,
-    ...grant
-  } = record
+  const { projectId: _projectId, tokenDigest: _tokenDigest, ...grant } = record
   return grant
 }

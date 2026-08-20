@@ -186,20 +186,9 @@ describe("share grant routes", () => {
     expect(withoutAuth.status).toBe(401)
   })
 
-  test("requires an app origin before issuing a link", async () => {
-    const { app, storage } = await createFixture({ includeApp: false })
-    const session = await seedSession(storage, [publishers.id])
-    const response = await app.fetch(
-      new Request("http://api.localhost/api/share-grants", {
-        method: "POST",
-        headers: session.write,
-        body: JSON.stringify({
-          shareTypeId: PublishedReport.id,
-          target: { objectTypeId: Report.id, primaryId: "report-1" },
-          expiresAt: "2098-01-01T00:00:00.000Z",
-        }),
-      })
+  test("requires an app origin when constructing a server with share types", async () => {
+    await expect(createFixture({ includeApp: false })).rejects.toThrow(
+      "Registered share types require an allowed browser origin for the 'app' audience"
     )
-    expect(response.status).toBe(503)
   })
 })
