@@ -439,6 +439,7 @@ export type {
   GrantDefinition,
   GroupDefinition,
   GroupReference,
+  ManageGrant,
   MembershipOperation,
   MembershipPolicyDefinition,
   ObserveGrant,
@@ -596,12 +597,35 @@ export {
 // ── Connectors ─────────────────────────────────────────────
 
 export type {
+  AesGcmConnectorCredentialProtectorOptions,
+  AnyConnectorAdapter,
+  ConnectorAccountCandidate,
   ConnectorAdapter,
   ConnectorClient,
+  ConnectorConnectionOwner,
+  ConnectorConnectionSelector,
   ConnectorContext,
+  ConnectorCredentialContext,
+  ConnectorCredentialProtector,
+  ConnectorCredentialPurpose,
   ConnectorDefinition,
+  ConnectorOAuthCredentials,
+  ConnectorOAuthErrorKind,
+  ConnectorTokenSource,
+  ManagedConnectorAdapter,
+  ManagedConnectorAuthorizationContext,
+  ManagedConnectorAuthorizationUrlInput,
+  ManagedConnectorClientContext,
+  ManagedConnectorCodeExchangeInput,
+  ProjectConnectorConnectionOwner,
+  SealedConnectorCredential,
+  StaticConnectorDefinition,
 } from "./connectors"
-export { defineConnector } from "./connectors"
+export {
+  ConnectorOAuthError,
+  createAesGcmConnectorCredentialProtector,
+  defineConnector,
+} from "./connectors"
 
 // ── Webhooks ───────────────────────────────────────────────
 

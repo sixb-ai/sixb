@@ -13,3 +13,18 @@ export class ConnectorNotFoundError extends ConnectorError {
     super(`Unknown connector '${connectorId}'`)
   }
 }
+
+export type ConnectorOAuthErrorKind = "retryable" | "terminal"
+
+/** Adapter signal used by Core to decide whether credentials require reauthorization. */
+export class ConnectorOAuthError extends ConnectorError {
+  override readonly name = "ConnectorOAuthError"
+
+  constructor(
+    readonly kind: ConnectorOAuthErrorKind,
+    message: string,
+    options?: ErrorOptions
+  ) {
+    super(message, options)
+  }
+}

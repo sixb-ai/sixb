@@ -3,6 +3,10 @@ import { InMemoryActionRunStorage } from "../action-runs"
 import { type AgentStorage, InMemoryAgentStorage } from "../agents"
 import { type AiUsageStorage, InMemoryAiUsageStorage } from "../ai-usage"
 import { type AuthStorage, InMemoryAuthStorage } from "../auth"
+import {
+  type ConnectorConnectionStorage,
+  InMemoryConnectorConnectionStorage,
+} from "../connector-connections"
 import { StorageTransactionError } from "../errors"
 import { InMemoryExecutionStorage } from "../executions/in-memory"
 import type { ExecutionStorage } from "../executions/types"
@@ -67,6 +71,7 @@ export class InMemoryStorage implements Storage {
   private readonly webhookRunStorage = new InMemoryWebhookRunStorage()
   private readonly rulesStorage = new InMemoryRulesStorage()
   private readonly fileUploadSessionStorage = new InMemoryFileUploadSessions()
+  private readonly connectorConnectionStorage = new InMemoryConnectorConnectionStorage()
   readonly auth: AuthStorage
   readonly executions: ExecutionStorage
   readonly agents: AgentStorage
@@ -81,6 +86,7 @@ export class InMemoryStorage implements Storage {
   readonly webhookRuns: WebhookRunStorage
   readonly rules: RulesStorage
   readonly fileUploadSessions: FileUploadSessionStore
+  readonly connectorConnections: ConnectorConnectionStorage
 
   constructor() {
     const scope = createStorageOperationScope(
@@ -106,6 +112,7 @@ export class InMemoryStorage implements Storage {
     this.webhookRuns = createOperationScopedFacade(this.webhookRunStorage, scope)
     this.rules = createOperationScopedFacade(this.rulesStorage, scope)
     this.fileUploadSessions = createOperationScopedFacade(this.fileUploadSessionStorage, scope)
+    this.connectorConnections = createOperationScopedFacade(this.connectorConnectionStorage, scope)
     this.ontologyStorage = new InMemoryOntologyStorage(this.objectStorage, this.timeseriesStorage, {
       runRootOperation: async (run) => run(),
       getTransactionToken: () => this.getActiveTransactionToken(),
@@ -243,6 +250,7 @@ export class InMemoryStorage implements Storage {
       webhookRuns: this.webhookRunStorage,
       rules: this.rulesStorage,
       fileUploadSessions: this.fileUploadSessionStorage,
+      connectorConnections: this.connectorConnectionStorage,
       ping: async () => undefined,
       transaction: async <T>(): Promise<T> => {
         throwNestedStorageTransaction()
@@ -269,6 +277,7 @@ export class InMemoryStorage implements Storage {
       webhookRuns: this.webhookRunStorage.snapshot(),
       rules: this.rulesStorage.snapshot(),
       fileUploadSessions: this.fileUploadSessionStorage.snapshot(),
+      connectorConnections: this.connectorConnectionStorage.snapshot(),
     }
   }
 
@@ -290,6 +299,7 @@ export class InMemoryStorage implements Storage {
     this.webhookRunStorage.restore(snapshot.webhookRuns)
     this.rulesStorage.restore(snapshot.rules)
     this.fileUploadSessionStorage.restore(snapshot.fileUploadSessions)
+    this.connectorConnectionStorage.restore(snapshot.connectorConnections)
   }
 }
 
@@ -311,4 +321,5 @@ export interface InMemoryStorageSnapshot {
   readonly webhookRuns: ReturnType<InMemoryWebhookRunStorage["snapshot"]>
   readonly rules: ReturnType<InMemoryRulesStorage["snapshot"]>
   readonly fileUploadSessions: ReturnType<InMemoryFileUploadSessions["snapshot"]>
+  readonly connectorConnections: ReturnType<InMemoryConnectorConnectionStorage["snapshot"]>
 }

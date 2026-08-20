@@ -19,11 +19,99 @@ export interface ConnectorContext {
  * external system. They should return the client shape that feels natural for that system.
  */
 export interface ConnectorAdapter<TType extends string = string, TClient = unknown> {
+  readonly mode?: "static"
   readonly type: TType
   readonly webhooks?: readonly WebhookDefinition<unknown, TClient>[]
   connect(context: ConnectorContext): Promise<TClient> | TClient
   disconnect?(client: TClient): Promise<void> | void
 }
+
+/** One OAuth token set normalized by a managed connector adapter. */
+export interface ConnectorOAuthCredentials {
+  readonly accessToken: string
+  readonly refreshToken?: string
+  readonly tokenType?: string
+  readonly scopes?: readonly string[]
+  readonly expiresAt?: Date
+}
+
+/** Public, non-secret account information returned for framework-owned selection UI. */
+export interface ConnectorAccountCandidate {
+  readonly id: string
+  readonly label: string
+  readonly description?: string
+  readonly avatarUrl?: string
+}
+
+/** V1 intentionally supports project-owned managed connections only. */
+export interface ProjectConnectorConnectionOwner {
+  readonly type: "project"
+}
+
+export type ConnectorConnectionOwner = ProjectConnectorConnectionOwner
+
+/** Stable application-defined lookup key for one managed connection. */
+export interface ConnectorConnectionSelector {
+  readonly owner: ConnectorConnectionOwner
+  readonly slot: string
+}
+
+export interface ManagedConnectorAuthorizationContext extends ConnectorContext {
+  readonly redirectUri: string
+}
+
+export interface ManagedConnectorAuthorizationUrlInput {
+  readonly state: string
+  readonly codeChallenge: string
+  readonly codeChallengeMethod: "S256"
+}
+
+export interface ManagedConnectorCodeExchangeInput {
+  readonly code: string
+  readonly codeVerifier: string
+}
+
+export interface ManagedConnectorClientContext extends ConnectorContext {
+  readonly connectionId: string
+  readonly account: ConnectorAccountCandidate
+  readonly tokenSource: ConnectorTokenSource
+}
+
+/** Live credential source owned by Sixb. Adapters must not capture an access token at creation. */
+export interface ConnectorTokenSource {
+  get(): Promise<{ readonly accessToken: string; readonly tokenType?: string }>
+  invalidate(): void
+}
+
+/**
+ * OAuth-backed connector adapter. Sixb owns persistence, OAuth state, refresh coordination and UI;
+ * the adapter owns provider protocol details and typed client creation.
+ */
+export interface ManagedConnectorAdapter<TType extends string = string, TClient = unknown> {
+  readonly mode: "managed"
+  readonly type: TType
+  readonly webhooks?: undefined
+  authorizationUrl(
+    context: ManagedConnectorAuthorizationContext,
+    input: ManagedConnectorAuthorizationUrlInput
+  ): Promise<string | URL> | string | URL
+  exchangeCode(
+    context: ManagedConnectorAuthorizationContext,
+    input: ManagedConnectorCodeExchangeInput
+  ): Promise<ConnectorOAuthCredentials> | ConnectorOAuthCredentials
+  refresh(
+    context: ConnectorContext,
+    credentials: ConnectorOAuthCredentials
+  ): Promise<ConnectorOAuthCredentials> | ConnectorOAuthCredentials
+  revoke?(context: ConnectorContext, credentials: ConnectorOAuthCredentials): Promise<void> | void
+  discoverAccounts(
+    context: ConnectorContext,
+    credentials: ConnectorOAuthCredentials
+  ): Promise<readonly ConnectorAccountCandidate[]> | readonly ConnectorAccountCandidate[]
+  connect(context: ManagedConnectorClientContext): Promise<TClient> | TClient
+}
+
+export type AnyConnectorAdapter = ConnectorAdapter | ManagedConnectorAdapter
 
 /**
  * Inert connector definition registered with Sixb.
@@ -33,30 +121,64 @@ export interface ConnectorAdapter<TType extends string = string, TClient = unkno
  */
 export interface ConnectorDefinition<
   TId extends string = string,
-  TAdapter extends ConnectorAdapter = ConnectorAdapter,
+  TAdapter extends AnyConnectorAdapter = AnyConnectorAdapter,
 > {
   readonly kind: "connector"
   readonly id: TId
   readonly adapter: TAdapter
 }
 
+export type StaticConnectorDefinition = ConnectorDefinition<string, ConnectorAdapter>
+
 /** Infer the connected client type returned by a connector adapter. */
-export type ConnectorClient<TAdapter extends ConnectorAdapter> = Awaited<
+export type ConnectorClient<TAdapter extends AnyConnectorAdapter> = Awaited<
   ReturnType<TAdapter["connect"]>
 >
+
+export function isManagedConnectorAdapter(
+  value: AnyConnectorAdapter
+): value is ManagedConnectorAdapter {
+  return "mode" in value && value.mode === "managed"
+}
+
+export function isManagedConnectorDefinition(
+  value: ConnectorDefinition
+): value is ConnectorDefinition<string, ManagedConnectorAdapter> {
+  return isManagedConnectorAdapter(value.adapter)
+}
+
+export function isStaticConnectorDefinition(
+  value: ConnectorDefinition
+): value is StaticConnectorDefinition {
+  return !isManagedConnectorDefinition(value)
+}
 
 export function isConnectorDefinition(value: unknown): value is ConnectorDefinition {
   if (!isRecord(value)) {
     return false
   }
 
-  return (
+  const adapter = value.adapter
+  if (
     value.kind === "connector" &&
     typeof value.id === "string" &&
-    isRecord(value.adapter) &&
-    typeof value.adapter.type === "string" &&
-    typeof value.adapter.connect === "function"
-  )
+    isRecord(adapter) &&
+    typeof adapter.type === "string" &&
+    typeof adapter.connect === "function"
+  ) {
+    if (adapter.mode !== undefined && adapter.mode !== "static" && adapter.mode !== "managed") {
+      return false
+    }
+    if (adapter.mode !== "managed") return true
+    return (
+      typeof adapter.authorizationUrl === "function" &&
+      typeof adapter.exchangeCode === "function" &&
+      typeof adapter.refresh === "function" &&
+      typeof adapter.discoverAccounts === "function"
+    )
+  }
+
+  return false
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

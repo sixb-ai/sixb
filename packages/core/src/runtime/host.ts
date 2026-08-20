@@ -17,8 +17,10 @@ import {
 } from "../auth"
 import type { BlobStorage } from "../blob-storage"
 import type { Broker } from "../broker"
+import type { ConnectorCredentialProtector } from "../connectors/credentials"
+import { ConnectorError } from "../connectors/errors"
 import { ConnectorService } from "../connectors/service"
-import type { ConnectorDefinition } from "../connectors/types"
+import { type ConnectorDefinition, isManagedConnectorDefinition } from "../connectors/types"
 import type { DatasetDefinition } from "../datasets/types"
 import { attachSixbErrorReporter, shareSixbErrorReporter } from "../error-reporting/capability"
 import { reportEventDeliveryFailure } from "../error-reporting/reports"
@@ -95,6 +97,10 @@ export interface SixbHostOptions<TOntologySources extends readonly OntologySourc
   datasets?: readonly DatasetDefinition[]
   /** Connector definitions registered with this host. */
   connectors?: readonly ConnectorDefinition[]
+  /** At-rest protection for managed connector credentials. Required by durable storage. */
+  connectorCredentials?: {
+    readonly protector?: ConnectorCredentialProtector
+  }
   schedules?: readonly ScheduleDefinition[]
   syncs?: readonly SyncDefinition[]
   pipelines?: readonly PipelineDefinition[]
@@ -168,7 +174,11 @@ export class SixbHost<
     })
     validateAuthStrategySecurityReferences(this.auth.getStrategy(), definitions.security)
     const connectors = definitions.connectors.list()
-    this.connectorService = new ConnectorService(this.projectId, connectors)
+    assertManagedConnectorSurfaces(connectors, definitions.syncs.list())
+    this.connectorService = new ConnectorService(this.projectId, connectors, {
+      storage: this.storage.connectorConnections,
+      credentialProtector: options.connectorCredentials?.protector,
+    })
     assertWebhookDeliveryStorage(connectors, this.storage)
     this.webhookRegistry = new WebhookRegistry({ connectors })
 
@@ -340,6 +350,28 @@ function assertWebhookDeliveryStorage(
     if (webhooks.some((webhook) => webhook.idempotencyKey !== undefined)) {
       throw new WebhookValidationError(
         "[Sixb] Webhook idempotency requires storage.webhookDeliveries to be configured."
+      )
+    }
+  }
+}
+
+function assertManagedConnectorSurfaces(
+  connectors: readonly ConnectorDefinition[],
+  syncs: readonly SyncDefinition[]
+): void {
+  for (const connector of connectors) {
+    if (!isManagedConnectorDefinition(connector)) continue
+    if ((connector.adapter as { readonly webhooks?: unknown }).webhooks !== undefined) {
+      throw new ConnectorError(
+        `Managed connector '${connector.id}' cannot register webhooks until connection routing is defined.`
+      )
+    }
+  }
+
+  for (const sync of syncs) {
+    if (isManagedConnectorDefinition(sync.connector as ConnectorDefinition)) {
+      throw new ConnectorError(
+        `Sync '${sync.id}' cannot use managed connector '${sync.connector.id}' until connection fan-out is defined.`
       )
     }
   }

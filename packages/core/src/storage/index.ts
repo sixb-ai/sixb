@@ -6,6 +6,7 @@
  */
 export type { Principal } from "../auth"
 export type { SixbFailure } from "../errors/types"
+export type { ConnectorAccountCandidate, SealedConnectorCredential } from "../connectors"
 export type { StoredRuleResolvedEvent, StoredRuleTriggeredEvent } from "../events"
 export type { ReadonlyJsonObject } from "../json"
 export { stableJsonStringify } from "../json"
@@ -172,6 +173,37 @@ export type {
   UserStatus,
 } from "./auth"
 export { AuthStorageError, InMemoryAuthStorage } from "./auth"
+export type {
+  ClaimConnectorRefreshLeaseInput,
+  ConnectorAuthorizationAttemptRecord,
+  ConnectorAuthorizationCredential,
+  ConnectorAuthorizationRecord,
+  ConnectorAuthorizationStatus,
+  ConnectorConnectionOwner,
+  ConnectorConnectionRecord,
+  ConnectorConnectionSelector,
+  ConnectorConnectionStorage,
+  ConnectorConnectionStorageErrorCode,
+  ConnectorRefreshLease,
+  CreateConnectorAuthorizationAttemptInput,
+  CreateConnectorAuthorizationInput,
+  DisconnectConnectorConnectionInput,
+  GetConnectorConnectionInput,
+  InMemoryConnectorConnectionStorageOptions,
+  MarkConnectorAuthorizationInput,
+  ProjectConnectorConnectionOwner,
+  PutConnectorConnectionInput,
+  PutConnectorConnectionResult,
+  ReauthorizeConnectorAuthorizationInput,
+  ReleaseConnectorRefreshLeaseInput,
+  RevokeConnectorAuthorizationInput,
+  RevokeConnectorAuthorizationResult,
+  UpdateConnectorAuthorizationCredentialsInput,
+} from "./connector-connections"
+export {
+  ConnectorConnectionStorageError,
+  InMemoryConnectorConnectionStorage,
+} from "./connector-connections"
 export type {
   StorageTransactionErrorCode,
   StorageTransactionErrorOptions,
