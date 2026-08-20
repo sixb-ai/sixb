@@ -55,7 +55,7 @@ export class ServerAuthGuard {
     }
 
     const route = classifyRoute(request)
-    if (route.kind === "public") {
+    if (route.kind === "public" || route.kind === "shared") {
       return { kind: "allow", session: null }
     }
 

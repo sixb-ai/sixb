@@ -10,6 +10,11 @@ export const ShareGrantPrincipalSchema = z.object({
   id: z.string().min(1),
 })
 
+export const ShareGrantRevocationPrincipalSchema = z.object({
+  type: z.enum(["user", "serviceAccount", "system"]),
+  id: z.string().min(1),
+})
+
 export const ShareGrantRefSchema = z.union([
   z.object({ capability: z.literal("view"), objectTypeId: z.string().min(1) }),
   z.object({ capability: z.literal("apply"), actionId: z.string().min(1) }),
@@ -24,7 +29,7 @@ export const SharedAccessGrantSchema = z.object({
   createdAt: z.string().datetime(),
   expiresAt: z.string().datetime(),
   revokedAt: z.string().datetime().optional(),
-  revokedBy: ShareGrantPrincipalSchema.optional(),
+  revokedBy: ShareGrantRevocationPrincipalSchema.optional(),
 })
 
 export const IssueSharedAccessGrantBodySchema = z.object({

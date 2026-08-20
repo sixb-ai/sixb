@@ -24,6 +24,7 @@ import { InMemoryPipelineRunStorage, type PipelineRunStorage } from "../pipeline
 import { InMemoryProjectionRunStorage } from "../projection-runs"
 import { InMemoryRulesStorage, type RulesStorage } from "../rules"
 import { InMemoryShareGrantStorage, type ShareGrantStorage } from "../share-grants"
+import { InMemoryShareSessionStorage, type ShareSessionStorage } from "../share-sessions"
 import { InMemorySyncRunStorage, type SyncRunStorage } from "../sync-runs"
 import type { TimeseriesStorage } from "../timeseries"
 import { InMemoryTimeseriesStorage } from "../timeseries/store"
@@ -68,6 +69,7 @@ export class InMemoryStorage implements Storage {
   private readonly webhookRunStorage = new InMemoryWebhookRunStorage()
   private readonly rulesStorage = new InMemoryRulesStorage()
   private readonly shareGrantStorage = new InMemoryShareGrantStorage()
+  private readonly shareSessionStorage = new InMemoryShareSessionStorage()
   private readonly fileUploadSessionStorage = new InMemoryFileUploadSessions()
   readonly auth: AuthStorage
   readonly executions: ExecutionStorage
@@ -83,6 +85,7 @@ export class InMemoryStorage implements Storage {
   readonly webhookRuns: WebhookRunStorage
   readonly rules: RulesStorage
   readonly shareGrants: ShareGrantStorage
+  readonly shareSessions: ShareSessionStorage
   readonly fileUploadSessions: FileUploadSessionStore
 
   constructor() {
@@ -109,6 +112,7 @@ export class InMemoryStorage implements Storage {
     this.webhookRuns = createOperationScopedFacade(this.webhookRunStorage, scope)
     this.rules = createOperationScopedFacade(this.rulesStorage, scope)
     this.shareGrants = createOperationScopedFacade(this.shareGrantStorage, scope)
+    this.shareSessions = createOperationScopedFacade(this.shareSessionStorage, scope)
     this.fileUploadSessions = createOperationScopedFacade(this.fileUploadSessionStorage, scope)
     this.ontologyStorage = new InMemoryOntologyStorage(this.objectStorage, this.timeseriesStorage, {
       runRootOperation: async (run) => run(),
@@ -247,6 +251,7 @@ export class InMemoryStorage implements Storage {
       webhookRuns: this.webhookRunStorage,
       rules: this.rulesStorage,
       shareGrants: this.shareGrantStorage,
+      shareSessions: this.shareSessionStorage,
       fileUploadSessions: this.fileUploadSessionStorage,
       ping: async () => undefined,
       transaction: async <T>(): Promise<T> => {
@@ -274,6 +279,7 @@ export class InMemoryStorage implements Storage {
       webhookRuns: this.webhookRunStorage.snapshot(),
       rules: this.rulesStorage.snapshot(),
       shareGrants: this.shareGrantStorage.snapshot(),
+      shareSessions: this.shareSessionStorage.snapshot(),
       fileUploadSessions: this.fileUploadSessionStorage.snapshot(),
     }
   }
@@ -296,6 +302,7 @@ export class InMemoryStorage implements Storage {
     this.webhookRunStorage.restore(snapshot.webhookRuns)
     this.rulesStorage.restore(snapshot.rules)
     this.shareGrantStorage.restore(snapshot.shareGrants)
+    this.shareSessionStorage.restore(snapshot.shareSessions)
     this.fileUploadSessionStorage.restore(snapshot.fileUploadSessions)
   }
 }
@@ -318,5 +325,6 @@ export interface InMemoryStorageSnapshot {
   readonly webhookRuns: ReturnType<InMemoryWebhookRunStorage["snapshot"]>
   readonly rules: ReturnType<InMemoryRulesStorage["snapshot"]>
   readonly shareGrants: ReturnType<InMemoryShareGrantStorage["snapshot"]>
+  readonly shareSessions: ReturnType<InMemoryShareSessionStorage["snapshot"]>
   readonly fileUploadSessions: ReturnType<InMemoryFileUploadSessions["snapshot"]>
 }

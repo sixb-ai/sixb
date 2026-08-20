@@ -39,6 +39,7 @@ layer and never touch the transport directly. In a standalone app, configure
 | `@sixb/client/hooks` | TanStack Query hooks and `*Options` factories, `SixbProvider`, the events layer, and `useAgentRunStream` |
 | `@sixb/client/logs` | The `logs` builder — read, tail, and subscribe to run logs |
 | `@sixb/client/browser` | CSRF/auth bootstrap and `__SIXB_RUNTIME__` handoff |
+| `@sixb/client/shared` | Isolated link exchange, shared-session bootstrap, and sign-out client |
 | `@sixb/client/models` | `encode`/`decodeObjectId` and UI shape mappers |
 
 > `@sixb/client/hooks` re-exports the events layer and the typed-query hooks,

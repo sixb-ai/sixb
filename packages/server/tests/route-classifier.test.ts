@@ -79,6 +79,17 @@ describe("classifyRoute", () => {
     expect(classifyRoute(request("GET", "/docs/json")).kind).toBe("html")
   })
 
+  test("keeps shared routes outside ambient application auth", () => {
+    expect(classifyRoute(request("POST", "/api/shares/shr_1/exchange"))).toEqual({
+      kind: "shared",
+      csrfProtected: false,
+    })
+    expect(classifyRoute(request("GET", "/api/shares/shr_1/session"))).toEqual({
+      kind: "shared",
+      csrfProtected: false,
+    })
+  })
+
   test("a mutation to an unrecognized path is CSRF-protected", () => {
     // Failing closed has to fail closed all the way: an unclassified POST that needed
     // auth but skipped CSRF would still be reachable from another origin's page.

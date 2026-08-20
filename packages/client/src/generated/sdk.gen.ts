@@ -50,6 +50,9 @@ import type {
   DisableAuthServiceAccountData,
   DisableAuthServiceAccountErrors,
   DisableAuthServiceAccountResponses,
+  ExchangeSharedAccessData,
+  ExchangeSharedAccessErrors,
+  ExchangeSharedAccessResponses,
   ExistsObjectsData,
   ExistsObjectsErrors,
   ExistsObjectsResponses,
@@ -129,6 +132,8 @@ import type {
   GetRuleData,
   GetRuleErrors,
   GetRuleResponses,
+  GetSharedAccessSessionData,
+  GetSharedAccessSessionResponses,
   GetStatusData,
   GetStatusResponses,
   GetSyncData,
@@ -320,6 +325,9 @@ import type {
   SignOutData,
   SignOutErrors,
   SignOutResponses,
+  SignOutSharedAccessData,
+  SignOutSharedAccessErrors,
+  SignOutSharedAccessResponses,
   SubmitWorkflowInterventionData,
   SubmitWorkflowInterventionErrors,
   SubmitWorkflowInterventionResponses,
@@ -2054,5 +2062,51 @@ export const revokeSharedAccessGrant = <ThrowOnError extends boolean = false>(
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/share-grants/{grantId}",
+    ...options,
+  })
+
+/**
+ * Exchange a shared link for a short-lived session
+ */
+export const exchangeSharedAccess = <ThrowOnError extends boolean = false>(
+  options: Options<ExchangeSharedAccessData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    ExchangeSharedAccessResponses,
+    ExchangeSharedAccessErrors,
+    ThrowOnError
+  >({
+    url: "/api/shares/{grantId}/exchange",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Get the current shared access session
+ */
+export const getSharedAccessSession = <ThrowOnError extends boolean = false>(
+  options: Options<GetSharedAccessSessionData, ThrowOnError>
+) =>
+  (options.client ?? client).get<GetSharedAccessSessionResponses, unknown, ThrowOnError>({
+    url: "/api/shares/{grantId}/session",
+    ...options,
+  })
+
+/**
+ * Sign out a shared access session
+ */
+export const signOutSharedAccess = <ThrowOnError extends boolean = false>(
+  options: Options<SignOutSharedAccessData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    SignOutSharedAccessResponses,
+    SignOutSharedAccessErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/shares/{grantId}/sign-out",
     ...options,
   })

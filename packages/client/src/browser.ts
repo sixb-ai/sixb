@@ -219,7 +219,8 @@ function isAuthRedirectExcludedRequest(
   const method = request.method.toUpperCase()
   return (
     requestUrl.origin === apiUrl.origin &&
-    ((method === "GET" && requestUrl.pathname === `${apiPath}/api/auth/session`) ||
+    (requestUrl.pathname.startsWith(`${apiPath}/api/shares/`) ||
+      (method === "GET" && requestUrl.pathname === `${apiPath}/api/auth/session`) ||
       (method === "POST" && requestUrl.pathname === `${apiPath}/api/auth/sign-out`))
   )
 }

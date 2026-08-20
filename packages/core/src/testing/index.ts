@@ -93,6 +93,10 @@ export {
   type ShareGrantStorageContractSuiteOptions,
 } from "./share-grant-storage-contract"
 export {
+  runShareSessionStorageContractSuite,
+  type ShareSessionStorageContractSuiteOptions,
+} from "./share-session-storage-contract"
+export {
   runWebhookDeliveryStorageContractSuite,
   type WebhookDeliveryStorageContractSuiteOptions,
 } from "./webhook-delivery-storage-contract"

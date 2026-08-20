@@ -58,6 +58,12 @@
       "bun": "./src/query.ts",
       "import": "./dist/query.js",
       "default": "./dist/query.js"
+    },
+    "./shared": {
+      "types": "./dist/shared.d.ts",
+      "bun": "./src/shared.ts",
+      "import": "./dist/shared.js",
+      "default": "./dist/shared.js"
     }
   },
   "scripts": {

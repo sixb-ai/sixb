@@ -64,6 +64,7 @@ describe("Postgres storage migrations", () => {
             "018-ontology-outbox-failure-record",
             "019-webhook-delivery-failure-record",
             "020-shared-access-grants",
+            "021-shared-access-sessions",
           ],
         },
       ])
@@ -207,6 +208,13 @@ describe("Postgres storage migrations", () => {
           id: "020-shared-access-grants",
           status: "applied",
           version: 20,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "021-shared-access-sessions",
+          status: "applied",
+          version: 21,
         },
       ])
     })
@@ -1154,6 +1162,13 @@ describe("Postgres storage migrations", () => {
           id: "020-shared-access-grants",
           status: "applied",
           version: 20,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "021-shared-access-sessions",
+          status: "applied",
+          version: 21,
         },
       ])
     } finally {

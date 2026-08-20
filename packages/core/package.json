@@ -263,6 +263,12 @@
       "import": "./dist/schedules/index.js",
       "default": "./dist/schedules/index.js"
     },
+    "./internal/shares": {
+      "types": "./dist/shares/protocol.d.ts",
+      "bun": "./src/shares/protocol.ts",
+      "import": "./dist/shares/protocol.js",
+      "default": "./dist/shares/protocol.js"
+    },
     "./internal/storage-operation-scope": {
       "types": "./dist/storage/operation-scope.d.ts",
       "bun": "./src/storage/operation-scope.ts",

@@ -165,6 +165,15 @@ export function runShareGrantStorageContractSuite<TStorage extends ShareGrantSto
       })
     })
 
+    test("validates a record before detecting collisions", async () => {
+      await withStorage(async (storage) => {
+        await storage.create(grantInput())
+        await expect(
+          storage.create(grantInput({ expiresAt: new Date(createdAt) }))
+        ).rejects.toEqual(expect.objectContaining({ code: "invalid" }))
+      })
+    })
+
     test("keeps one concurrent revocation and accepts system attribution", async () => {
       await withStorage(async (storage) => {
         await storage.create(grantInput())

@@ -852,7 +852,7 @@
     },
     {
       "name": "Shared Access",
-      "description": "Capability-scoped shared access grants"
+      "description": "Capability-scoped grants and isolated shared sessions"
     },
     {
       "name": "Telemetry",
@@ -30236,7 +30236,7 @@
                           "properties": {
                             "type": {
                               "type": "string",
-                              "enum": ["user", "serviceAccount"]
+                              "enum": ["user", "serviceAccount", "system"]
                             },
                             "id": {
                               "type": "string",
@@ -30575,7 +30575,7 @@
                             "properties": {
                               "type": {
                                 "type": "string",
-                                "enum": ["user", "serviceAccount"]
+                                "enum": ["user", "serviceAccount", "system"]
                               },
                               "id": {
                                 "type": "string",
@@ -30858,7 +30858,7 @@
                       "properties": {
                         "type": {
                           "type": "string",
-                          "enum": ["user", "serviceAccount"]
+                          "enum": ["user", "serviceAccount", "system"]
                         },
                         "id": {
                           "type": "string",
@@ -30994,6 +30994,395 @@
           },
           "501": {
             "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/shares/{grantId}/exchange": {
+      "post": {
+        "summary": "Exchange a shared link for a short-lived session",
+        "tags": ["Shared Access"],
+        "operationId": "exchangeSharedAccess",
+        "security": [],
+        "parameters": [
+          {
+            "name": "grantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "secret": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{43}$"
+                  }
+                },
+                "required": ["secret"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "secret": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{43}$"
+                  }
+                },
+                "required": ["secret"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "secret": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{43}$"
+                  }
+                },
+                "required": ["secret"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "authenticated": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "csrfToken": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "grant": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "shareTypeId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "target": {
+                          "type": "object",
+                          "properties": {
+                            "objectTypeId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "primaryId": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["objectTypeId", "primaryId"],
+                          "additionalProperties": false
+                        },
+                        "grants": {
+                          "type": "array",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "capability": {
+                                    "type": "string",
+                                    "enum": ["view"]
+                                  },
+                                  "objectTypeId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": ["capability", "objectTypeId"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "capability": {
+                                    "type": "string",
+                                    "enum": ["apply"]
+                                  },
+                                  "actionId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": ["capability", "actionId"],
+                                "additionalProperties": false
+                              }
+                            ]
+                          }
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": ["id", "shareTypeId", "target", "grants", "expiresAt"],
+                      "additionalProperties": false
+                    },
+                    "session": {
+                      "type": "object",
+                      "properties": {
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": ["expiresAt"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["authenticated", "csrfToken", "grant", "session"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/shares/{grantId}/session": {
+      "get": {
+        "summary": "Get the current shared access session",
+        "tags": ["Shared Access"],
+        "operationId": "getSharedAccessSession",
+        "security": [],
+        "parameters": [
+          {
+            "name": "grantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "authenticated": {
+                          "type": "boolean",
+                          "enum": [true]
+                        },
+                        "csrfToken": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "grant": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "shareTypeId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "target": {
+                              "type": "object",
+                              "properties": {
+                                "objectTypeId": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "primaryId": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": ["objectTypeId", "primaryId"],
+                              "additionalProperties": false
+                            },
+                            "grants": {
+                              "type": "array",
+                              "items": {
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "capability": {
+                                        "type": "string",
+                                        "enum": ["view"]
+                                      },
+                                      "objectTypeId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    },
+                                    "required": ["capability", "objectTypeId"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "capability": {
+                                        "type": "string",
+                                        "enum": ["apply"]
+                                      },
+                                      "actionId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    },
+                                    "required": ["capability", "actionId"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              }
+                            },
+                            "expiresAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          },
+                          "required": ["id", "shareTypeId", "target", "grants", "expiresAt"],
+                          "additionalProperties": false
+                        },
+                        "session": {
+                          "type": "object",
+                          "properties": {
+                            "expiresAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          },
+                          "required": ["expiresAt"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["authenticated", "csrfToken", "grant", "session"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "authenticated": {
+                          "type": "boolean",
+                          "enum": [false]
+                        }
+                      },
+                      "required": ["authenticated"],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/shares/{grantId}/sign-out": {
+      "post": {
+        "summary": "Sign out a shared access session",
+        "tags": ["Shared Access"],
+        "operationId": "signOutSharedAccess",
+        "security": [
+          {
+            "sixbCsrf": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "grantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signedOut": {
+                      "type": "boolean",
+                      "enum": [true]
+                    }
+                  },
+                  "required": ["signedOut"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
             "content": {
               "application/json": {
                 "schema": {

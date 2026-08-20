@@ -160,9 +160,7 @@ export class SixbHost<
 
     const definitions = resolveDefinitions(options)
     this.definitions = definitions
-    if (definitions.shares.list().length > 0 && this.storage.shareGrants === undefined) {
-      throw new Error("[Sixb] Registered share types require storage.shareGrants to be configured.")
-    }
+    assertSharedAccessStorage(definitions.shares.list(), this.storage)
     registerProjectionRegistry(this, definitions.projections)
 
     this.auth = new AuthRuntime({
@@ -347,5 +345,19 @@ function assertWebhookDeliveryStorage(
         "[Sixb] Webhook idempotency requires storage.webhookDeliveries to be configured."
       )
     }
+  }
+}
+
+function assertSharedAccessStorage(
+  shareTypes: readonly ShareTypeDefinition[],
+  storage: Storage
+): void {
+  if (shareTypes.length === 0) return
+
+  if (storage.shareGrants === undefined) {
+    throw new Error("[Sixb] Registered share types require storage.shareGrants to be configured.")
+  }
+  if (storage.shareSessions === undefined) {
+    throw new Error("[Sixb] Registered share types require storage.shareSessions to be configured.")
   }
 }

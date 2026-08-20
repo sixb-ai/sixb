@@ -1,7 +1,7 @@
 import { AGENT_API_GATEWAY_PREFIX } from "@sixb/core/internal/agents"
 import { isCsrfExemptMethod } from "@sixb/core/internal/auth"
 
-export type RouteAccessKind = "public" | "api" | "html" | "websocket"
+export type RouteAccessKind = "public" | "shared" | "api" | "html" | "websocket"
 
 export interface RouteAccess {
   readonly kind: RouteAccessKind
@@ -14,6 +14,12 @@ export function classifyRoute(request: Request): RouteAccess {
 
   if (isPublicRoute(pathname, request.method)) {
     return { kind: "public", csrfProtected: false }
+  }
+
+  // Shared routes have their own cookie, CSRF boundary, and guard. Treating them as a distinct
+  // class prevents ambient OIDC or access-token authority from leaking into shared execution.
+  if (pathname.startsWith("/api/shares/")) {
+    return { kind: "shared", csrfProtected: false }
   }
 
   if (pathname.startsWith("/ws/")) {

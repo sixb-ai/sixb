@@ -10299,7 +10299,7 @@ export type ListSharedAccessGrantsResponses = {
       expiresAt: string
       revokedAt?: string
       revokedBy?: {
-        type: "user" | "serviceAccount"
+        type: "user" | "serviceAccount" | "system"
         id: string
       }
     }>
@@ -10413,7 +10413,7 @@ export type IssueSharedAccessGrantResponses = {
       expiresAt: string
       revokedAt?: string
       revokedBy?: {
-        type: "user" | "serviceAccount"
+        type: "user" | "serviceAccount" | "system"
         id: string
       }
     }
@@ -10516,7 +10516,7 @@ export type RevokeSharedAccessGrantResponses = {
     expiresAt: string
     revokedAt?: string
     revokedBy?: {
-      type: "user" | "serviceAccount"
+      type: "user" | "serviceAccount" | "system"
       id: string
     }
   }
@@ -10524,3 +10524,140 @@ export type RevokeSharedAccessGrantResponses = {
 
 export type RevokeSharedAccessGrantResponse =
   RevokeSharedAccessGrantResponses[keyof RevokeSharedAccessGrantResponses]
+
+export type ExchangeSharedAccessData = {
+  body: {
+    secret: string
+  }
+  path: {
+    grantId: string
+  }
+  query?: never
+  url: "/api/shares/{grantId}/exchange"
+}
+
+export type ExchangeSharedAccessErrors = {
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+}
+
+export type ExchangeSharedAccessError = ExchangeSharedAccessErrors[keyof ExchangeSharedAccessErrors]
+
+export type ExchangeSharedAccessResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    authenticated: true
+    csrfToken: string
+    grant: {
+      id: string
+      shareTypeId: string
+      target: {
+        objectTypeId: string
+        primaryId: string
+      }
+      grants: Array<
+        | {
+            capability: "view"
+            objectTypeId: string
+          }
+        | {
+            capability: "apply"
+            actionId: string
+          }
+      >
+      expiresAt: string
+    }
+    session: {
+      expiresAt: string
+    }
+  }
+}
+
+export type ExchangeSharedAccessResponse =
+  ExchangeSharedAccessResponses[keyof ExchangeSharedAccessResponses]
+
+export type GetSharedAccessSessionData = {
+  body?: never
+  path: {
+    grantId: string
+  }
+  query?: never
+  url: "/api/shares/{grantId}/session"
+}
+
+export type GetSharedAccessSessionResponses = {
+  /**
+   * Response for status 200
+   */
+  200:
+    | {
+        authenticated: true
+        csrfToken: string
+        grant: {
+          id: string
+          shareTypeId: string
+          target: {
+            objectTypeId: string
+            primaryId: string
+          }
+          grants: Array<
+            | {
+                capability: "view"
+                objectTypeId: string
+              }
+            | {
+                capability: "apply"
+                actionId: string
+              }
+          >
+          expiresAt: string
+        }
+        session: {
+          expiresAt: string
+        }
+      }
+    | {
+        authenticated: false
+      }
+}
+
+export type GetSharedAccessSessionResponse =
+  GetSharedAccessSessionResponses[keyof GetSharedAccessSessionResponses]
+
+export type SignOutSharedAccessData = {
+  body?: never
+  path: {
+    grantId: string
+  }
+  query?: never
+  url: "/api/shares/{grantId}/sign-out"
+}
+
+export type SignOutSharedAccessErrors = {
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+}
+
+export type SignOutSharedAccessError = SignOutSharedAccessErrors[keyof SignOutSharedAccessErrors]
+
+export type SignOutSharedAccessResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    signedOut: true
+  }
+}
+
+export type SignOutSharedAccessResponse =
+  SignOutSharedAccessResponses[keyof SignOutSharedAccessResponses]

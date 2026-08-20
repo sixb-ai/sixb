@@ -317,6 +317,29 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     accessToken: true,
     agentApi: false,
   },
+  // Shared protocol routes authenticate exclusively with the link/session boundary. Normal bearer
+  // tokens and the agent gateway must never grant authority here.
+  {
+    operationId: "exchangeSharedAccess",
+    method: "POST",
+    path: "/api/shares/:grantId/exchange",
+    accessToken: false,
+    agentApi: false,
+  },
+  {
+    operationId: "getSharedAccessSession",
+    method: "GET",
+    path: "/api/shares/:grantId/session",
+    accessToken: false,
+    agentApi: false,
+  },
+  {
+    operationId: "signOutSharedAccess",
+    method: "POST",
+    path: "/api/shares/:grantId/sign-out",
+    accessToken: false,
+    agentApi: false,
+  },
   {
     operationId: "listWorkflows",
     method: "GET",

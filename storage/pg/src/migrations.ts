@@ -51,6 +51,9 @@ import webhookDeliveryFailureRecordSql from "./migrations/019-webhook-delivery-f
   type: "text",
 }
 import sharedAccessGrantsSql from "./migrations/020-shared-access-grants.sql" with { type: "text" }
+import sharedAccessSessionsSql from "./migrations/021-shared-access-sessions.sql" with {
+  type: "text",
+}
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -324,6 +327,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("018-ontology-outbox-failure-record", ontologyOutboxFailureRecordSql),
     pgSql("019-webhook-delivery-failure-record", webhookDeliveryFailureRecordSql),
     pgSql("020-shared-access-grants", sharedAccessGrantsSql),
+    pgSql("021-shared-access-sessions", sharedAccessSessionsSql),
   ],
 })
 

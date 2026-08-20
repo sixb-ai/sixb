@@ -17,6 +17,7 @@ import { registerProjectRoutes } from "./routes/project"
 import { registerProjectionRoutes } from "./routes/projections"
 import { registerRuleRoutes } from "./routes/rules"
 import { registerShareGrantRoutes, type ShareGrantRouteOptions } from "./routes/share-grants"
+import { registerSharedAccessRoutes } from "./routes/shared-access"
 import { registerStatusRoutes } from "./routes/status"
 import { registerSyncRoutes } from "./routes/syncs"
 import { registerTelemetryRoutes } from "./routes/telemetry"
@@ -50,6 +51,7 @@ export function registerHttpRoutes(
   registerProjectionRoutes(app, host)
   registerWebhookRunRoutes(app, host)
   registerShareGrantRoutes(app, host, options)
+  registerSharedAccessRoutes(app, host)
 
   return app
 }
