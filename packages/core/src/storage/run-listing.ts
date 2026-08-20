@@ -9,12 +9,6 @@ export interface StartedAtRunRecord<TStatus extends string = string> {
   readonly startedAt: Date
 }
 
-export interface RunListDateFilters<TStatus extends string = string> {
-  readonly statuses?: readonly TStatus[]
-  readonly startedAfter?: Date
-  readonly startedBefore?: Date
-}
-
 export function storageKey(projectId: string, id: string): string {
   return `${projectId}:${id}`
 }

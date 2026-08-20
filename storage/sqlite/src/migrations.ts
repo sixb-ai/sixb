@@ -138,10 +138,6 @@ export async function migrateSqliteStorage(basePath: string): Promise<void> {
   }
 }
 
-export async function migrateSqliteDatabase(path: string): Promise<void> {
-  await createSqliteMigrator({ path, migrations: sqliteStorageMigrations }).migrate()
-}
-
 function sqliteMigrationHistoryStore(db: Database): MigrationHistoryStore {
   return {
     ensure() {

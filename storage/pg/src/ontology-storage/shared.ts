@@ -106,13 +106,6 @@ export function jsonParameter(sql: SQLClient, value: unknown): ReturnType<SQLCli
   return sql.json(value as PgJsonValue)
 }
 
-export function jsonKeyParameter(
-  sql: SQLClient,
-  canonicalKey: string
-): ReturnType<SQLClient["json"]> {
-  return jsonParameter(sql, JSON.parse(canonicalKey))
-}
-
 export function toIsoString(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString()
 }
@@ -276,15 +269,6 @@ export async function assertProjectionExecution(
       `Projection run '${input.projectionRunId}' immutable source identity does not match.`
     )
   }
-}
-
-export function requireRow<T>(
-  row: T | undefined,
-  kind: ConstructorParameters<typeof MaterializationConflictError>[0],
-  message: string
-): T {
-  if (!row) throw new MaterializationConflictError(kind, message)
-  return row
 }
 
 export function ontologyLockKey(kind: string, ...parts: readonly string[]): string {

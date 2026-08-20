@@ -112,9 +112,7 @@ export async function runDev(options: DevOptions = {}) {
         apiDocsUrl={apiDocsUrl(topology)}
         wsUrl={apiEventsUrl(topology)}
         uiUrl={topology.atlasPublicOrigin}
-        uiStatus={null}
         appUrl={appUrl}
-        mqttUrl={null}
         warnings={runtime.warnings}
       />
     )

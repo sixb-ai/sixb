@@ -5,7 +5,6 @@ export {
   EVENT_DEFINITIONS,
   EVENT_TOPICS,
   EVENT_TYPES,
-  getEventTopic,
   isDomainEventType,
   isOntologyFactType,
   LINK_EVENT_DEFINITIONS,

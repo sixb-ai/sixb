@@ -1143,17 +1143,7 @@ function storedPoint(row: TelemetryRow): StoredTelemetryPoint {
   }
 }
 
-export function objectSortExpression(alias?: string): string {
-  const prefix = alias ? `${alias}.` : ""
-  return `LOWER(HEX(CAST(json_array(${prefix}object_type_id, ${prefix}primary_id) AS BLOB)))`
-}
-
 export function linkSortExpression(alias?: string): string {
   const prefix = alias ? `${alias}.` : ""
   return `LOWER(HEX(CAST(json_array(${prefix}source_type_id, ${prefix}source_id, ${prefix}link_id, ${prefix}target_type_id, ${prefix}target_id) AS BLOB)))`
-}
-
-export function pointSortExpression(alias?: string): string {
-  const prefix = alias ? `${alias}.` : ""
-  return `LOWER(HEX(CAST(json_array(${prefix}object_type_id, ${prefix}object_id, ${prefix}property_id, ${prefix}at) AS BLOB)))`
 }

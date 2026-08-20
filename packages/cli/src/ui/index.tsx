@@ -493,9 +493,7 @@ export function DevView({
   apiDocsUrl,
   wsUrl,
   uiUrl,
-  uiStatus,
   appUrl,
-  mqttUrl,
   warnings = [],
 }: {
   name: string
@@ -503,9 +501,7 @@ export function DevView({
   apiDocsUrl: string
   wsUrl: string
   uiUrl: string | null
-  uiStatus: string | null
   appUrl?: string | null
-  mqttUrl: string | null
   warnings?: readonly string[]
 }) {
   const serverItems: KeyValueItem[] = [
@@ -515,8 +511,6 @@ export function DevView({
   ]
   if (uiUrl) {
     serverItems.push({ label: "Atlas UI", value: uiUrl })
-  } else if (uiStatus) {
-    serverItems.push({ label: "Atlas UI", value: uiStatus })
   }
 
   return (
@@ -531,12 +525,6 @@ export function DevView({
           <ServicePanel name="Custom app" items={[{ label: "URL", value: appUrl }]} />
         </>
       ) : null}
-      {mqttUrl ? (
-        <>
-          <Spacer />
-          <ServicePanel name="MQTT" items={[{ label: "Broker", value: mqttUrl }]} />
-        </>
-      ) : null}
       {warnings.length > 0 ? (
         <>
           <Spacer />
@@ -548,63 +536,6 @@ export function DevView({
       ) : null}
       <Spacer />
       <Text dimColor>ctrl+c to stop</Text>
-    </Box>
-  )
-}
-
-export function StartView({
-  name,
-  apiUrl,
-  apiDocsUrl,
-  wsUrl,
-  uiUrl,
-  uiStatus,
-  appUrl,
-  warnings = [],
-}: {
-  name: string
-  apiUrl: string
-  apiDocsUrl: string
-  wsUrl: string
-  uiUrl: string | null
-  uiStatus?: string | null
-  appUrl?: string | null
-  warnings?: readonly string[]
-}) {
-  const serverItems: KeyValueItem[] = [
-    { label: "API", value: apiUrl },
-    { label: "API docs", value: apiDocsUrl },
-    { label: "Events", value: wsUrl },
-  ]
-  if (uiUrl) {
-    serverItems.push({ label: "Atlas UI", value: uiUrl })
-  } else if (uiStatus) {
-    serverItems.push({ label: "Atlas UI", value: uiStatus })
-  }
-
-  return (
-    <Box flexDirection="column">
-      <Text color="green" bold>
-        Sixb started
-      </Text>
-      <Text dimColor>{name}</Text>
-      <Spacer />
-      <ServicePanel name="Server" items={serverItems} />
-      {appUrl ? (
-        <>
-          <Spacer />
-          <ServicePanel name="Custom app" items={[{ label: "URL", value: appUrl }]} />
-        </>
-      ) : null}
-      {warnings.length > 0 ? (
-        <>
-          <Spacer />
-          <SectionTitle>Warnings</SectionTitle>
-          <BulletList items={warnings} />
-        </>
-      ) : null}
-      <Spacer />
-      <Text dimColor>Press Ctrl+C to stop</Text>
     </Box>
   )
 }

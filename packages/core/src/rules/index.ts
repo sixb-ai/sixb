@@ -25,6 +25,5 @@ export {
   assertRuleDefinition,
   assertRulePredicateShape,
   isRuleDefinition,
-  isRuleValue,
   validateRulesAtStartup,
 } from "./validation"
