@@ -94,7 +94,7 @@ export class InMemoryOntologyOutboxStorage implements OntologyOutboxStorage {
       this.state.outbox.set(key, {
         ...row,
         availableAt: input.availableAt,
-        lastError: input.error,
+        lastFailure: input.failure === undefined ? row.lastFailure : structuredClone(input.failure),
         leaseId: null,
         leaseExpiresAt: null,
       })

@@ -25,16 +25,45 @@ import {
 import { bindDurablePrimitiveExecution } from "@sixb/core/internal/primitive-execution"
 import { snapshotWorkflowInput } from "@sixb/core/internal/workflows"
 import type {
+  ActionRunFailure,
+  ActionRunPhase,
   ActionRunStorage,
   QueueWorkflowRunInput,
   WorkflowRunStorage,
 } from "@sixb/core/storage"
 import { createTestSixb, createTestWorkflowExecution } from "@sixb/core/testing"
-import { WorkflowWorkerError } from "../src/errors"
 import { EventsRuntimeWorkflowRunObserver } from "../src/events"
 import { runWorkflowJob as executeWorkflowJob, runWorkflowResumeJob } from "../src/run-workflow-job"
 import type { RunWorkflowJobInput, WorkflowRunObserver, WorkflowWorkerContext } from "../src/types"
 import type { WorkflowWorkerHost } from "../src/worker"
+
+const ACTION_FAILURE_AT = "2026-05-08T10:00:00.000Z"
+
+function actionFailure<TPhase extends ActionRunPhase>(
+  phase: TPhase,
+  _message: string,
+  actionId: string,
+  runId: string
+): ActionRunFailure<TPhase> {
+  const code =
+    phase === "cancelled"
+      ? "runtime.cancelled"
+      : phase === "enqueue"
+        ? "queue.enqueue_failed"
+        : "action.phase_failed"
+  return {
+    code,
+    message:
+      code === "runtime.cancelled"
+        ? "Execution was cancelled."
+        : code === "queue.enqueue_failed"
+          ? "The job could not be enqueued."
+          : "Action execution failed.",
+    retryable: code === "queue.enqueue_failed",
+    at: ACTION_FAILURE_AT,
+    details: { actionId, runId, phase },
+  }
+}
 
 const Transaction = defineObjectType({
   id: "Transaction",
@@ -375,10 +404,12 @@ async function completeRequestedActions(
               projectId: sixb.id,
               id: event.payload.runId,
               status: "failed",
-              error: {
-                message: options.effectsErrorMessage,
-                phase: "effects",
-              },
+              error: actionFailure(
+                "effects",
+                options.effectsErrorMessage,
+                event.payload.actionId,
+                event.payload.runId
+              ),
             })
           }
 
@@ -395,10 +426,12 @@ async function completeRequestedActions(
                   id: event.payload.runId,
                   status: "failed",
                   finishedAt: new Date("2026-05-08T10:00:00.000Z"),
-                  error: {
-                    message: errorMessage,
-                    phase: "writeback",
-                  },
+                  error: actionFailure(
+                    "writeback",
+                    errorMessage,
+                    event.payload.actionId,
+                    event.payload.runId
+                  ),
                 }
           )
 
@@ -420,10 +453,12 @@ async function completeRequestedActions(
                       actionId: event.payload.actionId,
                       runId: event.payload.runId,
                       subject: event.payload.subject,
-                      error: {
-                        message: errorMessage,
-                        phase: "writeback",
-                      },
+                      error: actionFailure(
+                        "writeback",
+                        errorMessage,
+                        event.payload.actionId,
+                        event.payload.runId
+                      ),
                       finishedAt: "2026-05-08T10:00:00.000Z",
                     },
                   },
@@ -1149,7 +1184,7 @@ describe("runWorkflowJob", () => {
           onNodeStarted: async () => undefined,
           onNodeFinished: async () => undefined,
           onRunFinished: async (run) => {
-            observerCalls.push(`${run.status}:${run.error}`)
+            observerCalls.push(`${run.status}:${run.error?.message}`)
           },
         },
       })
@@ -1161,8 +1196,7 @@ describe("runWorkflowJob", () => {
     })
     expect(run?.status).toBe("failed")
     expect(observerCalls).toHaveLength(1)
-    expect(observerCalls[0]).toContain("failed:[Sixb] Missing required field")
-    expect(observerCalls[0]).toContain('Workflow "queued-invalid-input" input.transaction')
+    expect(observerCalls[0]).toBe("failed:An unexpected internal error occurred.")
   })
 
   test("marks the active step and workflow failed when step output validation fails", async () => {
@@ -1197,9 +1231,19 @@ describe("runWorkflowJob", () => {
     expect(run?.status).toBe("failed")
     expect(nodes.nodes).toHaveLength(1)
     expect(nodes.nodes[0]?.status).toBe("failed")
-    expect(nodes.nodes[0]?.error).toContain(
-      'Workflow "invalid-output-workflow" step "invalid-output" output.invoice'
-    )
+    expect(run?.error).toMatchObject({
+      code: "workflow.node_failed",
+      retryable: false,
+      details: {
+        workflowId: workflow.id,
+        workflowRunId: "wfrun_invalid_output",
+        nodeId: invalidOutputStep.id,
+        nodeRunId: "wfrun_invalid_output:node:0",
+        stepId: invalidOutputStep.id,
+      },
+    })
+    expect(nodes.nodes[0]?.error).toEqual(run?.error)
+    expect(nodes.nodes[0]?.error?.message).toBe("Workflow node execution failed.")
   })
 
   test("marks the active step and workflow failed when a step handler throws", async () => {
@@ -1237,7 +1281,140 @@ describe("runWorkflowJob", () => {
     })
     expect(run?.status).toBe("failed")
     expect(nodes.nodes.map((node) => node.status)).toEqual(["succeeded", "failed"])
-    expect(nodes.nodes[1]?.error).toBe("step exploded")
+    expect(run?.error).toMatchObject({
+      code: "workflow.node_failed",
+      retryable: false,
+      details: {
+        workflowId: workflow.id,
+        workflowRunId: "wfrun_step_failed",
+        nodeId: failingStep.id,
+        nodeRunId: "wfrun_step_failed:node:1",
+        stepId: failingStep.id,
+      },
+    })
+    expect(nodes.nodes[1]?.error).toMatchObject({
+      code: "workflow.node_failed",
+      retryable: false,
+      details: {
+        workflowId: workflow.id,
+        workflowRunId: "wfrun_step_failed",
+        nodeId: failingStep.id,
+        nodeRunId: "wfrun_step_failed:node:1",
+        stepId: failingStep.id,
+      },
+    })
+    expect(nodes.nodes[1]?.error).toEqual(run?.error)
+    expect(nodes.nodes[1]?.error?.message).toBe("Workflow node execution failed.")
+  })
+
+  test("preserves the cause and run details when workflow finalization fails after side effects", async () => {
+    const workflow = defineWorkflow("bookkeeping-failure-workflow")
+      .input({
+        transaction: ref(Transaction),
+      })
+      .then(findBestInvoice)
+    const sixb = createSixb({ workflows: [workflow] })
+    const runtime = createRuntime(sixb)
+    const finish = runtime.workflowRuns.finish.bind(runtime.workflowRuns)
+    const finishCause = new Error("workflow finish unavailable")
+    runtime.workflowRuns.finish = async (input) => {
+      if (input.status === "succeeded") {
+        throw finishCause
+      }
+      return finish(input)
+    }
+
+    await expect(
+      runWorkflowJob({
+        runtime,
+        job: {
+          id: "wfrun_bookkeeping_failed",
+          workflowId: workflow.id,
+          input: {
+            transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+          },
+        },
+      })
+    ).rejects.toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      cause: finishCause,
+      message:
+        "[SixbWorkflowWorker] Workflow 'bookkeeping-failure-workflow' executed side effects, but failed to finalize workflow run 'wfrun_bookkeeping_failed'. The workflow state may need repair.",
+      details: {
+        workflowId: workflow.id,
+        runId: "wfrun_bookkeeping_failed",
+      },
+    })
+
+    const run = await runtime.workflowRuns.getById({
+      projectId: sixb.id,
+      id: "wfrun_bookkeeping_failed",
+    })
+    expect(run?.error).toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      details: {
+        workflowId: workflow.id,
+        runId: "wfrun_bookkeeping_failed",
+      },
+    })
+  })
+
+  test("keeps node finalization failures out of the node-failed vocabulary", async () => {
+    const workflow = defineWorkflow("node-finalization-failure-workflow")
+      .input({ transaction: ref(Transaction) })
+      .then(findBestInvoice)
+    const sixb = createSixb({ workflows: [workflow] })
+    const runtime = createRuntime(sixb)
+    const finishNode = runtime.workflowRuns.nodes.finish.bind(runtime.workflowRuns.nodes)
+    const finishCause = new Error("node finish unavailable")
+    runtime.workflowRuns.nodes.finish = async (input) => {
+      if (input.status === "succeeded") throw finishCause
+      return finishNode(input)
+    }
+
+    await expect(
+      runWorkflowJob({
+        runtime,
+        job: {
+          id: "wfrun_node_finish_failed",
+          workflowId: workflow.id,
+          input: {
+            transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+          },
+        },
+      })
+    ).rejects.toMatchObject({
+      code: "internal.unexpected",
+      cause: finishCause,
+      details: {
+        workflowId: workflow.id,
+        workflowRunId: "wfrun_node_finish_failed",
+        nodeId: findBestInvoice.id,
+        nodeRunId: "wfrun_node_finish_failed:node:0",
+      },
+    })
+
+    const run = await runtime.workflowRuns.getById({
+      projectId: sixb.id,
+      id: "wfrun_node_finish_failed",
+    })
+    const node = await runtime.workflowRuns.nodes.getById({
+      projectId: sixb.id,
+      id: "wfrun_node_finish_failed:node:0",
+    })
+    expect(run?.error).toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      details: {
+        workflowId: workflow.id,
+        workflowRunId: "wfrun_node_finish_failed",
+        nodeId: findBestInvoice.id,
+        nodeRunId: "wfrun_node_finish_failed:node:0",
+      },
+    })
+    expect(node?.error).toEqual(run?.error)
   })
 
   test("uses the workflow input as output when every node is an action", async () => {
@@ -1447,6 +1624,62 @@ describe("runWorkflowJob", () => {
     }
   })
 
+  test("preserves action-node details without inventing a node run before preparation", async () => {
+    const workflow = defineWorkflow("invalid-global-action-input-workflow")
+      .input({
+        transaction: ref(Transaction),
+      })
+      .then(findBestInvoice)
+      .then(prepareAttachInvoiceAction)
+      .then(createInvoice)
+    const sixb = createSixb({ actions: [createInvoice], workflows: [workflow] })
+
+    const expectedOriginalError = {
+      code: "internal.unexpected",
+      retryable: false,
+      message:
+        "[SixbWorkflowWorker] Workflow 'invalid-global-action-input-workflow' action node 'create-invoice' direct input must not include subject for a global action.",
+      details: {
+        actionId: createInvoice.id,
+        workflowId: workflow.id,
+        workflowRunId: "wfrun_invalid_global_action_input",
+        nodeId: "create-invoice",
+      },
+    }
+    const expectedFailure = {
+      ...expectedOriginalError,
+      code: "workflow.node_failed",
+      message: "Workflow node execution failed.",
+    }
+    await expect(
+      runWorkflowJob({
+        runtime: createRuntime(sixb),
+        job: {
+          id: "wfrun_invalid_global_action_input",
+          workflowId: workflow.id,
+          input: {
+            transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+          },
+        },
+      })
+    ).rejects.toMatchObject(expectedOriginalError)
+
+    const run = await sixb.storage.workflowRuns!.getById({
+      projectId: sixb.id,
+      id: "wfrun_invalid_global_action_input",
+    })
+    const nodes = await sixb.storage.workflowRuns!.nodes.list({
+      projectId: sixb.id,
+      workflowRunId: "wfrun_invalid_global_action_input",
+      order: "asc",
+    })
+    expect(run?.error).toMatchObject(expectedFailure)
+    expect(nodes.nodes.map((node) => node.nodeId)).toEqual([
+      "find-best-invoice",
+      "prepare-attach-invoice-action",
+    ])
+  })
+
   test("picks declared params from direct global action dataflow", async () => {
     actionHandlerCalls = 0
     const workflow = defineWorkflow("create-invoice-from-transaction-workflow")
@@ -1596,7 +1829,10 @@ describe("runWorkflowJob", () => {
       expect(actionRun?.status).toBe("succeeded")
       expect(actionRun?.effects).toMatchObject({
         status: "failed",
-        error: { message: "notification failed", phase: "effects" },
+        error: {
+          message: "Action execution failed.",
+          details: { phase: "effects" },
+        },
       })
     } finally {
       unsubscribe()
@@ -1700,7 +1936,7 @@ describe("runWorkflowJob", () => {
             },
           },
         })
-      ).rejects.toThrow("attach failed")
+      ).rejects.toThrow("Action execution failed.")
     } finally {
       unsubscribe()
     }
@@ -1716,7 +1952,20 @@ describe("runWorkflowJob", () => {
     })
     expect(run?.status).toBe("failed")
     expect(nodes.nodes.map((node) => node.status)).toEqual(["succeeded", "failed"])
-    expect(nodes.nodes[1]?.error).toBe("attach failed")
+    expect(run?.error).toMatchObject({
+      code: "workflow.node_failed",
+      retryable: false,
+      details: {
+        workflowId: workflow.id,
+        workflowRunId: "wfrun_action_run_failed",
+        nodeId: attachInvoice.id,
+        nodeRunId: "wfrun_action_run_failed:node:1",
+        actionId: attachInvoice.id,
+        actionRunId: "wfrun_action_run_failed:action:1",
+      },
+    })
+    expect(nodes.nodes[1]?.error).toEqual(run?.error)
+    expect(nodes.nodes[1]?.error?.message).toBe("Workflow node execution failed.")
   })
 
   test("marks action node and workflow failed when the action run fails after request", async () => {
@@ -1750,7 +1999,7 @@ describe("runWorkflowJob", () => {
             },
           },
         })
-      ).rejects.toThrow("Object not found for action request")
+      ).rejects.toThrow("Action execution failed.")
     } finally {
       unsubscribe()
     }
@@ -1784,7 +2033,12 @@ describe("runWorkflowJob", () => {
           input: {},
         },
       })
-    ).rejects.toThrow("[SixbWorkflowWorker] Unknown workflow 'missing-workflow'.")
+    ).rejects.toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      message: "[SixbWorkflowWorker] Unknown workflow 'missing-workflow'.",
+      details: { workflowId: "missing-workflow", runId: "wfrun_missing" },
+    })
   })
 
   test("does not invent a node row when a mapper throws before producing input", async () => {
@@ -1794,7 +2048,7 @@ describe("runWorkflowJob", () => {
       })
       .then(findBestInvoice)
       .then(reviewInvoiceMatch, () => {
-        throw new WorkflowWorkerError("mapper exploded")
+        throw new Error("mapper exploded")
       })
     const sixb = createSixb({ workflows: [workflow] })
 
@@ -1811,10 +2065,24 @@ describe("runWorkflowJob", () => {
       })
     ).rejects.toThrow("mapper exploded")
 
+    const run = await sixb.storage.workflowRuns!.getById({
+      projectId: sixb.id,
+      id: "wfrun_mapper_failed",
+    })
     const nodes = await sixb.storage.workflowRuns!.nodes.list({
       projectId: sixb.id,
       workflowRunId: "wfrun_mapper_failed",
       order: "asc",
+    })
+    expect(run?.error).toMatchObject({
+      code: "workflow.node_failed",
+      retryable: false,
+      details: {
+        workflowId: workflow.id,
+        workflowRunId: "wfrun_mapper_failed",
+        nodeId: reviewInvoiceMatch.id,
+        stepId: reviewInvoiceMatch.id,
+      },
     })
     expect(nodes.nodes.map((node) => node.nodeId)).toEqual(["find-best-invoice"])
   })

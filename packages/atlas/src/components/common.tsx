@@ -1,4 +1,4 @@
-import { Button, Card, CardContent, EmptyState } from "@sixb/ui/components"
+import { Button, Card, EmptyState } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { AlertCircle, ChevronLeft, Loader2 } from "lucide-react"
 import { type ReactNode, useState } from "react"
@@ -127,34 +127,6 @@ export function PageFrame({
         </header>
         {children}
       </div>
-    </div>
-  )
-}
-
-export function MetricCard({ label, value }: { label: string; value: number }) {
-  return (
-    <Card>
-      <CardContent className="p-4">
-        <p className="text-sm text-muted-foreground">{label}</p>
-        <p className="mt-1 text-2xl font-semibold tabular-nums text-foreground">{value}</p>
-      </CardContent>
-    </Card>
-  )
-}
-
-export function KeyValue({ label, value, to }: { label: string; value: string; to?: string }) {
-  return (
-    <div className="space-y-1">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className="break-words text-foreground">
-        {to ? (
-          <Link to={to} className="underline-offset-4 hover:underline">
-            {value}
-          </Link>
-        ) : (
-          value
-        )}
-      </p>
     </div>
   )
 }

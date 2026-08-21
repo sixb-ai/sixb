@@ -1,11 +1,17 @@
 import type { Queues } from "@sixb/core"
 import type {
+  ActionQueueJobFailureCode,
   ActionRunRequestedQueueJob,
-  AgentRunRequestedQueueJob,
+  AgentQueueJob,
+  AgentQueueJobFailureCode,
+  PipelineQueueJobFailureCode,
   PipelineRunRequestedQueueJob,
+  ProjectionQueueJobFailureCode,
   ProjectionRunRequestedQueueJob,
+  SyncQueueJobFailureCode,
   SyncRunRequestedQueueJob,
   WorkflowQueueJob,
+  WorkflowQueueJobFailureCode,
 } from "@sixb/core/queues"
 import type { KeepJobs } from "bullmq"
 import { type BullMqLaneShared, BullMqQueue } from "./bullmq-queue"
@@ -69,12 +75,12 @@ export interface BullMqQueuesOptions {
  */
 export class BullMqQueues implements Queues {
   readonly scope = "shared" as const
-  readonly syncRuns: BullMqQueue<SyncRunRequestedQueueJob>
-  readonly pipelines: BullMqQueue<PipelineRunRequestedQueueJob>
-  readonly projections: BullMqQueue<ProjectionRunRequestedQueueJob>
-  readonly workflows: BullMqQueue<WorkflowQueueJob>
-  readonly actions: BullMqQueue<ActionRunRequestedQueueJob>
-  readonly agents: BullMqQueue<AgentRunRequestedQueueJob>
+  readonly syncRuns: BullMqQueue<SyncRunRequestedQueueJob, SyncQueueJobFailureCode>
+  readonly pipelines: BullMqQueue<PipelineRunRequestedQueueJob, PipelineQueueJobFailureCode>
+  readonly projections: BullMqQueue<ProjectionRunRequestedQueueJob, ProjectionQueueJobFailureCode>
+  readonly workflows: BullMqQueue<WorkflowQueueJob, WorkflowQueueJobFailureCode>
+  readonly actions: BullMqQueue<ActionRunRequestedQueueJob, ActionQueueJobFailureCode>
+  readonly agents: BullMqQueue<AgentQueueJob, AgentQueueJobFailureCode>
 
   private readonly connections: BullMqConnections
 
@@ -91,12 +97,27 @@ export class BullMqQueues implements Queues {
       removeOnFail: options.removeOnFail ?? DEFAULT_REMOVE_ON_FAIL,
     }
 
-    this.syncRuns = new BullMqQueue<SyncRunRequestedQueueJob>(shared, "sync.runs")
-    this.pipelines = new BullMqQueue<PipelineRunRequestedQueueJob>(shared, "pipeline.runs")
-    this.projections = new BullMqQueue<ProjectionRunRequestedQueueJob>(shared, "projection.runs")
-    this.workflows = new BullMqQueue<WorkflowQueueJob>(shared, "workflow.runs")
-    this.actions = new BullMqQueue<ActionRunRequestedQueueJob>(shared, "action.runs")
-    this.agents = new BullMqQueue<AgentRunRequestedQueueJob>(shared, "agent.runs")
+    this.syncRuns = new BullMqQueue<SyncRunRequestedQueueJob, SyncQueueJobFailureCode>(
+      shared,
+      "sync.runs"
+    )
+    this.pipelines = new BullMqQueue<PipelineRunRequestedQueueJob, PipelineQueueJobFailureCode>(
+      shared,
+      "pipeline.runs"
+    )
+    this.projections = new BullMqQueue<
+      ProjectionRunRequestedQueueJob,
+      ProjectionQueueJobFailureCode
+    >(shared, "projection.runs")
+    this.workflows = new BullMqQueue<WorkflowQueueJob, WorkflowQueueJobFailureCode>(
+      shared,
+      "workflow.runs"
+    )
+    this.actions = new BullMqQueue<ActionRunRequestedQueueJob, ActionQueueJobFailureCode>(
+      shared,
+      "action.runs"
+    )
+    this.agents = new BullMqQueue<AgentQueueJob, AgentQueueJobFailureCode>(shared, "agent.runs")
   }
 
   /** The non-blocking handle: a probe has no business queueing behind BullMQ's fetch loop. */

@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import type { SixbHostView } from "@sixb/core"
 import { change, col, defineConnector, defineDataset, defineSync } from "@sixb/core"
-import type { ListLatestSyncRunsInput, SyncRunStorage } from "@sixb/core/storage"
+import type {
+  ListLatestSyncRunsInput,
+  SixbFailure,
+  SyncRunFailureCode,
+  SyncRunStorage,
+} from "@sixb/core/storage"
 import { Elysia } from "elysia"
 import { registerSyncRoutes } from "../src/routes/syncs"
 
@@ -39,6 +44,14 @@ const syncs = [
     .read(() => change.delete({ invoiceId: "missing" }))
     .intoDataset(invoicesDataset),
 ]
+
+const FAILURE: SixbFailure<SyncRunFailureCode> = {
+  code: "internal.unexpected",
+  message: "Provider offline",
+  retryable: false,
+  at: "2026-04-06T16:00:01.000Z",
+  details: { provider: "erp" },
+}
 
 function createSixbStub(syncRuns: Partial<SyncRunStorage>): SixbHostView {
   return {
@@ -90,6 +103,17 @@ describe("sync routes", () => {
         return {
           runs: [
             {
+              id: "run-customers",
+              projectId: "my-app",
+              syncId: "sync-customers",
+              datasetId: "raw.crm.customers",
+              mode: "append",
+              status: "failed",
+              startedAt: new Date("2026-04-06T16:00:00.000Z"),
+              finishedAt: new Date("2026-04-06T16:00:01.000Z"),
+              error: FAILURE,
+            },
+            {
               id: "run-invoices",
               projectId: "my-app",
               syncId: "sync-invoices",
@@ -109,7 +133,12 @@ describe("sync routes", () => {
     const body = (await response.json()) as Array<{
       id: string
       target: { dataset: { primaryKey?: string | string[] } }
-      latestRun: { id: string; syncId: string; status: string } | null
+      latestRun: {
+        id: string
+        syncId: string
+        status: string
+        error?: SixbFailure<SyncRunFailureCode>
+      } | null
     }>
 
     expect(bulkCalls).toBe(1)
@@ -117,11 +146,15 @@ describe("sync routes", () => {
     expect(requestedSyncIds).toEqual([["sync-orders", "sync-customers", "sync-invoices"]])
     expect(body.map((sync) => [sync.id, sync.latestRun?.id ?? null])).toEqual([
       ["sync-orders", null],
-      ["sync-customers", null],
+      ["sync-customers", "run-customers"],
       ["sync-invoices", "run-invoices"],
     ])
     expect(body.find((sync) => sync.id === "sync-invoices")?.target.dataset.primaryKey).toBe(
       "invoiceId"
     )
+    expect(body.find((sync) => sync.id === "sync-customers")?.latestRun).toMatchObject({
+      status: "failed",
+      error: FAILURE,
+    })
   })
 })

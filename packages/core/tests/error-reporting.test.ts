@@ -3,16 +3,27 @@ import type { SixbErrorContext } from "../src"
 import type { Broker } from "../src/broker"
 import {
   attachSixbErrorReporter,
+  type ErrorReporter,
   flushSixbErrors,
   normalizeReportedError,
   reportEventDeliveryFailure,
   reportRuleEvaluationFailure,
   reportRunFailure,
+  SixbErrorReporter,
 } from "../src/error-reporting/internal"
 import { DomainEventService } from "../src/events"
 
 const PROJECT_ID = "error-reporting-tests"
 const OCCURRED_AT = "2026-07-29T12:00:00.000Z"
+
+function unexpectedFailure(message: string, at = OCCURRED_AT) {
+  return {
+    code: "internal.unexpected" as const,
+    message,
+    retryable: false,
+    at,
+  }
+}
 
 describe("Sixb error reporting", () => {
   test("reports a normalized terminal run failure with stable context", async () => {
@@ -22,16 +33,17 @@ describe("Sixb error reporting", () => {
       reports.push({ error, context })
     })
 
+    const failure = unexpectedFailure("projection exploded", "2026-01-02T03:04:05.000Z")
     reportRunFailure(host, "projection exploded", {
       projectId: PROJECT_ID,
-      occurredAt: "2026-01-02T03:04:05.000Z",
       attempt: 2,
+      runKind: "projection",
       run: {
-        kind: "projection",
         runId: "projection-run-1",
         projectionId: "rooms",
         projectionKind: "object",
       },
+      failure,
     })
     await flushSixbErrors(host)
 
@@ -45,13 +57,16 @@ describe("Sixb error reporting", () => {
       projectId: PROJECT_ID,
       occurredAt: "2026-01-02T03:04:05.000Z",
       attempt: 2,
+      runKind: "projection",
       run: {
-        kind: "projection",
         runId: "projection-run-1",
         projectionId: "rooms",
         projectionKind: "object",
       },
+      failure,
     })
+    if (reports[0]?.context.type !== "run.failed") throw new Error("expected a run failure")
+    expect(reports[0].context.failure).toBe(failure)
   })
 
   test("reports delivery failures with envelope IDs only", async () => {
@@ -61,9 +76,21 @@ describe("Sixb error reporting", () => {
       reports.push({ error, context })
     })
 
+    const failure = {
+      code: "event.delivery_failed" as const,
+      message: "broker unavailable",
+      retryable: true,
+      at: "2026-01-02T03:04:05.000Z",
+      details: {
+        attempts: 3,
+        eventTypes: ["object.updated"],
+        eventIds: ["event-a", "event-b"],
+      },
+    }
     reportEventDeliveryFailure(host, new Error("broker unavailable"), {
       projectId: PROJECT_ID,
       occurredAt: "2026-01-02T03:04:05.000Z",
+      failure,
       attempts: 3,
       eventTypes: ["object.updated"],
       eventIds: ["event-b", "event-a"],
@@ -75,6 +102,7 @@ describe("Sixb error reporting", () => {
       notificationId: "project:error-reporting-tests:event-delivery:events:event-a:attempt:3",
       projectId: PROJECT_ID,
       occurredAt: "2026-01-02T03:04:05.000Z",
+      failure,
       attempts: 3,
       eventTypes: ["object.updated"],
       eventIds: ["event-a", "event-b"],
@@ -147,6 +175,13 @@ describe("Sixb error reporting", () => {
         "project:error-reporting-tests:rule-evaluation:live:event-a:failed:2026-01-02T03:04:05.000Z",
       projectId: PROJECT_ID,
       occurredAt: "2026-01-02T03:04:05.000Z",
+      failure: {
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        retryable: false,
+        at: "2026-01-02T03:04:05.000Z",
+        details: { source: "live", eventIds: ["event-a", "event-b"] },
+      },
       source: "live",
       eventIds: ["event-a", "event-b"],
     })
@@ -182,7 +217,9 @@ describe("Sixb error reporting", () => {
     expect(() =>
       reportRunFailure(host, new Error("run failed"), {
         projectId: PROJECT_ID,
-        run: { kind: "sync", runId: "sync-run-1", syncId: "customers" },
+        runKind: "sync",
+        run: { runId: "sync-run-1", syncId: "customers" },
+        failure: unexpectedFailure("run failed"),
       })
     ).not.toThrow()
     await flushSixbErrors(host)
@@ -199,14 +236,18 @@ describe("Sixb error reporting", () => {
       if (error.message === "first") {
         reportRunFailure(host, new Error("second"), {
           projectId: PROJECT_ID,
-          run: { kind: "sync", runId: "sync-run-2", syncId: "customers" },
+          runKind: "sync",
+          run: { runId: "sync-run-2", syncId: "customers" },
+          failure: unexpectedFailure("second"),
         })
       }
     })
 
     reportRunFailure(host, new Error("first"), {
       projectId: PROJECT_ID,
-      run: { kind: "sync", runId: "sync-run-1", syncId: "customers" },
+      runKind: "sync",
+      run: { runId: "sync-run-1", syncId: "customers" },
+      failure: unexpectedFailure("first"),
     })
     await flushSixbErrors(host)
 
@@ -219,7 +260,9 @@ describe("Sixb error reporting", () => {
     attachSixbErrorReporter(host, () => new Promise<void>(() => {}))
     reportRunFailure(host, new Error("run failed"), {
       projectId: PROJECT_ID,
-      run: { kind: "agent", runId: "agent-run-1", agentId: "assistant" },
+      runKind: "agent",
+      run: { runId: "agent-run-1", agentId: "assistant" },
+      failure: unexpectedFailure("run failed"),
     })
 
     await flushSixbErrors(host, 5)
@@ -230,13 +273,50 @@ describe("Sixb error reporting", () => {
     consoleError.mockRestore()
   })
 
-  test("is a no-op when no reporter is attached", async () => {
-    const host = {}
-    reportRunFailure(host, new Error("ignored"), {
-      projectId: PROJECT_ID,
-      run: { kind: "workflow", runId: "workflow-run-1", workflowId: "approval" },
+  test("falls back to the console when no reporter is attached", async () => {
+    const consoleError = spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const host = {}
+      const error = new Error("workflow failed")
+      reportRunFailure(host, error, {
+        projectId: PROJECT_ID,
+        runKind: "workflow",
+        run: { runId: "workflow-run-1", workflowId: "approval" },
+        failure: unexpectedFailure("workflow failed"),
+      })
+      await flushSixbErrors(host)
+
+      expect(consoleError).toHaveBeenCalledWith(
+        "[Sixb] Unhandled run.failed:",
+        error,
+        expect.objectContaining({
+          type: "run.failed",
+          projectId: PROJECT_ID,
+          runKind: "workflow",
+          run: { runId: "workflow-run-1", workflowId: "approval" },
+        })
+      )
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
+  test("isolates the console fallback from framework execution", () => {
+    const consoleError = spyOn(console, "error").mockImplementation(() => {
+      throw new Error("console is broken")
     })
-    await expect(flushSixbErrors(host)).resolves.toBeUndefined()
+    try {
+      expect(() =>
+        reportRunFailure({}, new Error("run failed"), {
+          projectId: PROJECT_ID,
+          runKind: "sync",
+          run: { runId: "sync-run-1", syncId: "customers" },
+          failure: unexpectedFailure("run failed"),
+        })
+      ).not.toThrow()
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 
   test("a rule failure is correlated by candidate, since it has no run id", async () => {
@@ -287,11 +367,11 @@ describe("Sixb error reporting", () => {
     try {
       const host = {}
       const reports: Array<{ error: Error; context: SixbErrorContext }> = []
-      attachSixbErrorReporter(host, (error, context) => {
+      const reporter = attachSixbErrorReporter(host, (error, context) => {
         reports.push({ error, context })
       })
       const appendFailure = new Error("broker unavailable")
-      const events = eventServiceFor(host)
+      const events = eventServiceFor(reporter)
       spyOn(events, "append").mockImplementation(() => Promise.reject(appendFailure))
 
       await events.emit(
@@ -313,55 +393,79 @@ describe("Sixb error reporting", () => {
       if (context?.type !== "event.delivery.failed") throw new Error("expected a delivery failure")
       expect(context.eventTypes).toEqual(["sync.run.finished"])
       expect(context.notificationId).toStartWith(`project:${PROJECT_ID}:event-delivery:emit:`)
-      // The console line stays for local debugging; the report is what makes it visible in prod.
-      expect(consoleError).toHaveBeenCalledWith(
-        "[SixbTestWorker] Failed to emit sync.run.finished:",
-        appendFailure
-      )
+      expect(consoleError).not.toHaveBeenCalled()
     } finally {
       consoleError.mockRestore()
     }
   })
 
-  test("emit still resolves when escalation itself throws", async () => {
+  test("emit still resolves when its injected reporter throws", async () => {
     // `emit` promises never to reject, and that promise cannot depend on the escalation path working:
-    // an app that replaced `console` with something that throws would otherwise turn a run that had
-    // already succeeded into a failed one. The batch is lost either way — rejecting on top helps nobody.
-    const consoleError = spyOn(console, "error").mockImplementation(() => {
-      throw new Error("console is broken")
+    // a broken adapter must not turn a run that already succeeded into a failed one. The batch is lost
+    // either way — rejecting on top helps nobody.
+    const events = eventServiceFor({
+      report() {
+        throw new Error("reporter is broken")
+      },
     })
+    spyOn(events, "append").mockImplementation(() =>
+      Promise.reject(new Error("broker unavailable"))
+    )
+
+    await expect(
+      events.emit(
+        {
+          events: [
+            {
+              type: "sync.run.finished",
+              payload: { syncId: "nightly", runId: "sync-run-1", status: "failed" },
+            },
+          ],
+        },
+        { source: "SixbTestWorker" }
+      )
+    ).resolves.toBeUndefined()
+  })
+
+  test("a failed standalone emit falls back to the console", async () => {
+    const consoleError = spyOn(console, "error").mockImplementation(() => {})
     try {
-      const host = {}
-      const events = eventServiceFor(host)
-      spyOn(events, "append").mockImplementation(() =>
-        Promise.reject(new Error("broker unavailable"))
+      const appendFailure = new Error("broker unavailable")
+      const events = eventServiceFor()
+      spyOn(events, "append").mockImplementation(() => Promise.reject(appendFailure))
+
+      await events.emit(
+        {
+          events: [
+            {
+              type: "sync.run.finished",
+              payload: { syncId: "nightly", runId: "sync-run-1", status: "failed" },
+            },
+          ],
+        },
+        { source: "SixbTestWorker" }
       )
 
-      await expect(
-        events.emit(
-          {
-            events: [
-              {
-                type: "sync.run.finished",
-                payload: { syncId: "nightly", runId: "sync-run-1", status: "failed" },
-              },
-            ],
-          },
-          { source: "SixbTestWorker" }
-        )
-      ).resolves.toBeUndefined()
+      expect(consoleError).toHaveBeenCalledTimes(1)
+      expect(consoleError).toHaveBeenCalledWith(
+        "[Sixb] Unhandled event.delivery.failed:",
+        appendFailure,
+        expect.objectContaining({
+          type: "event.delivery.failed",
+          eventTypes: ["sync.run.finished"],
+        })
+      )
     } finally {
       consoleError.mockRestore()
     }
   })
 
   test("an emit that reaches the broker reports nothing", async () => {
-    const host = {}
     const reports: SixbErrorContext[] = []
-    attachSixbErrorReporter(host, (_error, context) => {
+    const reporter = new SixbErrorReporter((_error, context) => {
       reports.push(context)
     })
-    const events = eventServiceFor(host)
+    const events = eventServiceFor(reporter)
     spyOn(events, "append").mockImplementation(() => Promise.resolve([]))
 
     await events.emit(
@@ -375,13 +479,13 @@ describe("Sixb error reporting", () => {
       },
       { source: "SixbTestWorker" }
     )
-    await flushSixbErrors(host)
+    await reporter.flush()
 
     expect(reports).toEqual([])
   })
 })
 
 // The broker is never reached: every test here spies on `append`, which is the seam `emit` wraps.
-function eventServiceFor(host: object): DomainEventService {
-  return new DomainEventService({ projectId: PROJECT_ID, broker: {} as Broker, host })
+function eventServiceFor(errorReporter?: ErrorReporter): DomainEventService {
+  return new DomainEventService({ projectId: PROJECT_ID, broker: {} as Broker, errorReporter })
 }

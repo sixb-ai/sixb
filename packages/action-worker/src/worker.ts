@@ -1,4 +1,5 @@
 import type { DomainEventLog, Queues, SixbDefinitions, Storage } from "@sixb/core"
+import { createSixbError } from "@sixb/core/internal/errors"
 import type { LoggingService } from "@sixb/core/internal/logging"
 import {
   bindDurablePrimitiveExecution,
@@ -7,7 +8,7 @@ import {
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { ActionRunRequestedQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
-import { ActionWorkerError } from "./errors"
+import { ACTION_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { runActionJob } from "./run-action-job"
 import type { ActionJob, ActionRunResult, ActionWorkerContext } from "./types"
 
@@ -24,7 +25,10 @@ export interface ActionWorkerOptions {
   readonly idlePollMs?: number
 }
 
-export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
+export class ActionWorker extends QueueWorker<
+  ActionRunRequestedQueueJob,
+  typeof ACTION_RUN_FAILURE_CODES
+> {
   private readonly host: ActionWorkerHost
   private readonly idleWithoutDefinitions: boolean
 
@@ -32,6 +36,7 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
     super({
       projectId: host.id,
       queue: host.queues.actions,
+      failureCodes: ACTION_RUN_FAILURE_CODES,
       workerId: `action-worker-${host.id}`,
       claimLimit: 1,
       leaseMs: options.leaseMs,
@@ -42,7 +47,10 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
     if (actions.length === 0) {
       console.log("[SixbActionWorker] No action definitions registered; worker will idle.")
     } else if (!host.storage.actionRuns) {
-      throw new ActionWorkerError("Action workers require storage.actionRuns support.")
+      throw createSixbError(
+        "internal.unexpected",
+        "[SixbActionWorker] Action workers require storage.actionRuns support."
+      )
     }
 
     this.host = host
@@ -69,21 +77,37 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
     signal: AbortSignal
   ): Promise<void> {
     if (this.idleWithoutDefinitions) {
-      throw new ActionWorkerError("No action definitions are registered.")
+      throw createSixbError(
+        "internal.unexpected",
+        "[SixbActionWorker] No action definitions are registered.",
+        { details: { runId: claimed.job.payload.runId } }
+      )
     }
 
     const { job } = claimed
     if (job.type !== "action.run.requested") {
-      throw new ActionWorkerError(`Unsupported action job type '${job.type}'.`)
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbActionWorker] Unsupported action job type '${job.type}'.`,
+        { details: { runId: job.payload.runId } }
+      )
     }
 
     const actionRuns = this.host.storage.actionRuns
     if (!actionRuns) {
-      throw new ActionWorkerError("Action workers require storage.actionRuns support.")
+      throw createSixbError(
+        "internal.unexpected",
+        "[SixbActionWorker] Action workers require storage.actionRuns support.",
+        { details: { runId: job.payload.runId } }
+      )
     }
     const run = await actionRuns.getById({ projectId: this.host.id, id: job.payload.runId })
     if (!run) {
-      throw new ActionWorkerError(`Action run '${job.payload.runId}' was not found.`)
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbActionWorker] Action run '${job.payload.runId}' was not found.`,
+        { details: { runId: job.payload.runId } }
+      )
     }
 
     const durableExecution = await this.host.storage.executions.getById({
@@ -91,8 +115,16 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
       id: run.executionId,
     })
     if (!durableExecution) {
-      throw new ActionWorkerError(
-        `Action run '${run.id}' references missing execution '${run.executionId}'.`
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbActionWorker] Action run '${run.id}' references missing execution '${run.executionId}'.`,
+        {
+          details: {
+            actionId: run.actionId,
+            runId: run.id,
+            executionId: run.executionId,
+          },
+        }
       )
     }
 
@@ -185,7 +217,10 @@ function buildActionContext(
 ): ActionWorkerContext {
   const actionRunsStorage = host.storage.actionRuns
   if (!actionRunsStorage) {
-    throw new ActionWorkerError("Action workers require storage.actionRuns support.")
+    throw createSixbError(
+      "internal.unexpected",
+      "[SixbActionWorker] Action workers require storage.actionRuns support."
+    )
   }
   const sixb = {
     objects: execution.sixb.objects,

@@ -149,6 +149,10 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
     run: { id: runId, agentId: agent.id, ...(threadId ? { threadId } : {}) },
     connector: context.connector,
     logger,
+    errorDetails:
+      mode === "conversation"
+        ? { agentId: agent.id, runId }
+        : { agentId: agent.id, nodeRunId: runId },
   })
 
   let sandboxWasUsed = false

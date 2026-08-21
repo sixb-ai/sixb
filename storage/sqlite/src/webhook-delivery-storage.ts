@@ -1,11 +1,14 @@
 import type { Database } from "bun:sqlite"
+import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/internal/errors"
 import type {
   WebhookDeliveryClaimRecord,
   WebhookDeliveryClaimResult,
+  WebhookDeliveryFailure,
   WebhookDeliveryKey,
   WebhookDeliveryRecord,
   WebhookDeliveryStorage,
 } from "@sixb/core/storage"
+import { WEBHOOK_DELIVERY_FAILURE_CODES } from "@sixb/core/storage"
 import { installFreshSqliteSchema } from "./migrations"
 import {
   closeSqliteStoreConnection,
@@ -96,7 +99,7 @@ export class SqliteWebhookDeliveryStorage implements WebhookDeliveryStorage {
               received_at = ?,
               completed_at = NULL,
               failed_at = NULL,
-              error = NULL
+              failure = NULL
           WHERE project_id = ?
             AND connector_id = ?
             AND webhook_id = ?
@@ -134,7 +137,7 @@ export class SqliteWebhookDeliveryStorage implements WebhookDeliveryStorage {
         SET status = 'completed',
             completed_at = ?,
             failed_at = NULL,
-            error = NULL
+            failure = NULL
         WHERE project_id = ?
           AND connector_id = ?
           AND webhook_id = ?
@@ -153,7 +156,7 @@ export class SqliteWebhookDeliveryStorage implements WebhookDeliveryStorage {
   }
 
   async fail(
-    input: WebhookDeliveryKey & { failedAt: string; error: string }
+    input: WebhookDeliveryKey & { failedAt: string; failure: WebhookDeliveryFailure }
   ): Promise<WebhookDeliveryRecord> {
     this.db
       .query(
@@ -161,7 +164,7 @@ export class SqliteWebhookDeliveryStorage implements WebhookDeliveryStorage {
         UPDATE webhook_deliveries
         SET status = 'failed',
             failed_at = ?,
-            error = ?
+            failure = ?
         WHERE project_id = ?
           AND connector_id = ?
           AND webhook_id = ?
@@ -170,7 +173,7 @@ export class SqliteWebhookDeliveryStorage implements WebhookDeliveryStorage {
       )
       .run(
         input.failedAt,
-        input.error,
+        serializeSixbFailure(input.failure, WEBHOOK_DELIVERY_FAILURE_CODES),
         input.projectId,
         input.connectorId,
         input.webhookId,
@@ -197,7 +200,7 @@ export class SqliteWebhookDeliveryStorage implements WebhookDeliveryStorage {
           received_at,
           completed_at,
           failed_at,
-          error
+          failure
         FROM webhook_deliveries
         WHERE project_id = ?
           AND connector_id = ?
@@ -240,7 +243,7 @@ interface SqliteWebhookDeliveryRow {
   readonly received_at: string
   readonly completed_at: string | null
   readonly failed_at: string | null
-  readonly error: string | null
+  readonly failure: string | null
 }
 
 function toWebhookDeliveryRecord(row: SqliteWebhookDeliveryRow): WebhookDeliveryRecord {
@@ -253,7 +256,10 @@ function toWebhookDeliveryRecord(row: SqliteWebhookDeliveryRow): WebhookDelivery
     receivedAt: row.received_at,
     completedAt: row.completed_at ?? undefined,
     failedAt: row.failed_at ?? undefined,
-    error: row.error ?? undefined,
+    failure:
+      row.failure === null
+        ? undefined
+        : parseSixbFailure(row.failure, WEBHOOK_DELIVERY_FAILURE_CODES),
   }
 }
 

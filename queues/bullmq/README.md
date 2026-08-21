@@ -55,18 +55,20 @@ Per-project queues keep tenants isolated — `getNextJob` on one project's queue
 
 ## Translation cheatsheet
 
-| Sixb `Queue<TJob>`       | BullMQ                                  |
-| ------------------------- | --------------------------------------- |
-| `enqueue(jobs)`           | `queue.addBulk([{ name, data, opts }])` |
-| `claim({ leaseMs })`      | `worker.getNextJob(token)` + `extendLock` |
-| `complete(leaseId)`       | `job.moveToCompleted(_, token, false)`  |
-| `retry(availableAt)`      | `job.moveToDelayed(ts, token)`          |
-| `fail(error)`             | `job.moveToFailed(err, token, false)`   |
-| `renewLease(leaseMs)`     | `job.extendLock(token, leaseMs)`        |
-| `leaseId`                 | BullMQ `token` (minted per claim)       |
-| `attempt`                 | BullMQ `attemptsStarted`                |
+| Sixb `Queue<TJob, TFailureCode>` | BullMQ                                      |
+| -------------------------------- | ------------------------------------------- |
+| `enqueue(jobs)`                  | `queue.addBulk([{ name, data, opts }])`     |
+| `claim({ leaseMs })`             | `worker.getNextJob(token)` + `extendLock`   |
+| `complete(leaseId)`              | `job.moveToCompleted(_, token, false)`      |
+| `retry(availableAt)`             | `job.moveToDelayed(ts, token)`              |
+| `fail(failure)`                  | `job.moveToFailed(err, token, false)`       |
+| `renewLease(leaseMs)`            | `job.extendLock(token, leaseMs)`            |
+| `leaseId`                        | BullMQ `token` (minted per claim)           |
+| `attempt`                        | BullMQ `attemptsStarted`                    |
 
 Retries are caller-driven: `enqueue` always sets BullMQ `attempts: 1` so BullMQ never auto-retries. Sixb's own `retry(availableAt)` uses `moveToDelayed`, which is the only release primitive available to a manually-fetched job.
+
+For terminal failures, BullMQ's native record keeps the `SixbFailure.message` as `failedReason` and the stable `SixbFailure.code` as the error name in its stack trace. The queue contract does not yet expose a queryable structured dead-letter history; adding one requires a dedicated read contract.
 
 ## Connections
 

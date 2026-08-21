@@ -23,6 +23,8 @@ export type {
 } from "../materialization/model"
 export type {
   ActionRunFailure,
+  ActionRunFailureCode,
+  ActionRunFailureDetails,
   ActionRunParams,
   ActionRunPhase,
   ActionRunRecord,
@@ -35,10 +37,11 @@ export type {
   QueueActionRunInput,
   StartActionRunInput,
 } from "./action-runs"
-export { ActionRunError } from "./action-runs"
+export { ACTION_RUN_FAILURE_CODES, ACTION_RUN_PHASES, ActionRunError } from "./action-runs"
 export type {
   AgentMessageRecord,
   AgentRunExecution,
+  AgentRunFailureCode,
   AgentRunRecord,
   AgentStorage,
   AgentThreadRecord,
@@ -57,7 +60,7 @@ export type {
   ReclaimAgentRunInput,
   StartAgentRunInput,
 } from "./agents"
-export { AgentStorageError } from "./agents"
+export { AGENT_RUN_FAILURE_CODES, AgentStorageError } from "./agents"
 export type {
   AiModelCallUsage,
   AiModelCallUsageInput,
@@ -150,7 +153,7 @@ export type {
   ListPipelineRunsResult,
   ListPipelineStepRunsInput,
   ListPipelineStepRunsResult,
-  PipelineRunFailure,
+  PipelineRunFailureCode,
   PipelineRunRecord,
   PipelineRunStatus,
   PipelineRunStorage,
@@ -171,6 +174,7 @@ export type {
   ObjectProjectionTarget,
   ProjectionKind,
   ProjectionRunClaim,
+  ProjectionRunFailureCode,
   ProjectionRunProgress,
   ProjectionRunRecord,
   ProjectionRunStatus,
@@ -181,7 +185,7 @@ export type {
   TelemetryProjectionRunRecord,
   UpdateProjectionRunInput,
 } from "./projection-runs"
-export { ProjectionRunError } from "./projection-runs"
+export { PROJECTION_RUN_FAILURE_CODES, ProjectionRunError } from "./projection-runs"
 export type {
   ListActiveRuleStatesInput,
   ListActiveRuleStatesResult,
@@ -193,7 +197,7 @@ export type {
   ListSyncRunsInput,
   ListSyncRunsResult,
   StartSyncRunInput,
-  SyncRunFailure,
+  SyncRunFailureCode,
   SyncRunMode,
   SyncRunRecord,
   SyncRunStatus,
@@ -210,6 +214,8 @@ export type {
 export type {
   WebhookDeliveryClaimRecord,
   WebhookDeliveryClaimResult,
+  WebhookDeliveryFailure,
+  WebhookDeliveryFailureCode,
   WebhookDeliveryKey,
   WebhookDeliveryRecord,
   WebhookDeliveryStatus,
@@ -221,11 +227,12 @@ export type {
   ListWebhookRunsInput,
   ListWebhookRunsResult,
   StartWebhookRunInput,
+  WebhookRunFailureCode,
   WebhookRunRecord,
   WebhookRunStatus,
   WebhookRunStorage,
 } from "./webhook-runs"
-export { WebhookRunError } from "./webhook-runs"
+export { WEBHOOK_RUN_FAILURE_CODES, WebhookRunError } from "./webhook-runs"
 export type {
   CancelWorkflowInterventionInput,
   CreateWorkflowInterventionInput,
@@ -272,11 +279,12 @@ export type {
   WorkflowNodeRunStorage,
   WorkflowNodeRunType,
   WorkflowRunExecution,
+  WorkflowRunFailureCode,
   WorkflowRunRecord,
   WorkflowRunStatus,
   WorkflowRunStorage,
 } from "./workflow-runs"
-export { WorkflowRunError } from "./workflow-runs"
+export { WORKFLOW_RUN_FAILURE_CODES, WorkflowRunError } from "./workflow-runs"
 
 export interface StorageTransactionOptions {
   readonly isolation?: "default" | "serializable"

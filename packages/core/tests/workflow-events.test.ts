@@ -2,6 +2,17 @@ import { describe, expect, test } from "bun:test"
 import { InMemoryBroker } from "../src"
 import { DomainEventService, toStoredEvent } from "../src/events"
 
+const WORKFLOW_FAILURE = {
+  code: "internal.unexpected",
+  retryable: false,
+  message: "No match",
+  at: "2026-05-08T10:00:02.000Z",
+  details: {
+    workflowId: "reconcile-transaction",
+    runId: "wfrun_1",
+  },
+} as const
+
 describe("workflow runtime events", () => {
   test("stores workflow lifecycle events with workflow topic and run partition", () => {
     const queued = toStoredEvent({
@@ -218,7 +229,7 @@ describe("workflow runtime events", () => {
             nodeKey: "findBestInvoice",
             status: "failed",
             finishedAt: "2026-05-08T10:00:02.000Z",
-            error: "No match",
+            error: WORKFLOW_FAILURE,
           },
         },
         {
@@ -228,7 +239,7 @@ describe("workflow runtime events", () => {
             runId: "wfrun_1",
             status: "failed",
             finishedAt: "2026-05-08T10:00:03.000Z",
-            error: "No match",
+            error: WORKFLOW_FAILURE,
           },
         },
       ],
@@ -257,7 +268,8 @@ describe("workflow runtime events", () => {
       runId: "wfrun_1",
       status: "failed",
       finishedAt: "2026-05-08T10:00:03.000Z",
-      error: "No match",
+      error: WORKFLOW_FAILURE,
     })
+    expect(events[3]?.payload).toMatchObject({ error: WORKFLOW_FAILURE })
   })
 })

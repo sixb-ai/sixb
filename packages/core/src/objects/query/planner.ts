@@ -48,12 +48,6 @@ const fallbackNodeKinds = new Set<ObjectQuery["kind"]>([
   "expand",
 ])
 
-export class QueryPlanner {
-  plan(query: ObjectQuery, options: ObjectQueryPlanningOptions): ObjectQueryPlan {
-    return planObjectQuery(query, options)
-  }
-}
-
 export function planObjectQuery(
   query: ObjectQuery,
   options: ObjectQueryPlanningOptions

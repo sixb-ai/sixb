@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import { defineObjectType, migrateStorage, OntologyRegistry, prop } from "@sixb/core"
-import { defineMigrations } from "@sixb/core/storage"
+import { parseActionRunFailure } from "@sixb/core/internal/action-run-storage"
+import { parseSixbFailure } from "@sixb/core/internal/errors"
+import {
+  ACTION_RUN_FAILURE_CODES,
+  defineMigrations,
+  ONTOLOGY_OUTBOX_FAILURE_CODES,
+  SYNC_RUN_FAILURE_CODES,
+  WEBHOOK_DELIVERY_FAILURE_CODES,
+} from "@sixb/core/storage"
 import { createMaterializerTestFixture, createTestWorkflowExecution } from "@sixb/core/testing"
 import { SQL } from "bun"
 import { PostgresStorage, type PostgresStorage as PostgresStorageType } from "../src"
@@ -46,6 +54,15 @@ describe("Postgres storage migrations", () => {
             "008-action-executions",
             "009-agent-executions",
             "010-ai-usage-accounting-foundation",
+            "011-sync-failure-record",
+            "012-pipeline-failure-record",
+            "013-workflow-failure-record",
+            "014-agent-failure-record",
+            "015-projection-failure-record",
+            "016-webhook-run-failure-record",
+            "017-action-failure-record",
+            "018-ontology-outbox-failure-record",
+            "019-webhook-delivery-failure-record",
           ],
         },
       ])
@@ -119,6 +136,69 @@ describe("Postgres storage migrations", () => {
           id: "010-ai-usage-accounting-foundation",
           status: "applied",
           version: 10,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "011-sync-failure-record",
+          status: "applied",
+          version: 11,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "012-pipeline-failure-record",
+          status: "applied",
+          version: 12,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "013-workflow-failure-record",
+          status: "applied",
+          version: 13,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "014-agent-failure-record",
+          status: "applied",
+          version: 14,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "015-projection-failure-record",
+          status: "applied",
+          version: 15,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "016-webhook-run-failure-record",
+          status: "applied",
+          version: 16,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "017-action-failure-record",
+          status: "applied",
+          version: 17,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "018-ontology-outbox-failure-record",
+          status: "applied",
+          version: 18,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "019-webhook-delivery-failure-record",
+          status: "applied",
+          version: 19,
         },
       ])
     })
@@ -291,6 +371,227 @@ describe("Postgres storage migrations", () => {
     })
   })
 
+  test("migrates failed run records from the version 10 main schema", async () => {
+    await withStorage(false, async (storage, schemaName) => {
+      const connectionString = process.env.DATABASE_URL
+      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
+
+      const sql = createPgClient({ connectionString, schemaName, max: 1 })
+      try {
+        const versionTen = defineMigrations({
+          adapterId: POSTGRES_STORAGE_ADAPTER_ID,
+          steps: postgresStorageMigrations.steps.slice(0, 10),
+        })
+        await createPostgresMigrator({ sql, schemaName, migrations: versionTen }).migrate()
+        const schema = quoteIdent(schemaName)
+        await sql.unsafe(`
+          INSERT INTO ${schema}.executions (
+            project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
+            authority_kind, authority_primitive_kind, authority_primitive_id, created_at
+          ) VALUES (
+            'project-a', 'execution-action-legacy', 'action', 'action-legacy', 'event',
+            'event-action-legacy', 'correlation-action-legacy', 'trustedPrimitive', 'action',
+            'approve', '2026-08-10T12:00:00.000Z'
+          );
+
+          INSERT INTO ${schema}.sync_runs (
+            project_id, id, sync_id, dataset_id, mode, status, started_at, finished_at,
+            error_name, error_message
+          ) VALUES (
+            'project-a', 'sync-legacy', 'sync.orders', 'orders', 'snapshot', 'failed',
+            '2026-08-10T12:00:00.000Z', '2026-08-10T12:01:00.000Z',
+            'ProviderError', 'secret sync diagnostic'
+          );
+
+          INSERT INTO ${schema}.action_runs (
+            project_id, id, execution_id, action_id, subject_kind, status, phase, queued_at,
+            finished_at, params, idempotency_key, error_name, error_message, error_phase
+          ) VALUES (
+            'project-a', 'action-legacy', 'execution-action-legacy', 'approve', 'none', 'failed',
+            'enqueue',
+            '2026-08-10T12:00:00.000Z', '2026-08-10T12:01:00.000Z', '{}'::jsonb,
+            'action-legacy', 'QueueError', 'secret queue diagnostic', 'enqueue'
+          );
+        `)
+
+        await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
+
+        const [sync] = await sql.unsafe<Array<{ readonly error: unknown }>>(
+          `SELECT error FROM ${schema}.sync_runs WHERE id = 'sync-legacy'`
+        )
+        const [action] = await sql.unsafe<Array<{ readonly error: unknown }>>(
+          `SELECT error FROM ${schema}.action_runs WHERE id = 'action-legacy'`
+        )
+        expect(parseSixbFailure(sync?.error, SYNC_RUN_FAILURE_CODES)).toMatchObject({
+          code: "internal.unexpected",
+          message: "An unexpected internal error occurred.",
+          details: { syncId: "sync.orders", runId: "sync-legacy" },
+        })
+        expect(parseActionRunFailure(action?.error)).toMatchObject({
+          code: "queue.enqueue_failed",
+          retryable: true,
+          details: { actionId: "approve", runId: "action-legacy", phase: "enqueue" },
+        })
+        expect(JSON.stringify(sync)).not.toContain("secret")
+        expect(await readTableColumns(schemaName, "sync_runs")).not.toContain("error_message")
+        expect(await readTableColumns(schemaName, "action_runs")).not.toContain("error_phase")
+        expect(ACTION_RUN_FAILURE_CODES).toContain("queue.enqueue_failed")
+      } finally {
+        await sql.end()
+      }
+    })
+  })
+
+  test("ontology outbox failure migration replaces legacy diagnostics with a safe failure", async () => {
+    await withStorage(false, async (storage, schemaName) => {
+      const failureMigrationIndex = postgresStorageMigrations.steps.findIndex(
+        (migration) => migration.id === "018-ontology-outbox-failure-record"
+      )
+      if (failureMigrationIndex !== 17) {
+        throw new Error("PostgreSQL ontology outbox failure migration is missing.")
+      }
+      const connectionString = process.env.DATABASE_URL
+      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
+
+      const sql = createPgClient({ connectionString, schemaName, max: 1 })
+      try {
+        const beforeFailureRecord = defineMigrations({
+          adapterId: POSTGRES_STORAGE_ADAPTER_ID,
+          steps: postgresStorageMigrations.steps.slice(0, failureMigrationIndex),
+        })
+        await createPostgresMigrator({
+          sql,
+          schemaName,
+          migrations: beforeFailureRecord,
+        }).migrate()
+        await sql.unsafe(`
+          INSERT INTO ${quoteIdent(schemaName)}.ontology_outbox (
+            project_id, id, commit_id, commit_ordinal, envelope, available_at,
+            attempts, published_at, last_error, created_at
+          ) VALUES
+            (
+              'project-a', 'event-failed', 'commit-failed', 0,
+              '{"type":"object.created"}'::jsonb, '2026-08-10T12:01:00.000Z',
+              2, NULL, 'Error: broker unavailable', '2026-08-10T12:00:00.000Z'
+            ),
+            (
+              'project-a', 'event-stopped', 'commit-stopped', 0,
+              '{"type":"object.updated"}'::jsonb, '2026-08-10T12:02:00.000Z',
+              1, NULL, 'Outbox dispatcher stopped before publication completed.',
+              '2026-08-10T12:00:00.000Z'
+            )
+        `)
+
+        await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
+
+        const rows = await sql.unsafe<
+          Array<{ readonly id: string; readonly last_failure: unknown | null }>
+        >(`SELECT id, last_failure FROM ${quoteIdent(schemaName)}.ontology_outbox ORDER BY id`)
+        expect(parseSixbFailure(rows[0]?.last_failure, ONTOLOGY_OUTBOX_FAILURE_CODES)).toEqual({
+          code: "event.delivery_failed",
+          message: "Event delivery failed.",
+          retryable: true,
+          at: "2026-08-10T12:01:00.000Z",
+          details: {
+            attempts: 2,
+            eventIds: ["event-failed"],
+            eventTypes: ["object.created"],
+            migratedFromLegacyLastError: true,
+            timestampSource: "availableAt",
+          },
+        })
+        expect(rows[1]).toEqual({ id: "event-stopped", last_failure: null })
+        expect(await readTableColumns(schemaName, "ontology_outbox")).toContain("last_failure")
+        expect(await readTableColumns(schemaName, "ontology_outbox")).not.toContain("last_error")
+      } finally {
+        await sql.end()
+      }
+    })
+  })
+
+  test("webhook delivery failure migration replaces legacy diagnostics with a safe failure", async () => {
+    await withStorage(false, async (storage, schemaName) => {
+      const failureMigrationIndex = postgresStorageMigrations.steps.findIndex(
+        (migration) => migration.id === "019-webhook-delivery-failure-record"
+      )
+      if (failureMigrationIndex !== 18) {
+        throw new Error("PostgreSQL migrations before webhook delivery failures are missing.")
+      }
+      const connectionString = process.env.DATABASE_URL
+      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
+
+      const sql = createPgClient({ connectionString, schemaName, max: 1 })
+      try {
+        const beforeFailureRecord = defineMigrations({
+          adapterId: POSTGRES_STORAGE_ADAPTER_ID,
+          steps: postgresStorageMigrations.steps.slice(0, failureMigrationIndex),
+        })
+        await createPostgresMigrator({
+          sql,
+          schemaName,
+          migrations: beforeFailureRecord,
+        }).migrate()
+        await sql.unsafe(`
+          INSERT INTO ${quoteIdent(schemaName)}.webhook_deliveries (
+            project_id, connector_id, webhook_id, idempotency_key, status,
+            received_at, completed_at, failed_at, error
+          ) VALUES
+            (
+              'project-a', 'github', 'events', 'delivery-failed-at', 'failed',
+              '2026-08-10T12:00:00.000Z', NULL, '2026-08-10T12:01:00.000Z',
+              'Error: handler unavailable'
+            ),
+            (
+              'project-a', 'stripe', 'payments', 'delivery-received-at', 'failed',
+              '2026-08-10T12:02:00.000Z', NULL, NULL,
+              'Error: legacy row without failure time'
+            )
+        `)
+
+        await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
+
+        const rows = await sql.unsafe<
+          Array<{ readonly idempotency_key: string; readonly failure: unknown | null }>
+        >(`
+          SELECT idempotency_key, failure
+          FROM ${quoteIdent(schemaName)}.webhook_deliveries
+          ORDER BY idempotency_key
+        `)
+        expect(rows[0]?.idempotency_key).toBe("delivery-failed-at")
+        expect(parseSixbFailure(rows[0]?.failure, WEBHOOK_DELIVERY_FAILURE_CODES)).toEqual({
+          code: "webhook.delivery_failed",
+          message: "Webhook delivery failed.",
+          retryable: true,
+          at: "2026-08-10T12:01:00.000Z",
+          details: {
+            connectorId: "github",
+            webhookId: "events",
+            idempotencyKey: "delivery-failed-at",
+            migratedFromLegacyError: true,
+            timestampSource: "failedAt",
+          },
+        })
+        expect(parseSixbFailure(rows[1]?.failure, WEBHOOK_DELIVERY_FAILURE_CODES)).toEqual({
+          code: "webhook.delivery_failed",
+          message: "Webhook delivery failed.",
+          retryable: true,
+          at: "2026-08-10T12:02:00.000Z",
+          details: {
+            connectorId: "stripe",
+            webhookId: "payments",
+            idempotencyKey: "delivery-received-at",
+            migratedFromLegacyError: true,
+            timestampSource: "receivedAt",
+          },
+        })
+        expect(await readTableColumns(schemaName, "webhook_deliveries")).toContain("failure")
+        expect(await readTableColumns(schemaName, "webhook_deliveries")).not.toContain("error")
+      } finally {
+        await sql.end()
+      }
+    })
+  })
+
   test("recorded old checksums are rejected before schema mutation", async () => {
     await withStorage(false, async (storage, schemaName) => {
       await migrateStorage(storage)
@@ -353,6 +654,7 @@ describe("Postgres storage migrations", () => {
           "next_batch_ordinal",
           "next_row_offset",
           "input_exhausted",
+          "error",
         ])
       )
       expect(await readTableColumns(schemaName, "workflow_runs")).toEqual(
@@ -774,6 +1076,69 @@ describe("Postgres storage migrations", () => {
           id: "010-ai-usage-accounting-foundation",
           status: "applied",
           version: 10,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "011-sync-failure-record",
+          status: "applied",
+          version: 11,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "012-pipeline-failure-record",
+          status: "applied",
+          version: 12,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "013-workflow-failure-record",
+          status: "applied",
+          version: 13,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "014-agent-failure-record",
+          status: "applied",
+          version: 14,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "015-projection-failure-record",
+          status: "applied",
+          version: 15,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "016-webhook-run-failure-record",
+          status: "applied",
+          version: 16,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "017-action-failure-record",
+          status: "applied",
+          version: 17,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "018-ontology-outbox-failure-record",
+          status: "applied",
+          version: 18,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "019-webhook-delivery-failure-record",
+          status: "applied",
+          version: 19,
         },
       ])
     } finally {

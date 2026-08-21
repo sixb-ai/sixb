@@ -5,10 +5,18 @@ import {
   agentRunFinishedEvent,
   agentRunStreamId,
   agentRunStreamIdempotencyKey,
+  isAgentRunStreamEvent,
 } from "../src/agents/streams"
 import type { AgentRunRecord } from "../src/storage"
 
 const OCCURRED_AT = new Date("2026-01-02T03:04:05.000Z")
+const FAILURE = {
+  code: "internal.unexpected" as const,
+  message: "boom",
+  retryable: false,
+  at: "2026-01-02T03:04:04.000Z",
+  details: { agentId: "assistant", runId: "agt_run_1" },
+}
 
 function runRecord(overrides: Partial<AgentRunRecord> = {}): AgentRunRecord {
   return {
@@ -29,7 +37,7 @@ function runRecord(overrides: Partial<AgentRunRecord> = {}): AgentRunRecord {
 describe("agent run stream records", () => {
   test("builds the finished event from a terminal run record", () => {
     const event = agentRunFinishedEvent(
-      runRecord({ status: "failed", attempt: 2, finishReason: "error", error: "boom" }),
+      runRecord({ status: "failed", attempt: 2, finishReason: "error", error: FAILURE }),
       OCCURRED_AT
     )
 
@@ -43,9 +51,23 @@ describe("agent run stream records", () => {
       attempt: 2,
       status: "failed",
       finishReason: "error",
-      error: "boom",
+      error: FAILURE,
       occurredAt: "2026-01-02T03:04:05.000Z",
     })
+  })
+
+  test("validates the exact durable failure on a finished event", () => {
+    const event = agentRunFinishedEvent(
+      runRecord({ status: "failed", error: FAILURE }),
+      OCCURRED_AT
+    )
+
+    expect(isAgentRunStreamEvent(event)).toBe(true)
+    expect(isAgentRunStreamEvent({ ...event, error: FAILURE.message })).toBe(false)
+    expect(isAgentRunStreamEvent({ ...event, error: { ...FAILURE, retryable: true } })).toBe(false)
+    expect(
+      isAgentRunStreamEvent({ ...event, error: { ...FAILURE, code: "dataset.not_found" } })
+    ).toBe(false)
   })
 
   test("refuses to build a finished event for a non-terminal run", () => {

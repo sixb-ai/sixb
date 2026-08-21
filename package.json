@@ -44,6 +44,9 @@
     "ui:dev": "bun --filter @sixb/ui dev",
     "ui:add": "bun --filter @sixb/ui shadcn:add"
   },
+  "overrides": {
+    "@types/bun": "1.3.14"
+  },
   "devDependencies": {
     "@biomejs/biome": "2.4.6",
     "@types/bun": "latest",

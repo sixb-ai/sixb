@@ -1,5 +1,6 @@
 import type { ExecutionStorage } from "../executions"
 import { ActionRunError } from "./errors"
+import { parseActionRunFailure } from "./failure"
 import {
   actionRunPhaseRecordsEqual,
   actionSubjectsEqual,
@@ -11,6 +12,7 @@ import type {
   ActionRunEffectsRecord,
   ActionRunFailure,
   ActionRunParams,
+  ActionRunPhase,
   ActionRunRecord,
   ActionRunStorage,
   ActionRunWritebackRecord,
@@ -51,8 +53,13 @@ function normalizeSubject(subject: QueueActionRunInput["subject"]): QueueActionR
   return structuredClone(subject)
 }
 
-function normalizeError(error: ActionRunFailure | undefined): ActionRunFailure | undefined {
-  return error ? structuredClone(error) : undefined
+function normalizeError<TPhase extends ActionRunPhase>(
+  error: ActionRunFailure<TPhase>,
+  expectedPhase?: TPhase
+): ActionRunFailure<TPhase> {
+  return expectedPhase === undefined
+    ? (parseActionRunFailure(error) as ActionRunFailure<TPhase>)
+    : parseActionRunFailure(error, expectedPhase)
 }
 
 function normalizeWriteback(
@@ -70,7 +77,7 @@ function normalizeWriteback(
   return {
     status: "failed",
     completedAt,
-    error: normalizeError(input.error),
+    error: normalizeError(input.error, "writeback"),
   }
 }
 
@@ -88,7 +95,7 @@ function normalizeEffects(
   return {
     status: "failed",
     completedAt,
-    error: normalizeError(input.error),
+    error: normalizeError(input.error, "effects"),
   }
 }
 
@@ -312,9 +319,7 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
       }
 
       const phase =
-        input.status === "succeeded"
-          ? (input.phase ?? existing.phase)
-          : (input.phase ?? input.error?.phase ?? existing.phase)
+        input.status === "succeeded" ? (input.phase ?? existing.phase) : input.error.details.phase
 
       const base: ActionRunRecord = {
         ...existing,

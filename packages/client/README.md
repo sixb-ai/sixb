@@ -179,7 +179,7 @@ matching events. See `docs/client/events.md` for the full event builder and hook
 
 ```typescript
 import type { ObjectSummary, ObjectDetail, TelemetryHistory } from "@sixb/client/models"
-import { toObjectSummary, toObjectDetail, executeAction } from "@sixb/client/models"
+import { toObjectSummary, toObjectDetail } from "@sixb/client/models"
 ```
 
 The models module provides normalized types and adapter functions that transform raw API responses into UI-friendly shapes with merged telemetry properties, parsed actions, and computed fields.
@@ -190,4 +190,4 @@ The models module provides normalized types and adapter functions that transform
 |---|---|
 | `@sixb/client` | `client`, all generated SDK functions (`listObjects`, `getObject`, `upsertObject`, `requestAction`, `getActionRun`, `getTelemetryHistory`, etc.), terminal action wait helpers (`requestActionAndWait`, `waitForActionRun`), all generated types, and UI model types/adapters |
 | `@sixb/client/hooks` | TanStack Query `queryOptions` factories (`listObjectsOptions`, `getObjectOptions`, `getTelemetryHistoryOptions`, `telemetryHistoryQueryOptions`, `listRelationshipsOptions`), typed hooks (`useTelemetryHistoryQuery`, object query hooks, `useActionRunMutation`), object-query key/invalidation helpers, the `events.object(Type)` builder, and event hooks (`useEvents`, `useLatest`, `useLatestByObject`, `useInvalidateOnEvent`, `SixbEventsProvider`) |
-| `@sixb/client/models` | UI model types (`ObjectSummary`, `ObjectDetail`, `TelemetryHistory`, `RelationshipEdge`, etc.) and adapters (`toObjectSummary`, `toObjectDetail`, `toTelemetryHistoryWithRange`, `executeAction`) |
+| `@sixb/client/models` | UI model types (`ObjectSummary`, `ObjectDetail`, `TelemetryHistory`, `RelationshipEdge`, etc.) and adapters (`toObjectSummary`, `toObjectDetail`, `toTelemetryHistoryWithRange`) |

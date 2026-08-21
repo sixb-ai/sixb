@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import { QueueError } from "../queues/errors"
-import type { Queues } from "../queues/types"
+import type { PipelineQueueJobFailureCode, QueueJobFailure, Queues } from "../queues/types"
+
+const TERMINAL_FAILURE = {
+  code: "internal.unexpected",
+  retryable: false,
+  message: "boom",
+  at: "2026-01-01T00:00:00.000Z",
+  details: { pipelineId: "p-1" },
+} as const satisfies QueueJobFailure<PipelineQueueJobFailureCode>
 
 export interface QueueContractSuiteOptions {
   /** Factory that produces a fresh `Queues` instance for each test case. */
@@ -422,7 +430,6 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
             jobId: job!.id,
             leaseId: firstClaim!.leaseId,
             availableAt: retryAt,
-            error: { message: "try again" },
           })
           await Bun.sleep(retryRedeliveryMs + 30)
           const [secondClaim] = await queues.syncRuns.claim({
@@ -476,7 +483,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
             projectId: "project-a",
             jobId: job!.id,
             leaseId: claim!.leaseId,
-            error: { message: "boom" },
+            failure: TERMINAL_FAILURE,
           })
 
           const later = await queues.pipelines.claim({

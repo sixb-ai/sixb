@@ -1,3 +1,5 @@
+import type { SixbFailure } from "../../errors/types"
+import type { SyncRunFailureCode } from "../../storage/sync-runs/types"
 import type { EventEnvelope } from "../envelope"
 
 export interface SyncRunStartedEvent extends EventEnvelope {
@@ -21,6 +23,7 @@ export interface SyncRunFinishedEvent extends EventEnvelope {
     status: "succeeded" | "failed" | "cancelled"
     datasetId?: string
     versionId?: string
+    error?: SixbFailure<SyncRunFailureCode>
   }
 }
 

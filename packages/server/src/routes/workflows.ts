@@ -6,6 +6,7 @@ import {
   type WorkflowDefinition,
 } from "@sixb/core"
 import { publishAgentRunCancel } from "@sixb/core/internal/agents"
+import { createSixbError, toSixbFailure } from "@sixb/core/internal/errors"
 import type { Sixb, WorkflowRunView } from "@sixb/core/internal/request-execution"
 import {
   snapshotWorkflowInterventionResponse,
@@ -18,6 +19,7 @@ import type {
   WorkflowRunRecord,
   WorkflowRunStorage,
 } from "@sixb/core/storage"
+import { AGENT_RUN_FAILURE_CODES, WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { z } from "zod"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
@@ -181,6 +183,49 @@ function principalForExecution(sixb: Sixb<readonly OntologySource[]>): Principal
   return sixb.execution.requestedBy ?? SYSTEM_PRINCIPAL
 }
 
+function toWorkflowCancellationFailure(input: {
+  readonly message: string
+  readonly at: Date
+  readonly workflowId: string
+  readonly runId: string
+  readonly nodeRunId?: string
+}) {
+  const details: Readonly<Record<string, string>> = input.nodeRunId
+    ? {
+        workflowId: input.workflowId,
+        workflowRunId: input.runId,
+        nodeRunId: input.nodeRunId,
+      }
+    : { workflowId: input.workflowId, workflowRunId: input.runId }
+  return toSixbFailure(createSixbError("runtime.cancelled", input.message, { details }), {
+    allowedCodes: WORKFLOW_RUN_FAILURE_CODES,
+    at: input.at,
+  })
+}
+
+function toAgentCancellationFailure(input: {
+  readonly message: string
+  readonly at: Date
+  readonly agentId: string
+  readonly workflowId: string
+  readonly runId: string
+  readonly nodeRunId: string
+}) {
+  return toSixbFailure(
+    createSixbError("runtime.cancelled", input.message, {
+      details: {
+        agentId: input.agentId,
+        workflowId: input.workflowId,
+        workflowRunId: input.runId,
+        nodeRunId: input.nodeRunId,
+      },
+    }),
+    {
+      allowedCodes: AGENT_RUN_FAILURE_CODES,
+      at: input.at,
+    }
+  )
+}
 function serializeWorkflowIntervention(intervention: WorkflowInterventionRecord) {
   return {
     id: intervention.id,
@@ -796,6 +841,7 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
 
           CancelWorkflowInterventionBodySchema.parse(body ?? {})
           const cancelledAt = new Date()
+          const cancellationMessage = "Workflow intervention cancelled."
           const { cancelled, cancelledNode, cancelledRun } = await host.storage.transaction(
             async (tx) => {
               if (!tx.workflowInterventions || !tx.workflowRuns) {
@@ -812,14 +858,25 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
                 id: intervention.nodeRunId,
                 status: "cancelled",
                 finishedAt: cancelledAt,
-                error: "Workflow intervention cancelled.",
+                error: toWorkflowCancellationFailure({
+                  message: cancellationMessage,
+                  at: cancelledAt,
+                  workflowId: intervention.workflowId,
+                  runId: intervention.workflowRunId,
+                  nodeRunId: intervention.nodeRunId,
+                }),
               })
               const cancelledRun = await tx.workflowRuns.finish({
                 projectId: host.id,
                 id: intervention.workflowRunId,
                 status: "cancelled",
                 finishedAt: cancelledAt,
-                error: "Workflow intervention cancelled.",
+                error: toWorkflowCancellationFailure({
+                  message: cancellationMessage,
+                  at: cancelledAt,
+                  workflowId: intervention.workflowId,
+                  runId: intervention.workflowRunId,
+                }),
               })
               return { cancelled, cancelledNode, cancelledRun }
             }
@@ -1057,7 +1114,7 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
           }
 
           const cancelledAt = new Date()
-          const cancellationError = "Workflow run cancelled."
+          const cancellationMessage = "Workflow run cancelled."
           const result = await host.storage.transaction(async (tx) => {
             const runs = tx.workflowRuns
             if (!runs) {
@@ -1081,7 +1138,14 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
                   projectId: host.id,
                   nodeRunId: active.id,
                   completedAt: cancelledAt,
-                  error: cancellationError,
+                  error: toAgentCancellationFailure({
+                    message: cancellationMessage,
+                    at: cancelledAt,
+                    agentId: execution.agentId,
+                    workflowId: run.workflowId,
+                    runId: run.id,
+                    nodeRunId: active.id,
+                  }),
                 })
               }
             }
@@ -1109,7 +1173,13 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
                 id: active.id,
                 status: "cancelled",
                 finishedAt: cancelledAt,
-                error: cancellationError,
+                error: toWorkflowCancellationFailure({
+                  message: cancellationMessage,
+                  at: cancelledAt,
+                  workflowId: run.workflowId,
+                  runId: run.id,
+                  nodeRunId: active.id,
+                }),
                 executionToken: run.execution?.token,
               })
             }
@@ -1118,7 +1188,12 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
               id: run.id,
               status: "cancelled",
               finishedAt: cancelledAt,
-              error: cancellationError,
+              error: toWorkflowCancellationFailure({
+                message: cancellationMessage,
+                at: cancelledAt,
+                workflowId: run.workflowId,
+                runId: run.id,
+              }),
               executionToken: run.execution?.token,
             })
             return { run: cancelledRun, node: cancelledNode }

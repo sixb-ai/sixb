@@ -1,8 +1,9 @@
 import type { JsonValue } from "@sixb/core"
 import { isObjectActionDefinition } from "@sixb/core"
 import type { ActionEditCommitResult } from "@sixb/core/internal/actions"
+import { reportActionPhaseFailure } from "@sixb/core/internal/error-reporting"
 import type { ActionRunRecord } from "@sixb/core/storage"
-import { toActionRunFailure } from "../normalize"
+import { toActionRunFailure, translateActionPhaseError } from "../normalize"
 import { type BasePhaseContext, requireObjectSubject, toActionRuntimeFacade } from "./context"
 import type { LoadedObjectTarget, PhaseExecutionBase, UpdateActiveRun } from "./types"
 
@@ -32,7 +33,10 @@ export async function runEffectsPhase(
       const effects = input.action.phases.effects
       await effects({
         ...input.baseContext,
-        subject: requireObjectSubject(input.run.subject, input.action.id),
+        subject: requireObjectSubject(input.run.subject, {
+          actionId: input.action.id,
+          runId: input.run.id,
+        }),
         sixb: toActionRuntimeFacade(input.runtime),
         writeback: input.writeback,
         commit: input.commit,
@@ -46,23 +50,41 @@ export async function runEffectsPhase(
         commit: input.commit,
       })
     }
-
-    run = await input.runtime.actionRunsStorage.recordEffects({
-      projectId: input.runtime.id,
-      id: input.run.id,
-      status: "succeeded",
-    })
-    input.updateActiveRun(run)
-    return run
   } catch (error) {
-    const failure = toActionRunFailure(error, "effects")
+    const completedAt = new Date()
+    const phaseError = translateActionPhaseError(error, "effects", {
+      actionId: input.action.id,
+      runId: input.run.id,
+      signal: input.signal,
+    })
+    const failure = toActionRunFailure(phaseError, "effects", {
+      actionId: input.action.id,
+      runId: input.run.id,
+      at: completedAt,
+    })
     run = await input.runtime.actionRunsStorage.recordEffects({
       projectId: input.runtime.id,
       id: input.run.id,
       status: "failed",
+      completedAt,
       error: failure,
     })
     input.updateActiveRun(run)
+    reportActionPhaseFailure(input.runtime.errorReporterHost, error, {
+      projectId: input.runtime.id,
+      actionId: input.action.id,
+      runId: input.run.id,
+      phase: "effects",
+      failure,
+    })
     return run
   }
+
+  run = await input.runtime.actionRunsStorage.recordEffects({
+    projectId: input.runtime.id,
+    id: input.run.id,
+    status: "succeeded",
+  })
+  input.updateActiveRun(run)
+  return run
 }

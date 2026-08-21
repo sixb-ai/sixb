@@ -5,12 +5,13 @@ import type {
   PipelineStepInput,
   PipelineStepRunContext,
 } from "@sixb/core"
+import { createSixbError } from "@sixb/core/internal/errors"
 import type {
   DatasetVersion,
   DatasetVersionRef,
   ReadDatasetRowsInput,
 } from "@sixb/core/lake-storage"
-import { PipelineWorkerError, requireRegisteredDataset } from "./errors"
+import { requireRegisteredDataset } from "./errors"
 import type { PipelineWorkerContext } from "./types"
 
 export interface ResolvedStepInput {
@@ -24,14 +25,16 @@ export async function resolveStepInputs(input: {
   readonly runtime: PipelineWorkerContext
   readonly pipeline: PipelineDefinition
   readonly step: PipelineStepDefinition
+  readonly pipelineRunId: string
 }): Promise<readonly ResolvedStepInput[]> {
-  const { runtime, pipeline, step } = input
+  const { runtime, pipeline, step, pipelineRunId } = input
   const resolved: ResolvedStepInput[] = []
 
   for (const [name, declaredDataset] of Object.entries(step.inputs)) {
     const dataset = requireRegisteredDataset({
       dataset: runtime.datasets.getById(declaredDataset.id),
       pipelineId: pipeline.id,
+      pipelineRunId,
       stepId: step.id,
       role: "input",
       name,
@@ -40,8 +43,17 @@ export async function resolveStepInputs(input: {
 
     const version = await runtime.lakeStorage.getLatestVersion(dataset.id)
     if (!version) {
-      throw new PipelineWorkerError(
-        `[SixbPipelineWorker] Pipeline '${pipeline.id}' step '${step.id}' input '${name}' dataset '${dataset.id}' has no committed version.`
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbPipelineWorker] Pipeline '${pipeline.id}' step '${step.id}' input '${name}' dataset '${dataset.id}' has no committed version.`,
+        {
+          details: {
+            pipelineId: pipeline.id,
+            pipelineRunId,
+            stepId: step.id,
+            datasetId: dataset.id,
+          },
+        }
       )
     }
 

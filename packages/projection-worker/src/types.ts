@@ -1,7 +1,13 @@
-import type { LakeStorage, OntologyDefinitionCatalog, SixbDefinitions } from "@sixb/core"
+import type {
+  LakeStorage,
+  OntologyDefinitionCatalog,
+  SixbDefinitions,
+  SixbFailure,
+} from "@sixb/core"
 import type { ProjectionMaterializationIdentity } from "@sixb/core/internal/materialization"
 import type {
   ProjectionRunClaim,
+  ProjectionRunFailureCode,
   ProjectionRunRecord,
   ProjectionRunStorage,
 } from "@sixb/core/storage"
@@ -36,7 +42,11 @@ export interface RunProjectionJobInput {
   readonly onRunFailed?: ProjectionRunFailedHandler
 }
 
-export type ProjectionRunFailedHandler = (error: unknown, run: ProjectionRunRecord) => void
+export type ProjectionRunFailedHandler = (
+  error: unknown,
+  run: ProjectionRunRecord,
+  failure: SixbFailure<ProjectionRunFailureCode>
+) => void
 
 export interface ProjectionJobResult {
   readonly run: ProjectionRunRecord

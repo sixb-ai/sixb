@@ -551,9 +551,15 @@ describe("SixbServer HTTP contract", () => {
       status: "failed",
       completedAt: new Date("2026-02-18T09:12:04.000Z"),
       error: {
-        name: "NotificationError",
-        message: "Notification failed",
-        phase: "effects",
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        retryable: false,
+        at: "2026-02-18T09:12:04.000Z",
+        details: {
+          actionId: "syncDeviceLabel",
+          runId: "act_audit_previous",
+          phase: "effects",
+        },
       },
     })
     await sixb.storage.actionRuns!.finish({
@@ -728,7 +734,10 @@ describe("SixbServer HTTP contract", () => {
 
       const missingDatasetResponse = await fetch(`${baseUrl}/api/datasets/missing`)
       expect(missingDatasetResponse.status).toBe(404)
-      expect(await missingDatasetResponse.json()).toEqual({ error: "Dataset not found" })
+      expect(await missingDatasetResponse.json()).toEqual({
+        error: "Dataset not found",
+        code: "dataset.not_found",
+      })
 
       const versionsResponse = await fetch(
         `${baseUrl}/api/datasets/raw.github.events/versions?limit=5`
@@ -777,6 +786,7 @@ describe("SixbServer HTTP contract", () => {
       expect(uncommittedRowsResponse.status).toBe(404)
       expect(await uncommittedRowsResponse.json()).toEqual({
         error: "Dataset version not found",
+        code: "dataset.version_not_found",
       })
 
       const invalidRowsResponse = await fetch(
@@ -1856,7 +1866,15 @@ describe("SixbServer HTTP contract", () => {
       expect(cancelledRun).toMatchObject({
         id: pending.workflowRunId,
         status: "cancelled",
-        error: "Workflow intervention cancelled.",
+        error: {
+          code: "runtime.cancelled",
+          message: "Execution was cancelled.",
+          retryable: false,
+          details: {
+            workflowId: "review-device-health-workflow",
+            workflowRunId: pending.workflowRunId,
+          },
+        },
       })
 
       const cancelledNode = await sixb.storage.workflowRuns!.nodes.getById({
@@ -1866,7 +1884,16 @@ describe("SixbServer HTTP contract", () => {
       expect(cancelledNode).toMatchObject({
         id: pending.nodeRunId,
         status: "cancelled",
-        error: "Workflow intervention cancelled.",
+        error: {
+          code: "runtime.cancelled",
+          message: "Execution was cancelled.",
+          retryable: false,
+          details: {
+            workflowId: "review-device-health-workflow",
+            workflowRunId: pending.workflowRunId,
+            nodeRunId: pending.nodeRunId,
+          },
+        },
       })
 
       const workflowEvents = await events.read({
@@ -1890,6 +1917,12 @@ describe("SixbServer HTTP contract", () => {
           nodeRunId: pending.nodeRunId,
           pendingInterventionId: pending.id,
         }),
+      })
+      expect(workflowEvents[1]).toMatchObject({
+        payload: expect.objectContaining({ error: cancelledNode?.error }),
+      })
+      expect(workflowEvents[2]).toMatchObject({
+        payload: expect.objectContaining({ error: cancelledRun?.error }),
       })
     })
   })
@@ -1979,6 +2012,29 @@ describe("SixbServer HTTP contract", () => {
           },
         ],
       })
+
+      const cancelledExecutionResponse = await fetch(
+        `${baseUrl}/api/workflow-runs/${runId}/nodes/resolveDevice/agent-execution`
+      )
+      expect(cancelledExecutionResponse.status).toBe(200)
+      const cancelledExecution = (await cancelledExecutionResponse.json()) as {
+        completedAt: string
+        error: { at: string }
+      }
+      expect(cancelledExecution).toMatchObject({
+        status: "cancelled",
+        error: {
+          code: "runtime.cancelled",
+          message: "Execution was cancelled.",
+          details: {
+            agentId: "device-resolver",
+            workflowId: "review-device-health-workflow",
+            workflowRunId: runId,
+            nodeRunId,
+          },
+        },
+      })
+      expect(cancelledExecution.error.at).toBe(cancelledExecution.completedAt)
     })
   })
 
@@ -2127,9 +2183,15 @@ describe("SixbServer HTTP contract", () => {
           status: "failed",
           completedAt: "2026-02-18T09:12:04.000Z",
           error: {
-            name: "NotificationError",
-            message: "Notification failed",
-            phase: "effects",
+            code: "internal.unexpected",
+            message: "An unexpected internal error occurred.",
+            retryable: false,
+            at: "2026-02-18T09:12:04.000Z",
+            details: {
+              actionId: "syncDeviceLabel",
+              runId: "act_audit_previous",
+              phase: "effects",
+            },
           },
         },
       })

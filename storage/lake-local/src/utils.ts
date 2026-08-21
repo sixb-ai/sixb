@@ -15,12 +15,6 @@ export function assertDatasetId(datasetId: string): void {
   }
 }
 
-export function assertRow(row: DatasetRow): void {
-  if (!row || typeof row !== "object" || Array.isArray(row)) {
-    throw new LakeStorageError("[LakeLocal] Dataset rows must be plain objects")
-  }
-}
-
 export function selectColumns(row: DatasetRow, columns?: readonly string[]): DatasetRow {
   if (!columns || columns.length === 0) {
     return row

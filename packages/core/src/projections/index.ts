@@ -8,7 +8,6 @@ export {
   isObjectProjectionDefinition,
   isProjectionDefinition,
   isTelemetryProjectionDefinition,
-  projectionKindOf,
 } from "./builders"
 // ── Errors ──────────────────────────────────────────────────
 export { ProjectionValidationError } from "./errors"
