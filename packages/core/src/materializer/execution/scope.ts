@@ -1,8 +1,5 @@
 import type { EventActor } from "../../events/envelope"
-import {
-  type ResolvedRuntimeAuthorization,
-  resolveExecutionScopeAuthorization,
-} from "../../execution/authorization"
+import { resolveExecutionScopeAuthorization } from "../../execution/authorization"
 import { ensureExecutionRecord, executionRecordInputFromRuntime } from "../../execution/durable"
 import type { ExecutionScope, TrustedPrimitiveKind } from "../../execution/types"
 import {
@@ -29,14 +26,7 @@ export function prepareMaterializerExecution(
   projectId: string,
   scope: ExecutionScope
 ): MaterializerExecution {
-  let authorization: Exclude<ResolvedRuntimeAuthorization, { readonly type: "denied" }>
-  try {
-    authorization = resolveExecutionScopeAuthorization(projectId, scope)
-  } catch (error) {
-    throw new MaterializationValidationError(
-      error instanceof Error ? error.message : "Materializer execution scope is invalid."
-    )
-  }
+  const authorization = resolveExecutionScopeAuthorization(projectId, scope)
 
   const base = {
     scope,
