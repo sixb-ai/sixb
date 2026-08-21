@@ -564,7 +564,7 @@ describe("Postgres storage migrations", () => {
   })
 
   test("webhook delivery failure migration replaces legacy diagnostics with a safe failure", async () => {
-    await withStorage(false, async (storage, schemaName) => {
+    await withStorage(false, async (_storage, schemaName) => {
       const failureMigrationIndex = postgresStorageMigrations.steps.findIndex(
         (migration) => migration.id === "019-webhook-delivery-failure-record"
       )
@@ -602,7 +602,18 @@ describe("Postgres storage migrations", () => {
             )
         `)
 
-        await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
+        // Stop at 019: later authority migrations deliberately reject these legacy deliveries.
+        const throughFailureRecord = defineMigrations({
+          adapterId: POSTGRES_STORAGE_ADAPTER_ID,
+          steps: postgresStorageMigrations.steps.slice(0, failureMigrationIndex + 1),
+        })
+        await expect(
+          createPostgresMigrator({
+            sql,
+            schemaName,
+            migrations: throughFailureRecord,
+          }).migrate()
+        ).resolves.toMatchObject({ status: "migrated" })
 
         const rows = await sql.unsafe<
           Array<{ readonly idempotency_key: string; readonly failure: unknown | null }>
