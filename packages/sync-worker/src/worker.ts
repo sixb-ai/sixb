@@ -5,6 +5,7 @@ import {
   bindDurablePrimitiveExecution,
   type PrimitiveExecutionHost,
 } from "@sixb/core/internal/primitive-execution"
+import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type { ClaimedQueueJob, SyncRunRequestedQueueJob } from "@sixb/core/queues"
@@ -106,6 +107,19 @@ export class SyncWorker extends QueueWorker<
       if (error instanceof SyncRunAlreadyStartedError) return
       throw error
     }
+  }
+
+  protected override async onExecutionError(
+    claimed: ClaimedQueueJob<SyncRunRequestedQueueJob>,
+    _error: unknown
+  ): Promise<QueueWorkerFailureDecision<(typeof SYNC_RUN_FAILURE_CODES)[number]>> {
+    const run = await this.host.storage.syncRuns?.getById({
+      projectId: this.host.id,
+      id: claimed.job.payload.runId,
+    })
+    return run?.status === "failed" && run.error
+      ? { kind: "fail", failure: run.error }
+      : { kind: "fail" }
   }
 }
 

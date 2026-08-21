@@ -101,8 +101,10 @@ describe("pipeline routes", () => {
             {
               id: "run-customers",
               projectId: "my-app",
+              executionId: "exec-run-customers",
               pipelineId: "customers",
               status: "failed",
+              queuedAt: new Date("2026-05-08T09:59:59.000Z"),
               startedAt: new Date("2026-05-08T10:00:00.000Z"),
               finishedAt: new Date("2026-05-08T10:00:01.000Z"),
               error: FAILURE,
@@ -130,8 +132,10 @@ describe("pipeline routes", () => {
         return {
           id: "run-customers",
           projectId: "my-app",
+          executionId: "exec-run-customers",
           pipelineId: "customers",
           status: "failed",
+          queuedAt: new Date("2026-05-08T09:59:59.000Z"),
           startedAt: new Date("2026-05-08T10:00:00.000Z"),
           finishedAt: new Date("2026-05-08T10:00:01.000Z"),
           error: FAILURE,

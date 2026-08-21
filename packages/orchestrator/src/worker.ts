@@ -247,8 +247,10 @@ async function enqueueDirectJob(
   switch (item.queue) {
     case "syncRuns": {
       if (sourceEvent.type !== "schedule.triggered") {
-        throw new OrchestratorError(
-          `Direct Sync route received unsupported event '${sourceEvent.type}'.`
+        throw createSixbError(
+          "internal.unexpected",
+          `[SixbOrchestrator] Direct Sync route received unsupported event '${sourceEvent.type}'.`,
+          { details: { projectId: options.projectId, sourceEventType: sourceEvent.type } }
         )
       }
       const scheduleId = sourceEvent.payload.scheduleId
@@ -263,8 +265,10 @@ async function enqueueDirectJob(
     }
     case "pipelines": {
       if (sourceEvent.type !== "schedule.triggered") {
-        throw new OrchestratorError(
-          `Direct Pipeline route received unsupported event '${sourceEvent.type}'.`
+        throw createSixbError(
+          "internal.unexpected",
+          `[SixbOrchestrator] Direct Pipeline route received unsupported event '${sourceEvent.type}'.`,
+          { details: { projectId: options.projectId, sourceEventType: sourceEvent.type } }
         )
       }
       const scheduleId = sourceEvent.payload.scheduleId
