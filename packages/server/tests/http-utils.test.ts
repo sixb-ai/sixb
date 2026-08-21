@@ -30,6 +30,24 @@ describe("handleRouteError", () => {
     })
   })
 
+  test("maps shared access codes without depending on their message", () => {
+    const cases = [
+      ["share.access_unavailable", 401],
+      ["share.grant_not_found", 404],
+      ["share.type_not_found", 404],
+    ] as const
+
+    for (const [code, status] of cases) {
+      const set: { status?: number | string } = {}
+
+      expect(handleRouteError(createSixbError(code, "Safe message"), set)).toEqual({
+        error: "Safe message",
+        code,
+      })
+      expect(set.status).toBe(status)
+    }
+  })
+
   test("does not infer a status from legacy error messages", () => {
     for (const message of ["Unknown property", "Resource not found"]) {
       const set: { status?: number | string } = {}

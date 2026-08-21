@@ -74,6 +74,18 @@ export const SIXB_ERROR_DEFINITIONS = {
     publicMessage: "Execution was cancelled.",
     retryable: false,
   },
+  "share.access_unavailable": {
+    publicMessage: "Shared access is unavailable.",
+    retryable: false,
+  },
+  "share.grant_not_found": {
+    publicMessage: "Shared access grant not found.",
+    retryable: false,
+  },
+  "share.type_not_found": {
+    publicMessage: "Share type not found.",
+    retryable: false,
+  },
   "sync.execution_failed": {
     publicMessage: "Sync execution failed.",
     retryable: false,

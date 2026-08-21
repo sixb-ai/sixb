@@ -191,4 +191,66 @@ describe("share grant routes", () => {
       "Registered share types require an allowed browser origin for the 'app' audience"
     )
   })
+
+  test("exposes stable not-found codes for share types and grants", async () => {
+    const { app, storage } = await createFixture()
+    const session = await seedSession(storage, [publishers.id])
+
+    const unknownType = await app.fetch(
+      new Request("http://api.localhost/api/share-grants", {
+        method: "POST",
+        headers: session.write,
+        body: JSON.stringify({
+          shareTypeId: "unknown-report",
+          target: { objectTypeId: Report.id, primaryId: "report-1" },
+          expiresAt: "2098-01-01T00:00:00.000Z",
+        }),
+      })
+    )
+    expect(unknownType.status).toBe(404)
+    expect(await unknownType.json()).toEqual({
+      error: "Share type not found.",
+      code: "share.type_not_found",
+    })
+
+    const unknownGrant = await app.fetch(
+      new Request("http://api.localhost/api/share-grants/shr_missing", {
+        method: "DELETE",
+        headers: session.write,
+      })
+    )
+    expect(unknownGrant.status).toBe(404)
+    expect(await unknownGrant.json()).toEqual({
+      error: "Shared access grant not found.",
+      code: "share.grant_not_found",
+    })
+  })
+
+  test("does not expose unexpected storage failures", async () => {
+    const { app, storage } = await createFixture()
+    const session = await seedSession(storage, [publishers.id])
+    Object.defineProperty(storage.shareGrants, "create", {
+      value: async () => {
+        throw new Error("postgres://private-host/provider-secret")
+      },
+    })
+
+    const response = await app.fetch(
+      new Request("http://api.localhost/api/share-grants", {
+        method: "POST",
+        headers: session.write,
+        body: JSON.stringify({
+          shareTypeId: PublishedReport.id,
+          target: { objectTypeId: Report.id, primaryId: "report-1" },
+          expiresAt: "2098-01-01T00:00:00.000Z",
+        }),
+      })
+    )
+
+    expect(response.status).toBe(500)
+    expect(await response.json()).toEqual({
+      error: "An unexpected internal error occurred.",
+      code: "internal.unexpected",
+    })
+  })
 })

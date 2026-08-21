@@ -2,10 +2,9 @@ import {
   AuthorizationError,
   OntologyNotFoundError,
   OntologyValidationError,
-  ShareError,
   type SixbErrorCode,
 } from "@sixb/core"
-import { isSixbError } from "@sixb/core/internal/errors"
+import { createSixbError, isSixbError } from "@sixb/core/internal/errors"
 import {
   FileUploadSessionError,
   type FileUploadSessionErrorReason,
@@ -17,6 +16,9 @@ import { RequestBodyTooLargeError } from "./request-body"
 const HTTP_STATUS_BY_ERROR_CODE: Partial<Record<SixbErrorCode, number>> = {
   "dataset.not_found": 404,
   "dataset.version_not_found": 404,
+  "share.access_unavailable": 401,
+  "share.grant_not_found": 404,
+  "share.type_not_found": 404,
 }
 
 export function toIsoString(value: Date): string {
@@ -93,18 +95,6 @@ export function handleRouteError(
     return { error: error.message }
   }
 
-  if (error instanceof ShareError) {
-    set.status =
-      error.reason === "unauthenticated"
-        ? 401
-        : error.reason === "not_found"
-          ? 404
-          : error.reason === "storage_unavailable"
-            ? 501
-            : 400
-    return { error: error.message }
-  }
-
   // Before the OntologyValidationError branch: it is a subclass, and it is the half that is a
   // missing resource rather than bad input.
   if (error instanceof OntologyNotFoundError || error instanceof ObjectNotFoundError) {
@@ -122,6 +112,13 @@ export function handleRouteError(
   const message = error instanceof Error ? error.message : String(error)
   set.status = 400
   return { error: message }
+}
+
+/** Keeps native diagnostics private while exposing one stable HTTP-safe internal failure. */
+export function createUnexpectedRouteError(error: unknown) {
+  return createSixbError("internal.unexpected", "An unexpected internal error occurred.", {
+    cause: error,
+  })
 }
 
 function fileUploadSessionErrorStatus(reason: FileUploadSessionErrorReason): number {

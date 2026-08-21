@@ -1,9 +1,17 @@
-import type { SharedAccessGrant, SixbHostView } from "@sixb/core"
+import {
+  AuthorizationError,
+  type SharedAccessGrant,
+  ShareError,
+  type SixbHostView,
+} from "@sixb/core"
+import { createSixbError } from "@sixb/core/internal/errors"
+import { ObjectNotFoundError } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
+import { z } from "zod"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
-import { ErrorResponseSchema } from "../schemas/common"
+import { codedErrorResponseSchema, ErrorResponseSchema } from "../schemas/common"
 import {
   IssueSharedAccessGrantBodySchema,
   IssueSharedAccessGrantResponseSchema,
@@ -12,7 +20,27 @@ import {
   SharedAccessGrantIdParamsSchema,
   SharedAccessGrantSchema,
 } from "../schemas/share-grants"
-import { handleRouteError, toIsoString, unconfiguredStorageResponse } from "../utils/http"
+import {
+  createUnexpectedRouteError,
+  handleRouteError,
+  toIsoString,
+  unconfiguredStorageResponse,
+} from "../utils/http"
+
+const ShareTypeNotFoundErrorResponseSchema = codedErrorResponseSchema(["share.type_not_found"])
+const ShareGrantNotFoundErrorResponseSchema = codedErrorResponseSchema([
+  "share.grant_not_found",
+  "share.type_not_found",
+])
+const InternalErrorResponseSchema = codedErrorResponseSchema(["internal.unexpected"])
+const ShareTypeOrTargetNotFoundErrorResponseSchema = z.union([
+  ShareTypeNotFoundErrorResponseSchema,
+  ErrorResponseSchema,
+])
+const ShareGrantOrTargetNotFoundErrorResponseSchema = z.union([
+  ShareGrantNotFoundErrorResponseSchema,
+  ErrorResponseSchema,
+])
 
 export interface ShareGrantRouteOptions {
   readonly sharedApplicationOrigin: string | null
@@ -56,7 +84,7 @@ export function registerShareGrantRoutes(
             ),
           })
         } catch (error) {
-          return handleRouteError(error, set)
+          return handleShareGrantRouteError(error, set)
         }
       },
       {
@@ -66,7 +94,8 @@ export function registerShareGrantRoutes(
           400: ErrorResponseSchema,
           401: ErrorResponseSchema,
           403: ErrorResponseSchema,
-          404: ErrorResponseSchema,
+          404: ShareTypeOrTargetNotFoundErrorResponseSchema,
+          500: InternalErrorResponseSchema,
           501: ErrorResponseSchema,
           503: ErrorResponseSchema,
         },
@@ -97,7 +126,7 @@ export function registerShareGrantRoutes(
           })
           return ListSharedAccessGrantsResponseSchema.parse({ grants: grants.map(serializeGrant) })
         } catch (error) {
-          return handleRouteError(error, set)
+          return handleShareGrantRouteError(error, set)
         }
       },
       {
@@ -107,7 +136,8 @@ export function registerShareGrantRoutes(
           400: ErrorResponseSchema,
           401: ErrorResponseSchema,
           403: ErrorResponseSchema,
-          404: ErrorResponseSchema,
+          404: ShareTypeOrTargetNotFoundErrorResponseSchema,
+          500: InternalErrorResponseSchema,
           501: ErrorResponseSchema,
         },
         detail: {
@@ -130,12 +160,16 @@ export function registerShareGrantRoutes(
           const sixb = requireRequestSixb(context)
           const grant = await sixb.shares.revoke(params.grantId)
           if (!grant) {
-            set.status = 404
-            return { error: "Shared access grant not found" }
+            return handleRouteError(
+              createSixbError("share.grant_not_found", "Shared access grant not found.", {
+                details: { grantId: params.grantId },
+              }),
+              set
+            )
           }
           return SharedAccessGrantSchema.parse(serializeGrant(grant))
         } catch (error) {
-          return handleRouteError(error, set)
+          return handleShareGrantRouteError(error, set)
         }
       },
       {
@@ -145,7 +179,8 @@ export function registerShareGrantRoutes(
           400: ErrorResponseSchema,
           401: ErrorResponseSchema,
           403: ErrorResponseSchema,
-          404: ErrorResponseSchema,
+          404: ShareGrantOrTargetNotFoundErrorResponseSchema,
+          500: InternalErrorResponseSchema,
           501: ErrorResponseSchema,
         },
         detail: {
@@ -156,6 +191,35 @@ export function registerShareGrantRoutes(
         },
       }
     )
+}
+
+function handleShareGrantRouteError(error: unknown, set: { status?: number | string }) {
+  if (error instanceof ShareError) {
+    switch (error.reason) {
+      case "not_found":
+        return handleRouteError(
+          createSixbError("share.type_not_found", "Share type not found.", { cause: error }),
+          set
+        )
+      case "invalid_input":
+        set.status = 400
+        return { error: error.message }
+      case "unauthenticated":
+        set.status = 401
+        return { error: error.message }
+      case "storage_unavailable":
+        set.status = 501
+        return { error: error.message }
+      case "invalid_definition":
+        return handleRouteError(createUnexpectedRouteError(error), set)
+    }
+  }
+
+  if (error instanceof AuthorizationError || error instanceof ObjectNotFoundError) {
+    return handleRouteError(error, set)
+  }
+
+  return handleRouteError(createUnexpectedRouteError(error), set)
 }
 
 function serializeGrant(grant: SharedAccessGrant) {

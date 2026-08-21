@@ -10237,8 +10237,26 @@ export type ListSharedAccessGrantsErrors = {
   /**
    * Response for status 404
    */
-  404: {
+  404:
+    | {
+        error: string
+        /**
+         * Stable machine-readable failure code for programmatic handling.
+         */
+        code: "share.type_not_found"
+      }
+    | {
+        error: string
+      }
+  /**
+   * Response for status 500
+   */
+  500: {
     error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "internal.unexpected"
   }
   /**
    * Response for status 501
@@ -10327,8 +10345,26 @@ export type IssueSharedAccessGrantErrors = {
   /**
    * Response for status 404
    */
-  404: {
+  404:
+    | {
+        error: string
+        /**
+         * Stable machine-readable failure code for programmatic handling.
+         */
+        code: "share.type_not_found"
+      }
+    | {
+        error: string
+      }
+  /**
+   * Response for status 500
+   */
+  500: {
     error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "internal.unexpected"
   }
   /**
    * Response for status 501
@@ -10419,8 +10455,26 @@ export type RevokeSharedAccessGrantErrors = {
   /**
    * Response for status 404
    */
-  404: {
+  404:
+    | {
+        error: string
+        /**
+         * Stable machine-readable failure code for programmatic handling.
+         */
+        code: "share.grant_not_found" | "share.type_not_found"
+      }
+    | {
+        error: string
+      }
+  /**
+   * Response for status 500
+   */
+  500: {
     error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "internal.unexpected"
   }
   /**
    * Response for status 501
