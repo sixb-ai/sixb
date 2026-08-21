@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { migrateStorage, type Storage } from "@sixb/core"
 import { StorageTransactionError } from "@sixb/core/storage"
-import { queueTestActionRun, startTestSyncRun } from "@sixb/core/testing"
+import { queueTestActionRun, startTestSyncRun, startTestWebhookRun } from "@sixb/core/testing"
 import { SqliteStorage } from "../src"
 import { closeSqliteStoreConnection, openSqliteStoreConnection } from "../src/transactions"
 
@@ -90,10 +90,10 @@ describe("SqliteStorage.transaction", () => {
   test("rolls back writes across every mutated table when the transaction fails", async () => {
     await expect(
       storage.transaction(async (tx) => {
-        const runs = requireTransactionalRunStores(tx)
+        requireTransactionalRunStores(tx)
         await queueTestActionRun(tx, actionRunInput("run_rollback"))
         await startTestSyncRun(tx, syncRunInput("sync_rollback"))
-        await runs.webhookRuns.start(webhookRunInput("webhook_rollback"))
+        await startTestWebhookRun(tx, webhookRunInput("webhook_rollback"))
 
         throw new Error("boom")
       })
@@ -240,14 +240,9 @@ function actionRunInput(id: string) {
   }
 }
 
-function requireTransactionalRunStores(tx: Storage) {
+function requireTransactionalRunStores(tx: Storage): void {
   if (!tx.actionRuns || !tx.syncRuns || !tx.webhookRuns) {
     throw new Error("[test] expected transaction storage to expose all run stores")
-  }
-  return {
-    actionRuns: tx.actionRuns,
-    syncRuns: tx.syncRuns,
-    webhookRuns: tx.webhookRuns,
   }
 }
 
@@ -270,6 +265,8 @@ function webhookRunInput(id: string) {
     webhookId: "payments",
     method: "POST",
     route: "/webhooks/stripe/payments",
+    requestBodyBytes: 2,
+    requestBodySha256: "0".repeat(64),
     startedAt: new Date("2026-06-17T10:00:00.000Z"),
   }
 }

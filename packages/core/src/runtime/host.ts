@@ -169,7 +169,7 @@ export class SixbHost<
     validateAuthStrategySecurityReferences(this.auth.getStrategy(), definitions.security)
     const connectors = definitions.connectors.list()
     this.connectorService = new ConnectorService(this.projectId, connectors)
-    assertWebhookDeliveryStorage(connectors, this.storage)
+    assertWebhookRunStorage(connectors, this.storage)
     this.webhookRegistry = new WebhookRegistry({ connectors })
 
     const materializer = createOntologyMaterializer({
@@ -323,23 +323,19 @@ function validateAuthStrategySecurityReferences(
   }
 }
 
-function assertWebhookDeliveryStorage(
+function assertWebhookRunStorage(
   connectors: readonly ConnectorDefinition[],
   storage: Storage
 ): void {
-  if (storage.webhookDeliveries !== undefined) {
+  if (storage.webhookRuns !== undefined) {
     return
   }
 
   for (const connector of connectors) {
     const webhooks = connector.adapter.webhooks
-    if (!Array.isArray(webhooks)) {
-      continue
-    }
-
-    if (webhooks.some((webhook) => webhook.idempotencyKey !== undefined)) {
+    if (Array.isArray(webhooks) && webhooks.length > 0) {
       throw new WebhookValidationError(
-        "[Sixb] Webhook idempotency requires storage.webhookDeliveries to be configured."
+        "[Sixb] Webhooks require storage.webhookRuns to be configured."
       )
     }
   }

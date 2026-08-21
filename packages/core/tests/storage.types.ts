@@ -5,8 +5,8 @@ import type {
   OntologyOutboxRecord,
   QueryObjectsInput,
   QueryObjectsResult,
-  WebhookDeliveryFailureCode,
-  WebhookDeliveryRecord,
+  WebhookRunFailureCode,
+  WebhookRunRecord,
 } from "../src/storage"
 
 const outboxFailureCode: OntologyOutboxFailureCode = "event.delivery_failed"
@@ -18,14 +18,13 @@ const unrelatedOutboxFailureCode: OntologyOutboxFailureCode = "internal.unexpect
 void storedOutboxFailureCode
 void unrelatedOutboxFailureCode
 
-const deliveryFailureCode: WebhookDeliveryFailureCode = "webhook.delivery_failed"
-const storedDeliveryFailureCode: NonNullable<WebhookDeliveryRecord["failure"]>["code"] =
-  deliveryFailureCode
-// @ts-expect-error The delivery journal exposes only its retryable delivery-failure code.
-const unrelatedDeliveryFailureCode: WebhookDeliveryFailureCode = "internal.unexpected"
+const webhookFailureCode: WebhookRunFailureCode = "webhook.delivery_failed"
+const storedWebhookFailureCode: NonNullable<WebhookRunRecord["error"]>["code"] = webhookFailureCode
+// @ts-expect-error Webhook runs expose only their declared delivery-failure codes.
+const unrelatedWebhookFailureCode: WebhookRunFailureCode = "runtime.cancelled"
 
-void storedDeliveryFailureCode
-void unrelatedDeliveryFailureCode
+void storedWebhookFailureCode
+void unrelatedWebhookFailureCode
 
 const capabilities: ObjectQueryCapabilities = {
   queryObjects: true,

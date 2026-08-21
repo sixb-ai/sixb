@@ -477,31 +477,21 @@ export {
 } from "./transaction"
 export type { Storage, StorageTransactionOptions } from "./types"
 export type {
-  WebhookDeliveryClaimRecord,
-  WebhookDeliveryClaimResult,
-  WebhookDeliveryFailure,
-  WebhookDeliveryFailureCode,
-  WebhookDeliveryKey,
-  WebhookDeliveryRecord,
-  WebhookDeliveryStatus,
-  WebhookDeliveryStorage,
-} from "./webhook-deliveries"
-export {
-  InMemoryWebhookDeliveryStorage,
-  WEBHOOK_DELIVERY_FAILURE_CODES,
-} from "./webhook-deliveries"
-export type {
   FinishWebhookRunInput,
   FinishWebhookRunStatus,
+  GetWebhookRunByDeliveryInput,
   ListWebhookRunsInput,
   ListWebhookRunsResult,
+  RestartWebhookRunInput,
   StartWebhookRunInput,
+  WebhookRunErrorCode,
   WebhookRunFailureCode,
   WebhookRunRecord,
   WebhookRunStatus,
   WebhookRunStorage,
 } from "./webhook-runs"
 export {
+  canRetryWebhookRun,
   InMemoryWebhookRunStorage,
   WEBHOOK_RUN_FAILURE_CODES,
   WebhookRunError,

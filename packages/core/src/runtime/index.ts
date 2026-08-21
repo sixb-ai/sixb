@@ -16,16 +16,6 @@ export type { SchedulerController } from "../scheduler"
 export { SchedulerError, SchedulerValidationError } from "../scheduler"
 export type { ScheduleDefinition } from "../schedules"
 export { CronValidationError, ScheduleValidationError } from "../schedules"
-export type {
-  WebhookDeliveryClaimRecord,
-  WebhookDeliveryClaimResult,
-  WebhookDeliveryFailure,
-  WebhookDeliveryFailureCode,
-  WebhookDeliveryKey,
-  WebhookDeliveryRecord,
-  WebhookDeliveryStatus,
-  WebhookDeliveryStorage,
-} from "../storage"
 export { ObjectNotFoundError } from "../storage"
 export type { SyncDefinition } from "../syncs"
 export { SyncValidationError } from "../syncs"
