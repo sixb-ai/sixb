@@ -10,6 +10,7 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   prop,
+  type SixbErrorContext,
   SixbHost,
 } from "../src"
 import { ProjectionRunDispatcher } from "../src/projections/run-dispatch"
@@ -28,7 +29,10 @@ const deviceProjection = defineProjection("project-devices", Device)
   .fromDataset(devices)
   .properties({ id: "device_id" })
 
-function createDependencies(projection = deviceProjection) {
+function createDependencies(
+  projection = deviceProjection,
+  onError?: (error: Error, context: SixbErrorContext) => void
+) {
   const storage = new InMemoryStorage()
   const lakeStorage = new InMemoryLakeStorage()
   const queues = new InMemoryQueues()
@@ -42,6 +46,7 @@ function createDependencies(projection = deviceProjection) {
     queues,
     datasets: [devices],
     projections: [projection],
+    ...(onError ? { onError } : {}),
   })
   return { host, lakeStorage, queues, storage }
 }
@@ -142,7 +147,11 @@ describe("ProjectionRunDispatcher", () => {
   })
 
   test("reuses one execution when queue publication is retried", async () => {
-    const { host, lakeStorage, queues, storage } = createDependencies()
+    const reports: SixbErrorContext[] = []
+    const { host, lakeStorage, queues, storage } = createDependencies(
+      deviceProjection,
+      (_error, context) => reports.push(context)
+    )
     const version = await commitDevicesVersion(lakeStorage)
     const enqueue = queues.projections.enqueue.bind(queues.projections)
     let attempts = 0
@@ -155,11 +164,37 @@ describe("ProjectionRunDispatcher", () => {
 
     await expect(dispatcher.dispatch(dispatchInput(version))).rejects.toThrow("queue unavailable")
     const failed = (await storage.projectionRuns.list({ projectId: host.id })).runs[0]
+    if (!failed?.error) throw new Error("Expected the enqueue failure to be persisted.")
     expect(failed).toMatchObject({
       status: "failed",
       attempt: 0,
-      error: { phase: "enqueue", message: "queue unavailable" },
+      error: {
+        code: "queue.enqueue_failed",
+        message: "The job could not be enqueued.",
+        retryable: true,
+        details: {
+          projectionId: deviceProjection.id,
+          projectionKind: "object",
+          runId: failed?.id,
+          phase: "enqueue",
+        },
+      },
     })
+    expect(reports).toEqual([
+      {
+        type: "run.failed",
+        notificationId: `project:${host.id}:run:projection:${failed.id}:failed:${failed.error.at}`,
+        projectId: host.id,
+        occurredAt: failed.error.at,
+        runKind: "projection",
+        run: {
+          runId: failed!.id,
+          projectionId: deviceProjection.id,
+          projectionKind: "object",
+        },
+        failure: failed.error,
+      },
+    ])
 
     const retried = await dispatcher.dispatch(dispatchInput(version))
     const replayed = await dispatcher.dispatch(dispatchInput(version))

@@ -1,6 +1,5 @@
 import type { SixbErrorCode, SixbFailure } from "../errors/types"
 import type { JsonValue } from "../json"
-import type { ProjectionMaterializationIdentity } from "../materialization/model"
 import type { ProjectionRunFailureCode } from "../projections/types"
 import type { ProviderScope } from "../provider-scope"
 import type { ActionRunFailureCode } from "../storage/action-runs/types"

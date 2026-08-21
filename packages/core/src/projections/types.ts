@@ -3,8 +3,8 @@ import type { SixbErrorCode } from "../errors/types"
 /** Error codes a projection run can persist and expose through its public contract. */
 export const PROJECTION_RUN_FAILURE_CODES = [
   "internal.unexpected",
-  "queue.enqueue_failed",
   "runtime.cancelled",
+  "queue.enqueue_failed",
   "projection.execution_failed",
 ] as const satisfies readonly [SixbErrorCode, ...SixbErrorCode[]]
 

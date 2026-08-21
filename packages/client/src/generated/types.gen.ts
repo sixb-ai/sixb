@@ -8876,16 +8876,22 @@ export type ListProjectionsResponses = {
         | {
             id: string
             projectId: string
-            status: "running" | "succeeded" | "failed" | "cancelled"
+            executionId: string
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
             attempt: number
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
             }
-            startedAt: string
+            queuedAt: string
+            startedAt?: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              code:
+                | "internal.unexpected"
+                | "runtime.cancelled"
+                | "queue.enqueue_failed"
+                | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -8923,16 +8929,22 @@ export type ListProjectionsResponses = {
         | {
             id: string
             projectId: string
-            status: "running" | "succeeded" | "failed" | "cancelled"
+            executionId: string
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
             attempt: number
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
             }
-            startedAt: string
+            queuedAt: string
+            startedAt?: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              code:
+                | "internal.unexpected"
+                | "runtime.cancelled"
+                | "queue.enqueue_failed"
+                | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -8971,16 +8983,22 @@ export type ListProjectionsResponses = {
         | {
             id: string
             projectId: string
-            status: "running" | "succeeded" | "failed" | "cancelled"
+            executionId: string
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
             attempt: number
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
             }
-            startedAt: string
+            queuedAt: string
+            startedAt?: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              code:
+                | "internal.unexpected"
+                | "runtime.cancelled"
+                | "queue.enqueue_failed"
+                | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -9030,16 +9048,22 @@ export type ListProjectionsResponses = {
         | {
             id: string
             projectId: string
-            status: "running" | "succeeded" | "failed" | "cancelled"
+            executionId: string
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
             attempt: number
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
             }
-            startedAt: string
+            queuedAt: string
+            startedAt?: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              code:
+                | "internal.unexpected"
+                | "runtime.cancelled"
+                | "queue.enqueue_failed"
+                | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -9077,16 +9101,22 @@ export type ListProjectionsResponses = {
         | {
             id: string
             projectId: string
-            status: "running" | "succeeded" | "failed" | "cancelled"
+            executionId: string
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
             attempt: number
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
             }
-            startedAt: string
+            queuedAt: string
+            startedAt?: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              code:
+                | "internal.unexpected"
+                | "runtime.cancelled"
+                | "queue.enqueue_failed"
+                | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -9125,16 +9155,22 @@ export type ListProjectionsResponses = {
         | {
             id: string
             projectId: string
-            status: "running" | "succeeded" | "failed" | "cancelled"
+            executionId: string
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
             attempt: number
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
             }
-            startedAt: string
+            queuedAt: string
+            startedAt?: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              code:
+                | "internal.unexpected"
+                | "runtime.cancelled"
+                | "queue.enqueue_failed"
+                | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -9185,16 +9221,22 @@ export type ListProjectionsResponses = {
         | {
             id: string
             projectId: string
-            status: "running" | "succeeded" | "failed" | "cancelled"
+            executionId: string
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
             attempt: number
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
             }
-            startedAt: string
+            queuedAt: string
+            startedAt?: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              code:
+                | "internal.unexpected"
+                | "runtime.cancelled"
+                | "queue.enqueue_failed"
+                | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -9232,16 +9274,22 @@ export type ListProjectionsResponses = {
         | {
             id: string
             projectId: string
-            status: "running" | "succeeded" | "failed" | "cancelled"
+            executionId: string
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
             attempt: number
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
             }
-            startedAt: string
+            queuedAt: string
+            startedAt?: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              code:
+                | "internal.unexpected"
+                | "runtime.cancelled"
+                | "queue.enqueue_failed"
+                | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -9280,16 +9328,22 @@ export type ListProjectionsResponses = {
         | {
             id: string
             projectId: string
-            status: "running" | "succeeded" | "failed" | "cancelled"
+            executionId: string
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
             attempt: number
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
             }
-            startedAt: string
+            queuedAt: string
+            startedAt?: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              code:
+                | "internal.unexpected"
+                | "runtime.cancelled"
+                | "queue.enqueue_failed"
+                | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -9376,16 +9430,22 @@ export type GetProjectionResponses = {
           | {
               id: string
               projectId: string
-              status: "running" | "succeeded" | "failed" | "cancelled"
+              executionId: string
+              status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
               attempt: number
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
               }
-              startedAt: string
+              queuedAt: string
+              startedAt?: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                code:
+                  | "internal.unexpected"
+                  | "runtime.cancelled"
+                  | "queue.enqueue_failed"
+                  | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9423,16 +9483,22 @@ export type GetProjectionResponses = {
           | {
               id: string
               projectId: string
-              status: "running" | "succeeded" | "failed" | "cancelled"
+              executionId: string
+              status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
               attempt: number
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
               }
-              startedAt: string
+              queuedAt: string
+              startedAt?: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                code:
+                  | "internal.unexpected"
+                  | "runtime.cancelled"
+                  | "queue.enqueue_failed"
+                  | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9471,16 +9537,22 @@ export type GetProjectionResponses = {
           | {
               id: string
               projectId: string
-              status: "running" | "succeeded" | "failed" | "cancelled"
+              executionId: string
+              status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
               attempt: number
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
               }
-              startedAt: string
+              queuedAt: string
+              startedAt?: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                code:
+                  | "internal.unexpected"
+                  | "runtime.cancelled"
+                  | "queue.enqueue_failed"
+                  | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9530,16 +9602,22 @@ export type GetProjectionResponses = {
           | {
               id: string
               projectId: string
-              status: "running" | "succeeded" | "failed" | "cancelled"
+              executionId: string
+              status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
               attempt: number
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
               }
-              startedAt: string
+              queuedAt: string
+              startedAt?: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                code:
+                  | "internal.unexpected"
+                  | "runtime.cancelled"
+                  | "queue.enqueue_failed"
+                  | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9577,16 +9655,22 @@ export type GetProjectionResponses = {
           | {
               id: string
               projectId: string
-              status: "running" | "succeeded" | "failed" | "cancelled"
+              executionId: string
+              status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
               attempt: number
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
               }
-              startedAt: string
+              queuedAt: string
+              startedAt?: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                code:
+                  | "internal.unexpected"
+                  | "runtime.cancelled"
+                  | "queue.enqueue_failed"
+                  | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9625,16 +9709,22 @@ export type GetProjectionResponses = {
           | {
               id: string
               projectId: string
-              status: "running" | "succeeded" | "failed" | "cancelled"
+              executionId: string
+              status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
               attempt: number
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
               }
-              startedAt: string
+              queuedAt: string
+              startedAt?: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                code:
+                  | "internal.unexpected"
+                  | "runtime.cancelled"
+                  | "queue.enqueue_failed"
+                  | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9685,16 +9775,22 @@ export type GetProjectionResponses = {
           | {
               id: string
               projectId: string
-              status: "running" | "succeeded" | "failed" | "cancelled"
+              executionId: string
+              status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
               attempt: number
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
               }
-              startedAt: string
+              queuedAt: string
+              startedAt?: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                code:
+                  | "internal.unexpected"
+                  | "runtime.cancelled"
+                  | "queue.enqueue_failed"
+                  | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9732,16 +9828,22 @@ export type GetProjectionResponses = {
           | {
               id: string
               projectId: string
-              status: "running" | "succeeded" | "failed" | "cancelled"
+              executionId: string
+              status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
               attempt: number
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
               }
-              startedAt: string
+              queuedAt: string
+              startedAt?: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                code:
+                  | "internal.unexpected"
+                  | "runtime.cancelled"
+                  | "queue.enqueue_failed"
+                  | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9780,16 +9882,22 @@ export type GetProjectionResponses = {
           | {
               id: string
               projectId: string
-              status: "running" | "succeeded" | "failed" | "cancelled"
+              executionId: string
+              status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
               attempt: number
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
               }
-              startedAt: string
+              queuedAt: string
+              startedAt?: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                code:
+                  | "internal.unexpected"
+                  | "runtime.cancelled"
+                  | "queue.enqueue_failed"
+                  | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9838,7 +9946,7 @@ export type ListProjectionRunsData = {
     projectionKind?: "object" | "link" | "telemetry"
     datasetId?: string
     datasetVersionId?: string
-    status?: "running" | "succeeded" | "failed" | "cancelled"
+    status?: "queued" | "running" | "succeeded" | "failed" | "cancelled"
     startedAfter?: string
     startedBefore?: string
     limit?: string
@@ -9874,16 +9982,22 @@ export type ListProjectionRunsResponses = {
       | {
           id: string
           projectId: string
-          status: "running" | "succeeded" | "failed" | "cancelled"
+          executionId: string
+          status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
           attempt: number
           progress: {
             sourceRowsRead: number
             sourceRowsSkipped: number
           }
-          startedAt: string
+          queuedAt: string
+          startedAt?: string
           finishedAt?: string
           error?: {
-            code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+            code:
+              | "internal.unexpected"
+              | "runtime.cancelled"
+              | "queue.enqueue_failed"
+              | "projection.execution_failed"
             message: string
             retryable: boolean
             at: string
@@ -9921,16 +10035,22 @@ export type ListProjectionRunsResponses = {
       | {
           id: string
           projectId: string
-          status: "running" | "succeeded" | "failed" | "cancelled"
+          executionId: string
+          status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
           attempt: number
           progress: {
             sourceRowsRead: number
             sourceRowsSkipped: number
           }
-          startedAt: string
+          queuedAt: string
+          startedAt?: string
           finishedAt?: string
           error?: {
-            code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+            code:
+              | "internal.unexpected"
+              | "runtime.cancelled"
+              | "queue.enqueue_failed"
+              | "projection.execution_failed"
             message: string
             retryable: boolean
             at: string
@@ -9969,16 +10089,22 @@ export type ListProjectionRunsResponses = {
       | {
           id: string
           projectId: string
-          status: "running" | "succeeded" | "failed" | "cancelled"
+          executionId: string
+          status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
           attempt: number
           progress: {
             sourceRowsRead: number
             sourceRowsSkipped: number
           }
-          startedAt: string
+          queuedAt: string
+          startedAt?: string
           finishedAt?: string
           error?: {
-            code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+            code:
+              | "internal.unexpected"
+              | "runtime.cancelled"
+              | "queue.enqueue_failed"
+              | "projection.execution_failed"
             message: string
             retryable: boolean
             at: string
@@ -10062,16 +10188,22 @@ export type GetProjectionRunResponses = {
     | {
         id: string
         projectId: string
-        status: "running" | "succeeded" | "failed" | "cancelled"
+        executionId: string
+        status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
         attempt: number
         progress: {
           sourceRowsRead: number
           sourceRowsSkipped: number
         }
-        startedAt: string
+        queuedAt: string
+        startedAt?: string
         finishedAt?: string
         error?: {
-          code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+          code:
+            | "internal.unexpected"
+            | "runtime.cancelled"
+            | "queue.enqueue_failed"
+            | "projection.execution_failed"
           message: string
           retryable: boolean
           at: string
@@ -10109,16 +10241,22 @@ export type GetProjectionRunResponses = {
     | {
         id: string
         projectId: string
-        status: "running" | "succeeded" | "failed" | "cancelled"
+        executionId: string
+        status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
         attempt: number
         progress: {
           sourceRowsRead: number
           sourceRowsSkipped: number
         }
-        startedAt: string
+        queuedAt: string
+        startedAt?: string
         finishedAt?: string
         error?: {
-          code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+          code:
+            | "internal.unexpected"
+            | "runtime.cancelled"
+            | "queue.enqueue_failed"
+            | "projection.execution_failed"
           message: string
           retryable: boolean
           at: string
@@ -10157,16 +10295,22 @@ export type GetProjectionRunResponses = {
     | {
         id: string
         projectId: string
-        status: "running" | "succeeded" | "failed" | "cancelled"
+        executionId: string
+        status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
         attempt: number
         progress: {
           sourceRowsRead: number
           sourceRowsSkipped: number
         }
-        startedAt: string
+        queuedAt: string
+        startedAt?: string
         finishedAt?: string
         error?: {
-          code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+          code:
+            | "internal.unexpected"
+            | "runtime.cancelled"
+            | "queue.enqueue_failed"
+            | "projection.execution_failed"
           message: string
           retryable: boolean
           at: string
