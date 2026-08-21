@@ -1,5 +1,5 @@
 import type { BrokerStreamDefinition } from "@sixb/core/broker"
-import type { RedisBrokerClient, RedisConnectionManager } from "./connection"
+import type { RedisBrokerCommandClient, RedisConnectionManager } from "./connection"
 import { RedisBrokerError } from "./errors"
 import { assertStreamId, type RedisStreamKeys, streamKeysFor, validateProjectId } from "./keys"
 import { assertStream, normalizeRetention } from "./retention"
@@ -103,7 +103,7 @@ export class StreamManager {
   }
 
   async readMetadata(
-    client: RedisBrokerClient,
+    client: RedisBrokerCommandClient,
     ensured: EnsuredStream,
     fields: readonly string[]
   ): Promise<ReadonlyMap<string, string>> {

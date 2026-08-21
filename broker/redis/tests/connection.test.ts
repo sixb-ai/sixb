@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test"
 import { type RedisBrokerClient, RedisConnectionManager } from "../src/connection"
 import { RedisBrokerError } from "../src/errors"
+import { streamKeysFor } from "../src/keys"
 import { RedisBroker } from "../src/redis-broker"
+import type { EnsuredStream, StreamManager } from "../src/stream-manager"
 
 test("aborts a pending subscription client connection", async () => {
   let closeCount = 0
@@ -70,13 +72,15 @@ test("closing the manager aborts a subscription client that is still connecting"
 function fakeClient(overrides: {
   readonly connect?: () => Promise<void>
   readonly close?: () => void
-  readonly send?: () => Promise<unknown>
+  readonly exists?: RedisBrokerClient["exists"]
+  readonly hmget?: RedisBrokerClient["hmget"]
+  readonly send?: RedisBrokerClient["send"]
 }): RedisBrokerClient {
   return {
     connect: overrides.connect ?? (async () => undefined),
     close: overrides.close ?? (() => undefined),
-    exists: async () => false,
-    hmget: async () => [],
+    exists: overrides.exists ?? (async () => false),
+    hmget: overrides.hmget ?? (async () => []),
     send: overrides.send ?? (async () => null),
   }
 }
@@ -94,8 +98,8 @@ function settle<T>(promise: Promise<T>): Promise<T | unknown> {
 }
 
 // The tests below guard the fix for #217. To prove they still guard it, drop the
-// `runWithCommandTimeout` call in `useCommandClient` back to `await operation(client)`. All four
-// timeout tests then hang until bun's per-test timeout, because without a bound nothing ever
+// `boundedCommandClient(client)` wrapper in `useCommandClient` and pass `client` directly. All
+// four timeout tests then hang until bun's per-test timeout, because without a bound nothing ever
 // settles them -- including the first, which never reaches its assertion.
 
 test("a command that is never answered fails once the bound elapses", async () => {
@@ -107,12 +111,12 @@ test("a command that is never answered fails once the bound elapses", async () =
 
   expect(error).toBeInstanceOf(RedisBrokerError)
   if (!(error instanceof Error)) throw new Error("Expected the command to fail")
-  expect(error.message).toContain("did not respond within 25ms")
+  expect(error.message).toContain("command EVAL did not respond within 25ms")
 
   await manager.close()
 })
 
-test("a command that is never answered does not block later commands", async () => {
+test("an unanswered command does not block later commands", async () => {
   // #217: one unanswered append held the shared command queue and stopped all event publication.
   let clientCount = 0
   const manager = new RedisConnectionManager(
@@ -200,12 +204,83 @@ test("the command bound is ours and never reaches the Redis client", async () =>
   await manager.close()
 })
 
-test("rejects a command bound that is not a positive integer", () => {
-  // Unvalidated, `Number(process.env.X)` on an unset variable yields NaN, `setTimeout` coerces it
-  // to 1ms, and every command fails; a negative value would disable the bound entirely.
-  for (const commandTimeoutMs of [Number.NaN, 0, -1, 0.5]) {
+test("each command in one operation gets its own timeout", async () => {
+  // To prove this guards command-level granularity, also race the complete operation against
+  // `commandTimeoutMs` in `useCommandClient`; the second command then fails this test.
+  let callCount = 0
+  const manager = new RedisConnectionManager({ url: "redis://unused", commandTimeoutMs: 30 }, () =>
+    fakeClient({
+      send: async () => {
+        callCount += 1
+        const call = callCount
+        await Bun.sleep(20)
+        return `reply-${call}`
+      },
+    })
+  )
+
+  const replies = await manager.useCommandClient(async (client) => {
+    const first = await client.send("ONE", [])
+    const second = await client.send("TWO", [])
+    return [first, second]
+  })
+
+  expect(replies).toEqual(["reply-1", "reply-2"])
+  await manager.close()
+})
+
+test("rejects a command bound that setTimeout cannot represent", () => {
+  // Bun coerces NaN, non-positive values, and delays above a signed 32-bit integer to 1ms.
+  for (const commandTimeoutMs of [Number.NaN, 0, -1, 0.5, 2_147_483_648]) {
     expect(() => new RedisBroker({ connection: { commandTimeoutMs } })).toThrow(RedisBrokerError)
   }
 
   expect(() => new RedisBroker({ connection: { commandTimeoutMs: 25 } })).not.toThrow()
 })
+
+test("keeps the caller-owned dedupe window independent from the command timeout", () => {
+  // Reintroducing a constructor check between these values fails this test while still being
+  // unable to account for later commands or the caller's retry delay.
+  expect(
+    () => new RedisBroker({ connection: { commandTimeoutMs: 25 }, dedupeTtlMs: 1 })
+  ).not.toThrow()
+})
+
+test("bounds the latest-cursor lookup before starting a subscription", async () => {
+  // To prove this guards the bootstrap path, resolve the latest cursor with the raw subscription
+  // client again. Its XREVRANGE then hangs until this test's own timeout.
+  const ensured: EnsuredStream = {
+    projectId: "project",
+    streamId: "events",
+    keys: streamKeysFor("sixb:broker", "project", "events"),
+  }
+  let clientCount = 0
+  const manager = new RedisConnectionManager(
+    { url: "redis://unused", commandTimeoutMs: 25 },
+    () => {
+      clientCount += 1
+      return fakeClient({
+        hmget: async () => [null],
+        send: (command) => (command === "XREVRANGE" ? neverResponds() : Promise.resolve(null)),
+      })
+    }
+  )
+  const broker = new RedisBroker({ connection: { commandTimeoutMs: 25 } })
+  const internals = broker as unknown as {
+    connectionManager: RedisConnectionManager
+    streamManager: Pick<StreamManager, "readMetadata" | "requireStream">
+  }
+  internals.connectionManager = manager
+  internals.streamManager = {
+    readMetadata: async () => new Map(),
+    requireStream: async () => ensured,
+  }
+
+  const error = await settle(
+    broker.subscribe({ projectId: "project", streamId: "events" }, () => undefined)
+  )
+
+  expect(error).toBeInstanceOf(RedisBrokerError)
+  expect(clientCount).toBe(1)
+  await broker.close()
+}, 250)
