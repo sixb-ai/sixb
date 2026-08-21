@@ -503,7 +503,7 @@ async function createGatewayRuntime(
       projectId: PROJECT_ID,
       agentId: "assistant",
       runId,
-      parentExecutionId: parentWorkflowExecutionId,
+      sourceExecutionId: parentWorkflowExecutionId,
     })
     await storage.workflowRuns.agentNodes.create({
       projectId: PROJECT_ID,
