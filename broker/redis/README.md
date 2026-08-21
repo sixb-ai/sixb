@@ -40,7 +40,7 @@ default Redis URL.
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
-| `connection` | `RedisBrokerConnectionOptions` | `undefined` | Bun Redis URL/options. Supports `url`, `commandTimeoutMs`, `connectionTimeout`, `idleTimeout`, `autoReconnect`, `maxRetries`, `enableOfflineQueue`, `enableAutoPipelining`, and `tls`. |
+| `connection` | `RedisBrokerConnectionOptions` | `undefined` | Redis connection and command settings. Supports `url`, `commandTimeoutMs`, `connectionTimeout`, `idleTimeout`, `autoReconnect`, `maxRetries`, `enableOfflineQueue`, `enableAutoPipelining`, and `tls`. |
 | `prefix` | `string` | `"sixb:broker"` | Redis key prefix. |
 | `dedupeTtlMs` | `number` | `120000` | Retry dedupe window for `idempotencyKey`. |
 | `readBatchSize` | `number` | `1000` | `XRANGE COUNT` page size for retained reads. |
@@ -85,31 +85,24 @@ skipping unavailable history.
 
 ### Append
 
-A single `append()` call with multiple records writes them sequentially. Each
-individual record append is atomic through a Lua script that handles `XADD`,
-retry dedupe, retention trimming, and retained-range metadata updates.
+A single `append()` sends the complete record batch through one Lua call. The
+`XADD` and retry-deduplication writes are atomic across that batch. Physical
+retention trimming follows as a separate command; the append script records the
+logical retained boundary first so concurrent reads cannot expose trimmed data.
 
 For retryable writes, pass a stable `idempotencyKey`. The provider maps it to a
 short-lived Redis key and returns the original retained record when the same key
 is retried within `dedupeTtlMs`.
 
-Appends, reads, and retention commands share one Redis client, and each such
-operation is bounded by `connection.commandTimeoutMs` (30 seconds by default,
-and a positive integer). Bun's `connectionTimeout` covers connecting and
-`idleTimeout` covers an idle socket; neither bounds a command that was sent and
-never answered, and one unanswered command on the shared client would otherwise
-stop every later append and read. Note that one operation can be more than one
-round trip: an append also trims retention, and a read also enforces age
-retention.
+Appends, reads, and retention commands share one Redis client. Each command sent
+through that client is bounded by `connection.commandTimeoutMs` (30 seconds by
+default). The value must be an integer from 1 through 2,147,483,647 milliseconds,
+which is the largest delay Bun's timer can represent. Bun's `connectionTimeout`
+covers connecting and `idleTimeout` covers an idle socket; neither bounds a
+command that was sent and never answered. One operation can make multiple round
+trips; each round trip gets its own command timeout.
 
-An operation that passes the bound fails with a `RedisBrokerError`, and its
-client is discarded rather than reused, because the missing reply may still
-arrive and a late reply on a shared connection can be matched to the wrong
-command. Two consequences are worth planning for. A timeout is **indeterminate**:
-Redis may still apply the command afterwards, so pass an `idempotencyKey` to
-make a retry safe -- the retained record is returned instead of a second append.
-And a Redis failover longer than the bound no longer completes transparently
-through Bun's reconnect and offline queue; it surfaces as a failed operation.
+A command that passes the bound fails with a `RedisBrokerError`, and its client is discarded rather than reused, because the missing reply may still arrive and a late reply on a shared connection can be matched to the wrong command. A timeout is **indeterminate**: Redis may still apply a write after its caller has failed. Pass a stable `idempotencyKey` and retry while its deduplication key is still alive. Size `dedupeTtlMs` for the complete elapsed time from the original write through any later commands and retry backoff; `commandTimeoutMs` alone cannot guarantee that window. A Redis failover longer than the bound no longer completes transparently through Bun's reconnect and offline queue; it surfacesas a failed command.
 
 ### Subscribe
 
