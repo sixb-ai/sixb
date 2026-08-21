@@ -53,6 +53,7 @@ import ontologyOutboxFailureRecordSql from "./migrations/018-ontology-outbox-fai
 import webhookDeliveryFailureRecordSql from "./migrations/019-webhook-delivery-failure-record.sql" with {
   type: "text",
 }
+import sharedAccessGrantsSql from "./migrations/020-shared-access-grants.sql" with { type: "text" }
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -92,6 +93,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("017-action-failure-record", actionFailureRecordSql),
     sqliteSql("018-ontology-outbox-failure-record", ontologyOutboxFailureRecordSql),
     sqliteSql("019-webhook-delivery-failure-record", webhookDeliveryFailureRecordSql),
+    sqliteSql("020-shared-access-grants", sharedAccessGrantsSql),
   ],
 })
 

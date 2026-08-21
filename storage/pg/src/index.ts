@@ -37,6 +37,7 @@ import { PgObjectStorage } from "./pg-object-storage"
 import { PgPipelineRunStorage } from "./pg-pipeline-run-storage"
 import { PgProjectionRunStorage } from "./pg-projection-run-storage"
 import { PgRulesStorage } from "./pg-rules-storage"
+import { PgShareGrantStorage } from "./pg-share-grant-storage"
 import { PgSyncRunStorage } from "./pg-sync-run-storage"
 import { PgTimeseriesStorage } from "./pg-timeseries-storage"
 import { PgWebhookDeliveryStorage } from "./pg-webhook-delivery-storage"
@@ -144,6 +145,7 @@ export class PostgresStorage implements MigrationCapableStorage {
   readonly webhookDeliveries: PgWebhookDeliveryStorage
   readonly webhookRuns: PgWebhookRunStorage
   readonly rules: PgRulesStorage
+  readonly shareGrants: PgShareGrantStorage
   readonly migrators: readonly StorageMigrator[]
 
   private readonly sql: SQL
@@ -217,6 +219,7 @@ export class PostgresStorage implements MigrationCapableStorage {
     this.webhookDeliveries = createOperationScopedFacade(stores.webhookDeliveries, scope)
     this.webhookRuns = createOperationScopedFacade(stores.webhookRuns, scope)
     this.rules = createOperationScopedFacade(stores.rules, scope)
+    this.shareGrants = createOperationScopedFacade(stores.shareGrants, scope)
   }
 
   async ping(): Promise<void> {
@@ -343,6 +346,7 @@ function createPostgresStores(
     webhookDeliveries: new PgWebhookDeliveryStorage(sql),
     webhookRuns: new PgWebhookRunStorage(sql),
     rules: new PgRulesStorage(sql),
+    shareGrants: new PgShareGrantStorage(sql),
   }
 }
 
@@ -363,6 +367,7 @@ interface PostgresStoreSet {
   readonly webhookDeliveries: PgWebhookDeliveryStorage
   readonly webhookRuns: PgWebhookRunStorage
   readonly rules: PgRulesStorage
+  readonly shareGrants: PgShareGrantStorage
 }
 
 function resolveTimeoutMillis(value: number | undefined, label: string): number | undefined {

@@ -16,6 +16,7 @@ import {
   discoverRoles,
   discoverRules,
   discoverSchedules,
+  discoverShares,
   discoverSyncs,
   discoverWorkflows,
 } from "../bootstrap"
@@ -33,6 +34,7 @@ import type { RuleDefinition } from "../rules"
 import type { SandboxFactory } from "../sandboxes"
 import type { ScheduleDefinition } from "../schedules"
 import type { GroupDefinition, MembershipPolicyDefinition, RoleDefinition } from "../security"
+import type { ShareTypeDefinition } from "../shares"
 import type { Storage } from "../storage"
 import type { SyncDefinition } from "../syncs"
 import type { WorkflowDefinition } from "../workflows"
@@ -72,6 +74,8 @@ export interface CreateSixbOptions {
   groups?: readonly GroupDefinition[]
   roles?: readonly RoleDefinition[]
   membershipPolicies?: readonly MembershipPolicyDefinition[]
+  /** Share types to register in addition to auto-discovered `shares/` exports. */
+  shares?: readonly ShareTypeDefinition[]
   auth?: SixbAuthConfig
   projectRoot?: string
 }
@@ -81,7 +85,7 @@ export interface CreateSixbOptions {
  *
  * The host auto-discovers exported definitions from `ontology/`, `actions/`, `datasets/`,
  * `connectors/`, `syncs/`, `schedules/`, `pipelines/`, `projections/`,
- * `rules/`, `workflows/`, `agents/`, and `security/{groups,roles,policies}/`
+ * `rules/`, `workflows/`, `agents/`, `shares/`, and `security/{groups,roles,policies}/`
  * relative to `projectRoot`.
  */
 export async function createSixb(
@@ -112,6 +116,7 @@ export async function createSixb(
     roles,
     membershipPolicies,
     agents,
+    shares,
   ] = await Promise.all([
     discoverActions(projectRoot),
     discoverProjections(projectRoot),
@@ -126,6 +131,7 @@ export async function createSixb(
     discoverRoles(projectRoot),
     discoverMembershipPolicies(projectRoot),
     discoverAgents(projectRoot),
+    discoverShares(projectRoot),
   ])
 
   // Explicit definitions come first so local setup can override ordering while duplicate ids are
@@ -158,6 +164,7 @@ export async function createSixb(
     roles: [...(options.roles ?? []), ...roles],
     membershipPolicies: [...(options.membershipPolicies ?? []), ...membershipPolicies],
     agents: [...(options.agents ?? []), ...agents],
+    shares: [...(options.shares ?? []), ...shares],
     auth: options.auth,
   })
 }

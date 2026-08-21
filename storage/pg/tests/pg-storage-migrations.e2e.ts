@@ -63,6 +63,7 @@ describe("Postgres storage migrations", () => {
             "017-action-failure-record",
             "018-ontology-outbox-failure-record",
             "019-webhook-delivery-failure-record",
+            "020-shared-access-grants",
           ],
         },
       ])
@@ -199,6 +200,13 @@ describe("Postgres storage migrations", () => {
           id: "019-webhook-delivery-failure-record",
           status: "applied",
           version: 19,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "020-shared-access-grants",
+          status: "applied",
+          version: 20,
         },
       ])
     })
@@ -1139,6 +1147,13 @@ describe("Postgres storage migrations", () => {
           id: "019-webhook-delivery-failure-record",
           status: "applied",
           version: 19,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "020-shared-access-grants",
+          status: "applied",
+          version: 20,
         },
       ])
     } finally {

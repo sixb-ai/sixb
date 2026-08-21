@@ -14,6 +14,7 @@ export type {
   ProjectionExecution,
   ProjectionMaterializationIdentity,
 } from "../materialization/model"
+export type { ObjectRef } from "../ontology"
 export type {
   ActionRunEffectsRecord,
   ActionRunFailure,
@@ -438,6 +439,24 @@ export type {
   RulesStorage,
 } from "./rules"
 export { InMemoryRulesStorage } from "./rules"
+export type {
+  CreateSharedAccessGrantInput,
+  GetSharedAccessGrantInput,
+  ListSharedAccessGrantsInput,
+  RevokeSharedAccessGrantInput,
+  SharedAccessGrantRecord,
+  SharedAccessGrantRef,
+  ShareGrantStorage,
+  ShareGrantStorageErrorCode,
+} from "./share-grants"
+export {
+  assertSharedAccessGrantRevocation,
+  cloneSharedAccessGrant,
+  InMemoryShareGrantStorage,
+  normalizeSharedAccessGrant,
+  normalizeSharedAccessGrantRefs,
+  ShareGrantStorageError,
+} from "./share-grants"
 export type {
   FinishSyncRunInput,
   ListLatestSyncRunsInput,

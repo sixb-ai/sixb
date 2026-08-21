@@ -11,7 +11,7 @@ may do. Sixb builds it from four small layers:
 | --- | --- |
 | **Groups** | Named buckets that principals belong to |
 | **Roles** | Bundles of grants attached to groups |
-| **Grants** | The capabilities a role gives — access, view, apply, run |
+| **Grants** | The capabilities a role gives — access, view, apply, share, run |
 | **Membership policies** | Who can administer membership for which groups |
 
 At request time these resolve into one set of grants per principal, and the `Sixb` SDK enforces
@@ -81,9 +81,9 @@ are the union of every role whose `grantedTo` group it belongs to.
 
 ## Grants
 
-A grant pairs a capability with the definitions it covers. Seven capability builders —
-`can.access`, `can.view`, `can.edit`, `can.append`, `can.apply`, `can.run`, and `can.observe` —
-resolve to **eleven grant kinds**, one per protected target family.
+A grant pairs a capability with the definitions it covers. Eight capability builders —
+`can.access`, `can.view`, `can.edit`, `can.append`, `can.apply`, `can.share`, `can.run`, and
+`can.observe` — resolve to **twelve grant kinds**, one per protected target family.
 
 | Grant kind | Builder | Allows | Targets |
 | --- | --- | --- | --- |
@@ -93,6 +93,7 @@ resolve to **eleven grant kinds**, one per protected target family.
 | `edit:object` | `can.edit(...)` | Write objects: properties, links, `delete`, `restore` | [Object types](../ontology/object-types.md) |
 | `append:telemetry` | `can.append(...)` | Append telemetry points | [Object types](../ontology/object-types.md) |
 | `apply:action` | `can.apply(...)` | Request actions | [Actions](../actions/overview.md) |
+| `share:share` | `can.share(...)` | Issue, list, and revoke links for a share type | Share types |
 | `run:workflow` | `can.run(...)` | Start workflows | [Workflows](../workflows/overview.md) |
 | `run:sync` | `can.run(...)` | Run syncs | [Syncs](../data/syncs.md) |
 | `run:pipeline` | `can.run(...)` | Run pipelines | [Pipelines](../data/pipelines.md) |
@@ -105,6 +106,9 @@ picks between `run:workflow`, `run:sync`, `run:pipeline`, and `run:agent` the sa
 type-checked, so mixing target families in one call does not compile. `can.observe` takes the
 `"logs"` target literal and grants `observe:logs`, which gates reading captured
 [logs](../logging/overview.md).
+
+`can.share(Type)` permits managing links for that share type. Issuing, listing, or revoking still
+requires access to the exact target object; the grant never widens object access on its own.
 
 > **Only `can.view(Type)` reaches subtypes.** `can.edit` and `can.append` cover exactly the types
 > you name, so adding a type under one you granted never makes it writable on its own.
@@ -125,6 +129,7 @@ Each builder takes one definition, a list, or a breadth selector.
 | Ingest telemetry everywhere | `can.append(every.object())` |
 | Every dataset | `can.view(every.dataset())` |
 | Every action | `can.apply(every.action())` |
+| Every share type | `can.share(every.share())` |
 | Every workflow | `can.run(every.workflow())` |
 | Every sync | `can.run(every.sync())` |
 | Every pipeline | `can.run(every.pipeline())` |

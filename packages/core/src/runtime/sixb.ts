@@ -14,6 +14,7 @@ import { createPipelinesRuntime, type PipelinesRuntime } from "../pipelines/exec
 import { createProjectionsRuntime, type ProjectionsRuntime } from "../projections/execution"
 import { createRulesRuntime, type RulesRuntime } from "../rules/execution"
 import { createSchedulesRuntime, type SchedulesRuntime } from "../schedules/execution"
+import { createSharesRuntime, type SharesRuntime } from "../shares"
 import { createSyncsRuntime, type SyncsRuntime } from "../syncs/execution"
 import { createWorkflowsRuntime, type WorkflowsRuntime } from "../workflows/execution"
 import type { SixbDefinitions } from "./definitions"
@@ -38,6 +39,7 @@ export interface Sixb<
   readonly schedules: SchedulesRuntime
   readonly connector: ConnectorRuntime
   readonly blobs: BlobsRuntime
+  readonly shares: SharesRuntime
 }
 
 const boundSixbInstances = new WeakSet<object>()
@@ -74,8 +76,9 @@ function createExecutionFacades<TOntologySources extends readonly OntologySource
   execution: ExecutionContext,
   dependencies: SixbDependencies
 ): Omit<Sixb<TOntologySources>, "execution"> {
+  const objects = createObjectsRuntime<TOntologySources>(runtime, execution)
   return {
-    objects: createObjectsRuntime<TOntologySources>(runtime, execution),
+    objects,
     actions: createActionsRuntime(runtime, execution),
     datasets: createDatasetsRuntime(runtime, dependencies.definitions.datasets),
     workflows: createWorkflowsRuntime(runtime, execution, dependencies.definitions.workflows),
@@ -94,5 +97,6 @@ function createExecutionFacades<TOntologySources extends readonly OntologySource
     schedules: createSchedulesRuntime(dependencies.definitions.schedules),
     connector: createConnectorRuntime(runtime, execution, dependencies.connectorService),
     blobs: createBlobsRuntime(runtime, execution, dependencies.blobStorage),
+    shares: createSharesRuntime(runtime, execution, dependencies.definitions.shares, objects),
   }
 }

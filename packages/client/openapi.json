@@ -851,6 +851,10 @@
       "description": "Object relationship links"
     },
     {
+      "name": "Shared Access",
+      "description": "Capability-scoped shared access grants"
+    },
+    {
       "name": "Telemetry",
       "description": "Telemetry history and appends"
     },
@@ -29990,6 +29994,999 @@
                     }
                   },
                   "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/share-grants": {
+      "post": {
+        "summary": "Issue a shared access grant",
+        "tags": ["Shared Access"],
+        "operationId": "issueSharedAccessGrant",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "shareTypeId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "target": {
+                    "type": "object",
+                    "properties": {
+                      "objectTypeId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "primaryId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["objectTypeId", "primaryId"],
+                    "additionalProperties": false
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": ["shareTypeId", "target", "expiresAt"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "shareTypeId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "target": {
+                    "type": "object",
+                    "properties": {
+                      "objectTypeId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "primaryId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["objectTypeId", "primaryId"],
+                    "additionalProperties": false
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": ["shareTypeId", "target", "expiresAt"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "shareTypeId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "target": {
+                    "type": "object",
+                    "properties": {
+                      "objectTypeId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "primaryId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["objectTypeId", "primaryId"],
+                    "additionalProperties": false
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": ["shareTypeId", "target", "expiresAt"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Response for status 201",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "grant": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "shareTypeId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "target": {
+                          "type": "object",
+                          "properties": {
+                            "objectTypeId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "primaryId": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["objectTypeId", "primaryId"],
+                          "additionalProperties": false
+                        },
+                        "issuedBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "grants": {
+                          "type": "array",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "capability": {
+                                    "type": "string",
+                                    "enum": ["view"]
+                                  },
+                                  "objectTypeId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": ["capability", "objectTypeId"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "capability": {
+                                    "type": "string",
+                                    "enum": ["apply"]
+                                  },
+                                  "actionId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": ["capability", "actionId"],
+                                "additionalProperties": false
+                              }
+                            ]
+                          }
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "revokedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "revokedBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "shareTypeId",
+                        "target",
+                        "issuedBy",
+                        "grants",
+                        "createdAt",
+                        "expiresAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "url": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  },
+                  "required": ["grant", "url"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": ["share.type_not_found"],
+                          "description": "Stable machine-readable failure code for programmatic handling."
+                        }
+                      },
+                      "required": ["error", "code"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["error"],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["internal.unexpected"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error", "code"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List shared access grants for one object",
+        "tags": ["Shared Access"],
+        "operationId": "listSharedAccessGrants",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "shareTypeId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "objectTypeId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "primaryId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "includeRevoked",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false"]
+            }
+          },
+          {
+            "name": "includeExpired",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "grants": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "shareTypeId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "target": {
+                            "type": "object",
+                            "properties": {
+                              "objectTypeId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "primaryId": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["objectTypeId", "primaryId"],
+                            "additionalProperties": false
+                          },
+                          "issuedBy": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user", "serviceAccount"]
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false
+                          },
+                          "grants": {
+                            "type": "array",
+                            "items": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "capability": {
+                                      "type": "string",
+                                      "enum": ["view"]
+                                    },
+                                    "objectTypeId": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "required": ["capability", "objectTypeId"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "capability": {
+                                      "type": "string",
+                                      "enum": ["apply"]
+                                    },
+                                    "actionId": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "required": ["capability", "actionId"],
+                                  "additionalProperties": false
+                                }
+                              ]
+                            }
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "expiresAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "revokedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "revokedBy": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user", "serviceAccount"]
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "shareTypeId",
+                          "target",
+                          "issuedBy",
+                          "grants",
+                          "createdAt",
+                          "expiresAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["grants"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": ["share.type_not_found"],
+                          "description": "Stable machine-readable failure code for programmatic handling."
+                        }
+                      },
+                      "required": ["error", "code"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["error"],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["internal.unexpected"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error", "code"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/share-grants/{grantId}": {
+      "delete": {
+        "summary": "Revoke a shared access grant",
+        "tags": ["Shared Access"],
+        "operationId": "revokeSharedAccessGrant",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "grantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "shareTypeId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "objectTypeId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "primaryId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["objectTypeId", "primaryId"],
+                      "additionalProperties": false
+                    },
+                    "issuedBy": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": ["user", "serviceAccount"]
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["type", "id"],
+                      "additionalProperties": false
+                    },
+                    "grants": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "capability": {
+                                "type": "string",
+                                "enum": ["view"]
+                              },
+                              "objectTypeId": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["capability", "objectTypeId"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "capability": {
+                                "type": "string",
+                                "enum": ["apply"]
+                              },
+                              "actionId": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["capability", "actionId"],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "revokedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "revokedBy": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": ["user", "serviceAccount"]
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["type", "id"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "shareTypeId",
+                    "target",
+                    "issuedBy",
+                    "grants",
+                    "createdAt",
+                    "expiresAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": ["share.grant_not_found", "share.type_not_found"],
+                          "description": "Stable machine-readable failure code for programmatic handling."
+                        }
+                      },
+                      "required": ["error", "code"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["error"],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["internal.unexpected"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error", "code"],
                   "additionalProperties": false
                 }
               }

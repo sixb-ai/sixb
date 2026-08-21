@@ -22,6 +22,7 @@ export interface SecurityRegistryOptions {
   readonly objectTypeIds?: ReadonlySet<string>
   readonly datasetIds?: ReadonlySet<string>
   readonly actionIds?: ReadonlySet<string>
+  readonly shareTypeIds?: ReadonlySet<string>
   readonly workflowIds?: ReadonlySet<string>
   readonly syncIds?: ReadonlySet<string>
   readonly pipelineIds?: ReadonlySet<string>
@@ -44,6 +45,7 @@ export class SecurityRegistry implements SecurityDefinitionCatalog {
       objectTypeIds: input.objectTypeIds,
       datasetIds: input.datasetIds,
       actionIds: input.actionIds,
+      shareTypeIds: input.shareTypeIds,
       workflowIds: input.workflowIds,
       syncIds: input.syncIds,
       pipelineIds: input.pipelineIds,
@@ -56,6 +58,7 @@ export class SecurityRegistry implements SecurityDefinitionCatalog {
       objectTypeIds: input.objectTypeIds ?? new Set<string>(),
       datasetIds: input.datasetIds ?? new Set<string>(),
       actionIds: input.actionIds ?? new Set<string>(),
+      shareTypeIds: input.shareTypeIds ?? new Set<string>(),
       workflowIds: input.workflowIds ?? new Set<string>(),
       syncIds: input.syncIds ?? new Set<string>(),
       pipelineIds: input.pipelineIds ?? new Set<string>(),

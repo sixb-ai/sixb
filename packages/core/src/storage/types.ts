@@ -9,6 +9,7 @@ import type { OntologyStorage } from "./ontology"
 import type { PipelineRunStorage } from "./pipeline-runs"
 import type { ProjectionRunStorage } from "./projection-runs"
 import type { RulesStorage } from "./rules"
+import type { ShareGrantStorage } from "./share-grants"
 import type { SyncRunStorage } from "./sync-runs"
 import type { TimeseriesStorage } from "./timeseries/types"
 import type { WebhookDeliveryStorage } from "./webhook-deliveries"
@@ -193,6 +194,17 @@ export type {
   RulesStorage,
 } from "./rules"
 export type {
+  CreateSharedAccessGrantInput,
+  GetSharedAccessGrantInput,
+  ListSharedAccessGrantsInput,
+  RevokeSharedAccessGrantInput,
+  SharedAccessGrantRecord,
+  SharedAccessGrantRef,
+  ShareGrantStorage,
+  ShareGrantStorageErrorCode,
+} from "./share-grants"
+export { ShareGrantStorageError } from "./share-grants"
+export type {
   FinishSyncRunInput,
   ListSyncRunsInput,
   ListSyncRunsResult,
@@ -307,6 +319,7 @@ export interface Storage {
   webhookDeliveries?: WebhookDeliveryStorage
   webhookRuns?: WebhookRunStorage
   rules?: RulesStorage
+  shareGrants?: ShareGrantStorage
   fileUploadSessions?: FileUploadSessionStore
 
   /** Lightweight reachability probe. It must not open a write transaction or run migrations. */

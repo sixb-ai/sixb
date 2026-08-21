@@ -111,6 +111,10 @@ export const OPENAPI_TAGS = {
     name: "Links",
     description: "Object relationship links",
   },
+  sharedAccess: {
+    name: "Shared Access",
+    description: "Capability-scoped shared access grants",
+  },
   telemetry: {
     name: "Telemetry",
     description: "Telemetry history and appends",

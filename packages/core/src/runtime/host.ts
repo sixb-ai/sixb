@@ -58,6 +58,7 @@ import type {
   RoleDefinition,
   SecurityDefinitionCatalog,
 } from "../security"
+import type { ShareTypeDefinition } from "../shares"
 import type { Storage } from "../storage"
 import type { SyncDefinition } from "../syncs"
 import type { RegisteredWebhook } from "../webhooks"
@@ -105,6 +106,7 @@ export interface SixbHostOptions<TOntologySources extends readonly OntologySourc
   groups?: readonly GroupDefinition[]
   roles?: readonly RoleDefinition[]
   membershipPolicies?: readonly MembershipPolicyDefinition[]
+  shares?: readonly ShareTypeDefinition[]
   auth?: SixbAuthConfig
 }
 
@@ -158,6 +160,9 @@ export class SixbHost<
 
     const definitions = resolveDefinitions(options)
     this.definitions = definitions
+    if (definitions.shares.list().length > 0 && this.storage.shareGrants === undefined) {
+      throw new Error("[Sixb] Registered share types require storage.shareGrants to be configured.")
+    }
     registerProjectionRegistry(this, definitions.projections)
 
     this.auth = new AuthRuntime({

@@ -27,6 +27,7 @@ const GRANT_CAPABILITIES = Object.keys({
   edit: true,
   append: true,
   apply: true,
+  share: true,
   run: true,
   observe: true,
 } satisfies Record<GrantCapability, true>) as readonly GrantCapability[]
@@ -292,6 +293,8 @@ export function validateSecurityDefinitionsAtStartup(input: {
   readonly datasetIds?: ReadonlySet<string>
   /** Registered action ids — when provided, apply grants must reference them. */
   readonly actionIds?: ReadonlySet<string>
+  /** Registered share type ids — when provided, share grants must reference them. */
+  readonly shareTypeIds?: ReadonlySet<string>
   /** Registered workflow ids — when provided, run grants must reference them. */
   readonly workflowIds?: ReadonlySet<string>
   /** Registered sync ids — when provided, sync run grants must reference them. */

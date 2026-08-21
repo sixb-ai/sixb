@@ -225,11 +225,12 @@ await expect(
 expect(await anonymous.objects.list({})).toEqual({ objects: [], hasMore: false, total: 0 })
 ```
 
-There are eleven grant kinds. `access:application` gates browser applications at the server
+There are twelve grant kinds. `access:application` gates browser applications at the server
 boundary, and `observe:logs` gates reading captured [logs](../logging/overview.md). The bound SDK
 gates the rest: `view:object` (`objects.list`/`objects.get`), `view:dataset`
 (`datasets.list`), `edit:object` (`objects.upsert`, links, `delete`), `append:telemetry`
-(`objects.appendTelemetry`), `apply:action` (`actions.request`), `run:workflow`
+(`objects.appendTelemetry`), `apply:action` (`actions.request`), `share:share`
+(`shares.issue`/`shares.list`/`shares.revoke`), `run:workflow`
 (`workflows.requestById`), `run:sync` (`syncs.request`), `run:pipeline` (`pipelines.request`), and
 `run:agent` (`agents.request`). See [authorization](../auth/authorization.md) for how roles,
 grants, groups, and membership policies resolve; the full pattern lives in

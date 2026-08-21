@@ -89,6 +89,10 @@ export {
   type SandboxesContractSuiteOptions,
 } from "./sandboxes-contract"
 export {
+  runShareGrantStorageContractSuite,
+  type ShareGrantStorageContractSuiteOptions,
+} from "./share-grant-storage-contract"
+export {
   runWebhookDeliveryStorageContractSuite,
   type WebhookDeliveryStorageContractSuiteOptions,
 } from "./webhook-delivery-storage-contract"

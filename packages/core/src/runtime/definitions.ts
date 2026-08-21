@@ -8,6 +8,7 @@ import type { ProjectionDefinitionCatalog } from "../projections"
 import type { RuleDefinition } from "../rules"
 import type { ScheduleDefinition } from "../schedules"
 import type { SecurityDefinitionCatalog } from "../security"
+import type { ShareTypeDefinition } from "../shares"
 import type { SyncDefinition } from "../syncs"
 import type { WorkflowDefinition } from "../workflows"
 
@@ -29,6 +30,7 @@ export interface SixbDefinitions {
   readonly rules: DefinitionCatalog<RuleDefinition>
   readonly schedules: DefinitionCatalog<ScheduleDefinition>
   readonly security: SecurityDefinitionCatalog
+  readonly shares: DefinitionCatalog<ShareTypeDefinition>
   readonly syncs: DefinitionCatalog<SyncDefinition>
   readonly workflows: DefinitionCatalog<WorkflowDefinition>
 }

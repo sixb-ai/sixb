@@ -143,6 +143,7 @@ describe("resolveAuthorizationContext", () => {
     objectTypeIds: new Set(["contract", "signed-contract", "invoice"]),
     datasetIds: new Set(["raw.contracts", "raw.invoices"]),
     actionIds: new Set(["send-contract"]),
+    shareTypeIds: new Set<string>(),
     workflowIds: new Set<string>(),
     syncIds: new Set(["sync-contracts", "sync-invoices"]),
     pipelineIds: new Set(["pipeline-contracts", "pipeline-invoices"]),

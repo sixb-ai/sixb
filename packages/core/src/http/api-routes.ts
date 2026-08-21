@@ -294,6 +294,29 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     accessToken: true,
     agentApi: false,
   },
+  // Share management uses normal request authorization. It is never agent-proxied: shared grants
+  // delegate external authority and require an explicit `can.share(ShareType)` grant.
+  {
+    operationId: "issueSharedAccessGrant",
+    method: "POST",
+    path: "/api/share-grants",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
+    operationId: "listSharedAccessGrants",
+    method: "GET",
+    path: "/api/share-grants",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
+    operationId: "revokeSharedAccessGrant",
+    method: "DELETE",
+    path: "/api/share-grants/:grantId",
+    accessToken: true,
+    agentApi: false,
+  },
   {
     operationId: "listWorkflows",
     method: "GET",

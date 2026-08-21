@@ -34,6 +34,8 @@ my-sixb-app/
 │   └── invoice-reminder.ts
 ├── agents/
 │   └── invoice-assistant.ts
+├── shares/
+│   └── published-invoice.ts
 ├── skills/
 │   └── acme-writing-style/
 │       ├── SKILL.md
@@ -74,6 +76,7 @@ agent sandboxes.
 | `rules/` | Rule definitions | [Rules](../rules/overview.md) |
 | `workflows/` | Workflow definitions | [Workflows](../workflows/overview.md) |
 | `agents/` | Agent definitions | [Agents](../agents/overview.md) |
+| `shares/` | Shared-access type definitions | [Authorization](../auth/authorization.md) |
 | `skills/` | Agent Skills (`<name>/SKILL.md` plus references/assets/scripts) read by the agent worker | [Agents](../agents/overview.md) |
 | `security/groups/` | Group definitions | [Authorization](../auth/authorization.md) |
 | `security/roles/` | Role definitions | [Authorization](../auth/authorization.md) |

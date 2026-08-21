@@ -47,6 +47,7 @@ export {
   isObjectRefSchema,
   link,
   OntologyRegistry,
+  objectRef,
   prop,
   ref,
   stringEnum,
@@ -449,6 +450,7 @@ export type {
   RunGrantTarget,
   SecurityDefinitionCatalog,
   Selection,
+  ShareGrant,
   ViewGrant,
   ViewGrantTarget,
 } from "./security"
@@ -461,6 +463,22 @@ export {
   every,
   SecurityValidationError,
 } from "./security"
+
+// ── Shared access ──────────────────────────────────────────
+
+export type {
+  DefineShareTypeOptions,
+  IssueSharedAccessInput,
+  ListSharedAccessInput,
+  SharedAccessGrant,
+  SharedAccessInvitation,
+  ShareErrorReason,
+  SharesRuntime,
+  ShareTypeDefinition,
+  ShareTypeGrant,
+  ShareTypeReference,
+} from "./shares"
+export { defineShareType, isShareTypeDefinition, ShareError } from "./shares"
 
 // ── Storage ────────────────────────────────────────────────
 // Config contract + operator migration API + in-memory dev providers.

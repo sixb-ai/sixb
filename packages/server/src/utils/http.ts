@@ -4,7 +4,7 @@ import {
   OntologyValidationError,
   type SixbErrorCode,
 } from "@sixb/core"
-import { isSixbError } from "@sixb/core/internal/errors"
+import { createSixbError, isSixbError } from "@sixb/core/internal/errors"
 import {
   FileUploadSessionError,
   type FileUploadSessionErrorReason,
@@ -16,6 +16,9 @@ import { RequestBodyTooLargeError } from "./request-body"
 const HTTP_STATUS_BY_ERROR_CODE: Partial<Record<SixbErrorCode, number>> = {
   "dataset.not_found": 404,
   "dataset.version_not_found": 404,
+  "share.access_unavailable": 401,
+  "share.grant_not_found": 404,
+  "share.type_not_found": 404,
 }
 
 export function toIsoString(value: Date): string {
@@ -109,6 +112,13 @@ export function handleRouteError(
   const message = error instanceof Error ? error.message : String(error)
   set.status = 400
   return { error: message }
+}
+
+/** Keeps native diagnostics private while exposing one stable HTTP-safe internal failure. */
+export function createUnexpectedRouteError(error: unknown) {
+  return createSixbError("internal.unexpected", "An unexpected internal error occurred.", {
+    cause: error,
+  })
 }
 
 function fileUploadSessionErrorStatus(reason: FileUploadSessionErrorReason): number {

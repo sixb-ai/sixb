@@ -60,6 +60,7 @@ import {
   getWorkflowNodeRunFileContent,
   getWorkflowRun,
   getWorkflowRunFileContent,
+  issueSharedAccessGrant,
   listActionRuns,
   listActions,
   listAgents,
@@ -87,6 +88,7 @@ import {
   listProjections,
   listRuleStates,
   listRules,
+  listSharedAccessGrants,
   listSyncRuns,
   listSyncs,
   listWebhookRuns,
@@ -107,6 +109,7 @@ import {
   revokeAuthInvitation,
   revokeAuthServiceAccountAccessToken,
   revokeAuthSession,
+  revokeSharedAccessGrant,
   searchObjects,
   signFileUploadPart,
   signOut,
@@ -267,6 +270,9 @@ import type {
   GetWorkflowRunFileContentError,
   GetWorkflowRunFileContentResponse,
   GetWorkflowRunResponse,
+  IssueSharedAccessGrantData,
+  IssueSharedAccessGrantError,
+  IssueSharedAccessGrantResponse,
   ListActionRunsData,
   ListActionRunsError,
   ListActionRunsResponse,
@@ -341,6 +347,9 @@ import type {
   ListRuleStatesResponse,
   ListRulesData,
   ListRulesResponse,
+  ListSharedAccessGrantsData,
+  ListSharedAccessGrantsError,
+  ListSharedAccessGrantsResponse,
   ListSyncRunsData,
   ListSyncRunsError,
   ListSyncRunsResponse,
@@ -396,6 +405,9 @@ import type {
   RevokeAuthSessionData,
   RevokeAuthSessionError,
   RevokeAuthSessionResponse,
+  RevokeSharedAccessGrantData,
+  RevokeSharedAccessGrantError,
+  RevokeSharedAccessGrantResponse,
   SearchObjectsData,
   SearchObjectsError,
   SearchObjectsResponse,
@@ -3874,3 +3886,82 @@ export const listWebhookRunsInfiniteOptions = (options?: Options<ListWebhookRuns
       queryKey: listWebhookRunsInfiniteQueryKey(options),
     }
   )
+
+export const listSharedAccessGrantsQueryKey = (options: Options<ListSharedAccessGrantsData>) =>
+  createQueryKey("listSharedAccessGrants", options)
+
+/**
+ * List shared access grants for one object
+ */
+export const listSharedAccessGrantsOptions = (options: Options<ListSharedAccessGrantsData>) =>
+  queryOptions<
+    ListSharedAccessGrantsResponse,
+    ListSharedAccessGrantsError,
+    ListSharedAccessGrantsResponse,
+    ReturnType<typeof listSharedAccessGrantsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listSharedAccessGrants({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listSharedAccessGrantsQueryKey(options),
+  })
+
+/**
+ * Issue a shared access grant
+ */
+export const issueSharedAccessGrantMutation = (
+  options?: Partial<Options<IssueSharedAccessGrantData>>
+): UseMutationOptions<
+  IssueSharedAccessGrantResponse,
+  IssueSharedAccessGrantError,
+  Options<IssueSharedAccessGrantData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    IssueSharedAccessGrantResponse,
+    IssueSharedAccessGrantError,
+    Options<IssueSharedAccessGrantData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await issueSharedAccessGrant({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Revoke a shared access grant
+ */
+export const revokeSharedAccessGrantMutation = (
+  options?: Partial<Options<RevokeSharedAccessGrantData>>
+): UseMutationOptions<
+  RevokeSharedAccessGrantResponse,
+  RevokeSharedAccessGrantError,
+  Options<RevokeSharedAccessGrantData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    RevokeSharedAccessGrantResponse,
+    RevokeSharedAccessGrantError,
+    Options<RevokeSharedAccessGrantData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await revokeSharedAccessGrant({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
