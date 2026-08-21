@@ -394,7 +394,7 @@ describe("Postgres storage migrations", () => {
   })
 
   test("migrates failed run records from the version 10 main schema", async () => {
-    await withStorage(false, async (storage, schemaName) => {
+    await withStorage(false, async (_storage, schemaName) => {
       const connectionString = process.env.DATABASE_URL
       if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
 
@@ -436,7 +436,19 @@ describe("Postgres storage migrations", () => {
           );
         `)
 
-        await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
+        const executionMigrationIndex = postgresStorageMigrations.steps.findIndex(
+          (migration) => migration.id === "020-sync-pipeline-executions"
+        )
+        if (executionMigrationIndex < 0) {
+          throw new Error("PostgreSQL sync-pipeline-executions migration is missing.")
+        }
+        const failureMigrations = defineMigrations({
+          adapterId: POSTGRES_STORAGE_ADAPTER_ID,
+          steps: postgresStorageMigrations.steps.slice(0, executionMigrationIndex),
+        })
+        await expect(
+          createPostgresMigrator({ sql, schemaName, migrations: failureMigrations }).migrate()
+        ).resolves.toMatchObject({ status: "migrated" })
 
         const [sync] = await sql.unsafe<Array<{ readonly error: unknown }>>(
           `SELECT error FROM ${schema}.sync_runs WHERE id = 'sync-legacy'`
@@ -872,7 +884,7 @@ describe("Postgres storage migrations", () => {
           await sql.unsafe(`CREATE SCHEMA ${schema}`)
           await sql.unsafe(`SET search_path TO ${schema}`)
           const executionMigrationIndex = postgresStorageMigrations.steps.findIndex(
-            (migration) => migration.id === "010-sync-pipeline-executions"
+            (migration) => migration.id === "020-sync-pipeline-executions"
           )
           const executionMigration = postgresStorageMigrations.steps[executionMigrationIndex]
           if (!executionMigration) {
