@@ -6,6 +6,7 @@ import {
   type SixbFailure,
 } from "@sixb/core/storage"
 import { z } from "zod"
+import { AiUsageSummarySchema } from "./ai-usage"
 import { JsonValueSchema, sixbFailureSchema } from "./common"
 import { FileRefSchema } from "./files"
 
@@ -251,14 +252,6 @@ export const AgentRunFinishReasonSchema = z.enum([
   "unknown",
 ])
 
-export const AgentRunUsageSchema = z.object({
-  inputTokens: z.number().optional(),
-  outputTokens: z.number().optional(),
-  totalTokens: z.number().optional(),
-  reasoningTokens: z.number().optional(),
-  cachedInputTokens: z.number().optional(),
-})
-
 export const AgentRunSchema = z.object({
   id: z.string(),
   projectId: z.string(),
@@ -269,7 +262,7 @@ export const AgentRunSchema = z.object({
   status: AgentRunStatusSchema,
   modelId: z.string().optional(),
   finishReason: AgentRunFinishReasonSchema.optional(),
-  usage: AgentRunUsageSchema.optional(),
+  usage: AiUsageSummarySchema.optional(),
   diagnostics: z.array(AgentRunDiagnosticSchema).optional(),
   error: AgentRunFailureSchema.optional(),
   attempt: z.number(),

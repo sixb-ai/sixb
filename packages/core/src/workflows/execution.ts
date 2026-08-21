@@ -1,6 +1,8 @@
 import { canViewWorkflowIntervention, canViewWorkflowRun, isAllowed } from "../authorization"
 import type { AuthorizablePrincipal, ExecutionContext } from "../execution"
+import { resolveExecutionUsage } from "../runtime/ai-usage"
 import type { SixbRuntimeContext } from "../runtime/types"
+import type { AiModelCallUsage } from "../storage/ai-usage"
 import type {
   ListWorkflowInterventionsInput,
   ListWorkflowInterventionsResult,
@@ -8,9 +10,14 @@ import type {
 } from "../storage/workflow-interventions"
 import type {
   ListLatestWorkflowRunsResult,
+  ListWorkflowNodeRunsInput,
+  ListWorkflowNodeRunsResult,
   ListWorkflowRunsInput,
   ListWorkflowRunsResult,
+  WorkflowAgentNodeRunRecord,
+  WorkflowNodeRunRecord,
   WorkflowRunRecord,
+  WorkflowRunStorage,
 } from "../storage/workflow-runs"
 import { WorkflowValidationError } from "./errors"
 import {
@@ -27,6 +34,10 @@ export interface WorkflowRunsRuntime {
     input?: Omit<ListWorkflowRunsInput, "projectId" | "workflowIds">
   ): Promise<WorkflowRunListResult>
   listLatest(workflowIds: readonly string[]): Promise<LatestWorkflowRunListResult>
+  listNodes(
+    runId: string,
+    input?: ListWorkflowRunNodesInput
+  ): Promise<WorkflowNodeRunListResult | null>
 }
 
 /** Execution-facing run view with provenance resolved from the immutable execution ledger. */
@@ -40,6 +51,25 @@ export interface WorkflowRunListResult extends Omit<ListWorkflowRunsResult, "run
 
 export interface LatestWorkflowRunListResult extends Omit<ListLatestWorkflowRunsResult, "runs"> {
   readonly runs: readonly WorkflowRunView[]
+}
+
+export type ListWorkflowRunNodesInput = Omit<
+  ListWorkflowNodeRunsInput,
+  "projectId" | "workflowRunId" | "workflowId"
+>
+
+/** Execution-facing Agent node view derived from its run row and model-call ledger. */
+export interface WorkflowAgentNodeRunView extends Omit<WorkflowAgentNodeRunRecord, "execution"> {
+  readonly usage?: AiModelCallUsage
+}
+
+/** Execution-facing workflow node view with optional Agent execution details. */
+export interface WorkflowNodeRunView extends WorkflowNodeRunRecord {
+  readonly agentExecution?: WorkflowAgentNodeRunView
+}
+
+export interface WorkflowNodeRunListResult extends Omit<ListWorkflowNodeRunsResult, "nodes"> {
+  readonly nodes: readonly WorkflowNodeRunView[]
 }
 
 export interface WorkflowInterventionsRuntime {
@@ -75,6 +105,36 @@ export function createWorkflowsRuntime(
       .list()
       .filter((workflow) => allowed(workflow.id))
       .map((workflow) => workflow.id)
+  const getVisibleRunRecord = async (runId: string): Promise<WorkflowRunRecord | null> => {
+    const run =
+      (await runtime.storage.workflowRuns?.getById({
+        projectId: runtime.projectId,
+        id: runId,
+      })) ?? null
+    return run && canViewWorkflowRun(runtime.authorization, run) && canAccessHistory(run.workflowId)
+      ? run
+      : null
+  }
+  const getRun = async (runId: string): Promise<WorkflowRunView | null> => {
+    const run = await getVisibleRunRecord(runId)
+    return run ? attachRequestedBy(runtime, run) : null
+  }
+  const listNodes = async (
+    runId: string,
+    input: ListWorkflowRunNodesInput = {}
+  ): Promise<WorkflowNodeRunListResult | null> => {
+    const storage = runtime.storage.workflowRuns
+    if (!storage || !(await getVisibleRunRecord(runId))) return null
+    const result = await storage.nodes.list({
+      projectId: runtime.projectId,
+      ...input,
+      workflowRunId: runId,
+    })
+    return {
+      ...result,
+      nodes: await attachWorkflowNodeViews(runtime, storage, result.nodes),
+    }
+  }
 
   return {
     list: () => source.list().filter((workflow) => allowed(workflow.id)),
@@ -91,18 +151,7 @@ export function createWorkflowsRuntime(
       return requestWorkflowRun(runtime, execution, workflow, input)
     },
     runs: {
-      getById: async (runId) => {
-        const run =
-          (await runtime.storage.workflowRuns?.getById({
-            projectId: runtime.projectId,
-            id: runId,
-          })) ?? null
-        return run &&
-          canViewWorkflowRun(runtime.authorization, run) &&
-          canAccessHistory(run.workflowId)
-          ? attachRequestedBy(runtime, run)
-          : null
-      },
+      getById: getRun,
       list: async (input = {}) => {
         const storage = runtime.storage.workflowRuns
         if (!storage) return { runs: [], hasMore: false, total: 0 }
@@ -129,6 +178,7 @@ export function createWorkflowsRuntime(
           runs: await Promise.all(result.runs.map((run) => attachRequestedBy(runtime, run))),
         }
       },
+      listNodes,
     },
     interventions: {
       getById: async (interventionId) => {
@@ -153,6 +203,70 @@ export function createWorkflowsRuntime(
         })
       },
     },
+  }
+}
+
+async function attachWorkflowNodeViews(
+  runtime: SixbRuntimeContext,
+  storage: WorkflowRunStorage,
+  nodes: readonly WorkflowNodeRunRecord[]
+): Promise<readonly WorkflowNodeRunView[]> {
+  const executions = await Promise.all(
+    nodes.map((node) =>
+      node.nodeType === "agent"
+        ? storage.agentNodes.getByNodeRunId({
+            projectId: runtime.projectId,
+            nodeRunId: node.id,
+          })
+        : null
+    )
+  )
+  const agentExecutions = executions.filter(
+    (execution): execution is WorkflowAgentNodeRunRecord => execution !== null
+  )
+  if (agentExecutions.length === 0) return nodes
+
+  const usages = await resolveExecutionUsage({
+    storage: runtime.storage.aiUsage,
+    projectId: runtime.projectId,
+    executionIds: agentExecutions.map((execution) => execution.executionId),
+  })
+  const usageByExecutionId = new Map(
+    agentExecutions.map((execution, index) => [execution.executionId, usages[index]] as const)
+  )
+
+  return nodes.map((node, index) => {
+    const execution = executions[index]
+    if (!execution) return node
+    const usage = usageByExecutionId.get(execution.executionId)
+    return {
+      ...node,
+      agentExecution: toWorkflowAgentNodeRunView(execution, usage),
+    }
+  })
+}
+
+function toWorkflowAgentNodeRunView(
+  execution: WorkflowAgentNodeRunRecord,
+  usage: AiModelCallUsage | undefined
+): WorkflowAgentNodeRunView {
+  return {
+    projectId: execution.projectId,
+    nodeRunId: execution.nodeRunId,
+    executionId: execution.executionId,
+    agentId: execution.agentId,
+    status: execution.status,
+    prompt: execution.prompt,
+    modelId: execution.modelId,
+    finishReason: execution.finishReason,
+    trace: execution.trace,
+    diagnostics: execution.diagnostics,
+    error: execution.error,
+    attempt: execution.attempt,
+    createdAt: execution.createdAt,
+    startedAt: execution.startedAt,
+    completedAt: execution.completedAt,
+    ...(usage === undefined ? {} : { usage }),
   }
 }
 

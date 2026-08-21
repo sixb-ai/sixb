@@ -3,6 +3,7 @@ import type { SixbHostView } from "@sixb/core"
 import { defineWorkflow, defineWorkflowStep } from "@sixb/core"
 import type {
   ListLatestWorkflowRunsInput,
+  ListWorkflowNodeRunsInput,
   SixbFailure,
   WorkflowNodeRunStorage,
   WorkflowRunFailureCode,
@@ -70,6 +71,18 @@ function createTestApp(workflowRuns: WorkflowRunStorageStub) {
               projectId: host.id,
               workflowIds,
             })) ?? { runs: [] }
+          )
+        },
+        async listNodes(
+          runId: string,
+          input: Omit<ListWorkflowNodeRunsInput, "projectId" | "workflowRunId" | "workflowId"> = {}
+        ) {
+          return (
+            (await workflowRuns.nodes?.list?.({
+              projectId: host.id,
+              ...input,
+              workflowRunId: runId,
+            })) ?? null
           )
         },
       },

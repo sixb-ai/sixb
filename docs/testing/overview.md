@@ -314,9 +314,9 @@ sandbox, or agent/auth storage), `@sixb/core/testing` exports conformance suites
 `runQueueContractSuite`, `runLakeStorageContractSuite`,
 `runLakeMergeStorageContractSuite`,
 `runBlobStorageContractSuite`, `runAgentStorageContractSuite`,
-`runAuthStorageContractSuite`, and `runSandboxesContractSuite` — that assert your
-implementation satisfies the provider contract. This is only relevant when
-building an integration, not when testing an app.
+`runAiUsageStorageContractSuite`, `runAuthStorageContractSuite`, and
+`runSandboxesContractSuite` — that assert your implementation satisfies the provider
+contract. This is only relevant when building an integration, not when testing an app.
 
 ## Related
 

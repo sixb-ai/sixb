@@ -904,8 +904,15 @@ export type {
 } from "./storage"
 export type { SyncRunsRuntime, SyncsRuntime } from "./syncs/execution"
 export type {
+  LatestWorkflowRunListResult,
+  ListWorkflowRunNodesInput,
+  WorkflowAgentNodeRunView,
   WorkflowInterventionsRuntime,
+  WorkflowNodeRunListResult,
+  WorkflowNodeRunView,
+  WorkflowRunListResult,
   WorkflowRunsRuntime,
+  WorkflowRunView,
   WorkflowsRuntime,
 } from "./workflows/execution"
 

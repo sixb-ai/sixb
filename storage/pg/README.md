@@ -3,9 +3,9 @@
 PostgreSQL storage provider for Sixb.
 
 One shared connection pool (porsager `postgres`) backs every Sixb store: objects, ontology commits,
-auth, agents, the immutable execution ledger, timeseries, and the run history for actions, syncs,
-pipelines, projections, workflows, and webhooks. This is the provider to use for anything you intend
-to operate.
+auth, agents, the immutable execution and AI usage ledgers, timeseries, and the run history for
+actions, syncs, pipelines, projections, workflows, and webhooks. This is the provider to use for
+anything you intend to operate.
 
 ## Install
 

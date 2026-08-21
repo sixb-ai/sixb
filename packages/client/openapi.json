@@ -11031,7 +11031,46 @@
                               },
                               "usage": {
                                 "type": "object",
-                                "additionalProperties": {}
+                                "properties": {
+                                  "inputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "outputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "totalTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "uncachedInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "cacheReadInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "cacheWriteInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "textOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "reasoningOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "reportingStatus": {
+                                    "type": "string",
+                                    "enum": ["complete", "partial", "unavailable"]
+                                  }
+                                },
+                                "required": ["reportingStatus"],
+                                "additionalProperties": false
                               },
                               "startedAt": {
                                 "type": "string"
@@ -11178,7 +11217,46 @@
                     },
                     "usage": {
                       "type": "object",
-                      "additionalProperties": {}
+                      "properties": {
+                        "inputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "outputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "totalTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "uncachedInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "cacheReadInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "cacheWriteInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "textOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "reasoningOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "reportingStatus": {
+                          "type": "string",
+                          "enum": ["complete", "partial", "unavailable"]
+                        }
+                      },
+                      "required": ["reportingStatus"],
+                      "additionalProperties": false
                     },
                     "startedAt": {
                       "type": "string"
@@ -11709,7 +11787,46 @@
                               },
                               "usage": {
                                 "type": "object",
-                                "additionalProperties": {}
+                                "properties": {
+                                  "inputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "outputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "totalTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "uncachedInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "cacheReadInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "cacheWriteInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "textOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "reasoningOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "reportingStatus": {
+                                    "type": "string",
+                                    "enum": ["complete", "partial", "unavailable"]
+                                  }
+                                },
+                                "required": ["reportingStatus"],
+                                "additionalProperties": false
                               },
                               "startedAt": {
                                 "type": "string"
@@ -19350,21 +19467,43 @@
                           "type": "object",
                           "properties": {
                             "inputTokens": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": 0
                             },
                             "outputTokens": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": 0
                             },
                             "totalTokens": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": 0
                             },
-                            "reasoningTokens": {
-                              "type": "number"
+                            "uncachedInputTokens": {
+                              "type": "integer",
+                              "minimum": 0
                             },
-                            "cachedInputTokens": {
-                              "type": "number"
+                            "cacheReadInputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "cacheWriteInputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "textOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "reasoningOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "reportingStatus": {
+                              "type": "string",
+                              "enum": ["complete", "partial", "unavailable"]
                             }
                           },
+                          "required": ["reportingStatus"],
                           "additionalProperties": false
                         },
                         "diagnostics": {
@@ -19904,21 +20043,43 @@
                           "type": "object",
                           "properties": {
                             "inputTokens": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": 0
                             },
                             "outputTokens": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": 0
                             },
                             "totalTokens": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": 0
                             },
-                            "reasoningTokens": {
-                              "type": "number"
+                            "uncachedInputTokens": {
+                              "type": "integer",
+                              "minimum": 0
                             },
-                            "cachedInputTokens": {
-                              "type": "number"
+                            "cacheReadInputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "cacheWriteInputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "textOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "reasoningOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "reportingStatus": {
+                              "type": "string",
+                              "enum": ["complete", "partial", "unavailable"]
                             }
                           },
+                          "required": ["reportingStatus"],
                           "additionalProperties": false
                         },
                         "diagnostics": {
@@ -20210,21 +20371,43 @@
                           "type": "object",
                           "properties": {
                             "inputTokens": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": 0
                             },
                             "outputTokens": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": 0
                             },
                             "totalTokens": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": 0
                             },
-                            "reasoningTokens": {
-                              "type": "number"
+                            "uncachedInputTokens": {
+                              "type": "integer",
+                              "minimum": 0
                             },
-                            "cachedInputTokens": {
-                              "type": "number"
+                            "cacheReadInputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "cacheWriteInputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "textOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "reasoningOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "reportingStatus": {
+                              "type": "string",
+                              "enum": ["complete", "partial", "unavailable"]
                             }
                           },
+                          "required": ["reportingStatus"],
                           "additionalProperties": false
                         },
                         "diagnostics": {
@@ -20538,21 +20721,43 @@
                             "type": "object",
                             "properties": {
                               "inputTokens": {
-                                "type": "number"
+                                "type": "integer",
+                                "minimum": 0
                               },
                               "outputTokens": {
-                                "type": "number"
+                                "type": "integer",
+                                "minimum": 0
                               },
                               "totalTokens": {
-                                "type": "number"
+                                "type": "integer",
+                                "minimum": 0
                               },
-                              "reasoningTokens": {
-                                "type": "number"
+                              "uncachedInputTokens": {
+                                "type": "integer",
+                                "minimum": 0
                               },
-                              "cachedInputTokens": {
-                                "type": "number"
+                              "cacheReadInputTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "cacheWriteInputTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "textOutputTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "reasoningOutputTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "reportingStatus": {
+                                "type": "string",
+                                "enum": ["complete", "partial", "unavailable"]
                               }
                             },
+                            "required": ["reportingStatus"],
                             "additionalProperties": false
                           },
                           "diagnostics": {
@@ -20817,21 +21022,43 @@
                       "type": "object",
                       "properties": {
                         "inputTokens": {
-                          "type": "number"
+                          "type": "integer",
+                          "minimum": 0
                         },
                         "outputTokens": {
-                          "type": "number"
+                          "type": "integer",
+                          "minimum": 0
                         },
                         "totalTokens": {
-                          "type": "number"
+                          "type": "integer",
+                          "minimum": 0
                         },
-                        "reasoningTokens": {
-                          "type": "number"
+                        "uncachedInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
                         },
-                        "cachedInputTokens": {
-                          "type": "number"
+                        "cacheReadInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "cacheWriteInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "textOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "reasoningOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "reportingStatus": {
+                          "type": "string",
+                          "enum": ["complete", "partial", "unavailable"]
                         }
                       },
+                      "required": ["reportingStatus"],
                       "additionalProperties": false
                     },
                     "diagnostics": {

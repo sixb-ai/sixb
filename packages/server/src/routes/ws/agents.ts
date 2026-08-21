@@ -263,7 +263,10 @@ async function sendRunSnapshot(
       safeSend(ws, { type: "error", message: "Agent run not found." })
       return false
     }
-    safeSend(ws, { type: "run.snapshot", run: serializeAgentRun(run) })
+    safeSend(ws, {
+      type: "run.snapshot",
+      run: serializeAgentRun(run),
+    })
     return true
   } catch (error) {
     safeSend(ws, { type: "error", message: errorMessage(error) })

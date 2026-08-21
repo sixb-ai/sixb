@@ -64,7 +64,6 @@ export type {
   AgentRunRecord,
   AgentRunStatus,
   AgentRunStore,
-  AgentRunUsage,
   AgentStorage,
   AgentStorageErrorCode,
   AgentThreadRecord,

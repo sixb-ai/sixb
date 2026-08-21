@@ -18,7 +18,12 @@ import {
 import { agentRunControlStreamId, agentRunStreamId } from "@sixb/core/agents/streams"
 import { createAgentRunExecutionToken } from "@sixb/core/internal/agents"
 import { createSessionCredential } from "@sixb/core/internal/auth"
-import type { AgentRunFailureCode, AgentStorage, SixbFailure } from "@sixb/core/storage"
+import type {
+  AgentRunFailureCode,
+  AgentStorage,
+  AiUsageStorage,
+  SixbFailure,
+} from "@sixb/core/storage"
 import { createTestAgentExecution, createTestSixb } from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
@@ -846,6 +851,25 @@ describe("agent routes", () => {
       startedAt: new Date("2026-06-27T10:00:01.000Z"),
     })
 
+    await storage.aiUsage.recordModelCall({
+      id: "usage-readable",
+      projectId: sixb.id,
+      executionId: run.executionId,
+      attempt: 1,
+      callId: "call-readable",
+      requesterGroupIds: [],
+      providerId: "test",
+      requestedModelId: "test-model",
+      responseId: "response-readable",
+      usage: {
+        inputTokens: 12,
+        outputTokens: 8,
+        cacheReadInputTokens: 3,
+        reasoningOutputTokens: 2,
+      },
+      occurredAt: new Date("2026-06-27T10:00:02.000Z"),
+    })
+
     const response = await app.fetch(new Request(`http://localhost/api/agent-runs/${run.id}`))
     expect(response.status).toBe(200)
     const body = (await response.json()) as Record<string, unknown>
@@ -858,9 +882,90 @@ describe("agent routes", () => {
       modelId: "test-model",
       attempt: 1,
       streamId: `agents.runs.${run.id}`,
+      usage: {
+        inputTokens: 12,
+        outputTokens: 8,
+        totalTokens: 20,
+        cacheReadInputTokens: 3,
+        reasoningOutputTokens: 2,
+        reportingStatus: "complete",
+      },
       startedAt: "2026-06-27T10:00:01.000Z",
     })
     expect("execution" in body).toBe(false)
+  })
+
+  test("batches ledger summaries when listing a thread's run history", async () => {
+    const { app, storage, sixb } = createApp()
+    const thread = await storage.agents.threads.create({
+      id: "thread-run-list",
+      projectId: sixb.id,
+      agentId: "assistant",
+      ownerPrincipal: { type: "system", id: "system" },
+    })
+    const firstExecutionId = await createTestAgentExecution(storage, {
+      projectId: sixb.id,
+      agentId: "assistant",
+      runId: "run-list-1",
+    })
+    await storage.agents.runs.create({
+      id: "run-list-1",
+      projectId: sixb.id,
+      executionId: firstExecutionId,
+      threadId: thread.id,
+      agentId: "assistant",
+      triggerMessageId: "msg-list-1",
+      requesterGroupIds: [],
+    })
+    await storage.agents.runs.finishQueued({
+      id: "run-list-1",
+      projectId: sixb.id,
+      status: "cancelled",
+    })
+    const secondExecutionId = await createTestAgentExecution(storage, {
+      projectId: sixb.id,
+      agentId: "assistant",
+      runId: "run-list-2",
+    })
+    await storage.agents.runs.create({
+      id: "run-list-2",
+      projectId: sixb.id,
+      executionId: secondExecutionId,
+      threadId: thread.id,
+      agentId: "assistant",
+      triggerMessageId: "msg-list-2",
+      requesterGroupIds: [],
+    })
+
+    const aiUsage = storage.aiUsage
+    const summaryInputs: Parameters<AiUsageStorage["summarizeExecutions"]>[0][] = []
+    Object.defineProperty(storage, "aiUsage", {
+      value: {
+        recordModelCall: (input) => aiUsage.recordModelCall(input),
+        summarizeExecution: (input) => aiUsage.summarizeExecution(input),
+        summarizeExecutions: (input) => {
+          summaryInputs.push(input)
+          return aiUsage.summarizeExecutions(input)
+        },
+      } satisfies AiUsageStorage,
+    })
+    const response = await app.fetch(
+      new Request(`http://localhost/api/agent-threads/${thread.id}/runs`)
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      runs: [{ id: "run-list-2" }, { id: "run-list-1" }],
+      hasMore: false,
+      total: 2,
+    })
+    // Regression guard: serializing each row independently records one input per run here.
+    expect(summaryInputs).toEqual([
+      {
+        projectId: sixb.id,
+        executionIds: [secondExecutionId, firstExecutionId],
+      },
+    ])
   })
 
   test("cancel publishes a stop signal, rejects a finished run, and fences to the thread", async () => {

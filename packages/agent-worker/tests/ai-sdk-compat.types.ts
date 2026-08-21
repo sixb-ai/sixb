@@ -6,20 +6,9 @@
 import type { LanguageModelV4 } from "@ai-sdk/provider"
 import type { AgentInboundUiMessage, AgentMessage } from "@sixb/core"
 import { toModelMessages } from "@sixb/core/internal/agents"
-import type { AgentRunUsage, AiModelCallUsageInput } from "@sixb/core/storage"
-import type {
-  generateText,
-  LanguageModelUsage,
-  ModelMessage,
-  StepResult,
-  streamText,
-  UIMessage,
-} from "ai"
-import {
-  agentRunUsageFromAiSdk,
-  agentTraceFromAiSdkSteps,
-  aiModelCallUsageFromAiSdk,
-} from "../src/ai-sdk-adapters"
+import type { AiModelCallUsageInput } from "@sixb/core/storage"
+import type { generateText, ModelMessage, StepResult, streamText, UIMessage } from "ai"
+import { agentTraceFromAiSdkSteps, aiModelCallUsageFromAiSdk } from "../src/ai-sdk-adapters"
 
 // A real `UIMessage` must assign to `fromAiSdk`'s inbound shape *without a cast* — this is the
 // safety net at the SDK boundary and the reason the worker can pass `responseMessage` straight in.
@@ -78,15 +67,12 @@ const _generateTextOptions: Parameters<typeof generateText>[0] = {
   },
 }
 
-// A real final StepResult and LanguageModelUsage must cross the worker adapter without a cast.
+// A real final StepResult must cross the durable trace adapter without a cast.
 declare const sdkSteps: readonly StepResult<Record<string, never>>[]
-declare const sdkUsage: LanguageModelUsage
 const _trace = agentTraceFromAiSdkSteps(sdkSteps)
-const _usage: AgentRunUsage | undefined = agentRunUsageFromAiSdk(sdkUsage)
 
 void _inbound
 void _model
 void _streamTextOptions
 void _generateTextOptions
 void _trace
-void _usage

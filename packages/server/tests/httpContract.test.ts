@@ -1927,6 +1927,99 @@ describe("SixbServer HTTP contract", () => {
     })
   })
 
+  test("batches ledger summaries when reading workflow agent nodes", async () => {
+    await withHttpContractServer(async ({ baseUrl, sixb }) => {
+      const runs = sixb.storage.workflowRuns!
+      const runId = "workflow-agent-usage-batch"
+      const workflowExecutionId = await createTestWorkflowExecution(sixb.storage.executions, {
+        projectId: sixb.id,
+        workflowId: "review-device-health-workflow",
+        runId,
+      })
+      await runs.queue({
+        id: runId,
+        projectId: sixb.id,
+        executionId: workflowExecutionId,
+        workflowId: "review-device-health-workflow",
+        input: { deviceId: "fan-1" },
+        requesterGroupIds: [],
+      })
+      await runs.start({ id: runId, projectId: sixb.id })
+
+      const executionIds: string[] = []
+      for (const index of [0, 1]) {
+        const nodeRunId = `${runId}:node:${index}`
+        await runs.nodes.start({
+          id: nodeRunId,
+          projectId: sixb.id,
+          workflowRunId: runId,
+          workflowId: "review-device-health-workflow",
+          nodeIndex: index,
+          nodeType: "agent",
+          nodeId: `agent-step-${index}`,
+          nodeKey: `agentStep${index}`,
+          input: { deviceId: "fan-1" },
+        })
+        const executionId = await createTestAgentExecution(sixb.storage, {
+          projectId: sixb.id,
+          agentId: "device-resolver",
+          runId: nodeRunId,
+          parentExecutionId: workflowExecutionId,
+        })
+        executionIds.push(executionId)
+        await runs.agentNodes.create({
+          projectId: sixb.id,
+          nodeRunId,
+          executionId,
+          agentId: "device-resolver",
+          prompt: `Resolve node ${index}.`,
+        })
+      }
+
+      const aiUsage = sixb.storage.aiUsage
+      if (!aiUsage) throw new Error("expected AI usage storage")
+      for (const [index, executionId] of executionIds.entries()) {
+        await aiUsage.recordModelCall({
+          id: `workflow-batch-usage-${index}`,
+          projectId: sixb.id,
+          executionId,
+          attempt: 1,
+          callId: `workflow-batch-call-${index}`,
+          requesterGroupIds: [],
+          providerId: "test",
+          requestedModelId: "test-model",
+          responseId: `workflow-batch-response-${index}`,
+          usage: { inputTokens: 10 + index, outputTokens: 1 },
+          occurredAt: new Date(`2026-07-02T12:00:0${index}.000Z`),
+        })
+      }
+      const summarizeExecutions = aiUsage.summarizeExecutions.bind(aiUsage)
+      const summaryInputs: Parameters<typeof aiUsage.summarizeExecutions>[0][] = []
+      aiUsage.summarizeExecutions = (input) => {
+        summaryInputs.push(input)
+        return summarizeExecutions(input)
+      }
+
+      const response = await fetch(`${baseUrl}/api/workflow-runs/${runId}`)
+
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({
+        run: { id: runId },
+        nodes: [
+          {
+            id: `${runId}:node:0`,
+            agentExecution: { agentId: "device-resolver", usage: { inputTokens: 10 } },
+          },
+          {
+            id: `${runId}:node:1`,
+            agentExecution: { agentId: "device-resolver", usage: { inputTokens: 11 } },
+          },
+        ],
+      })
+      expect(summaryInputs).toEqual([{ projectId: sixb.id, executionIds }])
+    })
+  })
+
   test("exposes agent node diagnostics without ownership tokens and cancels atomically", async () => {
     await withHttpContractServer(async ({ baseUrl, sixb }) => {
       const runs = sixb.storage.workflowRuns!
@@ -1981,6 +2074,21 @@ describe("SixbServer HTTP contract", () => {
           queueLeaseExpiresAt: new Date(Date.now() + 60_000),
         },
       })
+      const aiUsage = sixb.storage.aiUsage
+      if (!aiUsage) throw new Error("expected AI usage storage")
+      await aiUsage.recordModelCall({
+        id: "workflow-agent-usage",
+        projectId: sixb.id,
+        executionId: agentExecutionId,
+        attempt: 1,
+        callId: "workflow-agent-call",
+        requesterGroupIds: [],
+        providerId: "test",
+        requestedModelId: "test-model",
+        responseId: "workflow-agent-response",
+        usage: { inputTokens: 15, outputTokens: 5, cacheWriteInputTokens: 2 },
+        occurredAt: new Date("2026-07-02T12:00:00.000Z"),
+      })
 
       const detailResponse = await fetch(
         `${baseUrl}/api/workflow-runs/${runId}/nodes/resolveDevice/agent-execution`
@@ -1993,6 +2101,13 @@ describe("SixbServer HTTP contract", () => {
         status: "running",
         prompt: "Resolve fan-1.",
         modelId: "test-model",
+        usage: {
+          inputTokens: 15,
+          outputTokens: 5,
+          totalTokens: 20,
+          cacheWriteInputTokens: 2,
+          reportingStatus: "complete",
+        },
       })
       expect(JSON.stringify(detail)).not.toContain("secret-execution-token")
 
@@ -2008,7 +2123,11 @@ describe("SixbServer HTTP contract", () => {
           {
             id: nodeRunId,
             status: "cancelled",
-            agentExecution: { status: "cancelled", agentId: "device-resolver" },
+            agentExecution: {
+              status: "cancelled",
+              agentId: "device-resolver",
+              usage: { inputTokens: 15, outputTokens: 5 },
+            },
           },
         ],
       })

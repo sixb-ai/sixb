@@ -708,7 +708,6 @@ export class InMemoryWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRun
       status: input.status,
       ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
       ...(input.finishReason === undefined ? {} : { finishReason: input.finishReason }),
-      ...(input.usage === undefined ? {} : { usage: cloneRecord(input.usage) }),
       ...(input.trace === undefined ? {} : { trace: cloneRecord(input.trace) }),
       ...(input.diagnostics === undefined ? {} : { diagnostics: cloneRecord(input.diagnostics) }),
       ...(input.status === "succeeded" || input.error === undefined

@@ -5,6 +5,7 @@ import {
 } from "@sixb/core/storage"
 import { z } from "zod"
 import { AgentRunFailureSchema } from "./agents"
+import { AiUsageSummarySchema } from "./ai-usage"
 import { JsonValueSchema, sixbFailureSchema } from "./common"
 
 export const WorkflowIOSnapshotSchema = z.record(JsonValueSchema)
@@ -146,7 +147,7 @@ export const WorkflowAgentNodeExecutionSummarySchema = z.object({
   attempt: z.number().int().nonnegative(),
   modelId: z.string().optional(),
   finishReason: z.string().optional(),
-  usage: z.record(z.unknown()).optional(),
+  usage: AiUsageSummarySchema.optional(),
   startedAt: z.string().optional(),
   completedAt: z.string().optional(),
 })

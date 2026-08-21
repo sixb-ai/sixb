@@ -569,7 +569,9 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           const result = await sixb.agents.runs.request(requestInput)
 
           set.status = 202
-          return PostAgentMessageResponseSchema.parse({ run: serializeAgentRun(result.run) })
+          return PostAgentMessageResponseSchema.parse({
+            run: serializeAgentRun(result.run),
+          })
         } catch (error) {
           return handleAgentRouteError(error, set)
         }
@@ -663,7 +665,9 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             set.status = 404
             return { error: "Agent run not found" }
           }
-          return CancelAgentRunResponseSchema.parse({ run: serializeAgentRun(currentView) })
+          return CancelAgentRunResponseSchema.parse({
+            run: serializeAgentRun(currentView),
+          })
         } catch (error) {
           return handleAgentRouteError(error, set)
         }
@@ -716,7 +720,9 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           const { run } = await sixb.agents.runs.retry(failedRun.id)
 
           set.status = 202
-          return RetryAgentRunResponseSchema.parse({ run: serializeAgentRun(run) })
+          return RetryAgentRunResponseSchema.parse({
+            run: serializeAgentRun(run),
+          })
         } catch (error) {
           return handleAgentRouteError(error, set)
         }

@@ -161,6 +161,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 19,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "020-drop-run-usage-projections",
+    status: "applied",
+    version: 20,
+  },
 ]
 
 afterEach(async () => {
@@ -1365,10 +1372,70 @@ describe("SQLite storage migrations", () => {
       table: "executions",
       to: "id",
     })
-    expect(readTableColumns(path, "agent_runs")).toContain("requester_group_ids")
+    const agentRunColumns = readTableColumns(path, "agent_runs")
+    const workflowAgentNodeColumns = readTableColumns(path, "workflow_agent_node_runs")
+    expect(agentRunColumns).toContain("requester_group_ids")
+    expect(agentRunColumns).not.toContain("usage_input_tokens")
+    expect(agentRunColumns).not.toContain("usage_output_tokens")
+    expect(agentRunColumns).not.toContain("usage_total_tokens")
+    expect(agentRunColumns).not.toContain("usage_reasoning_tokens")
+    expect(agentRunColumns).not.toContain("usage_cached_input_tokens")
+    expect(workflowAgentNodeColumns).not.toContain("usage")
     expect(readTableColumns(path, "workflow_runs")).toContain("requester_group_ids")
-    expect(readTableColumns(path, "agent_runs")).toContain("usage_input_tokens")
-    expect(readTableColumns(path, "workflow_agent_node_runs")).toContain("usage")
+  })
+
+  test("drops only obsolete run usage projections from an existing schema", () => {
+    // Regression guard: remove migration 020 (or any one DROP COLUMN) and this leaves the old
+    // projection column behind; deleting the run rows instead breaks the preservation assertions.
+    const db = new Database(":memory:")
+    try {
+      const cleanupIndex = sqliteStorageMigrations.steps.findIndex(
+        (migration) => migration.id === "020-drop-run-usage-projections"
+      )
+      const cleanup = sqliteStorageMigrations.steps[cleanupIndex]
+      if (!cleanup) throw new Error("expected run usage cleanup migration")
+      for (const migration of sqliteStorageMigrations.steps.slice(0, cleanupIndex)) {
+        const applied = migration.up(db)
+        if (applied instanceof Promise) throw new Error("expected synchronous SQLite migration")
+      }
+      db.run(`
+        INSERT INTO agent_runs (
+          project_id, id, execution_id, thread_id, agent_id, trigger_message_id, status,
+          usage_input_tokens, usage_output_tokens, usage_total_tokens, created_at
+        ) VALUES (
+          'project-a', 'run-1', 'execution-run-1', 'thread-1', 'sales', 'message-1', 'succeeded',
+          12, 8, 20, '2026-07-01T12:00:00.000Z'
+        )
+      `)
+      db.run(`
+        INSERT INTO workflow_agent_node_runs (
+          project_id, node_run_id, execution_id, agent_id, status, prompt, usage, created_at
+        ) VALUES (
+          'project-a', 'node-1', 'execution-node-1', 'sales', 'succeeded', 'Resolve it',
+          '{"inputTokens":12,"outputTokens":8}', '2026-07-01T12:00:00.000Z'
+        )
+      `)
+
+      const applied = cleanup.up(db)
+      if (applied instanceof Promise) throw new Error("expected synchronous SQLite migration")
+
+      const agentColumns = tableColumns(db, "agent_runs")
+      const workflowColumns = tableColumns(db, "workflow_agent_node_runs")
+      expect(agentColumns.some((column) => column.startsWith("usage_"))).toBe(false)
+      expect(workflowColumns).not.toContain("usage")
+      expect(
+        db.query("SELECT id, status, model_id FROM agent_runs WHERE id = 'run-1'").get()
+      ).toEqual({ id: "run-1", status: "succeeded", model_id: null })
+      expect(
+        db
+          .query(
+            "SELECT node_run_id, status, prompt FROM workflow_agent_node_runs WHERE node_run_id = 'node-1'"
+          )
+          .get()
+      ).toEqual({ node_run_id: "node-1", status: "succeeded", prompt: "Resolve it" })
+    } finally {
+      db.close()
+    }
   })
 
   test("untracked existing schema collides and rolls back without conversion", async () => {
@@ -1501,6 +1568,12 @@ function readTableNames(path: string): readonly string[] {
   } finally {
     db.close()
   }
+}
+
+function tableColumns(db: Database, tableName: string): readonly string[] {
+  return (db.query(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>).map(
+    (column) => column.name
+  )
 }
 
 function readTableColumns(path: string, tableName: string): readonly string[] {

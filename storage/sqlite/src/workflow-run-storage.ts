@@ -596,7 +596,7 @@ export class SqliteWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunSt
       this.db
         .query(`
         UPDATE workflow_agent_node_runs SET
-          status = ?, model_id = COALESCE(?, model_id), finish_reason = ?, usage = ?, trace = ?,
+          status = ?, model_id = COALESCE(?, model_id), finish_reason = ?, trace = ?,
           diagnostics = ?, error = ?, execution_token = NULL,
           execution_queue_lease_expires_at = NULL, completed_at = ?
         WHERE project_id = ? AND node_run_id = ?
@@ -605,7 +605,6 @@ export class SqliteWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunSt
           input.status,
           input.modelId ?? null,
           input.finishReason ?? null,
-          input.usage ? JSON.stringify(input.usage) : null,
           input.trace ? JSON.stringify(input.trace) : null,
           input.diagnostics ? JSON.stringify(input.diagnostics) : null,
           input.status === "succeeded" || input.error === undefined
@@ -1079,7 +1078,6 @@ interface WorkflowAgentNodeRunDatabaseRow {
   prompt: string
   model_id: string | null
   finish_reason: WorkflowAgentNodeRunRecord["finishReason"] | null
-  usage: string | null
   trace: string | null
   diagnostics: string | null
   error: string | null
@@ -1114,7 +1112,6 @@ function rowToWorkflowAgentNodeRunRecord(
     prompt: row.prompt,
     ...(row.model_id ? { modelId: row.model_id } : {}),
     ...(row.finish_reason ? { finishReason: row.finish_reason } : {}),
-    ...(row.usage ? { usage: JSON.parse(row.usage) } : {}),
     ...(row.trace ? { trace: JSON.parse(row.trace) } : {}),
     ...(row.diagnostics ? { diagnostics: JSON.parse(row.diagnostics) } : {}),
     ...(row.error ? { error: parseSixbFailure(row.error, AGENT_RUN_FAILURE_CODES) } : {}),

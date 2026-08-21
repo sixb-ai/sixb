@@ -5,7 +5,6 @@ import {
   type AgentMessageRecord,
   type AgentRunDiagnostic,
   type AgentRunRecord,
-  type AgentRunUsage,
   type AgentThreadRecord,
   coerceAgentRunFinishReason,
 } from "@sixb/core/storage"
@@ -40,11 +39,6 @@ export interface AgentRunRow {
   status: AgentRunRecord["status"]
   model_id: string | null
   finish_reason: string | null
-  usage_input_tokens: number | string | null
-  usage_output_tokens: number | string | null
-  usage_total_tokens: number | string | null
-  usage_reasoning_tokens: number | string | null
-  usage_cached_input_tokens: number | string | null
   error: JsonValue | null
   diagnostics: AgentRunDiagnostic[] | string | null
   attempt: number | string
@@ -104,7 +98,6 @@ export function rowToRunRecord(row: AgentRunRow): AgentRunRecord {
     status: row.status,
     modelId: row.model_id ?? undefined,
     finishReason: coerceAgentRunFinishReason(row.finish_reason),
-    usage: rowToUsage(row),
     error: row.error === null ? undefined : parseSixbFailure(row.error, AGENT_RUN_FAILURE_CODES),
     diagnostics: normalizeDiagnostics(row.diagnostics),
     attempt: Number(row.attempt),
@@ -146,21 +139,6 @@ function principalFromColumns(
   id: string | null | undefined
 ): Principal | undefined {
   return type && id ? { type, id } : undefined
-}
-
-function rowToUsage(row: AgentRunRow): AgentRunUsage | undefined {
-  const usage: AgentRunUsage = {
-    ...(row.usage_input_tokens === null ? {} : { inputTokens: Number(row.usage_input_tokens) }),
-    ...(row.usage_output_tokens === null ? {} : { outputTokens: Number(row.usage_output_tokens) }),
-    ...(row.usage_total_tokens === null ? {} : { totalTokens: Number(row.usage_total_tokens) }),
-    ...(row.usage_reasoning_tokens === null
-      ? {}
-      : { reasoningTokens: Number(row.usage_reasoning_tokens) }),
-    ...(row.usage_cached_input_tokens === null
-      ? {}
-      : { cachedInputTokens: Number(row.usage_cached_input_tokens) }),
-  }
-  return Object.keys(usage).length === 0 ? undefined : usage
 }
 
 function normalizeMetadata(value: unknown): AgentMessageRecord["metadata"] {

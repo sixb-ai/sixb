@@ -1,10 +1,13 @@
+import type { AgentRunView, WorkflowAgentNodeRunView } from "@sixb/core"
 import type {
+  AgentRunRecord,
   AiModelCallUsageRecord,
   AiUsageExecutionSummary,
   AiUsageStorage,
   ReadonlyJsonObject,
   RecordAiModelCallInput,
   RecordAiModelCallResult,
+  WorkflowAgentNodeRunRecord,
 } from "@sixb/core/storage"
 
 const rawUsage: ReadonlyJsonObject = { provider_counter: 1 }
@@ -48,6 +51,23 @@ const provider = {
     return executionIds.map(() => emptySummary)
   },
 } satisfies AiUsageStorage
+
+declare const agentRun: AgentRunRecord
+declare const agentRunView: AgentRunView
+declare const workflowAgentNode: WorkflowAgentNodeRunRecord
+declare const workflowAgentNodeView: WorkflowAgentNodeRunView
+
+// Run rows must never grow a second accounting authority beside the model-call ledger.
+// @ts-expect-error usage exists only through AiUsageStorage
+agentRun.usage
+// @ts-expect-error usage exists only through AiUsageStorage
+workflowAgentNode.usage
+
+// Runtime views may expose the ledger-derived summary without mutating storage records.
+agentRunView.usage
+workflowAgentNodeView.usage
+// @ts-expect-error execution ownership stays private to the storage contract
+workflowAgentNodeView.execution
 
 void input
 void provider
