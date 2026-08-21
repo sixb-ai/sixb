@@ -55,6 +55,7 @@ interface OntologyCommitFields {
   readonly id: string
   readonly idempotencyKey: string
   readonly requestHash: string
+  readonly executionId: string
   readonly origin: OntologyMaterializationOrigin
   readonly actor?: EventActor
   readonly ontologyRevision: string

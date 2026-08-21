@@ -60,6 +60,9 @@ import projectionExecutionsSql from "./migrations/021-projection-executions.sql"
   type: "text",
 }
 import webhookExecutionsSql from "./migrations/022-webhook-executions.sql" with { type: "text" }
+import ontologyCommitExecutionsSql from "./migrations/023-ontology-commit-executions.sql" with {
+  type: "text",
+}
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -125,6 +128,18 @@ export const sqliteStorageMigrations = defineMigrations({
         db.run(webhookExecutionsSql)
       },
       { checksum: checksum(webhookExecutionsSql) }
+    ),
+    sqliteStep(
+      "023-ontology-commit-executions",
+      (db) => {
+        if (db.query("SELECT 1 FROM ontology_commits LIMIT 1").get()) {
+          throw new Error(
+            "[SixbSqliteStorage] Ontology commit execution migration cannot preserve commits with unknown authority."
+          )
+        }
+        db.run(ontologyCommitExecutionsSql)
+      },
+      { checksum: checksum(ontologyCommitExecutionsSql) }
     ),
   ],
 })

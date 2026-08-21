@@ -1,4 +1,3 @@
-import { assertPrivileged } from "../authorization"
 import type { OntologySource } from "../ontology"
 import type { OntologyMutationRuntime } from "../runtime/ontology-mutations"
 import { getOntologyMutationRuntime } from "../runtime/ontology-mutations"
@@ -43,37 +42,8 @@ function bindPrimitiveScope(
   const bound: BoundPrimitiveExecution = {
     sixb,
     get ontologyMutations() {
-      ontologyMutations ??= createBoundOntologyMutations(host, scope)
+      ontologyMutations ??= getOntologyMutationRuntime(sixb)
       return ontologyMutations
-    },
-  }
-  return Object.freeze(bound)
-}
-
-function createBoundOntologyMutations(
-  host: object,
-  scope: ExecutionScope
-): OntologyMutationRuntime {
-  const mutations = getOntologyMutationRuntime(host)
-  const assertMutationAccess = () =>
-    assertPrivileged({ runtimeAuthorization: scope.authorization }, "ontology.mutate")
-
-  const bound: OntologyMutationRuntime = {
-    commitEdits: (command) => {
-      assertMutationAccess()
-      return mutations.commitEdits(command)
-    },
-    replaceProjection: (command) => {
-      assertMutationAccess()
-      return mutations.replaceProjection(command)
-    },
-    finishProjection: (command) => {
-      assertMutationAccess()
-      return mutations.finishProjection(command)
-    },
-    appendTelemetry: (command) => {
-      assertMutationAccess()
-      return mutations.appendTelemetry(command)
     },
   }
   return Object.freeze(bound)

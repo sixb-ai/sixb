@@ -16,8 +16,8 @@ import {
 import { recordEdits } from "../src/actions/worker"
 import type { EditBatch } from "../src/edits"
 import { lowerEditBatch } from "../src/edits"
+import { bindDurablePrimitiveExecution } from "../src/execution/primitive"
 import { createLinkScopeFingerprint } from "../src/materializer"
-import { getOntologyMutationRuntime } from "../src/runtime/internal"
 import type { ObjectRow, Storage } from "../src/storage"
 import { StorageTransactionError } from "../src/storage"
 import { createTestSixb, queueTestActionRun } from "../src/testing"
@@ -86,7 +86,7 @@ async function startActionRun(host: EditsHost, runId: string, actionId = "markPa
   await actionRuns.start({ projectId: host.id, id: runId })
 }
 
-function commit(
+async function commit(
   host: EditsHost,
   input: {
     readonly runId: string
@@ -95,8 +95,20 @@ function commit(
     readonly dependencies?: Parameters<typeof commitActionEdits>[0]["dependencies"]
   }
 ) {
+  const run = await host.storage.actionRuns?.getById({ projectId: host.id, id: input.runId })
+  if (!run) throw new Error(`Expected Action run '${input.runId}'.`)
+  const execution = await host.storage.executions.getById({
+    projectId: host.id,
+    id: run.executionId,
+  })
+  if (!execution) throw new Error(`Expected Action execution '${run.executionId}'.`)
+  const primitive = {
+    kind: "action" as const,
+    id: input.actionId ?? "markPaid",
+    runId: input.runId,
+  }
   return commitActionEdits({
-    mutations: getOntologyMutationRuntime(host),
+    mutations: bindDurablePrimitiveExecution(host, { execution, primitive }).ontologyMutations,
     projectId: host.id,
     runId: input.runId,
     actionId: input.actionId ?? "markPaid",

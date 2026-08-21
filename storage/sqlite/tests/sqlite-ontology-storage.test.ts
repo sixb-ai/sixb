@@ -27,6 +27,14 @@ test("SQLite work staging rolls back a partial batch after a later record confli
   const pending = classificationWork("pending")
   try {
     await storage.transaction(async (tx) => {
+      await tx.executions.create({
+        id: header.commit.executionId,
+        projectId: header.commit.projectId,
+        executor: { type: "request", requestId: "atomic-work-stage" },
+        source: { type: "http", requestId: "atomic-work-stage" },
+        correlationId: "contract-correlation:atomic-work-stage",
+        authorizationRef: { type: "disabled" },
+      })
       const materializations = tx.ontology.materializations
       const session = await materializations.begin(header)
       await materializations.stageWork({ session, records: [first] })
@@ -132,6 +140,7 @@ function atomicStageHeader(): MaterializationPlanHeader {
       id: "atomic-work-stage",
       idempotencyKey: "runtime:atomic-work-stage",
       requestHash: "hash:atomic-work-stage",
+      executionId: "contract-execution:atomic-work-stage",
       origin: { kind: "runtime", requestId: "atomic-work-stage" },
       ontologyRevision: "ontology-contract-revision",
       intent: { kind: "edit", mode: "atomic", operationCount: 0 },

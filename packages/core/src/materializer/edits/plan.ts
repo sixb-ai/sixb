@@ -58,6 +58,7 @@ export interface EditPlanChanges {
 interface EditPlanContext {
   readonly identity: TimedCommitIdentity
   readonly origin: OntologyMaterializationOrigin
+  readonly correlationId: string
   readonly actor?: EventActor
 }
 
@@ -241,6 +242,7 @@ function materializationEventContext(
     commitId: planContext.identity.commitId,
     committedAt: planContext.identity.committedAt,
     origin: planContext.origin,
+    correlationId: planContext.correlationId,
   }
   if (planContext.actor === undefined) return base
   return { ...base, actor: planContext.actor }

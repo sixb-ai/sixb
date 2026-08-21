@@ -1,4 +1,3 @@
-import type { EventActor } from "../../events/envelope"
 import { assertJsonValue, cloneJsonValue, compareStrings, stableJsonStringify } from "../../json"
 import { MaterializationValidationError } from "../../materialization/errors"
 import type {
@@ -58,21 +57,6 @@ function normalizeNonblank(value: string, label: string): string {
     throw new MaterializationValidationError(`${label} must be a nonblank string.`)
   }
   return value
-}
-
-function normalizeEventActor(actor: EventActor): EventActor {
-  if (typeof actor !== "object" || actor === null || Array.isArray(actor)) {
-    throw new MaterializationValidationError("Event actor must be an object.")
-  }
-  if (actor.type !== "user" && actor.type !== "serviceAccount" && actor.type !== "system") {
-    throw new MaterializationValidationError(
-      "Event actor type must be 'user', 'serviceAccount', or 'system'."
-    )
-  }
-  return Object.freeze({
-    type: actor.type,
-    id: normalizeNonblank(actor.id, "Event actor id"),
-  })
 }
 
 function normalizeTimestamp(value: string, label: string): string {
@@ -280,7 +264,6 @@ export function normalizeOntologyEditCommit(input: OntologyEditCommit): Ontology
         kind: "runtime",
         requestId: normalizeNonblank(input.source.requestId, "Runtime request id"),
       }),
-      ...(input.actor !== undefined ? { actor: normalizeEventActor(input.actor) } : {}),
       operations: Object.freeze(operations),
       ...(input.operationGroups !== undefined
         ? { operationGroups: normalizeOperationGroups(input.operationGroups, operationIds) }
@@ -306,7 +289,6 @@ export function normalizeOntologyEditCommit(input: OntologyEditCommit): Ontology
   return Object.freeze({
     mode: "atomic",
     source,
-    ...(input.actor !== undefined ? { actor: normalizeEventActor(input.actor) } : {}),
     operations: Object.freeze(operations),
     expectedObjects: deduplicateExpectations(
       expectedObjects,
@@ -521,7 +503,6 @@ export function normalizeTelemetryAppend(input: TelemetryAppend): TelemetryAppen
   }
   return Object.freeze({
     source,
-    ...(input.actor !== undefined ? { actor: normalizeEventActor(input.actor) } : {}),
     points: Object.freeze(points),
   })
 }

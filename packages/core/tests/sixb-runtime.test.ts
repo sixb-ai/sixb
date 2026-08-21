@@ -21,7 +21,7 @@ import {
 } from "../src"
 import type { ObjectStorage, QueryObjectsInput, QueryObjectsResult } from "../src/storage"
 import { createTestSixb } from "../src/testing"
-import { createTestRuntimeDeps } from "./test-runtime-deps"
+import { createTestRuntimeDeps, waitFor } from "./test-runtime-deps"
 
 const Room = defineObjectType({
   id: "Room",
@@ -638,15 +638,18 @@ describe("SixbHost runtime", () => {
     ).rejects.toThrow("does not define link properties")
 
     // Latest telemetry is part of effective object state, so appending a point also updates the
-    // object it belongs to. Facts of one commit are claimed in commit-ordinal order, so a link
-    // never arrives before the object it references.
-    const stream = await sixb.events.read()
-    expect([...stream].map((event) => event.type)).toEqual([
+    // object it belongs to. The outbox is eventually dispatched and does not promise ordering
+    // between independent commits, so this assertion waits for and compares the complete fact set.
+    const stream = await waitFor(
+      () => sixb.events.read(),
+      (events) => events.length === 5
+    )
+    expect([...stream].map((event) => event.type).sort()).toEqual([
+      "link.created",
+      "object.created",
       "object.created",
       "object.updated",
       "telemetry.appended",
-      "object.created",
-      "link.created",
     ])
     expect(Object.fromEntries(stream.map((event) => [event.type, event.topic]))).toEqual({
       "object.created": "objects",
@@ -990,9 +993,10 @@ describe("SixbHost runtime", () => {
     expect(linksAfter).toHaveLength(0)
 
     // Verify link.deleted event was emitted
-    const events = await sixb.events.read({
-      types: ["link.deleted"],
-    })
+    const events = await waitFor(
+      () => sixb.events.read({ types: ["link.deleted"] }),
+      (published) => published.length === 1
+    )
     expect(events).toHaveLength(1)
   })
 

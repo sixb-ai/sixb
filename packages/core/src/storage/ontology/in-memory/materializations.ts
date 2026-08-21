@@ -184,6 +184,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     private readonly timeseries: InMemoryTimeseriesStorage,
     private readonly getTransactionToken: () => object | null,
     private readonly getMaterializationLifecycle: () => ProviderMaterializationTransactionLifecycle | null,
+    private readonly executionExists: (projectId: string, executionId: string) => Promise<boolean>,
     private readonly hooks: InMemoryOntologyStorageTestHooks = {}
   ) {}
 
@@ -196,6 +197,11 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       )
     }
     assertMaterializationHeader(input)
+    if (!(await this.executionExists(input.commit.projectId, input.commit.executionId))) {
+      throw new MaterializationValidationError(
+        `Ontology commit execution '${input.commit.executionId}' does not exist in project '${input.commit.projectId}'.`
+      )
+    }
     this.assertCommitAbsent(input)
     for (const expected of input.expected.sources)
       this.assertSource(expected, input.commit.projectId)

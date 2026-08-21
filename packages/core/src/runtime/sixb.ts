@@ -17,6 +17,7 @@ import { createSchedulesRuntime, type SchedulesRuntime } from "../schedules/exec
 import { createSyncsRuntime, type SyncsRuntime } from "../syncs/execution"
 import { createWorkflowsRuntime, type WorkflowsRuntime } from "../workflows/execution"
 import type { SixbDefinitions } from "./definitions"
+import { shareOntologyMutationRuntime } from "./ontology-mutations"
 import type { OntologySource, SixbRuntimeContext } from "./types"
 
 /** Domain SDK bound to one immutable execution and one registered runtime authority. */
@@ -58,6 +59,7 @@ export function createBoundSixb<TOntologySources extends readonly OntologySource
     execution,
     ...createExecutionFacades<TOntologySources>(runtime, execution, dependencies),
   }
+  shareOntologyMutationRuntime(runtime, sixb)
   boundSixbInstances.add(sixb)
   return sixb
 }

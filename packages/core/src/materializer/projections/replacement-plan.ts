@@ -53,6 +53,7 @@ export interface ProjectionReplacementPlanInput {
   readonly projectionKind: "object" | "link"
   readonly identity: TimedCommitIdentity
   readonly origin: OntologyMaterializationOrigin
+  readonly correlationId: string
   readonly signal?: AbortSignal
 }
 
@@ -160,6 +161,7 @@ function appendObjectChangeWork(
         commitId: input.identity.commitId,
         committedAt: input.identity.committedAt,
         origin: input.origin,
+        correlationId: input.correlationId,
         change,
       })
     )
@@ -356,6 +358,7 @@ function appendLinkChangeWork(
         commitId: input.identity.commitId,
         committedAt: input.identity.committedAt,
         origin: input.origin,
+        correlationId: input.correlationId,
         change,
       })
     )

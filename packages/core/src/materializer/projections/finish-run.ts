@@ -14,6 +14,14 @@ import type { MaterializerContext, MaterializerStorage } from "../context"
 import { withSerializationRetry } from "../execution/commit-lifecycle"
 import { lockProjectionRunForMaterialization } from "../execution/run-correlation"
 import {
+  assertMaterializerRunExecution,
+  assertTrustedPrimitiveMutationExecution,
+  ensureMaterializerExecution,
+  type MaterializerExecution,
+  prepareMaterializerExecution,
+} from "../execution/scope"
+import type { MaterializerCommand } from "../materializer"
+import {
   normalizePinnedDatasetVersion,
   normalizeProjectionExecution,
   normalizeProjectionSourceRef,
@@ -26,11 +34,12 @@ interface PreparedProjectionRunFinish {
   readonly identity: ProjectionMaterializationIdentity
   readonly resolved: ResolvedProjection<ProjectionDefinition>
   readonly finishedAt: Date
+  readonly execution: MaterializerExecution
 }
 
 export async function finishProjectionRun(
   context: MaterializerContext,
-  raw: ProjectionRunFinishInput
+  raw: MaterializerCommand<ProjectionRunFinishInput>
 ): Promise<void> {
   const command = prepareProjectionRunFinish(context, raw)
   await withSerializationRetry(context, () =>
@@ -42,14 +51,14 @@ export async function finishProjectionRun(
 
 function prepareProjectionRunFinish(
   context: Pick<MaterializerContext, "projectId" | "projectionRegistry" | "clock">,
-  raw: ProjectionRunFinishInput
+  raw: MaterializerCommand<ProjectionRunFinishInput>
 ): PreparedProjectionRunFinish {
-  assertValidTerminalDecision(raw)
-  const source = normalizeProjectionSourceRef(raw.source)
-  const datasetVersion = normalizePinnedDatasetVersion(raw.datasetVersion)
-  const execution = normalizeProjectionExecution(raw.execution)
+  assertValidTerminalDecision(raw.input)
+  const source = normalizeProjectionSourceRef(raw.input.source)
+  const datasetVersion = normalizePinnedDatasetVersion(raw.input.datasetVersion)
+  const projectionExecution = normalizeProjectionExecution(raw.input.execution)
   const resolved =
-    raw.protocol === "replacement"
+    raw.input.protocol === "replacement"
       ? context.projectionRegistry.resolveSource(source.projectionId)
       : context.projectionRegistry.resolveTelemetry(source.projectionId)
   if (resolved.datasetId !== datasetVersion.datasetId) {
@@ -64,10 +73,11 @@ function prepareProjectionRunFinish(
   })
   return {
     projectId: context.projectId,
-    input: { ...raw, source, datasetVersion, execution },
+    input: { ...raw.input, source, datasetVersion, execution: projectionExecution },
     identity,
     resolved,
-    finishedAt: new Date(raw.finishedAt ?? context.clock()),
+    finishedAt: new Date(raw.input.finishedAt ?? context.clock()),
+    execution: prepareMaterializerExecution(context.projectId, raw.scope),
   }
 }
 
@@ -75,13 +85,20 @@ async function finishProjectionRunTransaction(
   storage: MaterializerStorage,
   command: PreparedProjectionRunFinish
 ): Promise<void> {
-  const { projectionRuns } = await lockProjectionRunForMaterialization(storage, {
+  await ensureMaterializerExecution(storage.executions, command.execution)
+  assertTrustedPrimitiveMutationExecution(command.execution, {
+    kind: "projection",
+    id: command.input.source.projectionId,
+    runId: command.input.execution.projectionRunId,
+  })
+  const { projectionRuns, run } = await lockProjectionRunForMaterialization(storage, {
     projectId: command.projectId,
     projectionRunId: command.input.execution.projectionRunId,
     executionToken: command.input.execution.executionToken,
     identity: command.identity,
     resolved: command.resolved,
   })
+  assertMaterializerRunExecution(command.execution, run.executionId, `Projection run '${run.id}'`)
 
   if (command.input.protocol === "replacement") {
     await assertReplacementTerminalDecision(storage, command)
@@ -168,6 +185,7 @@ function assertReplacementCommitCorrelation(
   const { input, identity } = command
   if (
     commit.origin.kind !== "projection" ||
+    commit.executionId !== command.execution.executionId ||
     commit.intent.kind !== "projection" ||
     commit.result.kind !== "projection" ||
     commit.origin.projectionRunId !== input.execution.projectionRunId ||

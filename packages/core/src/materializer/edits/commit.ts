@@ -1,4 +1,7 @@
-import { MaterializationValidationError } from "../../materialization/errors"
+import {
+  MaterializationConflictError,
+  MaterializationValidationError,
+} from "../../materialization/errors"
 import type {
   EditCommitResult,
   OntologyEditCommit,
@@ -10,7 +13,16 @@ import type { Storage } from "../../storage"
 import type { MaterializationSession, OntologyCommitWrite } from "../../storage/ontology"
 import type { MaterializerContext, MaterializerStorage } from "../context"
 import { replayCommit, withSerializationRetry } from "../execution/commit-lifecycle"
+import {
+  assertMaterializerRunExecution,
+  assertRuntimeMutationExecution,
+  assertTrustedPrimitiveMutationExecution,
+  ensureMaterializerExecution,
+  type MaterializerExecution,
+  prepareMaterializerExecution,
+} from "../execution/scope"
 import { drainStagedEvents, drainStagedWork } from "../execution/work-executor"
+import type { MaterializerCommand } from "../materializer"
 import {
   createActionIdempotencyKey,
   createRuntimeIdempotencyKey,
@@ -30,24 +42,22 @@ interface PreparedEditCommit {
   readonly input: NormalizedEditCommit
   readonly identity: TimedCommitIdentity
   readonly origin: OntologyMaterializationOrigin
+  readonly execution: MaterializerExecution
 }
 
 export async function commitEdits(
   context: MaterializerContext,
-  raw: OntologyEditCommit
+  raw: MaterializerCommand<OntologyEditCommit>
 ): Promise<EditCommitResult> {
   const command = prepareEditCommit(context, raw)
-  const replay = await replayEditCommit(context, command)
-  if (replay) return replay
-
   return executeEditCommit(context, command)
 }
 
 function prepareEditCommit(
   context: Pick<MaterializerContext, "projectId" | "clock">,
-  raw: OntologyEditCommit
+  raw: MaterializerCommand<OntologyEditCommit>
 ): PreparedEditCommit {
-  const input = normalizeOntologyEditCommit(raw)
+  const input = normalizeOntologyEditCommit(raw.input)
   const idempotencyKey = editIdempotencyKey(input)
   const identity = createTimedCommitIdentity({
     projectId: context.projectId,
@@ -55,7 +65,12 @@ function prepareEditCommit(
     normalizedCallerIntent: input,
     now: context.clock(),
   })
-  return { input, identity, origin: input.source }
+  return {
+    input,
+    identity,
+    origin: input.source,
+    execution: prepareMaterializerExecution(context.projectId, raw.scope),
+  }
 }
 
 function editIdempotencyKey(input: NormalizedEditCommit): string {
@@ -68,7 +83,8 @@ function editIdempotencyKey(input: NormalizedEditCommit): string {
 async function lockActionRunForMaterialization(
   storage: Storage,
   projectId: string,
-  input: NormalizedEditCommit
+  input: NormalizedEditCommit,
+  execution: MaterializerExecution
 ): Promise<void> {
   if (input.source.kind !== "action") return
   if (!storage.actionRuns) {
@@ -76,18 +92,45 @@ async function lockActionRunForMaterialization(
       "Storage does not provide Action run capabilities required by this commit."
     )
   }
-  await storage.actionRuns.lockForMaterialization({
+  const run = await storage.actionRuns.lockForMaterialization({
     projectId,
     actionId: input.source.actionId,
     runId: input.source.runId,
   })
+  assertMaterializerRunExecution(execution, run.executionId, `Action run '${run.id}'`)
 }
 
-function replayEditCommit(
-  context: MaterializerContext,
-  command: PreparedEditCommit
-): Promise<EditCommitResult | null> {
-  return replayCommit<EditCommitResult>(context, command.identity)
+async function validateMutationExecution(
+  storage: Storage,
+  projectId: string,
+  input: NormalizedEditCommit,
+  execution: MaterializerExecution
+): Promise<void> {
+  if (input.source.kind !== "action") {
+    assertRuntimeMutationExecution(execution)
+    return
+  }
+  assertTrustedPrimitiveMutationExecution(execution, {
+    kind: "action",
+    id: input.source.actionId,
+    runId: input.source.runId,
+  })
+  if (!storage.actionRuns) {
+    throw new MaterializationValidationError(
+      "Storage does not provide Action run capabilities required by this commit."
+    )
+  }
+  const run = await storage.actionRuns.getById({ projectId, id: input.source.runId })
+  if (!run) {
+    throw new MaterializationValidationError(`Action run '${input.source.runId}' was not found.`)
+  }
+  if (run.actionId !== input.source.actionId) {
+    throw new MaterializationConflictError(
+      "run-correlation",
+      `Action run '${run.id}' does not belong to action '${input.source.actionId}'.`
+    )
+  }
+  assertMaterializerRunExecution(execution, run.executionId, `Action run '${run.id}'`)
 }
 
 async function executeEditCommit(
@@ -106,10 +149,23 @@ async function executeEditTransaction(
   storage: MaterializerStorage,
   command: PreparedEditCommit
 ): Promise<EditCommitResult> {
-  await lockActionRunForMaterialization(storage, context.projectId, command.input)
+  await ensureMaterializerExecution(storage.executions, command.execution)
+  await validateMutationExecution(storage, context.projectId, command.input, command.execution)
 
-  const replay = await replayCommit<EditCommitResult>(context, command.identity, storage)
+  const replay = await replayCommit<EditCommitResult>(
+    context,
+    command.identity,
+    command.execution.executionId,
+    storage
+  )
   if (replay) return replay
+
+  await lockActionRunForMaterialization(
+    storage,
+    context.projectId,
+    command.input,
+    command.execution
+  )
 
   const session = await beginEditMaterialization(context, storage, command)
   const workingState = await loadEditWorkingState(
@@ -171,6 +227,7 @@ function buildEditCommit(
     id: command.identity.commitId,
     idempotencyKey: command.identity.idempotencyKey,
     requestHash: command.identity.requestHash,
+    executionId: command.execution.executionId,
     origin: command.origin,
     ontologyRevision: context.projectionRegistry.ontologyRevision,
     intent: {
@@ -180,8 +237,8 @@ function buildEditCommit(
     },
     committedAt: command.identity.committedAt,
   }
-  if (command.input.actor === undefined) return commit
-  return { ...commit, actor: command.input.actor }
+  if (command.execution.actor === undefined) return commit
+  return { ...commit, actor: command.execution.actor }
 }
 
 function editExpectations(input: NormalizedEditCommit) {
@@ -289,9 +346,13 @@ function isRecoverableEditValidation(
 }
 
 function editPlanContext(command: PreparedEditCommit) {
-  const context = { identity: command.identity, origin: command.origin }
-  if (command.input.actor === undefined) return context
-  return { ...context, actor: command.input.actor }
+  const context = {
+    identity: command.identity,
+    origin: command.origin,
+    correlationId: command.execution.correlationId,
+  }
+  if (command.execution.actor === undefined) return context
+  return { ...context, actor: command.execution.actor }
 }
 
 async function finalizeEditMaterialization(

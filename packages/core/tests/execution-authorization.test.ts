@@ -2,12 +2,14 @@ import { describe, expect, test } from "bun:test"
 import { agentServiceAccountId } from "../src/agents/authority"
 import type { Principal } from "../src/auth"
 import { type AuthorizationContext, emptyGrantIndex } from "../src/authorization"
+import { isSixbError } from "../src/errors/internal"
 import { restoreAgentExecutionScope } from "../src/execution/agent"
 import {
   assertExecutionScopeProject,
   createPrincipalRuntimeAuthorization,
   createTrustedPrimitiveRuntimeAuthorization,
   getAuthorizationRef,
+  resolveExecutionScopeAuthorization,
   resolveRuntimeAuthorization,
 } from "../src/execution/authorization"
 import {
@@ -125,6 +127,31 @@ describe("runtime authorization capabilities", () => {
 })
 
 describe("execution scopes", () => {
+  test("rejects mixing an execution with authority from another scope", () => {
+    const principalScope = createTestingScope({
+      projectId: "project-1",
+      context: authorizationContext({ type: "user", id: "user-1" }),
+    })
+    const disabledScope = createTestingScope({ projectId: "project-1" })
+
+    expect(() => resolveExecutionScopeAuthorization("project-1", principalScope)).not.toThrow()
+    let error: unknown
+    try {
+      resolveExecutionScopeAuthorization("project-1", {
+        execution: principalScope.execution,
+        authorization: disabledScope.authorization,
+      })
+    } catch (cause) {
+      error = cause
+    }
+    expect(isSixbError(error)).toBe(true)
+    expect(error).toMatchObject({ code: "internal.unexpected" })
+    expect(error).toHaveProperty(
+      "message",
+      expect.stringContaining("incompatible with its authority")
+    )
+  })
+
   test("creates a principal request scope with explicit request provenance", () => {
     const scope = createPrincipalRequestScope({
       projectId: "project-1",
