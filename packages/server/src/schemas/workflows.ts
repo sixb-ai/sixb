@@ -4,8 +4,8 @@ import {
   type WorkflowRunFailureCode,
 } from "@sixb/core/storage"
 import { z } from "zod"
-import { AiUsageSummarySchema } from "./ai-usage"
 import { AgentRunFailureSchema } from "./agents"
+import { AiUsageSummarySchema } from "./ai-usage"
 import { JsonValueSchema, sixbFailureSchema } from "./common"
 
 export const WorkflowIOSnapshotSchema = z.record(JsonValueSchema)
