@@ -22,16 +22,10 @@ export interface SyncWorkerContext {
   readonly connector: ConnectorRuntime
 }
 
-export interface SyncJob {
-  readonly id: string
-  readonly syncId: string
-  readonly expectedLatestVersionId?: string
-  readonly commitMessage?: string
-}
-
 export interface RunSyncJobInput {
   readonly runtime: SyncWorkerContext
-  readonly job: SyncJob
+  /** Durable run loaded before the execution scope is restored. */
+  readonly run: SyncRunRecord
   readonly signal?: AbortSignal
   readonly onRunStarted?: SyncRunStartedHandler
   readonly onRunFinished?: SyncRunFinishedHandler

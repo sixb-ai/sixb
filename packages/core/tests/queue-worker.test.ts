@@ -42,7 +42,7 @@ describe("QueueWorker", () => {
 
     const [queued] = await queues.syncRuns.enqueue({
       projectId: PROJECT_ID,
-      jobs: [{ type: "sync.run.requested", payload: { syncId: "s" } }],
+      jobs: [{ type: "sync.run.requested", payload: { runId: "s" } }],
     })
 
     await worker.start()
@@ -80,7 +80,7 @@ describe("QueueWorker", () => {
     })
     await queues.syncRuns.enqueue({
       projectId: PROJECT_ID,
-      jobs: [{ type: "sync.run.requested", payload: { syncId: "s" } }],
+      jobs: [{ type: "sync.run.requested", payload: { runId: "s" } }],
     })
 
     await worker.start()
@@ -121,7 +121,7 @@ describe("QueueWorker", () => {
 
     await queues.syncRuns.enqueue({
       projectId: PROJECT_ID,
-      jobs: [{ type: "sync.run.requested", payload: { syncId: "s" } }],
+      jobs: [{ type: "sync.run.requested", payload: { runId: "s" } }],
     })
 
     await worker.start()
@@ -140,6 +140,54 @@ describe("QueueWorker", () => {
       details: { syncId: "s" },
     })
     expect(Date.parse(settledFailure!.at)).not.toBeNaN()
+  })
+
+  test("settles with the exact durable failure supplied by a worker", async () => {
+    const queues = new InMemoryQueues()
+    const failure: QueueJobFailure<SyncQueueJobFailureCode> = {
+      code: "sync.execution_failed",
+      message: "Sync execution failed.",
+      retryable: false,
+      at: "2026-08-21T12:00:00.000Z",
+      details: { syncId: "s", runId: "run-s" },
+    }
+    let settledFailure: QueueJobFailure<SyncQueueJobFailureCode> | undefined
+    const originalFail = queues.syncRuns.fail.bind(queues.syncRuns)
+    queues.syncRuns.fail = async (params) => {
+      settledFailure = params.failure
+      await originalFail(params)
+    }
+
+    class DurableFailingWorker extends QueueWorker<
+      SyncRunRequestedQueueJob,
+      typeof SYNC_RUN_FAILURE_CODES
+    > {
+      protected async execute(): Promise<void> {
+        throw new Error("private provider diagnostic")
+      }
+
+      protected onExecutionError(): QueueWorkerFailureDecision<SyncQueueJobFailureCode> {
+        return { kind: "fail", failure }
+      }
+    }
+
+    const worker = new DurableFailingWorker({
+      projectId: PROJECT_ID,
+      queue: queues.syncRuns,
+      failureCodes: SYNC_RUN_FAILURE_CODES,
+      workerId: "w",
+      idlePollMs: 10,
+    })
+    await queues.syncRuns.enqueue({
+      projectId: PROJECT_ID,
+      jobs: [{ type: "sync.run.requested", payload: { runId: "run-s" } }],
+    })
+
+    await worker.start()
+    await waitFor(() => settledFailure !== undefined)
+    await worker.stop()
+
+    expect(settledFailure).toEqual(failure)
   })
 
   test("custom onExecutionError can request retry with availableAt", async () => {
@@ -177,7 +225,7 @@ describe("QueueWorker", () => {
 
     await queues.syncRuns.enqueue({
       projectId: PROJECT_ID,
-      jobs: [{ type: "sync.run.requested", payload: { syncId: "s" } }],
+      jobs: [{ type: "sync.run.requested", payload: { runId: "s" } }],
     })
 
     await worker.start()
@@ -221,7 +269,7 @@ describe("QueueWorker", () => {
 
     await queues.syncRuns.enqueue({
       projectId: PROJECT_ID,
-      jobs: [{ type: "sync.run.requested", payload: { syncId: "s" } }],
+      jobs: [{ type: "sync.run.requested", payload: { runId: "s" } }],
     })
 
     await worker.start()
@@ -273,7 +321,7 @@ describe("QueueWorker", () => {
 
     await queues.syncRuns.enqueue({
       projectId: PROJECT_ID,
-      jobs: [{ type: "sync.run.requested", payload: { syncId: "slow" } }],
+      jobs: [{ type: "sync.run.requested", payload: { runId: "slow" } }],
     })
 
     await worker.start()
@@ -303,7 +351,7 @@ describe("QueueWorker", () => {
       typeof SYNC_RUN_FAILURE_CODES
     > {
       protected async execute(claimed: ClaimedQueueJob<SyncRunRequestedQueueJob>): Promise<void> {
-        processed.push(claimed.job.payload.syncId)
+        processed.push(claimed.job.payload.runId)
       }
     }
 
@@ -318,7 +366,7 @@ describe("QueueWorker", () => {
 
     await queues.syncRuns.enqueue({
       projectId: PROJECT_ID,
-      jobs: [{ type: "sync.run.requested", payload: { syncId: "first" } }],
+      jobs: [{ type: "sync.run.requested", payload: { runId: "first" } }],
     })
 
     await worker.start()
@@ -326,7 +374,7 @@ describe("QueueWorker", () => {
       await waitFor(() => processed.includes("first") && completionCalls === 1)
       await queues.syncRuns.enqueue({
         projectId: PROJECT_ID,
-        jobs: [{ type: "sync.run.requested", payload: { syncId: "second" } }],
+        jobs: [{ type: "sync.run.requested", payload: { runId: "second" } }],
       })
       await waitFor(() => processed.includes("second"))
       expect(consoleError).toHaveBeenCalled()
@@ -372,7 +420,7 @@ describe("QueueWorker", () => {
 
     await queues.syncRuns.enqueue({
       projectId: PROJECT_ID,
-      jobs: [{ type: "sync.run.requested", payload: { syncId: "a" } }],
+      jobs: [{ type: "sync.run.requested", payload: { runId: "a" } }],
     })
 
     await worker.start()
@@ -381,8 +429,8 @@ describe("QueueWorker", () => {
       await queues.syncRuns.enqueue({
         projectId: PROJECT_ID,
         jobs: [
-          { type: "sync.run.requested", payload: { syncId: "b" } },
-          { type: "sync.run.requested", payload: { syncId: "c" } },
+          { type: "sync.run.requested", payload: { runId: "b" } },
+          { type: "sync.run.requested", payload: { runId: "c" } },
         ],
       })
       await waitFor(() => processed.length === 3)

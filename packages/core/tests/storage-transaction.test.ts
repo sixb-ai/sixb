@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { defineObjectType, InMemoryStorage, OntologyRegistry, prop, type Storage } from "../src"
 import { StorageTransactionError } from "../src/storage"
-import { createMaterializerTestFixture, queueTestActionRun } from "../src/testing"
+import { createMaterializerTestFixture, queueTestActionRun, startTestSyncRun } from "../src/testing"
 
 const Room = defineObjectType({
   id: "Room",
@@ -86,7 +86,7 @@ describe("InMemoryStorage.transaction", () => {
       storage.transaction(async (tx) => {
         const runs = requireTransactionalRunStores(tx)
         await queueTestActionRun(tx, actionRunInput("run_rollback"))
-        await runs.syncRuns.start(syncRunInput("sync_rollback"))
+        await startTestSyncRun(tx, syncRunInput("sync_rollback"))
         await runs.webhookRuns.start(webhookRunInput("webhook_rollback"))
 
         throw new Error("boom")
@@ -106,7 +106,7 @@ describe("InMemoryStorage.transaction", () => {
     await storage.transaction(async (tx) => {
       const runs = requireTransactionalRunStores(tx)
       await queueTestActionRun(tx, actionRunInput("run_commit"))
-      await runs.syncRuns.start(syncRunInput("sync_commit"))
+      await startTestSyncRun(tx, syncRunInput("sync_commit"))
       await runs.webhookRuns.start(webhookRunInput("webhook_commit"))
     })
 
@@ -267,7 +267,7 @@ describe("InMemoryStorage.transaction", () => {
         }
 
         await tx.agents.threads.create(agentThreadInput("thread_uncommitted"))
-        await tx.syncRuns.start(syncRunInput("sync_uncommitted"))
+        await startTestSyncRun(tx, syncRunInput("sync_uncommitted"))
         await tx.webhookRuns.start(webhookRunInput("webhook_uncommitted"))
         transactionStarted.resolve()
         await releaseTransaction.promise
@@ -312,7 +312,7 @@ describe("InMemoryStorage.transaction", () => {
         settled.agentWrite = true
         return record
       })
-    const syncWrite = storage.syncRuns.start(syncRunInput("sync_external")).then((record) => {
+    const syncWrite = startTestSyncRun(storage, syncRunInput("sync_external")).then((record) => {
       settled.syncWrite = true
       return record
     })

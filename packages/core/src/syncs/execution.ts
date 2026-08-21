@@ -1,4 +1,5 @@
 import { isAllowed } from "../authorization"
+import type { ExecutionContext } from "../execution"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type {
   ListLatestSyncRunsResult,
@@ -25,6 +26,7 @@ export interface SyncsRuntime {
 
 export function createSyncsRuntime(
   runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
   source: Pick<SyncsRuntime, "list" | "getById">
 ): SyncsRuntime {
   const allowed = (syncId: string) => isAllowed(runtime.authorization, { kind: "sync.run", syncId })
@@ -43,7 +45,7 @@ export function createSyncsRuntime(
     request: async (input) => {
       const sync = source.getById(input.syncId)
       if (!sync) throw new SyncValidationError(`[Sixb] Unknown sync '${input.syncId}'`)
-      return requestSyncRun(runtime, sync, input)
+      return requestSyncRun(runtime, execution, sync, input)
     },
     runs: {
       getById: async (runId) => {

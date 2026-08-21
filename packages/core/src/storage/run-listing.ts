@@ -6,7 +6,8 @@ export { paginate } from "./pagination"
 export interface StartedAtRunRecord<TStatus extends string = string> {
   readonly id: string
   readonly status: TStatus
-  readonly startedAt: Date
+  readonly startedAt?: Date
+  readonly queuedAt?: Date
 }
 
 export function storageKey(projectId: string, id: string): string {
@@ -39,11 +40,13 @@ export function matchesRunListDateFilters<TStatus extends string>(
     return false
   }
 
-  if (filters.startedAfter && record.startedAt < filters.startedAfter) {
+  const startedAt = effectiveStartedAt(record)
+
+  if (filters.startedAfter && startedAt < filters.startedAfter) {
     return false
   }
 
-  if (filters.startedBefore && record.startedAt > filters.startedBefore) {
+  if (filters.startedBefore && startedAt > filters.startedBefore) {
     return false
   }
 
@@ -51,11 +54,11 @@ export function matchesRunListDateFilters<TStatus extends string>(
 }
 
 export function compareStartedAt(
-  left: { readonly id: string; readonly startedAt: Date },
-  right: { readonly id: string; readonly startedAt: Date },
+  left: { readonly id: string; readonly startedAt?: Date; readonly queuedAt?: Date },
+  right: { readonly id: string; readonly startedAt?: Date; readonly queuedAt?: Date },
   order: RunListOrder
 ): number {
-  const delta = left.startedAt.getTime() - right.startedAt.getTime()
+  const delta = effectiveStartedAt(left).getTime() - effectiveStartedAt(right).getTime()
   if (delta !== 0) {
     return order === "asc" ? delta : -delta
   }
@@ -68,7 +71,7 @@ export function compareStartedAt(
 }
 
 export function latestStartedAtByOwnerId<
-  TRecord extends { readonly id: string; readonly startedAt: Date },
+  TRecord extends { readonly id: string; readonly startedAt?: Date; readonly queuedAt?: Date },
 >(
   records: readonly TRecord[],
   ownerIds: readonly string[],
@@ -98,4 +101,16 @@ export function latestStartedAtByOwnerId<
     const record = latestByOwnerId.get(ownerId)
     return record ? [record] : []
   })
+}
+
+function effectiveStartedAt(record: {
+  readonly id: string
+  readonly startedAt?: Date
+  readonly queuedAt?: Date
+}): Date {
+  const value = record.startedAt ?? record.queuedAt
+  if (!value) {
+    throw new Error(`[Sixb] Run '${record.id}' has neither startedAt nor queuedAt.`)
+  }
+  return value
 }

@@ -1,17 +1,24 @@
 import type { Database } from "bun:sqlite"
 import type { JsonValue } from "@sixb/core"
 import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/internal/errors"
+import { assertSyncRunExecution } from "@sixb/core/internal/sync-run-storage-provider"
 import type {
+  ExecutionStorage,
   FinishSyncRunInput,
   ListLatestSyncRunsInput,
   ListLatestSyncRunsResult,
   ListSyncRunsInput,
   ListSyncRunsResult,
+  QueueSyncRunInput,
   StartSyncRunInput,
   SyncRunRecord,
   SyncRunStorage,
 } from "@sixb/core/storage"
-import { SYNC_RUN_FAILURE_CODES, SyncRunError } from "@sixb/core/storage"
+import {
+  canRequeueSyncRunAfterEnqueueFailure,
+  SYNC_RUN_FAILURE_CODES,
+  SyncRunError,
+} from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import { installFreshSqliteSchema } from "./migrations"
 import {
@@ -27,6 +34,8 @@ import {
 } from "./transactions"
 
 export interface SqliteSyncRunStorageOptions {
+  /** Execution lookup sharing the same provider transaction. */
+  executions: ExecutionStorage
   /** Path to SQLite database file. Defaults to ':memory:' for in-memory database. */
   path?: string
   /** Internal shared connection used by bundled SqliteStorage. */
@@ -36,18 +45,27 @@ export interface SqliteSyncRunStorageOptions {
 export class SqliteSyncRunStorage implements SyncRunStorage {
   private readonly connection: SqliteStoreConnection
   private readonly db: Database
+  private readonly executions: ExecutionStorage
 
-  constructor(options: SqliteSyncRunStorageOptions = {}) {
+  constructor(options: SqliteSyncRunStorageOptions) {
     this.connection = openSqliteStoreConnection(options)
     this.db = this.connection.db
+    this.executions = options.executions
 
     if (this.connection.installFreshSchema) {
       installFreshSqliteSchema(this.db)
     }
   }
 
-  async start(input: StartSyncRunInput): Promise<SyncRunRecord> {
-    const startedAt = input.startedAt ?? new Date()
+  async queue(input: QueueSyncRunInput): Promise<SyncRunRecord> {
+    const queuedAt = input.queuedAt ?? new Date()
+    await assertSyncRunExecution({
+      executions: this.executions,
+      projectId: input.projectId,
+      executionId: input.executionId,
+      runId: input.id,
+      syncId: input.syncId,
+    })
 
     try {
       this.db
@@ -56,32 +74,33 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
           INSERT INTO sync_runs (
             project_id,
             id,
+            execution_id,
             sync_id,
             dataset_id,
             mode,
             status,
+            queued_at,
             started_at,
             expected_latest_version_id,
             commit_message
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
         `
         )
         .run(
           input.projectId,
           input.id,
+          input.executionId,
           input.syncId,
           input.datasetId,
           input.mode,
-          "running",
-          startedAt.toISOString(),
+          "queued",
+          queuedAt.toISOString(),
           input.expectedLatestVersionId ?? null,
           input.commitMessage ?? null
         )
     } catch (error) {
       if (isUniqueConstraintError(error)) {
-        throw new SyncRunError(
-          `[SixbSqlite] Sync run '${input.id}' already exists for project '${input.projectId}'.`
-        )
+        return this.requeueAfterEnqueueFailure(input, queuedAt)
       }
 
       throw error
@@ -97,6 +116,70 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
     return record
   }
 
+  private async requeueAfterEnqueueFailure(
+    input: QueueSyncRunInput,
+    queuedAt: Date
+  ): Promise<SyncRunRecord> {
+    return this.db.transaction(() => {
+      const existing = this.db
+        .query("SELECT * FROM sync_runs WHERE project_id = ? AND id = ?")
+        .get(input.projectId, input.id) as DatabaseRow | null
+      if (!existing || !canRequeueSyncRunAfterEnqueueFailure(rowToSyncRunRecord(existing), input)) {
+        throw new SyncRunError(
+          `[SixbSqlite] Sync run '${input.id}' already exists for project '${input.projectId}'.`
+        )
+      }
+
+      this.db
+        .query(
+          `
+          UPDATE sync_runs
+          SET status = ?, queued_at = ?, started_at = NULL, finished_at = NULL,
+              rows_read = NULL, output_version_id = NULL, error = NULL, checkpoint = NULL
+          WHERE project_id = ? AND id = ?
+        `
+        )
+        .run("queued", queuedAt.toISOString(), input.projectId, input.id)
+
+      const updated = this.db
+        .query("SELECT * FROM sync_runs WHERE project_id = ? AND id = ?")
+        .get(input.projectId, input.id) as DatabaseRow
+      return rowToSyncRunRecord(updated)
+    })()
+  }
+
+  async start(input: StartSyncRunInput): Promise<SyncRunRecord> {
+    const result = this.db
+      .query(
+        `
+        UPDATE sync_runs
+        SET status = ?, started_at = ?, error = NULL
+        WHERE project_id = ? AND id = ? AND status = ?
+      `
+      )
+      .run(
+        "running",
+        (input.startedAt ?? new Date()).toISOString(),
+        input.projectId,
+        input.id,
+        "queued"
+      )
+    if (result.changes > 0) {
+      const record = await this.getById({ projectId: input.projectId, id: input.id })
+      if (record) return record
+    }
+
+    const existing = await this.getById({ projectId: input.projectId, id: input.id })
+    if (!existing) {
+      throw new SyncRunError(
+        `[SixbSqlite] Sync run '${input.id}' not found for project '${input.projectId}'.`
+      )
+    }
+    throw new SyncRunError(
+      `[SixbSqlite] Sync run '${input.id}' cannot start from status '${existing.status}'.`
+    )
+  }
+
   async finish(input: FinishSyncRunInput): Promise<SyncRunRecord> {
     return this.db.transaction(() => {
       const existing = this.db
@@ -106,6 +189,17 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
       if (!existing) {
         throw new SyncRunError(
           `[SixbSqlite] Sync run '${input.id}' not found for project '${input.projectId}'.`
+        )
+      }
+
+      const enqueueFailure =
+        input.status === "failed" && input.error.code === "queue.enqueue_failed"
+      if (
+        (enqueueFailure && existing.status !== "queued") ||
+        (!enqueueFailure && existing.status !== "running")
+      ) {
+        throw new SyncRunError(
+          `[SixbSqlite] Sync run '${input.id}' cannot finish from status '${existing.status}'.`
         )
       }
 
@@ -194,7 +288,7 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
       args.push(input.datasetId)
     }
 
-    appendRunListFilters(whereClauses, args, input)
+    appendRunListFilters(whereClauses, args, input, "COALESCE(started_at, queued_at)")
 
     const { rows, total, hasMore } = queryRunList<DatabaseRow>({
       db: this.db,
@@ -245,11 +339,13 @@ function rowToSyncRunRecord(row: DatabaseRow): SyncRunRecord {
   return {
     id: row.id,
     projectId: row.project_id,
+    executionId: row.execution_id,
     syncId: row.sync_id,
     datasetId: row.dataset_id,
     mode: row.mode,
     status: row.status,
-    startedAt: new Date(row.started_at),
+    queuedAt: new Date(row.queued_at),
+    startedAt: row.started_at ? new Date(row.started_at) : undefined,
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     rowsRead: row.rows_read ?? undefined,
     output: row.output_version_id
@@ -272,11 +368,13 @@ function isUniqueConstraintError(error: unknown): boolean {
 interface DatabaseRow {
   project_id: string
   id: string
+  execution_id: string
   sync_id: string
   dataset_id: string
   mode: SyncRunRecord["mode"]
   status: SyncRunRecord["status"]
-  started_at: string
+  queued_at: string
+  started_at: string | null
   finished_at: string | null
   rows_read: number | null
   output_version_id: string | null

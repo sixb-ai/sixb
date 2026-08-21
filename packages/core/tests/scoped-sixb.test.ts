@@ -620,6 +620,7 @@ describe("bound Sixb operational access", () => {
 
   test("a listable sync or pipeline can actually be started, and only with can.run", async () => {
     const host = createRuntime()
+    await seedPrincipal(host)
     const _sixb = createTestSixb(host)
     const runner = bindPrincipal(host, contextFor(host, ["operations"]))
 

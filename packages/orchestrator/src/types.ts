@@ -10,19 +10,19 @@ import type {
   WorkflowDefinition,
   WorkflowScheduleTriggerDefinition,
 } from "@sixb/core"
+import type {
+  AutomaticPipelineRunDispatchInput,
+  PipelineRunDispatchPort,
+} from "@sixb/core/internal/pipelines"
 import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projections"
 import type { RuntimeEventScheduleDefinition } from "@sixb/core/internal/schedules"
+import type { AutomaticSyncRunDispatchInput, SyncRunDispatchPort } from "@sixb/core/internal/syncs"
 import type {
   AutomaticWorkflowRunDispatchInput,
   WorkflowRunDispatchPort,
 } from "@sixb/core/internal/workflows"
 import type { LakeStorage } from "@sixb/core/lake-storage"
-import type {
-  NewQueueJob,
-  PipelineRunRequestedQueueJob,
-  ProjectionRunRequestedQueueJob,
-  SyncRunRequestedQueueJob,
-} from "@sixb/core/queues"
+import type { ProjectionRunRequestedQueueJob } from "@sixb/core/queues"
 import type { ProjectionRunStorage } from "@sixb/core/storage"
 
 export type RoutableProjectionDefinition = ProjectionDispatchDescriptor
@@ -52,9 +52,19 @@ export interface WorkflowRunDispatchJobTemplate {
   }
 }
 
+export interface SyncRunDispatchJobTemplate {
+  readonly type: "sync.run.requested"
+  readonly payload: { readonly syncId: string }
+}
+
+export interface PipelineRunDispatchJobTemplate {
+  readonly type: "pipeline.run.requested"
+  readonly payload: { readonly pipelineId: string }
+}
+
 export type OrchestratorJob =
-  | { readonly queue: "syncRuns"; readonly job: NewQueueJob<SyncRunRequestedQueueJob> }
-  | { readonly queue: "pipelines"; readonly job: NewQueueJob<PipelineRunRequestedQueueJob> }
+  | { readonly queue: "syncRuns"; readonly job: SyncRunDispatchJobTemplate }
+  | { readonly queue: "pipelines"; readonly job: PipelineRunDispatchJobTemplate }
   | { readonly queue: "projections"; readonly job: ProjectionRunRequestedJobTemplate }
   | { readonly queue: "workflows"; readonly job: WorkflowRunDispatchJobTemplate }
 
@@ -116,8 +126,16 @@ export interface ProjectionDispatchPorts {
 
 export type WorkflowDispatchInput = AutomaticWorkflowRunDispatchInput
 export type WorkflowDispatcherPort = WorkflowRunDispatchPort
+export type SyncDispatchInput = AutomaticSyncRunDispatchInput
+export type SyncDispatcherPort = SyncRunDispatchPort
+export type PipelineDispatchInput = AutomaticPipelineRunDispatchInput
+export type PipelineDispatcherPort = PipelineRunDispatchPort
 
 export interface OrchestratorDispatchers {
+  /** Required when the compiled routes contain automatic Sync triggers. */
+  readonly syncs?: SyncDispatcherPort
+  /** Required when the compiled routes contain automatic Pipeline triggers. */
+  readonly pipelines?: PipelineDispatcherPort
   /** Required when the compiled routes contain automatic workflow triggers. */
   readonly workflows?: WorkflowDispatcherPort
 }
