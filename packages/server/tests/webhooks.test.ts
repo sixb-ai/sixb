@@ -585,8 +585,13 @@ describe("webhook routes", () => {
       }
       return finishRun(input)
     }
-    const { app, sixb } = createWebhookRuntime([connector], storage, undefined, (error, context) =>
-      reports.push({ error, context })
+    const { app, sixb } = createWebhookRuntime(
+      [connector],
+      storage,
+      undefined,
+      (error, context) => {
+        reports.push({ error, context })
+      }
     )
     const dispatch = () =>
       app.fetch(
