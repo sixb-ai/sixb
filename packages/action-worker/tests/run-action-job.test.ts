@@ -323,7 +323,7 @@ describe("runActionJob", () => {
     }
 
     const result = await runStoredActionJob({
-      runtime: createContext(host),
+      host,
       job: { id: "act_finalize", actionId: "complete" },
     })
 

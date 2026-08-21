@@ -1,6 +1,7 @@
 import type { Principal } from "../auth"
 import { emptyGrantSets, GRANT_KIND_KEYS } from "../authorization/grant-kinds"
 import type { AuthorizationContext, GrantIndex } from "../authorization/types"
+import { createSixbError } from "../errors/internal"
 import {
   type AuthorizablePrincipal,
   type AuthorizationRef,
@@ -150,18 +151,38 @@ export function getAuthorizationRef(authorization: RuntimeAuthorization): Author
 export function assertExecutionScopeProject(projectId: string, scope: ExecutionScope): void {
   assertNonEmpty(projectId, "Project id")
   if (scope.execution.projectId !== projectId) {
-    throw new Error(
-      `[Sixb] Execution scope belongs to project '${scope.execution.projectId}', not '${projectId}'.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[Sixb] Execution scope belongs to project '${scope.execution.projectId}', not '${projectId}'.`,
+      {
+        details: {
+          executionId: scope.execution.id,
+          expectedProjectId: projectId,
+          scopeProjectId: scope.execution.projectId,
+        },
+      }
     )
   }
 
   const resolved = resolveRuntimeAuthorization(scope.authorization)
   if (resolved.type === "denied") {
-    throw new Error("[Sixb] Execution scope carries unregistered runtime authorization.")
+    throw createSixbError(
+      "internal.unexpected",
+      "[Sixb] Execution scope carries unregistered runtime authorization.",
+      { details: { executionId: scope.execution.id, projectId } }
+    )
   }
   if (resolved.projectId !== projectId) {
-    throw new Error(
-      `[Sixb] Execution authorization belongs to project '${resolved.projectId}', not '${projectId}'.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[Sixb] Execution authorization belongs to project '${resolved.projectId}', not '${projectId}'.`,
+      {
+        details: {
+          authorizationProjectId: resolved.projectId,
+          executionId: scope.execution.id,
+          expectedProjectId: projectId,
+        },
+      }
     )
   }
 }
@@ -174,7 +195,11 @@ export function resolveExecutionScopeAuthorization(
   assertExecutionScopeProject(projectId, scope)
   const resolved = resolveRuntimeAuthorization(scope.authorization)
   if (resolved.type === "denied") {
-    throw new Error("[Sixb] Execution scope carries unregistered runtime authorization.")
+    throw createSixbError(
+      "internal.unexpected",
+      "[Sixb] Execution scope carries unregistered runtime authorization.",
+      { details: { executionId: scope.execution.id, projectId } }
+    )
   }
 
   const { execution } = scope
@@ -261,8 +286,10 @@ function principalsEqual(
 }
 
 function invalidExecutionAuthority(executionId: string, reason: string): Error {
-  return new Error(
-    `[Sixb] Execution '${executionId}' is incompatible with its authority: ${reason}.`
+  return createSixbError(
+    "internal.unexpected",
+    `[Sixb] Execution '${executionId}' is incompatible with its authority: ${reason}.`,
+    { details: { executionId, reason } }
   )
 }
 
