@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks"
 import type { AgentStorage } from "./agents"
 import type { AuthStorage } from "./auth"
+import type { ConnectorConnectionStorage } from "./connector-connections"
 import type { OntologyStorage } from "./ontology"
 import type { WorkflowRunStorage } from "./workflow-runs"
 
@@ -215,6 +216,17 @@ export function createAgentOperationScope<T extends AgentStorage>(
     threads: createOperationScopedFacade(target.threads, scope),
     runs: createOperationScopedFacade(target.runs, scope),
     messages: createOperationScopedFacade(target.messages, scope),
+  }) as T
+}
+
+export function createConnectorConnectionOperationScope<T extends ConnectorConnectionStorage>(
+  target: T,
+  scope: StorageOperationScope
+): T {
+  return createOperationScopedFacade<ConnectorConnectionStorage>(target, scope, {
+    attempts: createOperationScopedFacade(target.attempts, scope),
+    authorizations: createOperationScopedFacade(target.authorizations, scope),
+    connections: createOperationScopedFacade(target.connections, scope),
   }) as T
 }
 

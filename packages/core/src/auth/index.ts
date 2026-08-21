@@ -142,7 +142,7 @@ export type {
   UpdateMemberGroupsInput,
   UpdateMemberGroupsResult,
 } from "./types"
-export { principalsEqual, SYSTEM_PRINCIPAL } from "./types"
+export { principalKey, principalsEqual, SYSTEM_PRINCIPAL } from "./types"
 export {
   isInvitationDeliveryAuthStrategy,
   isMagicLinkAuthStrategy,

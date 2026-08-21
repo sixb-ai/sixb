@@ -1,4 +1,4 @@
-import type { Principal } from "../../auth"
+import { type Principal, principalKey } from "../../auth"
 import type { FileRef, SignedBlobUploadPart } from "../../blob-storage"
 import { FileUploadSessionError } from "./errors"
 import type {
@@ -10,7 +10,6 @@ import {
   createFileUploadId,
   isFileUploadSessionExpired,
   isTerminalFileUploadSessionExpired,
-  principalKey,
   shouldDeleteFileUploadSession,
 } from "./utils"
 

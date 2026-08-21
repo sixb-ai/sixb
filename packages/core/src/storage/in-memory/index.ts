@@ -3,6 +3,10 @@ import { InMemoryActionRunStorage } from "../action-runs"
 import { type AgentStorage, InMemoryAgentStorage } from "../agents"
 import { type AiUsageStorage, InMemoryAiUsageStorage } from "../ai-usage"
 import { type AuthStorage, InMemoryAuthStorage } from "../auth"
+import {
+  type ConnectorConnectionStorage,
+  InMemoryConnectorConnectionStorage,
+} from "../connector-connections"
 import { StorageTransactionError } from "../errors"
 import { InMemoryExecutionStorage } from "../executions/in-memory"
 import type { ExecutionStorage } from "../executions/types"
@@ -15,6 +19,7 @@ import { ProviderMaterializationTransactionLifecycle } from "../ontology/provide
 import {
   createAgentOperationScope,
   createAuthOperationScope,
+  createConnectorConnectionOperationScope,
   createOntologyOperationScope,
   createOperationScopedFacade,
   createStorageOperationScope,
@@ -63,6 +68,7 @@ export class InMemoryStorage implements Storage {
   private readonly projectionRunStorage = new InMemoryProjectionRunStorage()
   private readonly workflowRunStorage = new InMemoryWorkflowRunStorage(this.executionStorage)
   private readonly workflowInterventionStorage = new InMemoryWorkflowInterventionStorage()
+  private readonly connectorConnectionStorage = new InMemoryConnectorConnectionStorage()
   private readonly webhookDeliveryStorage = new InMemoryWebhookDeliveryStorage()
   private readonly webhookRunStorage = new InMemoryWebhookRunStorage()
   private readonly rulesStorage = new InMemoryRulesStorage()
@@ -77,6 +83,7 @@ export class InMemoryStorage implements Storage {
   readonly projectionRuns: InMemoryProjectionRunStorage
   readonly workflowRuns: WorkflowRunStorage
   readonly workflowInterventions: WorkflowInterventionStorage
+  readonly connectorConnections: ConnectorConnectionStorage
   readonly webhookDeliveries: WebhookDeliveryStorage
   readonly webhookRuns: WebhookRunStorage
   readonly rules: RulesStorage
@@ -100,6 +107,10 @@ export class InMemoryStorage implements Storage {
     this.workflowRuns = createWorkflowRunOperationScope(this.workflowRunStorage, scope)
     this.workflowInterventions = createOperationScopedFacade(
       this.workflowInterventionStorage,
+      scope
+    )
+    this.connectorConnections = createConnectorConnectionOperationScope(
+      this.connectorConnectionStorage,
       scope
     )
     this.webhookDeliveries = createOperationScopedFacade(this.webhookDeliveryStorage, scope)
@@ -239,6 +250,7 @@ export class InMemoryStorage implements Storage {
       projectionRuns: this.projectionRunStorage,
       workflowRuns: this.workflowRunStorage,
       workflowInterventions: this.workflowInterventionStorage,
+      connectorConnections: this.connectorConnectionStorage,
       webhookDeliveries: this.webhookDeliveryStorage,
       webhookRuns: this.webhookRunStorage,
       rules: this.rulesStorage,
@@ -265,6 +277,7 @@ export class InMemoryStorage implements Storage {
       projectionRuns: this.projectionRunStorage.snapshot(),
       workflowRuns: this.workflowRunStorage.snapshot(),
       workflowInterventions: this.workflowInterventionStorage.snapshot(),
+      connectorConnections: this.connectorConnectionStorage.snapshot(),
       webhookDeliveries: this.webhookDeliveryStorage.snapshot(),
       webhookRuns: this.webhookRunStorage.snapshot(),
       rules: this.rulesStorage.snapshot(),
@@ -286,6 +299,7 @@ export class InMemoryStorage implements Storage {
     this.projectionRunStorage.restore(snapshot.projectionRuns)
     this.workflowRunStorage.restore(snapshot.workflowRuns)
     this.workflowInterventionStorage.restore(snapshot.workflowInterventions)
+    this.connectorConnectionStorage.restore(snapshot.connectorConnections)
     this.webhookDeliveryStorage.restore(snapshot.webhookDeliveries)
     this.webhookRunStorage.restore(snapshot.webhookRuns)
     this.rulesStorage.restore(snapshot.rules)
@@ -307,6 +321,7 @@ export interface InMemoryStorageSnapshot {
   readonly projectionRuns: ReturnType<InMemoryProjectionRunStorage["snapshot"]>
   readonly workflowRuns: ReturnType<InMemoryWorkflowRunStorage["snapshot"]>
   readonly workflowInterventions: ReturnType<InMemoryWorkflowInterventionStorage["snapshot"]>
+  readonly connectorConnections: ReturnType<InMemoryConnectorConnectionStorage["snapshot"]>
   readonly webhookDeliveries: ReturnType<InMemoryWebhookDeliveryStorage["snapshot"]>
   readonly webhookRuns: ReturnType<InMemoryWebhookRunStorage["snapshot"]>
   readonly rules: ReturnType<InMemoryRulesStorage["snapshot"]>

@@ -18,6 +18,30 @@ export const SIXB_ERROR_DEFINITIONS = {
     publicMessage: "Agent execution failed.",
     retryable: false,
   },
+  "connector.authorization_attempt_invalid": {
+    publicMessage: "Connector authorization attempt is not usable.",
+    retryable: false,
+  },
+  "connector.authorization_invalid": {
+    publicMessage: "Connector authorization is no longer usable.",
+    retryable: false,
+  },
+  "connector.credentials_unreadable": {
+    publicMessage: "Connector credentials could not be read.",
+    retryable: false,
+  },
+  "connector.encryption_key_invalid": {
+    publicMessage: "Connector connection encryption key is missing or invalid.",
+    retryable: false,
+  },
+  "connector.refresh_conflict": {
+    publicMessage: "Connector credentials changed while refreshing.",
+    retryable: true,
+  },
+  "connector.refresh_failed": {
+    publicMessage: "Connector credential refresh failed.",
+    retryable: true,
+  },
   "dataset.not_found": {
     publicMessage: "Dataset not found.",
     retryable: false,

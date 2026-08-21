@@ -56,6 +56,7 @@ Each boundary exposes only the codes it can persist.
 | Workflow run or node | `internal.unexpected`, `runtime.cancelled`, `workflow.node_failed` |
 | Webhook run | `internal.unexpected`, `webhook.delivery_failed` |
 | Ontology outbox | `event.delivery_failed` |
+| Connector authorization | `connector.authorization_invalid`, `connector.refresh_failed` |
 
 Additional rules:
 
@@ -65,6 +66,9 @@ Additional rules:
 - Webhook non-retryable outcomes remain HTTP outcomes; only retryable post-claim failures use
   `webhook.delivery_failed`.
 - The outbox retains `event.delivery_failed` while publication is retried.
+- A connector authorization stores only the last refresh outcome. `connector.refresh_failed` leaves
+  it usable; `connector.authorization_invalid` is terminal and its connections read as
+  `needs_reauthorization`. Connector failure `details` carry ids only, never token material.
 
 ## Reporting
 
@@ -83,6 +87,12 @@ Additional rules:
 | --- | --- | --- | --- |
 | `action.phase_failed` | No | An Action phase could not complete successfully. | Inspect `details.phase` and the native error reported to `onError`. |
 | `agent.execution_failed` | No | An active Agent execution failed. | Inspect the run identity and the native error reported to `onError`. |
+| `connector.authorization_attempt_invalid` | No | An authorization attempt was missing, expired, already consumed, or its state did not match. | Start the connect flow again. |
+| `connector.authorization_invalid` | No | A refresh was rejected, consent was withdrawn, or scopes were revoked. | Reconnect the account to obtain a new authorization. |
+| `connector.credentials_unreadable` | No | A sealed credential failed authenticated decryption. | Check that `connectorConnections.encryptionKey` is the key the row was sealed with. |
+| `connector.encryption_key_invalid` | No | The connector connection encryption key is missing or is not 32 bytes. | Set `connectorConnections.encryptionKey` to a 32-byte base64 value from `openssl rand -base64 32`. |
+| `connector.refresh_conflict` | Yes | Credentials were rotated by another process while this refresh was in flight. | Re-read the authorization and use the credentials it now holds. |
+| `connector.refresh_failed` | Yes | A credential refresh failed without invalidating the authorization. | Let the next refresh retry; inspect the provider if it persists. |
 | `dataset.not_found` | No | Dataset is unavailable to the caller. | Check its ID and access policy. |
 | `dataset.version_incompatible` | No | Version does not match the required dataset or schema. | Materialize a compatible version. |
 | `dataset.version_not_found` | No | Version does not exist or nothing has been committed yet. | Check the ID or materialize the dataset. |

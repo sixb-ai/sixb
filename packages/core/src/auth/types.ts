@@ -30,6 +30,16 @@ export function principalsEqual(left: Principal, right: Principal): boolean {
   return left.type === right.type && left.id === right.id
 }
 
+/**
+ * Stable string identity for a principal, for storage keys and indexes.
+ *
+ * Lives beside `principalsEqual` so the structural comparison and the serialized form cannot
+ * drift apart. Stores that key by principal must use this rather than re-deriving the string.
+ */
+export function principalKey(principal: Principal): string {
+  return `${principal.type}:${principal.id}`
+}
+
 export interface SecurityContext {
   readonly principal: Principal
   readonly sessionId?: string

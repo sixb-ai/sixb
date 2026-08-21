@@ -14,6 +14,7 @@ export type {
   ProjectionExecution,
   ProjectionMaterializationIdentity,
 } from "../materialization/model"
+export type { ObjectRef } from "../ontology/refs"
 export type {
   ActionRunEffectsRecord,
   ActionRunFailure,
@@ -172,6 +173,41 @@ export type {
   UserStatus,
 } from "./auth"
 export { AuthStorageError, InMemoryAuthStorage } from "./auth"
+export type {
+  AcquireConnectorRefreshLeaseResult,
+  ConnectorAuthorizationAttemptRecord,
+  ConnectorAuthorizationAttemptStore,
+  ConnectorAuthorizationRecord,
+  ConnectorAuthorizationStatus,
+  ConnectorAuthorizationStore,
+  ConnectorConnectionEncryptionKey,
+  ConnectorConnectionFailure,
+  ConnectorConnectionFailureCode,
+  ConnectorConnectionOwner,
+  ConnectorConnectionRecord,
+  ConnectorConnectionStatus,
+  ConnectorConnectionStorage,
+  ConnectorConnectionStore,
+  CreateConnectorAuthorizationAttemptInput,
+  CreateConnectorAuthorizationInput,
+  InMemoryConnectorConnectionStorageSnapshot,
+  SealedEnvelope,
+  SealedEnvelopeContext,
+  SealedEnvelopePurpose,
+  UpsertConnectorConnectionInput,
+} from "./connector-connections"
+export {
+  CONNECTOR_CONNECTION_FAILURE_CODES,
+  connectorConnectionOwnerKey,
+  connectorConnectionStatus,
+  createConnectorAuthorizationAttemptId,
+  createConnectorAuthorizationId,
+  createConnectorConnectionEncryptionKey,
+  createConnectorConnectionId,
+  InMemoryConnectorConnectionStorage,
+  openConnectorSecret,
+  sealConnectorSecret,
+} from "./connector-connections"
 export type {
   StorageTransactionErrorCode,
   StorageTransactionErrorOptions,

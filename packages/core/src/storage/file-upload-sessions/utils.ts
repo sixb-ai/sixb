@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto"
-import type { Principal } from "../../auth"
 import type { FileUploadSession } from "./types"
 
 export const DEFAULT_FILE_UPLOAD_SESSION_TTL_MS = 60 * 60 * 1000
@@ -11,10 +10,6 @@ export function createUploadExpiresAt(now = Date.now()): Date {
 
 export function createFileUploadId(): string {
   return `upload_${randomUUID().replaceAll("-", "")}`
-}
-
-export function principalKey(principal: Principal): string {
-  return `${principal.type}:${principal.id}`
 }
 
 export function isFileUploadSessionExpired(
