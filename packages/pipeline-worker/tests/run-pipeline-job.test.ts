@@ -273,7 +273,7 @@ describe("runPipelineJob", () => {
         await output.writeRows(inputs.rawCustomers.readRows({ columns: ["id", "name"] }))
       })
     const pipeline = definePipeline("customers").then(step)
-    const pipelineRunsStorage = new InMemoryPipelineRunStorage()
+    const pipelineRunsStorage = createPipelineRunStorage()
     const finishStep = pipelineRunsStorage.finishStep.bind(pipelineRunsStorage)
     const finishCause = new Error("step finish unavailable")
     pipelineRunsStorage.finishStep = async (input) => {
@@ -378,7 +378,9 @@ describe("runPipelineJob", () => {
       .inputs({ rawCustomers: rawCustomersDataset })
       .output(customersDataset)
       .run(async () => {})
-    const pipelineRunsStorage = new RejectingFinishPipelineRunStorage()
+    const provider = new InMemoryStorage()
+    const pipelineRunsStorage = new RejectingFinishPipelineRunStorage(provider.executions)
+    executionsByRunStorage.set(pipelineRunsStorage, provider.executions)
     const runtime = createRuntime({
       pipelines: [definePipeline("customers").then(cleanStep)],
       datasets: [rawCustomersDataset, customersDataset],

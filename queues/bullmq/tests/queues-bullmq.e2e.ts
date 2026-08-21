@@ -189,7 +189,7 @@ describe("BullMqQueues (Redis-specific)", () => {
       try {
         const [job] = await provider.pipelines.enqueue({
           projectId,
-          jobs: [{ type: "pipeline.run.requested", payload: { pipelineId: "pipeline-a" } }],
+          jobs: [{ type: "pipeline.run.requested", payload: { runId: "pipeline-run-a" } }],
         })
         const [claimed] = await provider.pipelines.claim({ projectId, workerId: "worker-a" })
 

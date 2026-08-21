@@ -189,6 +189,12 @@ describe("SyncWorker", () => {
     const sixb = createSixbForSync(sync, undefined, (error, context) => {
       reports.push({ error, context })
     })
+    let settledFailure: unknown
+    const fail = sixb.queues.syncRuns.fail.bind(sixb.queues.syncRuns)
+    sixb.queues.syncRuns.fail = async (input) => {
+      settledFailure = input.failure
+      await fail(input)
+    }
     const worker = new SyncWorker(sixb)
 
     await enqueueSyncRun(sixb, { syncId: sync.id, runId: "run-failed" })
@@ -202,6 +208,10 @@ describe("SyncWorker", () => {
       await waitFor(
         async () => reports.length,
         (count) => count === 1
+      )
+      await waitFor(
+        async () => settledFailure,
+        (failure) => failure !== undefined
       )
 
       expect(run?.error).toMatchObject({
@@ -227,6 +237,7 @@ describe("SyncWorker", () => {
         },
         failure: run!.error!,
       })
+      expect(settledFailure).toEqual(run!.error)
 
       const claimed = await sixb.queues.syncRuns.claim({
         projectId: sixb.id,

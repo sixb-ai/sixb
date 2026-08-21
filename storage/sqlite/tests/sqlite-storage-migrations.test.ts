@@ -394,7 +394,12 @@ describe("SQLite storage migrations", () => {
         );
       `)
 
-      for (const migration of sqliteStorageMigrations.steps.slice(10)) migration.up(db)
+      const executionMigrationIndex = sqliteStorageMigrations.steps.findIndex(
+        (migration) => migration.id === "020-sync-pipeline-executions"
+      )
+      for (const migration of sqliteStorageMigrations.steps.slice(10, executionMigrationIndex)) {
+        migration.up(db)
+      }
 
       const row = db
         .query("SELECT error FROM sync_runs WHERE project_id = ? AND id = ?")
@@ -1304,7 +1309,7 @@ describe("SQLite storage migrations", () => {
       const db = new Database(":memory:")
       try {
         const executionMigrationIndex = sqliteStorageMigrations.steps.findIndex(
-          (migration) => migration.id === "010-sync-pipeline-executions"
+          (migration) => migration.id === "020-sync-pipeline-executions"
         )
         const executionMigration = sqliteStorageMigrations.steps[executionMigrationIndex]
         if (!executionMigration) {

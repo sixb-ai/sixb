@@ -127,18 +127,24 @@ export class PipelineWorker extends QueueWorker<
   }
 
   protected override async onExecutionError(
-    _claimed: ClaimedQueueJob<PipelineRunRequestedQueueJob>,
+    claimed: ClaimedQueueJob<PipelineRunRequestedQueueJob>,
     _error: unknown
-  ): Promise<QueueWorkerFailureDecision> {
+  ): Promise<QueueWorkerFailureDecision<(typeof PIPELINE_RUN_FAILURE_CODES)[number]>> {
     // Pipeline runs are not all-or-nothing in V1. A previous step may have committed an append
     // output, so failed pipeline jobs must not be retried automatically.
-    return { kind: "fail" }
+    const run = await this.host.storage.pipelineRuns?.getById({
+      projectId: this.host.id,
+      id: claimed.job.payload.runId,
+    })
+    return run?.status === "failed" && run.error
+      ? { kind: "fail", failure: run.error }
+      : { kind: "fail" }
   }
 
   protected override async onAbortError(
     claimed: ClaimedQueueJob<PipelineRunRequestedQueueJob>,
     _error: unknown
-  ): Promise<QueueWorkerFailureDecision> {
+  ): Promise<QueueWorkerFailureDecision<(typeof PIPELINE_RUN_FAILURE_CODES)[number]>> {
     const run = await this.host.storage.pipelineRuns?.getById({
       projectId: this.host.id,
       id: claimed.job.payload.runId,
@@ -150,7 +156,9 @@ export class PipelineWorker extends QueueWorker<
     }
 
     // After a step commit, rerunning the whole pipeline could duplicate append outputs.
-    return { kind: "fail" }
+    return run.status === "cancelled" && run.error
+      ? { kind: "fail", failure: run.error }
+      : { kind: "fail" }
   }
 }
 
