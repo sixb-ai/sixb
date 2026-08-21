@@ -1098,7 +1098,10 @@ describe("runWorkflowJob", () => {
           nodeRunId: "wfrun_resume_other:node:1",
         },
       })
-    ).rejects.toThrow("does not match run 'wfrun_resume_owner'")
+    ).rejects.toMatchObject({
+      code: "internal.unexpected",
+      message: expect.stringContaining("does not match run 'wfrun_resume_owner'"),
+    })
 
     const run = await sixb.storage.workflowRuns!.getById({
       projectId: sixb.id,
