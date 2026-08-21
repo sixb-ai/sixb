@@ -1,8 +1,5 @@
-import type {
-  ConnectorAccountCandidate,
-  ConnectorConnectionSelector,
-  SealedConnectorCredential,
-} from "../../connectors"
+import type { ConnectorAccountCandidate, ConnectorConnectionSelector } from "../../connectors"
+import type { SealedConnectorCredential } from "../../connectors/credentials"
 import type { AuthorizablePrincipal, AuthorizationRef } from "../../execution"
 
 export type {
@@ -41,8 +38,7 @@ export interface CreateConnectorAuthorizationAttemptInput extends ConnectorConne
   readonly redirectUri: string
   readonly reauthorizationId?: string
   readonly reauthorizationConnectionIds?: readonly string[]
-  readonly createdAt: Date
-  readonly expiresAt: Date
+  readonly ttlMs: number
 }
 
 export interface ConsumeConnectorAuthorizationAttemptInput {
@@ -53,15 +49,34 @@ export interface ConsumeConnectorAuthorizationAttemptInput {
   readonly credential: ConnectorAuthorizationCredential
   readonly stateHash: string
   readonly redirectUri: string
-  readonly now: Date
 }
 
-export type ConnectorAuthorizationStatus = "active" | "needs_reauthorization" | "revoked"
+export type ConnectorAuthorizationStatus =
+  | "pending_selection"
+  | "active"
+  | "needs_reauthorization"
+  | "revocation_pending"
+  | "revoked"
 
-export interface ConnectorRefreshLease {
+export type ConnectorCredentialMutationKind = "refresh" | "reauthorization" | "revocation"
+export type ConnectorCredentialMutationPhase = "prepared" | "executing" | "result_staged"
+
+export interface ConnectorStagedCredentials {
+  readonly credentials: SealedConnectorCredential
+  readonly credentialExpiresAt?: Date
+  readonly scopes: readonly string[]
+}
+
+/** Durable fencing record for one provider-side OAuth credential mutation. */
+export interface ConnectorCredentialMutation {
   readonly id: string
+  readonly kind: ConnectorCredentialMutationKind
+  readonly phase: ConnectorCredentialMutationPhase
   readonly holderId: string
   readonly expiresAt: Date
+  readonly deadlineAt: Date
+  readonly expectedConnectionIds?: readonly string[]
+  readonly stagedCredentials?: ConnectorStagedCredentials
 }
 
 export interface ConnectorAuthorizationRecord {
@@ -74,8 +89,10 @@ export interface ConnectorAuthorizationRecord {
   readonly scopes: readonly string[]
   readonly accounts: readonly ConnectorAccountCandidate[]
   readonly status: ConnectorAuthorizationStatus
+  /** Storage-authoritative deadline for the first account selection. */
+  readonly selectionExpiresAt?: Date
   readonly revision: number
-  readonly refreshLease?: ConnectorRefreshLease
+  readonly credentialMutation?: ConnectorCredentialMutation
   readonly createdAt: Date
   readonly updatedAt: Date
 }
@@ -89,49 +106,83 @@ export interface CreateConnectorAuthorizationInput {
   readonly credentialExpiresAt?: Date
   readonly scopes: readonly string[]
   readonly accounts: readonly ConnectorAccountCandidate[]
-  readonly createdAt: Date
+  readonly selectionTtlMs: number
 }
 
-export interface ClaimConnectorRefreshLeaseInput {
+export interface InitializeConnectorAuthorizationAccountsInput {
+  readonly projectId: string
+  readonly connectorId: string
   readonly authorizationId: string
   readonly expectedRevision: number
-  readonly lease: Omit<ConnectorRefreshLease, "expiresAt">
-  readonly durationMs: number
-}
-
-export interface UpdateConnectorAuthorizationCredentialsInput {
-  readonly authorizationId: string
-  readonly expectedRevision: number
-  readonly leaseId: string
-  readonly credentials: SealedConnectorCredential
-  readonly credentialExpiresAt?: Date
-  readonly scopes: readonly string[]
-  readonly updatedAt: Date
-}
-
-export interface ReauthorizeConnectorAuthorizationInput {
-  readonly authorizationId: string
-  readonly expectedRevision: number
-  readonly expectedConnectionIds: readonly string[]
-  readonly credentials: SealedConnectorCredential
-  readonly credentialExpiresAt?: Date
-  readonly scopes: readonly string[]
   readonly accounts: readonly ConnectorAccountCandidate[]
-  readonly updatedAt: Date
 }
 
-export interface ReleaseConnectorRefreshLeaseInput {
+export interface ClaimConnectorCredentialMutationInput {
+  readonly projectId: string
+  readonly connectorId: string
   readonly authorizationId: string
   readonly expectedRevision: number
-  readonly leaseId: string
-  readonly updatedAt: Date
+  readonly mutation: {
+    readonly id: string
+    readonly kind: ConnectorCredentialMutationKind
+    readonly holderId: string
+  }
+  readonly expectedConnectionIds?: readonly string[]
+  readonly leaseDurationMs: number
+  readonly operationTimeoutMs: number
 }
 
-export interface MarkConnectorAuthorizationInput {
+export interface ClaimConnectorCredentialMutationResult {
+  readonly authorization: ConnectorAuthorizationRecord
+  readonly disconnected: readonly ConnectorConnectionRecord[]
+}
+
+export interface ConnectorCredentialMutationFence {
+  readonly projectId: string
+  readonly connectorId: string
   readonly authorizationId: string
   readonly expectedRevision: number
-  readonly leaseId?: string
-  readonly updatedAt: Date
+  readonly mutationId: string
+}
+
+export interface MarkConnectorCredentialMutationExecutingInput
+  extends ConnectorCredentialMutationFence {
+  readonly holderId: string
+}
+
+export interface RenewConnectorCredentialMutationInput extends ConnectorCredentialMutationFence {
+  readonly holderId: string
+  readonly leaseDurationMs: number
+}
+
+export interface StageConnectorCredentialMutationCredentialsInput
+  extends ConnectorCredentialMutationFence {
+  readonly holderId: string
+  readonly credentials: SealedConnectorCredential
+  readonly credentialExpiresAt?: Date
+  readonly scopes: readonly string[]
+}
+
+export interface StageConnectorCredentialMutationRevocationInput
+  extends ConnectorCredentialMutationFence {
+  readonly holderId: string
+}
+
+export interface ReleaseConnectorCredentialMutationInput extends ConnectorCredentialMutationFence {
+  readonly holderId: string
+}
+
+export interface RecoverExpiredConnectorCredentialMutationInput {
+  readonly projectId: string
+  readonly connectorId: string
+  readonly authorizationId: string
+}
+
+export interface MarkConnectorAuthorizationNeedsReauthorizationInput
+  extends ConnectorCredentialMutationFence {}
+
+export interface FinalizeConnectorReauthorizationInput extends ConnectorCredentialMutationFence {
+  readonly accounts: readonly ConnectorAccountCandidate[]
 }
 
 export interface ConnectorConnectionRecord extends ConnectorConnectionSelector {
@@ -151,11 +202,11 @@ export interface PutConnectorConnectionInput extends ConnectorConnectionSelector
   readonly authorizationId: string
   readonly account: ConnectorAccountCandidate
   readonly replace: boolean
-  readonly now: Date
 }
 
 export interface PutConnectorConnectionResult {
   readonly connection: ConnectorConnectionRecord
+  readonly authorization: ConnectorAuthorizationRecord
   readonly created: boolean
   readonly replaced: boolean
 }
@@ -169,19 +220,6 @@ export interface DisconnectConnectorConnectionInput {
   readonly projectId: string
   readonly connectorId: string
   readonly connectionId: string
-}
-
-export interface RevokeConnectorAuthorizationInput {
-  readonly projectId: string
-  readonly connectorId: string
-  readonly authorizationId: string
-  readonly expectedRevision: number
-  readonly revokedAt: Date
-}
-
-export interface RevokeConnectorAuthorizationResult {
-  readonly authorization: ConnectorAuthorizationRecord
-  readonly disconnected: readonly ConnectorConnectionRecord[]
 }
 
 /** Persistent contract. Implementations must make every individual mutation atomic. */
@@ -198,19 +236,45 @@ export interface ConnectorConnectionStorage {
   createAuthorization(
     input: CreateConnectorAuthorizationInput
   ): Promise<ConnectorAuthorizationRecord>
+  initializeAuthorizationAccounts(
+    input: InitializeConnectorAuthorizationAccountsInput
+  ): Promise<ConnectorAuthorizationRecord | null>
   getAuthorization(authorizationId: string): Promise<ConnectorAuthorizationRecord | null>
-  claimRefreshLease(
-    input: ClaimConnectorRefreshLeaseInput
+  claimCredentialMutation(
+    input: ClaimConnectorCredentialMutationInput
+  ): Promise<ClaimConnectorCredentialMutationResult | null>
+  markCredentialMutationExecuting(
+    input: MarkConnectorCredentialMutationExecutingInput
   ): Promise<ConnectorAuthorizationRecord | null>
-  updateAuthorizationCredentials(
-    input: UpdateConnectorAuthorizationCredentialsInput
+  renewCredentialMutation(
+    input: RenewConnectorCredentialMutationInput
   ): Promise<ConnectorAuthorizationRecord | null>
-  reauthorizeAuthorization(
-    input: ReauthorizeConnectorAuthorizationInput
+  stageCredentialMutationCredentials(
+    input: StageConnectorCredentialMutationCredentialsInput
   ): Promise<ConnectorAuthorizationRecord | null>
-  releaseRefreshLease(input: ReleaseConnectorRefreshLeaseInput): Promise<boolean>
+  stageCredentialMutationRevocation(
+    input: StageConnectorCredentialMutationRevocationInput
+  ): Promise<ConnectorAuthorizationRecord | null>
+  releaseCredentialMutation(input: ReleaseConnectorCredentialMutationInput): Promise<boolean>
+  /**
+   * Recovers an expired mutation without replaying an unknown provider effect. Prepared work is
+   * released, executing refresh/reauthorization fails closed, revocation stays retryable, and a
+   * staged result remains available for finalization.
+   */
+  recoverExpiredCredentialMutation(
+    input: RecoverExpiredConnectorCredentialMutationInput
+  ): Promise<ConnectorAuthorizationRecord | null>
   markNeedsReauthorization(
-    input: MarkConnectorAuthorizationInput
+    input: MarkConnectorAuthorizationNeedsReauthorizationInput
+  ): Promise<ConnectorAuthorizationRecord | null>
+  finalizeRefresh(
+    input: ConnectorCredentialMutationFence
+  ): Promise<ConnectorAuthorizationRecord | null>
+  finalizeReauthorization(
+    input: FinalizeConnectorReauthorizationInput
+  ): Promise<ConnectorAuthorizationRecord | null>
+  finalizeRevocation(
+    input: ConnectorCredentialMutationFence
   ): Promise<ConnectorAuthorizationRecord | null>
 
   putConnection(input: PutConnectorConnectionInput): Promise<PutConnectorConnectionResult>
@@ -222,7 +286,4 @@ export interface ConnectorConnectionStorage {
   disconnectConnection(
     input: DisconnectConnectorConnectionInput
   ): Promise<ConnectorConnectionRecord | null>
-  revokeAuthorization(
-    input: RevokeConnectorAuthorizationInput
-  ): Promise<RevokeConnectorAuthorizationResult | null>
 }

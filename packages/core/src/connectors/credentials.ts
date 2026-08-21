@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto"
-import { ConnectorError } from "./errors"
+import { createConnectorCodedError } from "./errors"
 
 export type ConnectorCredentialPurpose = "oauth-authorization" | "pkce-verifier"
 
@@ -40,13 +40,15 @@ export function createConnectorCredentialProtectorFromKey(
   try {
     key = decodeBase64Url(encodedKey)
   } catch (error) {
-    throw new ConnectorError(
+    throw createConnectorCodedError(
+      "connector.configuration_invalid",
       "connectorConnections.encryptionKey must be canonical base64url encoding.",
       { cause: error }
     )
   }
   if (key.byteLength !== 32) {
-    throw new ConnectorError(
+    throw createConnectorCodedError(
+      "connector.configuration_invalid",
       "connectorConnections.encryptionKey must encode exactly 32 random bytes."
     )
   }
@@ -57,7 +59,10 @@ function createAesGcmConnectorCredentialProtector(
   encryptionKey: Uint8Array
 ): ConnectorCredentialProtector {
   if (encryptionKey.byteLength !== 32) {
-    throw new ConnectorError("Connector credential encryption key must contain exactly 32 bytes.")
+    throw createConnectorCodedError(
+      "connector.configuration_invalid",
+      "Connector credential encryption key must contain exactly 32 bytes."
+    )
   }
   const key = Buffer.from(encryptionKey)
 
@@ -79,7 +84,10 @@ function createAesGcmConnectorCredentialProtector(
     async open(envelope, context) {
       assertCredentialContext(context)
       if (envelope.version !== 1 || envelope.algorithm !== "A256GCM") {
-        throw new ConnectorError("Connector credential envelope format is not supported.")
+        throw createConnectorCodedError(
+          "connector.credentials_unavailable",
+          "Connector credential envelope format is not supported."
+        )
       }
       try {
         const nonce = decodeBase64Url(envelope.nonce)
@@ -91,9 +99,11 @@ function createAesGcmConnectorCredentialProtector(
         decipher.setAuthTag(tag)
         return Buffer.concat([decipher.update(ciphertext), decipher.final()])
       } catch (error) {
-        throw new ConnectorError("Connector credential envelope authentication failed.", {
-          cause: error,
-        })
+        throw createConnectorCodedError(
+          "connector.credentials_unavailable",
+          "Connector credential envelope authentication failed.",
+          { cause: error }
+        )
       }
     },
   }
@@ -130,7 +140,10 @@ function assertCredentialContext(context: ConnectorCredentialContext): void {
 
 function assertNonblank(value: string, field: string): string {
   if (!value.trim()) {
-    throw new ConnectorError(`Connector credential ${field} must not be empty.`)
+    throw createConnectorCodedError(
+      "connector.configuration_invalid",
+      `Connector credential ${field} must not be empty.`
+    )
   }
   return value
 }

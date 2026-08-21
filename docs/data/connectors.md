@@ -90,6 +90,32 @@ The first call opens the connection. Later calls reuse the same client for that 
 > with the same id throws `Connector '<id>' is not the registered definition instance.` Always
 > import and pass the exported connector, not a local copy.
 
+## Protect OAuth credentials
+
+When at least one OAuth connector uses durable connector storage, Sixb encrypts its tokens at rest.
+Provide one 32-byte key through `createSixb()`:
+
+```ts
+const connectorEncryptionKey = process.env.SIXB_CONNECTOR_ENCRYPTION_KEY
+
+if (!connectorEncryptionKey) {
+  throw new Error("[SixbConfig] SIXB_CONNECTOR_ENCRYPTION_KEY is required")
+}
+
+export const sixb = createSixb({
+  // ...providers
+  connectorConnections: {
+    encryptionKey: connectorEncryptionKey,
+  },
+})
+```
+
+Generate the value once, then store it in the deployment's secret manager.
+
+Every process sharing the same connector database must receive the same key. Do not commit it, and do not replace or lose it: existing OAuth credentials would become unreadable.
+
+Static connectors do not need this setting. It can also be omitted with ephemeral connector storage, where both the stored credentials and Sixb's process-local protection disappear on restart.
+
 ## ConnectorContext
 
 `connect` receives a `ConnectorContext` so adapters can scope logs, build cache keys, or cancel

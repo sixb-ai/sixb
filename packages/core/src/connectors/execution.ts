@@ -2,6 +2,7 @@ import { AuthorizationError, assertProviderAccess } from "../authorization"
 import { assertRuntimeAuthorizationBound } from "../authorization/decision"
 import type { ExecutionContext } from "../execution"
 import type { SixbRuntimeContext } from "../runtime/types"
+import { createConnectorCodedError } from "./errors"
 import type { ConnectorService } from "./service"
 import type {
   ConnectorAdapter,
@@ -32,14 +33,18 @@ export function createConnectorRuntime(
     if (isOAuthConnectorDefinition(definition)) {
       assertConnectorConnectionAccess(runtime)
       if (!selector) {
-        throw new Error(
+        throw createConnectorCodedError(
+          "connector.configuration_invalid",
           `[Sixb] Connector '${definition.id}' uses persistent connections and requires an explicit owner and slot.`
         )
       }
       return service.connectConnection(definition, selector)
     }
     if (selector) {
-      throw new Error(`[Sixb] Static connector '${definition.id}' does not accept a connection.`)
+      throw createConnectorCodedError(
+        "connector.configuration_invalid",
+        `[Sixb] Static connector '${definition.id}' does not accept a connection.`
+      )
     }
     assertProviderAccess(runtime, execution, "connector.connect")
     return service.connect(definition as ConnectorDefinition<string, ConnectorAdapter>)

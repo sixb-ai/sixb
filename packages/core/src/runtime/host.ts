@@ -18,9 +18,13 @@ import {
 import type { BlobStorage } from "../blob-storage"
 import type { Broker } from "../broker"
 import { createConnectorCredentialProtectorFromKey } from "../connectors/credentials"
-import { ConnectorError } from "../connectors/errors"
+import { createConnectorCodedError } from "../connectors/errors"
 import { ConnectorService } from "../connectors/service"
-import { type ConnectorDefinition, isOAuthConnectorDefinition } from "../connectors/types"
+import {
+  type ConnectorConnectionOptions,
+  type ConnectorDefinition,
+  isOAuthConnectorDefinition,
+} from "../connectors/types"
 import type { DatasetDefinition } from "../datasets/types"
 import { attachSixbErrorReporter, shareSixbErrorReporter } from "../error-reporting/capability"
 import { reportEventDeliveryFailure } from "../error-reporting/reports"
@@ -98,10 +102,7 @@ export interface SixbHostOptions<TOntologySources extends readonly OntologySourc
   /** Connector definitions registered with this host. */
   connectors?: readonly ConnectorDefinition[]
   /** Persistent connector connection settings. Required for OAuth with durable storage. */
-  connectorConnections?: {
-    /** Canonical base64url encoding of exactly 32 random bytes. */
-    readonly encryptionKey: string
-  }
+  connectorConnections?: ConnectorConnectionOptions
   schedules?: readonly ScheduleDefinition[]
   syncs?: readonly SyncDefinition[]
   pipelines?: readonly PipelineDefinition[]
@@ -368,7 +369,8 @@ function assertConnectorConnectionSurfaces(
   for (const connector of connectors) {
     if (!isOAuthConnectorDefinition(connector)) continue
     if ((connector.adapter as { readonly webhooks?: unknown }).webhooks !== undefined) {
-      throw new ConnectorError(
+      throw createConnectorCodedError(
+        "connector.configuration_invalid",
         `OAuth connector '${connector.id}' cannot register webhooks until connection routing is defined.`
       )
     }
@@ -376,7 +378,8 @@ function assertConnectorConnectionSurfaces(
 
   for (const sync of syncs) {
     if (isOAuthConnectorDefinition(sync.connector as ConnectorDefinition)) {
-      throw new ConnectorError(
+      throw createConnectorCodedError(
+        "connector.configuration_invalid",
         `Sync '${sync.id}' cannot use OAuth connector '${sync.connector.id}' until connection fan-out is defined.`
       )
     }

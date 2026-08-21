@@ -602,6 +602,7 @@ export type {
   ConnectorAdapter,
   ConnectorClient,
   ConnectorConnectionClientContext,
+  ConnectorConnectionOptions,
   ConnectorConnectionOwner,
   ConnectorConnectionSelector,
   ConnectorContext,
@@ -615,7 +616,6 @@ export type {
   OAuthConnectorAuthorizationUrlInput,
   OAuthConnectorCodeExchangeInput,
   ProjectConnectorConnectionOwner,
-  SealedConnectorCredential,
   StaticConnectorDefinition,
 } from "./connectors"
 export { ConnectorOAuthError, defineConnector } from "./connectors"

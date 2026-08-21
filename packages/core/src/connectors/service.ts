@@ -10,7 +10,7 @@ import {
   type StartConnectorAuthorizationInput,
   type StartConnectorAuthorizationResult,
 } from "./connection-service"
-import { ConnectorError, ConnectorNotFoundError } from "./errors"
+import { ConnectorError, ConnectorNotFoundError, createConnectorCodedError } from "./errors"
 import type {
   ConnectorAdapter,
   ConnectorClient,
@@ -154,7 +154,10 @@ export class ConnectorService {
 
   private requireConnections(): ConnectorConnectionService {
     if (!this.connections) {
-      throw new ConnectorError("No OAuth connectors are registered with this runtime.")
+      throw createConnectorCodedError(
+        "connector.configuration_invalid",
+        "No OAuth connectors are registered with this runtime."
+      )
     }
     return this.connections
   }

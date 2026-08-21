@@ -56,6 +56,12 @@ export interface ConnectorConnectionSelector {
   readonly slot: string
 }
 
+/** Credential protection required when an OAuth connector uses durable connection storage. */
+export interface ConnectorConnectionOptions {
+  /** Canonical base64url encoding of exactly 32 random bytes, shared by storage replicas. */
+  readonly encryptionKey: string
+}
+
 export interface OAuthConnectorAuthorizationContext extends ConnectorContext {
   readonly redirectUri: string
 }

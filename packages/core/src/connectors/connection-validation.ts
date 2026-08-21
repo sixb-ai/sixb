@@ -1,13 +1,21 @@
 import { createHash } from "node:crypto"
 import type { ConnectorAuthorizationRecord } from "../storage"
-import { ConnectorError } from "./errors"
+import { createConnectorCodedError } from "./errors"
 import type { ConnectorAccountCandidate, ConnectorOAuthCredentials } from "./types"
+
+type ConnectorValidationErrorCode =
+  | "connector.adapter_invalid"
+  | "connector.authorization_invalid"
+  | "connector.configuration_invalid"
 
 export function validateCredentials(
   credentials: ConnectorOAuthCredentials
 ): ConnectorOAuthCredentials {
   if (!isRecord(credentials)) {
-    throw new ConnectorError("OAuth connector adapter returned invalid credentials.")
+    throw createConnectorCodedError(
+      "connector.adapter_invalid",
+      "OAuth connector adapter returned invalid credentials."
+    )
   }
 
   const normalized: {
@@ -17,29 +25,51 @@ export function validateCredentials(
     scopes?: string[]
     expiresAt?: Date
   } = {
-    accessToken: nonblank(credentials.accessToken, "provider access token"),
+    accessToken: nonblank(
+      credentials.accessToken,
+      "provider access token",
+      "connector.adapter_invalid"
+    ),
   }
 
   if (credentials.refreshToken !== undefined) {
-    normalized.refreshToken = nonblank(credentials.refreshToken, "provider refresh token")
+    normalized.refreshToken = nonblank(
+      credentials.refreshToken,
+      "provider refresh token",
+      "connector.adapter_invalid"
+    )
   }
 
   if (credentials.tokenType !== undefined) {
-    normalized.tokenType = nonblank(credentials.tokenType, "provider token type")
+    normalized.tokenType = nonblank(
+      credentials.tokenType,
+      "provider token type",
+      "connector.adapter_invalid"
+    )
   }
 
   if (credentials.scopes !== undefined) {
     if (!Array.isArray(credentials.scopes)) {
-      throw new ConnectorError("OAuth connector adapter returned invalid scopes.")
+      throw createConnectorCodedError(
+        "connector.adapter_invalid",
+        "OAuth connector adapter returned invalid scopes."
+      )
     }
     normalized.scopes = [
-      ...new Set(credentials.scopes.map((scope) => nonblank(scope, "provider scope"))),
+      ...new Set(
+        credentials.scopes.map((scope) =>
+          nonblank(scope, "provider scope", "connector.adapter_invalid")
+        )
+      ),
     ]
   }
 
   if (credentials.expiresAt !== undefined) {
     if (!(credentials.expiresAt instanceof Date) || Number.isNaN(credentials.expiresAt.getTime())) {
-      throw new ConnectorError("OAuth connector adapter returned an invalid token expiry.")
+      throw createConnectorCodedError(
+        "connector.adapter_invalid",
+        "OAuth connector adapter returned an invalid token expiry."
+      )
     }
     normalized.expiresAt = new Date(credentials.expiresAt)
   }
@@ -51,32 +81,42 @@ export function validateAccounts(
   accounts: readonly ConnectorAccountCandidate[]
 ): readonly ConnectorAccountCandidate[] {
   if (!Array.isArray(accounts)) {
-    throw new ConnectorError("OAuth connector adapter returned an invalid account list.")
+    throw createConnectorCodedError(
+      "connector.adapter_invalid",
+      "OAuth connector adapter returned an invalid account list."
+    )
   }
   const ids = new Set<string>()
   return accounts.map((account) => {
     if (!isRecord(account)) {
-      throw new ConnectorError("OAuth connector adapter returned an invalid account.")
+      throw createConnectorCodedError(
+        "connector.adapter_invalid",
+        "OAuth connector adapter returned an invalid account."
+      )
     }
-    const id = nonblank(account.id, "external account id")
+    const id = nonblank(account.id, "external account id", "connector.adapter_invalid")
     if (ids.has(id)) {
-      throw new ConnectorError(`OAuth connector adapter returned duplicate account '${id}'.`)
+      throw createConnectorCodedError(
+        "connector.adapter_invalid",
+        `OAuth connector adapter returned duplicate account '${id}'.`
+      )
     }
     ids.add(id)
     const description =
       account.description === undefined
         ? undefined
-        : nonblank(account.description, "external account description")
+        : nonblank(account.description, "external account description", "connector.adapter_invalid")
     const avatarUrl =
       account.avatarUrl === undefined
         ? undefined
         : normalizedHttpUrl(
-            nonblank(account.avatarUrl, "external account avatar URL"),
-            "external account avatar URL"
+            nonblank(account.avatarUrl, "external account avatar URL", "connector.adapter_invalid"),
+            "external account avatar URL",
+            "connector.adapter_invalid"
           )
     return {
       id,
-      label: nonblank(account.label, "external account label"),
+      label: nonblank(account.label, "external account label", "connector.adapter_invalid"),
       ...(description === undefined ? {} : { description }),
       ...(avatarUrl === undefined ? {} : { avatarUrl }),
     }
@@ -100,11 +140,18 @@ export function parseCredentials(serialized: string): ConnectorOAuthCredentials 
   let value: unknown
   try {
     value = JSON.parse(serialized)
-  } catch {
-    throw new ConnectorError("Stored connector credentials are invalid.")
+  } catch (error) {
+    throw createConnectorCodedError(
+      "connector.credentials_unavailable",
+      "Stored connector credentials are invalid.",
+      { cause: error }
+    )
   }
   if (!isRecord(value) || value.version !== 1 || typeof value.accessToken !== "string") {
-    throw new ConnectorError("Stored connector credentials are invalid.")
+    throw createConnectorCodedError(
+      "connector.credentials_unavailable",
+      "Stored connector credentials are invalid."
+    )
   }
   if (
     (value.refreshToken !== undefined && typeof value.refreshToken !== "string") ||
@@ -113,16 +160,27 @@ export function parseCredentials(serialized: string): ConnectorOAuthCredentials 
       (!Array.isArray(value.scopes) || value.scopes.some((scope) => typeof scope !== "string"))) ||
     (value.expiresAt !== undefined && typeof value.expiresAt !== "string")
   ) {
-    throw new ConnectorError("Stored connector credentials are invalid.")
+    throw createConnectorCodedError(
+      "connector.credentials_unavailable",
+      "Stored connector credentials are invalid."
+    )
   }
   const expiresAt = value.expiresAt === undefined ? undefined : new Date(value.expiresAt)
-  return validateCredentials({
-    accessToken: value.accessToken,
-    ...(value.refreshToken === undefined ? {} : { refreshToken: value.refreshToken }),
-    ...(value.tokenType === undefined ? {} : { tokenType: value.tokenType }),
-    ...(value.scopes === undefined ? {} : { scopes: value.scopes as string[] }),
-    ...(expiresAt === undefined ? {} : { expiresAt }),
-  })
+  try {
+    return validateCredentials({
+      accessToken: value.accessToken,
+      ...(value.refreshToken === undefined ? {} : { refreshToken: value.refreshToken }),
+      ...(value.tokenType === undefined ? {} : { tokenType: value.tokenType }),
+      ...(value.scopes === undefined ? {} : { scopes: value.scopes as string[] }),
+      ...(expiresAt === undefined ? {} : { expiresAt }),
+    })
+  } catch (error) {
+    throw createConnectorCodedError(
+      "connector.credentials_unavailable",
+      "Stored connector credentials are invalid.",
+      { cause: error }
+    )
+  }
 }
 
 export function shouldRefresh(
@@ -146,7 +204,7 @@ export function tokenView(credentials: ConnectorOAuthCredentials) {
 export function parseAttemptId(state: string): string {
   const separator = state.indexOf(".")
   if (separator <= 0 || separator === state.length - 1) {
-    throw new ConnectorError("OAuth state is invalid.")
+    throw createConnectorCodedError("connector.authorization_invalid", "OAuth state is invalid.")
   }
   return state.slice(0, separator)
 }
@@ -155,19 +213,23 @@ export function hashSecret(value: string): string {
   return createHash("sha256").update(value).digest("base64url")
 }
 
-export function normalizedHttpUrl(value: string | URL, field: string): string {
+export function normalizedHttpUrl(
+  value: string | URL,
+  field: string,
+  code: ConnectorValidationErrorCode = "connector.configuration_invalid"
+): string {
   let url: URL
   try {
     if (typeof value !== "string" && !(value instanceof URL)) throw new Error("invalid URL")
     url = new URL(value)
-  } catch {
-    throw new ConnectorError(`${field} must be an absolute URL.`)
+  } catch (error) {
+    throw createConnectorCodedError(code, `${field} must be an absolute URL.`, { cause: error })
   }
   if (url.username || url.password) {
-    throw new ConnectorError(`${field} must not contain credentials.`)
+    throw createConnectorCodedError(code, `${field} must not contain credentials.`)
   }
   if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopbackHost(url.hostname))) {
-    throw new ConnectorError(`${field} must use HTTPS, except on a loopback host.`)
+    throw createConnectorCodedError(code, `${field} must use HTTPS, except on a loopback host.`)
   }
   return url.toString()
 }
@@ -182,29 +244,40 @@ export function assertAuthorizationUrlParameters(
     !sameSingleParameter(parameters, "code_challenge", expected.codeChallenge) ||
     !sameSingleParameter(parameters, "code_challenge_method", "S256")
   ) {
-    throw new ConnectorError(
+    throw createConnectorCodedError(
+      "connector.adapter_invalid",
       "OAuth connector authorization URL must preserve the framework-provided state and PKCE S256 parameters."
     )
   }
 }
 
-export function nonblank(value: unknown, field: string): string {
+export function nonblank(
+  value: unknown,
+  field: string,
+  code: ConnectorValidationErrorCode = "connector.configuration_invalid"
+): string {
   if (typeof value !== "string" || !value.trim()) {
-    throw new ConnectorError(`${field} must be a non-empty string.`)
+    throw createConnectorCodedError(code, `${field} must be a non-empty string.`)
   }
   return value
 }
 
 export function positiveDuration(value: number, field: string): number {
   if (!Number.isFinite(value) || value <= 0) {
-    throw new ConnectorError(`Connector ${field} must be a positive duration.`)
+    throw createConnectorCodedError(
+      "connector.configuration_invalid",
+      `Connector ${field} must be a positive duration.`
+    )
   }
   return value
 }
 
 export function nonNegativeDuration(value: number, field: string): number {
   if (!Number.isFinite(value) || value < 0) {
-    throw new ConnectorError(`Connector ${field} must not be negative.`)
+    throw createConnectorCodedError(
+      "connector.configuration_invalid",
+      `Connector ${field} must not be negative.`
+    )
   }
   return value
 }

@@ -5,8 +5,9 @@
  * the interface cannot be implemented from outside the package.
  */
 export type { Principal } from "../auth"
+export type { ConnectorAccountCandidate } from "../connectors"
+export type { SealedConnectorCredential } from "../connectors/credentials"
 export type { SixbFailure } from "../errors/types"
-export type { ConnectorAccountCandidate, SealedConnectorCredential } from "../connectors"
 export type { StoredRuleResolvedEvent, StoredRuleTriggeredEvent } from "../events"
 export type { ReadonlyJsonObject } from "../json"
 export { stableJsonStringify } from "../json"
@@ -174,7 +175,8 @@ export type {
 } from "./auth"
 export { AuthStorageError, InMemoryAuthStorage } from "./auth"
 export type {
-  ClaimConnectorRefreshLeaseInput,
+  ClaimConnectorCredentialMutationInput,
+  ClaimConnectorCredentialMutationResult,
   ConnectorAuthorizationAttemptRecord,
   ConnectorAuthorizationCredential,
   ConnectorAuthorizationRecord,
@@ -184,21 +186,28 @@ export type {
   ConnectorConnectionSelector,
   ConnectorConnectionStorage,
   ConnectorConnectionStorageErrorCode,
-  ConnectorRefreshLease,
+  ConnectorCredentialMutation,
+  ConnectorCredentialMutationFence,
+  ConnectorCredentialMutationKind,
+  ConnectorCredentialMutationPhase,
+  ConnectorStagedCredentials,
   CreateConnectorAuthorizationAttemptInput,
   CreateConnectorAuthorizationInput,
   DisconnectConnectorConnectionInput,
+  FinalizeConnectorReauthorizationInput,
   GetConnectorConnectionInput,
+  InitializeConnectorAuthorizationAccountsInput,
   InMemoryConnectorConnectionStorageOptions,
-  MarkConnectorAuthorizationInput,
+  MarkConnectorAuthorizationNeedsReauthorizationInput,
+  MarkConnectorCredentialMutationExecutingInput,
   ProjectConnectorConnectionOwner,
   PutConnectorConnectionInput,
   PutConnectorConnectionResult,
-  ReauthorizeConnectorAuthorizationInput,
-  ReleaseConnectorRefreshLeaseInput,
-  RevokeConnectorAuthorizationInput,
-  RevokeConnectorAuthorizationResult,
-  UpdateConnectorAuthorizationCredentialsInput,
+  RecoverExpiredConnectorCredentialMutationInput,
+  ReleaseConnectorCredentialMutationInput,
+  RenewConnectorCredentialMutationInput,
+  StageConnectorCredentialMutationCredentialsInput,
+  StageConnectorCredentialMutationRevocationInput,
 } from "./connector-connections"
 export {
   ConnectorConnectionStorageError,

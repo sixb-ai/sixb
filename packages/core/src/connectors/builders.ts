@@ -1,4 +1,4 @@
-import { ConnectorError } from "./errors"
+import { ConnectorError, createConnectorCodedError } from "./errors"
 import type {
   AnyConnectorAdapter,
   ConnectorAdapter,
@@ -47,12 +47,14 @@ export function defineConnector<TId extends string, TAdapter extends AnyConnecto
       typeof adapter.authentication.refresh !== "function" ||
       typeof adapter.discoverAccounts !== "function"
     ) {
-      throw new ConnectorError(
+      throw createConnectorCodedError(
+        "connector.configuration_invalid",
         "OAuth connector adapters must define oauth2 authentication and implement authorizationUrl, exchangeCode, refresh, and discoverAccounts."
       )
     }
     if (adapter.webhooks !== undefined) {
-      throw new ConnectorError(
+      throw createConnectorCodedError(
+        "connector.configuration_invalid",
         "OAuth connector adapters cannot register webhooks until connection routing is defined."
       )
     }

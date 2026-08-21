@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryStorage } from "../src"
+import { InMemoryStorage, type SixbErrorCode } from "../src"
 import {
   type ConnectorCredentialContext,
   createConnectorCredentialProtectorFromKey,
 } from "../src/connectors/credentials"
+import { isSixbError } from "../src/errors/internal"
 import { InMemoryConnectorConnectionStorage } from "../src/storage/connector-connections"
 
 const context: ConnectorCredentialContext = {
@@ -18,14 +19,33 @@ function protector(fill: number) {
   return createConnectorCredentialProtectorFromKey(key)
 }
 
+async function rejectionOf(promise: Promise<unknown>): Promise<unknown> {
+  try {
+    await promise
+  } catch (error) {
+    return error
+  }
+  throw new Error("Expected promise to reject.")
+}
+
+function expectSixbError(error: unknown, code: SixbErrorCode) {
+  expect(isSixbError(error)).toBe(true)
+  if (!isSixbError(error)) throw new Error("Expected a coded Sixb error.")
+  expect(error.code).toBe(code)
+  return error
+}
+
 describe("connector credential protection", () => {
   test("authenticates immutable context", async () => {
     const credentialProtector = protector(1)
     const envelope = await credentialProtector.seal(new TextEncoder().encode("secret"), context)
 
-    await expect(
-      credentialProtector.open(envelope, { ...context, recordId: "authorization-b" })
-    ).rejects.toThrow("authentication failed")
+    expectSixbError(
+      await rejectionOf(
+        credentialProtector.open(envelope, { ...context, recordId: "authorization-b" })
+      ),
+      "connector.credentials_unavailable"
+    )
     await expect(
       credentialProtector.open({ ...envelope, ciphertext: "*" }, context)
     ).rejects.toThrow("authentication failed")
@@ -35,9 +55,14 @@ describe("connector credential protection", () => {
   })
 
   test("requires one canonical base64url key containing exactly 32 bytes", () => {
-    expect(() => createConnectorCredentialProtectorFromKey("not+/base64")).toThrow(
-      "canonical base64url"
-    )
+    let error: unknown
+    try {
+      createConnectorCredentialProtectorFromKey("not+/base64")
+    } catch (caught) {
+      error = caught
+    }
+    expectSixbError(error, "connector.configuration_invalid")
+    expect((error as Error).message).toContain("canonical base64url")
     expect(() =>
       createConnectorCredentialProtectorFromKey(
         Buffer.from(new Uint8Array(31)).toString("base64url")
@@ -60,7 +85,7 @@ describe("connector credential protection", () => {
           credentials,
           scopes: [],
           accounts: [],
-          createdAt: new Date("2026-08-19T12:00:00.000Z"),
+          selectionTtlMs: 60_000,
         })
         throw new Error("rollback")
       })
@@ -83,7 +108,7 @@ describe("connector connection storage", () => {
       credentials,
       scopes: [],
       accounts: [{ id: "account-a", label: "Canonical account" }],
-      createdAt: new Date("2026-08-19T12:00:00.000Z"),
+      selectionTtlMs: 60_000,
     })
 
     await expect(
@@ -96,7 +121,6 @@ describe("connector connection storage", () => {
         slot: "social",
         account: { id: "account-b", label: "Injected account" },
         replace: false,
-        now: new Date("2026-08-19T12:01:00.000Z"),
       })
     ).rejects.toThrow("not exposed by its authorization")
 
@@ -109,12 +133,11 @@ describe("connector connection storage", () => {
       slot: "social",
       account: { id: "account-a", label: "Caller-controlled label" },
       replace: false,
-      now: new Date("2026-08-19T12:01:00.000Z"),
     })
     expect(result.connection.account.label).toBe("Canonical account")
   })
 
-  test("uses the storage clock to expire refresh leases", async () => {
+  test("uses the storage clock to expire credential mutation leases", async () => {
     let now = new Date("2026-08-19T12:00:00.000Z")
     const storage = new InMemoryConnectorConnectionStorage({ now: () => new Date(now) })
     const credentialProtector = protector(5)
@@ -126,38 +149,59 @@ describe("connector connection storage", () => {
       authorizedBy: { type: "user", id: "user-a" },
       credentials,
       scopes: [],
-      accounts: [],
-      createdAt: now,
+      accounts: [{ id: "account-a", label: "Account A" }],
+      selectionTtlMs: 60_000,
+    })
+    await storage.putConnection({
+      id: "connection-a",
+      projectId: context.projectId,
+      connectorId: context.connectorId,
+      authorizationId: context.recordId,
+      owner: { type: "project" },
+      slot: "social",
+      account: { id: "account-a", label: "Account A" },
+      replace: false,
     })
 
-    const first = await storage.claimRefreshLease({
+    const first = await storage.claimCredentialMutation({
+      projectId: context.projectId,
+      connectorId: context.connectorId,
       authorizationId: context.recordId,
-      expectedRevision: 0,
-      lease: { id: "lease-a", holderId: "worker-a" },
-      durationMs: 1_000,
+      expectedRevision: 1,
+      mutation: { id: "mutation-a", kind: "refresh", holderId: "worker-a" },
+      leaseDurationMs: 1_000,
+      operationTimeoutMs: 10_000,
     })
-    expect(first?.refreshLease?.expiresAt).toEqual(new Date("2026-08-19T12:00:01.000Z"))
+    expect(first?.authorization.credentialMutation?.expiresAt).toEqual(
+      new Date("2026-08-19T12:00:01.000Z")
+    )
 
     now = new Date("2026-08-19T12:00:00.999Z")
     expect(
-      await storage.claimRefreshLease({
+      await storage.claimCredentialMutation({
+        projectId: context.projectId,
+        connectorId: context.connectorId,
         authorizationId: context.recordId,
-        expectedRevision: 0,
-        lease: { id: "lease-b", holderId: "worker-b" },
-        durationMs: 1_000,
+        expectedRevision: 1,
+        mutation: { id: "mutation-b", kind: "refresh", holderId: "worker-b" },
+        leaseDurationMs: 1_000,
+        operationTimeoutMs: 10_000,
       })
     ).toBeNull()
 
     now = new Date("2026-08-19T12:00:01.000Z")
     expect(
       (
-        await storage.claimRefreshLease({
+        await storage.claimCredentialMutation({
+          projectId: context.projectId,
+          connectorId: context.connectorId,
           authorizationId: context.recordId,
-          expectedRevision: 0,
-          lease: { id: "lease-b", holderId: "worker-b" },
-          durationMs: 1_000,
+          expectedRevision: 1,
+          mutation: { id: "mutation-b", kind: "refresh", holderId: "worker-b" },
+          leaseDurationMs: 1_000,
+          operationTimeoutMs: 10_000,
         })
-      )?.refreshLease?.id
-    ).toBe("lease-b")
+      )?.authorization.credentialMutation?.id
+    ).toBe("mutation-b")
   })
 })
