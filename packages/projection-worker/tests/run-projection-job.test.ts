@@ -1035,6 +1035,12 @@ describe("runProjectionJob", () => {
       ownershipHash: descriptor.ownershipHash,
     }
     const runId = createProjectionRunId(sixb.id, identity)
+    await queueTestProjectionRun(deps.storage, {
+      id: runId,
+      projectId: sixb.id,
+      identity,
+      target: { objectTypeId: Room.id },
+    })
     const error = await runCanonicalProjectionJob({
       runtime: createRuntime(sixb),
       job: { id: runId, ...identity },
@@ -2847,7 +2853,7 @@ describe("runProjectionJob", () => {
     })
   })
 
-  test("rejects an unknown projection before claiming a run", async () => {
+  test("fails a claimed run when its Projection is no longer registered", async () => {
     const deps = createDeps()
     const sixb = createSixb(
       {
@@ -2942,7 +2948,15 @@ describe("runProjectionJob", () => {
         projectId: sixb.id,
         id: canonicalRunId("projrun-unknown-dataset"),
       })
-    ).toBeNull()
+    ).toMatchObject({
+      status: "failed",
+      attempt: 1,
+      error: {
+        code: "projection.execution_failed",
+        message: "Projection execution failed.",
+        retryable: false,
+      },
+    })
   })
 
   test("rejects a missing pinned version with the shared version code", async () => {
@@ -2982,7 +2996,15 @@ describe("runProjectionJob", () => {
         projectId: sixb.id,
         id: canonicalRunId("projrun-unknown-version"),
       })
-    ).toBeNull()
+    ).toMatchObject({
+      status: "failed",
+      attempt: 1,
+      error: {
+        code: "projection.execution_failed",
+        message: "Projection execution failed.",
+        retryable: false,
+      },
+    })
   })
 
   test("rejects an incompatible object FK target at startup before reading rows", () => {
@@ -3389,8 +3411,9 @@ describe("runProjectionJob", () => {
       status: "failed",
       attempt: 1,
       error: {
-        phase: "execution",
-        message: expect.stringContaining("must be a string, date, or timestamp"),
+        code: "projection.execution_failed",
+        message: "Projection execution failed.",
+        retryable: false,
       },
     })
   })
