@@ -31188,9 +31188,36 @@
                   "properties": {
                     "error": {
                       "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["share.access_unavailable"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
                     }
                   },
-                  "required": ["error"],
+                  "required": ["error", "code"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["internal.unexpected"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error", "code"],
                   "additionalProperties": false
                 }
               }
@@ -31336,6 +31363,28 @@
                 }
               }
             }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["internal.unexpected"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error", "code"],
+                  "additionalProperties": false
+                }
+              }
+            }
           }
         }
       }
@@ -31393,6 +31442,28 @@
                     }
                   },
                   "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["internal.unexpected"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error", "code"],
                   "additionalProperties": false
                 }
               }

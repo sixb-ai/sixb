@@ -331,6 +331,8 @@ export type {
   GetRuleResponse,
   GetRuleResponses,
   GetSharedAccessSessionData,
+  GetSharedAccessSessionError,
+  GetSharedAccessSessionErrors,
   GetSharedAccessSessionResponse,
   GetSharedAccessSessionResponses,
   GetStatusData,

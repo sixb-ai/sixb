@@ -251,6 +251,7 @@ import type {
   GetRuleError,
   GetRuleResponse,
   GetSharedAccessSessionData,
+  GetSharedAccessSessionError,
   GetSharedAccessSessionResponse,
   GetStatusData,
   GetStatusResponse,
@@ -4013,7 +4014,7 @@ export const getSharedAccessSessionQueryKey = (options: Options<GetSharedAccessS
 export const getSharedAccessSessionOptions = (options: Options<GetSharedAccessSessionData>) =>
   queryOptions<
     GetSharedAccessSessionResponse,
-    DefaultError,
+    GetSharedAccessSessionError,
     GetSharedAccessSessionResponse,
     ReturnType<typeof getSharedAccessSessionQueryKey>
   >({

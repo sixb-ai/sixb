@@ -10542,6 +10542,20 @@ export type ExchangeSharedAccessErrors = {
    */
   401: {
     error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "share.access_unavailable"
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "internal.unexpected"
   }
 }
 
@@ -10590,6 +10604,22 @@ export type GetSharedAccessSessionData = {
   query?: never
   url: "/api/shares/{grantId}/session"
 }
+
+export type GetSharedAccessSessionErrors = {
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "internal.unexpected"
+  }
+}
+
+export type GetSharedAccessSessionError =
+  GetSharedAccessSessionErrors[keyof GetSharedAccessSessionErrors]
 
 export type GetSharedAccessSessionResponses = {
   /**
@@ -10645,6 +10675,16 @@ export type SignOutSharedAccessErrors = {
    */
   403: {
     error: string
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "internal.unexpected"
   }
 }
 

@@ -133,6 +133,7 @@ import type {
   GetRuleErrors,
   GetRuleResponses,
   GetSharedAccessSessionData,
+  GetSharedAccessSessionErrors,
   GetSharedAccessSessionResponses,
   GetStatusData,
   GetStatusResponses,
@@ -2090,10 +2091,11 @@ export const exchangeSharedAccess = <ThrowOnError extends boolean = false>(
 export const getSharedAccessSession = <ThrowOnError extends boolean = false>(
   options: Options<GetSharedAccessSessionData, ThrowOnError>
 ) =>
-  (options.client ?? client).get<GetSharedAccessSessionResponses, unknown, ThrowOnError>({
-    url: "/api/shares/{grantId}/session",
-    ...options,
-  })
+  (options.client ?? client).get<
+    GetSharedAccessSessionResponses,
+    GetSharedAccessSessionErrors,
+    ThrowOnError
+  >({ url: "/api/shares/{grantId}/session", ...options })
 
 /**
  * Sign out a shared access session

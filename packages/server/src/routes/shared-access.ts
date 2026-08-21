@@ -3,7 +3,7 @@ import type { SharedAccessSessionContext } from "@sixb/core/internal/shares"
 import type { Elysia } from "elysia"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
-import { ErrorResponseSchema } from "../schemas/common"
+import { codedErrorResponseSchema, ErrorResponseSchema } from "../schemas/common"
 import {
   ExchangeSharedAccessBodySchema,
   SharedAccessContextSchema,
@@ -12,7 +12,12 @@ import {
   SharedAccessSignOutResponseSchema,
 } from "../schemas/shared-access"
 import { SharedAccessGuard } from "../shared-access/guard"
-import { toIsoString } from "../utils/http"
+import { createUnexpectedRouteError, toIsoString } from "../utils/http"
+
+const SharedAccessUnavailableErrorResponseSchema = codedErrorResponseSchema([
+  "share.access_unavailable",
+])
+const InternalErrorResponseSchema = codedErrorResponseSchema(["internal.unexpected"])
 
 export function registerSharedAccessRoutes(app: Elysia, host: SixbHostView) {
   const guard = new SharedAccessGuard(host)
@@ -21,31 +26,42 @@ export function registerSharedAccessRoutes(app: Elysia, host: SixbHostView) {
     .post(
       "/api/shares/:grantId/exchange",
       async ({ body, params, request }) => {
-        const input = ExchangeSharedAccessBodySchema.parse(body)
-        const exchanged = await guard.exchange(params.grantId, input.secret)
-        if (!exchanged) {
-          return sharedJsonResponse({ error: "Shared access is unavailable" }, 401)
-        }
+        try {
+          const input = ExchangeSharedAccessBodySchema.parse(body)
+          const exchanged = await guard.exchange(params.grantId, input.secret)
+          if (!exchanged) {
+            return sharedJsonResponse(
+              {
+                error: "Shared access is unavailable.",
+                code: "share.access_unavailable",
+              },
+              401
+            )
+          }
 
-        const csrfToken = guard.createCsrfToken()
-        return sharedJsonResponse(
-          SharedAccessContextSchema.parse(serializeContext(exchanged.context, csrfToken)),
-          200,
-          guard.createSessionCookies({
-            request,
-            grantId: params.grantId,
-            sessionValue: exchanged.cookieValue,
-            csrfToken,
-            expiresAt: exchanged.context.session.expiresAt,
-          })
-        )
+          const csrfToken = guard.createCsrfToken()
+          return sharedJsonResponse(
+            SharedAccessContextSchema.parse(serializeContext(exchanged.context, csrfToken)),
+            200,
+            guard.createSessionCookies({
+              request,
+              grantId: params.grantId,
+              sessionValue: exchanged.cookieValue,
+              csrfToken,
+              expiresAt: exchanged.context.session.expiresAt,
+            })
+          )
+        } catch (error) {
+          return sharedInternalErrorResponse(error)
+        }
       },
       {
         params: SharedAccessGrantParamsSchema,
         body: ExchangeSharedAccessBodySchema,
         response: {
           200: SharedAccessContextSchema,
-          401: ErrorResponseSchema,
+          401: SharedAccessUnavailableErrorResponseSchema,
+          500: InternalErrorResponseSchema,
         },
         detail: {
           summary: "Exchange a shared link for a short-lived session",
@@ -58,27 +74,34 @@ export function registerSharedAccessRoutes(app: Elysia, host: SixbHostView) {
     .get(
       "/api/shares/:grantId/session",
       async ({ params, request }) => {
-        const context = await guard.resolve(request, params.grantId)
-        if (!context) {
-          return sharedJsonResponse(
-            { authenticated: false as const },
-            200,
-            guard.hasSessionCookie(request)
-              ? guard.clearSessionCookies(request, params.grantId)
-              : []
-          )
-        }
+        try {
+          const context = await guard.resolve(request, params.grantId)
+          if (!context) {
+            return sharedJsonResponse(
+              { authenticated: false as const },
+              200,
+              guard.hasSessionCookie(request)
+                ? guard.clearSessionCookies(request, params.grantId)
+                : []
+            )
+          }
 
-        const csrf = guard.resolveCsrf(request, params.grantId, context.session.expiresAt)
-        return sharedJsonResponse(
-          SharedAccessContextSchema.parse(serializeContext(context, csrf.token)),
-          200,
-          csrf.setCookie ? [csrf.setCookie] : []
-        )
+          const csrf = guard.resolveCsrf(request, params.grantId, context.session.expiresAt)
+          return sharedJsonResponse(
+            SharedAccessContextSchema.parse(serializeContext(context, csrf.token)),
+            200,
+            csrf.setCookie ? [csrf.setCookie] : []
+          )
+        } catch (error) {
+          return sharedInternalErrorResponse(error)
+        }
       },
       {
         params: SharedAccessGrantParamsSchema,
-        response: { 200: SharedAccessSessionResponseSchema },
+        response: {
+          200: SharedAccessSessionResponseSchema,
+          500: InternalErrorResponseSchema,
+        },
         detail: {
           summary: "Get the current shared access session",
           tags: [OPENAPI_TAGS.sharedAccess.name],
@@ -90,23 +113,28 @@ export function registerSharedAccessRoutes(app: Elysia, host: SixbHostView) {
     .post(
       "/api/shares/:grantId/sign-out",
       async ({ params, request }) => {
-        const context = await guard.resolve(request, params.grantId)
-        if (context && !guard.verifyCsrf(request)) {
-          return sharedJsonResponse({ error: "CSRF verification failed" }, 403)
-        }
-        if (context) await guard.revoke(context)
+        try {
+          const context = await guard.resolve(request, params.grantId)
+          if (context && !guard.verifyCsrf(request)) {
+            return sharedJsonResponse({ error: "CSRF verification failed" }, 403)
+          }
+          if (context) await guard.revoke(context)
 
-        return sharedJsonResponse(
-          { signedOut: true as const },
-          200,
-          guard.clearSessionCookies(request, params.grantId)
-        )
+          return sharedJsonResponse(
+            { signedOut: true as const },
+            200,
+            guard.clearSessionCookies(request, params.grantId)
+          )
+        } catch (error) {
+          return sharedInternalErrorResponse(error)
+        }
       },
       {
         params: SharedAccessGrantParamsSchema,
         response: {
           200: SharedAccessSignOutResponseSchema,
           403: ErrorResponseSchema,
+          500: InternalErrorResponseSchema,
         },
         detail: {
           summary: "Sign out a shared access session",
@@ -116,6 +144,11 @@ export function registerSharedAccessRoutes(app: Elysia, host: SixbHostView) {
         },
       }
     )
+}
+
+function sharedInternalErrorResponse(error: unknown): Response {
+  const safeError = createUnexpectedRouteError(error)
+  return sharedJsonResponse({ error: safeError.message, code: safeError.code }, 500)
 }
 
 function serializeContext(context: SharedAccessSessionContext, csrfToken: string) {

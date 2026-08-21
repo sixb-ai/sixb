@@ -54,11 +54,32 @@ describe("shared access client", () => {
     )
     expect(called).toBe(false)
   })
+
+  test("surfaces the stable code for an unavailable link", async () => {
+    const client = createSharedAccessClient({
+      baseUrl: "https://api.example.test",
+      fetch: mockFetch(async () =>
+        jsonResponse(
+          {
+            error: "Shared access is unavailable.",
+            code: "share.access_unavailable",
+          },
+          401
+        )
+      ),
+    })
+
+    await expect(client.exchange({ grantId, secret })).rejects.toMatchObject({
+      name: "SixbApiError",
+      status: 401,
+      code: "share.access_unavailable",
+    })
+  })
 })
 
-function jsonResponse(body: unknown): Response {
+function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
-    status: 200,
+    status,
     headers: { "content-type": "application/json" },
   })
 }

@@ -112,12 +112,62 @@ describe("shared access routes", () => {
 
     const invalid = await exchange(fixture, invitation.grantId, wrongSecret)
     const unknown = await exchange(fixture, "shr_unknown", wrongSecret)
+    const revocation = await fixture.app.fetch(
+      new Request(`http://api.localhost/api/share-grants/${invitation.grantId}`, {
+        method: "DELETE",
+        headers: fixture.normalSession.write,
+      })
+    )
+    expect(revocation.status).toBe(200)
+    const revoked = await exchange(fixture, invitation.grantId, invitation.secret)
 
-    expect(invalid.status).toBe(401)
-    expect(unknown.status).toBe(401)
-    expect(await invalid.json()).toEqual({ error: "Shared access is unavailable" })
-    expect(await unknown.json()).toEqual({ error: "Shared access is unavailable" })
+    const unavailable = {
+      error: "Shared access is unavailable.",
+      code: "share.access_unavailable",
+    }
+    for (const response of [invalid, unknown, revoked]) {
+      expect(response.status).toBe(401)
+      expect(await response.json()).toEqual(unavailable)
+    }
     expect(invalid.headers.get("set-cookie")).toBeNull()
+  })
+
+  test("does not expose unexpected protocol failures on any shared route", async () => {
+    const fixture = await createFixture()
+    const invitation = await issueGrant(fixture)
+    const exchanged = await exchange(fixture, invitation.grantId, invitation.secret)
+    const exchangedBody = (await exchanged.json()) as { csrfToken: string }
+    const cookies = requestCookieHeader(getSetCookies(exchanged))
+
+    Object.defineProperty(fixture.storage.shareGrants, "get", {
+      value: async () => {
+        throw new Error("postgres://private-host/provider-secret")
+      },
+    })
+
+    const responses = await Promise.all([
+      exchange(fixture, invitation.grantId, invitation.secret),
+      fixture.app.fetch(
+        new Request(`http://api.localhost/api/shares/${invitation.grantId}/session`, {
+          headers: { cookie: cookies },
+        })
+      ),
+      fixture.app.fetch(
+        new Request(`http://api.localhost/api/shares/${invitation.grantId}/sign-out`, {
+          method: "POST",
+          headers: { cookie: cookies, "x-sixb-csrf": exchangedBody.csrfToken },
+        })
+      ),
+    ])
+
+    for (const response of responses) {
+      expect(response.status).toBe(500)
+      expect(await response.json()).toEqual({
+        error: "An unexpected internal error occurred.",
+        code: "internal.unexpected",
+      })
+      expect(response.headers.get("set-cookie")).toBeNull()
+    }
   })
 
   test("requires shared CSRF for sign-out and invalidates the session", async () => {
