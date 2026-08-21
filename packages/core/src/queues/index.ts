@@ -26,6 +26,5 @@ export type {
   WorkflowQueueJob,
   WorkflowQueueJobFailureCode,
   WorkflowRunRequestedQueueJob,
-  WorkflowRunResumeCause,
   WorkflowRunResumeRequestedQueueJob,
 } from "./types"

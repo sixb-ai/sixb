@@ -8,7 +8,6 @@ import type {
   WorkflowStepOutputs,
 } from "@sixb/core"
 import type { LoggingService } from "@sixb/core/internal/logging"
-import type { WorkflowRunResumeCause } from "@sixb/core/queues"
 import type {
   WorkflowInterventionRecord,
   WorkflowNodeRunRecord,
@@ -40,7 +39,7 @@ export interface WorkflowJob {
 export interface WorkflowResumeJob {
   readonly id: string
   readonly workflowId: string
-  readonly resume: WorkflowRunResumeCause
+  readonly nodeRunId: string
   readonly execution?: WorkflowRunExecution
 }
 

@@ -40,7 +40,6 @@ export type ExecutionExecutor =
  * Occurrence that directly triggered an execution.
  *
  * An `execution` source is the single logical parent of a nested execution.
- * The `queue` source is transitional until workers restore durable execution authority.
  */
 export type ExecutionSource =
   | { readonly type: "http"; readonly requestId: string }
@@ -49,7 +48,6 @@ export type ExecutionSource =
   | { readonly type: "event"; readonly eventId: string }
   | { readonly type: "datasetVersion"; readonly datasetId: string; readonly versionId: string }
   | { readonly type: "execution"; readonly executionId: string }
-  | { readonly type: "queue"; readonly queue: string; readonly jobId: string }
 
 /** Immutable provenance for one request, primitive run, agent run, or kernel operation. */
 export interface ExecutionContext {

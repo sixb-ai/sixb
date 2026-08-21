@@ -7,6 +7,7 @@ import type {
   Storage,
 } from "@sixb/core"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
+import { isSixbError } from "@sixb/core/internal/errors"
 import type { LoggingService } from "@sixb/core/internal/logging"
 import {
   bindDurablePrimitiveExecution,
@@ -101,7 +102,7 @@ export class WorkflowWorker extends QueueWorker<
           job: {
             id: run.id,
             workflowId: run.workflowId,
-            resume: claimed.job.payload.resume,
+            nodeRunId: claimed.job.payload.nodeRunId,
             execution,
           },
           signal,
@@ -181,14 +182,23 @@ export class WorkflowWorker extends QueueWorker<
 
   protected override async onExecutionError(
     claimed: ClaimedQueueJob<WorkflowQueueJob>,
-    _error: unknown
-  ): Promise<QueueWorkerFailureDecision> {
+    error: unknown
+  ): Promise<QueueWorkerFailureDecision<(typeof WORKFLOW_RUN_FAILURE_CODES)[number]>> {
+    // A coded invariant failure is deterministic. Redelivery cannot repair a malformed durable
+    // identity edge, so honor the catalog policy before considering infrastructure retries.
+    if (isSixbError(error) && !error.retryable) {
+      return { kind: "fail" }
+    }
+
     const run = await this.workflowRuns
       .getById({
         projectId: this.host.id,
         id: claimed.job.payload.runId,
       })
       .catch(() => null)
+    if ((run?.status === "failed" || run?.status === "cancelled") && run.error) {
+      return { kind: "fail", failure: run.error }
+    }
     if (
       (!run || run.status === "queued" || run.status === "running") &&
       claimed.job.attempt < MAX_WORKFLOW_DELIVERY_ATTEMPTS
