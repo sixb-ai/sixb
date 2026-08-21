@@ -3,11 +3,12 @@ import type {
   ConnectorRuntime,
   LakeStorage,
   SixbDefinitions,
+  SixbFailure,
   SyncMode,
 } from "@sixb/core"
 import type { LoggingService } from "@sixb/core/internal/logging"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
-import type { SyncRunRecord, SyncRunStorage } from "@sixb/core/storage"
+import type { SyncRunFailureCode, SyncRunRecord, SyncRunStorage } from "@sixb/core/storage"
 
 export interface SyncWorkerContext {
   readonly id: string
@@ -33,12 +34,23 @@ export interface RunSyncJobInput {
   readonly job: SyncJob
   readonly signal?: AbortSignal
   readonly onRunStarted?: SyncRunStartedHandler
+  readonly onRunFinished?: SyncRunFinishedHandler
   readonly onRunFailed?: SyncRunFailedHandler
 }
 
 export type SyncRunStartedHandler = (run: SyncRunRecord) => Promise<void> | void
 
-export type SyncRunFailedHandler = (error: unknown, run: SyncRunRecord) => void
+export type SyncRunFinishedHandler = (
+  run: SyncRunRecord,
+  /** Dataset version created by this run, when the durable output is new. */
+  createdVersion?: DatasetVersion
+) => Promise<void> | void
+
+export type SyncRunFailedHandler = (
+  error: unknown,
+  run: SyncRunRecord,
+  failure: SixbFailure<SyncRunFailureCode>
+) => void
 
 interface SyncRunResultBase {
   readonly id: string

@@ -1,3 +1,4 @@
+import type { SixbErrorCode, SixbFailure } from "../../errors/types"
 import type { OntologyMaterializationEvent } from "../../materialization/events"
 
 export type {
@@ -12,6 +13,15 @@ export interface OntologyOutboxWrite {
   readonly createdAt: string
 }
 
+/** Error codes a durable ontology outbox delivery can persist. */
+export const ONTOLOGY_OUTBOX_FAILURE_CODES = ["event.delivery_failed"] as const satisfies readonly [
+  SixbErrorCode,
+  ...SixbErrorCode[],
+]
+
+export type OntologyOutboxFailureCode = (typeof ONTOLOGY_OUTBOX_FAILURE_CODES)[number]
+export type OntologyOutboxFailure = SixbFailure<OntologyOutboxFailureCode>
+
 export interface OntologyOutboxRecord {
   readonly envelope: OntologyMaterializationEvent
   readonly availableAt: string
@@ -19,7 +29,7 @@ export interface OntologyOutboxRecord {
   readonly leaseId: string | null
   readonly leaseExpiresAt: string | null
   readonly publishedAt: string | null
-  readonly lastError: string | null
+  readonly lastFailure: OntologyOutboxFailure | null
   readonly createdAt: string
 }
 
@@ -48,7 +58,8 @@ export interface RescheduleOntologyOutboxLeaseInput {
   readonly ids: readonly string[]
   readonly leaseId: string
   readonly availableAt: string
-  readonly error: string
+  /** The delivery failure that caused this retry. Omitted for lifecycle-only rescheduling. */
+  readonly failure?: OntologyOutboxFailure
 }
 
 export interface PurgePublishedOntologyOutboxInput {

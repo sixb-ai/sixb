@@ -1,8 +1,16 @@
-import type { DomainEventLog, LakeStorage, Queues, SixbDefinitions, Storage } from "@sixb/core"
+import type {
+  DomainEventLog,
+  LakeStorage,
+  Queues,
+  SixbDefinitions,
+  SixbFailure,
+  Storage,
+} from "@sixb/core"
 import type { LoggingService } from "@sixb/core/internal/logging"
 import type { PrimitiveExecutionHost } from "@sixb/core/internal/primitive-execution"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type {
+  PipelineRunFailureCode,
   PipelineRunRecord,
   PipelineRunStorage,
   PipelineStepRunRecord,
@@ -39,6 +47,7 @@ export interface RunPipelineJobInput {
   readonly job: PipelineJob
   readonly signal?: AbortSignal
   readonly onRunStarted?: PipelineRunStartedHandler
+  readonly onRunFinished?: PipelineRunFinishedHandler
   readonly onRunFailed?: PipelineRunFailedHandler
   readonly onStepStarted?: PipelineStepStartedHandler
   readonly onStepFinished?: PipelineStepFinishedHandler
@@ -49,7 +58,13 @@ export type PipelineStepCommittedHandler = (result: PipelineStepRunResult) => Pr
 
 export type PipelineRunStartedHandler = (run: PipelineRunRecord) => Promise<void> | void
 
-export type PipelineRunFailedHandler = (error: unknown, run: PipelineRunRecord) => void
+export type PipelineRunFinishedHandler = (run: PipelineRunRecord) => Promise<void> | void
+
+export type PipelineRunFailedHandler = (
+  error: unknown,
+  run: PipelineRunRecord,
+  failure: SixbFailure<PipelineRunFailureCode>
+) => void
 
 export interface PipelineStepLifecycleContext {
   readonly stepIndex: number

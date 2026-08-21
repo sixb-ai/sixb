@@ -431,15 +431,16 @@ describe("PipelineWorker", () => {
       expect(reports[0]?.error).toBe(originalError)
       expect(reports[0]?.context).toEqual({
         type: "run.failed",
-        notificationId: `project:${sixb.id}:run:pipeline:run-fails-late:failed:${run!.finishedAt!.toISOString()}`,
+        notificationId: `project:${sixb.id}:run:pipeline:run-fails-late:failed:${run!.error!.at}`,
         projectId: sixb.id,
-        occurredAt: run!.finishedAt!.toISOString(),
+        occurredAt: run!.error!.at,
         attempt: 1,
+        runKind: "pipeline",
         run: {
-          kind: "pipeline",
           runId: "run-fails-late",
           pipelineId: pipeline.id,
         },
+        failure: run!.error!,
       })
 
       const claimed = await sixb.queues.pipelines.claim({
@@ -479,7 +480,18 @@ describe("PipelineWorker", () => {
       stepIndex: 1,
       totalSteps: 2,
       status: "failed",
-      error: "nope",
+      error: {
+        code: "pipeline.step_failed",
+        message: "Pipeline step execution failed.",
+        retryable: false,
+        at: expect.any(String),
+        details: {
+          pipelineId: "customers",
+          pipelineRunId: "run-fails-late",
+          stepId: "explode",
+          stepRunId: "run-fails-late:step:2:explode",
+        },
+      },
     })
 
     const datasetPayload = events[3]?.payload as {
@@ -502,12 +514,18 @@ describe("PipelineWorker", () => {
       status: string
       datasetId?: string
       versionId?: string
+      error?: unknown
     }
-    expect(finishedPayload.pipelineId).toBe("customers")
-    expect(finishedPayload.runId).toBe("run-fails-late")
-    expect(finishedPayload.status).toBe("failed")
-    expect(finishedPayload.datasetId).toBeUndefined()
-    expect(finishedPayload.versionId).toBeUndefined()
+    const failedRun = await sixb.storage.pipelineRuns!.getById({
+      projectId: sixb.id,
+      id: "run-fails-late",
+    })
+    expect(finishedPayload).toEqual({
+      pipelineId: "customers",
+      runId: "run-fails-late",
+      status: "failed",
+      error: failedRun?.error,
+    })
   })
 
   test("fails an aborted queue job after a step has committed without reporting it", async () => {
@@ -599,6 +617,27 @@ describe("PipelineWorker", () => {
       runId: "run-aborts-late",
       status: "cancelled",
     })
+    const cancelledRun = await sixb.storage.pipelineRuns!.getById({
+      projectId: sixb.id,
+      id: "run-aborts-late",
+    })
+    const [cancelledStep] = (
+      await sixb.storage.pipelineRuns!.listSteps({
+        projectId: sixb.id,
+        pipelineRunId: "run-aborts-late",
+        statuses: ["cancelled"],
+      })
+    ).steps
+    expect(cancelledRun?.error).toMatchObject({
+      code: "runtime.cancelled",
+      retryable: false,
+    })
+    expect(cancelledStep?.error).toMatchObject({
+      code: "runtime.cancelled",
+      retryable: false,
+    })
+    expect(events[5]?.payload).toMatchObject({ error: cancelledStep?.error })
+    expect(events[6]?.payload).toMatchObject({ error: cancelledRun?.error })
     expect(reportCount).toBe(0)
   })
 })

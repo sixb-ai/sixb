@@ -47,6 +47,7 @@ import {
 } from "lucide-react"
 import { type ReactNode, useEffect, useMemo, useState } from "react"
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom"
+import { SixbFailureSummary } from "../components/SixbFailureSummary"
 import { StructuredValue } from "../components/StructuredValue"
 import {
   isUnconfiguredStorageError,
@@ -1266,7 +1267,7 @@ function RunsListPanel({
                       {runTimeLabel(run)} · {formatRunDuration(run)}
                     </p>
                     {run.error ? (
-                      <p className="mt-1 break-words text-[11px] text-destructive">{run.error}</p>
+                      <SixbFailureSummary failure={run.error} className="mt-1 text-[11px]" />
                     ) : null}
                   </div>
                   <StatusBadge status={run.status} />
@@ -1320,9 +1321,10 @@ function RunSummaryPanel({
         <RunProgress status={run.status} nodes={nodes} totalSteps={totalSteps} />
 
         {run.error ? (
-          <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
-            {run.error}
-          </div>
+          <SixbFailureSummary
+            failure={run.error}
+            className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs"
+          />
         ) : null}
 
         <p className="rounded-lg bg-muted/30 p-3 text-xs text-muted-foreground">
@@ -1488,7 +1490,7 @@ function RunNodePanel({
 
             {runNode.error ? (
               <PanelBlock label="Error" icon={<X className={cn(SECTION_ICON, "text-red-500")} />}>
-                <p className="break-words text-sm text-destructive">{runNode.error}</p>
+                <SixbFailureSummary failure={runNode.error} className="text-sm" />
               </PanelBlock>
             ) : (
               <PanelBlock
@@ -1563,7 +1565,7 @@ function AgentExecutionPanel({
             </div>
           ) : null}
           {execution?.error ? (
-            <p className="break-words text-sm text-destructive">{execution.error}</p>
+            <SixbFailureSummary failure={execution.error} className="text-sm" />
           ) : null}
         </div>
       ) : loading ? (

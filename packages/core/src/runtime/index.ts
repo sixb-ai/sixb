@@ -19,6 +19,8 @@ export { CronValidationError, ScheduleValidationError } from "../schedules"
 export type {
   WebhookDeliveryClaimRecord,
   WebhookDeliveryClaimResult,
+  WebhookDeliveryFailure,
+  WebhookDeliveryFailureCode,
   WebhookDeliveryKey,
   WebhookDeliveryRecord,
   WebhookDeliveryStatus,

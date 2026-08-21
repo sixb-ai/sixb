@@ -3,7 +3,6 @@ import { InMemoryQueues, InMemoryStorage, type ReadonlyJsonValue } from "@sixb/c
 import type { AgentAiUsageRecordRequestedQueueJob } from "@sixb/core/queues"
 import { AiUsageStorageError, type RecordAiModelCallInput } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
-import { AgentWorkerError } from "../src/errors"
 import {
   agentAiUsageRecoveryJobId,
   enqueueAiModelCallRecovery,
@@ -100,18 +99,21 @@ describe("AI usage recovery", () => {
     }
 
     const storage = new InMemoryStorage()
-    await expect(recordRecoveredAiModelCall(storage.aiUsage, job)).rejects.toBeInstanceOf(
-      AgentWorkerError
+    const invalidJobError = await recordRecoveredAiModelCall(storage.aiUsage, job).catch(
+      (error: unknown) => error
     )
+    expect(invalidJobError).toMatchObject({
+      name: "InvalidAiUsageRecoveryJobError",
+      message:
+        "[SixbAgentWorker] AI usage recovery job 'agt_usage_job_usage_1' has an invalid occurredAt timestamp.",
+    })
+    expect(isPermanentAiUsageRecoveryError(invalidJobError)).toBe(true)
     expect(isPermanentAiUsageRecoveryError(new TypeError("invalid"))).toBe(true)
     expect(
       isPermanentAiUsageRecoveryError(
         new AiUsageStorageError("missing_execution", "missing execution")
       )
     ).toBe(true)
-    expect(isPermanentAiUsageRecoveryError(new AgentWorkerError("queue response mismatch"))).toBe(
-      false
-    )
     expect(isPermanentAiUsageRecoveryError(new Error("storage unavailable"))).toBe(false)
   })
 })

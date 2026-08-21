@@ -1,9 +1,14 @@
 import type { ActionSubject } from "@sixb/core"
 import { ActionRunFailedError, isObjectActionDefinition } from "@sixb/core"
+import { parseActionRunFailure } from "@sixb/core/internal/action-run-storage"
+import { createSixbError, toSixbFailure } from "@sixb/core/internal/errors"
 import type { WorkflowActionNodeDefinition } from "@sixb/core/internal/workflows"
 import { snapshotWorkflowActionInput } from "@sixb/core/internal/workflows"
-import type { ActionRunFailure } from "@sixb/core/storage"
-import { WorkflowWorkerError } from "../errors"
+import {
+  ACTION_RUN_FAILURE_CODES,
+  type ActionRunFailure,
+  type ActionRunPhase,
+} from "@sixb/core/storage"
 import type { WorkflowNodeExecutor } from "../execution/node-executor"
 import { isRecord } from "../normalize"
 import { callWorkflowMapper } from "./mapper"
@@ -23,12 +28,14 @@ export const actionNodeExecutor: WorkflowNodeExecutor<WorkflowActionNodeDefiniti
         : callWorkflowMapper({
             mapper: node.mapper,
             workflowId: context.workflow.id,
+            workflowRunId: context.job.id,
             nodeId: node.id,
             workflowInput: context.state.workflowInput,
             steps: context.state.steps,
           })
     const mapperResult = normalizeActionMapperResult({
       workflowId: context.workflow.id,
+      workflowRunId: context.job.id,
       nodeId: node.id,
       action: node.action,
       value: rawMapperResult,
@@ -45,10 +52,12 @@ export const actionNodeExecutor: WorkflowNodeExecutor<WorkflowActionNodeDefiniti
     }
   },
 
-  async execute({ node, nodeIndex, prepared, context }) {
+  async execute({ node, nodeIndex, nodeRun, prepared, context }) {
     const mapperResult = normalizeActionMapperResult({
       workflowId: context.workflow.id,
+      workflowRunId: context.job.id,
       nodeId: node.id,
+      nodeRunId: nodeRun.id,
       action: node.action,
       value: prepared.input,
       mode: "mapped",
@@ -64,12 +73,21 @@ export const actionNodeExecutor: WorkflowNodeExecutor<WorkflowActionNodeDefiniti
       onRequested: () => context.markSideEffectBoundaryPassed(),
     })
     if (run.status !== "succeeded") {
+      const finishedAt = run.finishedAt ?? new Date()
       throw new ActionRunFailedError({
         runId: run.id,
         actionId: run.actionId,
         subject: run.subject,
-        error: run.error ?? actionRunStatusFailure(run.status, run.phase),
-        finishedAt: (run.finishedAt ?? new Date()).toISOString(),
+        error:
+          run.error ??
+          actionRunStatusFailure({
+            status: run.status,
+            phase: run.phase,
+            actionId: run.actionId,
+            runId: run.id,
+            at: finishedAt,
+          }),
+        finishedAt: finishedAt.toISOString(),
       })
     }
 
@@ -79,26 +97,48 @@ export const actionNodeExecutor: WorkflowNodeExecutor<WorkflowActionNodeDefiniti
   },
 }
 
-function actionRunStatusFailure(
-  status: "queued" | "running" | "failed" | "cancelled",
-  phase: ActionRunFailure["phase"]
-): ActionRunFailure {
-  return {
-    message: `Action run finished with status '${status}'.`,
-    phase,
-  }
+function actionRunStatusFailure(input: {
+  readonly status: "queued" | "running" | "failed" | "cancelled"
+  readonly phase?: ActionRunPhase
+  readonly actionId: string
+  readonly runId: string
+  readonly at: Date
+}): ActionRunFailure {
+  const phase = input.phase ?? (input.status === "cancelled" ? "cancelled" : "validation")
+  const error = createSixbError(
+    input.status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+    `Action run finished with status '${input.status}'.`,
+    {
+      details: {
+        actionId: input.actionId,
+        runId: input.runId,
+        phase,
+      },
+    }
+  )
+  return parseActionRunFailure(
+    toSixbFailure(error, {
+      allowedCodes: ACTION_RUN_FAILURE_CODES,
+      at: input.at,
+    }),
+    phase
+  )
 }
 
 function normalizeActionMapperResult(input: {
   readonly workflowId: string
+  readonly workflowRunId: string
   readonly nodeId: string
+  readonly nodeRunId?: string
   readonly action: WorkflowActionNodeDefinition["action"]
   readonly value: unknown
   readonly mode: "direct" | "mapped"
 }): ActionMapperResult {
   if (!isRecord(input.value)) {
-    throw new WorkflowWorkerError(
-      `[SixbWorkflowWorker] Workflow '${input.workflowId}' action node '${input.nodeId}' input must be an object.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbWorkflowWorker] Workflow '${input.workflowId}' action node '${input.nodeId}' input must be an object.`,
+      { details: actionNodeErrorDetails(input) }
     )
   }
 
@@ -113,15 +153,19 @@ function normalizeActionMapperResult(input: {
 
 function normalizeMappedActionInput(input: {
   readonly workflowId: string
+  readonly workflowRunId: string
   readonly nodeId: string
+  readonly nodeRunId?: string
   readonly action: WorkflowActionNodeDefinition["action"]
   readonly value: Readonly<Record<string, unknown>>
 }): ActionMapperResult {
   const { subject, params } = input.value
 
   if (!isRecord(params)) {
-    throw new WorkflowWorkerError(
-      `[SixbWorkflowWorker] Workflow '${input.workflowId}' action node '${input.nodeId}' mapper must return params as an object.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbWorkflowWorker] Workflow '${input.workflowId}' action node '${input.nodeId}' mapper must return params as an object.`,
+      { details: actionNodeErrorDetails(input) }
     )
   }
 
@@ -129,7 +173,10 @@ function normalizeMappedActionInput(input: {
     return {
       subject: normalizeObjectActionSubject({
         workflowId: input.workflowId,
+        workflowRunId: input.workflowRunId,
         nodeId: input.nodeId,
+        nodeRunId: input.nodeRunId,
+        action: input.action,
         value: subject,
       }),
       params,
@@ -137,8 +184,10 @@ function normalizeMappedActionInput(input: {
   }
 
   if (Object.hasOwn(input.value, "subject")) {
-    throw new WorkflowWorkerError(
-      `[SixbWorkflowWorker] Workflow '${input.workflowId}' action node '${input.nodeId}' mapper must not return subject for a global action.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbWorkflowWorker] Workflow '${input.workflowId}' action node '${input.nodeId}' mapper must not return subject for a global action.`,
+      { details: actionNodeErrorDetails(input) }
     )
   }
 
@@ -149,21 +198,28 @@ function normalizeMappedActionInput(input: {
 
 function normalizeDirectActionInput(input: {
   readonly workflowId: string
+  readonly workflowRunId: string
   readonly nodeId: string
+  readonly nodeRunId?: string
   readonly action: WorkflowActionNodeDefinition["action"]
   readonly value: Readonly<Record<string, unknown>>
 }): ActionMapperResult {
   if (isObjectActionDefinition(input.action)) {
     if (!Object.hasOwn(input.value, "subject")) {
-      throw new WorkflowWorkerError(
-        `[SixbWorkflowWorker] Workflow '${input.workflowId}' action node '${input.nodeId}' direct input must include subject for an object action.`
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbWorkflowWorker] Workflow '${input.workflowId}' action node '${input.nodeId}' direct input must include subject for an object action.`,
+        { details: actionNodeErrorDetails(input) }
       )
     }
 
     return {
       subject: normalizeObjectActionSubject({
         workflowId: input.workflowId,
+        workflowRunId: input.workflowRunId,
         nodeId: input.nodeId,
+        nodeRunId: input.nodeRunId,
+        action: input.action,
         value: input.value.subject,
       }),
       params: pickActionParams(input.action, input.value),
@@ -171,8 +227,10 @@ function normalizeDirectActionInput(input: {
   }
 
   if (Object.hasOwn(input.value, "subject")) {
-    throw new WorkflowWorkerError(
-      `[SixbWorkflowWorker] Workflow '${input.workflowId}' action node '${input.nodeId}' direct input must not include subject for a global action.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbWorkflowWorker] Workflow '${input.workflowId}' action node '${input.nodeId}' direct input must not include subject for a global action.`,
+      { details: actionNodeErrorDetails(input) }
     )
   }
 
@@ -196,7 +254,10 @@ function pickActionParams(
 
 function normalizeObjectActionSubject(input: {
   readonly workflowId: string
+  readonly workflowRunId: string
   readonly nodeId: string
+  readonly nodeRunId?: string
+  readonly action: WorkflowActionNodeDefinition["action"]
   readonly value: unknown
 }): ActionSubject {
   if (isActionObjectSubject(input.value)) {
@@ -204,8 +265,10 @@ function normalizeObjectActionSubject(input: {
   }
 
   if (!isObjectRef(input.value)) {
-    throw new WorkflowWorkerError(
-      `[SixbWorkflowWorker] Workflow '${input.workflowId}' action node '${input.nodeId}' mapper must return a valid subject object ref.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbWorkflowWorker] Workflow '${input.workflowId}' action node '${input.nodeId}' mapper must return a valid subject object ref.`,
+      { details: actionNodeErrorDetails(input) }
     )
   }
 
@@ -230,4 +293,20 @@ function isObjectRef(value: unknown): value is { objectTypeId: string; primaryId
     typeof value.primaryId === "string" &&
     value.primaryId.trim().length > 0
   )
+}
+
+function actionNodeErrorDetails(input: {
+  readonly workflowId: string
+  readonly workflowRunId: string
+  readonly nodeId: string
+  readonly nodeRunId?: string
+  readonly action: WorkflowActionNodeDefinition["action"]
+}): Readonly<Record<string, string>> {
+  return {
+    actionId: input.action.id,
+    workflowId: input.workflowId,
+    workflowRunId: input.workflowRunId,
+    nodeId: input.nodeId,
+    ...(input.nodeRunId ? { nodeRunId: input.nodeRunId } : {}),
+  }
 }

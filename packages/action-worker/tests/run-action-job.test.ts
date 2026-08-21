@@ -13,6 +13,7 @@ import {
   type OntologySource,
   param,
   prop,
+  type SixbErrorContext,
   SixbHost,
 } from "@sixb/core"
 import { findActionEditCommit } from "@sixb/core/internal/actions"
@@ -20,7 +21,6 @@ import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import { bindPrimitiveExecution } from "@sixb/core/internal/primitive-execution"
 import type { ActionRunParams, ActionRunRecord } from "@sixb/core/storage"
 import { createTestSixb, queueTestActionRun } from "@sixb/core/testing"
-import { ActionWorkerError } from "../src/errors"
 import { runActionJob } from "../src/run-action-job"
 import type { ActionWorkerContext, RunActionJobInput } from "../src/types"
 import type { ActionWorkerHost } from "../src/worker"
@@ -151,7 +151,19 @@ describe("runActionJob", () => {
         },
         run,
       })
-    ).rejects.toBeInstanceOf(ActionWorkerError)
+    ).rejects.toMatchObject({
+      code: "internal.unexpected",
+      message:
+        "[SixbActionWorker] Action job 'act_other' does not match durable run 'act_stored' in project 'action-worker-tests'.",
+      retryable: false,
+      details: {
+        actionId: "count",
+        runId: "act_other",
+        durableActionId: "count",
+        durableRunId: "act_stored",
+        durableProjectId: "action-worker-tests",
+      },
+    })
   })
 
   test("passes nullable params to action handlers unchanged", async () => {
@@ -259,11 +271,13 @@ describe("runActionJob", () => {
 
     expect(result.status).toBe("failed")
     if ("error" in result) {
-      expect(result.error).toEqual({
-        name: "Error",
-        message: "external API failed",
-        phase: "writeback",
+      expect(result.error).toMatchObject({
+        code: "action.phase_failed",
+        message: "Action execution failed.",
+        retryable: false,
+        details: { actionId: "failWriteback", runId: "act_1", phase: "writeback" },
       })
+      expect(result.error.at).toEqual(expect.any(String))
     }
 
     const run = await host.storage.actionRuns!.getById({ projectId: host.id, id: "act_1" })
@@ -273,6 +287,42 @@ describe("runActionJob", () => {
     ).toBeNull()
     const updated = await deviceObjects(sixb).get("device-1")
     expect(updated?.properties.status).toBe("old")
+  })
+
+  test("keeps run finalization failures out of the phase-failed vocabulary", async () => {
+    const complete = defineAction("complete")
+      .params({})
+      .writeback(() => ({ ok: true }))
+    const { host } = createSixb([complete])
+    await queueActionRun(host, {
+      id: "act_finalize",
+      actionId: "complete",
+      subject: { kind: "none" },
+      params: {},
+    })
+
+    const actionRuns = host.storage.actionRuns!
+    const finish = actionRuns.finish.bind(actionRuns)
+    actionRuns.finish = async (input) => {
+      if (input.status === "succeeded") {
+        throw new Error("finish exploded")
+      }
+      return finish(input)
+    }
+
+    const result = await runStoredActionJob({
+      runtime: createContext(host),
+      job: { id: "act_finalize", actionId: "complete" },
+    })
+
+    expect(result.status).toBe("failed")
+    if ("error" in result) {
+      expect(result.error).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        details: { actionId: "complete", runId: "act_finalize", phase: "writeback" },
+      })
+    }
   })
 
   test("exposes immutable blob operations inside action writeback", async () => {
@@ -781,8 +831,12 @@ describe("runActionJob", () => {
 
     expect(result.status).toBe("failed")
     if ("error" in result) {
-      expect(result.error.message).toBe("[SixbActionWorker] Unknown action 'missingAction'.")
-      expect(result.error.phase).toBe("validation")
+      expect(result.error).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        retryable: false,
+        details: { actionId: "missingAction", runId: "act_1", phase: "validation" },
+      })
     }
     const run = await host.storage.actionRuns!.getById({ projectId: host.id, id: "act_1" })
     expect(run?.status).toBe("failed")
@@ -823,8 +877,9 @@ describe("runActionJob", () => {
 
     expect(result.status).toBe("failed")
     if ("error" in result) {
-      expect(result.error.name).toBe("ActionRunLeaseLostError")
-      expect(result.error.phase).toBe("validation")
+      expect(result.error.code).toBe("internal.unexpected")
+      expect(result.error.message).toBe("An unexpected internal error occurred.")
+      expect(result.error.details.phase).toBe("validation")
     }
     expect(invoked).toBe(0)
 
@@ -931,6 +986,7 @@ describe("runActionJob", () => {
   })
 
   test("records effects errors without failing committed actions", async () => {
+    const originalError = new Error("notification failed")
     const setStatus = defineAction("setStatus")
       .on(Device)
       .params({})
@@ -938,13 +994,13 @@ describe("runActionJob", () => {
         objects(Device).byId(subject.primaryId).update({ status: "ready" })
       })
       .effects(() => {
-        throw new Error("notification failed")
+        throw originalError
       })
 
     const { host, sixb } = createSixb([setStatus])
-    let reportCount = 0
-    const reporter = attachSixbErrorReporter(sixb, () => {
-      reportCount += 1
+    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
+    const reporter = attachSixbErrorReporter(host, (error, context) => {
+      reports.push({ error, context })
     })
     await sixb.objects.upsert("Device", {
       id: "device-1",
@@ -971,13 +1027,24 @@ describe("runActionJob", () => {
     expect(run?.effects).toMatchObject({
       status: "failed",
       error: {
-        name: "Error",
-        message: "notification failed",
-        phase: "effects",
+        code: "action.phase_failed",
+        message: "Action execution failed.",
+        retryable: false,
+        details: { actionId: "setStatus", runId: "act_1", phase: "effects" },
       },
     })
     await reporter.flush()
-    expect(reportCount).toBe(0)
+    expect(reports).toHaveLength(1)
+    expect(reports[0]?.error).toBe(originalError)
+    expect(reports[0]?.context).toMatchObject({
+      type: "action.phase.failed",
+      projectId: host.id,
+      actionId: "setStatus",
+      runId: "act_1",
+      phase: "effects",
+      failure: run?.effects?.error,
+    })
+    expect(reports[0]?.context.occurredAt).toBe(run?.effects?.error?.at ?? "")
   })
 
   test("does not report cancelled runs", async () => {
@@ -1022,6 +1089,18 @@ describe("runActionJob", () => {
     const result = await execution
 
     expect(result.status).toBe("cancelled")
+    if ("error" in result) {
+      expect(result.error).toMatchObject({
+        code: "runtime.cancelled",
+        message: "Execution was cancelled.",
+        retryable: false,
+        details: {
+          actionId: "waitForCancel",
+          runId: "act_cancelled",
+          phase: "cancelled",
+        },
+      })
+    }
     await reporter.flush()
     expect(reportCount).toBe(0)
   })
@@ -1057,10 +1136,12 @@ describe("runActionJob", () => {
 
     expect(result.status).toBe("failed")
     if ("error" in result) {
-      expect(result.error.message).toBe(
-        "[SixbActionWorker] Action 'setStatus' is not valid for object type 'Sensor'."
-      )
-      expect(result.error.phase).toBe("validation")
+      expect(result.error).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        retryable: false,
+        details: { actionId: "setStatus", runId: "act_1", phase: "validation" },
+      })
     }
     expect(invoked).toBe(0)
   })

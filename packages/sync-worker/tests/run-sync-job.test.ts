@@ -24,7 +24,7 @@ import {
   InMemoryStorage,
 } from "@sixb/core"
 import type { BeginDatasetWriteInput, LakeWriteSession } from "@sixb/core/lake-storage"
-import type { SyncRunStorage } from "@sixb/core/storage"
+import type { SyncRunRecord, SyncRunStorage } from "@sixb/core/storage"
 import { InMemorySyncRunStorage } from "@sixb/core/storage"
 import { LocalLakeStorage } from "@sixb/lake-local"
 import { runSyncJob } from "../src/run-sync-job"
@@ -225,12 +225,16 @@ describe("runSyncJob", () => {
       syncRunsStorage,
       lakeStorage: wrappedLakeStorage,
     })
+    const finishedRuns: SyncRunRecord[] = []
 
     const result = await runSyncJob({
       runtime,
       job: {
         id: "run_1",
         syncId: "sync-orders",
+      },
+      onRunFinished(run) {
+        finishedRuns.push(run)
       },
     })
 
@@ -262,6 +266,8 @@ describe("runSyncJob", () => {
         versionId: result.version!.versionId,
       },
     })
+    if (!run) throw new Error("Expected the sync run to be persisted.")
+    expect(finishedRuns).toEqual([run])
 
     const rows = await collectRows(runtime.lakeStorage.readRows({ datasetId: "raw.erp.orders" }))
     expect(rows).toEqual([
@@ -949,8 +955,15 @@ describe("runSyncJob", () => {
       status: "failed",
       rowsRead: 1,
       error: {
-        message:
-          "[SixbSyncWorker] Sync 'sync-orders' returned an invalid row at item 2. Dataset rows must be plain objects.",
+        code: "sync.execution_failed",
+        message: "Sync execution failed.",
+        retryable: false,
+        at: expect.any(String),
+        details: {
+          syncId: "sync-orders",
+          runId: "run_1",
+          datasetId: "raw.erp.orders",
+        },
       },
     })
   })
@@ -983,8 +996,15 @@ describe("runSyncJob", () => {
       status: "failed",
       rowsRead: 0,
       error: {
-        message:
-          "[SixbSyncWorker] Sync 'sync-orders' returned an unsupported read result. Expected a row object, iterable, or async iterable.",
+        code: "sync.execution_failed",
+        message: "Sync execution failed.",
+        retryable: false,
+        at: expect.any(String),
+        details: {
+          syncId: "sync-orders",
+          runId: "run_1",
+          datasetId: "raw.erp.orders",
+        },
       },
     })
   })
@@ -1017,8 +1037,15 @@ describe("runSyncJob", () => {
       status: "failed",
       rowsRead: 0,
       error: {
-        message:
-          "[SixbSyncWorker] Sync 'sync-orders' returned an invalid row at item 1. Dataset 'raw.erp.orders' row contains unknown column 'unexpected'.",
+        code: "sync.execution_failed",
+        message: "Sync execution failed.",
+        retryable: false,
+        at: expect.any(String),
+        details: {
+          syncId: "sync-orders",
+          runId: "run_schema_error",
+          datasetId: "raw.erp.orders",
+        },
       },
     })
   })
@@ -1060,8 +1087,15 @@ describe("runSyncJob", () => {
       status: "failed",
       rowsRead: 0,
       error: {
-        message:
-          "[SixbSyncWorker] Sync 'sync-docs' returned row 1 with dataset 'raw.docs' column 'attachment' referencing unknown blob 'blob_missing'.",
+        code: "sync.execution_failed",
+        message: "Sync execution failed.",
+        retryable: false,
+        at: expect.any(String),
+        details: {
+          syncId: "sync-docs",
+          runId: "run_missing_blob",
+          datasetId: "raw.docs",
+        },
       },
     })
   })
@@ -1163,7 +1197,10 @@ describe("runSyncJob", () => {
       status: "cancelled",
       rowsRead: 1,
       error: {
-        name: "AbortError",
+        code: "runtime.cancelled",
+        retryable: false,
+        at: expect.any(String),
+        details: { syncId: "sync-orders", runId: "run_1" },
       },
     })
   })
@@ -1226,6 +1263,7 @@ describe("runSyncJob", () => {
     }
 
     const lakeStorage = new InMemoryLakeStorage()
+    const finishedRuns: SyncRunRecord[] = []
     const sync = defineSync("sync-orders")
       .from(erpDb)
       .read(() => [{ orderId: "ord_1" }])
@@ -1242,8 +1280,20 @@ describe("runSyncJob", () => {
           id: "run_1",
           syncId: "sync-orders",
         },
+        onRunFinished(run) {
+          finishedRuns.push(run)
+        },
       })
-    ).rejects.toThrow("dataset commit may already have succeeded")
+    ).rejects.toMatchObject({
+      code: "internal.unexpected",
+      message: expect.stringContaining("dataset commit may already have succeeded"),
+      details: {
+        syncId: "sync-orders",
+        runId: "run_1",
+        datasetId: "raw.erp.orders",
+        versionId: expect.any(String),
+      },
+    })
 
     const latestVersion = await lakeStorage.getLatestVersion("raw.erp.orders")
     expect(latestVersion?.producer).toEqual({
@@ -1257,6 +1307,7 @@ describe("runSyncJob", () => {
       id: "run_1",
     })
     expect(run?.status).toBe("running")
+    expect(finishedRuns).toHaveLength(0)
   })
 
   test("works against LocalLakeStorage", async () => {

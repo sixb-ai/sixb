@@ -6,7 +6,7 @@ import {
 } from "@sixb/core/internal/actions"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
 import type { ActionRunRecord } from "@sixb/core/storage"
-import { throwIfAborted } from "../normalize"
+import { throwIfAborted, translateActionPhaseError } from "../normalize"
 import { createBasePhaseContext, loadObjectTarget } from "./context"
 import { runEditsAndCommitPhase } from "./edits-commit"
 import { runEffectsPhase } from "./effects"
@@ -33,7 +33,16 @@ export async function executeActionPhases(
     projectId: runtime.id,
     runId: run.id,
   })
-  const objectTarget = existingCommit ? null : await loadObjectTarget({ runtime, action, run })
+  let objectTarget: Awaited<ReturnType<typeof loadObjectTarget>> | null
+  try {
+    objectTarget = existingCommit ? null : await loadObjectTarget({ runtime, action, run })
+  } catch (error) {
+    throw translateActionPhaseError(error, "validation", {
+      actionId: action.id,
+      runId: run.id,
+      signal,
+    })
+  }
   const phaseContext = createBasePhaseContext({
     runtime,
     action,
@@ -108,12 +117,20 @@ async function executePreCommitPhases(
       phase: "validation",
     })
     input.updateActiveRun(run)
-    await runActionValidators({
-      action,
-      subject: run.subject,
-      baseContext: phaseContext,
-      target: isObjectActionDefinition(action) ? objectTarget?.snapshot : undefined,
-    })
+    try {
+      await runActionValidators({
+        action,
+        subject: run.subject,
+        baseContext: phaseContext,
+        target: isObjectActionDefinition(action) ? objectTarget?.snapshot : undefined,
+      })
+    } catch (error) {
+      throw translateActionPhaseError(error, "validation", {
+        actionId: action.id,
+        runId: run.id,
+        signal,
+      })
+    }
   }
 
   throwIfAborted(signal)

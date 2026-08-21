@@ -1,16 +1,22 @@
+import { captureSixbFailure } from "@sixb/core/internal/errors"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
-import type { PipelineRunRecord } from "@sixb/core/storage"
+import { PIPELINE_RUN_FAILURE_CODES, type PipelineRunRecord } from "@sixb/core/storage"
 import {
   createPipelineBookkeepingError,
   requireFinishedAt,
   requirePipeline,
   statusForFailure,
   throwIfAborted,
-  toPipelineRunFailure,
+  unwrapPipelineStepFailure,
 } from "./errors"
 import { runStep } from "./run-step"
-import type { PipelineRunResult, PipelineStepRunResult, RunPipelineJobInput } from "./types"
+import type {
+  PipelineRunFinishedHandler,
+  PipelineRunResult,
+  PipelineStepRunResult,
+  RunPipelineJobInput,
+} from "./types"
 
 export class PipelineRunAlreadyStartedError extends Error {
   override readonly name = "PipelineRunAlreadyStartedError"
@@ -97,34 +103,62 @@ export async function runPipelineJob(input: RunPipelineJobInput): Promise<Pipeli
       }
       throw error
     }
-    finished = true
+    const finishedRun = {
+      ...run,
+      finishedAt: requireFinishedAt({
+        pipelineId: pipeline.id,
+        runId: job.id,
+        finishedAt: run.finishedAt,
+      }),
+    }
 
+    finished = true
+    await notifyRunFinished(input.onRunFinished, finishedRun)
     return {
-      run: {
-        ...run,
-        finishedAt: requireFinishedAt(job.id, run.finishedAt),
-      },
+      run: finishedRun,
       steps,
       version: finalVersion,
     }
   } catch (error) {
+    const reportedError = unwrapPipelineStepFailure(error)
     if (startedRun && !finished) {
       const status = statusForFailure(signal, error)
       try {
+        const failure = captureSixbFailure(error, {
+          allowedCodes: PIPELINE_RUN_FAILURE_CODES,
+          defaultCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+          details: { pipelineId: pipeline.id, runId: job.id },
+        })
         const run = await runtime.pipelineRunsStorage.finish({
           projectId: runtime.id,
           id: job.id,
           status,
-          error: toPipelineRunFailure(error),
+          error: failure,
         })
-        if (status === "failed" && run.status === "failed") input.onRunFailed?.(error, run)
+        if (status === "failed" && run.status === "failed") {
+          input.onRunFailed?.(reportedError, run, failure)
+        }
+        await notifyRunFinished(input.onRunFinished, run)
       } catch {
         // The run did not transition to the requested terminal status.
       }
     }
 
-    throw error
+    throw reportedError
   } finally {
     await logSession.flush()
+  }
+}
+
+async function notifyRunFinished(
+  handler: PipelineRunFinishedHandler | undefined,
+  run: PipelineRunRecord
+): Promise<void> {
+  try {
+    await handler?.(run)
+  } catch (error) {
+    // The built-in event log reports lost batches itself. Anything reaching here is a broken
+    // invariant in a custom lifecycle handler and must not change an already durable outcome.
+    console.error("[SixbPipelineWorker] Pipeline run lifecycle handler failed:", error)
   }
 }

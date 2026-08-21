@@ -39,7 +39,9 @@ export type {
   WorkflowNodeRunStorage,
   WorkflowNodeRunType,
   WorkflowRunExecution,
+  WorkflowRunFailureCode,
   WorkflowRunRecord,
   WorkflowRunStatus,
   WorkflowRunStorage,
 } from "./types"
+export { WORKFLOW_RUN_FAILURE_CODES } from "./types"

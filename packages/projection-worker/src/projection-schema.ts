@@ -1,9 +1,15 @@
-import type { Schema, ValueType } from "@sixb/core"
-import { ProjectionWorkerError } from "./errors"
+import type { ReadonlyJsonValue, Schema, ValueType } from "@sixb/core"
+import { createSixbError } from "@sixb/core/internal/errors"
+
+interface ProjectionSchemaErrorOptions {
+  readonly code?: "internal.unexpected" | "projection.definition_invalid"
+  readonly details?: Readonly<Record<string, ReadonlyJsonValue>>
+}
 
 export function resolveProjectionSchema(
   schema: Schema,
   valueTypesById: ReadonlyMap<string, ValueType>,
+  options: ProjectionSchemaErrorOptions = {},
   seen = new Set<string>()
 ): Schema {
   if (typeof schema === "string") {
@@ -14,9 +20,13 @@ export function resolveProjectionSchema(
     return schema
   }
 
+  const code = options.code ?? "internal.unexpected"
+  const details = options.details ?? {}
   if (seen.has(schema.valueTypeId)) {
-    throw new ProjectionWorkerError(
-      `[SixbProjectionWorker] Circular valueTypeRef '${schema.valueTypeId}' in projection schema.`
+    throw createSixbError(
+      code,
+      `[SixbProjectionWorker] Circular valueTypeRef '${schema.valueTypeId}' in projection schema.`,
+      { details: { ...details, valueTypeId: schema.valueTypeId } }
     )
   }
 
@@ -24,17 +34,19 @@ export function resolveProjectionSchema(
   nextSeen.add(schema.valueTypeId)
 
   if (schema._resolved) {
-    return resolveProjectionSchema(schema._resolved, valueTypesById, nextSeen)
+    return resolveProjectionSchema(schema._resolved, valueTypesById, options, nextSeen)
   }
 
   const valueType = valueTypesById.get(schema.valueTypeId)
   if (!valueType) {
-    throw new ProjectionWorkerError(
-      `[SixbProjectionWorker] Unknown valueTypeRef '${schema.valueTypeId}' in projection schema.`
+    throw createSixbError(
+      code,
+      `[SixbProjectionWorker] Unknown valueTypeRef '${schema.valueTypeId}' in projection schema.`,
+      { details: { ...details, valueTypeId: schema.valueTypeId } }
     )
   }
 
-  return resolveProjectionSchema(valueType.schema, valueTypesById, nextSeen)
+  return resolveProjectionSchema(valueType.schema, valueTypesById, options, nextSeen)
 }
 
 export function isIntegerEnumSchema(schema: Schema): boolean {

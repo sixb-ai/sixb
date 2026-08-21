@@ -12,30 +12,28 @@ import {
   type MergeChange,
   type SyncDefinition,
 } from "@sixb/core"
+import {
+  captureSixbFailure,
+  createSixbError,
+  isSixbError,
+  summarizeErrorMessage,
+} from "@sixb/core/internal/errors"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
 import { type DatasetVersion, getDatasetMergeChangeValidationError } from "@sixb/core/lake-storage"
-import type { SyncRunFailure, SyncRunRecord } from "@sixb/core/storage"
+import { SYNC_RUN_FAILURE_CODES, type SyncRunRecord } from "@sixb/core/storage"
 import { assertDatasetRow, normalizeReadResult, throwIfAborted } from "./normalize"
-import type { RunSyncJobInput, SyncRunResult, SyncWorkerContext } from "./types"
+import type {
+  RunSyncJobInput,
+  SyncRunFinishedHandler,
+  SyncRunResult,
+  SyncWorkerContext,
+} from "./types"
 
 export class SyncRunAlreadyStartedError extends Error {
   override readonly name = "SyncRunAlreadyStartedError"
 
   constructor(readonly run: SyncRunRecord) {
     super(`[SixbSyncWorker] Sync run '${run.id}' has already started.`)
-  }
-}
-
-function toSyncRunFailure(error: unknown): SyncRunFailure {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-    }
-  }
-
-  return {
-    message: String(error),
   }
 }
 
@@ -46,18 +44,61 @@ function createBookkeepingError(options: {
   cause: unknown
 }): Error {
   // The lake commit is already durable here, so we surface an explicit repair-needed error.
-  return new Error(
+  return createSixbError(
+    "internal.unexpected",
     `[SixbSyncWorker] Sync '${options.syncId}' committed dataset version '${options.version.versionId}', but failed to finalize sync run '${options.runId}'. The dataset commit may already have succeeded and the sync run record may need repair.`,
-    { cause: options.cause }
+    {
+      cause: options.cause,
+      details: {
+        syncId: options.syncId,
+        runId: options.runId,
+        datasetId: options.version.datasetId,
+        versionId: options.version.versionId,
+      },
+    }
   )
 }
 
-function requireFinishedAt(runId: string, finishedAt: Date | undefined): Date {
-  if (finishedAt) {
-    return finishedAt
+function requireFinishedAt(input: {
+  readonly syncId: string
+  readonly runId: string
+  readonly finishedAt: Date | undefined
+}): Date {
+  if (input.finishedAt) {
+    return input.finishedAt
   }
 
-  throw new Error(`[SixbSyncWorker] Sync run '${runId}' finished without a finishedAt timestamp.`)
+  throw createSixbError(
+    "internal.unexpected",
+    `[SixbSyncWorker] Sync run '${input.runId}' finished without a finishedAt timestamp.`,
+    { details: { syncId: input.syncId, runId: input.runId } }
+  )
+}
+
+function translateSyncExecutionError(
+  error: unknown,
+  input: {
+    readonly syncId: string
+    readonly runId: string
+    readonly datasetId: string
+  }
+): unknown {
+  if (isSixbError(error) && error.code === "internal.unexpected") {
+    return error
+  }
+
+  return createSixbError(
+    "sync.execution_failed",
+    summarizeErrorMessage(error, "Sync execution failed."),
+    {
+      cause: error,
+      details: {
+        syncId: input.syncId,
+        runId: input.runId,
+        datasetId: input.datasetId,
+      },
+    }
+  )
 }
 
 async function verifyFileRef(options: {
@@ -383,6 +424,12 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
               : {}),
             checkpoint: nextCheckpoint,
           })
+          const finishedAt = requireFinishedAt({
+            syncId: sync.id,
+            runId: job.id,
+            finishedAt: finishedRun.finishedAt,
+          })
+          await notifyRunFinished(input.onRunFinished, finishedRun)
 
           return {
             id: job.id,
@@ -390,7 +437,7 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
             datasetId: dataset.id,
             mode: sync.config.mode,
             startedAt: startedRun.startedAt,
-            finishedAt: requireFinishedAt(job.id, finishedRun.finishedAt),
+            finishedAt,
             rowsRead,
             ...(version ? { version } : {}),
             versionCreated: false,
@@ -409,7 +456,11 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
     const { outcome, version } = commitResult
     if (outcome === "created") {
       if (!version) {
-        throw new Error(`[SixbSyncWorker] Sync '${sync.id}' created no dataset version.`)
+        throw createSixbError(
+          "internal.unexpected",
+          `[SixbSyncWorker] Sync '${sync.id}' created no dataset version.`,
+          { details: { syncId: sync.id, runId: job.id, datasetId: dataset.id } }
+        )
       }
       committedVersion = version
     }
@@ -438,13 +489,19 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
       throw error
     }
 
+    const finishedAt = requireFinishedAt({
+      syncId: sync.id,
+      runId: job.id,
+      finishedAt: finishedRun.finishedAt,
+    })
+    await notifyRunFinished(input.onRunFinished, finishedRun, committedVersion)
     const result = {
       id: job.id,
       syncId: sync.id,
       datasetId: dataset.id,
       mode: sync.config.mode,
       startedAt: startedRun.startedAt,
-      finishedAt: requireFinishedAt(job.id, finishedRun.finishedAt),
+      finishedAt,
       rowsRead,
     }
     return version
@@ -457,14 +514,30 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
 
       const status = signal.aborted ? "cancelled" : "failed"
       try {
+        const failureError =
+          status === "failed"
+            ? translateSyncExecutionError(error, {
+                syncId: sync.id,
+                runId: job.id,
+                datasetId: dataset.id,
+              })
+            : error
+        const failure = captureSixbFailure(failureError, {
+          allowedCodes: SYNC_RUN_FAILURE_CODES,
+          defaultCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+          details: { syncId: sync.id, runId: job.id, datasetId: dataset.id },
+        })
         const run = await syncRunsStorage.finish({
           projectId: runtime.id,
           id: job.id,
           status,
           rowsRead,
-          error: toSyncRunFailure(error),
+          error: failure,
         })
-        if (status === "failed" && run.status === "failed") input.onRunFailed?.(error, run)
+        await notifyRunFinished(input.onRunFinished, run)
+        if (status === "failed" && run.status === "failed") {
+          input.onRunFailed?.(error, run, failure)
+        }
       } catch {
         // The run did not transition to the requested terminal status.
       }
@@ -473,5 +546,19 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
     throw error
   } finally {
     await logSession.flush()
+  }
+}
+
+async function notifyRunFinished(
+  handler: SyncRunFinishedHandler | undefined,
+  run: SyncRunRecord,
+  createdVersion?: DatasetVersion
+): Promise<void> {
+  try {
+    await handler?.(run, createdVersion)
+  } catch (error) {
+    // The built-in event log reports lost batches itself. Anything reaching here is a broken
+    // invariant in a custom lifecycle handler and must not change an already durable outcome.
+    console.error("[SixbSyncWorker] Sync run lifecycle handler failed:", error)
   }
 }

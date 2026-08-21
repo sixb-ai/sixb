@@ -1,5 +1,6 @@
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
-import type { ActionRunRecord } from "@sixb/core/storage"
+import { createSixbError } from "@sixb/core/internal/errors"
+import type { ActionRunFailure, ActionRunRecord } from "@sixb/core/storage"
 import { isTerminalActionRun } from "@sixb/core/storage"
 import { executeActionPhases } from "./action-execution/phases"
 import {
@@ -7,8 +8,7 @@ import {
   requireFinishedAt,
   resolveRedeliveredRunningRun,
 } from "./action-execution/results"
-import { ActionWorkerError } from "./errors"
-import { throwIfAborted, toActionRunFailure } from "./normalize"
+import { throwIfAborted, toActionRunFailure, unwrapActionPhaseError } from "./normalize"
 import type { ActionRunResult, RunActionJobInput } from "./types"
 
 export async function runActionJob(input: RunActionJobInput): Promise<ActionRunResult> {
@@ -23,8 +23,18 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
     existingRun.id !== job.id ||
     existingRun.actionId !== job.actionId
   ) {
-    throw new ActionWorkerError(
-      `Action job '${job.id}' does not match durable run '${existingRun.id}' in project '${existingRun.projectId}'.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbActionWorker] Action job '${job.id}' does not match durable run '${existingRun.id}' in project '${existingRun.projectId}'.`,
+      {
+        details: {
+          actionId: job.actionId,
+          runId: job.id,
+          durableActionId: existingRun.actionId,
+          durableRunId: existingRun.id,
+          durableProjectId: existingRun.projectId,
+        },
+      }
     )
   }
   if (isTerminalActionRun(existingRun)) {
@@ -40,15 +50,25 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
 
   const action = runtime.actions.getById(job.actionId)
   if (!action) {
-    const error = new ActionWorkerError(`Unknown action '${job.actionId}'.`)
-    const failure = toActionRunFailure(error, "validation")
+    const error = createSixbError(
+      "internal.unexpected",
+      `[SixbActionWorker] Unknown action '${job.actionId}'.`,
+      { details: { actionId: job.actionId, runId: job.id } }
+    )
+    const failedAt = new Date()
+    const failure = toActionRunFailure(error, "validation", {
+      actionId: job.actionId,
+      runId: job.id,
+      at: failedAt,
+    })
     const finishedRun = await runtime.actionRunsStorage.finish({
       projectId: runtime.id,
       id: job.id,
       status: "failed",
+      finishedAt: failedAt,
       error: failure,
     })
-    reportActionFailure(input, error, finishedRun)
+    reportActionFailure(input, error, failure)
 
     return failedResult(job.id, job.actionId, finishedRun, failure)
   }
@@ -59,8 +79,10 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
     existingRun = resolution.run
   }
   if (existingRun.status !== "queued" && existingRun.status !== "running") {
-    throw new ActionWorkerError(
-      `Action run '${job.id}' cannot execute from status '${existingRun.status}'.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbActionWorker] Action run '${job.id}' cannot execute from status '${existingRun.status}'.`,
+      { details: { actionId: job.actionId, runId: job.id } }
     )
   }
 
@@ -96,30 +118,48 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
       subject: finalRun.subject,
       status: "succeeded",
       startedAt: startedRun.startedAt ?? startedRun.queuedAt,
-      finishedAt: requireFinishedAt(job.id, finalRun.finishedAt),
+      finishedAt: requireFinishedAt({
+        actionId: job.actionId,
+        runId: job.id,
+        finishedAt: finalRun.finishedAt,
+      }),
       record: finalRun,
     }
   } catch (error) {
+    const nativeError = unwrapActionPhaseError(error)
     const status = signal.aborted ? "cancelled" : "failed"
-    const failure = toActionRunFailure(
-      error,
-      status === "cancelled" ? "cancelled" : (activeRun?.phase ?? "validation")
-    )
+    const finishedAt = new Date()
+    const writebackFailure =
+      status === "failed" && activeRun?.writeback?.status === "failed"
+        ? activeRun.writeback.error
+        : undefined
+    const failure =
+      writebackFailure ??
+      toActionRunFailure(
+        error,
+        status === "cancelled" ? "cancelled" : (activeRun?.phase ?? "validation"),
+        {
+          actionId: job.actionId,
+          runId: job.id,
+          at: finishedAt,
+        }
+      )
 
     const finishedRun = await runtime.actionRunsStorage
       .finish({
         projectId: runtime.id,
         id: job.id,
         status,
+        finishedAt,
         error: failure,
       })
       .catch(() => null)
 
     if (!finishedRun) {
-      throw error
+      throw nativeError
     }
     if (status === "failed" && finishedRun.status === "failed") {
-      reportActionFailure(input, error, finishedRun)
+      reportActionFailure(input, nativeError, failure)
     }
 
     const startedAt = startedRun?.startedAt ?? finishedRun.startedAt ?? finishedRun.queuedAt
@@ -129,22 +169,30 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
       subject: finishedRun.subject,
       status,
       startedAt,
-      finishedAt: requireFinishedAt(job.id, finishedRun.finishedAt),
+      finishedAt: requireFinishedAt({
+        actionId: job.actionId,
+        runId: job.id,
+        finishedAt: finishedRun.finishedAt,
+      }),
       error: failure,
       record: finishedRun,
     }
   }
 }
 
-function reportActionFailure(input: RunActionJobInput, error: unknown, run: ActionRunRecord): void {
+function reportActionFailure(
+  input: RunActionJobInput,
+  error: unknown,
+  failure: ActionRunFailure
+): void {
   reportRunFailure(input.runtime.errorReporterHost, error, {
     projectId: input.runtime.id,
-    occurredAt: run.finishedAt,
     attempt: input.attempt,
+    runKind: "action",
     run: {
-      kind: "action",
       runId: input.job.id,
       actionId: input.job.actionId,
     },
+    failure,
   })
 }

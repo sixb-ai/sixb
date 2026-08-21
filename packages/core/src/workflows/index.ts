@@ -6,6 +6,8 @@ export {
   interventionField,
 } from "./builders"
 export { WorkflowDefinitionError, WorkflowValidationError } from "./errors"
+export type { WorkflowNodeFailureIdentity } from "./failure"
+export { createWorkflowNodeFailure, unwrapWorkflowNodeFailure } from "./failure"
 export type {
   RequestWorkflowRunInput,
   WorkflowRunRequestOptions,

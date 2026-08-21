@@ -11,12 +11,13 @@ import {
   fromAiSdk,
   toModelMessages,
 } from "@sixb/core/internal/agents"
+import { createSixbError } from "@sixb/core/internal/errors"
 import { isAbortError, QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { AgentRunRecord, AgentStorage } from "@sixb/core/storage"
 import { type ModelMessage, stepCountIs, streamText, toUIMessageStream } from "ai"
 import { agentRunUsageFromAiSdk, agentToolErrorText } from "./ai-sdk-adapters"
 import { attachmentKey, modelSupportsInlineImages, prepareAgentAttachments } from "./attachments"
-import { AgentTurnTimeoutError, AgentWorkerError } from "./errors"
+import { AgentTurnTimeoutError } from "./errors"
 import { appendMessageAndFinishRunOrThrow, finishRunOrThrow } from "./finalize"
 import { AiModelCallRecorder } from "./model-call-recorder"
 import {
@@ -54,7 +55,11 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   const runId = run.id
   const executionToken = run.execution?.token
   if (!executionToken) {
-    throw new AgentWorkerError(`Agent run '${runId}' has no execution token.`)
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbAgentWorker] Agent run '${runId}' has no execution token.`,
+      { details: { agentId: run.agentId, runId } }
+    )
   }
   const agents = storage.agents
 
@@ -213,7 +218,11 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       throw drainError
     }
     if (!responseMessage) {
-      throw new AgentWorkerError(`Agent run '${runId}' produced no response message.`)
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbAgentWorker] Agent run '${runId}' produced no response message.`,
+        { details: { agentId: run.agentId, runId } }
+      )
     }
 
     const finishReason = await result.finishReason

@@ -18,6 +18,7 @@ export type {
   ProjectionMaterializationIdentity,
   ProjectionMissingTarget,
   ProjectionRunClaim,
+  ProjectionRunFailureCode,
   ProjectionRunProgress,
   ProjectionRunRecord,
   ProjectionRunStatus,
@@ -30,6 +31,7 @@ export type {
   UpdateProjectionRunInput,
 } from "./types"
 export {
+  PROJECTION_RUN_FAILURE_CODES,
   PROJECTION_RUN_PROGRESS_KEYS,
   projectionRunObjectTypesVisible,
   zeroProjectionRunProgress,

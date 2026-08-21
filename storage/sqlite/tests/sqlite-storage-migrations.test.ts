@@ -5,6 +5,18 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { migrateStorage } from "@sixb/core"
+import { parseActionRunFailure } from "@sixb/core/internal/action-run-storage"
+import { parseSixbFailure } from "@sixb/core/internal/errors"
+import {
+  AGENT_RUN_FAILURE_CODES,
+  ONTOLOGY_OUTBOX_FAILURE_CODES,
+  PIPELINE_RUN_FAILURE_CODES,
+  PROJECTION_RUN_FAILURE_CODES,
+  SYNC_RUN_FAILURE_CODES,
+  WEBHOOK_DELIVERY_FAILURE_CODES,
+  WEBHOOK_RUN_FAILURE_CODES,
+  WORKFLOW_RUN_FAILURE_CODES,
+} from "@sixb/core/storage"
 import { SqliteStorage } from "../src"
 import {
   createSqliteStorageMigrators,
@@ -86,6 +98,69 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 10,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "011-sync-failure-record",
+    status: "applied",
+    version: 11,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "012-pipeline-failure-record",
+    status: "applied",
+    version: 12,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "013-workflow-failure-record",
+    status: "applied",
+    version: 13,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "014-agent-failure-record",
+    status: "applied",
+    version: 14,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "015-projection-failure-record",
+    status: "applied",
+    version: 15,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "016-webhook-run-failure-record",
+    status: "applied",
+    version: 16,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "017-action-failure-record",
+    status: "applied",
+    version: 17,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "018-ontology-outbox-failure-record",
+    status: "applied",
+    version: 18,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "019-webhook-delivery-failure-record",
+    status: "applied",
+    version: 19,
+  },
 ]
 
 afterEach(async () => {
@@ -121,6 +196,355 @@ describe("SQLite storage migrations", () => {
       await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "current" })
     } finally {
       storage.close()
+    }
+  })
+
+  test("migrates legacy failed run records from the version 10 schema", () => {
+    const db = new Database(":memory:")
+    try {
+      for (const migration of sqliteStorageMigrations.steps.slice(0, 10)) migration.up(db)
+      db.query(`
+        INSERT INTO sync_runs (
+          project_id, id, sync_id, dataset_id, mode, status, started_at, finished_at,
+          error_name, error_message
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        "project-a",
+        "sync-legacy",
+        "sync.orders",
+        "orders",
+        "snapshot",
+        "failed",
+        "2026-08-10T12:00:00.000Z",
+        "2026-08-10T12:01:00.000Z",
+        "ProviderError",
+        "secret sync diagnostic"
+      )
+
+      db.query(`
+        INSERT INTO pipeline_runs (
+          project_id, id, pipeline_id, status, started_at, finished_at, error_name, error_message
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        "project-a",
+        "pipeline-legacy",
+        "orders",
+        "failed",
+        "2026-08-10T12:00:00.000Z",
+        "2026-08-10T12:01:00.000Z",
+        "PipelineError",
+        "secret pipeline diagnostic"
+      )
+
+      db.query(`
+        INSERT INTO pipeline_step_runs (
+          project_id, id, pipeline_run_id, pipeline_id, step_id, dataset_id, mode, status,
+          started_at, finished_at, inputs, error_name, error_message
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        "project-a",
+        "step-legacy",
+        "pipeline-legacy",
+        "orders",
+        "extract",
+        "orders",
+        "snapshot",
+        "failed",
+        "2026-08-10T12:00:00.000Z",
+        "2026-08-10T12:01:00.000Z",
+        "{}",
+        "StepError",
+        "secret step diagnostic"
+      )
+
+      db.run(`
+        INSERT INTO auth_service_accounts (
+          project_id, id, name, status, created_by_principal_type, created_at, updated_at
+        ) VALUES (
+          'project-a', 'svc_agent_reviewer', 'Reviewer Agent', 'active', 'system',
+          '2026-08-10T11:00:00.000Z', '2026-08-10T11:00:00.000Z'
+        );
+
+        INSERT INTO executions (
+          project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
+          authority_kind, authority_primitive_kind, authority_primitive_id, created_at
+        ) VALUES (
+          'project-a', 'execution-workflow-legacy', 'workflow', 'workflow-legacy', 'event',
+          'event-workflow-legacy', 'correlation-workflow-legacy', 'trustedPrimitive', 'workflow',
+          'orders', '2026-08-10T12:00:00.000Z'
+        );
+
+        INSERT INTO executions (
+          project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
+          authority_kind, authority_primitive_kind, authority_primitive_id, created_at
+        ) VALUES (
+          'project-a', 'execution-action-legacy', 'action', 'action-legacy', 'event',
+          'event-action-legacy', 'correlation-action-legacy', 'trustedPrimitive', 'action',
+          'approve', '2026-08-10T12:00:00.000Z'
+        );
+
+        INSERT INTO executions (
+          project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
+          authority_kind, created_at
+        ) VALUES (
+          'project-a', 'execution-agent-parent-legacy', 'request',
+          'request-agent-parent-legacy', 'http', 'request-agent-parent-legacy',
+          'correlation-agent-legacy', 'disabled', '2026-08-10T11:59:00.000Z'
+        );
+
+        INSERT INTO executions (
+          project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
+          parent_execution_id, authority_kind, authority_service_account_id, created_at
+        ) VALUES
+          (
+            'project-a', 'execution-agent-legacy', 'agent', 'agent-legacy', 'execution',
+            'execution-agent-parent-legacy', 'correlation-agent-legacy',
+            'execution-agent-parent-legacy', 'principal', 'svc_agent_reviewer',
+            '2026-08-10T12:00:00.000Z'
+          ),
+          (
+            'project-a', 'execution-workflow-agent-legacy', 'agent', 'node-legacy', 'execution',
+            'execution-workflow-legacy', 'correlation-workflow-legacy',
+            'execution-workflow-legacy', 'principal', 'svc_agent_reviewer',
+            '2026-08-10T12:00:00.000Z'
+          );
+
+        INSERT INTO workflow_runs (
+          project_id, id, workflow_id, status, input, started_at, finished_at, error, execution_id
+        ) VALUES (
+          'project-a', 'workflow-legacy', 'orders', 'failed', '{}',
+          '2026-08-10T12:00:00.000Z', '2026-08-10T12:01:00.000Z',
+          'secret workflow diagnostic', 'execution-workflow-legacy'
+        );
+
+        INSERT INTO workflow_node_runs (
+          project_id, id, workflow_run_id, workflow_id, node_index, node_type, node_id, node_key,
+          status, input, started_at, finished_at, error
+        ) VALUES (
+          'project-a', 'node-legacy', 'workflow-legacy', 'orders', 0, 'agent', 'review', 'review',
+          'failed', '{}', '2026-08-10T12:00:00.000Z', '2026-08-10T12:01:00.000Z',
+          'secret workflow node diagnostic'
+        );
+
+        INSERT INTO workflow_agent_node_runs (
+          project_id, node_run_id, execution_id, agent_id, status, prompt, error, created_at,
+          completed_at
+        ) VALUES (
+          'project-a', 'node-legacy', 'execution-workflow-agent-legacy', 'reviewer', 'failed',
+          'Review this order', 'secret workflow Agent diagnostic',
+          '2026-08-10T12:00:00.000Z', '2026-08-10T12:01:00.000Z'
+        );
+
+        INSERT INTO agent_runs (
+          project_id, id, execution_id, thread_id, agent_id, trigger_message_id, status, error,
+          created_at, completed_at
+        ) VALUES (
+          'project-a', 'agent-legacy', 'execution-agent-legacy', 'thread-legacy', 'reviewer',
+          'message-legacy', 'failed', 'secret Agent diagnostic',
+          '2026-08-10T12:00:00.000Z', '2026-08-10T12:01:00.000Z'
+        );
+
+        INSERT INTO projection_runs (
+          project_id, id, projection_id, projection_kind, materialization_protocol, dataset_id,
+          dataset_version_id, dataset_version_created_at, ontology_revision, projection_revision,
+          ownership_hash, object_type_id, status, started_at, finished_at, attempt, error_message
+        ) VALUES (
+          'project-a', 'projection-legacy', 'orders', 'object', 'replacement', 'orders', 'version-1',
+          '2026-08-10T11:00:00.000Z', 'ontology-1', 'projection-1', 'ownership-1', 'Order',
+          'failed', '2026-08-10T12:00:00.000Z', '2026-08-10T12:01:00.000Z', 1,
+          'secret projection diagnostic'
+        );
+
+        INSERT INTO webhook_runs (
+          project_id, id, connector_id, webhook_id, status, method, route, started_at, finished_at,
+          error
+        ) VALUES (
+          'project-a', 'webhook-legacy', 'github', 'events', 'failed', 'POST', '/hooks/github',
+          '2026-08-10T12:00:00.000Z', '2026-08-10T12:01:00.000Z',
+          'secret webhook diagnostic'
+        );
+
+        INSERT INTO action_runs (
+          project_id, id, execution_id, action_id, subject_kind, status, phase, queued_at,
+          finished_at, params, idempotency_key, writeback_status, writeback_completed_at,
+          writeback_error_name, writeback_error_message, writeback_error_phase, effects_status,
+          effects_completed_at, effects_error_name, effects_error_message, effects_error_phase,
+          error_name, error_message, error_phase
+        ) VALUES (
+          'project-a', 'action-legacy', 'execution-action-legacy', 'approve', 'none', 'failed',
+          'effects', '2026-08-10T12:00:00.000Z', '2026-08-10T12:01:00.000Z', '{}',
+          'action-legacy', 'failed', '2026-08-10T12:00:30.000Z', 'WritebackError',
+          'secret writeback diagnostic', 'writeback', 'failed', '2026-08-10T12:00:45.000Z',
+          'EffectsError', 'secret effects diagnostic', 'effects', 'ActionError',
+          'secret Action diagnostic', 'effects'
+        );
+      `)
+
+      for (const migration of sqliteStorageMigrations.steps.slice(10)) migration.up(db)
+
+      const row = db
+        .query("SELECT error FROM sync_runs WHERE project_id = ? AND id = ?")
+        .get("project-a", "sync-legacy") as { readonly error: string }
+      const failure = parseSixbFailure(row.error, SYNC_RUN_FAILURE_CODES)
+
+      expect(failure).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        retryable: false,
+        at: "2026-08-10T12:01:00.000Z",
+        details: {
+          syncId: "sync.orders",
+          runId: "sync-legacy",
+          datasetId: "orders",
+          migratedFromLegacyError: true,
+        },
+      })
+      expect(JSON.stringify(failure)).not.toContain("secret sync diagnostic")
+
+      const pipelineRow = db
+        .query("SELECT error FROM pipeline_runs WHERE project_id = ? AND id = ?")
+        .get("project-a", "pipeline-legacy") as { readonly error: string }
+      const pipelineFailure = parseSixbFailure(pipelineRow.error, PIPELINE_RUN_FAILURE_CODES)
+      expect(pipelineFailure).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        details: { pipelineId: "orders", runId: "pipeline-legacy" },
+      })
+      expect(JSON.stringify(pipelineFailure)).not.toContain("secret pipeline diagnostic")
+
+      const stepRow = db
+        .query("SELECT error FROM pipeline_step_runs WHERE project_id = ? AND id = ?")
+        .get("project-a", "step-legacy") as { readonly error: string }
+      const stepFailure = parseSixbFailure(stepRow.error, PIPELINE_RUN_FAILURE_CODES)
+      expect(stepFailure).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        details: {
+          pipelineId: "orders",
+          pipelineRunId: "pipeline-legacy",
+          stepId: "extract",
+          stepRunId: "step-legacy",
+        },
+      })
+      expect(JSON.stringify(stepFailure)).not.toContain("secret step diagnostic")
+
+      const workflowRow = db
+        .query("SELECT error FROM workflow_runs WHERE project_id = ? AND id = ?")
+        .get("project-a", "workflow-legacy") as { readonly error: string }
+      const workflowFailure = parseSixbFailure(workflowRow.error, WORKFLOW_RUN_FAILURE_CODES)
+      expect(workflowFailure).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        details: { workflowId: "orders", workflowRunId: "workflow-legacy" },
+      })
+      expect(JSON.stringify(workflowFailure)).not.toContain("secret workflow diagnostic")
+
+      const nodeRow = db
+        .query("SELECT error FROM workflow_node_runs WHERE project_id = ? AND id = ?")
+        .get("project-a", "node-legacy") as { readonly error: string }
+      const nodeFailure = parseSixbFailure(nodeRow.error, WORKFLOW_RUN_FAILURE_CODES)
+      expect(nodeFailure).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        details: {
+          workflowId: "orders",
+          workflowRunId: "workflow-legacy",
+          nodeId: "review",
+          nodeRunId: "node-legacy",
+        },
+      })
+      expect(JSON.stringify(nodeFailure)).not.toContain("secret workflow node diagnostic")
+
+      const agentRow = db
+        .query("SELECT error FROM agent_runs WHERE project_id = ? AND id = ?")
+        .get("project-a", "agent-legacy") as { readonly error: string }
+      const agentFailure = parseSixbFailure(agentRow.error, AGENT_RUN_FAILURE_CODES)
+      expect(agentFailure).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        details: {
+          agentId: "reviewer",
+          runId: "agent-legacy",
+          threadId: "thread-legacy",
+        },
+      })
+      expect(JSON.stringify(agentFailure)).not.toContain("secret Agent diagnostic")
+
+      const agentNodeRow = db
+        .query(
+          "SELECT error FROM workflow_agent_node_runs WHERE project_id = ? AND node_run_id = ?"
+        )
+        .get("project-a", "node-legacy") as { readonly error: string }
+      const agentNodeFailure = parseSixbFailure(agentNodeRow.error, AGENT_RUN_FAILURE_CODES)
+      expect(agentNodeFailure).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        details: {
+          agentId: "reviewer",
+          workflowId: "orders",
+          workflowRunId: "workflow-legacy",
+          nodeId: "review",
+          nodeRunId: "node-legacy",
+        },
+      })
+      expect(JSON.stringify(agentNodeFailure)).not.toContain("secret workflow Agent diagnostic")
+
+      const projectionRow = db
+        .query("SELECT error FROM projection_runs WHERE project_id = ? AND id = ?")
+        .get("project-a", "projection-legacy") as { readonly error: string }
+      const projectionFailure = parseSixbFailure(projectionRow.error, PROJECTION_RUN_FAILURE_CODES)
+      expect(projectionFailure).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        retryable: false,
+        at: "2026-08-10T12:01:00.000Z",
+        details: {
+          projectionId: "orders",
+          runId: "projection-legacy",
+          migratedFromLegacyError: true,
+        },
+      })
+      expect(JSON.stringify(projectionFailure)).not.toContain("secret projection diagnostic")
+
+      const webhookRow = db
+        .query("SELECT error FROM webhook_runs WHERE project_id = ? AND id = ?")
+        .get("project-a", "webhook-legacy") as { readonly error: string }
+      const webhookFailure = parseSixbFailure(webhookRow.error, WEBHOOK_RUN_FAILURE_CODES)
+      expect(webhookFailure).toMatchObject({
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        retryable: false,
+        at: "2026-08-10T12:01:00.000Z",
+        details: {
+          connectorId: "github",
+          webhookId: "events",
+          runId: "webhook-legacy",
+          migratedFromLegacyError: true,
+        },
+      })
+      expect(JSON.stringify(webhookFailure)).not.toContain("secret webhook diagnostic")
+
+      const actionRow = db
+        .query("SELECT error, writeback_error, effects_error FROM action_runs WHERE id = ?")
+        .get("action-legacy") as {
+        readonly error: string
+        readonly writeback_error: string
+        readonly effects_error: string
+      }
+      expect(parseActionRunFailure(actionRow.error)).toMatchObject({
+        code: "internal.unexpected",
+        details: { actionId: "approve", runId: "action-legacy", phase: "effects" },
+      })
+      expect(parseActionRunFailure(actionRow.writeback_error, "writeback")).toMatchObject({
+        details: { actionId: "approve", runId: "action-legacy", phase: "writeback" },
+      })
+      expect(parseActionRunFailure(actionRow.effects_error, "effects")).toMatchObject({
+        details: { actionId: "approve", runId: "action-legacy", phase: "effects" },
+      })
+      expect(JSON.stringify(actionRow)).not.toContain("secret")
+      expect(readMemoryTableColumns(db, "action_runs")).not.toContain("error_phase")
+    } finally {
+      db.close()
     }
   })
 
@@ -375,6 +799,159 @@ describe("SQLite storage migrations", () => {
     }
   })
 
+  test("ontology outbox failure migration replaces legacy diagnostics with a safe failure", () => {
+    const db = new Database(":memory:")
+    try {
+      const failureMigrationIndex = sqliteStorageMigrations.steps.findIndex(
+        (migration) => migration.id === "018-ontology-outbox-failure-record"
+      )
+      const failureMigration = sqliteStorageMigrations.steps[failureMigrationIndex]
+      if (failureMigrationIndex !== 17 || !failureMigration) {
+        throw new Error("SQLite ontology outbox failure migration is missing.")
+      }
+      for (const migration of sqliteStorageMigrations.steps.slice(0, failureMigrationIndex)) {
+        migration.up(db)
+      }
+      db.query(`
+        INSERT INTO ontology_outbox (
+          project_id, id, commit_id, commit_ordinal, envelope, available_at,
+          attempts, published_at, last_error, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+      `).run(
+        "project-a",
+        "event-failed",
+        "commit-failed",
+        0,
+        JSON.stringify({ type: "object.created" }),
+        "2026-08-10T12:01:00.000Z",
+        2,
+        "Error: broker unavailable",
+        "2026-08-10T12:00:00.000Z"
+      )
+      db.query(`
+        INSERT INTO ontology_outbox (
+          project_id, id, commit_id, commit_ordinal, envelope, available_at,
+          attempts, published_at, last_error, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+      `).run(
+        "project-a",
+        "event-stopped",
+        "commit-stopped",
+        0,
+        JSON.stringify({ type: "object.updated" }),
+        "2026-08-10T12:02:00.000Z",
+        1,
+        "Outbox dispatcher stopped before publication completed.",
+        "2026-08-10T12:00:00.000Z"
+      )
+
+      failureMigration.up(db)
+
+      expect(readMemoryTableColumns(db, "ontology_outbox")).toContain("last_failure")
+      expect(readMemoryTableColumns(db, "ontology_outbox")).not.toContain("last_error")
+      const rows = db
+        .query("SELECT id, last_failure FROM ontology_outbox ORDER BY id")
+        .all() as Array<{ readonly id: string; readonly last_failure: string | null }>
+      expect(rows[0]?.id).toBe("event-failed")
+      expect(parseSixbFailure(rows[0]?.last_failure, ONTOLOGY_OUTBOX_FAILURE_CODES)).toEqual({
+        code: "event.delivery_failed",
+        message: "Event delivery failed.",
+        retryable: true,
+        at: "2026-08-10T12:01:00.000Z",
+        details: {
+          attempts: 2,
+          eventIds: ["event-failed"],
+          eventTypes: ["object.created"],
+          migratedFromLegacyLastError: true,
+          timestampSource: "availableAt",
+        },
+      })
+      expect(rows[1]).toEqual({ id: "event-stopped", last_failure: null })
+    } finally {
+      db.close()
+    }
+  })
+
+  test("webhook delivery failure migration replaces legacy diagnostics with a safe failure", () => {
+    const db = new Database(":memory:")
+    try {
+      const failureMigrationIndex = sqliteStorageMigrations.steps.findIndex(
+        (migration) => migration.id === "019-webhook-delivery-failure-record"
+      )
+      const failureMigration = sqliteStorageMigrations.steps[failureMigrationIndex]
+      if (failureMigrationIndex !== 18 || !failureMigration) {
+        throw new Error("SQLite webhook delivery failure migration is missing.")
+      }
+      for (const migration of sqliteStorageMigrations.steps.slice(0, failureMigrationIndex)) {
+        migration.up(db)
+      }
+      db.query(`
+        INSERT INTO webhook_deliveries (
+          project_id, connector_id, webhook_id, idempotency_key, status,
+          received_at, completed_at, failed_at, error
+        ) VALUES (?, ?, ?, ?, 'failed', ?, NULL, ?, ?)
+      `).run(
+        "project-a",
+        "github",
+        "events",
+        "delivery-failed-at",
+        "2026-08-10T12:00:00.000Z",
+        "2026-08-10T12:01:00.000Z",
+        "Error: handler unavailable"
+      )
+      db.query(`
+        INSERT INTO webhook_deliveries (
+          project_id, connector_id, webhook_id, idempotency_key, status,
+          received_at, completed_at, failed_at, error
+        ) VALUES (?, ?, ?, ?, 'failed', ?, NULL, NULL, ?)
+      `).run(
+        "project-a",
+        "stripe",
+        "payments",
+        "delivery-received-at",
+        "2026-08-10T12:02:00.000Z",
+        "Error: legacy row without failure time"
+      )
+
+      failureMigration.up(db)
+
+      expect(readMemoryTableColumns(db, "webhook_deliveries")).toContain("failure")
+      expect(readMemoryTableColumns(db, "webhook_deliveries")).not.toContain("error")
+      const rows = db
+        .query("SELECT idempotency_key, failure FROM webhook_deliveries ORDER BY idempotency_key")
+        .all() as Array<{ readonly idempotency_key: string; readonly failure: string | null }>
+      expect(rows[0]?.idempotency_key).toBe("delivery-failed-at")
+      expect(parseSixbFailure(rows[0]?.failure, WEBHOOK_DELIVERY_FAILURE_CODES)).toEqual({
+        code: "webhook.delivery_failed",
+        message: "Webhook delivery failed.",
+        retryable: true,
+        at: "2026-08-10T12:01:00.000Z",
+        details: {
+          connectorId: "github",
+          webhookId: "events",
+          idempotencyKey: "delivery-failed-at",
+          migratedFromLegacyError: true,
+          timestampSource: "failedAt",
+        },
+      })
+      expect(parseSixbFailure(rows[1]?.failure, WEBHOOK_DELIVERY_FAILURE_CODES)).toEqual({
+        code: "webhook.delivery_failed",
+        message: "Webhook delivery failed.",
+        retryable: true,
+        at: "2026-08-10T12:02:00.000Z",
+        details: {
+          connectorId: "stripe",
+          webhookId: "payments",
+          idempotencyKey: "delivery-received-at",
+          migratedFromLegacyError: true,
+          timestampSource: "receivedAt",
+        },
+      })
+    } finally {
+      db.close()
+    }
+  })
+
   test("recorded old checksums are rejected before schema mutation", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-checksum-"))
     tempDirs.push(tempDir)
@@ -431,6 +1008,7 @@ describe("SQLite storage migrations", () => {
           "next_batch_ordinal",
           "next_row_offset",
           "input_exhausted",
+          "error",
         ])
       )
     } finally {

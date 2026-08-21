@@ -14,6 +14,7 @@ import {
   type MaterializationPlanWorkItem,
   type OntologyCommitRecord,
   type OntologyCommitWrite,
+  type OntologyOutboxFailure,
   StorageTransactionError,
 } from "../src/storage"
 import { getInMemoryStorageTestingAdapter } from "../src/storage/in-memory/testing"
@@ -26,6 +27,13 @@ import {
   replacement,
   sourceEntry,
 } from "./materializer-fixture"
+
+const TEST_OUTBOX_FAILURE = {
+  code: "event.delivery_failed",
+  message: "broker down",
+  retryable: true,
+  at: "2027-01-01T00:00:00.000Z",
+} as const satisfies OntologyOutboxFailure
 
 describe("in-memory ontology storage", () => {
   test("uniquely indexes authoritative commits by logical Action and projection origin", async () => {
@@ -485,7 +493,7 @@ describe("in-memory ontology storage", () => {
       ids: [claimed[0].envelope.id],
       leaseId: "lease",
       availableAt: "2027-01-02T00:00:00.000Z",
-      error: "broker down",
+      failure: TEST_OUTBOX_FAILURE,
     })
     const reclaimed = await storage.ontology.outbox.claim({
       projectId: "project",
@@ -1142,7 +1150,7 @@ describe("in-memory ontology storage", () => {
         ids,
         leaseId: "lease-1",
         availableAt: "2026-01-04T00:00:00.000Z",
-        error: "stale",
+        failure: TEST_OUTBOX_FAILURE,
       })
     ).rejects.toThrow("lease does not match")
     await expect(

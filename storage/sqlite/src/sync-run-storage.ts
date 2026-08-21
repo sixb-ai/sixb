@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite"
 import type { JsonValue } from "@sixb/core"
+import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/internal/errors"
 import type {
   FinishSyncRunInput,
   ListLatestSyncRunsInput,
@@ -7,11 +8,10 @@ import type {
   ListSyncRunsInput,
   ListSyncRunsResult,
   StartSyncRunInput,
-  SyncRunFailure,
   SyncRunRecord,
   SyncRunStorage,
 } from "@sixb/core/storage"
-import { SyncRunError } from "@sixb/core/storage"
+import { SYNC_RUN_FAILURE_CODES, SyncRunError } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import { installFreshSqliteSchema } from "./migrations"
 import {
@@ -131,8 +131,7 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
             finished_at = ?,
             rows_read = ?,
             output_version_id = ?,
-            error_name = ?,
-            error_message = ?,
+            error = ?,
             checkpoint = ?
           WHERE project_id = ? AND id = ?
         `
@@ -144,8 +143,9 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
             ? input.rowsRead
             : (input.rowsRead ?? existing.rows_read ?? null),
           input.status === "succeeded" ? (input.output?.versionId ?? null) : null,
-          input.status === "succeeded" ? null : (input.error?.name ?? null),
-          input.status === "succeeded" ? null : (input.error?.message ?? null),
+          input.status === "succeeded" || input.error === undefined
+            ? null
+            : serializeSixbFailure(input.error, SYNC_RUN_FAILURE_CODES),
           input.status === "succeeded" ? serializeCheckpoint(input.checkpoint) : null,
           input.projectId,
           input.id
@@ -241,17 +241,6 @@ function parseCheckpoint(value: string | null | undefined): JsonValue | undefine
   return value != null ? (JSON.parse(value) as JsonValue) : undefined
 }
 
-function toSyncRunFailure(row: DatabaseRow): SyncRunFailure | undefined {
-  if (!row.error_message) {
-    return undefined
-  }
-
-  return {
-    name: row.error_name ?? undefined,
-    message: row.error_message,
-  }
-}
-
 function rowToSyncRunRecord(row: DatabaseRow): SyncRunRecord {
   return {
     id: row.id,
@@ -271,7 +260,7 @@ function rowToSyncRunRecord(row: DatabaseRow): SyncRunRecord {
       : undefined,
     expectedLatestVersionId: row.expected_latest_version_id ?? undefined,
     commitMessage: row.commit_message ?? undefined,
-    error: toSyncRunFailure(row),
+    error: row.error === null ? undefined : parseSixbFailure(row.error, SYNC_RUN_FAILURE_CODES),
     checkpoint: parseCheckpoint(row.checkpoint),
   }
 }
@@ -293,7 +282,6 @@ interface DatabaseRow {
   output_version_id: string | null
   expected_latest_version_id: string | null
   commit_message: string | null
-  error_name: string | null
-  error_message: string | null
+  error: string | null
   checkpoint: string | null
 }

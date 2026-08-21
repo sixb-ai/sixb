@@ -1,3 +1,5 @@
+import type { SixbFailure } from "../../errors/types"
+import type { PipelineRunFailureCode } from "../../storage/pipeline-runs/types"
 import type { EventEnvelope } from "../envelope"
 
 export interface PipelineRunStartedEvent extends EventEnvelope {
@@ -43,7 +45,7 @@ export interface PipelineRunStepFinishedEvent extends EventEnvelope {
     finishedAt: string
     versionId?: string
     rowsWritten?: number
-    error?: string
+    error?: SixbFailure<PipelineRunFailureCode>
   }
 }
 
@@ -57,6 +59,7 @@ export interface PipelineRunFinishedEvent extends EventEnvelope {
     status: "succeeded" | "failed" | "cancelled"
     datasetId?: string
     versionId?: string
+    error?: SixbFailure<PipelineRunFailureCode>
   }
 }
 

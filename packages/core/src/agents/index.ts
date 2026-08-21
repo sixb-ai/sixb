@@ -106,6 +106,7 @@ export {
 } from "./request"
 export type {
   AgentRunControlStreamId,
+  AgentRunFailure,
   AgentRunFinishedEvent,
   AgentRunStreamEvent,
   AgentRunStreamId,
@@ -120,6 +121,7 @@ export {
   agentRunStreamId,
   agentRunStreamIdempotencyKey,
   DEFAULT_AGENT_RUN_STREAM_RETENTION,
+  isAgentRunStreamEvent,
   publishAgentRunCancel,
   publishAgentRunFinished,
   subscribeAgentRunCancel,

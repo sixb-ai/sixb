@@ -1,7 +1,7 @@
 import type { AgentRunStreamEvent } from "@sixb/core/agents/streams"
-// Import the schema-version value from the browser-safe streams subpath: the `@sixb/core` root pulls
-// in node-only runtime (e.g. `node:crypto`), which breaks the Atlas browser bundle.
-import { AGENT_RUN_STREAM_SCHEMA_VERSION } from "@sixb/core/agents/streams"
+// Import the wire validator from the browser-safe streams subpath: the `@sixb/core` root pulls in
+// node-only runtime (e.g. `node:crypto`), which breaks the Atlas browser bundle.
+import { isAgentRunStreamEvent } from "@sixb/core/agents/streams"
 import type { BrokerRecord } from "@sixb/core/broker"
 import type { GetAgentRunResponses } from "./generated/types.gen"
 import {
@@ -11,7 +11,7 @@ import {
   type ReconnectingSocketState,
 } from "./ws-socket"
 
-export type { AgentRunStreamEvent } from "@sixb/core/agents/streams"
+export type { AgentRunFailure, AgentRunStreamEvent } from "@sixb/core/agents/streams"
 export type { ReconnectingSocket, ReconnectingSocketState } from "./ws-socket"
 
 export type AgentRunSnapshot = GetAgentRunResponses[200]
@@ -220,39 +220,6 @@ function isAgentRunStreamRecord(value: unknown): value is AgentRunStreamRecord {
   )
 }
 
-function isAgentRunStreamEvent(value: unknown): value is AgentRunStreamEvent {
-  if (
-    !isRecord(value) ||
-    value.schemaVersion !== AGENT_RUN_STREAM_SCHEMA_VERSION ||
-    typeof value.projectId !== "string" ||
-    typeof value.runId !== "string" ||
-    typeof value.threadId !== "string" ||
-    typeof value.agentId !== "string" ||
-    !isFiniteNumber(value.attempt) ||
-    typeof value.occurredAt !== "string" ||
-    typeof value.type !== "string"
-  ) {
-    return false
-  }
-
-  switch (value.type) {
-    case "agent.run.started":
-      return value.modelId === undefined || typeof value.modelId === "string"
-    case "agent.ui.chunk":
-      return Number.isInteger(value.chunkIndex) && Object.hasOwn(value, "chunk")
-    case "agent.message.finalized":
-      return typeof value.messageId === "string"
-    case "agent.run.finished":
-      return (
-        isAgentRunStatus(value.status) &&
-        (value.finishReason === undefined || typeof value.finishReason === "string") &&
-        (value.error === undefined || typeof value.error === "string")
-      )
-    default:
-      return false
-  }
-}
-
 function isDurableAgentRunStatus(value: unknown): value is AgentRunSnapshot["status"] {
   return (
     value === "queued" ||
@@ -261,10 +228,6 @@ function isDurableAgentRunStatus(value: unknown): value is AgentRunSnapshot["sta
     value === "failed" ||
     value === "cancelled"
   )
-}
-
-function isAgentRunStatus(value: unknown): value is "succeeded" | "failed" | "cancelled" {
-  return value === "succeeded" || value === "failed" || value === "cancelled"
 }
 
 function isFiniteNumber(value: unknown): value is number {

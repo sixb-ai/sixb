@@ -1,3 +1,4 @@
+import type { SixbFailure } from "../../errors/types"
 import type {
   PinnedDatasetVersion,
   ProjectionExecution,
@@ -8,8 +9,12 @@ import type {
   LinkProjectionTarget,
   ObjectProjectionTarget,
   ProjectionKind,
+  ProjectionRunFailureCode,
   ProjectionTarget,
 } from "../../projections/types"
+
+export type { ProjectionRunFailureCode } from "../../projections/types"
+export { PROJECTION_RUN_FAILURE_CODES } from "../../projections/types"
 
 export type ProjectionRunStatus = "running" | "succeeded" | "failed" | "cancelled"
 
@@ -68,7 +73,7 @@ interface ProjectionRunRecordBase {
   readonly progress: ProjectionRunProgress
   readonly startedAt: Date
   readonly finishedAt?: Date
-  readonly errorMessage?: string
+  readonly error?: SixbFailure<ProjectionRunFailureCode>
 }
 
 type ProjectionIdentity<TKind extends ProjectionKind> = Extract<

@@ -1,4 +1,10 @@
+import {
+  ACTION_RUN_FAILURE_CODES,
+  ACTION_RUN_PHASES,
+  type ActionRunFailure,
+} from "@sixb/core/storage"
 import { z } from "zod"
+import { JsonValueSchema, sixbFailureSchema } from "./common"
 import { ActionParamSchema } from "./ontology"
 
 export const ActionIdParamsSchema = z.object({
@@ -55,16 +61,7 @@ export const ActionRunStatusSchema = z.enum([
   "cancelled",
 ])
 
-export const ActionRunPhaseSchema = z.enum([
-  "request",
-  "enqueue",
-  "validation",
-  "writeback",
-  "edits",
-  "commit",
-  "effects",
-  "cancelled",
-])
+export const ActionRunPhaseSchema = z.enum(ACTION_RUN_PHASES)
 
 export const ActionRunsQuerySchema = z.object({
   actionId: z.string().optional(),
@@ -78,10 +75,34 @@ export const ActionRunsQuerySchema = z.object({
   order: z.enum(["asc", "desc"]).optional(),
 })
 
-export const ActionRunFailureSchema = z.object({
-  name: z.string().optional(),
-  message: z.string(),
-  phase: ActionRunPhaseSchema.optional(),
+export const ActionRunFailureSchema: z.ZodType<ActionRunFailure> = sixbFailureSchema(
+  ACTION_RUN_FAILURE_CODES
+).extend({
+  details: z.object({
+    actionId: z.string(),
+    runId: z.string(),
+    phase: ActionRunPhaseSchema,
+  }),
+})
+
+const ActionRunWritebackFailureSchema: z.ZodType<ActionRunFailure<"writeback">> = sixbFailureSchema(
+  ACTION_RUN_FAILURE_CODES
+).extend({
+  details: z.object({
+    actionId: z.string(),
+    runId: z.string(),
+    phase: z.literal("writeback"),
+  }),
+})
+
+const ActionRunEffectsFailureSchema: z.ZodType<ActionRunFailure<"effects">> = sixbFailureSchema(
+  ACTION_RUN_FAILURE_CODES
+).extend({
+  details: z.object({
+    actionId: z.string(),
+    runId: z.string(),
+    phase: z.literal("effects"),
+  }),
 })
 
 export const ActionRunSummarySchema = z.object({
@@ -97,18 +118,30 @@ export const ActionRunSummarySchema = z.object({
   error: ActionRunFailureSchema.optional(),
 })
 
-const ActionRunWritebackRecordSchema = z.object({
-  status: z.enum(["succeeded", "failed"]),
-  completedAt: z.string(),
-  result: z.unknown().optional(),
-  error: ActionRunFailureSchema.optional(),
-})
+const ActionRunWritebackRecordSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("succeeded"),
+    completedAt: z.string(),
+    result: JsonValueSchema,
+  }),
+  z.object({
+    status: z.literal("failed"),
+    completedAt: z.string(),
+    error: ActionRunWritebackFailureSchema,
+  }),
+])
 
-const ActionRunEffectsRecordSchema = z.object({
-  status: z.enum(["succeeded", "failed"]),
-  completedAt: z.string(),
-  error: ActionRunFailureSchema.optional(),
-})
+const ActionRunEffectsRecordSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("succeeded"),
+    completedAt: z.string(),
+  }),
+  z.object({
+    status: z.literal("failed"),
+    completedAt: z.string(),
+    error: ActionRunEffectsFailureSchema,
+  }),
+])
 
 export const ActionRunDetailSchema = ActionRunSummarySchema.extend({
   params: z.record(z.unknown()),

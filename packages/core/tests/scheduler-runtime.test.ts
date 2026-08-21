@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
 import type { SixbErrorContext } from "../src"
 import { InMemoryBroker } from "../src"
-import { attachSixbErrorReporter, flushSixbErrors } from "../src/error-reporting/internal"
+import {
+  attachSixbErrorReporter,
+  type ErrorReporter,
+  flushSixbErrors,
+} from "../src/error-reporting/internal"
 import type { StoredScheduleTriggeredEvent } from "../src/events"
 import { DomainEventService } from "../src/events"
 import { SchedulerRuntime, SchedulerValidationError } from "../src/scheduler"
@@ -9,8 +13,8 @@ import { defineSchedule } from "../src/schedules"
 
 const PROJECT = "test"
 
-function createEvents(host?: object) {
-  return new DomainEventService({ projectId: PROJECT, broker: new InMemoryBroker(), host })
+function createEvents(errorReporter?: ErrorReporter) {
+  return new DomainEventService({ projectId: PROJECT, broker: new InMemoryBroker(), errorReporter })
 }
 
 function createTestClock(initial: Date) {
@@ -296,12 +300,11 @@ describe("SchedulerRuntime", () => {
     try {
       const reports: { error: Error; context: SixbErrorContext }[] = []
       const host = {}
-      attachSixbErrorReporter(host, (error, context) => {
+      const errorReporter = attachSixbErrorReporter(host, (error, context) => {
         reports.push({ error, context })
       })
 
-      // The scheduler reports lost triggers through its events runtime, so the host is attached there.
-      const eventsRuntime = createEvents(host)
+      const eventsRuntime = createEvents(errorReporter)
       const appendFailure = new Error("broker unavailable")
       eventsRuntime.append = () => Promise.reject(appendFailure)
 

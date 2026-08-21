@@ -1,3 +1,4 @@
+import type { SixbFailure } from "@sixb/core"
 import {
   isMaterializationConflictError,
   MaterializationCancellationError,
@@ -5,12 +6,22 @@ import {
   type ProjectionDefinition,
 } from "@sixb/core"
 import {
+  captureSixbFailure,
+  createSixbError,
+  isSixbError,
+  summarizeErrorMessage,
+} from "@sixb/core/internal/errors"
+import {
   MaterializationObjectNotFoundError,
   type ProjectionRunTerminalDecision,
 } from "@sixb/core/internal/materialization"
 import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
-import type { ProjectionRunRecord } from "@sixb/core/storage"
-import { ProjectionWorkerPermanentError } from "./errors"
+import {
+  PROJECTION_RUN_FAILURE_CODES,
+  type ProjectionRunFailureCode,
+  type ProjectionRunRecord,
+} from "@sixb/core/storage"
+import { collectIdentityMismatches } from "./identity-mismatch"
 import {
   assertProjectionJobId,
   type ValidatedProjectionJob,
@@ -45,21 +56,14 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
     if (succeeded) return terminalResult(succeeded)
 
     if (isExplicitCancellation(error)) {
-      await finishProjection(input, execution, {
-        protocol: input.job.protocol,
-        status: "cancelled",
-        errorMessage: error.message,
-      })
+      await finishProjection(input, execution, projectionFailure(input, error, "cancelled"))
       throw error
     }
     if ((await isPermanentFailure(input, execution, error)) && !signal.aborted) {
-      await finishProjection(input, execution, {
-        protocol: input.job.protocol,
-        status: "failed",
-        errorMessage: errorMessage(error),
-      })
+      const decision = projectionFailure(input, error, "failed")
+      await finishProjection(input, execution, decision)
       const run = await requireRun(input)
-      input.onRunFailed?.(error, run)
+      input.onRunFailed?.(error, run, decision.error)
     }
     // Transient errors, delivery loss, shutdown, and stale executions deliberately leave the run
     // running so the next QueueDelivery can reclaim it with a fresh token.
@@ -92,8 +96,18 @@ async function findMatchingTerminalRun(
   assertRunMatchesJob(run, input.job)
   if (run.status === "running") return null
   if (run.status === "succeeded") return run
-  throw new ProjectionWorkerPermanentError(
-    `[SixbProjectionWorker] Projection run '${run.id}' is already '${run.status}'.`
+  throw createSixbError(
+    "projection.run_already_terminal",
+    `[SixbProjectionWorker] Projection run '${run.id}' is already '${run.status}'.`,
+    {
+      details: {
+        projectionId: run.identity.projectionId,
+        runId: run.id,
+        datasetId: run.identity.datasetVersion.datasetId,
+        versionId: run.identity.datasetVersion.versionId,
+        status: run.status,
+      },
+    }
   )
 }
 
@@ -194,7 +208,7 @@ function replacementEntries(
 async function finishProjection(
   input: RunProjectionJobInput,
   execution: ClaimedProjectionExecution,
-  decision: ProjectionRunTerminalDecision
+  decision: ProjectionRunTerminalDecision & { readonly finishedAt?: Date }
 ): Promise<void> {
   const common = {
     source: { projectionId: input.job.projectionId },
@@ -205,6 +219,53 @@ async function finishProjection(
     ...common,
     ...decision,
   })
+}
+
+function projectionFailure(
+  input: RunProjectionJobInput,
+  error: unknown,
+  status: "failed" | "cancelled"
+): ProjectionRunTerminalDecision & {
+  readonly status: "failed" | "cancelled"
+  readonly finishedAt: Date
+  readonly error: SixbFailure<ProjectionRunFailureCode>
+} {
+  const finishedAt = new Date(input.now?.() ?? Date.now())
+  const failureError = status === "failed" ? translateProjectionExecutionError(input, error) : error
+  return {
+    protocol: input.job.protocol,
+    status,
+    finishedAt,
+    error: captureSixbFailure(failureError, {
+      allowedCodes: PROJECTION_RUN_FAILURE_CODES,
+      defaultCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+      details: { projectionId: input.job.projectionId, runId: input.job.id },
+      at: finishedAt,
+    }),
+  }
+}
+
+function translateProjectionExecutionError(input: RunProjectionJobInput, error: unknown): unknown {
+  if (
+    isSixbError(error) &&
+    (error.code === "internal.unexpected" || error.code === "projection.execution_failed")
+  ) {
+    return error
+  }
+
+  return createSixbError(
+    "projection.execution_failed",
+    summarizeErrorMessage(error, "Projection execution failed."),
+    {
+      cause: error,
+      details: {
+        projectionId: input.job.projectionId,
+        runId: input.job.id,
+        datasetId: input.job.datasetVersion.datasetId,
+        versionId: input.job.datasetVersion.versionId,
+      },
+    }
+  )
 }
 
 type ProjectionSuccessfulCompletion =
@@ -233,19 +294,60 @@ async function requireRun(input: RunProjectionJobInput): Promise<ProjectionRunRe
 }
 
 function assertRunMatchesJob(run: ProjectionRunRecord, job: ProjectionJob): void {
-  const matches =
-    run.identity.projectionId === job.projectionId &&
-    run.identity.projectionKind === job.projectionKind &&
-    run.identity.protocol === job.protocol &&
-    run.identity.datasetVersion.datasetId === job.datasetVersion.datasetId &&
-    run.identity.datasetVersion.versionId === job.datasetVersion.versionId &&
-    run.identity.datasetVersion.createdAt === job.datasetVersion.createdAt &&
-    run.identity.ontologyRevision === job.ontologyRevision &&
-    run.identity.projectionRevision === job.projectionRevision &&
-    run.identity.ownershipHash === job.ownershipHash
-  if (matches) return
-  throw new ProjectionWorkerPermanentError(
-    `[SixbProjectionWorker] Projection run '${run.id}' has a different durable identity.`
+  const identityMismatches = collectIdentityMismatches([
+    {
+      field: "projectionId",
+      expected: job.projectionId,
+      actual: run.identity.projectionId,
+    },
+    {
+      field: "projectionKind",
+      expected: job.projectionKind,
+      actual: run.identity.projectionKind,
+    },
+    { field: "protocol", expected: job.protocol, actual: run.identity.protocol },
+    {
+      field: "datasetId",
+      expected: job.datasetVersion.datasetId,
+      actual: run.identity.datasetVersion.datasetId,
+    },
+    {
+      field: "versionId",
+      expected: job.datasetVersion.versionId,
+      actual: run.identity.datasetVersion.versionId,
+    },
+    {
+      field: "versionCreatedAt",
+      expected: job.datasetVersion.createdAt,
+      actual: run.identity.datasetVersion.createdAt,
+    },
+    {
+      field: "ontologyRevision",
+      expected: job.ontologyRevision,
+      actual: run.identity.ontologyRevision,
+    },
+    {
+      field: "projectionRevision",
+      expected: job.projectionRevision,
+      actual: run.identity.projectionRevision,
+    },
+    {
+      field: "ownershipHash",
+      expected: job.ownershipHash,
+      actual: run.identity.ownershipHash,
+    },
+  ])
+  if (identityMismatches.length === 0) return
+  throw createSixbError(
+    "projection.run_identity_mismatch",
+    `[SixbProjectionWorker] Projection run '${run.id}' has a different durable identity.`,
+    {
+      details: {
+        projectionId: job.projectionId,
+        runId: run.id,
+        identityMismatches,
+      },
+    }
   )
 }
 
@@ -261,14 +363,12 @@ async function isPermanentFailure(
   if (error instanceof MaterializationObjectNotFoundError) {
     return missingTargetWaitedLongEnough(input, execution, error)
   }
-  return isPermanentSyncFailure(error)
+  return isPermanentProjectionError(error)
 }
 
-function isPermanentSyncFailure(error: unknown): boolean {
-  if (
-    error instanceof ProjectionWorkerPermanentError ||
-    error instanceof MaterializationValidationError
-  ) {
+function isPermanentProjectionError(error: unknown): boolean {
+  if (isSixbError(error)) return !error.retryable
+  if (error instanceof MaterializationValidationError) {
     return true
   }
   if (!isMaterializationConflictError(error)) return false
@@ -283,10 +383,6 @@ function isExplicitCancellation(error: unknown): error is MaterializationCancell
   return error instanceof MaterializationCancellationError
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
-
 /**
  * The worker's read, on the one path where no run exists — `failureDecision` reads the run first
  * and retries whatever it left `running`. A target cannot be missing from a run that never
@@ -294,7 +390,7 @@ function errorMessage(error: unknown): string {
  */
 export function isPermanentProjectionFailure(error: unknown): boolean {
   return (
-    (!(error instanceof MaterializationObjectNotFoundError) && isPermanentSyncFailure(error)) ||
+    (!(error instanceof MaterializationObjectNotFoundError) && isPermanentProjectionError(error)) ||
     isExplicitCancellation(error)
   )
 }

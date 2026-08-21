@@ -10,12 +10,15 @@ import { registerOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { ClaimedQueueJob, ProjectionRunRequestedQueueJob } from "@sixb/core/queues"
-import type { ProjectionRunStorage } from "@sixb/core/storage"
+import { PROJECTION_RUN_FAILURE_CODES, type ProjectionRunStorage } from "@sixb/core/storage"
 import { projectionRetryAvailableAt } from "./retry-backoff"
 import { isPermanentProjectionFailure, runProjectionJob } from "./run-projection-job"
 import type { ProjectionWorkerContext } from "./types"
 
-export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob> {
+export class ProjectionWorker extends QueueWorker<
+  ProjectionRunRequestedQueueJob,
+  typeof PROJECTION_RUN_FAILURE_CODES
+> {
   private readonly host: ProjectionWorkerHost
   private readonly projectionRunsStorage: ProjectionRunStorage
 
@@ -33,6 +36,7 @@ export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob
     super({
       projectId: host.id,
       queue: host.queues.projections,
+      failureCodes: PROJECTION_RUN_FAILURE_CODES,
       workerId: `projection-worker-${host.id}`,
     })
     this.host = host
@@ -57,17 +61,17 @@ export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob
       runtime: context,
       job: { id: job.id, ...job.payload },
       signal,
-      onRunFailed: (error, run) => {
+      onRunFailed: (error, run, failure) => {
         reportRunFailure(this.host, error, {
           projectId: this.host.id,
-          occurredAt: run.finishedAt,
           attempt: job.attempt,
+          runKind: "projection",
           run: {
-            kind: "projection",
             runId: run.id,
             projectionId: run.identity.projectionId,
             projectionKind: run.identity.projectionKind,
           },
+          failure,
         })
       },
     })

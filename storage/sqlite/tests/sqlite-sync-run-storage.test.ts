@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { SyncRunError } from "@sixb/core/storage"
+import { type SixbFailure, SyncRunError, type SyncRunFailureCode } from "@sixb/core/storage"
 import { SqliteSyncRunStorage } from "../src/sync-run-storage"
+
+const FAILURE: SixbFailure<SyncRunFailureCode> = {
+  code: "internal.unexpected",
+  message: "Database connection lost",
+  retryable: false,
+  at: "2026-04-06T15:00:00.420Z",
+  details: { provider: "erp" },
+}
 
 describe("SqliteSyncRunStorage", () => {
   let storage: SqliteSyncRunStorage
@@ -139,10 +147,7 @@ describe("SqliteSyncRunStorage", () => {
       projectId: "my-app",
       status: "failed",
       rowsRead: 23,
-      error: {
-        name: "Error",
-        message: "Database connection lost",
-      },
+      error: FAILURE,
     })
 
     await storage.start({
@@ -190,7 +195,7 @@ describe("SqliteSyncRunStorage", () => {
       projectId: "my-app",
       id: "run-1",
     })
-    expect(failed?.error?.message).toBe("Database connection lost")
+    expect(failed?.error).toEqual(FAILURE)
     expect(failed?.rowsRead).toBe(23)
   })
 
@@ -260,9 +265,7 @@ describe("SqliteSyncRunStorage", () => {
         id: "missing",
         projectId: "my-app",
         status: "failed",
-        error: {
-          message: "boom",
-        },
+        error: { ...FAILURE, message: "boom" },
       })
     ).rejects.toBeInstanceOf(SyncRunError)
 

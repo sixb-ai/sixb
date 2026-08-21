@@ -20,7 +20,6 @@ export {
   executeObjectQuery,
   existsObjects,
   facetObjects,
-  QueryExecutor,
 } from "./executor"
 export type {
   ObjectQueryExplainNode,
@@ -64,7 +63,7 @@ export type {
   ObjectQueryPlanningOptions,
   ObjectQueryProviderOperation,
 } from "./planner"
-export { planObjectQuery, QueryPlanner } from "./planner"
+export { planObjectQuery } from "./planner"
 export type {
   ObjectQueryValidationIssue,
   ObjectQueryValidationOptions,

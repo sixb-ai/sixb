@@ -26,11 +26,13 @@ export const sixb = createSixb({
   onError(error, context) {
     let failure: string
     if (context.type === "run.failed") {
-      failure = `${context.run.kind} run '${context.run.runId}' failed`
+      failure = `${context.runKind} run '${context.run.runId}' failed with ${context.failure.code}`
+    } else if (context.type === "action.phase.failed") {
+      failure = `action '${context.actionId}' phase '${context.phase}' failed with ${context.failure.code}`
     } else if (context.type === "event.delivery.failed") {
-      failure = `event delivery failed after ${context.attempts} attempt(s)`
+      failure = `event delivery failed with ${context.failure.code} after ${context.attempts} attempt(s)`
     } else {
-      failure = `${context.source} rule evaluation failed`
+      failure = `${context.source} rule evaluation failed with ${context.failure.code}`
     }
     console.error(`[Northline] ${failure} (${context.notificationId}):`, error)
   },

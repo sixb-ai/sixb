@@ -1,23 +1,32 @@
-import type { AgentDefinition, ValueType, WorkflowDefinition } from "@sixb/core"
+import type { AgentDefinition, SixbFailure, ValueType, WorkflowDefinition } from "@sixb/core"
 import {
   createAgentRunExecutionToken,
   resolveAgentExecutionAuthorization,
 } from "@sixb/core/internal/agents"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
+import { createSixbError, summarizeErrorMessage, toSixbFailure } from "@sixb/core/internal/errors"
 import type { QueueDelivery } from "@sixb/core/internal/workers"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { WorkflowAgentNodeDefinition } from "@sixb/core/internal/workflows"
-import type { AgentQueueJob, AgentWorkflowNodeRequestedQueueJob } from "@sixb/core/queues"
+import { createWorkflowNodeFailure } from "@sixb/core/internal/workflows"
+import type {
+  AgentQueueJob,
+  AgentQueueJobFailureCode,
+  AgentWorkflowNodeRequestedQueueJob,
+} from "@sixb/core/queues"
 import type {
   ExecutionRecord,
   WorkflowAgentNodeRunExecution,
   WorkflowAgentNodeRunRecord,
   WorkflowNodeRunRecord,
+  WorkflowRunFailureCode,
   WorkflowRunRecord,
   WorkflowRunStorage,
 } from "@sixb/core/storage"
-import { AgentUsageRecordingError, AgentWorkerError } from "./errors"
+import { AGENT_RUN_FAILURE_CODES, WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
+import { AgentUsageRecordingError } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
+import { toAgentExecutionFailure } from "./failure"
 import { AiModelCallRecorder } from "./model-call-recorder"
 import {
   type AgentExecutionEnvironment,
@@ -31,7 +40,7 @@ export interface ExecuteWorkflowAgentNodeInput {
   readonly host: AgentWorkerHost
   readonly job: AgentWorkflowNodeRequestedQueueJob
   readonly signal: AbortSignal
-  readonly delivery: QueueDelivery<AgentQueueJob>
+  readonly delivery: QueueDelivery<AgentQueueJob, AgentQueueJobFailureCode>
   readonly watchForCancel: (runId: string) => Promise<{
     readonly signal: AbortSignal
     readonly stop: () => void
@@ -94,7 +103,11 @@ export async function executeWorkflowAgentNode(
   })
   const executionToken = reserved.execution?.token
   if (!executionToken) {
-    throw new AgentWorkerError(`Agent workflow node '${nodeRun.id}' has no execution token.`)
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbAgentWorker] Agent workflow node '${nodeRun.id}' has no execution token.`,
+      { details: workflowAgentErrorDetails(agent.id, nodeRun) }
+    )
   }
   const usageRecorder = new AiModelCallRecorder({
     storage: context.storage.aiUsage,
@@ -136,6 +149,8 @@ export async function executeWorkflowAgentNode(
       agent,
       agentStep: node.agentStep,
       workflowId: workflow.id,
+      workflowRunId: nodeRun.workflowRunId,
+      nodeRunId: nodeRun.id,
       prompt: reserved.prompt,
       valueTypesById,
       usageRecorder,
@@ -144,6 +159,7 @@ export async function executeWorkflowAgentNode(
     const completedNode = await finishWorkflowAgentNodeSucceeded({
       context,
       nodeRun,
+      agentId: agent.id,
       executionToken,
       result,
     })
@@ -189,13 +205,13 @@ export async function executeWorkflowAgentNode(
     if (status === "failed") {
       reportRunFailure(input.host, executionError, {
         projectId: context.id,
-        occurredAt: failed.run.finishedAt,
         attempt: job.attempt,
+        runKind: "workflow",
         run: {
-          kind: "workflow",
           runId: failed.run.id,
           workflowId: failed.run.workflowId,
         },
+        failure: failed.failure,
       })
     }
     await emitNodeAndRunFailed(input.host, failed, workflow.nodes.length, status)
@@ -211,7 +227,13 @@ async function loadWorkflowAgentNodeExecution(
 ): Promise<WorkflowAgentNodeExecutionContext | null> {
   const { context, host, job } = input
   const runs = context.storage.workflowRuns
-  if (!runs) throw new AgentWorkerError("Workflow agent nodes require workflow storage.")
+  if (!runs) {
+    throw createSixbError(
+      "internal.unexpected",
+      "[SixbAgentWorker] Workflow agent nodes require workflow storage.",
+      { details: { nodeRunId: job.payload.nodeRunId } }
+    )
+  }
 
   const [executionRecord, nodeRun] = await Promise.all([
     runs.agentNodes.getByNodeRunId({
@@ -221,18 +243,38 @@ async function loadWorkflowAgentNodeExecution(
     runs.nodes.getById({ projectId: context.id, id: job.payload.nodeRunId }),
   ])
   if (!executionRecord || !nodeRun || nodeRun.nodeType !== "agent") {
-    throw new AgentWorkerError(`Agent workflow node '${job.payload.nodeRunId}' was not found.`)
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbAgentWorker] Agent workflow node '${job.payload.nodeRunId}' was not found.`,
+      { details: { nodeRunId: job.payload.nodeRunId } }
+    )
   }
   if (executionRecord.status !== "queued" && executionRecord.status !== "running") return null
 
   const workflowRun = await runs.getById({ projectId: context.id, id: nodeRun.workflowRunId })
   if (!workflowRun || workflowRun.status !== "waiting" || nodeRun.status !== "waiting") {
+    const completedAt = new Date()
+    const message = workflowRun
+      ? `Parent workflow run is ${workflowRun.status}.`
+      : "Parent workflow run is missing."
     await runs.agentNodes.cancel({
       projectId: context.id,
       nodeRunId: nodeRun.id,
-      error: workflowRun
-        ? `Parent workflow run is ${workflowRun.status}.`
-        : "Parent workflow run is missing.",
+      error: toSixbFailure(
+        createSixbError("runtime.cancelled", message, {
+          details: {
+            agentId: executionRecord.agentId,
+            workflowId: nodeRun.workflowId,
+            workflowRunId: nodeRun.workflowRunId,
+            nodeRunId: nodeRun.id,
+          },
+        }),
+        {
+          allowedCodes: AGENT_RUN_FAILURE_CODES,
+          at: completedAt,
+        }
+      ),
+      completedAt,
     })
     return null
   }
@@ -242,26 +284,46 @@ async function loadWorkflowAgentNodeExecution(
     id: executionRecord.executionId,
   })
   if (!durableExecution) {
-    throw new AgentWorkerError(
-      `Agent workflow node '${nodeRun.id}' references missing execution '${executionRecord.executionId}'.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbAgentWorker] Agent workflow node '${nodeRun.id}' references missing execution '${executionRecord.executionId}'.`,
+      {
+        details: {
+          ...workflowAgentErrorDetails(executionRecord.agentId, nodeRun),
+          executionId: executionRecord.executionId,
+        },
+      }
     )
   }
   if (durableExecution.parentExecutionId !== workflowRun.executionId) {
-    throw new AgentWorkerError(
-      `Agent workflow node '${nodeRun.id}' execution is not linked to workflow run '${workflowRun.id}'.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbAgentWorker] Agent workflow node '${nodeRun.id}' execution is not linked to workflow run '${workflowRun.id}'.`,
+      {
+        details: {
+          ...workflowAgentErrorDetails(executionRecord.agentId, nodeRun),
+          executionId: executionRecord.executionId,
+        },
+      }
     )
   }
 
   const workflow = host.definitions.workflows.getById(nodeRun.workflowId)
   const node = workflow?.nodes[nodeRun.nodeIndex]
   if (!workflow || !node || node.type !== "agent" || node.id !== nodeRun.nodeId) {
-    throw new AgentWorkerError(
-      `Workflow definition for agent node '${job.payload.nodeRunId}' is no longer available.`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbAgentWorker] Workflow definition for agent node '${job.payload.nodeRunId}' is no longer available.`,
+      { details: workflowAgentErrorDetails(executionRecord.agentId, nodeRun) }
     )
   }
   const agent = host.definitions.agents.getById(executionRecord.agentId)
   if (!agent || agent.id !== node.agentStep.agent.id) {
-    throw new AgentWorkerError(`Unknown agent '${executionRecord.agentId}'.`)
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbAgentWorker] Unknown agent '${executionRecord.agentId}'.`,
+      { details: workflowAgentErrorDetails(executionRecord.agentId, nodeRun) }
+    )
   }
 
   return {
@@ -300,7 +362,7 @@ async function reserveWorkflowAgentNode(input: {
 }
 
 function projectQueueOwnership(input: {
-  readonly delivery: QueueDelivery<AgentQueueJob>
+  readonly delivery: QueueDelivery<AgentQueueJob, AgentQueueJobFailureCode>
   readonly runs: WorkflowRunStorage
   readonly projectId: string
   readonly nodeRunId: string
@@ -332,12 +394,19 @@ function confirmQueueOwnership(input: {
 async function finishWorkflowAgentNodeSucceeded(input: {
   readonly context: AgentWorkerContext
   readonly nodeRun: WorkflowNodeRunRecord
+  readonly agentId: string
   readonly executionToken: string
   readonly result: Awaited<ReturnType<typeof runWorkflowAgentNode>>
 }): Promise<WorkflowNodeRunRecord> {
   return input.context.storage.transaction(async (tx) => {
     const runs = tx.workflowRuns
-    if (!runs) throw new AgentWorkerError("Workflow storage disappeared during finalization.")
+    if (!runs) {
+      throw createSixbError(
+        "internal.unexpected",
+        "[SixbAgentWorker] Workflow storage disappeared during finalization.",
+        { details: workflowAgentErrorDetails(input.agentId, input.nodeRun) }
+      )
+    }
     await runs.agentNodes.finish({
       projectId: input.context.id,
       nodeRunId: input.nodeRun.id,
@@ -364,32 +433,70 @@ async function finishWorkflowAgentNodeFailed(input: {
   readonly executionToken: string
   readonly status: "failed" | "cancelled"
   readonly error: unknown
-}): Promise<{ readonly node: WorkflowNodeRunRecord; readonly run: WorkflowRunRecord }> {
-  const message = errorMessage(input.error)
+}): Promise<{
+  readonly node: WorkflowNodeRunRecord
+  readonly run: WorkflowRunRecord
+  readonly failure: SixbFailure<WorkflowRunFailureCode>
+}> {
+  const at = new Date()
+  const workflowFailureError =
+    input.status === "failed"
+      ? createWorkflowNodeFailure(input.error, {
+          workflowId: input.nodeRun.workflowId,
+          workflowRunId: input.nodeRun.workflowRunId,
+          nodeId: input.nodeRun.nodeId,
+          nodeRunId: input.nodeRun.id,
+          child: { type: "agent", agentId: input.agent.id },
+        })
+      : createSixbError(
+          "runtime.cancelled",
+          summarizeErrorMessage(input.error, "Agent workflow node execution failed."),
+          {
+            cause: input.error,
+            details: workflowAgentErrorDetails(input.agent.id, input.nodeRun),
+          }
+        )
+  const workflowFailure = toSixbFailure(workflowFailureError, {
+    allowedCodes: WORKFLOW_RUN_FAILURE_CODES,
+    at,
+  })
   return input.context.storage.transaction(async (tx) => {
     const runs = tx.workflowRuns
-    if (!runs) throw new AgentWorkerError("Workflow storage disappeared during finalization.")
+    if (!runs) {
+      throw createSixbError(
+        "internal.unexpected",
+        "[SixbAgentWorker] Workflow storage disappeared during finalization.",
+        { details: workflowAgentErrorDetails(input.agent.id, input.nodeRun) }
+      )
+    }
     await runs.agentNodes.finish({
       projectId: input.context.id,
       nodeRunId: input.nodeRun.id,
       executionToken: input.executionToken,
       status: input.status,
       modelId: input.agent.model.modelId,
-      error: message,
+      error: toAgentExecutionFailure(input.error, {
+        status: input.status,
+        at,
+        details: workflowAgentErrorDetails(input.agent.id, input.nodeRun),
+      }),
+      completedAt: at,
     })
     const node = await runs.nodes.finish({
       projectId: input.context.id,
       id: input.nodeRun.id,
       status: input.status,
-      error: message,
+      finishedAt: at,
+      error: workflowFailure,
     })
     const run = await runs.finish({
       projectId: input.context.id,
       id: input.nodeRun.workflowRunId,
       status: input.status,
-      error: message,
+      finishedAt: at,
+      error: workflowFailure,
     })
-    return { node, run }
+    return { node, run, failure: workflowFailure }
   })
 }
 
@@ -521,11 +628,32 @@ function requireFinishedAt(
   record: WorkflowNodeRunRecord | WorkflowRunRecord
 ): NonNullable<typeof record.finishedAt> {
   if (!record.finishedAt) {
-    throw new AgentWorkerError(`Workflow run record '${record.id}' has no finishedAt.`)
+    const details: Readonly<Record<string, string>> =
+      "workflowRunId" in record
+        ? {
+            workflowId: record.workflowId,
+            workflowRunId: record.workflowRunId,
+            nodeRunId: record.id,
+          }
+        : { workflowId: record.workflowId, workflowRunId: record.id }
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbAgentWorker] Workflow run record '${record.id}' has no finishedAt.`,
+      { details }
+    )
   }
   return record.finishedAt
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+function workflowAgentErrorDetails(
+  agentId: string,
+  nodeRun: Pick<WorkflowNodeRunRecord, "id" | "workflowId" | "workflowRunId" | "nodeId">
+): Readonly<Record<string, string>> {
+  return {
+    agentId,
+    workflowId: nodeRun.workflowId,
+    workflowRunId: nodeRun.workflowRunId,
+    nodeId: nodeRun.nodeId,
+    nodeRunId: nodeRun.id,
+  }
 }

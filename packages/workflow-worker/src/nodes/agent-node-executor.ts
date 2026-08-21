@@ -4,12 +4,12 @@ import {
   ensureAgentExecutionIdentity,
   workflowAgentNodeQueueJobId,
 } from "@sixb/core/internal/agents"
+import { createSixbError } from "@sixb/core/internal/errors"
 import type { WorkflowAgentNodeDefinition } from "@sixb/core/internal/workflows"
 import {
   snapshotWorkflowAgentStepInput,
   validateWorkflowAgentStepInput,
 } from "@sixb/core/internal/workflows"
-import { WorkflowWorkerError } from "../errors"
 import type { WorkflowNodeExecutor } from "../execution/node-executor"
 import { throwIfAborted } from "../normalize"
 import { callWorkflowMapper, requireRecordInput } from "./mapper"
@@ -24,6 +24,7 @@ export const agentNodeExecutor: WorkflowNodeExecutor<WorkflowAgentNodeDefinition
         : callWorkflowMapper({
             mapper: node.mapper,
             workflowId: context.workflow.id,
+            workflowRunId: context.job.id,
             nodeId: node.id,
             workflowInput: context.state.workflowInput,
             steps: context.state.steps,
@@ -31,6 +32,7 @@ export const agentNodeExecutor: WorkflowNodeExecutor<WorkflowAgentNodeDefinition
     const nodeInput = requireRecordInput({
       value: rawInput,
       workflowId: context.workflow.id,
+      workflowRunId: context.job.id,
       nodeId: node.id,
     })
     const agentInput = validateWorkflowAgentStepInput({
@@ -54,12 +56,24 @@ export const agentNodeExecutor: WorkflowNodeExecutor<WorkflowAgentNodeDefinition
     const input = requireRecordInput({
       value: prepared.input,
       workflowId: context.workflow.id,
+      workflowRunId: context.job.id,
       nodeId: node.id,
+      nodeRunId: nodeRun.id,
     })
     const prompt = await node.agentStep.prompt({ input })
     if (typeof prompt !== "string" || !prompt.trim()) {
-      throw new WorkflowWorkerError(
-        `[SixbWorkflowWorker] Workflow '${context.workflow.id}' agent node '${node.id}' prompt must return a non-empty string.`
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbWorkflowWorker] Workflow '${context.workflow.id}' agent node '${node.id}' prompt must return a non-empty string.`,
+        {
+          details: {
+            agentId: node.agentStep.agent.id,
+            workflowId: context.workflow.id,
+            workflowRunId: context.job.id,
+            nodeId: node.id,
+            nodeRunId: nodeRun.id,
+          },
+        }
       )
     }
     throwIfAborted(context.signal)
@@ -73,8 +87,19 @@ export const agentNodeExecutor: WorkflowNodeExecutor<WorkflowAgentNodeDefinition
       id: context.runtime.sixb.execution.id,
     })
     if (!parentExecution) {
-      throw new WorkflowWorkerError(
-        `[SixbWorkflowWorker] Workflow run '${context.job.id}' references missing execution '${context.runtime.sixb.execution.id}'.`
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbWorkflowWorker] Workflow run '${context.job.id}' references missing execution '${context.runtime.sixb.execution.id}'.`,
+        {
+          details: {
+            agentId: node.agentStep.agent.id,
+            workflowId: context.workflow.id,
+            workflowRunId: context.job.id,
+            nodeId: node.id,
+            nodeRunId: nodeRun.id,
+            executionId: context.runtime.sixb.execution.id,
+          },
+        }
       )
     }
     const agentExecution = createAgentExecutionRecord({
@@ -88,8 +113,18 @@ export const agentNodeExecutor: WorkflowNodeExecutor<WorkflowAgentNodeDefinition
     const parked = await context.runtime.storage.transaction(async (tx) => {
       const workflowRuns = tx.workflowRuns
       if (!workflowRuns) {
-        throw new WorkflowWorkerError(
-          `[SixbWorkflowWorker] Workflow '${context.workflow.id}' agent node '${node.id}' requires storage.workflowRuns.`
+        throw createSixbError(
+          "internal.unexpected",
+          `[SixbWorkflowWorker] Workflow '${context.workflow.id}' agent node '${node.id}' requires storage.workflowRuns.`,
+          {
+            details: {
+              agentId: node.agentStep.agent.id,
+              workflowId: context.workflow.id,
+              workflowRunId: context.job.id,
+              nodeId: node.id,
+              nodeRunId: nodeRun.id,
+            },
+          }
         )
       }
       await tx.executions.create(agentExecution)

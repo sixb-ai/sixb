@@ -1,4 +1,5 @@
-import type { ClaimedQueueJob, Queue, QueueJob, QueueJobError } from "../queues"
+import type { SixbErrorCode } from "../errors/types"
+import type { ClaimedQueueJob, Queue, QueueJob, QueueJobFailure } from "../queues"
 import { WorkerAbortError } from "./errors"
 
 export type QueueDeliveryState = "active" | "lost" | "settled"
@@ -10,7 +11,10 @@ export type QueueDeliveryState = "active" | "lost" | "settled"
  */
 export type QueueSettlementResult = "settled" | "lost"
 
-export interface QueueDelivery<TJob extends QueueJob> {
+export interface QueueDelivery<
+  TJob extends QueueJob,
+  TFailureCode extends SixbErrorCode = SixbErrorCode,
+> {
   readonly claimed: ClaimedQueueJob<TJob>
   readonly signal: AbortSignal
   readonly state: QueueDeliveryState
@@ -20,16 +24,16 @@ export interface QueueDelivery<TJob extends QueueJob> {
   /** Observe successful queue renewals. The listener is not called for failed renewals. */
   onLeaseRenewed(listener: (claimed: ClaimedQueueJob<TJob>) => void): () => void
   complete(): Promise<QueueSettlementResult>
-  retry(input?: {
-    readonly availableAt?: string
-    readonly error?: QueueJobError
-  }): Promise<QueueSettlementResult>
-  fail(error: QueueJobError): Promise<QueueSettlementResult>
+  retry(input?: { readonly availableAt?: string }): Promise<QueueSettlementResult>
+  fail(failure: QueueJobFailure<TFailureCode>): Promise<QueueSettlementResult>
   close(): Promise<void>
 }
 
-export interface CreateQueueDeliveryOptions<TJob extends QueueJob> {
-  readonly queue: Queue<TJob>
+export interface CreateQueueDeliveryOptions<
+  TJob extends QueueJob,
+  TFailureCode extends SixbErrorCode,
+> {
+  readonly queue: Queue<TJob, TFailureCode>
   readonly claimed: ClaimedQueueJob<TJob>
   readonly leaseMs: number
   readonly signal: AbortSignal
@@ -47,19 +51,21 @@ type RenewalAttempt<TJob extends QueueJob> =
   | { readonly kind: "expired" }
 
 /** Owns lease renewal, loss detection, and settlement for one claimed queue job. */
-export function createQueueDelivery<TJob extends QueueJob>(
-  options: CreateQueueDeliveryOptions<TJob>
-): QueueDelivery<TJob> {
+export function createQueueDelivery<TJob extends QueueJob, TFailureCode extends SixbErrorCode>(
+  options: CreateQueueDeliveryOptions<TJob, TFailureCode>
+): QueueDelivery<TJob, TFailureCode> {
   return new ManagedQueueDelivery(options)
 }
 
-class ManagedQueueDelivery<TJob extends QueueJob> implements QueueDelivery<TJob> {
+class ManagedQueueDelivery<TJob extends QueueJob, TFailureCode extends SixbErrorCode>
+  implements QueueDelivery<TJob, TFailureCode>
+{
   readonly claimed: ClaimedQueueJob<TJob>
   readonly signal: AbortSignal
 
-  private readonly queue: Queue<TJob>
+  private readonly queue: Queue<TJob, TFailureCode>
   private readonly leaseMs: number
-  private readonly renewLease: Queue<TJob>["renewLease"]
+  private readonly renewLease: Queue<TJob, TFailureCode>["renewLease"]
   private readonly onLeaseLost: (() => void) | undefined
   private readonly onRenewalError: ((error: unknown) => void) | undefined
   private readonly lossController = new AbortController()
@@ -74,7 +80,7 @@ class ManagedQueueDelivery<TJob extends QueueJob> implements QueueDelivery<TJob>
   private closing: Promise<void> | null = null
   private settling = false
 
-  constructor(options: CreateQueueDeliveryOptions<TJob>) {
+  constructor(options: CreateQueueDeliveryOptions<TJob, TFailureCode>) {
     this.queue = options.queue
     this.claimed = options.claimed
     this.leaseMs = options.leaseMs
@@ -111,27 +117,24 @@ class ManagedQueueDelivery<TJob extends QueueJob> implements QueueDelivery<TJob>
     )
   }
 
-  retry(
-    input: { readonly availableAt?: string; readonly error?: QueueJobError } = {}
-  ): Promise<QueueSettlementResult> {
+  retry(input: { readonly availableAt?: string } = {}): Promise<QueueSettlementResult> {
     return this.settle(() =>
       this.queue.retry({
         projectId: this.claimed.job.projectId,
         jobId: this.claimed.job.id,
         leaseId: this.claimed.leaseId,
         availableAt: input.availableAt,
-        error: input.error,
       })
     )
   }
 
-  fail(error: QueueJobError): Promise<QueueSettlementResult> {
+  fail(failure: QueueJobFailure<TFailureCode>): Promise<QueueSettlementResult> {
     return this.settle(() =>
       this.queue.fail({
         projectId: this.claimed.job.projectId,
         jobId: this.claimed.job.id,
         leaseId: this.claimed.leaseId,
-        error,
+        failure,
       })
     )
   }

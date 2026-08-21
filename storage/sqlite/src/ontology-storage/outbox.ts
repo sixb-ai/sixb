@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite"
+import { serializeSixbFailure } from "@sixb/core/internal/errors"
 import {
   MaterializationConflictError,
   MaterializationValidationError,
@@ -13,6 +14,7 @@ import type {
   RescheduleOntologyOutboxLeaseInput,
   SummarizeOntologyOutboxInput,
 } from "@sixb/core/storage"
+import { ONTOLOGY_OUTBOX_FAILURE_CODES } from "@sixb/core/storage"
 import {
   assertNonblank,
   assertPositiveInteger,
@@ -55,7 +57,7 @@ export class SqliteOntologyOutboxStorage implements OntologyOutboxStorage {
               LIMIT ?
             )
             RETURNING envelope, available_at, attempts, lease_id, lease_expires_at,
-              published_at, last_error, created_at
+              published_at, last_failure, created_at
           `
         )
         .all(
@@ -127,6 +129,10 @@ export class SqliteOntologyOutboxStorage implements OntologyOutboxStorage {
       assertLeaseInput(input)
       assertTimestamp(input.availableAt, "Ontology outbox availableAt")
       const ids = validateLeaseIds(input.ids)
+      const failure =
+        input.failure === undefined
+          ? null
+          : serializeSixbFailure(input.failure, ONTOLOGY_OUTBOX_FAILURE_CODES)
       const changed = this.db
         .query(
           `
@@ -141,7 +147,8 @@ export class SqliteOntologyOutboxStorage implements OntologyOutboxStorage {
               SELECT id FROM leased WHERE (SELECT COUNT(*) FROM leased) = ?
             )
             UPDATE ontology_outbox
-            SET available_at = ?, last_error = ?, lease_id = NULL, lease_expires_at = NULL
+            SET available_at = ?, last_failure = COALESCE(?, last_failure),
+              lease_id = NULL, lease_expires_at = NULL
             WHERE project_id = ? AND id IN (SELECT id FROM eligible)
               AND lease_id = ? AND lease_expires_at IS NOT NULL
           `
@@ -152,7 +159,7 @@ export class SqliteOntologyOutboxStorage implements OntologyOutboxStorage {
           input.leaseId,
           ids.length,
           input.availableAt,
-          input.error,
+          failure,
           input.projectId,
           input.leaseId
         ).changes

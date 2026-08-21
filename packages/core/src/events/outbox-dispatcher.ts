@@ -1,5 +1,12 @@
 import { randomUUID } from "node:crypto"
-import type { ClaimedOntologyOutboxRow, OntologyOutboxStorage, Storage } from "../storage"
+import { createSixbError, serializeSixbFailure, toSixbFailure } from "../errors/internal"
+import type {
+  ClaimedOntologyOutboxRow,
+  OntologyOutboxFailure,
+  OntologyOutboxStorage,
+  Storage,
+} from "../storage"
+import { ONTOLOGY_OUTBOX_FAILURE_CODES } from "../storage/ontology/outbox"
 import type { StableEventPublisher } from "./service"
 
 const DEFAULT_BATCH_SIZE = 1_000
@@ -13,10 +20,11 @@ const DEFAULT_RETRY_JITTER_RATIO = 0.2
 const DEFAULT_MAX_ISOLATION_ATTEMPTS = 32
 const DEFAULT_MAX_CLAIMS_PER_DRAIN = 10
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 30_000
-const SHUTDOWN_RESCHEDULE_ERROR = "Outbox dispatcher stopped before publication completed."
 
 export interface OntologyOutboxDeliveryFailure {
   readonly occurredAt: string
+  /** Exact failure persisted on every envelope represented by this report. */
+  readonly failure: OntologyOutboxFailure
   readonly attempts: number
   readonly eventIds: readonly string[]
   /** Types of the undelivered envelopes. The one field both delivery paths can always report. */
@@ -320,7 +328,12 @@ export class OntologyOutboxDispatcher {
     const failedAt = this.now()
 
     for (const [attempts, attemptRows] of rowsByAttempts(settling)) {
-      failures.add(error, failedAt.toISOString(), attempts, attemptRows)
+      const deliveryError = createEventDeliveryError(error, attempts)
+      const failure = toSixbFailure(deliveryError, {
+        allowedCodes: ONTOLOGY_OUTBOX_FAILURE_CODES,
+        at: failedAt,
+      })
+      failures.add(deliveryError, failure, failedAt.toISOString(), attempts, attemptRows)
       try {
         await this.withOutbox((outbox) =>
           outbox.reschedule({
@@ -328,7 +341,7 @@ export class OntologyOutboxDispatcher {
             ids: eventIds(attemptRows),
             leaseId: sharedLeaseId(attemptRows),
             availableAt: new Date(failedAt.getTime() + this.retryDelayMs(attempts)).toISOString(),
-            error: errorMessage(error),
+            failure,
           })
         )
       } catch (rescheduleError) {
@@ -358,7 +371,6 @@ export class OntologyOutboxDispatcher {
           ids: eventIds(rows),
           leaseId: sharedLeaseId(rows),
           availableAt: this.now().toISOString(),
-          error: SHUTDOWN_RESCHEDULE_ERROR,
         })
       )
     } catch (error) {
@@ -407,19 +419,30 @@ interface AccumulatedDeliveryFailure {
 /** Coalesces bisection failures so one claimed row is reported once per delivery attempt. */
 class DeliveryFailureAccumulator {
   private readonly groups = new Map<
-    number,
-    { error: unknown; occurredAt: string; eventIds: Set<string>; eventTypes: Set<string> }
+    string,
+    {
+      error: unknown
+      failure: OntologyOutboxFailure
+      occurredAt: string
+      attempts: number
+      eventIds: Set<string>
+      eventTypes: Set<string>
+    }
   >()
 
   add(
     error: unknown,
+    failure: OntologyOutboxFailure,
     occurredAt: string,
     attempts: number,
     rows: readonly ClaimedOntologyOutboxRow[]
   ): void {
-    const group = this.groups.get(attempts) ?? {
+    const key = serializeSixbFailure(failure, ONTOLOGY_OUTBOX_FAILURE_CODES)
+    const group = this.groups.get(key) ?? {
       error,
+      failure,
       occurredAt,
+      attempts,
       eventIds: new Set<string>(),
       eventTypes: new Set<string>(),
     }
@@ -427,15 +450,16 @@ class DeliveryFailureAccumulator {
       group.eventIds.add(row.envelope.id)
       group.eventTypes.add(row.envelope.type)
     }
-    this.groups.set(attempts, group)
+    this.groups.set(key, group)
   }
 
   list(): readonly AccumulatedDeliveryFailure[] {
-    return [...this.groups.entries()].map(([attempts, group]) => ({
+    return [...this.groups.values()].map((group) => ({
       error: group.error,
       context: {
         occurredAt: group.occurredAt,
-        attempts,
+        failure: group.failure,
+        attempts: group.attempts,
         eventIds: [...group.eventIds].sort(),
         eventTypes: [...group.eventTypes].sort(),
       },
@@ -487,9 +511,17 @@ function sharedLeaseId(rows: readonly ClaimedOntologyOutboxRow[]): string {
   return leaseId
 }
 
-function errorMessage(error: unknown): string {
-  const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
-  return message.slice(0, 2_000)
+function createEventDeliveryError(cause: unknown, attempts: number) {
+  return createSixbError(
+    "event.delivery_failed",
+    "[Sixb] Could not deliver persisted ontology events.",
+    {
+      cause,
+      details: {
+        attempts,
+      },
+    }
+  )
 }
 
 async function publishUntilStopped(

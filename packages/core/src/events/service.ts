@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import type { Broker, BrokerCursor, BrokerRecord, BrokerStreamDefinition } from "../broker"
-import { reportEventDeliveryFailure } from "../error-reporting/capability"
+import { type ErrorReporter, SixbErrorReporter } from "../error-reporting/reporter"
+import { reportEventDeliveryFailure } from "../error-reporting/reports"
 import { getInvalidJsonValueReason, type JsonValue } from "../json"
 import type { OntologyMaterializationEvent } from "../materialization/events"
 import {
@@ -31,11 +32,8 @@ export interface DomainEventServiceOptions {
   readonly projectId: string
   readonly broker: Broker
   readonly stream?: BrokerStreamDefinition
-  /**
-   * The `Sixb` instance — or anything sharing its error reporter — that owns this service. Only `emit`
-   * needs it, to escalate a lost batch. Absent means a lost batch is logged and nothing more.
-   */
-  readonly host?: object
+  /** Internal failure reporter. Defaults to the console when this runtime is used standalone. */
+  readonly errorReporter?: ErrorReporter
 }
 
 export interface EventsAppendInput {
@@ -46,7 +44,7 @@ export interface EventsAppendInput {
 }
 
 export interface EventsEmitOptions {
-  /** Package prefix for the console line, such as `SixbPipelineWorker`. */
+  /** Framework component that initiated the emission, such as `SixbPipelineWorker`. */
   readonly source: string
 }
 
@@ -95,14 +93,14 @@ export class DomainEventService implements DomainEventLog, StableEventPublisher 
   private readonly projectId: string
   private readonly broker: Broker
   private readonly stream: BrokerStreamDefinition
-  private readonly host: object | undefined
+  private readonly errorReporter: ErrorReporter
   private readonly ensureStreamPromises = new Map<string, Promise<void>>()
 
   constructor(options: DomainEventServiceOptions) {
     this.projectId = options.projectId
     this.broker = options.broker
     this.stream = options.stream ?? EVENTS_STREAM
-    this.host = options.host
+    this.errorReporter = options.errorReporter ?? new SixbErrorReporter()
   }
 
   /**
@@ -112,29 +110,23 @@ export class DomainEventService implements DomainEventLog, StableEventPublisher 
    * turn a successful run into a failed one. It is not a swallow either — every event Sixb publishes is
    * a potential trigger edge (a rule's `.when()`, an event schedule, a workflow's wait node), so a lost
    * batch is a handler that silently never runs. The loss is escalated to `onError` as
-   * `event.delivery.failed`; the console line is there for local debugging.
+   * `event.delivery.failed`, or to the default console reporter when no handler was configured.
    *
    * Framework emit sites want this. Application code wants `append`, which reports failure to the
    * caller and returns the stored envelopes.
    */
-  async emit(input: EventsAppendInput, options: EventsEmitOptions): Promise<void> {
+  async emit(input: EventsAppendInput, _options: EventsEmitOptions): Promise<void> {
     try {
       await this.append(input)
     } catch (error) {
       try {
         const eventTypes = input.events.map((event) => event.type)
-        // Escalate before logging. `console` is replaceable and `onError` is the contract, so a
-        // replacement that throws must not be what loses the report.
-        reportEventDeliveryFailure(this.host, error, {
+        reportEventDeliveryFailure(this.errorReporter, error, {
           projectId: this.projectId,
           eventTypes,
         })
-        console.error(`[${options.source}] Failed to emit ${eventTypes.join(", ")}:`, error)
       } catch {
-        // The contract above is absolute, so escalation cannot be the thing that breaks it: a replaced
-        // `console` that throws would turn a run that already succeeded into a failed one. The loss is
-        // already unreported at this point — rejecting on top of it helps nobody. `SixbErrorReporter`
-        // guards its own console line the same way.
+        // The contract above is absolute, so escalation cannot be the thing that breaks it.
       }
     }
   }

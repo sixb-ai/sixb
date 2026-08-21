@@ -8,7 +8,6 @@ import type {
   MagicLinkRecord,
   OidcAuthorizationAttemptRecord,
   UpsertAuthGroupMembershipInput,
-  UserRecord,
 } from "@sixb/core/storage"
 import { AuthStorageError } from "@sixb/core/storage"
 import { isUniqueConstraintError } from "../storage-errors"
@@ -27,7 +26,6 @@ import {
   rowToMagicLinkRecord,
   rowToOidcAuthorizationAttemptRecord,
   rowToSessionRecord,
-  rowToUserRecord,
 } from "./rows"
 
 export type SqliteValue = string | number | null
@@ -46,10 +44,6 @@ export function normalizeEmail(email: string): string {
 
 export function normalizeGroupIds(groupIds: readonly string[] | undefined): readonly string[] {
   return [...new Set((groupIds ?? []).map((groupId) => assertNonEmpty(groupId, "Group id")))]
-}
-
-export function cloneRecord<T>(record: T): T {
-  return structuredClone(record)
 }
 
 export function dateOrNow(value: Date | undefined): Date {
@@ -93,14 +87,6 @@ export function getUserRowById(
     .get(params.projectId, params.id) as SqliteAuthUserRow | null
 }
 
-export function getUserById(
-  db: Database,
-  params: { readonly projectId: string; readonly id: string }
-): UserRecord | null {
-  const row = getUserRowById(db, params)
-  return row ? rowToUserRecord(row) : null
-}
-
 export function getUserRowByEmail(
   db: Database,
   params: { readonly projectId: string; readonly email: string }
@@ -108,14 +94,6 @@ export function getUserRowByEmail(
   return db
     .query("SELECT * FROM auth_users WHERE project_id = ? AND email = ?")
     .get(params.projectId, normalizeEmail(params.email)) as SqliteAuthUserRow | null
-}
-
-export function getUserByEmail(
-  db: Database,
-  params: { readonly projectId: string; readonly email: string }
-): UserRecord | null {
-  const row = getUserRowByEmail(db, params)
-  return row ? rowToUserRecord(row) : null
 }
 
 export function getIdentityRowBySubject(

@@ -6,7 +6,7 @@ import {
   type StorageTransactionOptions,
 } from "../src"
 import { DomainEventService, OntologyOutboxDispatcher, type StoredDomainEvent } from "../src/events"
-import type { OntologyMaterializationEvent } from "../src/storage"
+import type { OntologyMaterializationEvent, OntologyOutboxFailure } from "../src/storage"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import { createMaterializerFixture } from "./materializer-fixture"
 
@@ -133,7 +133,15 @@ describe("OntologyOutboxDispatcher", () => {
       availableAt: "2026-01-02T03:04:05.575Z",
       leaseId: null,
       leaseExpiresAt: null,
-      lastError: "Error: broker unavailable",
+      lastFailure: {
+        code: "event.delivery_failed",
+        message: "Event delivery failed.",
+        retryable: true,
+        at: "2026-01-02T03:04:05.325Z",
+        details: {
+          attempts: 3,
+        },
+      },
     })
     expect(
       await storage.ontology.outbox.claim({
@@ -174,11 +182,15 @@ describe("OntologyOutboxDispatcher", () => {
       ids: [olderId],
       leaseId: olderClaim!.leaseId,
       availableAt: NOW.toISOString(),
-      error: "seed retry",
+      failure: outboxFailure("seed retry"),
     })
     await seedObjectCreated(materializer, "request-newer", "newer")
     const newerId = outboxRows(storage).find((row) => row.envelope.id !== olderId)!.envelope.id
-    const failures: { readonly attempts: number; readonly eventIds: readonly string[] }[] = []
+    const failures: {
+      readonly failure: OntologyOutboxFailure
+      readonly attempts: number
+      readonly eventIds: readonly string[]
+    }[] = []
 
     const dispatcher = new OntologyOutboxDispatcher({
       projectId: "project",
@@ -219,7 +231,11 @@ describe("OntologyOutboxDispatcher", () => {
     for (let index = 0; index < 5; index += 1) {
       await seedObjectCreated(materializer, `request-${index}`, `device-${index}`)
     }
-    const failures: { readonly attempts: number; readonly eventIds: readonly string[] }[] = []
+    const failures: {
+      readonly failure: OntologyOutboxFailure
+      readonly attempts: number
+      readonly eventIds: readonly string[]
+    }[] = []
     const dispatcher = new OntologyOutboxDispatcher({
       projectId: "project",
       storage,
@@ -237,6 +253,10 @@ describe("OntologyOutboxDispatcher", () => {
     expect(outboxRows(storage).filter((row) => row.attempts === 0)).toHaveLength(3)
     expect(failures).toHaveLength(1)
     expect(failures[0]?.eventIds).toHaveLength(2)
+    const persistedFailures = outboxRows(storage)
+      .filter((row) => row.attempts === 1)
+      .map((row) => row.lastFailure)
+    expect(persistedFailures).toEqual([failures[0]?.failure, failures[0]?.failure])
     await dispatcher.stop()
   })
 
@@ -314,7 +334,15 @@ describe("OntologyOutboxDispatcher", () => {
     expect(rows.find((row) => row.envelope.id === poisonId)).toMatchObject({
       publishedAt: null,
       leaseId: null,
-      lastError: "Error: poison envelope",
+      lastFailure: {
+        code: "event.delivery_failed",
+        message: "Event delivery failed.",
+        retryable: true,
+        at: NOW.toISOString(),
+        details: {
+          attempts: 1,
+        },
+      },
     })
     expect(failures).toMatchObject([{ attempts: 1, eventIds: [poisonId] }])
     expect((await events.read()).map(objectPrimaryId).sort()).toEqual(["valid-1", "valid-2"])
@@ -354,7 +382,15 @@ describe("OntologyOutboxDispatcher", () => {
     expect(rows.find((row) => row.envelope.id === poisonId)).toMatchObject({
       publishedAt: null,
       leaseId: null,
-      lastError: "Error: poison envelope",
+      lastFailure: {
+        code: "event.delivery_failed",
+        message: "Event delivery failed.",
+        retryable: true,
+        at: NOW.toISOString(),
+        details: {
+          attempts: 1,
+        },
+      },
     })
     expect(await events.read({ limit: 1_000 })).toHaveLength(999)
   })
@@ -474,7 +510,7 @@ describe("OntologyOutboxDispatcher", () => {
       availableAt: NOW.toISOString(),
       leaseId: null,
       leaseExpiresAt: null,
-      lastError: "Outbox dispatcher stopped before publication completed.",
+      lastFailure: null,
     })
 
     broker.release.resolve()
@@ -528,6 +564,15 @@ async function seedObjectCreated(
 
 function outboxRows(storage: InMemoryStorage) {
   return [...getInMemoryOntologyStorageTestingAdapter(storage.ontology).snapshot().outbox.values()]
+}
+
+function outboxFailure(message: string): OntologyOutboxFailure {
+  return {
+    code: "event.delivery_failed",
+    message,
+    retryable: true,
+    at: NOW.toISOString(),
+  }
 }
 
 function objectPrimaryId(event: StoredDomainEvent): string | undefined {

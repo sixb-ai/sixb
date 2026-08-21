@@ -1,6 +1,6 @@
+import { createSixbError } from "@sixb/core/internal/errors"
 import type { ProjectionMaterializationIdentity } from "@sixb/core/internal/materialization"
 import type { ProjectionRunStorage } from "@sixb/core/storage"
-import { ProjectionWorkerError } from "./errors"
 
 const DEFAULT_PROGRESS_FLUSH_INTERVAL = 500
 
@@ -57,14 +57,41 @@ export class ReplacementProgress {
 
   assertComplete(): void {
     if (this.input.expectedRows !== undefined && this.sourceRowsRead !== this.input.expectedRows) {
-      throw new ProjectionWorkerError(
-        `[SixbProjectionWorker] Projection run '${this.input.projectionRunId}' reached EOF after ${this.sourceRowsRead} of ${this.input.expectedRows} pinned rows.`
+      throw createSixbError(
+        "dataset.version_read_inconsistent",
+        `[SixbProjectionWorker] Projection run '${this.input.projectionRunId}' reached EOF after ${this.sourceRowsRead} of ${this.input.expectedRows} pinned rows.`,
+        {
+          details: {
+            ...this.versionDetails(),
+            expectedRows: this.input.expectedRows,
+            rowsRead: this.sourceRowsRead,
+          },
+        }
       )
     }
     if (this.hasReachedPersistedFloor()) return
-    throw new ProjectionWorkerError(
-      `[SixbProjectionWorker] Projection run '${this.input.projectionRunId}' reached EOF before its persisted progress floor (${this.sourceRowsRead}/${this.input.persistedRowsRead} rows, ${this.sourceRowsSkipped}/${this.input.persistedRowsSkipped} skipped).`
+    throw createSixbError(
+      "dataset.version_read_inconsistent",
+      `[SixbProjectionWorker] Projection run '${this.input.projectionRunId}' reached EOF before its persisted progress floor (${this.sourceRowsRead}/${this.input.persistedRowsRead} rows, ${this.sourceRowsSkipped}/${this.input.persistedRowsSkipped} skipped).`,
+      {
+        details: {
+          ...this.versionDetails(),
+          persistedRowsRead: this.input.persistedRowsRead,
+          persistedRowsSkipped: this.input.persistedRowsSkipped,
+          rowsRead: this.sourceRowsRead,
+          rowsSkipped: this.sourceRowsSkipped,
+        },
+      }
     )
+  }
+
+  private versionDetails() {
+    return {
+      projectionId: this.input.identity.projectionId,
+      runId: this.input.projectionRunId,
+      datasetId: this.input.identity.datasetVersion.datasetId,
+      versionId: this.input.identity.datasetVersion.versionId,
+    }
   }
 
   private shouldFlush(): boolean {

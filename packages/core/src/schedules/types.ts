@@ -8,9 +8,7 @@ import type {
 import type { LinkToken, ObjectTypeWithTokens, Property, PropertyToken } from "../ontology"
 import type {
   FieldPredicate,
-  OrderedPredicateValueFor,
   Predicate,
-  PredicateValueFor,
   PropertyPredicate,
   PropertyPredicateBuilder,
 } from "../predicates"
@@ -182,12 +180,6 @@ export type EventScheduleConditionFor<
   readonly scope: TScope
   readonly predicate: TPredicate
 }
-
-export type EventScheduleSerializableValue<TProperty extends Property> =
-  PredicateValueFor<TProperty>
-
-export type EventScheduleNumericValue<TProperty extends Property> =
-  OrderedPredicateValueFor<TProperty>
 
 type LinkPropertyTokens<TLink extends LinkToken> =
   NonNullable<TLink["link"]["properties"]> extends readonly Property[]

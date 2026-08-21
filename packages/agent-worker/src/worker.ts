@@ -8,20 +8,17 @@ import {
   workflowAgentNodeQueueJobId,
 } from "@sixb/core/internal/agents"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
+import { createSixbError, isSixbError } from "@sixb/core/internal/errors"
 import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { isAbortError, QueueDeliveryLeaseLostError, QueueWorker } from "@sixb/core/internal/workers"
 import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
 import type { AgentRunExecution, AgentRunRecord } from "@sixb/core/storage"
-import { AgentStorageError } from "@sixb/core/storage"
+import { AGENT_RUN_FAILURE_CODES, AgentStorageError } from "@sixb/core/storage"
 import { loadAgentSkills } from "./agent-skills"
 import { normalizeApiBaseUrl } from "./api-url"
-import {
-  AgentExecutionLostError,
-  AgentFinalizationError,
-  AgentUsageRecordingError,
-  AgentWorkerError,
-} from "./errors"
+import { AgentExecutionLostError, AgentFinalizationError, AgentUsageRecordingError } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
+import { type AgentRunFailure, toAgentExecutionFailure, toAgentRunFailure } from "./failure"
 import { finishRunOrThrow } from "./finalize"
 import {
   enqueueAiModelCallRecovery,
@@ -72,7 +69,7 @@ type Reservation =
  * for redelivery when we **cannot** record the fate (storage unavailable) — acking then would leave
  * the thread silently locked forever, since nothing else reclaims a run but a redelivered job.
  */
-export class AgentWorker extends QueueWorker<AgentQueueJob> {
+export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAILURE_CODES> {
   private readonly host: AgentWorkerHost
   private readonly context: AgentWorkerContext | null
   private readonly idleWithoutAgents: boolean
@@ -87,6 +84,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
     super({
       projectId: host.id,
       queue: host.queues.agents,
+      failureCodes: AGENT_RUN_FAILURE_CODES,
       workerId: `agent-worker-${host.id}`,
       claimLimit: normalizeConcurrency(options.concurrency),
       leaseMs,
@@ -145,7 +143,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
   protected async execute(
     claimed: ClaimedQueueJob<AgentQueueJob>,
     signal: AbortSignal,
-    delivery: QueueDelivery<AgentQueueJob>
+    delivery: QueueDelivery<AgentQueueJob, (typeof AGENT_RUN_FAILURE_CODES)[number]>
   ): Promise<void> {
     const context = this.requireContext()
     const { job } = claimed
@@ -171,22 +169,44 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
       id: runId,
     })
     if (!queuedRun) {
-      throw new AgentWorkerError(`Queued agent run '${runId}' was not found.`)
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbAgentWorker] Queued agent run '${runId}' was not found.`,
+        { details: { runId } }
+      )
     }
     if (queuedRun.status !== "queued" && queuedRun.status !== "running") {
       return
     }
     const agent = this.host.definitions.agents.getById(queuedRun.agentId)
     if (!agent) {
-      const error = new AgentWorkerError(`Unknown agent '${queuedRun.agentId}'.`)
+      const error = createSixbError(
+        "internal.unexpected",
+        `[SixbAgentWorker] Unknown agent '${queuedRun.agentId}'.`,
+        { details: agentRunFailureDetails(queuedRun) }
+      )
       if (queuedRun.status === "queued") {
+        const completedAt = new Date()
+        const failure = toAgentRunFailure(
+          createSixbError(
+            "internal.unexpected",
+            `[SixbAgentWorker] Agent '${queuedRun.agentId}' is not registered.`,
+            { details: agentRunFailureDetails(queuedRun) }
+          ),
+          {
+            status: "failed",
+            at: completedAt,
+            details: agentRunFailureDetails(queuedRun),
+          }
+        )
         const failed = await context.storage.agents.runs.finishQueued({
           projectId: context.id,
           id: queuedRun.id,
           status: "failed",
-          error: `Agent '${queuedRun.agentId}' is not registered.`,
+          error: failure,
+          completedAt,
         })
-        this.reportFailure(error, failed, job.attempt)
+        this.reportFailure(error, failed, job.attempt, failure)
         await context.streamSink.publishRunFinished(failed)
         return
       }
@@ -198,8 +218,16 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
       id: queuedRun.executionId,
     })
     if (!durableExecution) {
-      throw new AgentWorkerError(
-        `Agent run '${runId}' references missing execution '${queuedRun.executionId}'.`
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbAgentWorker] Agent run '${runId}' references missing execution '${queuedRun.executionId}'.`,
+        {
+          details: {
+            agentId: queuedRun.agentId,
+            runId,
+            executionId: queuedRun.executionId,
+          },
+        }
       )
     }
     const resolved = await resolveAgentExecutionAuthorization({
@@ -230,7 +258,11 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
     const run = reservation.run
     const executionToken = run.execution?.token
     if (!executionToken) {
-      throw new AgentWorkerError(`Agent run '${run.id}' has no execution token.`)
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbAgentWorker] Agent run '${run.id}' has no execution token.`,
+        { details: { agentId: run.agentId, runId: run.id } }
+      )
     }
     let environment: AgentExecutionEnvironment | null = null
     let stopOwnershipProjection: (() => void) | undefined
@@ -297,16 +329,16 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
         (signal.aborted || cancel.signal.aborted || isAbortError(error))
       const finalized = await this.recordFate(
         context,
-        run.id,
+        run,
         executionToken,
         aborted ? "cancelled" : "failed",
         error
       )
       if (finalized) {
-        if (finalized.status === "failed") {
-          this.reportFailure(error, finalized, job.attempt)
+        if (finalized.run.status === "failed") {
+          this.reportFailure(error, finalized.run, job.attempt, finalized.failure)
         }
-        await context.streamSink.publishRunFinished(finalized)
+        await context.streamSink.publishRunFinished(finalized.run)
       }
       // Shutdown abort: rethrow so `onAbortError` releases the job for another process. A user cancel
       // or a recorded model/tool failure keeps its fate on the record, so we ack by returning.
@@ -340,7 +372,9 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
       }
       return { kind: "fail" }
     }
-    if (error instanceof AgentWorkerError) {
+    // Known deterministic failures honor the catalog policy; uncoded dependency failures retain
+    // the worker's bounded pre-start retry path below.
+    if (isSixbError(error) && !error.retryable) {
       return { kind: "fail" }
     }
 
@@ -360,13 +394,20 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
       id: runId,
     })
     if (run?.status === "queued") {
+      const completedAt = new Date()
+      const failure = toAgentRunFailure(error, {
+        status: "failed",
+        at: completedAt,
+        details: agentRunFailureDetails(run),
+      })
       const failed = await this.requireContext().storage.agents.runs.finishQueued({
         projectId: this.host.id,
         id: run.id,
         status: "failed",
-        error: toErrorMessage(error),
+        error: failure,
+        completedAt,
       })
-      this.reportFailure(error, failed, claimed.job.attempt)
+      this.reportFailure(error, failed, claimed.job.attempt, failure)
       await this.requireContext().streamSink.publishRunFinished(failed)
     }
     return { kind: "fail" }
@@ -482,7 +523,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
 
   private requireContext(): AgentWorkerContext {
     if (!this.context) {
-      throw new AgentWorkerError("Agent worker has no agent storage configured.")
+      throw createSixbError(
+        "internal.unexpected",
+        "[SixbAgentWorker] Agent worker has no agent storage configured."
+      )
     }
     return this.context
   }
@@ -562,34 +606,47 @@ export class AgentWorker extends QueueWorker<AgentQueueJob> {
     })
   }
 
-  private reportFailure(error: unknown, run: AgentRunRecord, attempt: number): void {
+  private reportFailure(
+    error: unknown,
+    run: AgentRunRecord,
+    attempt: number,
+    failure: AgentRunFailure
+  ): void {
     reportRunFailure(this.host, error, {
       projectId: this.host.id,
-      occurredAt: run.completedAt,
       attempt,
+      runKind: "agent",
       run: {
-        kind: "agent",
         runId: run.id,
         agentId: run.agentId,
       },
+      failure,
     })
   }
 
   private async recordFate(
     context: AgentWorkerContext,
-    runId: string,
+    run: AgentRunRecord,
     executionToken: string,
     status: "failed" | "cancelled",
     error: unknown
-  ): Promise<AgentRunRecord | undefined> {
+  ): Promise<{ readonly run: AgentRunRecord; readonly failure: AgentRunFailure } | undefined> {
     try {
-      return await finishRunOrThrow(context.storage.agents, {
+      const completedAt = new Date()
+      const failure = toAgentExecutionFailure(error, {
+        status,
+        at: completedAt,
+        details: agentRunFailureDetails(run),
+      })
+      const finalized = await finishRunOrThrow(context.storage.agents, {
         projectId: context.id,
-        id: runId,
+        id: run.id,
         executionToken,
         status,
-        error: toErrorMessage(error),
+        error: failure,
+        completedAt,
       })
+      return { run: finalized, failure }
     } catch (finalizeError) {
       // Execution already lost / run already terminal — nothing more to record.
       if (finalizeError instanceof AgentExecutionLostError) {
@@ -605,8 +662,9 @@ function buildAgentContext(host: AgentWorkerHost, options: AgentWorkerOptions): 
   const storage = host.storage
   assertAgentWorkerStorage(storage)
   if (!host.sandboxes) {
-    throw new AgentWorkerError(
-      "Agent workers require createSixb({ sandboxes }) for the built-in bash tool."
+    throw createSixbError(
+      "internal.unexpected",
+      "[SixbAgentWorker] Agent workers require createSixb({ sandboxes }) for the built-in bash tool."
     )
   }
   const agentSkills = loadAgentSkills({
@@ -640,13 +698,22 @@ function assertAgentWorkerStorage(
   storage: AgentWorkerHost["storage"]
 ): asserts storage is AgentWorkerStorage {
   if (!storage.agents) {
-    throw new AgentWorkerError("Agent workers require storage.agents support.")
+    throw createSixbError(
+      "internal.unexpected",
+      "[SixbAgentWorker] Agent workers require storage.agents support."
+    )
   }
   if (!storage.auth) {
-    throw new AgentWorkerError("Agent workers require storage.auth support.")
+    throw createSixbError(
+      "internal.unexpected",
+      "[SixbAgentWorker] Agent workers require storage.auth support."
+    )
   }
   if (!storage.aiUsage) {
-    throw new AgentWorkerError("Agent workers require storage.aiUsage support.")
+    throw createSixbError(
+      "internal.unexpected",
+      "[SixbAgentWorker] Agent workers require storage.aiUsage support."
+    )
   }
 }
 
@@ -678,17 +745,19 @@ function aiUsageRecoveryBackoffMs(attempt: number): number {
   )
 }
 
-function toErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message
-  }
-  return String(error)
+function agentRunFailureDetails(
+  run: Pick<AgentRunRecord, "id" | "agentId" | "threadId">
+): Readonly<Record<string, string>> {
+  return { agentId: run.agentId, runId: run.id, threadId: run.threadId }
 }
 
 function normalizeRequiredString(value: string | undefined): string {
   const trimmed = value?.trim()
   if (!trimmed) {
-    throw new AgentWorkerError("Agent workers require options.apiBaseUrl.")
+    throw createSixbError(
+      "internal.unexpected",
+      "[SixbAgentWorker] Agent workers require options.apiBaseUrl."
+    )
   }
   return trimmed
 }
@@ -711,7 +780,10 @@ function normalizeConcurrency(value: number | undefined): number {
     return DEFAULT_AGENT_CONCURRENCY
   }
   if (!Number.isFinite(value) || value < 1) {
-    throw new AgentWorkerError("Agent worker concurrency must be at least 1.")
+    throw createSixbError(
+      "internal.unexpected",
+      "[SixbAgentWorker] Agent worker concurrency must be at least 1."
+    )
   }
   return Math.floor(value)
 }

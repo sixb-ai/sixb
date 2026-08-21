@@ -1,9 +1,31 @@
 import type {
   ObjectQueryCapabilities,
   ObjectStorage,
+  OntologyOutboxFailureCode,
+  OntologyOutboxRecord,
   QueryObjectsInput,
   QueryObjectsResult,
+  WebhookDeliveryFailureCode,
+  WebhookDeliveryRecord,
 } from "../src/storage"
+
+const outboxFailureCode: OntologyOutboxFailureCode = "event.delivery_failed"
+const storedOutboxFailureCode: NonNullable<OntologyOutboxRecord["lastFailure"]>["code"] =
+  outboxFailureCode
+// @ts-expect-error The outbox exposes only its declared delivery-failure code.
+const unrelatedOutboxFailureCode: OntologyOutboxFailureCode = "internal.unexpected"
+
+void storedOutboxFailureCode
+void unrelatedOutboxFailureCode
+
+const deliveryFailureCode: WebhookDeliveryFailureCode = "webhook.delivery_failed"
+const storedDeliveryFailureCode: NonNullable<WebhookDeliveryRecord["failure"]>["code"] =
+  deliveryFailureCode
+// @ts-expect-error The delivery journal exposes only its retryable delivery-failure code.
+const unrelatedDeliveryFailureCode: WebhookDeliveryFailureCode = "internal.unexpected"
+
+void storedDeliveryFailureCode
+void unrelatedDeliveryFailureCode
 
 const capabilities: ObjectQueryCapabilities = {
   queryObjects: true,
