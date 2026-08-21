@@ -246,9 +246,9 @@ test("keeps the caller-owned dedupe window independent from the command timeout"
   ).not.toThrow()
 })
 
-test("bounds the latest-cursor lookup before starting a subscription", async () => {
-  // To prove this guards the bootstrap path, resolve the latest cursor with the raw subscription
-  // client again. Its XREVRANGE then hangs until this test's own timeout.
+test("bounds the latest-cursor lookup on the subscription client", async () => {
+  // To prove this guards the bootstrap path, pass the raw subscription client to
+  // `subscriptionStartCursor` again. Its XREVRANGE then hangs until this test's own timeout.
   const ensured: EnsuredStream = {
     projectId: "project",
     streamId: "events",
@@ -281,6 +281,6 @@ test("bounds the latest-cursor lookup before starting a subscription", async () 
   )
 
   expect(error).toBeInstanceOf(RedisBrokerError)
-  expect(clientCount).toBe(1)
+  expect(clientCount).toBe(2)
   await broker.close()
 }, 250)

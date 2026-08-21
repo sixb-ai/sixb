@@ -143,8 +143,8 @@ export class RedisConnectionManager {
     }
   }
 
-  /** Wraps every ordinary client command in its own timeout while preserving the shared lock. */
-  private boundedCommandClient(client: RedisBrokerClient): RedisBrokerCommandClient {
+  /** Returns a facade that applies the command timeout to every non-blocking call. */
+  boundedCommandClient(client: RedisBrokerClient): RedisBrokerCommandClient {
     return {
       exists: (key) => this.runWithCommandTimeout(client, "EXISTS", () => client.exists(key)),
       hmget: (key, fields) =>
@@ -173,7 +173,7 @@ export class RedisConnectionManager {
         pending,
         new Promise<never>((_resolve, reject) => {
           timer = setTimeout(() => {
-            this.discardCommandClient(client)
+            this.discardClient(client)
             reportAbandonedCommand(command, pending, timeoutMs)
             reject(
               new RedisBrokerError(`Redis command ${command} did not respond within ${timeoutMs}ms`)
@@ -186,12 +186,11 @@ export class RedisConnectionManager {
     }
   }
 
-  /** Drops the main client after a timeout so the next operation connects a fresh one. */
-  private discardCommandClient(client: RedisBrokerClient): void {
-    if (this.client !== client) {
-      return
+  /** Closes a timed-out client and forgets it when it is the shared command client. */
+  private discardClient(client: RedisBrokerClient): void {
+    if (this.client === client) {
+      this.client = undefined
     }
-    this.client = undefined
     this.closeClient(client)
   }
 
