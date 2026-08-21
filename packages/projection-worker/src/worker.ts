@@ -10,7 +10,12 @@ import { registerOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { ClaimedQueueJob, ProjectionRunRequestedQueueJob } from "@sixb/core/queues"
-import { PROJECTION_RUN_FAILURE_CODES, type ProjectionRunStorage } from "@sixb/core/storage"
+import {
+  PROJECTION_RUN_FAILURE_CODES,
+  type ProjectionRunFailureCode,
+  type ProjectionRunRecord,
+  type ProjectionRunStorage,
+} from "@sixb/core/storage"
 import { projectionRetryAvailableAt } from "./retry-backoff"
 import { isPermanentProjectionFailure, runProjectionJob } from "./run-projection-job"
 import type { ProjectionWorkerContext } from "./types"
@@ -92,16 +97,20 @@ export class ProjectionWorker extends QueueWorker<
   protected override async onExecutionError(
     claimed: ClaimedQueueJob<ProjectionRunRequestedQueueJob>,
     error: unknown
-  ): Promise<QueueWorkerFailureDecision> {
+  ): Promise<QueueWorkerFailureDecision<ProjectionRunFailureCode>> {
     return this.failureDecision(claimed, error)
   }
 
   protected override async onAbortError(
     claimed: ClaimedQueueJob<ProjectionRunRequestedQueueJob>,
     error: unknown
-  ): Promise<QueueWorkerFailureDecision> {
+  ): Promise<QueueWorkerFailureDecision<ProjectionRunFailureCode>> {
     if (error instanceof MaterializationCancellationError) {
-      return { kind: "fail" }
+      const run = await this.projectionRunsStorage.getById({
+        projectId: this.host.id,
+        id: claimed.job.payload.runId,
+      })
+      return terminalFailureDecision(run)
     }
     return this.failureDecision(claimed, error)
   }
@@ -109,7 +118,7 @@ export class ProjectionWorker extends QueueWorker<
   private async failureDecision(
     claimed: ClaimedQueueJob<ProjectionRunRequestedQueueJob>,
     error: unknown
-  ): Promise<QueueWorkerFailureDecision> {
+  ): Promise<QueueWorkerFailureDecision<ProjectionRunFailureCode>> {
     const run = await this.projectionRunsStorage.getById({
       projectId: this.host.id,
       id: claimed.job.payload.runId,
@@ -118,9 +127,15 @@ export class ProjectionWorker extends QueueWorker<
     if (run?.status === "queued") {
       return isPermanentProjectionFailure(error) ? { kind: "fail" } : retryWithBackoff(claimed)
     }
-    if (run) return { kind: "fail" }
+    if (run) return terminalFailureDecision(run)
     return isPermanentProjectionFailure(error) ? { kind: "fail" } : retryWithBackoff(claimed)
   }
+}
+
+function terminalFailureDecision(
+  run: ProjectionRunRecord | null
+): QueueWorkerFailureDecision<ProjectionRunFailureCode> {
+  return run?.error ? { kind: "fail", failure: run.error } : { kind: "fail" }
 }
 
 function retryWithBackoff(

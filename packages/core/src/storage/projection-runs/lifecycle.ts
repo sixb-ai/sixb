@@ -641,12 +641,8 @@ function assertPersistedLifecycle(row: PersistedProjectionRunRecord): void {
       return
     }
   }
-  if (
-    row.attempt < 1 ||
-    row.startedAt === undefined ||
-    (row.status === "succeeded" && hasError)
-  ) {
-      throw incompleteProjectionRun(row.id)
+  if (row.attempt < 1 || row.startedAt === undefined || (row.status === "succeeded" && hasError)) {
+    throw incompleteProjectionRun(row.id)
   }
 }
 

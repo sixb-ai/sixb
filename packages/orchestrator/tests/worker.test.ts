@@ -883,7 +883,7 @@ describe("OrchestratorWorker", () => {
       code: "internal.unexpected",
       retryable: false,
       message:
-        "[SixbOrchestrator] Projection routes require lake and projection-run storage for durable dispatch.",
+        "[SixbOrchestrator] Projection routes require lake storage for durable reconciliation.",
       details: {
         projectId: PROJECT_ID,
         projectionIds: [descriptor.projectionId],
