@@ -81,6 +81,12 @@ export {
   startTestPipelineRun,
 } from "./pipeline-execution"
 export {
+  claimTestProjectionRun,
+  createTestProjectionExecution,
+  queueTestProjectionRun,
+  startTestProjectionRun,
+} from "./projection-execution"
+export {
   type ProjectionRunStorageContractSuiteOptions,
   runProjectionRunStorageContractSuite,
 } from "./projection-run-storage-contract"

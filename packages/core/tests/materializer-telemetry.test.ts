@@ -3,6 +3,7 @@ import { InMemoryStorage } from "../src"
 import type { Storage, StorageTransactionOptions } from "../src/storage"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
+import { startTestProjectionRun } from "../src/testing"
 import {
   claimProjectionExecution,
   createMaterializerFixture,
@@ -25,7 +26,7 @@ describe("ontology materializer telemetry", () => {
       versionId: "wrong-telemetry-target",
       createdAt: "2026-01-01T00:00:00.000Z",
     }
-    const run = await storage.projectionRuns.startOrReclaim({
+    const run = await startTestProjectionRun(storage, {
       id: "wrong-telemetry-target-run",
       projectId: "project",
       identity: {

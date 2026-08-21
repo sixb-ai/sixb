@@ -25321,9 +25321,18 @@
                                   "projectId": {
                                     "type": "string"
                                   },
+                                  "executionId": {
+                                    "type": "string"
+                                  },
                                   "status": {
                                     "type": "string",
-                                    "enum": ["running", "succeeded", "failed", "cancelled"]
+                                    "enum": [
+                                      "queued",
+                                      "running",
+                                      "succeeded",
+                                      "failed",
+                                      "cancelled"
+                                    ]
                                   },
                                   "attempt": {
                                     "type": "number"
@@ -25341,6 +25350,9 @@
                                     "required": ["sourceRowsRead", "sourceRowsSkipped"],
                                     "additionalProperties": false
                                   },
+                                  "queuedAt": {
+                                    "type": "string"
+                                  },
                                   "startedAt": {
                                     "type": "string"
                                   },
@@ -25355,6 +25367,7 @@
                                         "enum": [
                                           "internal.unexpected",
                                           "runtime.cancelled",
+                                          "queue.enqueue_failed",
                                           "projection.execution_failed"
                                         ]
                                       },
@@ -25465,10 +25478,11 @@
                                 "required": [
                                   "id",
                                   "projectId",
+                                  "executionId",
                                   "status",
                                   "attempt",
                                   "progress",
-                                  "startedAt",
+                                  "queuedAt",
                                   "identity",
                                   "target"
                                 ],
@@ -25483,9 +25497,18 @@
                                   "projectId": {
                                     "type": "string"
                                   },
+                                  "executionId": {
+                                    "type": "string"
+                                  },
                                   "status": {
                                     "type": "string",
-                                    "enum": ["running", "succeeded", "failed", "cancelled"]
+                                    "enum": [
+                                      "queued",
+                                      "running",
+                                      "succeeded",
+                                      "failed",
+                                      "cancelled"
+                                    ]
                                   },
                                   "attempt": {
                                     "type": "number"
@@ -25503,6 +25526,9 @@
                                     "required": ["sourceRowsRead", "sourceRowsSkipped"],
                                     "additionalProperties": false
                                   },
+                                  "queuedAt": {
+                                    "type": "string"
+                                  },
                                   "startedAt": {
                                     "type": "string"
                                   },
@@ -25517,6 +25543,7 @@
                                         "enum": [
                                           "internal.unexpected",
                                           "runtime.cancelled",
+                                          "queue.enqueue_failed",
                                           "projection.execution_failed"
                                         ]
                                       },
@@ -25630,10 +25657,11 @@
                                 "required": [
                                   "id",
                                   "projectId",
+                                  "executionId",
                                   "status",
                                   "attempt",
                                   "progress",
-                                  "startedAt",
+                                  "queuedAt",
                                   "identity",
                                   "target"
                                 ],
@@ -25648,9 +25676,18 @@
                                   "projectId": {
                                     "type": "string"
                                   },
+                                  "executionId": {
+                                    "type": "string"
+                                  },
                                   "status": {
                                     "type": "string",
-                                    "enum": ["running", "succeeded", "failed", "cancelled"]
+                                    "enum": [
+                                      "queued",
+                                      "running",
+                                      "succeeded",
+                                      "failed",
+                                      "cancelled"
+                                    ]
                                   },
                                   "attempt": {
                                     "type": "number"
@@ -25668,6 +25705,9 @@
                                     "required": ["sourceRowsRead", "sourceRowsSkipped"],
                                     "additionalProperties": false
                                   },
+                                  "queuedAt": {
+                                    "type": "string"
+                                  },
                                   "startedAt": {
                                     "type": "string"
                                   },
@@ -25682,6 +25722,7 @@
                                         "enum": [
                                           "internal.unexpected",
                                           "runtime.cancelled",
+                                          "queue.enqueue_failed",
                                           "projection.execution_failed"
                                         ]
                                       },
@@ -25792,10 +25833,11 @@
                                 "required": [
                                   "id",
                                   "projectId",
+                                  "executionId",
                                   "status",
                                   "attempt",
                                   "progress",
-                                  "startedAt",
+                                  "queuedAt",
                                   "identity",
                                   "target"
                                 ],
@@ -25858,9 +25900,18 @@
                                   "projectId": {
                                     "type": "string"
                                   },
+                                  "executionId": {
+                                    "type": "string"
+                                  },
                                   "status": {
                                     "type": "string",
-                                    "enum": ["running", "succeeded", "failed", "cancelled"]
+                                    "enum": [
+                                      "queued",
+                                      "running",
+                                      "succeeded",
+                                      "failed",
+                                      "cancelled"
+                                    ]
                                   },
                                   "attempt": {
                                     "type": "number"
@@ -25878,6 +25929,9 @@
                                     "required": ["sourceRowsRead", "sourceRowsSkipped"],
                                     "additionalProperties": false
                                   },
+                                  "queuedAt": {
+                                    "type": "string"
+                                  },
                                   "startedAt": {
                                     "type": "string"
                                   },
@@ -25892,6 +25946,7 @@
                                         "enum": [
                                           "internal.unexpected",
                                           "runtime.cancelled",
+                                          "queue.enqueue_failed",
                                           "projection.execution_failed"
                                         ]
                                       },
@@ -26002,10 +26057,11 @@
                                 "required": [
                                   "id",
                                   "projectId",
+                                  "executionId",
                                   "status",
                                   "attempt",
                                   "progress",
-                                  "startedAt",
+                                  "queuedAt",
                                   "identity",
                                   "target"
                                 ],
@@ -26020,9 +26076,18 @@
                                   "projectId": {
                                     "type": "string"
                                   },
+                                  "executionId": {
+                                    "type": "string"
+                                  },
                                   "status": {
                                     "type": "string",
-                                    "enum": ["running", "succeeded", "failed", "cancelled"]
+                                    "enum": [
+                                      "queued",
+                                      "running",
+                                      "succeeded",
+                                      "failed",
+                                      "cancelled"
+                                    ]
                                   },
                                   "attempt": {
                                     "type": "number"
@@ -26040,6 +26105,9 @@
                                     "required": ["sourceRowsRead", "sourceRowsSkipped"],
                                     "additionalProperties": false
                                   },
+                                  "queuedAt": {
+                                    "type": "string"
+                                  },
                                   "startedAt": {
                                     "type": "string"
                                   },
@@ -26054,6 +26122,7 @@
                                         "enum": [
                                           "internal.unexpected",
                                           "runtime.cancelled",
+                                          "queue.enqueue_failed",
                                           "projection.execution_failed"
                                         ]
                                       },
@@ -26167,10 +26236,11 @@
                                 "required": [
                                   "id",
                                   "projectId",
+                                  "executionId",
                                   "status",
                                   "attempt",
                                   "progress",
-                                  "startedAt",
+                                  "queuedAt",
                                   "identity",
                                   "target"
                                 ],
@@ -26185,9 +26255,18 @@
                                   "projectId": {
                                     "type": "string"
                                   },
+                                  "executionId": {
+                                    "type": "string"
+                                  },
                                   "status": {
                                     "type": "string",
-                                    "enum": ["running", "succeeded", "failed", "cancelled"]
+                                    "enum": [
+                                      "queued",
+                                      "running",
+                                      "succeeded",
+                                      "failed",
+                                      "cancelled"
+                                    ]
                                   },
                                   "attempt": {
                                     "type": "number"
@@ -26205,6 +26284,9 @@
                                     "required": ["sourceRowsRead", "sourceRowsSkipped"],
                                     "additionalProperties": false
                                   },
+                                  "queuedAt": {
+                                    "type": "string"
+                                  },
                                   "startedAt": {
                                     "type": "string"
                                   },
@@ -26219,6 +26301,7 @@
                                         "enum": [
                                           "internal.unexpected",
                                           "runtime.cancelled",
+                                          "queue.enqueue_failed",
                                           "projection.execution_failed"
                                         ]
                                       },
@@ -26329,10 +26412,11 @@
                                 "required": [
                                   "id",
                                   "projectId",
+                                  "executionId",
                                   "status",
                                   "attempt",
                                   "progress",
-                                  "startedAt",
+                                  "queuedAt",
                                   "identity",
                                   "target"
                                 ],
@@ -26400,9 +26484,18 @@
                                   "projectId": {
                                     "type": "string"
                                   },
+                                  "executionId": {
+                                    "type": "string"
+                                  },
                                   "status": {
                                     "type": "string",
-                                    "enum": ["running", "succeeded", "failed", "cancelled"]
+                                    "enum": [
+                                      "queued",
+                                      "running",
+                                      "succeeded",
+                                      "failed",
+                                      "cancelled"
+                                    ]
                                   },
                                   "attempt": {
                                     "type": "number"
@@ -26420,6 +26513,9 @@
                                     "required": ["sourceRowsRead", "sourceRowsSkipped"],
                                     "additionalProperties": false
                                   },
+                                  "queuedAt": {
+                                    "type": "string"
+                                  },
                                   "startedAt": {
                                     "type": "string"
                                   },
@@ -26434,6 +26530,7 @@
                                         "enum": [
                                           "internal.unexpected",
                                           "runtime.cancelled",
+                                          "queue.enqueue_failed",
                                           "projection.execution_failed"
                                         ]
                                       },
@@ -26544,10 +26641,11 @@
                                 "required": [
                                   "id",
                                   "projectId",
+                                  "executionId",
                                   "status",
                                   "attempt",
                                   "progress",
-                                  "startedAt",
+                                  "queuedAt",
                                   "identity",
                                   "target"
                                 ],
@@ -26562,9 +26660,18 @@
                                   "projectId": {
                                     "type": "string"
                                   },
+                                  "executionId": {
+                                    "type": "string"
+                                  },
                                   "status": {
                                     "type": "string",
-                                    "enum": ["running", "succeeded", "failed", "cancelled"]
+                                    "enum": [
+                                      "queued",
+                                      "running",
+                                      "succeeded",
+                                      "failed",
+                                      "cancelled"
+                                    ]
                                   },
                                   "attempt": {
                                     "type": "number"
@@ -26582,6 +26689,9 @@
                                     "required": ["sourceRowsRead", "sourceRowsSkipped"],
                                     "additionalProperties": false
                                   },
+                                  "queuedAt": {
+                                    "type": "string"
+                                  },
                                   "startedAt": {
                                     "type": "string"
                                   },
@@ -26596,6 +26706,7 @@
                                         "enum": [
                                           "internal.unexpected",
                                           "runtime.cancelled",
+                                          "queue.enqueue_failed",
                                           "projection.execution_failed"
                                         ]
                                       },
@@ -26709,10 +26820,11 @@
                                 "required": [
                                   "id",
                                   "projectId",
+                                  "executionId",
                                   "status",
                                   "attempt",
                                   "progress",
-                                  "startedAt",
+                                  "queuedAt",
                                   "identity",
                                   "target"
                                 ],
@@ -26727,9 +26839,18 @@
                                   "projectId": {
                                     "type": "string"
                                   },
+                                  "executionId": {
+                                    "type": "string"
+                                  },
                                   "status": {
                                     "type": "string",
-                                    "enum": ["running", "succeeded", "failed", "cancelled"]
+                                    "enum": [
+                                      "queued",
+                                      "running",
+                                      "succeeded",
+                                      "failed",
+                                      "cancelled"
+                                    ]
                                   },
                                   "attempt": {
                                     "type": "number"
@@ -26747,6 +26868,9 @@
                                     "required": ["sourceRowsRead", "sourceRowsSkipped"],
                                     "additionalProperties": false
                                   },
+                                  "queuedAt": {
+                                    "type": "string"
+                                  },
                                   "startedAt": {
                                     "type": "string"
                                   },
@@ -26761,6 +26885,7 @@
                                         "enum": [
                                           "internal.unexpected",
                                           "runtime.cancelled",
+                                          "queue.enqueue_failed",
                                           "projection.execution_failed"
                                         ]
                                       },
@@ -26871,10 +26996,11 @@
                                 "required": [
                                   "id",
                                   "projectId",
+                                  "executionId",
                                   "status",
                                   "attempt",
                                   "progress",
-                                  "startedAt",
+                                  "queuedAt",
                                   "identity",
                                   "target"
                                 ],
@@ -26986,9 +27112,12 @@
                                 "projectId": {
                                   "type": "string"
                                 },
+                                "executionId": {
+                                  "type": "string"
+                                },
                                 "status": {
                                   "type": "string",
-                                  "enum": ["running", "succeeded", "failed", "cancelled"]
+                                  "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                                 },
                                 "attempt": {
                                   "type": "number"
@@ -27006,6 +27135,9 @@
                                   "required": ["sourceRowsRead", "sourceRowsSkipped"],
                                   "additionalProperties": false
                                 },
+                                "queuedAt": {
+                                  "type": "string"
+                                },
                                 "startedAt": {
                                   "type": "string"
                                 },
@@ -27020,6 +27152,7 @@
                                       "enum": [
                                         "internal.unexpected",
                                         "runtime.cancelled",
+                                        "queue.enqueue_failed",
                                         "projection.execution_failed"
                                       ]
                                     },
@@ -27130,10 +27263,11 @@
                               "required": [
                                 "id",
                                 "projectId",
+                                "executionId",
                                 "status",
                                 "attempt",
                                 "progress",
-                                "startedAt",
+                                "queuedAt",
                                 "identity",
                                 "target"
                               ],
@@ -27148,9 +27282,12 @@
                                 "projectId": {
                                   "type": "string"
                                 },
+                                "executionId": {
+                                  "type": "string"
+                                },
                                 "status": {
                                   "type": "string",
-                                  "enum": ["running", "succeeded", "failed", "cancelled"]
+                                  "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                                 },
                                 "attempt": {
                                   "type": "number"
@@ -27168,6 +27305,9 @@
                                   "required": ["sourceRowsRead", "sourceRowsSkipped"],
                                   "additionalProperties": false
                                 },
+                                "queuedAt": {
+                                  "type": "string"
+                                },
                                 "startedAt": {
                                   "type": "string"
                                 },
@@ -27182,6 +27322,7 @@
                                       "enum": [
                                         "internal.unexpected",
                                         "runtime.cancelled",
+                                        "queue.enqueue_failed",
                                         "projection.execution_failed"
                                       ]
                                     },
@@ -27295,10 +27436,11 @@
                               "required": [
                                 "id",
                                 "projectId",
+                                "executionId",
                                 "status",
                                 "attempt",
                                 "progress",
-                                "startedAt",
+                                "queuedAt",
                                 "identity",
                                 "target"
                               ],
@@ -27313,9 +27455,12 @@
                                 "projectId": {
                                   "type": "string"
                                 },
+                                "executionId": {
+                                  "type": "string"
+                                },
                                 "status": {
                                   "type": "string",
-                                  "enum": ["running", "succeeded", "failed", "cancelled"]
+                                  "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                                 },
                                 "attempt": {
                                   "type": "number"
@@ -27333,6 +27478,9 @@
                                   "required": ["sourceRowsRead", "sourceRowsSkipped"],
                                   "additionalProperties": false
                                 },
+                                "queuedAt": {
+                                  "type": "string"
+                                },
                                 "startedAt": {
                                   "type": "string"
                                 },
@@ -27347,6 +27495,7 @@
                                       "enum": [
                                         "internal.unexpected",
                                         "runtime.cancelled",
+                                        "queue.enqueue_failed",
                                         "projection.execution_failed"
                                       ]
                                     },
@@ -27457,10 +27606,11 @@
                               "required": [
                                 "id",
                                 "projectId",
+                                "executionId",
                                 "status",
                                 "attempt",
                                 "progress",
-                                "startedAt",
+                                "queuedAt",
                                 "identity",
                                 "target"
                               ],
@@ -27520,9 +27670,12 @@
                                 "projectId": {
                                   "type": "string"
                                 },
+                                "executionId": {
+                                  "type": "string"
+                                },
                                 "status": {
                                   "type": "string",
-                                  "enum": ["running", "succeeded", "failed", "cancelled"]
+                                  "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                                 },
                                 "attempt": {
                                   "type": "number"
@@ -27540,6 +27693,9 @@
                                   "required": ["sourceRowsRead", "sourceRowsSkipped"],
                                   "additionalProperties": false
                                 },
+                                "queuedAt": {
+                                  "type": "string"
+                                },
                                 "startedAt": {
                                   "type": "string"
                                 },
@@ -27554,6 +27710,7 @@
                                       "enum": [
                                         "internal.unexpected",
                                         "runtime.cancelled",
+                                        "queue.enqueue_failed",
                                         "projection.execution_failed"
                                       ]
                                     },
@@ -27664,10 +27821,11 @@
                               "required": [
                                 "id",
                                 "projectId",
+                                "executionId",
                                 "status",
                                 "attempt",
                                 "progress",
-                                "startedAt",
+                                "queuedAt",
                                 "identity",
                                 "target"
                               ],
@@ -27682,9 +27840,12 @@
                                 "projectId": {
                                   "type": "string"
                                 },
+                                "executionId": {
+                                  "type": "string"
+                                },
                                 "status": {
                                   "type": "string",
-                                  "enum": ["running", "succeeded", "failed", "cancelled"]
+                                  "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                                 },
                                 "attempt": {
                                   "type": "number"
@@ -27702,6 +27863,9 @@
                                   "required": ["sourceRowsRead", "sourceRowsSkipped"],
                                   "additionalProperties": false
                                 },
+                                "queuedAt": {
+                                  "type": "string"
+                                },
                                 "startedAt": {
                                   "type": "string"
                                 },
@@ -27716,6 +27880,7 @@
                                       "enum": [
                                         "internal.unexpected",
                                         "runtime.cancelled",
+                                        "queue.enqueue_failed",
                                         "projection.execution_failed"
                                       ]
                                     },
@@ -27829,10 +27994,11 @@
                               "required": [
                                 "id",
                                 "projectId",
+                                "executionId",
                                 "status",
                                 "attempt",
                                 "progress",
-                                "startedAt",
+                                "queuedAt",
                                 "identity",
                                 "target"
                               ],
@@ -27847,9 +28013,12 @@
                                 "projectId": {
                                   "type": "string"
                                 },
+                                "executionId": {
+                                  "type": "string"
+                                },
                                 "status": {
                                   "type": "string",
-                                  "enum": ["running", "succeeded", "failed", "cancelled"]
+                                  "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                                 },
                                 "attempt": {
                                   "type": "number"
@@ -27867,6 +28036,9 @@
                                   "required": ["sourceRowsRead", "sourceRowsSkipped"],
                                   "additionalProperties": false
                                 },
+                                "queuedAt": {
+                                  "type": "string"
+                                },
                                 "startedAt": {
                                   "type": "string"
                                 },
@@ -27881,6 +28053,7 @@
                                       "enum": [
                                         "internal.unexpected",
                                         "runtime.cancelled",
+                                        "queue.enqueue_failed",
                                         "projection.execution_failed"
                                       ]
                                     },
@@ -27991,10 +28164,11 @@
                               "required": [
                                 "id",
                                 "projectId",
+                                "executionId",
                                 "status",
                                 "attempt",
                                 "progress",
-                                "startedAt",
+                                "queuedAt",
                                 "identity",
                                 "target"
                               ],
@@ -28059,9 +28233,12 @@
                                 "projectId": {
                                   "type": "string"
                                 },
+                                "executionId": {
+                                  "type": "string"
+                                },
                                 "status": {
                                   "type": "string",
-                                  "enum": ["running", "succeeded", "failed", "cancelled"]
+                                  "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                                 },
                                 "attempt": {
                                   "type": "number"
@@ -28079,6 +28256,9 @@
                                   "required": ["sourceRowsRead", "sourceRowsSkipped"],
                                   "additionalProperties": false
                                 },
+                                "queuedAt": {
+                                  "type": "string"
+                                },
                                 "startedAt": {
                                   "type": "string"
                                 },
@@ -28093,6 +28273,7 @@
                                       "enum": [
                                         "internal.unexpected",
                                         "runtime.cancelled",
+                                        "queue.enqueue_failed",
                                         "projection.execution_failed"
                                       ]
                                     },
@@ -28203,10 +28384,11 @@
                               "required": [
                                 "id",
                                 "projectId",
+                                "executionId",
                                 "status",
                                 "attempt",
                                 "progress",
-                                "startedAt",
+                                "queuedAt",
                                 "identity",
                                 "target"
                               ],
@@ -28221,9 +28403,12 @@
                                 "projectId": {
                                   "type": "string"
                                 },
+                                "executionId": {
+                                  "type": "string"
+                                },
                                 "status": {
                                   "type": "string",
-                                  "enum": ["running", "succeeded", "failed", "cancelled"]
+                                  "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                                 },
                                 "attempt": {
                                   "type": "number"
@@ -28241,6 +28426,9 @@
                                   "required": ["sourceRowsRead", "sourceRowsSkipped"],
                                   "additionalProperties": false
                                 },
+                                "queuedAt": {
+                                  "type": "string"
+                                },
                                 "startedAt": {
                                   "type": "string"
                                 },
@@ -28255,6 +28443,7 @@
                                       "enum": [
                                         "internal.unexpected",
                                         "runtime.cancelled",
+                                        "queue.enqueue_failed",
                                         "projection.execution_failed"
                                       ]
                                     },
@@ -28368,10 +28557,11 @@
                               "required": [
                                 "id",
                                 "projectId",
+                                "executionId",
                                 "status",
                                 "attempt",
                                 "progress",
-                                "startedAt",
+                                "queuedAt",
                                 "identity",
                                 "target"
                               ],
@@ -28386,9 +28576,12 @@
                                 "projectId": {
                                   "type": "string"
                                 },
+                                "executionId": {
+                                  "type": "string"
+                                },
                                 "status": {
                                   "type": "string",
-                                  "enum": ["running", "succeeded", "failed", "cancelled"]
+                                  "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                                 },
                                 "attempt": {
                                   "type": "number"
@@ -28406,6 +28599,9 @@
                                   "required": ["sourceRowsRead", "sourceRowsSkipped"],
                                   "additionalProperties": false
                                 },
+                                "queuedAt": {
+                                  "type": "string"
+                                },
                                 "startedAt": {
                                   "type": "string"
                                 },
@@ -28420,6 +28616,7 @@
                                       "enum": [
                                         "internal.unexpected",
                                         "runtime.cancelled",
+                                        "queue.enqueue_failed",
                                         "projection.execution_failed"
                                       ]
                                     },
@@ -28530,10 +28727,11 @@
                               "required": [
                                 "id",
                                 "projectId",
+                                "executionId",
                                 "status",
                                 "attempt",
                                 "progress",
-                                "startedAt",
+                                "queuedAt",
                                 "identity",
                                 "target"
                               ],
@@ -28626,7 +28824,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["running", "succeeded", "failed", "cancelled"]
+              "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
             }
           },
           {
@@ -28692,9 +28890,12 @@
                               "projectId": {
                                 "type": "string"
                               },
+                              "executionId": {
+                                "type": "string"
+                              },
                               "status": {
                                 "type": "string",
-                                "enum": ["running", "succeeded", "failed", "cancelled"]
+                                "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                               },
                               "attempt": {
                                 "type": "number"
@@ -28712,6 +28913,9 @@
                                 "required": ["sourceRowsRead", "sourceRowsSkipped"],
                                 "additionalProperties": false
                               },
+                              "queuedAt": {
+                                "type": "string"
+                              },
                               "startedAt": {
                                 "type": "string"
                               },
@@ -28726,6 +28930,7 @@
                                     "enum": [
                                       "internal.unexpected",
                                       "runtime.cancelled",
+                                      "queue.enqueue_failed",
                                       "projection.execution_failed"
                                     ]
                                   },
@@ -28836,10 +29041,11 @@
                             "required": [
                               "id",
                               "projectId",
+                              "executionId",
                               "status",
                               "attempt",
                               "progress",
-                              "startedAt",
+                              "queuedAt",
                               "identity",
                               "target"
                             ],
@@ -28854,9 +29060,12 @@
                               "projectId": {
                                 "type": "string"
                               },
+                              "executionId": {
+                                "type": "string"
+                              },
                               "status": {
                                 "type": "string",
-                                "enum": ["running", "succeeded", "failed", "cancelled"]
+                                "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                               },
                               "attempt": {
                                 "type": "number"
@@ -28874,6 +29083,9 @@
                                 "required": ["sourceRowsRead", "sourceRowsSkipped"],
                                 "additionalProperties": false
                               },
+                              "queuedAt": {
+                                "type": "string"
+                              },
                               "startedAt": {
                                 "type": "string"
                               },
@@ -28888,6 +29100,7 @@
                                     "enum": [
                                       "internal.unexpected",
                                       "runtime.cancelled",
+                                      "queue.enqueue_failed",
                                       "projection.execution_failed"
                                     ]
                                   },
@@ -29001,10 +29214,11 @@
                             "required": [
                               "id",
                               "projectId",
+                              "executionId",
                               "status",
                               "attempt",
                               "progress",
-                              "startedAt",
+                              "queuedAt",
                               "identity",
                               "target"
                             ],
@@ -29019,9 +29233,12 @@
                               "projectId": {
                                 "type": "string"
                               },
+                              "executionId": {
+                                "type": "string"
+                              },
                               "status": {
                                 "type": "string",
-                                "enum": ["running", "succeeded", "failed", "cancelled"]
+                                "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                               },
                               "attempt": {
                                 "type": "number"
@@ -29039,6 +29256,9 @@
                                 "required": ["sourceRowsRead", "sourceRowsSkipped"],
                                 "additionalProperties": false
                               },
+                              "queuedAt": {
+                                "type": "string"
+                              },
                               "startedAt": {
                                 "type": "string"
                               },
@@ -29053,6 +29273,7 @@
                                     "enum": [
                                       "internal.unexpected",
                                       "runtime.cancelled",
+                                      "queue.enqueue_failed",
                                       "projection.execution_failed"
                                     ]
                                   },
@@ -29163,10 +29384,11 @@
                             "required": [
                               "id",
                               "projectId",
+                              "executionId",
                               "status",
                               "attempt",
                               "progress",
-                              "startedAt",
+                              "queuedAt",
                               "identity",
                               "target"
                             ],
@@ -29257,9 +29479,12 @@
                         "projectId": {
                           "type": "string"
                         },
+                        "executionId": {
+                          "type": "string"
+                        },
                         "status": {
                           "type": "string",
-                          "enum": ["running", "succeeded", "failed", "cancelled"]
+                          "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                         },
                         "attempt": {
                           "type": "number"
@@ -29277,6 +29502,9 @@
                           "required": ["sourceRowsRead", "sourceRowsSkipped"],
                           "additionalProperties": false
                         },
+                        "queuedAt": {
+                          "type": "string"
+                        },
                         "startedAt": {
                           "type": "string"
                         },
@@ -29291,6 +29519,7 @@
                               "enum": [
                                 "internal.unexpected",
                                 "runtime.cancelled",
+                                "queue.enqueue_failed",
                                 "projection.execution_failed"
                               ]
                             },
@@ -29401,10 +29630,11 @@
                       "required": [
                         "id",
                         "projectId",
+                        "executionId",
                         "status",
                         "attempt",
                         "progress",
-                        "startedAt",
+                        "queuedAt",
                         "identity",
                         "target"
                       ],
@@ -29419,9 +29649,12 @@
                         "projectId": {
                           "type": "string"
                         },
+                        "executionId": {
+                          "type": "string"
+                        },
                         "status": {
                           "type": "string",
-                          "enum": ["running", "succeeded", "failed", "cancelled"]
+                          "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                         },
                         "attempt": {
                           "type": "number"
@@ -29439,6 +29672,9 @@
                           "required": ["sourceRowsRead", "sourceRowsSkipped"],
                           "additionalProperties": false
                         },
+                        "queuedAt": {
+                          "type": "string"
+                        },
                         "startedAt": {
                           "type": "string"
                         },
@@ -29453,6 +29689,7 @@
                               "enum": [
                                 "internal.unexpected",
                                 "runtime.cancelled",
+                                "queue.enqueue_failed",
                                 "projection.execution_failed"
                               ]
                             },
@@ -29566,10 +29803,11 @@
                       "required": [
                         "id",
                         "projectId",
+                        "executionId",
                         "status",
                         "attempt",
                         "progress",
-                        "startedAt",
+                        "queuedAt",
                         "identity",
                         "target"
                       ],
@@ -29584,9 +29822,12 @@
                         "projectId": {
                           "type": "string"
                         },
+                        "executionId": {
+                          "type": "string"
+                        },
                         "status": {
                           "type": "string",
-                          "enum": ["running", "succeeded", "failed", "cancelled"]
+                          "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                         },
                         "attempt": {
                           "type": "number"
@@ -29604,6 +29845,9 @@
                           "required": ["sourceRowsRead", "sourceRowsSkipped"],
                           "additionalProperties": false
                         },
+                        "queuedAt": {
+                          "type": "string"
+                        },
                         "startedAt": {
                           "type": "string"
                         },
@@ -29618,6 +29862,7 @@
                               "enum": [
                                 "internal.unexpected",
                                 "runtime.cancelled",
+                                "queue.enqueue_failed",
                                 "projection.execution_failed"
                               ]
                             },
@@ -29728,10 +29973,11 @@
                       "required": [
                         "id",
                         "projectId",
+                        "executionId",
                         "status",
                         "attempt",
                         "progress",
-                        "startedAt",
+                        "queuedAt",
                         "identity",
                         "target"
                       ],

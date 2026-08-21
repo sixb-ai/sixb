@@ -4,6 +4,7 @@ import type { SixbErrorCode } from "../errors/types"
 export const PROJECTION_RUN_FAILURE_CODES = [
   "internal.unexpected",
   "runtime.cancelled",
+  "queue.enqueue_failed",
   "projection.execution_failed",
 ] as const satisfies readonly [SixbErrorCode, ...SixbErrorCode[]]
 

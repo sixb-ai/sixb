@@ -96,7 +96,7 @@ export function compileRoutesWithDiagnostics(params: CompileRoutesParams): Compi
     addDatasetVersionCommittedRouteJob(routes, projection.datasetId, {
       queue: "projections",
       job: {
-        type: "projection.run.requested",
+        type: "projection.dispatch",
         payload: projection,
       },
     })

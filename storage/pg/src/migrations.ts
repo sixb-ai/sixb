@@ -53,6 +53,9 @@ import webhookDeliveryFailureRecordSql from "./migrations/019-webhook-delivery-f
 import syncPipelineExecutionsSql from "./migrations/020-sync-pipeline-executions.sql" with {
   type: "text",
 }
+import projectionExecutionsSql from "./migrations/021-projection-executions.sql" with {
+  type: "text",
+}
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -326,6 +329,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("018-ontology-outbox-failure-record", ontologyOutboxFailureRecordSql),
     pgSql("019-webhook-delivery-failure-record", webhookDeliveryFailureRecordSql),
     pgSql("020-sync-pipeline-executions", syncPipelineExecutionsSql),
+    pgSql("021-projection-executions", projectionExecutionsSql),
   ],
 })
 

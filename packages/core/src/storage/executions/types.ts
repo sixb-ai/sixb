@@ -21,6 +21,7 @@ export type DurableExecutionSource =
   | { readonly type: "webhook"; readonly deliveryId: string }
   | { readonly type: "schedule"; readonly eventId: string }
   | { readonly type: "event"; readonly eventId: string }
+  | { readonly type: "datasetVersion"; readonly datasetId: string; readonly versionId: string }
   | { readonly type: "execution"; readonly executionId: string }
 
 /** Immutable execution provenance and the reference required to restore its runtime authority. */

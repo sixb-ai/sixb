@@ -2,7 +2,7 @@ import type { LakeStorage, Queues, SixbDefinitions, Storage } from "@sixb/core"
 import { MaterializationCancellationError } from "@sixb/core"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import {
-  bindPrimitiveExecution,
+  bindDurablePrimitiveExecution,
   type PrimitiveExecutionHost,
 } from "@sixb/core/internal/primitive-execution"
 import { shareProjectionRegistry } from "@sixb/core/internal/projections"
@@ -10,7 +10,12 @@ import { registerOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { ClaimedQueueJob, ProjectionRunRequestedQueueJob } from "@sixb/core/queues"
-import { PROJECTION_RUN_FAILURE_CODES, type ProjectionRunStorage } from "@sixb/core/storage"
+import {
+  PROJECTION_RUN_FAILURE_CODES,
+  type ProjectionRunFailureCode,
+  type ProjectionRunRecord,
+  type ProjectionRunStorage,
+} from "@sixb/core/storage"
 import { projectionRetryAvailableAt } from "./retry-backoff"
 import { isPermanentProjectionFailure, runProjectionJob } from "./run-projection-job"
 import type { ProjectionWorkerContext } from "./types"
@@ -48,18 +53,30 @@ export class ProjectionWorker extends QueueWorker<
     signal: AbortSignal
   ): Promise<void> {
     const { job } = claimed
-    const execution = bindPrimitiveExecution(this.host, {
-      primitive: {
-        kind: "projection",
-        id: job.payload.projectionId,
-        runId: job.id,
-      },
-      source: { type: "queue", queue: "projections", jobId: job.id },
+    const run = await this.projectionRunsStorage.getById({
+      projectId: this.host.id,
+      id: job.payload.runId,
+    })
+    if (!run) {
+      throw new Error(`[SixbProjectionWorker] Projection run '${job.payload.runId}' was not found.`)
+    }
+    const durableExecution = await this.host.storage.executions.getById({
+      projectId: this.host.id,
+      id: run.executionId,
+    })
+    if (!durableExecution) {
+      throw new Error(
+        `[SixbProjectionWorker] Projection run '${run.id}' references missing execution '${run.executionId}'.`
+      )
+    }
+    const execution = bindDurablePrimitiveExecution(this.host, {
+      execution: durableExecution,
+      primitive: { kind: "projection", id: run.identity.projectionId, runId: run.id },
     })
     const context = buildProjectionContext(this.host, this.projectionRunsStorage, execution)
     await runProjectionJob({
       runtime: context,
-      job: { id: job.id, ...job.payload },
+      job: { id: run.id, ...run.identity },
       signal,
       onRunFailed: (error, run, failure) => {
         reportRunFailure(this.host, error, {
@@ -80,16 +97,20 @@ export class ProjectionWorker extends QueueWorker<
   protected override async onExecutionError(
     claimed: ClaimedQueueJob<ProjectionRunRequestedQueueJob>,
     error: unknown
-  ): Promise<QueueWorkerFailureDecision> {
+  ): Promise<QueueWorkerFailureDecision<ProjectionRunFailureCode>> {
     return this.failureDecision(claimed, error)
   }
 
   protected override async onAbortError(
     claimed: ClaimedQueueJob<ProjectionRunRequestedQueueJob>,
     error: unknown
-  ): Promise<QueueWorkerFailureDecision> {
+  ): Promise<QueueWorkerFailureDecision<ProjectionRunFailureCode>> {
     if (error instanceof MaterializationCancellationError) {
-      return { kind: "fail" }
+      const run = await this.projectionRunsStorage.getById({
+        projectId: this.host.id,
+        id: claimed.job.payload.runId,
+      })
+      return terminalFailureDecision(run)
     }
     return this.failureDecision(claimed, error)
   }
@@ -97,15 +118,24 @@ export class ProjectionWorker extends QueueWorker<
   private async failureDecision(
     claimed: ClaimedQueueJob<ProjectionRunRequestedQueueJob>,
     error: unknown
-  ): Promise<QueueWorkerFailureDecision> {
+  ): Promise<QueueWorkerFailureDecision<ProjectionRunFailureCode>> {
     const run = await this.projectionRunsStorage.getById({
       projectId: this.host.id,
-      id: claimed.job.id,
+      id: claimed.job.payload.runId,
     })
     if (run?.status === "running") return retryWithBackoff(claimed)
-    if (run) return { kind: "fail" }
+    if (run?.status === "queued") {
+      return isPermanentProjectionFailure(error) ? { kind: "fail" } : retryWithBackoff(claimed)
+    }
+    if (run) return terminalFailureDecision(run)
     return isPermanentProjectionFailure(error) ? { kind: "fail" } : retryWithBackoff(claimed)
   }
+}
+
+function terminalFailureDecision(
+  run: ProjectionRunRecord | null
+): QueueWorkerFailureDecision<ProjectionRunFailureCode> {
+  return run?.error ? { kind: "fail", failure: run.error } : { kind: "fail" }
 }
 
 function retryWithBackoff(
@@ -114,7 +144,7 @@ function retryWithBackoff(
   return {
     kind: "retry",
     availableAt: projectionRetryAvailableAt({
-      jobId: claimed.job.id,
+      jobId: claimed.job.payload.runId,
       attempt: claimed.job.attempt,
     }),
   }
@@ -123,7 +153,7 @@ function retryWithBackoff(
 function buildProjectionContext(
   host: ProjectionWorkerHost,
   projectionRunsStorage: ProjectionRunStorage,
-  execution: ReturnType<typeof bindPrimitiveExecution>
+  execution: ReturnType<typeof bindDurablePrimitiveExecution>
 ): ProjectionWorkerContext {
   const context: ProjectionWorkerContext = {
     projectId: host.id,

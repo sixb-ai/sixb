@@ -4,7 +4,10 @@ import { AgentWorker } from "@sixb/agent-worker"
 import { migrateStorage } from "@sixb/core"
 import { flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import { PipelineRunDispatcher } from "@sixb/core/internal/pipelines"
-import { getProjectionDispatchDescriptors } from "@sixb/core/internal/projections"
+import {
+  getProjectionDispatchDescriptors,
+  ProjectionRunDispatcher,
+} from "@sixb/core/internal/projections"
 import { SyncRunDispatcher } from "@sixb/core/internal/syncs"
 import type { Worker } from "@sixb/core/internal/workers"
 import { WorkflowRunDispatcher } from "@sixb/core/internal/workflows"
@@ -138,16 +141,11 @@ export async function startOrchestratorRuntime(
   let orchestratorWorker: OrchestratorWorker | null = null
 
   if (routes.size > 0) {
-    const projectionRuns = sixb.storage.projectionRuns
-    if (projections.length > 0 && !projectionRuns) {
-      throw new Error(
-        "[SixbCLI] Projection dispatch requires storage.projectionRuns for durable reconciliation."
-      )
+    if (projections.length > 0 && !sixb.storage.projectionRuns) {
+      throw new Error("[SixbCLI] Projection dispatch requires storage.projectionRuns.")
     }
-    const projectionDispatch =
-      projections.length > 0 && projectionRuns
-        ? { lakeStorage: sixb.lakeStorage, projectionRuns }
-        : undefined
+    const projectionReconciliation =
+      projections.length > 0 ? { lakeStorage: sixb.lakeStorage } : undefined
     orchestratorWorker = new OrchestratorWorker({
       projectId: sixb.id,
       events: sixb.events,
@@ -156,9 +154,10 @@ export async function startOrchestratorRuntime(
       dispatchers: {
         syncs: new SyncRunDispatcher(sixb),
         pipelines: new PipelineRunDispatcher(sixb),
+        projections: new ProjectionRunDispatcher(sixb),
         workflows: new WorkflowRunDispatcher(sixb),
       },
-      ...(projectionDispatch ? { projectionDispatch } : {}),
+      ...(projectionReconciliation ? { projectionReconciliation } : {}),
     })
     await orchestratorWorker.start()
   }
