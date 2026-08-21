@@ -31,7 +31,6 @@ export function createAgentExecutionRecord(input: {
     executor: { type: "agent", runId: input.runId },
     source: { type: "execution", executionId: input.parent.id },
     correlationId: input.parent.correlationId,
-    parentExecutionId: input.parent.id,
     authorizationRef: {
       type: "principal",
       principal: structuredClone(input.principal),
@@ -74,9 +73,6 @@ export function restoreAgentExecutionScope(input: {
     executor: Object.freeze({ type: "agent", agentId: input.agentId, runId: input.runId }),
     source: Object.freeze(structuredClone(input.execution.source)),
     correlationId: input.execution.correlationId,
-    ...(input.execution.parentExecutionId === undefined
-      ? {}
-      : { parentExecutionId: input.execution.parentExecutionId }),
   })
   return Object.freeze({
     execution: context,
@@ -102,7 +98,6 @@ export function assertAgentExecutionRecord(input: {
     input.execution.executor.type !== "agent" ||
     input.execution.executor.runId !== input.runId ||
     input.execution.source.type !== "execution" ||
-    input.execution.source.executionId !== input.execution.parentExecutionId ||
     authority.type !== "principal" ||
     authority.principal.type !== "serviceAccount" ||
     input.authorization.principal.type !== "serviceAccount" ||

@@ -178,7 +178,6 @@ describe("execution scope factories", () => {
       source: { type: "queue", queue: "actions", jobId: "job-1" },
       requestedBy: { type: "user", id: "user-1" },
       correlationId: "correlation-1",
-      parentExecutionId: "execution-parent",
     })
 
     expect(scope.execution).toMatchObject({
@@ -191,7 +190,6 @@ describe("execution scope factories", () => {
       source: { type: "queue", queue: "actions", jobId: "job-1" },
       requestedBy: { type: "user", id: "user-1" },
       correlationId: "correlation-1",
-      parentExecutionId: "execution-parent",
     })
     expect(getAuthorizationRef(scope.authorization)).toEqual({
       type: "trustedPrimitive",
@@ -223,7 +221,6 @@ describe("execution scope factories", () => {
       source: { type: "execution", executionId: parent.execution.id },
       requestedBy: { type: "user", id: "user-1" },
       correlationId: parent.execution.correlationId,
-      parentExecutionId: parent.execution.id,
     })
 
     expect(scope.execution.executor).toEqual({
@@ -232,7 +229,10 @@ describe("execution scope factories", () => {
       runId: "agent-run-1",
     })
     expect(scope.execution.requestedBy).toEqual({ type: "user", id: "user-1" })
-    expect(scope.execution.parentExecutionId).toBe(parent.execution.id)
+    expect(scope.execution.source).toEqual({
+      type: "execution",
+      executionId: parent.execution.id,
+    })
     expect(scope.execution.correlationId).toBe(parent.execution.correlationId)
     expect(getAuthorizationRef(scope.authorization)).toEqual({
       type: "principal",
@@ -276,7 +276,7 @@ describe("execution scope factories", () => {
     })
   })
 
-  test("rejects incomplete or contradictory nested provenance", () => {
+  test("requires nested scopes to preserve a parent correlation id", () => {
     const primitive = { kind: "workflow", id: "onboarding", runId: "workflow-run-1" } as const
 
     expect(() =>
@@ -284,26 +284,15 @@ describe("execution scope factories", () => {
         projectId: "project-1",
         primitive,
         source: { type: "execution", executionId: "execution-parent" },
-        correlationId: "correlation-1",
       })
-    ).toThrow("Execution source must match the direct parent execution id")
-    expect(() =>
-      createTrustedPrimitiveScope({
-        projectId: "project-1",
-        primitive,
-        source: { type: "execution", executionId: "execution-other" },
-        correlationId: "correlation-1",
-        parentExecutionId: "execution-parent",
-      })
-    ).toThrow("Execution source must match the direct parent execution id")
-    expect(() =>
+    ).toThrow("Nested execution must preserve its parent correlation id")
+    expect(
       createTrustedPrimitiveScope({
         projectId: "project-1",
         primitive,
         source: { type: "queue", queue: "workflows", jobId: "job-1" },
-        parentExecutionId: "execution-parent",
       })
-    ).toThrow("Nested execution must preserve its parent correlation id")
+    ).toMatchObject({ execution: { source: { type: "queue", jobId: "job-1" } } })
   })
 })
 

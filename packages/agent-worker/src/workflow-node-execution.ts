@@ -295,7 +295,10 @@ async function loadWorkflowAgentNodeExecution(
       }
     )
   }
-  if (durableExecution.parentExecutionId !== workflowRun.executionId) {
+  if (
+    durableExecution.source.type !== "execution" ||
+    durableExecution.source.executionId !== workflowRun.executionId
+  ) {
     throw createSixbError(
       "internal.unexpected",
       `[SixbAgentWorker] Agent workflow node '${nodeRun.id}' execution is not linked to workflow run '${workflowRun.id}'.`,

@@ -1024,7 +1024,7 @@ async function queueWorkflowAgentNode(input: {
     projectId: PROJECT_ID,
     agentId: agent.id,
     runId: nodeRunId,
-    parentExecutionId: executionId,
+    sourceExecutionId: executionId,
   })
   await runs.agentNodes.create({
     projectId: PROJECT_ID,
@@ -1529,7 +1529,7 @@ describe("AgentWorker", () => {
       projectId: PROJECT_ID,
       agentId: agent.id,
       runId: nodeRunId,
-      parentExecutionId: executionId,
+      sourceExecutionId: executionId,
     })
     await runs.agentNodes.create({
       projectId: PROJECT_ID,
@@ -1595,7 +1595,7 @@ describe("AgentWorker", () => {
         sixb.storage.executions.getById({ projectId: PROJECT_ID, id: agentExecutionId })
       ).resolves.toMatchObject({
         requestedBy: REQUESTER,
-        parentExecutionId: executionId,
+        source: { type: "execution", executionId },
       })
       expect(recordedUsage.map((usage) => usage.usage)).toEqual([
         {
@@ -2153,7 +2153,7 @@ describe("AgentWorker", () => {
       projectId: PROJECT_ID,
       agentId: agent.id,
       runId: nodeRunId,
-      parentExecutionId: executionId,
+      sourceExecutionId: executionId,
     })
     await runs.agentNodes.create({
       projectId: PROJECT_ID,

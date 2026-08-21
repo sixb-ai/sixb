@@ -1,4 +1,5 @@
 import type { TrustedPrimitiveKind } from "../../execution/types"
+import { ExecutionStorageError } from "./errors"
 import type { CreateExecutionInput, ExecutionRecord } from "./types"
 import { normalizeExecutionRecord } from "./validation"
 
@@ -19,6 +20,7 @@ export interface ExecutionStorageRow {
   readonly requestedByUserId: string | null
   readonly requestedByServiceAccountId: string | null
   readonly correlationId: string
+  /** SQL-only projection of an execution source, used to enforce the parent foreign key. */
   readonly parentExecutionId: string | null
   readonly authorityKind: "disabled" | "kernel" | "principal" | "trustedPrimitive"
   readonly authorityUserId: string | null
@@ -44,7 +46,7 @@ export function executionRecordToStorageRow(record: ExecutionRecord): ExecutionS
     requestedByServiceAccountId:
       record.requestedBy?.type === "serviceAccount" ? record.requestedBy.id : null,
     correlationId: record.correlationId,
-    parentExecutionId: record.parentExecutionId ?? null,
+    parentExecutionId: record.source.type === "execution" ? record.source.executionId : null,
     ...authority,
     createdAt: new Date(record.createdAt),
   }
@@ -53,6 +55,7 @@ export function executionRecordToStorageRow(record: ExecutionRecord): ExecutionS
 export function executionRecordFromStorageRow(row: ExecutionStorageRow): ExecutionRecord {
   const executor = inflateExecutor(row)
   const source = inflateSource(row)
+  assertStoredParent(row, source)
   const authorizationRef = inflateAuthority(row)
   const requestedBy = row.requestedByUserId
     ? ({ type: "user", id: row.requestedByUserId } as const)
@@ -68,11 +71,23 @@ export function executionRecordFromStorageRow(row: ExecutionStorageRow): Executi
       executor,
       source,
       correlationId: row.correlationId,
-      ...(row.parentExecutionId === null ? {} : { parentExecutionId: row.parentExecutionId }),
       authorizationRef,
     },
     row.createdAt
   )
+}
+
+function assertStoredParent(
+  row: ExecutionStorageRow,
+  source: CreateExecutionInput["source"]
+): void {
+  const expected = source.type === "execution" ? source.executionId : null
+  if (row.parentExecutionId !== expected) {
+    throw new ExecutionStorageError(
+      "invalid_parent_execution",
+      `[Sixb] Stored execution '${row.id}' has inconsistent parent execution provenance.`
+    )
+  }
 }
 
 function flattenExecutor(

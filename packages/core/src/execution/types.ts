@@ -39,6 +39,7 @@ export type ExecutionExecutor =
 /**
  * Occurrence that directly triggered an execution.
  *
+ * An `execution` source is the single logical parent of a nested execution.
  * The `queue` source is transitional until workers restore durable execution authority.
  */
 export type ExecutionSource =
@@ -57,7 +58,6 @@ export interface ExecutionContext {
   readonly executor: ExecutionExecutor
   readonly source: ExecutionSource
   readonly correlationId: string
-  readonly parentExecutionId?: string
 }
 
 /** Durable descriptor used to rebuild authority. A reference is never authoritative by itself. */

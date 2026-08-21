@@ -11,7 +11,7 @@ export async function createTestAgentExecution(
     readonly agentId: string
     readonly runId: string
     readonly executionId?: string
-    readonly parentExecutionId?: string
+    readonly sourceExecutionId?: string
   }
 ): Promise<string> {
   const auth = storage.auth
@@ -41,7 +41,7 @@ export async function createTestAgentExecution(
     }
   }
 
-  const parentExecutionId = input.parentExecutionId ?? `test_request_execution:${input.runId}`
+  const sourceExecutionId = input.sourceExecutionId ?? `test_request_execution:${input.runId}`
   const executionId = input.executionId ?? `test_agent_execution:${input.runId}`
   const existing = await storage.executions.getById({
     projectId: input.projectId,
@@ -51,11 +51,11 @@ export async function createTestAgentExecution(
 
   let parent = await storage.executions.getById({
     projectId: input.projectId,
-    id: parentExecutionId,
+    id: sourceExecutionId,
   })
   if (!parent) {
     parent = await storage.executions.create({
-      id: parentExecutionId,
+      id: sourceExecutionId,
       projectId: input.projectId,
       executor: { type: "request", requestId: `test_request:${input.runId}` },
       source: { type: "http", requestId: `test_request:${input.runId}` },
@@ -67,12 +67,11 @@ export async function createTestAgentExecution(
     id: executionId,
     projectId: input.projectId,
     executor: { type: "agent", runId: input.runId },
-    source: { type: "execution", executionId: parentExecutionId },
+    source: { type: "execution", executionId: sourceExecutionId },
     ...(parent.requestedBy === undefined
       ? {}
       : { requestedBy: structuredClone(parent.requestedBy) }),
     correlationId: parent.correlationId,
-    parentExecutionId,
     authorizationRef: {
       type: "principal",
       principal: { type: "serviceAccount", id: serviceAccountId },

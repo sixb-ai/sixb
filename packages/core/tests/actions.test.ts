@@ -700,7 +700,6 @@ describe("requestAction", () => {
       executor: { type: "primitive", kind: "action", runId: result.runId },
       source: { type: "execution", executionId: sixb.execution.id },
       correlationId: sixb.execution.correlationId,
-      parentExecutionId: sixb.execution.id,
       authorizationRef: {
         type: "trustedPrimitive",
         primitive: { kind: "action", id: "counted", runId: result.runId },

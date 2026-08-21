@@ -40,7 +40,6 @@ export async function createTestActionExecution(
     executor: { type: "primitive", kind: primitive.kind, runId: primitive.runId },
     source: { type: "execution", executionId: parentExecutionId },
     correlationId: `test_correlation:${input.runId}`,
-    parentExecutionId,
     authorizationRef: { type: "trustedPrimitive", primitive },
   })
 

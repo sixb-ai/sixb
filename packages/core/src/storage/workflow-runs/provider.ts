@@ -43,7 +43,7 @@ export async function assertWorkflowAgentNodeRunExecution(input: {
   readonly executionId: string
   readonly nodeRunId: string
   readonly agentId: string
-  readonly parentExecutionId: string
+  readonly workflowExecutionId: string
 }): Promise<void> {
   const execution = await findAgentRunExecution({
     executions: input.executions,
@@ -52,7 +52,11 @@ export async function assertWorkflowAgentNodeRunExecution(input: {
     runId: input.nodeRunId,
     serviceAccountId: agentServiceAccountId(input.agentId),
   })
-  if (!execution || execution.parentExecutionId !== input.parentExecutionId) {
+  if (
+    !execution ||
+    execution.source.type !== "execution" ||
+    execution.source.executionId !== input.workflowExecutionId
+  ) {
     throw new WorkflowRunError(
       `[Sixb] Execution '${input.executionId}' does not authorize Workflow Agent-node run '${input.nodeRunId}'.`
     )
