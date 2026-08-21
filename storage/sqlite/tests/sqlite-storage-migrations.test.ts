@@ -395,7 +395,7 @@ describe("SQLite storage migrations", () => {
       `)
 
       const executionMigrationIndex = sqliteStorageMigrations.steps.findIndex(
-        (migration) => migration.id === "020-sync-pipeline-executions"
+        (migration) => migration.id === "021-sync-pipeline-executions"
       )
       for (const migration of sqliteStorageMigrations.steps.slice(10, executionMigrationIndex)) {
         migration.up(db)
@@ -1309,7 +1309,7 @@ describe("SQLite storage migrations", () => {
       const db = new Database(":memory:")
       try {
         const executionMigrationIndex = sqliteStorageMigrations.steps.findIndex(
-          (migration) => migration.id === "020-sync-pipeline-executions"
+          (migration) => migration.id === "021-sync-pipeline-executions"
         )
         const executionMigration = sqliteStorageMigrations.steps[executionMigrationIndex]
         if (!executionMigration) {
