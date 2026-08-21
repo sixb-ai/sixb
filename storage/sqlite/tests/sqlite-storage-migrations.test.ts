@@ -1390,7 +1390,7 @@ describe("SQLite storage migrations", () => {
     const db = new Database(":memory:")
     try {
       const cleanupIndex = sqliteStorageMigrations.steps.findIndex(
-        (migration) => migration.id === "011-drop-run-usage-projections"
+        (migration) => migration.id === "020-drop-run-usage-projections"
       )
       const cleanup = sqliteStorageMigrations.steps[cleanupIndex]
       if (!cleanup) throw new Error("expected run usage cleanup migration")

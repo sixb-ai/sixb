@@ -958,14 +958,14 @@ describe("Postgres storage migrations", () => {
   })
 
   test("drops only obsolete run usage projections from an existing schema", async () => {
-    // Regression guard: remove migration 011 (or any one DROP COLUMN) and this leaves the old
+    // Regression guard: remove migration 020 (or any one DROP COLUMN) and this leaves the old
     // projection column behind; deleting the run rows instead breaks the preservation assertions.
     const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     await withSql(async (sql) => {
       const schema = quoteIdent(schemaName)
       const context = { exec: (sqlText: string) => sql.unsafe(sqlText).then(() => undefined) }
       const cleanupIndex = postgresStorageMigrations.steps.findIndex(
-        (migration) => migration.id === "011-drop-run-usage-projections"
+        (migration) => migration.id === "020-drop-run-usage-projections"
       )
       const cleanup = postgresStorageMigrations.steps[cleanupIndex]
       if (!cleanup) throw new Error("PostgreSQL run usage cleanup migration is missing.")
