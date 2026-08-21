@@ -69,6 +69,9 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
       ...(input.reauthorizationId === undefined
         ? {}
         : { reauthorizationId: input.reauthorizationId }),
+      ...(input.reauthorizationRevision === undefined
+        ? {}
+        : { reauthorizationRevision: input.reauthorizationRevision }),
       ...(input.reauthorizationConnectionIds === undefined
         ? {}
         : { reauthorizationConnectionIds: [...input.reauthorizationConnectionIds] }),
@@ -507,64 +510,58 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
     }
     const existing = this.findConnection(input)
     if (existing) this.assertConnectionCanMove(existing)
-
-    if (authorization.status === "pending_selection") {
-      authorization = {
-        ...authorization,
-        status: "active",
-        selectionExpiresAt: undefined,
-        revision: authorization.revision + 1,
-        updatedAt: now,
-      }
-      this.authorizations.set(authorization.id, authorization)
-    }
-
-    if (!existing) {
-      if (this.connections.has(input.id)) {
-        throw new ConnectorConnectionStorageError(
-          "connection_conflict",
-          "[Sixb] Connector connection id already exists."
-        )
-      }
-      const connection: ConnectorConnectionRecord = {
-        id: input.id,
-        projectId: input.projectId,
-        connectorId: input.connectorId,
-        owner: structuredClone(input.owner),
-        slot: input.slot,
-        authorizationId: input.authorizationId,
-        account: structuredClone(account),
-        createdAt: now,
-        updatedAt: now,
-      }
-      this.connections.set(connection.id, connection)
-      return {
-        connection: structuredClone(connection),
-        authorization: structuredClone(authorization),
-        created: true,
-        replaced: false,
-      }
-    }
-
-    const sameAccount = existing.account.id === account.id
-    if (!sameAccount && !input.replace) {
+    const sameAccount = existing?.account.id === account.id
+    if (existing && !sameAccount && !input.replace) {
       throw new ConnectorConnectionStorageError(
         "connection_conflict",
         `[Sixb] Connector slot '${input.slot}' is already connected to another account; explicit replacement is required.`
       )
     }
-    const connection: ConnectorConnectionRecord = {
-      ...existing,
-      authorizationId: input.authorizationId,
-      account: structuredClone(account),
-      updatedAt: now,
+    if (!existing && this.connections.has(input.id)) {
+      throw new ConnectorConnectionStorageError(
+        "connection_conflict",
+        "[Sixb] Connector connection id already exists."
+      )
+    }
+
+    const updatedAuthorization: ConnectorAuthorizationRecord =
+      authorization.status === "pending_selection"
+        ? {
+            ...authorization,
+            status: "active",
+            selectionExpiresAt: undefined,
+            revision: authorization.revision + 1,
+            updatedAt: now,
+          }
+        : authorization
+    const connection: ConnectorConnectionRecord = existing
+      ? {
+          ...existing,
+          authorizationId: input.authorizationId,
+          account: structuredClone(account),
+          updatedAt: now,
+        }
+      : {
+          id: input.id,
+          projectId: input.projectId,
+          connectorId: input.connectorId,
+          owner: structuredClone(input.owner),
+          slot: input.slot,
+          authorizationId: input.authorizationId,
+          account: structuredClone(account),
+          createdAt: now,
+          updatedAt: now,
+        }
+
+    if (updatedAuthorization !== authorization) {
+      this.authorizations.set(updatedAuthorization.id, updatedAuthorization)
     }
     this.connections.set(connection.id, connection)
     return {
       connection: structuredClone(connection),
-      authorization: structuredClone(authorization),
-      created: false,
-      replaced: !sameAccount,
+      authorization: structuredClone(updatedAuthorization),
+      created: existing === undefined,
+      replaced: existing !== undefined && !sameAccount,
     }
   }
 

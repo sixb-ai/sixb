@@ -247,7 +247,13 @@ export class ConnectorConnectionService {
     assertSelector(input)
     const redirectUri = normalizedHttpUrl(input.redirectUri, "OAuth callback URL")
     let affectedConnections: readonly ConnectorConnectionView[] = []
-    let reauthorizationConnectionIds: readonly string[] | undefined
+    let reauthorization:
+      | {
+          readonly id: string
+          readonly revision: number
+          readonly connectionIds: readonly string[]
+        }
+      | undefined
     if (input.reauthorizationId !== undefined) {
       const authorization = await this.requireAuthorization(
         definition.id,
@@ -263,7 +269,11 @@ export class ConnectorConnectionService {
       const connections = await this.connectionStorage.listConnectionsByAuthorization(
         authorization.id
       )
-      reauthorizationConnectionIds = connections.map((connection) => connection.id).sort()
+      reauthorization = {
+        id: authorization.id,
+        revision: authorization.revision,
+        connectionIds: connections.map((connection) => connection.id).sort(),
+      }
       affectedConnections = connections.map((connection) =>
         connectionView(connection, authorization.status)
       )
@@ -308,11 +318,12 @@ export class ConnectorConnectionService {
         owner: input.owner,
         slot: input.slot,
         redirectUri,
-        ...(input.reauthorizationId === undefined
+        ...(reauthorization === undefined
           ? {}
           : {
-              reauthorizationId: input.reauthorizationId,
-              reauthorizationConnectionIds,
+              reauthorizationId: reauthorization.id,
+              reauthorizationRevision: reauthorization.revision,
+              reauthorizationConnectionIds: reauthorization.connectionIds,
             }),
         authorizedBy: actor.principal,
         credential: actor.credential,
@@ -365,26 +376,37 @@ export class ConnectorConnectionService {
     })
     const codeVerifier = textDecoder.decode(verifierBytes)
 
-    const completed =
-      attempt.reauthorizationId === undefined
-        ? await this.completeNewAuthorization(
-            definition,
-            actor.principal,
-            code,
-            codeVerifier,
-            redirectUri
-          )
-        : await this.runLocallySerialized(attempt.reauthorizationId, () =>
-            this.completeReauthorization(
-              definition,
-              attempt.reauthorizationId!,
-              attempt.reauthorizationConnectionIds ?? [],
-              actor.principal,
-              code,
-              codeVerifier,
-              redirectUri
-            )
-          )
+    let completed: ConnectorAuthorizationRecord
+    if (attempt.reauthorizationId === undefined) {
+      completed = await this.completeNewAuthorization(
+        definition,
+        actor.principal,
+        code,
+        codeVerifier,
+        redirectUri
+      )
+    } else {
+      const reauthorizationId = attempt.reauthorizationId
+      const expectedRevision = attempt.reauthorizationRevision
+      if (expectedRevision === undefined) {
+        throw createConnectorCodedError(
+          "internal.unexpected",
+          "Connector reauthorization attempt is missing its revision."
+        )
+      }
+      completed = await this.runLocallySerialized(reauthorizationId, () =>
+        this.completeReauthorization(
+          definition,
+          reauthorizationId,
+          expectedRevision,
+          attempt.reauthorizationConnectionIds ?? [],
+          actor.principal,
+          code,
+          codeVerifier,
+          redirectUri
+        )
+      )
+    }
 
     return {
       authorizationId: completed.id,
@@ -640,9 +662,7 @@ export class ConnectorConnectionService {
 
     let accounts: readonly ConnectorAccountCandidate[]
     try {
-      accounts = validateAccounts(
-        await definition.adapter.discoverAccounts(this.adapterContext(definition.id), credentials)
-      )
+      accounts = await this.discoverAccounts(definition, credentials)
     } catch (error) {
       throw providerBoundaryError(
         error,
@@ -669,6 +689,7 @@ export class ConnectorConnectionService {
   private async completeReauthorization<TAdapter extends OAuthConnectorAdapter>(
     definition: ConnectorDefinition<string, TAdapter>,
     authorizationId: string,
+    expectedRevision: number,
     expectedConnectionIds: readonly string[],
     principal: AuthorizationContext["principal"],
     code: string,
@@ -676,6 +697,7 @@ export class ConnectorConnectionService {
     redirectUri: string
   ): Promise<ConnectorAuthorizationRecord> {
     let authorization = await this.requireAuthorization(definition.id, authorizationId)
+    assertReauthorizationRevision(authorization, expectedRevision)
     if (authorization.status === "revoked" || authorization.status === "revocation_pending") {
       throw createConnectorCodedError(
         "connector.authorization_invalid",
@@ -689,6 +711,7 @@ export class ConnectorConnectionService {
       authorization,
       "reauthorization"
     )
+    assertReauthorizationRevision(authorization, expectedRevision)
     await this.assertAttachedConnections(authorization.id, expectedConnectionIds)
     const claimOutcome = await this.claimCredentialMutation(
       definition,
@@ -790,6 +813,26 @@ export class ConnectorConnectionService {
         "Connector authorization code exchange failed."
       )
     }
+  }
+
+  private async discoverAccounts<TAdapter extends OAuthConnectorAdapter>(
+    definition: ConnectorDefinition<string, TAdapter>,
+    credentials: ConnectorOAuthCredentials
+  ): Promise<readonly ConnectorAccountCandidate[]> {
+    return validateAccounts(
+      await this.withBoundedProviderSignal(
+        (signal) =>
+          definition.adapter.discoverAccounts(
+            this.adapterContext(definition.id, signal),
+            credentials
+          ),
+        () =>
+          createConnectorCodedError(
+            "connector.provider_failed",
+            "Connector account discovery did not complete."
+          )
+      )
+    )
   }
 
   private async refreshAuthorization<TAdapter extends OAuthConnectorAdapter>(
@@ -957,6 +1000,9 @@ export class ConnectorConnectionService {
           "Connector authorization revocation is pending."
         )
       }
+      if (kind === "reauthorization" && authorization.revision !== initialRevision) {
+        throw staleReauthorizationError()
+      }
       if (kind === "revocation" && authorization.status === "revoked") {
         return { type: "superseded", authorization }
       }
@@ -1068,14 +1114,15 @@ export class ConnectorConnectionService {
   }
 
   private async withBoundedProviderSignal<T>(
-    run: (signal: AbortSignal) => Promise<T> | T
+    run: (signal: AbortSignal) => Promise<T> | T,
+    interruptionError: () => Error = createAmbiguousProviderOperationError
   ): Promise<T> {
     const controller = new AbortController()
     const hostSignal = this.abortController.signal
-    const abortFromHost = () => controller.abort(createAmbiguousProviderOperationError())
+    const abortFromHost = () => controller.abort(interruptionError())
     hostSignal.addEventListener("abort", abortFromHost, { once: true })
     const timeout = setTimeout(
-      () => controller.abort(createAmbiguousProviderOperationError()),
+      () => controller.abort(interruptionError()),
       this.credentialMutationTimeoutMs
     )
     const aborted = new Promise<never>((_resolve, reject) => {
@@ -1120,9 +1167,7 @@ export class ConnectorConnectionService {
       )
       let accounts: readonly ConnectorAccountCandidate[]
       try {
-        accounts = validateAccounts(
-          await definition.adapter.discoverAccounts(this.adapterContext(definition.id), credentials)
-        )
+        accounts = await this.discoverAccounts(definition, credentials)
       } catch (error) {
         throw providerBoundaryError(
           error,
@@ -1438,6 +1483,20 @@ function assertAuthorizationActor(
       "[Sixb] This connector authorization can only be changed by its authorizing principal."
     )
   }
+}
+
+function assertReauthorizationRevision(
+  authorization: ConnectorAuthorizationRecord,
+  expectedRevision: number
+): void {
+  if (authorization.revision !== expectedRevision) throw staleReauthorizationError()
+}
+
+function staleReauthorizationError(): ReturnType<typeof createConnectorCodedError> {
+  return createConnectorCodedError(
+    "connector.authorization_invalid",
+    "Connector reauthorization attempt is stale; restart authorization."
+  )
 }
 
 function authorizationStatusError(

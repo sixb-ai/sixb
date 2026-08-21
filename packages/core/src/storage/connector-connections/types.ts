@@ -22,6 +22,7 @@ export interface ConnectorAuthorizationAttemptRecord extends ConnectorConnection
   readonly codeVerifier: SealedConnectorCredential
   readonly redirectUri: string
   readonly reauthorizationId?: string
+  readonly reauthorizationRevision?: number
   readonly reauthorizationConnectionIds?: readonly string[]
   readonly createdAt: Date
   readonly expiresAt: Date
@@ -37,6 +38,7 @@ export interface CreateConnectorAuthorizationAttemptInput extends ConnectorConne
   readonly codeVerifier: SealedConnectorCredential
   readonly redirectUri: string
   readonly reauthorizationId?: string
+  readonly reauthorizationRevision?: number
   readonly reauthorizationConnectionIds?: readonly string[]
   readonly ttlMs: number
 }

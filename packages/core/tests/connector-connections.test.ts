@@ -59,10 +59,12 @@ function createHarness(options: HarnessOptions = {}) {
   let revokeCount = 0
   let refreshError: Error | undefined
   let revokeError: Error | undefined
-  let discoverError: Error | undefined
+  let revokeAfterEffectError: Error | undefined
   let exchangeGate: Promise<void> | undefined
+  let discoverGate: Promise<void> | undefined
   let refreshGate: Promise<void> | undefined
   let revokeGate: Promise<void> | undefined
+  let providerRevoked = false
   const exchangedVerifiers: string[] = []
 
   const connector = defineConnector("social", {
@@ -103,11 +105,14 @@ function createHarness(options: HarnessOptions = {}) {
       async revoke() {
         revokeCount += 1
         await revokeGate
+        if (providerRevoked) return
         if (revokeError) throw revokeError
+        providerRevoked = true
+        if (revokeAfterEffectError) throw revokeAfterEffectError
       },
     },
-    discoverAccounts() {
-      if (discoverError) throw discoverError
+    async discoverAccounts() {
+      await discoverGate
       return [
         { id: "account-a", label: "Account A" },
         { id: "account-b", label: "Account B" },
@@ -151,11 +156,14 @@ function createHarness(options: HarnessOptions = {}) {
     setRevokeError(value: Error | undefined) {
       revokeError = value
     },
-    setDiscoverError(value: Error | undefined) {
-      discoverError = value
+    setRevokeAfterEffectError(value: Error | undefined) {
+      revokeAfterEffectError = value
     },
     setExchangeGate(value: Promise<void> | undefined) {
       exchangeGate = value
+    },
+    setDiscoverGate(value: Promise<void> | undefined) {
+      discoverGate = value
     },
     setRefreshGate(value: Promise<void> | undefined) {
       refreshGate = value
@@ -361,6 +369,21 @@ describe("connector OAuth lifecycle", () => {
     expect(persisted).not.toContain(harness.exchangedVerifiers[0])
   })
 
+  test("bounds initial account discovery while retaining pending credentials", async () => {
+    const harness = createHarness({ credentialMutationTimeoutMs: 20 })
+    harness.setDiscoverGate(new Promise<void>(() => {}))
+    const started = await startAuthorization(harness)
+
+    const error = expectSixbError(
+      await rejectionOf(started.complete()),
+      "connector.provider_failed"
+    )
+    expect(error.retryable).toBe(false)
+    const pending = [...harness.storage.snapshot().authorizations.values()]
+    expect(pending).toHaveLength(1)
+    expect(pending[0]).toMatchObject({ status: "pending_selection", accounts: [] })
+  })
+
   test("expires unselected authorizations before they can create a connection", async () => {
     const harness = createHarness({ accountSelectionTtlMs: 1_000 })
     const authorization = await authorize(harness)
@@ -535,6 +558,42 @@ describe("connector connection lifecycle", () => {
     expect(harness.counts().revokeCount).toBe(2)
   })
 
+  test("converges when a retried provider revocation was already applied", async () => {
+    const harness = createHarness()
+    const authorization = await authorize(harness)
+    await harness.service.selectAccount(managementRuntime(), harness.connector, {
+      authorizationId: authorization.authorizationId,
+      accountId: "account-a",
+      owner: projectOwner,
+      slot: "social",
+    })
+    harness.setRevokeAfterEffectError(new Error("provider response was lost"))
+
+    expectSixbError(
+      await rejectionOf(
+        harness.service.revokeAuthorization(
+          managementRuntime(),
+          harness.connector,
+          authorization.authorizationId
+        )
+      ),
+      "connector.revocation_pending"
+    )
+    expect((await harness.storage.getAuthorization(authorization.authorizationId))?.status).toBe(
+      "revocation_pending"
+    )
+
+    await harness.service.revokeAuthorization(
+      managementRuntime(),
+      harness.connector,
+      authorization.authorizationId
+    )
+    expect((await harness.storage.getAuthorization(authorization.authorizationId))?.status).toBe(
+      "revoked"
+    )
+    expect(harness.counts().revokeCount).toBe(2)
+  })
+
   test("coalesces concurrent revocation attempts across service instances", async () => {
     const harness = createHarness()
     let releaseRevoke!: () => void
@@ -665,6 +724,56 @@ describe("connector connection lifecycle", () => {
     ).toEqual([first.id, second.id].sort())
   })
 
+  test("rejects an older reauthorization callback after a newer attempt completes", async () => {
+    const harness = createHarness({ refreshSkewMs: 0 })
+    const authorization = await authorize(harness)
+    await harness.service.selectAccount(managementRuntime(), harness.connector, {
+      authorizationId: authorization.authorizationId,
+      accountId: "account-a",
+      owner: projectOwner,
+      slot: "social",
+    })
+    const startReauthorization = () =>
+      harness.service.startAuthorization(managementRuntime(), harness.connector, {
+        owner: projectOwner,
+        slot: "social",
+        redirectUri: callbackUrl,
+        reauthorizationId: authorization.authorizationId,
+      })
+    const older = await startReauthorization()
+    const newer = await startReauthorization()
+
+    await harness.service.completeAuthorization(managementRuntime(), harness.connector, {
+      state: new URL(newer.authorizationUrl).searchParams.get("state")!,
+      code: "newer-authorization-code",
+      redirectUri: callbackUrl,
+    })
+    const completedRevision = (
+      await harness.storage.getAuthorization(authorization.authorizationId)
+    )?.revision
+
+    const error = expectSixbError(
+      await rejectionOf(
+        harness.service.completeAuthorization(managementRuntime(), harness.connector, {
+          state: new URL(older.authorizationUrl).searchParams.get("state")!,
+          code: "older-authorization-code",
+          redirectUri: callbackUrl,
+        })
+      ),
+      "connector.authorization_invalid"
+    )
+    expect(error.retryable).toBe(false)
+    expect(harness.counts().exchangeCount).toBe(2)
+    expect((await harness.storage.getAuthorization(authorization.authorizationId))?.revision).toBe(
+      completedRevision
+    )
+    const client = await harness.service.connectConnection(harness.connector, {
+      owner: projectOwner,
+      slot: "social",
+    })
+    expect(await client.token()).toEqual({ accessToken: "access-secret-2", tokenType: "Bearer" })
+  })
+
   test("restarts shared reauthorization if its affected connection set changes", async () => {
     const harness = createHarness()
     const authorization = await authorize(harness)
@@ -702,8 +811,8 @@ describe("connector connection lifecycle", () => {
     expect(harness.counts().exchangeCount).toBe(1)
   })
 
-  test("stages reauthorized credentials before account discovery", async () => {
-    const harness = createHarness()
+  test("bounds account discovery and keeps reauthorized credentials staged", async () => {
+    const harness = createHarness({ credentialMutationTimeoutMs: 20 })
     const authorization = await authorize(harness)
     await harness.service.selectAccount(managementRuntime(), harness.connector, {
       authorizationId: authorization.authorizationId,
@@ -721,22 +830,25 @@ describe("connector connection lifecycle", () => {
         reauthorizationId: authorization.authorizationId,
       }
     )
-    harness.setDiscoverError(new Error("temporary discovery failure"))
+    harness.setDiscoverGate(new Promise<void>(() => {}))
 
-    await expect(
-      harness.service.completeAuthorization(managementRuntime(), harness.connector, {
-        state: new URL(started.authorizationUrl).searchParams.get("state")!,
-        code: "authorization-code",
-        redirectUri: callbackUrl,
-      })
-    ).rejects.toThrow("remains safely staged")
+    expectSixbError(
+      await rejectionOf(
+        harness.service.completeAuthorization(managementRuntime(), harness.connector, {
+          state: new URL(started.authorizationUrl).searchParams.get("state")!,
+          code: "authorization-code",
+          redirectUri: callbackUrl,
+        })
+      ),
+      "connector.provider_failed"
+    )
     expect(
       (await harness.storage.getAuthorization(authorization.authorizationId))?.credentialMutation
         ?.phase
     ).toBe("result_staged")
     expect(serializedSnapshot(harness.storage)).not.toContain("access-secret-2")
 
-    harness.setDiscoverError(undefined)
+    harness.setDiscoverGate(undefined)
     await harness.service.connectConnection(harness.connector, {
       owner: projectOwner,
       slot: "social",
@@ -789,7 +901,7 @@ describe("connector credential refresh", () => {
     )
   })
 
-  test("serializes refresh and reauthorization provider effects", async () => {
+  test("rejects reauthorization made stale by a concurrent refresh", async () => {
     const harness = createHarness()
     let releaseRefresh!: () => void
     harness.setRefreshGate(new Promise<void>((resolve) => (releaseRefresh = resolve)))
@@ -823,13 +935,14 @@ describe("connector credential refresh", () => {
       code: "authorization-code",
       redirectUri: callbackUrl,
     })
+    const reauthorizationFailure = rejectionOf(reauthorizing)
     await Bun.sleep(10)
     expect(harness.counts().exchangeCount).toBe(1)
 
     releaseRefresh()
     await refreshing
-    await reauthorizing
-    expect(harness.counts()).toMatchObject({ refreshCount: 1, exchangeCount: 2 })
+    expectSixbError(await reauthorizationFailure, "connector.authorization_invalid")
+    expect(harness.counts()).toMatchObject({ refreshCount: 1, exchangeCount: 1 })
     expect((await harness.storage.getAuthorization(authorization.authorizationId))?.status).toBe(
       "active"
     )

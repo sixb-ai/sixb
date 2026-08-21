@@ -116,6 +116,10 @@ Every process sharing the same connector database must receive the same key. Do 
 
 Static connectors do not need this setting. It can also be omitted with ephemeral connector storage, where both the stored credentials and Sixb's process-local protection disappear on restart.
 
+OAuth adapters that implement `revoke()` must make it idempotent. If the provider reports that a
+grant is already revoked or invalid, resolve successfully so Sixb can finish a previously ambiguous
+revocation retry.
+
 ## ConnectorContext
 
 `connect` receives a `ConnectorContext` so adapters can scope logs, build cache keys, or cancel

@@ -107,6 +107,10 @@ export interface ConnectorOAuth2Authentication {
     context: ConnectorContext,
     credentials: ConnectorOAuthCredentials
   ): Promise<ConnectorOAuthCredentials> | ConnectorOAuthCredentials
+  /**
+   * Revokes the grant idempotently. An already revoked or invalid grant must resolve successfully
+   * so Sixb can converge after losing an earlier provider response.
+   */
   revoke?(context: ConnectorContext, credentials: ConnectorOAuthCredentials): Promise<void> | void
 }
 

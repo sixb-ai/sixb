@@ -68,6 +68,34 @@ export function runConnectorConnectionStorageContractSuite<
       })
     })
 
+    test("keeps pending selection untouched when connection validation fails", async () => {
+      await withStorage(async (storage) => {
+        const active = await createAuthorization(storage, "authorization-a", "account-a")
+        const existing = await connect(storage, active, "connection-a", "account-a")
+        const replacement = await createAuthorization(storage, "authorization-b", "account-b")
+
+        await expect(connect(storage, replacement, "connection-b", "account-b")).rejects.toThrow(
+          "explicit replacement is required"
+        )
+        expect(await storage.getAuthorization(replacement.id)).toEqual(replacement)
+
+        const duplicateId = await createAuthorization(storage, "authorization-c", "account-c")
+        await expect(
+          storage.putConnection({
+            id: existing.connection.id,
+            projectId,
+            connectorId,
+            authorizationId: duplicateId.id,
+            owner: { type: "project" },
+            slot: "secondary",
+            account: { id: "account-c", label: "ignored" },
+            replace: false,
+          })
+        ).rejects.toThrow("connection id already exists")
+        expect(await storage.getAuthorization(duplicateId.id)).toEqual(duplicateId)
+      })
+    })
+
     test("fences staged credentials by project, revision and mutation id", async () => {
       await withStorage(async (storage) => {
         const authorization = await createActiveAuthorization(storage)
