@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { agentServiceAccountId } from "../src/agents/authority"
 import type { Principal } from "../src/auth"
 import { type AuthorizationContext, emptyGrantIndex } from "../src/authorization"
+import { isSixbError } from "../src/errors/internal"
 import { restoreAgentExecutionScope } from "../src/execution/agent"
 import {
   assertExecutionScopeProject,
@@ -134,12 +135,21 @@ describe("execution scopes", () => {
     const disabledScope = createTestingScope({ projectId: "project-1" })
 
     expect(() => resolveExecutionScopeAuthorization("project-1", principalScope)).not.toThrow()
-    expect(() =>
+    let error: unknown
+    try {
       resolveExecutionScopeAuthorization("project-1", {
         execution: principalScope.execution,
         authorization: disabledScope.authorization,
       })
-    ).toThrow("incompatible with its authority")
+    } catch (cause) {
+      error = cause
+    }
+    expect(isSixbError(error)).toBe(true)
+    expect(error).toMatchObject({ code: "internal.unexpected" })
+    expect(error).toHaveProperty(
+      "message",
+      expect.stringContaining("incompatible with its authority")
+    )
   })
 
   test("creates a principal request scope with explicit request provenance", () => {
