@@ -176,7 +176,6 @@ describe("PipelineWorker", () => {
         return property === "storage" ? storage : Reflect.get(target, property, receiver)
       },
     })
-
     expect(() => new PipelineWorker(withoutPipelineRuns)).toThrow("storage.pipelineRuns")
   })
 
@@ -408,6 +407,12 @@ describe("PipelineWorker", () => {
         reports.push({ error, context })
       },
     })
+    let settledFailure: unknown
+    const fail = sixb.queues.pipelines.fail.bind(sixb.queues.pipelines)
+    sixb.queues.pipelines.fail = async (input) => {
+      settledFailure = input.failure
+      await fail(input)
+    }
     await seedDatasetVersion(sixb.lakeStorage as InMemoryLakeStorage, rawCustomersDataset, [
       { id: "cust_1", name: "Ada" },
     ])
@@ -426,6 +431,10 @@ describe("PipelineWorker", () => {
         async () => reports.length,
         (count) => count === 1
       )
+      await waitFor(
+        async () => settledFailure,
+        (failure) => failure !== undefined
+      )
       expect(reports).toHaveLength(1)
       expect(reports[0]?.error).toBe(originalError)
       expect(reports[0]?.context).toEqual({
@@ -441,6 +450,7 @@ describe("PipelineWorker", () => {
         },
         failure: run!.error!,
       })
+      expect(settledFailure).toEqual(run!.error)
 
       const claimed = await sixb.queues.pipelines.claim({
         projectId: sixb.id,
