@@ -1966,7 +1966,7 @@ describe("SixbServer HTTP contract", () => {
           projectId: sixb.id,
           agentId: "device-resolver",
           runId: nodeRunId,
-          parentExecutionId: workflowExecutionId,
+          sourceExecutionId: workflowExecutionId,
         })
         executionIds.push(executionId)
         await runs.agentNodes.create({
@@ -2056,7 +2056,7 @@ describe("SixbServer HTTP contract", () => {
         projectId: sixb.id,
         agentId: "device-resolver",
         runId: nodeRunId,
-        parentExecutionId: workflowExecutionId,
+        sourceExecutionId: workflowExecutionId,
       })
       await runs.agentNodes.create({
         projectId: sixb.id,

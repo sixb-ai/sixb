@@ -611,7 +611,7 @@ describe("SqliteWorkflowRunStorage", () => {
       agentId: "resolver-agent",
       runId: "wf-run-agent:node:0",
       executionId: "test_agent_execution:wrong-parent",
-      parentExecutionId: "unrelated-workflow-execution",
+      sourceExecutionId: "unrelated-workflow-execution",
     })
     await expect(
       storage.agentNodes.create({
@@ -626,7 +626,7 @@ describe("SqliteWorkflowRunStorage", () => {
       projectId: "my-app",
       agentId: "resolver-agent",
       runId: "wf-run-agent:node:0",
-      parentExecutionId: workflowRun.executionId,
+      sourceExecutionId: workflowRun.executionId,
     })
     await storage.agentNodes.create({
       projectId: "my-app",

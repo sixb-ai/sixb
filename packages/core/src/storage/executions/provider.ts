@@ -1,4 +1,5 @@
 import type { TrustedPrimitiveKind } from "../../execution/types"
+import { ExecutionStorageError } from "./errors"
 import type { CreateExecutionInput, ExecutionRecord } from "./types"
 import { normalizeExecutionRecord } from "./validation"
 
@@ -82,7 +83,8 @@ function assertStoredParent(
 ): void {
   const expected = source.type === "execution" ? source.executionId : null
   if (row.parentExecutionId !== expected) {
-    throw new Error(
+    throw new ExecutionStorageError(
+      "invalid_parent_execution",
       `[Sixb] Stored execution '${row.id}' has inconsistent parent execution provenance.`
     )
   }
