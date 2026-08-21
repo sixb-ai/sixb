@@ -49,12 +49,12 @@ Each boundary exposes only the codes it can persist.
 | Boundary | Allowed codes |
 | --- | --- |
 | Action run or phase | `action.phase_failed`, `internal.unexpected`, `queue.enqueue_failed`, `runtime.cancelled` |
-| Sync run | `internal.unexpected`, `runtime.cancelled`, `sync.execution_failed` |
+| Sync run | `internal.unexpected`, `queue.enqueue_failed`, `runtime.cancelled`, `sync.execution_failed` |
 | Agent execution | `agent.execution_failed`, `internal.unexpected`, `runtime.cancelled` |
-| Projection run | `internal.unexpected`, `projection.execution_failed`, `runtime.cancelled` |
-| Pipeline run or step | `internal.unexpected`, `runtime.cancelled`, `pipeline.step_failed` |
+| Projection run | `internal.unexpected`, `projection.execution_failed`, `queue.enqueue_failed`, `runtime.cancelled` |
+| Pipeline run or step | `internal.unexpected`, `pipeline.step_failed`, `queue.enqueue_failed`, `runtime.cancelled` |
 | Workflow run or node | `internal.unexpected`, `runtime.cancelled`, `workflow.node_failed` |
-| Webhook run | `internal.unexpected`, `webhook.delivery_failed` |
+| Webhook run | `internal.unexpected`, `webhook.delivery_failed`, `webhook.delivery_rejected` |
 | Ontology outbox | `event.delivery_failed` |
 
 Additional rules:
@@ -62,8 +62,8 @@ Additional rules:
 - Action failures require `{ actionId, runId, phase }` in `details`.
 - Agent, Pipeline, Sync, and Workflow completion events reuse the failure stored on the run.
 - `agent.run.finished.error` reuses the failure stored on the Agent run.
-- Webhook non-retryable outcomes remain HTTP outcomes; only retryable post-claim failures use
-  `webhook.delivery_failed`.
+- Webhook retryability is carried by the persisted failure: retryable outcomes use
+  `webhook.delivery_failed`; terminal handler responses use `webhook.delivery_rejected`.
 - The outbox retains `event.delivery_failed` while publication is retried.
 
 ## Reporting
@@ -99,4 +99,5 @@ Additional rules:
 | `runtime.cancelled` | No | Work was cancelled before completion. | Confirm the cancellation before requesting another run. |
 | `sync.execution_failed` | No | A Sync failed while reading, validating, or writing its dataset. | Inspect the `onError` report, fix the source or data, then request a new run. |
 | `webhook.delivery_failed` | Yes | A claimed webhook delivery failed retryably. | Let the provider retry; inspect the handler if it persists. |
+| `webhook.delivery_rejected` | No | A webhook handler returned a terminal non-success response. | Inspect the handler response and provider payload before sending a new delivery. |
 | `workflow.node_failed` | No | A node failed during preparation or execution. | Inspect its identity and the native error reported to `onError`. |
