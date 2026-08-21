@@ -378,24 +378,10 @@ export class RedisBroker implements Broker {
     assertCursor(params.afterCursor)
 
     const ensured = await this.streamManager.requireStream(params.projectId, params.streamId)
-    const { cursor, lastTrimmedId } = await this.connectionManager.useCommandClient(
-      async (commandClient) => {
-        await this.enforceAgeRetention(commandClient, ensured)
-        const lastTrimmedId = await this.readLastTrimmedId(commandClient, ensured)
-        let cursor = params.afterCursor
-        if (cursor === undefined) {
-          if (params.from === "earliest") {
-            cursor = lastTrimmedId ?? "0-0"
-          } else {
-            // Resolve "latest" to a concrete id once. Reusing "$" after each BLOCK timeout can
-            // skip records written between XREAD calls. The concrete cursor also closes the gap
-            // between this bounded lookup and opening the dedicated subscription client.
-            cursor = await this.subscriptionStartCursor(commandClient, ensured)
-          }
-        }
-        return { cursor, lastTrimmedId }
-      }
-    )
+    const lastTrimmedId = await this.connectionManager.useCommandClient(async (commandClient) => {
+      await this.enforceAgeRetention(commandClient, ensured)
+      return this.readLastTrimmedId(commandClient, ensured)
+    })
     if (params.afterCursor !== undefined) {
       this.assertCursorInRetainedRange(ensured.streamId, params.afterCursor, lastTrimmedId)
     }
@@ -414,6 +400,18 @@ export class RedisBroker implements Broker {
     const unsubscribe = this.subscriptionRegistry.register(pump)
 
     try {
+      let cursor = params.afterCursor
+      if (cursor === undefined) {
+        if (params.from === "earliest") {
+          cursor = lastTrimmedId ?? "0-0"
+        } else {
+          // Resolve "latest" to a concrete id once. Reusing "$" after each BLOCK timeout can
+          // skip records written between XREAD calls. The concrete cursor closes the gap before
+          // the pump starts from the same dedicated connection.
+          const commandClient = this.connectionManager.boundedCommandClient(client)
+          cursor = await this.subscriptionStartCursor(commandClient, ensured)
+        }
+      }
       this.assertOpen()
       pump.start(cursor)
       return unsubscribe
