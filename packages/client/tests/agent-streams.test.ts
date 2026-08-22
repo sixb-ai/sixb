@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { AGENT_RUN_STREAM_SCHEMA_VERSION } from "@sixb/core/agents/streams"
-import { createAgentRunSocket } from "../src/agent-streams"
+import {
+  AGENT_ACTIVITY_STREAM_SCHEMA_VERSION,
+  AGENT_RUN_STREAM_SCHEMA_VERSION,
+} from "@sixb/core/agents/streams"
+import { createAgentActivitySocket, createAgentRunSocket } from "../src/agent-streams"
 
 function runSnapshotFrame(): string {
   return JSON.stringify({
@@ -39,6 +42,23 @@ function agentRecordFrame(cursor: string): string {
         attempt: 1,
         occurredAt: "2026-01-01T00:00:00.000Z",
       },
+    },
+  })
+}
+
+function agentActivityFrame(status: "queued" | "running" | "succeeded"): string {
+  return JSON.stringify({
+    type: "activity",
+    event: {
+      schemaVersion: AGENT_ACTIVITY_STREAM_SCHEMA_VERSION,
+      type: "agent.run.activity",
+      projectId: "proj",
+      runId: "run-1",
+      threadId: "thr-1",
+      agentId: "assistant",
+      status,
+      attempt: status === "queued" ? 0 : 1,
+      occurredAt: "2026-01-01T00:00:00.000Z",
     },
   })
 }
@@ -151,5 +171,29 @@ describe("createAgentRunSocket", () => {
     await tick()
 
     expect(FakeWebSocket.instances).toHaveLength(1)
+  })
+
+  test("subscribes once to project activity and delivers lifecycle changes", () => {
+    const received: string[] = []
+    let subscribed = 0
+    const socket = createAgentActivitySocket({
+      reconnect: false,
+      onActivity: (event) => received.push(event.status),
+      onSubscribed: () => {
+        subscribed += 1
+      },
+    })
+
+    const ws = FakeWebSocket.instances[0]
+    if (!ws) throw new Error("expected a websocket")
+    ws.onopen?.()
+    expect(JSON.parse(ws.sent[0])).toEqual({ type: "subscribe.activity" })
+
+    ws.onmessage?.({ data: JSON.stringify({ type: "subscribed.activity" }) })
+    ws.onmessage?.({ data: agentActivityFrame("running") })
+    expect(subscribed).toBe(1)
+    expect(received).toEqual(["running"])
+
+    socket.close()
   })
 })

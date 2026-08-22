@@ -22,6 +22,7 @@ import { resolveAgentContextParts } from "./context-resolution"
 import { dispatchQueuedAgentRuns } from "./dispatch"
 import { AgentRequestError } from "./errors"
 import { createAgentMessageId, createAgentRunId, createAgentThreadId } from "./ids"
+import { publishAgentRunActivity } from "./streams"
 import type { AgentDefinition } from "./types"
 
 export interface RequestAgentRunInput {
@@ -151,6 +152,7 @@ export async function requestAgentRun(
     throw error
   }
 
+  await publishRunActivity(runtime, run)
   const jobId = await dispatchAgentRun(runtime, agents, runId)
 
   return {
@@ -214,6 +216,7 @@ export async function retryAgentRun(
       requesterGroupIds,
     })
   })
+  await publishRunActivity(runtime, run)
   const jobId = await dispatchAgentRun(runtime, agents, runId)
   return { run, ...(jobId ? { jobId } : {}), createdThread: false }
 }
@@ -278,6 +281,15 @@ async function dispatchAgentRun(
   } catch (error) {
     console.error(`[Sixb] Could not dispatch queued agent run '${runId}'; retrying later.`, error)
     return undefined
+  }
+}
+
+/** Activity delivery is observational: durable run admission remains successful if the feed is down. */
+async function publishRunActivity(runtime: SixbRuntimeContext, run: AgentRunRecord): Promise<void> {
+  try {
+    await publishAgentRunActivity(runtime.broker, run)
+  } catch (error) {
+    console.error(`[Sixb] Agent run '${run.id}' activity stream publish failed:`, error)
   }
 }
 

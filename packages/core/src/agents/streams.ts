@@ -14,6 +14,86 @@ export const DEFAULT_AGENT_RUN_STREAM_RETENTION = {
   maxRecords: 5_000,
 } as const
 
+export const AGENT_ACTIVITY_STREAM_SCHEMA_VERSION = 1 as const
+export const AGENT_ACTIVITY_STREAM_ID = "agents.activity" as const
+export const DEFAULT_AGENT_ACTIVITY_STREAM_RETENTION = {
+  maxAgeMs: 24 * 60 * 60 * 1000, // 24 hours
+  maxRecords: 10_000,
+} as const
+
+export interface AgentRunActivityEvent {
+  readonly schemaVersion: typeof AGENT_ACTIVITY_STREAM_SCHEMA_VERSION
+  readonly type: "agent.run.activity"
+  readonly projectId: string
+  readonly runId: string
+  readonly threadId: string
+  readonly agentId: string
+  readonly status: AgentRunRecord["status"]
+  readonly attempt: number
+  readonly occurredAt: string
+}
+
+export function agentActivityStreamDefinition(): BrokerStreamDefinition {
+  return {
+    id: AGENT_ACTIVITY_STREAM_ID,
+    retention: DEFAULT_AGENT_ACTIVITY_STREAM_RETENTION,
+  }
+}
+
+export function agentRunActivityEvent(
+  run: AgentRunRecord,
+  occurredAt: Date = new Date()
+): AgentRunActivityEvent {
+  return {
+    schemaVersion: AGENT_ACTIVITY_STREAM_SCHEMA_VERSION,
+    type: "agent.run.activity",
+    projectId: run.projectId,
+    runId: run.id,
+    threadId: run.threadId,
+    agentId: run.agentId,
+    status: run.status,
+    attempt: run.attempt,
+    occurredAt: occurredAt.toISOString(),
+  }
+}
+
+export function isAgentRunActivityEvent(value: unknown): value is AgentRunActivityEvent {
+  return (
+    isPlainRecord(value) &&
+    value.schemaVersion === AGENT_ACTIVITY_STREAM_SCHEMA_VERSION &&
+    value.type === "agent.run.activity" &&
+    typeof value.projectId === "string" &&
+    typeof value.runId === "string" &&
+    typeof value.threadId === "string" &&
+    typeof value.agentId === "string" &&
+    isAgentRunStatus(value.status) &&
+    typeof value.attempt === "number" &&
+    Number.isFinite(value.attempt) &&
+    typeof value.occurredAt === "string"
+  )
+}
+
+export async function publishAgentRunActivity(broker: Broker, run: AgentRunRecord): Promise<void> {
+  const event = agentRunActivityEvent(run)
+  await broker.ensureStream({
+    projectId: run.projectId,
+    stream: agentActivityStreamDefinition(),
+  })
+  await broker.append({
+    projectId: run.projectId,
+    streamId: AGENT_ACTIVITY_STREAM_ID,
+    records: [
+      {
+        name: event.type,
+        key: event.threadId,
+        // The event is composed only of validated JSON primitives.
+        payload: event as unknown as JsonValue,
+        idempotencyKey: `${event.runId}:${event.attempt}:${event.status}`,
+      },
+    ],
+  })
+}
+
 export type AgentRunStreamId = `agents.runs.${string}`
 
 export function agentRunStreamId(runId: string): AgentRunStreamId {
@@ -206,6 +286,10 @@ function isTerminalAgentRunStatus(value: unknown): value is "succeeded" | "faile
   return value === "succeeded" || value === "failed" || value === "cancelled"
 }
 
+function isAgentRunStatus(value: unknown): value is AgentRunRecord["status"] {
+  return value === "queued" || value === "running" || isTerminalAgentRunStatus(value)
+}
+
 function isAgentRunFailure(value: unknown): value is AgentRunFailure {
   if (!isPlainRecord(value)) return false
   try {
@@ -253,4 +337,5 @@ export async function publishAgentRunFinished(broker: Broker, run: AgentRunRecor
       },
     ],
   })
+  await publishAgentRunActivity(broker, run)
 }
