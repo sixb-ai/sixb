@@ -60,6 +60,12 @@ const Device = defineObjectType({
   ],
 })
 
+const PrivateNote = defineObjectType({
+  id: "private-note",
+  name: "Private Note",
+  properties: [prop("id", "string", { required: true, primary: true })],
+})
+
 const labelDevice = defineAction("label-device")
   .on(Device)
   .params({})
@@ -86,9 +92,12 @@ describe("agent API gateway", () => {
 
     const objectTypes = await app.fetch(new Request(`${gatewayBaseUrl}/api/object-types`))
     expect(objectTypes.status).toBe(200)
+    // Regression guard: remove the auth-disabled branch in resolveAgentRunAuthState and this must
+    // fail because the principal-scoped Agent role deliberately cannot view PrivateNote.
     await expect(objectTypes.json()).resolves.toEqual([
       expect.objectContaining({ id: "contract" }),
       expect.objectContaining({ id: "device" }),
+      expect.objectContaining({ id: "private-note" }),
     ])
   })
 
@@ -371,7 +380,7 @@ async function createGatewayRuntime(
   const storage = new InMemoryStorage()
   const sixb = new SixbHost<readonly OntologySource[]>({
     id: PROJECT_ID,
-    ontology: [Contract, Device],
+    ontology: [Contract, Device, PrivateNote],
     actions: [labelDevice],
     workflows: [inspectDevices],
     groups: [agentRuntime],
