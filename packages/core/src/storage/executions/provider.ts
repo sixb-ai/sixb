@@ -20,7 +20,7 @@ export interface ExecutionStorageRow {
   readonly requestedByServiceAccountId: string | null
   readonly correlationId: string
   readonly parentExecutionId: string | null
-  readonly authorityKind: "disabled" | "kernel" | "principal" | "trustedPrimitive"
+  readonly authorityKind: "disabled" | "kernel" | "principal" | "sharedAccess" | "trustedPrimitive"
   readonly authorityUserId: string | null
   readonly authorityServiceAccountId: string | null
   readonly authoritySessionId: string | null
@@ -28,6 +28,8 @@ export interface ExecutionStorageRow {
   readonly authorityPrimitiveKind: TrustedPrimitiveKind | null
   readonly authorityPrimitiveId: string | null
   readonly authorityKernelOperation: "ontology.recover" | null
+  readonly authoritySharedGrantId: string | null
+  readonly authoritySharedSessionId: string | null
   readonly createdAt: Date
 }
 
@@ -116,6 +118,8 @@ function flattenAuthority(
   | "authorityPrimitiveId"
   | "authorityPrimitiveKind"
   | "authorityServiceAccountId"
+  | "authoritySharedGrantId"
+  | "authoritySharedSessionId"
   | "authoritySessionId"
   | "authorityUserId"
 > {
@@ -127,6 +131,8 @@ function flattenAuthority(
     authorityPrimitiveKind: null,
     authorityPrimitiveId: null,
     authorityKernelOperation: null,
+    authoritySharedGrantId: null,
+    authoritySharedSessionId: null,
   }
 
   switch (record.authorizationRef.type) {
@@ -157,6 +163,13 @@ function flattenAuthority(
         authorityKind: "trustedPrimitive",
         authorityPrimitiveKind: record.authorizationRef.primitive.kind,
         authorityPrimitiveId: record.authorizationRef.primitive.id,
+      }
+    case "sharedAccess":
+      return {
+        ...empty,
+        authorityKind: "sharedAccess",
+        authoritySharedGrantId: record.authorizationRef.grantId,
+        authoritySharedSessionId: record.authorizationRef.sessionId,
       }
     case "kernel":
       return {
@@ -230,6 +243,12 @@ function inflateAuthority(row: ExecutionStorageRow): CreateExecutionInput["autho
           id: requireValue(row.authorityPrimitiveId, "authority primitive id"),
           runId: row.executorId,
         },
+      }
+    case "sharedAccess":
+      return {
+        type: "sharedAccess",
+        grantId: requireValue(row.authoritySharedGrantId, "shared access authority grant id"),
+        sessionId: requireValue(row.authoritySharedSessionId, "shared access authority session id"),
       }
     case "kernel":
       return {

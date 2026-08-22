@@ -57,6 +57,9 @@ import sharedAccessGrantsSql from "./migrations/020-shared-access-grants.sql" wi
 import sharedAccessSessionsSql from "./migrations/021-shared-access-sessions.sql" with {
   type: "text",
 }
+import sharedAccessExecutionsSql from "./migrations/022-shared-access-executions.sql" with {
+  type: "text",
+}
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -98,6 +101,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("019-webhook-delivery-failure-record", webhookDeliveryFailureRecordSql),
     sqliteSql("020-shared-access-grants", sharedAccessGrantsSql),
     sqliteSql("021-shared-access-sessions", sharedAccessSessionsSql),
+    sqliteSql("022-shared-access-executions", sharedAccessExecutionsSql),
   ],
 })
 

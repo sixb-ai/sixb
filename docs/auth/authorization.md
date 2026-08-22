@@ -117,6 +117,10 @@ access-token sessions, recheck the grant on every request, and intersect its iss
 current share type. Shared routes use their own CSRF cookie, which is never accepted by normal
 Object or Action endpoints.
 
+`GET /api/shares/:grantId/resource` reads only the grant's exact object. Shared Actions receive the
+same fixed object as their subject; callers can provide only the Action ID and its parameters. The
+request execution records `grantId` and `sessionId` as authority without inventing a user identity.
+
 > **Only `can.view(Type)` reaches subtypes.** `can.edit` and `can.append` cover exactly the types
 > you name, so adding a type under one you granted never makes it writable on its own.
 

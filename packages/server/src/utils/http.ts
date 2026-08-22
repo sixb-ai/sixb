@@ -17,7 +17,10 @@ const HTTP_STATUS_BY_ERROR_CODE: Partial<Record<SixbErrorCode, number>> = {
   "dataset.not_found": 404,
   "dataset.version_not_found": 404,
   "share.access_unavailable": 401,
+  "share.action_invalid": 400,
+  "share.action_unavailable": 403,
   "share.grant_not_found": 404,
+  "share.resource_not_found": 404,
   "share.type_not_found": 404,
 }
 

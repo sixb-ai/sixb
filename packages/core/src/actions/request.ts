@@ -84,12 +84,12 @@ export async function requestAction(
   input: RequestActionInput
 ): Promise<RequestActionResult> {
   requireActionRunStorage(runtime)
+  assertAuthorized(runtime, { kind: "action.apply", actionId: input.actionId })
   const action = getActionDefinition(runtime, input.actionId)
   const actionId = action.id
   const rawParams: Record<string, unknown> = input.params ?? {}
   const subject: ActionSubject = input.subject ?? { kind: "none" }
 
-  assertAuthorized(runtime, { kind: "action.apply", actionId })
   if (action.binding.kind === "object") {
     // Object actions also require visibility of the subject's object type.
     assertAuthorized(runtime, { kind: "object.view", objectTypeId: action.binding.objectType.id })

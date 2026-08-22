@@ -10660,6 +10660,159 @@ export type GetSharedAccessSessionResponses = {
 export type GetSharedAccessSessionResponse =
   GetSharedAccessSessionResponses[keyof GetSharedAccessSessionResponses]
 
+export type GetSharedAccessResourceData = {
+  body?: never
+  path: {
+    grantId: string
+  }
+  query?: never
+  url: "/api/shares/{grantId}/resource"
+}
+
+export type GetSharedAccessResourceErrors = {
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "share.access_unavailable"
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "share.resource_not_found"
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "internal.unexpected"
+  }
+}
+
+export type GetSharedAccessResourceError =
+  GetSharedAccessResourceErrors[keyof GetSharedAccessResourceErrors]
+
+export type GetSharedAccessResourceResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    primaryId: string
+    objectTypeId: string
+    properties: {
+      [key: string]: unknown
+    }
+    createdAt: string
+    updatedAt: string
+  }
+}
+
+export type GetSharedAccessResourceResponse =
+  GetSharedAccessResourceResponses[keyof GetSharedAccessResourceResponses]
+
+export type RequestSharedAccessActionData = {
+  body: {
+    params?: {
+      [key: string]: unknown
+    }
+    runId?: string
+  }
+  path: {
+    grantId: string
+    actionId: string
+  }
+  query?: never
+  url: "/api/shares/{grantId}/actions/{actionId}"
+}
+
+export type RequestSharedAccessActionErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "share.action_invalid"
+  }
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "share.access_unavailable"
+  }
+  /**
+   * Response for status 403
+   */
+  403:
+    | {
+        error: string
+      }
+    | {
+        error: string
+        /**
+         * Stable machine-readable failure code for programmatic handling.
+         */
+        code: "share.action_unavailable"
+      }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "share.resource_not_found"
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "internal.unexpected"
+  }
+}
+
+export type RequestSharedAccessActionError =
+  RequestSharedAccessActionErrors[keyof RequestSharedAccessActionErrors]
+
+export type RequestSharedAccessActionResponses = {
+  /**
+   * Response for status 202
+   */
+  202: {
+    runId: string
+    queuedAt: string
+    jobId?: string
+    created: boolean
+  }
+}
+
+export type RequestSharedAccessActionResponse =
+  RequestSharedAccessActionResponses[keyof RequestSharedAccessActionResponses]
+
 export type SignOutSharedAccessData = {
   body?: never
   path: {

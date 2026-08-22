@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import {
+  type ActionDefinition,
   can,
+  defineAction,
   defineGroup,
   defineObjectType,
   defineRole,
@@ -10,6 +12,7 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  param,
   prop,
   SixbHost,
 } from "@sixb/core"
@@ -21,12 +24,23 @@ import { createTestBrowserPolicy } from "./helpers"
 const Report = defineObjectType({
   id: "shared-report",
   name: "Shared report",
-  properties: [prop("id", "string", { required: true, primary: true })],
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("title", "string", { required: true }),
+  ],
 })
+const acknowledgeReport = defineAction("shared-acknowledge-report")
+  .on(Report)
+  .params({ note: param("string") })
+  .writeback(async () => {})
+const archiveReport = defineAction("shared-archive-report")
+  .on(Report)
+  .params({})
+  .writeback(async () => {})
 const PublishedReport = defineShareType({
   id: "shared-published-report",
   target: Report,
-  grants: [can.view(Report)],
+  grants: [can.view(Report), can.apply(acknowledgeReport)],
 })
 const publishers = defineGroup("shared-publishers")
 const publisher = defineRole("shared-publisher", {
@@ -200,6 +214,25 @@ describe("shared access routes", () => {
         })
       ),
       fixture.app.fetch(
+        new Request(`http://api.localhost/api/shares/${invitation.grantId}/resource`, {
+          headers: { cookie: cookies },
+        })
+      ),
+      fixture.app.fetch(
+        new Request(
+          `http://api.localhost/api/shares/${invitation.grantId}/actions/${acknowledgeReport.id}`,
+          {
+            method: "POST",
+            headers: {
+              cookie: cookies,
+              "content-type": "application/json",
+              "x-sixb-csrf": exchangedBody.csrfToken,
+            },
+            body: JSON.stringify({ params: { note: "reviewed" } }),
+          }
+        )
+      ),
+      fixture.app.fetch(
         new Request(`http://api.localhost/api/shares/${invitation.grantId}/sign-out`, {
           method: "POST",
           headers: { cookie: cookies, "x-sixb-csrf": exchangedBody.csrfToken },
@@ -248,6 +281,136 @@ describe("shared access routes", () => {
     expect(await current.json()).toEqual({ authenticated: false })
   })
 
+  test("reads only the granted resource and requests Actions with shared provenance", async () => {
+    const fixture = await createFixture()
+    const invitation = await issueGrant(fixture)
+    const exchanged = await exchange(fixture, invitation.grantId, invitation.secret)
+    const exchangedBody = (await exchanged.json()) as { csrfToken: string }
+    const cookies = requestCookieHeader(getSetCookies(exchanged))
+    const resourceUrl = `http://api.localhost/api/shares/${invitation.grantId}/resource`
+
+    const resource = await fixture.app.fetch(
+      new Request(resourceUrl, {
+        headers: { cookie: `${cookies}; ${fixture.normalSession.read.cookie}` },
+      })
+    )
+    expect(resource.status).toBe(200)
+    expect(await resource.json()).toMatchObject({
+      objectTypeId: Report.id,
+      primaryId: "report-1",
+      properties: { id: "report-1", title: "Published" },
+    })
+    expectSharedSecurityHeaders(resource)
+
+    const actionUrl = `http://api.localhost/api/shares/${invitation.grantId}/actions/${acknowledgeReport.id}`
+    const missingCsrf = await fixture.app.fetch(
+      new Request(actionUrl, {
+        method: "POST",
+        headers: { cookie: cookies, "content-type": "application/json" },
+        body: JSON.stringify({ params: { note: "reviewed" } }),
+      })
+    )
+    expect(missingCsrf.status).toBe(403)
+
+    const action = await fixture.app.fetch(
+      new Request(actionUrl, {
+        method: "POST",
+        headers: {
+          cookie: cookies,
+          "content-type": "application/json",
+          "x-sixb-csrf": exchangedBody.csrfToken,
+          "x-request-id": "shared-action-request",
+        },
+        body: JSON.stringify({ params: { note: "reviewed" }, runId: "shared-action-run" }),
+      })
+    )
+    expect(action.status).toBe(202)
+    expectSharedSecurityHeaders(action)
+
+    const run = await fixture.storage.actionRuns?.getById({
+      projectId: "shared-project",
+      id: "shared-action-run",
+    })
+    expect(run).toMatchObject({
+      actionId: acknowledgeReport.id,
+      subject: { kind: "object", objectTypeId: Report.id, primaryId: "report-1" },
+      params: { note: "reviewed" },
+    })
+    const child = run
+      ? await fixture.storage.executions.getById({
+          projectId: "shared-project",
+          id: run.executionId,
+        })
+      : null
+    if (!child || child.source.type !== "execution") {
+      throw new Error("Expected shared Action child execution")
+    }
+    await expect(
+      fixture.storage.executions.getById({
+        projectId: "shared-project",
+        id: child.source.executionId,
+      })
+    ).resolves.toMatchObject({
+      executor: { type: "request", requestId: "shared-action-request" },
+      authorizationRef: {
+        type: "sharedAccess",
+        grantId: invitation.grantId,
+      },
+    })
+
+    const unavailableAction = await fixture.app.fetch(
+      new Request(
+        `http://api.localhost/api/shares/${invitation.grantId}/actions/${archiveReport.id}`,
+        {
+          method: "POST",
+          headers: {
+            cookie: cookies,
+            "content-type": "application/json",
+            "x-sixb-csrf": exchangedBody.csrfToken,
+          },
+          body: "{}",
+        }
+      )
+    )
+    expect(unavailableAction.status).toBe(403)
+    expect(await unavailableAction.json()).toEqual({
+      error: "Shared action is unavailable.",
+      code: "share.action_unavailable",
+    })
+  })
+
+  test("rejects attempts to provide a shared Action subject", async () => {
+    const fixture = await createFixture()
+    const invitation = await issueGrant(fixture)
+    const exchanged = await exchange(fixture, invitation.grantId, invitation.secret)
+    const exchangedBody = (await exchanged.json()) as { csrfToken: string }
+    const cookies = requestCookieHeader(getSetCookies(exchanged))
+    const response = await fixture.app.fetch(
+      new Request(
+        `http://api.localhost/api/shares/${invitation.grantId}/actions/${acknowledgeReport.id}`,
+        {
+          method: "POST",
+          headers: {
+            cookie: cookies,
+            "content-type": "application/json",
+            "x-sixb-csrf": exchangedBody.csrfToken,
+          },
+          body: JSON.stringify({
+            subject: { kind: "object", objectTypeId: Report.id, primaryId: "report-2" },
+            params: { note: "reviewed" },
+          }),
+        }
+      )
+    )
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({
+      error: "Shared action request is invalid.",
+      code: "share.action_invalid",
+    })
+    expectSharedSecurityHeaders(response)
+  })
+
   test("rechecks grant revocation on every shared request", async () => {
     const fixture = await createFixture()
     const invitation = await issueGrant(fixture)
@@ -277,6 +440,7 @@ async function createFixture() {
   const host = new SixbHost({
     id: "shared-project",
     ontology: [Report],
+    actions: [acknowledgeReport as ActionDefinition, archiveReport as ActionDefinition],
     shares: [PublishedReport],
     groups: [publishers],
     roles: [publisher],
@@ -287,7 +451,10 @@ async function createFixture() {
     queues: new InMemoryQueues(),
     auth: { id: "test", kind: "dev" as const },
   })
-  await createTestSixb(host).objects.upsert(Report.id, { id: "report-1" })
+  await createTestSixb(host).objects.upsert(Report.id, {
+    id: "report-1",
+    title: "Published",
+  })
   const normalSession = await seedSession(storage)
   const app = createSixbApi(
     new SixbServer({

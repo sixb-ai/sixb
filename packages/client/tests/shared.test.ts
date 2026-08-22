@@ -42,18 +42,40 @@ describe("shared access client", () => {
             session: { expiresAt: "2026-08-20T12:15:00.000Z" },
           })
         }
+        if (pathname.endsWith("/resource")) {
+          return jsonResponse({
+            primaryId: "report-1",
+            objectTypeId: "report",
+            properties: { title: "Published" },
+            createdAt: "2026-08-20T12:00:00.000Z",
+            updatedAt: "2026-08-20T12:00:00.000Z",
+          })
+        }
+        if (pathname.includes("/actions/")) {
+          return jsonResponse({
+            runId: "run-1",
+            queuedAt: "2026-08-20T12:01:00.000Z",
+            created: true,
+          })
+        }
         if (pathname.endsWith("/sign-out")) return jsonResponse({ signedOut: true })
         return jsonResponse({ authenticated: false })
       }),
     })
 
     await client.exchange(secret)
+    await client.getResource()
+    await client.requestAction("acknowledge", { params: { note: "reviewed" } })
     await client.signOut()
 
-    expect(requests).toHaveLength(2)
+    expect(requests).toHaveLength(4)
     expect(requests[0]?.credentials).toBe("include")
     expect(requests[0]?.headers.get("x-sixb-csrf")).toBeNull()
-    expect(requests[1]?.headers.get("x-sixb-csrf")).toBe("csrf_shared")
+    expect(requests[1]?.method).toBe("GET")
+    expect(requests[1]?.headers.get("x-sixb-csrf")).toBeNull()
+    expect(requests[2]?.headers.get("x-sixb-csrf")).toBe("csrf_shared")
+    expect(await requests[2]?.json()).toEqual({ params: { note: "reviewed" } })
+    expect(requests[3]?.headers.get("x-sixb-csrf")).toBe("csrf_shared")
   })
 
   test("creates a grant-bound client from the configured Sixb client", async () => {
@@ -86,6 +108,9 @@ describe("shared access client", () => {
     })
 
     await expect(client.exchange("short")).rejects.toThrow("Shared access secret is invalid")
+    await expect(client.requestAction(" ")).rejects.toThrow(
+      "Shared access Action id must not be empty"
+    )
     expect(called).toBe(false)
   })
 

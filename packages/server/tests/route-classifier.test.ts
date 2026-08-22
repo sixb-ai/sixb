@@ -88,6 +88,14 @@ describe("classifyRoute", () => {
       kind: "shared",
       csrfProtected: false,
     })
+    expect(classifyRoute(request("GET", "/api/shares/shr_1/resource"))).toEqual({
+      kind: "shared",
+      csrfProtected: false,
+    })
+    expect(classifyRoute(request("POST", "/api/shares/shr_1/actions/approve"))).toEqual({
+      kind: "shared",
+      csrfProtected: false,
+    })
     expect(classifyRoute(request("POST", "/api/shares/shr_1/sign-out"))).toEqual({
       kind: "shared",
       csrfProtected: false,
@@ -99,8 +107,9 @@ describe("classifyRoute", () => {
       ["GET", "/api/shares/shr_1/exchange"],
       ["POST", "/api/shares/shr_1/session"],
       ["GET", "/api/shares/shr_1/sign-out"],
-      ["GET", "/api/shares/shr_1/resource"],
-      ["POST", "/api/shares/shr_1/actions/approve"],
+      ["POST", "/api/shares/shr_1/resource"],
+      ["GET", "/api/shares/shr_1/actions/approve"],
+      ["POST", "/api/shares/shr_1/actions/approve/extra"],
       ["POST", "/api/shares/shr_1/exchange/extra"],
     ] as const) {
       expect(classifyRoute(request(method, path))).toEqual({

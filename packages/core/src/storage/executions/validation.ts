@@ -154,6 +154,10 @@ function assertAuthorizationRef(ref: AuthorizationRef): void {
       assertNonBlank(ref.primitive.id, "Authority primitive id")
       assertNonBlank(ref.primitive.runId, "Authority primitive run id")
       return
+    case "sharedAccess":
+      assertNonBlank(ref.grantId, "Shared access authority grant id")
+      assertNonBlank(ref.sessionId, "Shared access authority session id")
+      return
     case "kernel":
       assertKernelOperation(ref.operation, "Authority kernel operation")
       return
@@ -184,7 +188,15 @@ function assertExecutorAuthority(record: ExecutionRecord): void {
         }
         return
       }
-      invalid("Request executions require principal or explicitly disabled authority.")
+      if (authorizationRef.type === "sharedAccess") {
+        if (requestedBy !== undefined) {
+          invalid("Shared access request executions cannot have a requested-by principal.")
+        }
+        return
+      }
+      invalid(
+        "Request executions require principal, shared access, or explicitly disabled authority."
+      )
       break
     }
     case "primitive": {

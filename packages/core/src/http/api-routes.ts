@@ -339,6 +339,22 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     authBoundary: "shared",
   },
   {
+    operationId: "getSharedAccessResource",
+    method: "GET",
+    path: "/api/shares/:grantId/resource",
+    accessToken: false,
+    agentApi: false,
+    authBoundary: "shared",
+  },
+  {
+    operationId: "requestSharedAccessAction",
+    method: "POST",
+    path: "/api/shares/:grantId/actions/:actionId",
+    accessToken: false,
+    agentApi: false,
+    authBoundary: "shared",
+  },
+  {
     operationId: "signOutSharedAccess",
     method: "POST",
     path: "/api/shares/:grantId/sign-out",

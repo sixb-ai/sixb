@@ -38,7 +38,8 @@ import {
   TwinObjectSchema,
   UpsertObjectBodySchema,
 } from "../schemas/objects"
-import { handleRouteError, parseOptionalInt, toIsoString } from "../utils/http"
+import { handleRouteError, parseOptionalInt } from "../utils/http"
+import { serializeObject } from "../utils/objects"
 
 const ObjectFileContentQuerySchema = FileContentQuerySchema.extend({
   path: z
@@ -46,22 +47,6 @@ const ObjectFileContentQuerySchema = FileContentQuerySchema.extend({
     .min(1)
     .regex(/^\/properties(?:\/|$)/, "Object file content paths must start with /properties/"),
 })
-
-function serializeObject(row: {
-  primaryId: string
-  objectTypeId: string
-  properties: Record<string, unknown>
-  createdAt: Date
-  updatedAt: Date
-}) {
-  return {
-    primaryId: row.primaryId,
-    objectTypeId: row.objectTypeId,
-    properties: row.properties,
-    createdAt: toIsoString(row.createdAt),
-    updatedAt: toIsoString(row.updatedAt),
-  }
-}
 
 type SerializedObject = ReturnType<typeof serializeObject>
 type SerializedLinkValue = SerializedExpandedObject | SerializedExpandedObject[] | null

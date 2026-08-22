@@ -5,6 +5,10 @@ export const SharedAccessGrantParamsSchema = z.object({
   grantId: z.string().min(1),
 })
 
+export const SharedAccessActionParamsSchema = SharedAccessGrantParamsSchema.extend({
+  actionId: z.string().min(1),
+})
+
 export const ExchangeSharedAccessBodySchema = z.object({
   secret: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
 })
@@ -32,3 +36,10 @@ export const SharedAccessSessionResponseSchema = z.discriminatedUnion("authentic
 export const SharedAccessSignOutResponseSchema = z.object({
   signedOut: z.literal(true),
 })
+
+export const SharedAccessActionBodySchema = z
+  .object({
+    params: z.record(z.unknown()).optional(),
+    runId: z.string().min(1).optional(),
+  })
+  .strict()

@@ -96,7 +96,7 @@
       "@sixb/core/internal/runtime": ["./packages/core/src/runtime/internal.ts"],
       "@sixb/core/internal/scheduler": ["./packages/core/src/scheduler/index.ts"],
       "@sixb/core/internal/schedules": ["./packages/core/src/schedules/index.ts"],
-      "@sixb/core/internal/shares": ["./packages/core/src/shares/protocol.ts"],
+      "@sixb/core/internal/shares": ["./packages/core/src/shares/internal.ts"],
       "@sixb/core/internal/storage-operation-scope": [
         "./packages/core/src/storage/operation-scope.ts"
       ],

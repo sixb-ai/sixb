@@ -132,6 +132,9 @@ import type {
   GetRuleData,
   GetRuleErrors,
   GetRuleResponses,
+  GetSharedAccessResourceData,
+  GetSharedAccessResourceErrors,
+  GetSharedAccessResourceResponses,
   GetSharedAccessSessionData,
   GetSharedAccessSessionErrors,
   GetSharedAccessSessionResponses,
@@ -290,6 +293,9 @@ import type {
   RequestPipelineRunData,
   RequestPipelineRunErrors,
   RequestPipelineRunResponses,
+  RequestSharedAccessActionData,
+  RequestSharedAccessActionErrors,
+  RequestSharedAccessActionResponses,
   RequestSyncRunData,
   RequestSyncRunErrors,
   RequestSyncRunResponses,
@@ -2096,6 +2102,38 @@ export const getSharedAccessSession = <ThrowOnError extends boolean = false>(
     GetSharedAccessSessionErrors,
     ThrowOnError
   >({ url: "/api/shares/{grantId}/session", ...options })
+
+/**
+ * Get the exact resource authorized by a shared session
+ */
+export const getSharedAccessResource = <ThrowOnError extends boolean = false>(
+  options: Options<GetSharedAccessResourceData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetSharedAccessResourceResponses,
+    GetSharedAccessResourceErrors,
+    ThrowOnError
+  >({ url: "/api/shares/{grantId}/resource", ...options })
+
+/**
+ * Request an Action on the exact shared resource
+ */
+export const requestSharedAccessAction = <ThrowOnError extends boolean = false>(
+  options: Options<RequestSharedAccessActionData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    RequestSharedAccessActionResponses,
+    RequestSharedAccessActionErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/shares/{grantId}/actions/{actionId}",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
 
 /**
  * Sign out a shared access session

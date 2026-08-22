@@ -16,6 +16,8 @@ describe("SIXB_API_ROUTES", () => {
     expect(sharedRoutes.map((route) => route.operationId)).toEqual([
       "exchangeSharedAccess",
       "getSharedAccessSession",
+      "getSharedAccessResource",
+      "requestSharedAccessAction",
       "signOutSharedAccess",
     ])
     for (const route of sharedRoutes) {

@@ -78,8 +78,20 @@ export const SIXB_ERROR_DEFINITIONS = {
     publicMessage: "Shared access is unavailable.",
     retryable: false,
   },
+  "share.action_invalid": {
+    publicMessage: "Shared action request is invalid.",
+    retryable: false,
+  },
+  "share.action_unavailable": {
+    publicMessage: "Shared action is unavailable.",
+    retryable: false,
+  },
   "share.grant_not_found": {
     publicMessage: "Shared access grant not found.",
+    retryable: false,
+  },
+  "share.resource_not_found": {
+    publicMessage: "Shared resource not found.",
     retryable: false,
   },
   "share.type_not_found": {

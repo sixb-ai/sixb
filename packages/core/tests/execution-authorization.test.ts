@@ -12,6 +12,7 @@ import {
   createDisabledRequestScope,
   createKernelScope,
   createPrincipalRequestScope,
+  createSharedAccessRequestScope,
   createTestingScope,
   createTrustedPrimitiveScope,
 } from "../src/execution/scopes"
@@ -153,6 +154,32 @@ describe("execution scope factories", () => {
 
     expect(getAuthorizationRef(scope.authorization)).toEqual({ type: "disabled" })
     expect(resolveRuntimeAuthorization(scope.authorization).type).toBe("unrestricted")
+  })
+
+  test("creates shared request authority without inventing a requested-by principal", () => {
+    const grants = emptyGrantIndex()
+    const viewGrants = grants["view:object"] as Set<string>
+    viewGrants.add("report")
+    const scope = createSharedAccessRequestScope({
+      projectId: "project-1",
+      requestId: "request-shared",
+      correlationId: "correlation-shared",
+      principal: { type: "sharedAccess", grantId: "shr_1", sessionId: "shs_1" },
+      grants,
+    })
+    viewGrants.add("late-type")
+
+    expect(scope.execution.requestedBy).toBeUndefined()
+    expect(getAuthorizationRef(scope.authorization)).toEqual({
+      type: "sharedAccess",
+      grantId: "shr_1",
+      sessionId: "shs_1",
+    })
+    const resolved = resolveRuntimeAuthorization(scope.authorization)
+    expect(resolved.type).toBe("sharedAccess")
+    if (resolved.type !== "sharedAccess") throw new Error("expected shared access authorization")
+    expect(resolved.grants["view:object"].has("report")).toBe(true)
+    expect(resolved.grants["view:object"].has("late-type")).toBe(false)
   })
 
   test("creates synthetic principal test scopes without live session identity", () => {

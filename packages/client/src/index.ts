@@ -16,4 +16,11 @@ export * from "./logs"
 
 // Framework UI models and adapters
 export * from "./models"
-export type { SharedAccessClient, SharedAccessContext, SharedAccessSession } from "./shared"
+export type {
+  SharedAccessActionInput,
+  SharedAccessActionResult,
+  SharedAccessClient,
+  SharedAccessContext,
+  SharedAccessResource,
+  SharedAccessSession,
+} from "./shared"

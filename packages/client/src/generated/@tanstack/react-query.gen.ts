@@ -52,6 +52,7 @@ import {
   getProjection,
   getProjectionRun,
   getRule,
+  getSharedAccessResource,
   getSharedAccessSession,
   getStatus,
   getSync,
@@ -104,6 +105,7 @@ import {
   removeObjectLink,
   requestAction,
   requestPipelineRun,
+  requestSharedAccessAction,
   requestSyncRun,
   requestWorkflowRun,
   retryAgentRun,
@@ -250,6 +252,9 @@ import type {
   GetRuleData,
   GetRuleError,
   GetRuleResponse,
+  GetSharedAccessResourceData,
+  GetSharedAccessResourceError,
+  GetSharedAccessResourceResponse,
   GetSharedAccessSessionData,
   GetSharedAccessSessionError,
   GetSharedAccessSessionResponse,
@@ -393,6 +398,9 @@ import type {
   RequestPipelineRunData,
   RequestPipelineRunError,
   RequestPipelineRunResponse,
+  RequestSharedAccessActionData,
+  RequestSharedAccessActionError,
+  RequestSharedAccessActionResponse,
   RequestSyncRunData,
   RequestSyncRunError,
   RequestSyncRunResponse,
@@ -4029,6 +4037,58 @@ export const getSharedAccessSessionOptions = (options: Options<GetSharedAccessSe
     },
     queryKey: getSharedAccessSessionQueryKey(options),
   })
+
+export const getSharedAccessResourceQueryKey = (options: Options<GetSharedAccessResourceData>) =>
+  createQueryKey("getSharedAccessResource", options)
+
+/**
+ * Get the exact resource authorized by a shared session
+ */
+export const getSharedAccessResourceOptions = (options: Options<GetSharedAccessResourceData>) =>
+  queryOptions<
+    GetSharedAccessResourceResponse,
+    GetSharedAccessResourceError,
+    GetSharedAccessResourceResponse,
+    ReturnType<typeof getSharedAccessResourceQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getSharedAccessResource({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getSharedAccessResourceQueryKey(options),
+  })
+
+/**
+ * Request an Action on the exact shared resource
+ */
+export const requestSharedAccessActionMutation = (
+  options?: Partial<Options<RequestSharedAccessActionData>>
+): UseMutationOptions<
+  RequestSharedAccessActionResponse,
+  RequestSharedAccessActionError,
+  Options<RequestSharedAccessActionData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    RequestSharedAccessActionResponse,
+    RequestSharedAccessActionError,
+    Options<RequestSharedAccessActionData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await requestSharedAccessAction({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
 
 /**
  * Sign out a shared access session

@@ -1,17 +1,25 @@
 import { createSixbClient, type SixbClientOptions } from "./api"
 import {
   exchangeSharedAccess,
+  getSharedAccessResource,
   getSharedAccessSession,
+  requestSharedAccessAction,
   signOutSharedAccess,
 } from "./generated/sdk.gen"
 import type {
   ExchangeSharedAccessResponse,
+  GetSharedAccessResourceResponse,
   GetSharedAccessSessionResponse,
+  RequestSharedAccessActionData,
+  RequestSharedAccessActionResponse,
   SignOutSharedAccessResponse,
 } from "./generated/types.gen"
 
 export type SharedAccessContext = ExchangeSharedAccessResponse
 export type SharedAccessSession = GetSharedAccessSessionResponse
+export type SharedAccessResource = GetSharedAccessResourceResponse
+export type SharedAccessActionInput = RequestSharedAccessActionData["body"]
+export type SharedAccessActionResult = RequestSharedAccessActionResponse
 
 export interface SharedAccessClientOptions {
   readonly grantId: string
@@ -23,6 +31,11 @@ export interface SharedAccessClientOptions {
 export interface SharedAccessClient {
   exchange(secret: string): Promise<ExchangeSharedAccessResponse>
   getSession(): Promise<GetSharedAccessSessionResponse>
+  getResource(): Promise<GetSharedAccessResourceResponse>
+  requestAction(
+    actionId: string,
+    input?: RequestSharedAccessActionData["body"]
+  ): Promise<RequestSharedAccessActionResponse>
   signOut(): Promise<SignOutSharedAccessResponse>
 }
 
@@ -64,6 +77,24 @@ export function createSharedAccessClient(options: SharedAccessClientOptions): Sh
       csrfToken = data.authenticated ? data.csrfToken : null
       return data
     },
+    async getResource() {
+      const { data } = await getSharedAccessResource({
+        client,
+        path: { grantId },
+        throwOnError: true,
+      })
+      return data
+    },
+    async requestAction(actionId, input = {}) {
+      assertActionId(actionId)
+      const { data } = await requestSharedAccessAction({
+        client,
+        path: { grantId, actionId },
+        body: input,
+        throwOnError: true,
+      })
+      return data
+    },
     async signOut() {
       const { data } = await signOutSharedAccess({
         client,
@@ -73,6 +104,12 @@ export function createSharedAccessClient(options: SharedAccessClientOptions): Sh
       csrfToken = null
       return data
     },
+  }
+}
+
+function assertActionId(actionId: unknown): asserts actionId is string {
+  if (typeof actionId !== "string" || !actionId.trim()) {
+    throw new Error("[SixbClient] Shared access Action id must not be empty.")
   }
 }
 
