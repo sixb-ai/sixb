@@ -10,10 +10,11 @@ hooks, live WebSocket event hooks, or the browser auth bootstrap.
 
 ## Mental model
 
-Every subpath calls the same shared transport: a single generated `client`
+SDK calls, query builders, hooks, and the events WebSocket use one generated `client`
 instance (a [hey-api](https://heyapi.dev) fetch client). You configure it once —
-base URL, credentials, auth interceptors — and all SDK calls, query builders,
-hooks, and the events WebSocket inherit that configuration.
+base URL, credentials, auth interceptors — and those layers inherit that configuration.
+Shared access starts from this client but creates a grant-scoped transport so its authority cannot
+mix with the normal session.
 
 ```ts
 import { client } from "@sixb/client"
@@ -34,12 +35,24 @@ layer and never touch the transport directly. In a standalone app, configure
 
 | Import | What it gives you |
 | --- | --- |
-| `@sixb/client` | Generated per-route SDK functions, terminal action wait helpers, the shared `client`, the `SixbEvent` types and `events.object(...)` builder, and the UI models from `/models` |
+| `@sixb/client` | Generated per-route SDK functions, terminal action wait helpers, the global `client`, grant-bound shared-access clients, the `SixbEvent` types and `events.object(...)` builder, and the UI models from `/models` |
 | `@sixb/client/query` | `objects(Type).query()` — typed object-query builder over HTTP |
 | `@sixb/client/hooks` | TanStack Query hooks and `*Options` factories, `SixbProvider`, the events layer, and `useAgentRunStream` |
 | `@sixb/client/logs` | The `logs` builder — read, tail, and subscribe to run logs |
 | `@sixb/client/browser` | CSRF/auth bootstrap and `__SIXB_RUNTIME__` handoff |
+| `@sixb/client/shared` | Lower-level factory for explicitly configuring a shared-access client |
 | `@sixb/client/models` | `encode`/`decodeObjectId` and UI shape mappers |
+
+Create shared access from the configured client. The returned handle inherits its base URL and
+`fetch` implementation at creation, but uses grant-scoped authority and owns separate CSRF state:
+
+```ts
+import { client } from "@sixb/client"
+
+const shared = client.shared(grantId)
+await shared.exchange(secret)
+await shared.getSession()
+```
 
 > `@sixb/client/hooks` re-exports the events layer and the typed-query hooks,
 > so a React app usually only imports from `/hooks`.

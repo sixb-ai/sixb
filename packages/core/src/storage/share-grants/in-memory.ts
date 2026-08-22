@@ -18,17 +18,17 @@ export class InMemoryShareGrantStorage implements ShareGrantStorage {
   private rows = new Map<string, SharedAccessGrantRecord>()
 
   async create(input: CreateSharedAccessGrantInput): Promise<SharedAccessGrantRecord> {
-    const key = rowKey(input.projectId, input.id)
+    const row = normalizeSharedAccessGrant(input)
+    const key = rowKey(row.projectId, row.id)
     const duplicateDigest = [...this.rows.values()].some(
-      (row) => row.projectId === input.projectId && row.tokenDigest === input.tokenDigest
+      (current) => current.projectId === row.projectId && current.tokenDigest === row.tokenDigest
     )
     if (this.rows.has(key) || duplicateDigest) {
       throw new ShareGrantStorageError(
-        `[Sixb] Shared access grant '${input.id}' conflicts with an existing record.`,
+        `[Sixb] Shared access grant '${row.id}' conflicts with an existing record.`,
         "duplicate"
       )
     }
-    const row = normalizeSharedAccessGrant(input)
     this.rows.set(key, row)
     return cloneSharedAccessGrant(row)
   }

@@ -11,6 +11,19 @@ describe("SIXB_API_ROUTES", () => {
     }
   })
 
+  test("shared routes cannot accept ambient application authority", () => {
+    const sharedRoutes = SIXB_API_ROUTES.filter((route) => route.authBoundary === "shared")
+    expect(sharedRoutes.map((route) => route.operationId)).toEqual([
+      "exchangeSharedAccess",
+      "getSharedAccessSession",
+      "signOutSharedAccess",
+    ])
+    for (const route of sharedRoutes) {
+      expect(route.accessToken).toBe(false)
+      expect(route.agentApi).toBe(false)
+    }
+  })
+
   test("AGENT_API_ROUTES is exactly the agentApi projection ({method, path})", () => {
     const expected = SIXB_API_ROUTES.filter((route) => route.agentApi).map((route) => ({
       method: route.method,

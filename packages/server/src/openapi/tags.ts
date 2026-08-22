@@ -113,7 +113,7 @@ export const OPENAPI_TAGS = {
   },
   sharedAccess: {
     name: "Shared Access",
-    description: "Capability-scoped shared access grants",
+    description: "Capability-scoped grants and isolated shared sessions",
   },
   telemetry: {
     name: "Telemetry",

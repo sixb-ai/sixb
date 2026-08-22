@@ -1,14 +1,15 @@
 /**
  * The single source of truth for the Sixb HTTP API surface and its auth capabilities.
  *
- * Two views are derived from this one table:
+ * Three views are derived from this one table:
  * - `AGENT_API_ROUTES` (@sixb/core agent gateway) = the `agentApi` rows, projected to {method, path}.
  * - `ACCESS_TOKEN_ROUTES` (@sixb/server bearer boundary) = the `accessToken` rows, with operationId.
+ * - shared access routes (@sixb/server auth classifier) = the `authBoundary: "shared"` rows.
  *
- * Because both views are projections of this table, the agent gateway allow-list is structurally a
- * subset of the bearer boundary — the invariant below enforces `agentApi ⇒ accessToken` at load
- * time. This table lives in @sixb/core (never @sixb/server) because @sixb/server depends on core,
- * not the reverse; the operationId strings are opaque here.
+ * Because the first two views are projections of this table, the agent gateway allow-list is
+ * structurally a subset of the bearer boundary — the invariant below enforces
+ * `agentApi ⇒ accessToken` at load time. This table lives in @sixb/core (never @sixb/server)
+ * because @sixb/server depends on core, not the reverse; the operationId strings are opaque here.
  */
 export interface SixbApiRoute {
   /** OpenAPI operationId — the server keys its bearer security requirement off this. */
@@ -19,6 +20,8 @@ export interface SixbApiRoute {
   readonly accessToken: boolean
   /** The route is proxied by the agent API gateway (a strict subset of the accessToken routes). */
   readonly agentApi: boolean
+  /** Overrides normal application authentication with the isolated shared-access boundary. */
+  readonly authBoundary?: "shared"
 }
 
 export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
@@ -317,6 +320,32 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     accessToken: true,
     agentApi: false,
   },
+  // Shared protocol routes authenticate exclusively with the link/session boundary. Normal bearer
+  // tokens and the agent gateway must never grant authority here.
+  {
+    operationId: "exchangeSharedAccess",
+    method: "POST",
+    path: "/api/shares/:grantId/exchange",
+    accessToken: false,
+    agentApi: false,
+    authBoundary: "shared",
+  },
+  {
+    operationId: "getSharedAccessSession",
+    method: "GET",
+    path: "/api/shares/:grantId/session",
+    accessToken: false,
+    agentApi: false,
+    authBoundary: "shared",
+  },
+  {
+    operationId: "signOutSharedAccess",
+    method: "POST",
+    path: "/api/shares/:grantId/sign-out",
+    accessToken: false,
+    agentApi: false,
+    authBoundary: "shared",
+  },
   {
     operationId: "listWorkflows",
     method: "GET",
@@ -437,6 +466,11 @@ for (const route of SIXB_API_ROUTES) {
   if (route.agentApi && !route.accessToken) {
     throw new Error(
       `[Sixb] agent API route '${route.method} ${route.path}' must also be an access-token route.`
+    )
+  }
+  if (route.authBoundary === "shared" && (route.accessToken || route.agentApi)) {
+    throw new Error(
+      `[Sixb] shared API route '${route.method} ${route.path}' cannot accept application authority.`
     )
   }
 }

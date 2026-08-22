@@ -16,6 +16,7 @@ import {
 import { createSixbEventsWebSocketUrl } from "../src/events-transport"
 import { client } from "../src/generated/client.gen"
 import {
+  exchangeSharedAccess,
   listAuthMembers,
   listAuthSessions,
   requestSyncRun,
@@ -398,6 +399,26 @@ describe("browser client auth", () => {
     await signOut({ fetch: fetchMock })
 
     expect(controller.getCsrfToken()).toBe("csrf_current")
+    expect(redirects).toEqual([])
+  })
+
+  test("does not route shared-protocol failures through OIDC", async () => {
+    const redirects: string[] = []
+    configureBrowserClient({
+      getCurrentUrl: () => "http://localhost:3001/shared/report/shr_1",
+      redirect: (url) => redirects.push(url),
+    })
+    const fetchMock = Object.assign(
+      async () => Response.json({ error: "Shared access is unavailable" }, { status: 401 }),
+      { preconnect: fetch.preconnect }
+    ) satisfies typeof fetch
+
+    await exchangeSharedAccess({
+      path: { grantId: "shr_1" },
+      body: { secret: "A".repeat(43) },
+      fetch: fetchMock,
+    })
+
     expect(redirects).toEqual([])
   })
 

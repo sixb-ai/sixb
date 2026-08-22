@@ -17,6 +17,7 @@ export interface ResolvedAuthCookieOptions {
 interface CookieSerializationOptions {
   readonly name: string
   readonly value: string
+  readonly path?: string
   readonly httpOnly?: boolean
   readonly maxAge?: number
   readonly expires?: Date
@@ -88,7 +89,7 @@ export function getCookie(request: Request, name: string): string | undefined {
 export function serializeCookie(options: CookieSerializationOptions): string {
   const parts = [`${options.name}=${options.value}`]
 
-  parts.push("Path=/")
+  parts.push(`Path=${options.path ?? "/"}`)
   parts.push("SameSite=Strict")
 
   if (options.domain) {

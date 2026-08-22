@@ -458,6 +458,21 @@ export {
   ShareGrantStorageError,
 } from "./share-grants"
 export type {
+  CreateSharedAccessSessionInput,
+  GetSharedAccessSessionInput,
+  RevokeSharedAccessSessionInput,
+  SharedAccessSessionRecord,
+  ShareSessionStorage,
+  ShareSessionStorageErrorCode,
+} from "./share-sessions"
+export {
+  assertSharedAccessSessionRevocation,
+  cloneSharedAccessSession,
+  InMemoryShareSessionStorage,
+  normalizeSharedAccessSession,
+  ShareSessionStorageError,
+} from "./share-sessions"
+export type {
   FinishSyncRunInput,
   ListLatestSyncRunsInput,
   ListLatestSyncRunsResult,

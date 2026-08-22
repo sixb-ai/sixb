@@ -74,7 +74,7 @@ All JSON routes are prefixed with `/api` and mirror the runtime's typed APIs; se
 | Files          | `POST /api/files`, `/api/files/uploads/...`, `GET .../files/content`                 | [Files](#files)                                 |
 | Telemetry      | `GET/POST /api/objects/:type/:id/telemetry/:prop`, `.../history`, `.../latest`       | [Telemetry](../objects/telemetry.md)            |
 | Links          | `GET/PUT/DELETE /api/objects/:type/:id/links/:linkId`                                | [Links](../ontology/links.md)                   |
-| Shared access  | `POST/GET /api/share-grants`, `DELETE /api/share-grants/:grantId`                    | [Authorization](../auth/authorization.md)       |
+| Shared access  | `/api/share-grants`, `/api/shares/:grantId/exchange`, `.../session`, `.../sign-out` | [Authorization](../auth/authorization.md)       |
 | Actions        | `GET /api/actions`, `POST /api/actions/:actionId`                                    | [Actions](../actions/overview.md)               |
 | Action runs    | `GET /api/action-runs`, `GET /api/action-runs/:runId`                                | [Actions](../actions/overview.md)               |
 | Ontology       | `GET /api/object-types`, `GET /api/object-types/:objectTypeId`                       | [Ontology](../ontology/overview.md)             |
