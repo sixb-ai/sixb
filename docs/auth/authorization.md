@@ -113,8 +113,9 @@ requires access to the exact target object; the grant never widens object access
 Anyone holding an active link can exchange its fragment secret through
 `POST /api/shares/:grantId/exchange`. The raw secret is never stored: exchange creates a separate,
 15-minute HttpOnly shared session capped by the grant expiry. Shared routes ignore ambient OIDC and
-access-token sessions, recheck the grant on every request, and use their own CSRF cookie. The shared
-cookie is never accepted by normal Object or Action endpoints.
+access-token sessions, recheck the grant on every request, and intersect its issued grants with the
+current share type. Shared routes use their own CSRF cookie, which is never accepted by normal
+Object or Action endpoints.
 
 > **Only `can.view(Type)` reaches subtypes.** `can.edit` and `can.append` cover exactly the types
 > you name, so adding a type under one you granted never makes it writable on its own.

@@ -88,6 +88,26 @@ describe("classifyRoute", () => {
       kind: "shared",
       csrfProtected: false,
     })
+    expect(classifyRoute(request("POST", "/api/shares/shr_1/sign-out"))).toEqual({
+      kind: "shared",
+      csrfProtected: false,
+    })
+  })
+
+  test("keeps unregistered shared paths and methods behind application auth", () => {
+    for (const [method, path] of [
+      ["GET", "/api/shares/shr_1/exchange"],
+      ["POST", "/api/shares/shr_1/session"],
+      ["GET", "/api/shares/shr_1/sign-out"],
+      ["GET", "/api/shares/shr_1/resource"],
+      ["POST", "/api/shares/shr_1/actions/approve"],
+      ["POST", "/api/shares/shr_1/exchange/extra"],
+    ] as const) {
+      expect(classifyRoute(request(method, path))).toEqual({
+        kind: "api",
+        csrfProtected: method !== "GET",
+      })
+    }
   })
 
   test("a mutation to an unrecognized path is CSRF-protected", () => {

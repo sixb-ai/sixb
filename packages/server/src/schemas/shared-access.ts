@@ -2,7 +2,7 @@ import { z } from "zod"
 import { ShareGrantRefSchema, ShareGrantTargetSchema } from "./share-grants"
 
 export const SharedAccessGrantParamsSchema = z.object({
-  grantId: z.string().min(1).max(200),
+  grantId: z.string().min(1),
 })
 
 export const ExchangeSharedAccessBodySchema = z.object({

@@ -132,6 +132,53 @@ describe("shared access routes", () => {
     expect(invalid.headers.get("set-cookie")).toBeNull()
   })
 
+  test("keeps malformed shared requests generic and applies the shared security headers", async () => {
+    const fixture = await createFixture()
+    const malformedSecret = "credential-that-must-not-be-reflected"
+    const malformed = await fixture.app.fetch(
+      new Request("http://api.localhost/api/shares/shr_1/exchange", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ secret: malformedSecret }),
+      })
+    )
+    const invalidJson = await fixture.app.fetch(
+      new Request("http://api.localhost/api/shares/shr_1/exchange", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: '{"secret":',
+      })
+    )
+
+    for (const response of [malformed, invalidJson]) {
+      const text = await response.text()
+      expect(response.status).toBe(401)
+      expect(JSON.parse(text)).toEqual({
+        error: "Shared access is unavailable.",
+        code: "share.access_unavailable",
+      })
+      expect(text).not.toContain(malformedSecret)
+      expectSharedSecurityHeaders(response)
+    }
+
+    const invalidGrantId = "x".repeat(201)
+    const session = await fixture.app.fetch(
+      new Request(`http://api.localhost/api/shares/${invalidGrantId}/session`)
+    )
+    expect(session.status).toBe(200)
+    expect(await session.json()).toEqual({ authenticated: false })
+    expectSharedSecurityHeaders(session)
+
+    const signOut = await fixture.app.fetch(
+      new Request(`http://api.localhost/api/shares/${invalidGrantId}/sign-out`, {
+        method: "POST",
+      })
+    )
+    expect(signOut.status).toBe(200)
+    expect(await signOut.json()).toEqual({ signedOut: true })
+    expectSharedSecurityHeaders(signOut)
+  })
+
   test("does not expose unexpected protocol failures on any shared route", async () => {
     const fixture = await createFixture()
     const invitation = await issueGrant(fixture)
@@ -322,4 +369,13 @@ function getSetCookies(response: Response): string[] {
 
 function requestCookieHeader(setCookies: readonly string[]): string {
   return setCookies.map((cookie) => cookie.slice(0, cookie.indexOf(";"))).join("; ")
+}
+
+function expectSharedSecurityHeaders(response: Response): void {
+  expect(response.headers.get("cache-control")).toBe("no-store")
+  expect(response.headers.get("content-security-policy")).toBe(
+    "default-src 'none'; frame-ancestors 'none'"
+  )
+  expect(response.headers.get("referrer-policy")).toBe("no-referrer")
+  expect(response.headers.get("x-robots-tag")).toBe("noindex, nofollow")
 }

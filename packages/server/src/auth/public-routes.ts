@@ -1,5 +1,11 @@
 import { AGENT_API_GATEWAY_PREFIX } from "@sixb/core/internal/agents"
 import { isCsrfExemptMethod } from "@sixb/core/internal/auth"
+import {
+  matchesPathPattern,
+  normalizeRoutePath,
+  SIXB_API_ROUTES,
+  type SixbApiRoute,
+} from "@sixb/core/internal/http"
 
 export type RouteAccessKind = "public" | "shared" | "api" | "html" | "websocket"
 
@@ -8,9 +14,11 @@ export interface RouteAccess {
   readonly csrfProtected: boolean
 }
 
+const SHARED_ACCESS_ROUTES = SIXB_API_ROUTES.filter((route) => route.authBoundary === "shared")
+
 export function classifyRoute(request: Request): RouteAccess {
   const url = new URL(request.url)
-  const { pathname } = url
+  const pathname = normalizeRoutePath(url.pathname)
 
   if (isPublicRoute(pathname, request.method)) {
     return { kind: "public", csrfProtected: false }
@@ -18,7 +26,7 @@ export function classifyRoute(request: Request): RouteAccess {
 
   // Shared routes have their own cookie, CSRF boundary, and guard. Treating them as a distinct
   // class prevents ambient OIDC or access-token authority from leaking into shared execution.
-  if (pathname.startsWith("/api/shares/")) {
+  if (resolveSharedAccessRoute(pathname, request.method)) {
     return { kind: "shared", csrfProtected: false }
   }
 
@@ -38,6 +46,17 @@ export function classifyRoute(request: Request): RouteAccess {
   // path 404s before these hooks run. It defaults to `api` so the next route mounted outside
   // those prefixes is protected until someone puts it on the allow-list, not the reverse.
   return { kind: "api", csrfProtected: !isCsrfExemptMethod(request.method) }
+}
+
+export function resolveSharedAccessRoute(pathname: string, method: string): SixbApiRoute | null {
+  const normalizedPathname = normalizeRoutePath(pathname)
+  const normalizedMethod = method.toUpperCase()
+  return (
+    SHARED_ACCESS_ROUTES.find(
+      (route) =>
+        route.method === normalizedMethod && matchesPathPattern(normalizedPathname, route.path)
+    ) ?? null
+  )
 }
 
 export function isPublicRoute(pathname: string, method: string): boolean {

@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import { createHash } from "node:crypto"
-import { can, defineObjectType, defineShareType, prop } from "../src"
+import { can, defineAction, defineObjectType, defineShareType, prop } from "../src"
 import { createDefinitionCatalog } from "../src/runtime/definitions"
 import { DEFAULT_SHARED_ACCESS_SESSION_TTL_MS, SharedAccessProtocol } from "../src/shares/protocol"
 import { InMemoryShareGrantStorage } from "../src/storage/share-grants"
+import type { SharedAccessGrantRef } from "../src/storage/share-grants/types"
 import { InMemoryShareSessionStorage } from "../src/storage/share-sessions"
 
 const Report = defineObjectType({
@@ -11,8 +12,17 @@ const Report = defineObjectType({
   name: "Report",
   properties: [prop("id", "string", { primary: true, required: true })],
 })
+const acknowledge = defineAction("acknowledge-report")
+  .on(Report)
+  .params({})
+  .edits(() => {})
 const PublishedReport = defineShareType({
   id: "published-report",
+  target: Report,
+  grants: [can.view(Report), can.apply(acknowledge)],
+})
+const PublishedReportWithoutAction = defineShareType({
+  id: PublishedReport.id,
   target: Report,
   grants: [can.view(Report)],
 })
@@ -109,10 +119,35 @@ describe("SharedAccessProtocol", () => {
       fixture.protocol.revoke(exchanged.context, new Date(now.getTime() + 2_000))
     ).resolves.toEqual(revoked)
   })
+
+  test("keeps the issued snapshot while exposing only currently effective grants", async () => {
+    const removed = await createFixture({ registeredShareType: PublishedReportWithoutAction })
+    const removedExchange = await removed.protocol.exchange("shr_1", linkSecret, now)
+    expect(removedExchange?.context.grant.grants).toEqual([
+      { capability: "view", objectTypeId: Report.id },
+      { capability: "apply", actionId: acknowledge.id },
+    ])
+    expect(removedExchange?.context.effectiveGrants).toEqual([
+      { capability: "view", objectTypeId: Report.id },
+    ])
+
+    const added = await createFixture({
+      issuedGrants: [{ capability: "view", objectTypeId: Report.id }],
+    })
+    const addedExchange = await added.protocol.exchange("shr_1", linkSecret, now)
+    expect(addedExchange?.context.effectiveGrants).toEqual([
+      { capability: "view", objectTypeId: Report.id },
+    ])
+  })
 })
 
 async function createFixture(
-  options: { readonly grantExpiresAt?: Date; readonly registered?: boolean } = {}
+  options: {
+    readonly grantExpiresAt?: Date
+    readonly issuedGrants?: readonly SharedAccessGrantRef[]
+    readonly registered?: boolean
+    readonly registeredShareType?: typeof PublishedReport
+  } = {}
 ) {
   const grants = new InMemoryShareGrantStorage()
   const sessions = new InMemoryShareSessionStorage()
@@ -122,7 +157,10 @@ async function createFixture(
     shareTypeId: PublishedReport.id,
     target: { objectTypeId: Report.id, primaryId: "report-1" },
     issuedBy: { type: "user", id: "usr_1" },
-    grants: [{ capability: "view", objectTypeId: Report.id }],
+    grants: options.issuedGrants ?? [
+      { capability: "view", objectTypeId: Report.id },
+      { capability: "apply", actionId: acknowledge.id },
+    ],
     tokenDigest: digest(linkSecret),
     createdAt: new Date(now.getTime() - 1_000),
     expiresAt: options.grantExpiresAt ?? new Date(now.getTime() + 60 * 60_000),
@@ -130,7 +168,11 @@ async function createFixture(
   const protocol = new SharedAccessProtocol({
     projectId: "project",
     shareTypes: createDefinitionCatalog(
-      new Map(options.registered === false ? [] : [[PublishedReport.id, PublishedReport]])
+      new Map(
+        options.registered === false
+          ? []
+          : [[PublishedReport.id, options.registeredShareType ?? PublishedReport]]
+      )
     ),
     storage: { shareGrants: grants, shareSessions: sessions },
   })

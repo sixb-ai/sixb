@@ -14,18 +14,16 @@ export type SharedAccessContext = ExchangeSharedAccessResponse
 export type SharedAccessSession = GetSharedAccessSessionResponse
 
 export interface SharedAccessClientOptions {
+  readonly grantId: string
   readonly baseUrl?: string
   readonly fetch?: typeof fetch
   readonly headers?: SixbClientOptions["headers"]
 }
 
 export interface SharedAccessClient {
-  exchange(input: {
-    readonly grantId: string
-    readonly secret: string
-  }): Promise<ExchangeSharedAccessResponse>
-  getSession(grantId: string): Promise<GetSharedAccessSessionResponse>
-  signOut(grantId: string): Promise<SignOutSharedAccessResponse>
+  exchange(secret: string): Promise<ExchangeSharedAccessResponse>
+  getSession(): Promise<GetSharedAccessSessionResponse>
+  signOut(): Promise<SignOutSharedAccessResponse>
 }
 
 /**
@@ -33,32 +31,31 @@ export interface SharedAccessClient {
  *
  * It owns its CSRF state and never configures or reuses the normal Sixb browser client.
  */
-export function createSharedAccessClient(
-  options: SharedAccessClientOptions = {}
-): SharedAccessClient {
+export function createSharedAccessClient(options: SharedAccessClientOptions): SharedAccessClient {
+  const configuredGrantId = options?.grantId
+  assertGrantId(configuredGrantId)
+  const { grantId, ...clientOptions } = options
   let csrfToken: string | null = null
   const client = createSixbClient({
-    ...options,
+    ...clientOptions,
     auth: { kind: "cookie", csrfToken: () => csrfToken },
   })
 
   return {
-    async exchange(input) {
-      assertGrantId(input.grantId)
-      if (!/^[A-Za-z0-9_-]{43}$/.test(input.secret)) {
+    async exchange(secret) {
+      if (!/^[A-Za-z0-9_-]{43}$/.test(secret)) {
         throw new Error("[SixbClient] Shared access secret is invalid.")
       }
       const { data } = await exchangeSharedAccess({
         client,
-        path: { grantId: input.grantId },
-        body: { secret: input.secret },
+        path: { grantId },
+        body: { secret },
         throwOnError: true,
       })
       csrfToken = data.csrfToken
       return data
     },
-    async getSession(grantId) {
-      assertGrantId(grantId)
+    async getSession() {
       const { data } = await getSharedAccessSession({
         client,
         path: { grantId },
@@ -67,8 +64,7 @@ export function createSharedAccessClient(
       csrfToken = data.authenticated ? data.csrfToken : null
       return data
     },
-    async signOut(grantId) {
-      assertGrantId(grantId)
+    async signOut() {
       const { data } = await signOutSharedAccess({
         client,
         path: { grantId },
@@ -80,6 +76,8 @@ export function createSharedAccessClient(
   }
 }
 
-function assertGrantId(grantId: string): void {
-  if (!grantId.trim()) throw new Error("[SixbClient] Shared access grant id must not be empty.")
+function assertGrantId(grantId: unknown): asserts grantId is string {
+  if (typeof grantId !== "string" || !grantId.trim()) {
+    throw new Error("[SixbClient] Shared access grant id must not be empty.")
+  }
 }

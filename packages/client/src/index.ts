@@ -8,11 +8,12 @@ export type {
   SixbBrowserRuntimeConfig,
   SixbBrowserRuntimeDefaults,
 } from "./browser"
+export { client, type SixbClientWithSharedAccess } from "./client"
 export * from "./events"
 export * from "./file"
 export * from "./generated"
-export { client } from "./generated/client.gen"
 export * from "./logs"
 
 // Framework UI models and adapters
 export * from "./models"
+export type { SharedAccessClient, SharedAccessContext, SharedAccessSession } from "./shared"
