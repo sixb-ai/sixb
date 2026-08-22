@@ -1,7 +1,7 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger, Markdown } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { ChevronRight, Wrench } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { memo, useEffect, useRef, useState } from "react"
 import { BashToolView } from "../bash/BashToolView"
 import type { NormalizedPart, NormalizedTool } from "../parts"
 import { ReadToolView } from "../read/ReadToolView"
@@ -69,13 +69,17 @@ export function AssistantBody({
   return <div className="flex flex-col gap-3">{blocks}</div>
 }
 
-function TextBlock({ text }: { text: string }) {
+const TextBlock = memo(function TextBlock({ text }: { text: string }) {
   return <Markdown className="prose-chat">{text}</Markdown>
-}
+})
 
-function FileBlock({ part }: { part: Extract<NormalizedPart, { kind: "file" }> }) {
+const FileBlock = memo(function FileBlock({
+  part,
+}: {
+  part: Extract<NormalizedPart, { kind: "file" }>
+}) {
   return <FileAttachmentCard fileRef={part.fileRef} document={part.document} />
-}
+})
 
 /**
  * A consecutive run of reasoning + tool parts, folded into a single disclosure. It stays open while
@@ -118,13 +122,13 @@ function WorkGroup({
 
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="max-w-full">
-      <CollapsibleTrigger className="group flex w-fit max-w-full items-center gap-1.5 text-[13px] leading-normal text-muted-foreground transition-colors hover:text-foreground">
+      <CollapsibleTrigger className="group flex w-fit max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-[13px] leading-normal text-muted-foreground outline-none transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
         <span className={cn(inProgress && "shimmer")}>{label}</span>
         {detail ? <span className="text-muted-foreground/60">· {detail}</span> : null}
         <ChevronRight className="size-4 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="mt-2 ml-1.5 flex flex-col gap-3 border-l-2 border-border pl-3">
+        <div className="scrollbar-thin mt-2 ml-1.5 flex max-h-[min(24rem,50vh)] flex-col gap-3 overflow-y-auto overscroll-contain border-l-2 border-border py-0.5 pr-2 pl-3">
           {parts.map((part, index) => {
             if (part.kind === "reasoning") {
               return <GroupReasoning key={index} text={part.text} streaming={part.streaming} />

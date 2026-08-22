@@ -7,9 +7,8 @@ import {
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
-  useMessageScroller,
 } from "@sixb/ui/components"
-import { useLayoutEffect, useMemo, useRef } from "react"
+import { memo, useMemo } from "react"
 import { hasLiveContent, type LiveRunState } from "../liveRun"
 import type { AgentContextEntryInput, AgentFileRef, AgentMessage } from "../types"
 import { ContextChips } from "./ContextChips"
@@ -106,43 +105,23 @@ export function Transcript({
   ])
 
   return (
-    // Opening an existing thread should land at the bottom/latest message. New in-flight turns still
-    // get an explicit anchor (pending user, then durable user) so the answer can stream into stable
-    // space below the prompt without changing the initial load behavior for saved threads.
-    //
-    // No `autoScroll`: anchoring inflates a spacer so the turn can reach the top, which leaves the
-    // viewport sitting at its own scroll-bottom. With `autoScroll` the scroller reads that as "follow
-    // the live edge", collapses the spacer on the next token, and pins everything to the bottom —
-    // exactly the behavior we're avoiding. Without it the turn stays anchored at the top while the
-    // answer streams in below, and `MessageScrollerButton` remains for an explicit jump to latest.
-    <MessageScrollerProvider key={threadId ?? "draft"} defaultScrollPosition="end">
+    // Let the message-scroller own the complete chat contract: open saved threads at the latest
+    // content, anchor a newly submitted prompt while the response fills the viewport, follow the
+    // live edge once appropriate, and release immediately on human scroll intent. The jump button
+    // explicitly resumes following after that override.
+    <MessageScrollerProvider key={threadId ?? "draft"} autoScroll defaultScrollPosition="end">
       <MessageScroller className="flex-1">
-        <ScrollToLatestOnThreadLoad
-          threadId={threadId}
-          enabled={!shouldAnchorCurrentTurn}
-          hasMessages={
-            messages.length > 0 ||
-            Boolean(pendingUserText) ||
-            pendingUserAttachments.length > 0 ||
-            pendingUserContext.length > 0 ||
-            showLive ||
-            showThinking
-          }
-          currentTurnActive={Boolean(anchorCurrentTurn)}
-        />
         <MessageScrollerViewport>
           <MessageScrollerContent
             aria-busy={live.active || showThinking}
             className="mx-auto w-full max-w-3xl px-4 py-6"
           >
             {messages.map((message) => (
-              <MessageScrollerItem
+              <TranscriptMessage
                 key={message.id}
-                messageId={message.id}
+                message={message}
                 scrollAnchor={message.id === anchoredUserMessageId}
-              >
-                <MessageView message={message} />
-              </MessageScrollerItem>
+              />
             ))}
             {pendingUserText ||
             pendingUserAttachments.length > 0 ||
@@ -204,67 +183,18 @@ export function Transcript({
   )
 }
 
-function ScrollToLatestOnThreadLoad({
-  threadId,
-  enabled,
-  hasMessages,
-  currentTurnActive,
+// A live chunk should only reconcile the transient assistant row. Completed rows can contain
+// substantial Markdown, tables, and file previews, so keep their scroller wrappers stable too.
+const TranscriptMessage = memo(function TranscriptMessage({
+  message,
+  scrollAnchor,
 }: {
-  threadId: string | null
-  enabled: boolean
-  hasMessages: boolean
-  currentTurnActive: boolean
+  readonly message: AgentMessage
+  readonly scrollAnchor: boolean
 }) {
-  const { scrollToEnd } = useMessageScroller()
-  const didInitialScrollRef = useRef(false)
-  const suppressInitialScrollRef = useRef(false)
-
-  // Reset only when a different thread opens. If the current thread starts an in-flight turn, we
-  // suppress this initial-load scroll for the rest of that thread view; otherwise the completion
-  // handoff would flip `enabled` back on and yank the transcript to the bottom.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally reset only per thread
-  useLayoutEffect(() => {
-    didInitialScrollRef.current = false
-    suppressInitialScrollRef.current = currentTurnActive
-  }, [threadId])
-
-  useLayoutEffect(() => {
-    if (currentTurnActive) suppressInitialScrollRef.current = true
-  }, [currentTurnActive])
-
-  useLayoutEffect(() => {
-    if (
-      !threadId ||
-      !enabled ||
-      !hasMessages ||
-      currentTurnActive ||
-      didInitialScrollRef.current ||
-      suppressInitialScrollRef.current
-    ) {
-      return
-    }
-
-    didInitialScrollRef.current = true
-    let frameOne = 0
-    let frameTwo = 0
-    const timers: number[] = []
-    const scroll = () => scrollToEnd({ behavior: "auto" })
-
-    scroll()
-    frameOne = window.requestAnimationFrame(() => {
-      scroll()
-      frameTwo = window.requestAnimationFrame(scroll)
-    })
-    timers.push(window.setTimeout(scroll, 80), window.setTimeout(scroll, 240))
-
-    return () => {
-      window.cancelAnimationFrame(frameOne)
-      window.cancelAnimationFrame(frameTwo)
-      timers.forEach((timer) => {
-        window.clearTimeout(timer)
-      })
-    }
-  }, [currentTurnActive, enabled, hasMessages, scrollToEnd, threadId])
-
-  return null
-}
+  return (
+    <MessageScrollerItem messageId={message.id} scrollAnchor={scrollAnchor}>
+      <MessageView message={message} />
+    </MessageScrollerItem>
+  )
+})
