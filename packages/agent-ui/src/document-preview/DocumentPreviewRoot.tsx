@@ -15,12 +15,14 @@ import { cn } from "@sixb/ui/lib/utils"
 import { Download, ExternalLink, FileWarning, X } from "lucide-react"
 import {
   createContext,
+  memo,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   useCallback,
   useContext,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
@@ -63,9 +65,12 @@ const DocumentPreviewContext = createContext<DocumentPreviewContextValue | null>
 export function DocumentPreviewRoot({
   children,
   compact = false,
+  scopeKey,
 }: {
   readonly children: ReactNode
   readonly compact?: boolean
+  /** Changing conversations closes inspector content that belongs to the previous thread. */
+  readonly scopeKey?: string | null
 }) {
   const idPrefix = useId()
   const [state, dispatch] = useReducer(documentPreviewReducer, EMPTY_DOCUMENT_PREVIEW_STATE)
@@ -73,6 +78,12 @@ export function DocumentPreviewRoot({
   const openerRef = useRef<HTMLElement | null>(null)
   const activeDocument = state.documents.find((document) => document.id === state.activeId) ?? null
   const presentation = documentPreviewPresentation(compact, useIsMobile())
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only when conversation scope changes
+  useLayoutEffect(() => {
+    dispatch({ type: "close-all" })
+    openerRef.current = null
+  }, [scopeKey])
 
   const restoreOpenerFocus = useCallback(() => {
     const opener = openerRef.current
@@ -103,14 +114,18 @@ export function DocumentPreviewRoot({
     dispatch({ type: "close-all" })
     restoreOpenerFocus()
   }, [restoreOpenerFocus])
+  const selectDocument = useCallback((id: string) => dispatch({ type: "select", id }), [])
   const context = useMemo<DocumentPreviewContextValue>(() => ({ openDocument }), [openDocument])
-  const viewerProps: DocumentViewerProps = {
-    idPrefix,
-    state,
-    onSelect: (id) => dispatch({ type: "select", id }),
-    onClose: closeDocument,
-    onCloseAll: closeAllDocuments,
-  }
+  const viewerProps = useMemo<DocumentViewerProps>(
+    () => ({
+      idPrefix,
+      state,
+      onSelect: selectDocument,
+      onClose: closeDocument,
+      onCloseAll: closeAllDocuments,
+    }),
+    [closeAllDocuments, closeDocument, idPrefix, selectDocument, state]
+  )
 
   return (
     <DocumentPreviewContext.Provider value={context}>
@@ -138,6 +153,11 @@ export function useDocumentPreview(): DocumentPreviewContextValue | null {
   return useContext(DocumentPreviewContext)
 }
 
+// Keep the conversation wrapper stable while the document panel opens, closes, or changes tabs.
+const ConversationPane = memo(function ConversationPane({ children }: { children: ReactNode }) {
+  return <div className="h-full min-h-0 min-w-0">{children}</div>
+})
+
 function DocumentPreviewWorkspace({
   children,
   open,
@@ -163,19 +183,19 @@ function DocumentPreviewWorkspace({
 
     if (!openedOnceRef.current) {
       openedOnceRef.current = true
-      panel.resize("50%")
+      panel.resize("28rem")
       return
     }
 
-    // A repeated click on an already-open document increments `revealVersion`; expand the pane
-    // again if the user previously collapsed it by dragging the separator.
-    if (panel.isCollapsed() || revealVersion > 0) panel.expand()
+    // Reopening or clicking an already-open document should restore a pane the user collapsed by
+    // dragging the separator. `revealVersion` makes repeated clicks reach this effect.
+    if (revealVersion > 0 && panel.isCollapsed()) panel.expand()
   }, [open, revealVersion])
 
   return (
     <ResizablePanelGroup id="agent-document-workspace" orientation="horizontal" className="min-h-0">
       <ResizablePanel id="agent-conversation" defaultSize="100%" minSize="30%">
-        <div className="h-full min-h-0 min-w-0">{children}</div>
+        <ConversationPane>{children}</ConversationPane>
       </ResizablePanel>
       <ResizableHandle
         className={cn(
@@ -186,8 +206,9 @@ function DocumentPreviewWorkspace({
       <ResizablePanel
         id="agent-document-preview"
         defaultSize="0%"
-        minSize="30%"
-        maxSize="70%"
+        minSize="20rem"
+        maxSize="65%"
+        groupResizeBehavior="preserve-pixel-size"
         collapsedSize="0%"
         collapsible
         panelRef={(panel) => {

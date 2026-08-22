@@ -1,12 +1,10 @@
 import { EmptyState } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { MessagesSquare } from "lucide-react"
-import { useEffect } from "react"
 import { AgentsHome } from "./components/AgentsHome"
 import { ConversationPanel } from "./components/ConversationPanel"
 import { DocumentPreviewRoot } from "./document-preview/DocumentPreviewRoot"
 import { useAgentConversation } from "./hooks/useAgentConversation"
-import { installAgentResizeObserverGuard } from "./resizeObserver"
 import type { AgentContextInput } from "./types"
 
 export interface AgentChatProps {
@@ -42,10 +40,6 @@ export function AgentChat({
     onThreadCreated: onNavigateThread,
   })
 
-  useEffect(() => {
-    installAgentResizeObserverGuard()
-  }, [])
-
   if (conversation.agentsLoading) {
     return <div className={cn("h-full", className)} aria-busy="true" />
   }
@@ -79,7 +73,10 @@ export function AgentChat({
   const presentation = conversation.presentation
 
   return (
-    <DocumentPreviewRoot compact={compact}>
+    <DocumentPreviewRoot
+      compact={compact}
+      scopeKey={threadId ?? (draftAgentIdInput ? `draft:${draftAgentIdInput}` : "home")}
+    >
       <div
         data-agent-panel={compact ? "" : undefined}
         className={cn("relative flex h-full min-h-0 flex-col", className)}

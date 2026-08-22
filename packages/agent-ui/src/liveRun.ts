@@ -125,11 +125,18 @@ function applyChunk(state: LiveRunState, chunk: unknown): LiveRunState {
 function reduceText(state: LiveRunState, chunk: Record<string, unknown>): LiveRunState {
   const id = typeof chunk.id === "string" ? chunk.id : "text"
   const delta = typeof chunk.delta === "string" ? chunk.delta : ""
+  const key = spanKey("text", id, liveStepIndex(state))
+  const existingIndex = state.partKeys.indexOf(key)
+
+  // Start/end lifecycle chunks carry no content. Likewise, do not let leading whitespace create a
+  // placeholder row; once a real span exists, whitespace deltas remain significant between words.
+  if (!delta || (existingIndex === -1 && !delta.trim())) return state
+
   return upsertPart(
     state,
-    spanKey("text", id, liveStepIndex(state)),
+    key,
     () => ({ kind: "text", text: delta }),
-    (part) => (part.kind === "text" && delta ? { kind: "text", text: part.text + delta } : part)
+    (part) => (part.kind === "text" ? { kind: "text", text: part.text + delta } : part)
   )
 }
 

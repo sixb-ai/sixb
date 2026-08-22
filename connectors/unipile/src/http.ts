@@ -214,12 +214,19 @@ function createRequestScheduler(minDelayMs: number): () => Promise<void> {
 
   return () => {
     const scheduled = queue.then(async () => {
-      const waitMs = Math.max(nextAvailableAt - Date.now(), 0)
-      await sleep(waitMs)
-      nextAvailableAt = Date.now() + minDelayMs
+      await sleepUntil(nextAvailableAt)
+      nextAvailableAt = performance.now() + minDelayMs
     })
     queue = scheduled.catch(() => undefined)
     return scheduled
+  }
+}
+
+async function sleepUntil(deadline: number): Promise<void> {
+  let remaining = deadline - performance.now()
+  while (remaining > 0) {
+    await sleep(remaining)
+    remaining = deadline - performance.now()
   }
 }
 
