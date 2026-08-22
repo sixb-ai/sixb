@@ -25,7 +25,7 @@
     "build": "bun ../../scripts/build-package.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "test:e2e": "bun test ./tests/prod-roles.e2e.ts && bun test ./tests/worker-group.e2e.ts",
+    "test:e2e": "bun test ./tests/build.e2e.ts && bun test ./tests/prod-roles.e2e.ts && bun test ./tests/worker-group.e2e.ts",
     "prepack": "bun run build"
   },
   "dependencies": {

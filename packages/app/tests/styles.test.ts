@@ -266,6 +266,20 @@ describe("custom app Tailwind build (e2e)", () => {
     expect(cssBundles.join("\n")).toContain("line-through")
     expect(cssBundles.join("\n")).not.toContain("@source")
 
+    const builtHtml = await readFile(join(outdir, "index.html"), "utf-8")
+    const entryFile = builtHtml.match(/src="\/(app-[a-z0-9]+\.js)"/)?.[1]
+    expect(entryFile).toBeDefined()
+    const javascriptFiles = await Array.fromAsync(new Bun.Glob("*.js").scan({ cwd: outdir }))
+    expect(javascriptFiles.length).toBeGreaterThan(1)
+    const hasDynamicChunk = await Promise.all(
+      javascriptFiles.map(async (file) =>
+        (await readFile(join(outdir, file), "utf-8")).includes('import("/chunk-')
+      )
+    )
+    expect(hasDynamicChunk).toContain(true)
+    // Regression proof: restoring the HTML entry without `splitting` emits one ~10 MB JavaScript
+    // file for this fixture (all Shiki grammars) and fails both assertions above.
+
     expect(await Bun.file(staleChunkPath).exists()).toBe(false)
   }, 30_000)
 

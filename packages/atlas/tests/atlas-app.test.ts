@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, readdir, rm } from "node:fs/promises"
 import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -77,8 +77,14 @@ describe("createAtlasApp", () => {
       // chunk. Naming both `[name]-[hash]` made `main.tsx` and its 47 shared chunks indistinguishable.
       expect(scriptPath).toMatch(/^\/__sixb\/atlas-[^.]+\.js$/)
       expect(stylesheetPath).toMatch(/^\/__sixb\/atlas-[^.]+\.css$/)
-      expect(html).toContain('<div id="root"></div>')
-      expect(dottedRouteHtml).toContain('<div id="root"></div>')
+      expect(html).toContain('class="sixb-loading-shell"')
+      expect(dottedRouteHtml).toContain('class="sixb-loading-shell"')
+
+      const builtFiles = await readdir(assetsOutdir)
+      expect(builtFiles.some((file) => /^chunk-AgentsPage-[^.]+\.js$/.test(file))).toBe(true)
+      expect(builtFiles.some((file) => /^chunk-PipelinesPage-[^.]+\.js$/.test(file))).toBe(true)
+      // Regression proof: replacing the lazy ProjectWorkspace routes with static imports removes
+      // these chunks and puts their agent/canvas dependencies back on Atlas's initial path.
 
       for (const assetPath of [scriptPath, stylesheetPath]) {
         const assetResponse = await fetch(`${baseUrl}${assetPath}`)
@@ -87,6 +93,13 @@ describe("createAtlasApp", () => {
           "public, max-age=31536000, immutable"
         )
       }
+
+      const encodedAssetResponse = await fetch(`${baseUrl}${scriptPath}`, {
+        headers: { "accept-encoding": "br, gzip" },
+      })
+      expect(encodedAssetResponse.headers.get("content-encoding")).toBe("br")
+      expect(encodedAssetResponse.headers.get("vary")).toContain("Accept-Encoding")
+      expect((await encodedAssetResponse.text()).length).toBeGreaterThan(1000)
 
       const stableAssetResponse = await fetch(`${baseUrl}/__sixb/main.js`)
       expect(stableAssetResponse.status).toBe(404)
