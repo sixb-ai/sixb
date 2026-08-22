@@ -60,6 +60,12 @@ export function AgentChat({
     if (!pinnedAgentId && currentAgentId) rememberAgent(currentAgentId)
   }, [currentAgentId, pinnedAgentId, rememberAgent])
 
+  useEffect(() => {
+    if (!compact && !pinnedAgentId && conversation.home && selectedAgentId) {
+      onNavigateDraft(selectedAgentId)
+    }
+  }, [compact, conversation.home, onNavigateDraft, pinnedAgentId, selectedAgentId])
+
   if (conversation.agentsLoading) {
     return <div className={cn("h-full", className)} aria-busy="true" />
   }
@@ -86,6 +92,9 @@ export function AgentChat({
         />
       </div>
     )
+  }
+  if (!compact && !pinnedAgentId && conversation.home && selectedAgentId) {
+    return <div className={cn("h-full", className)} aria-busy="true" />
   }
 
   const startNewChatWith = (agentId: string) => {
