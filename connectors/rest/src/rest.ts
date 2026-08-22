@@ -241,13 +241,21 @@ function createRequestScheduler(minDelayMs: number): (signal: AbortSignal) => Pr
 
   return (signal) => {
     const scheduled = queue.then(async () => {
-      await sleep(Math.max(nextAvailableAt - Date.now(), 0), signal)
-      nextAvailableAt = Date.now() + minDelayMs
+      await sleepUntil(nextAvailableAt, signal)
+      nextAvailableAt = performance.now() + minDelayMs
     })
     queue = scheduled.catch(() => undefined)
     // A request can sit behind another request's pacing slot. Reject its caller immediately when
     // aborted; the queued task will later observe the same signal and release the queue cleanly.
     return abortable(scheduled, signal)
+  }
+}
+
+async function sleepUntil(deadline: number, signal: AbortSignal): Promise<void> {
+  let remaining = deadline - performance.now()
+  while (remaining > 0) {
+    await sleep(remaining, signal)
+    remaining = deadline - performance.now()
   }
 }
 
