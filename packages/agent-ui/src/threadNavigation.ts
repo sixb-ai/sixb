@@ -2,30 +2,20 @@ import type { Agent, AgentThread } from "./types"
 
 export const THREAD_PAGE_SIZE = 50
 
-export interface ThreadNavigationSections {
-  readonly running: readonly AgentThread[]
-  readonly recent: readonly AgentThread[]
-}
-
-/** Search across the human-visible thread and agent identity, then prioritize active work. */
-export function threadNavigationSections(
+/** Search across the human-visible thread and agent identity without changing its date order. */
+export function filterThreadNavigation(
   threads: readonly AgentThread[],
   agentsById: ReadonlyMap<string, Agent>,
   searchTerm: string
-): ThreadNavigationSections {
+): readonly AgentThread[] {
   const query = searchTerm.trim().toLocaleLowerCase()
-  const visible = query
-    ? threads.filter((thread) => {
-        const title = thread.title?.trim() || "Untitled chat"
-        const agentName = agentsById.get(thread.agentId)?.name ?? thread.agentId
-        return `${title}\n${agentName}`.toLocaleLowerCase().includes(query)
-      })
-    : threads
+  if (!query) return threads
 
-  return {
-    running: visible.filter((thread) => thread.activeRunId !== null),
-    recent: visible.filter((thread) => thread.activeRunId === null),
-  }
+  return threads.filter((thread) => {
+    const title = thread.title?.trim() || "Untitled chat"
+    const agentName = agentsById.get(thread.agentId)?.name ?? thread.agentId
+    return `${title}\n${agentName}`.toLocaleLowerCase().includes(query)
+  })
 }
 
 /** Calculate the next offset for the Agent thread list's offset-based pagination. */

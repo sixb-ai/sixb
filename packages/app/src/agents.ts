@@ -17,7 +17,7 @@ export default function AgentsPage({ className, ...props }: AgentsPageProps) {
     ...props,
     routeBase: "/agents",
     className: className
-      ? `h-dvh min-h-dvh max-h-dvh overflow-hidden ${className}`
-      : "h-dvh min-h-dvh max-h-dvh overflow-hidden",
+      ? `h-dvh min-h-0 max-h-full overflow-hidden ${className}`
+      : "h-dvh min-h-0 max-h-full overflow-hidden",
   })
 }

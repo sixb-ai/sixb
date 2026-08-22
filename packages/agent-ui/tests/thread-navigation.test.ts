@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { nextThreadPageOffset, threadNavigationSections } from "../src/threadNavigation"
+import { filterThreadNavigation, nextThreadPageOffset } from "../src/threadNavigation"
 import type { Agent, AgentThread } from "../src/types"
 
 const agents = new Map<string, Agent>([
@@ -37,9 +37,9 @@ function thread(overrides: Partial<AgentThread> & Pick<AgentThread, "id">): Agen
   }
 }
 
-describe("threadNavigationSections", () => {
-  test("prioritizes active runs without disturbing order inside each section", () => {
-    const sections = threadNavigationSections(
+describe("filterThreadNavigation", () => {
+  test("preserves date order regardless of run activity", () => {
+    const visible = filterThreadNavigation(
       [
         thread({ id: "idle-new", title: "Newest idle" }),
         thread({ id: "running", title: "Background work", activeRunId: "run-1" }),
@@ -49,8 +49,7 @@ describe("threadNavigationSections", () => {
       ""
     )
 
-    expect(sections.running.map((item) => item.id)).toEqual(["running"])
-    expect(sections.recent.map((item) => item.id)).toEqual(["idle-new", "idle-old"])
+    expect(visible.map((item) => item.id)).toEqual(["idle-new", "running", "idle-old"])
   })
 
   test("searches thread titles and agent names case-insensitively", () => {
@@ -59,12 +58,12 @@ describe("threadNavigationSections", () => {
       thread({ id: "ops", agentId: "operator", title: "Deploy service" }),
     ]
 
-    expect(
-      threadNavigationSections(threads, agents, "FORECAST").recent.map((item) => item.id)
-    ).toEqual(["forecast"])
-    expect(
-      threadNavigationSections(threads, agents, "operations").recent.map((item) => item.id)
-    ).toEqual(["ops"])
+    expect(filterThreadNavigation(threads, agents, "FORECAST").map((item) => item.id)).toEqual([
+      "forecast",
+    ])
+    expect(filterThreadNavigation(threads, agents, "operations").map((item) => item.id)).toEqual([
+      "ops",
+    ])
   })
 })
 

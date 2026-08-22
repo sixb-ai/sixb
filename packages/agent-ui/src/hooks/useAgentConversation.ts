@@ -350,7 +350,6 @@ export function useAgentConversation({
     threadsLoadingMore: threadsQuery.isFetchingNextPage,
     threadsLoadMoreError: threadsQuery.isFetchNextPageError,
     loadMoreThreads: () => threadsQuery.fetchNextPage(),
-    activityConnected: activityStream.connected && !activityStream.error,
     draftAgentId,
     home: threadId === null && draftAgentId === null,
     currentAgent,

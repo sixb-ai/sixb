@@ -32,6 +32,8 @@ export function OperationsAssistant() {
   const objectContext = currentObjectContext(location.pathname)
   const context = objectContext ? [pageContext, objectContext] : [pageContext]
 
+  if (location.pathname.startsWith("/agents")) return null
+
   return (
     <>
       {!open ? (
