@@ -3,6 +3,13 @@ import type { Principal } from "../auth/types"
 /** User or service account that may initiate or authorize an execution. */
 export type AuthorizablePrincipal = Extract<Principal, { readonly type: "user" | "serviceAccount" }>
 
+/** Anonymous holder of one exact shared grant and session. Never an owning principal. */
+export interface SharedAccessPrincipal {
+  readonly type: "sharedAccess"
+  readonly grantId: string
+  readonly sessionId: string
+}
+
 /** Registered primitive kinds that may receive internal trusted authority. */
 export type TrustedPrimitiveKind =
   | "action"
@@ -70,6 +77,7 @@ export type AuthorizationRef =
         | { readonly type: "accessToken"; readonly id: string }
     }
   | { readonly type: "trustedPrimitive"; readonly primitive: TrustedPrimitiveRef }
+  | SharedAccessPrincipal
   | { readonly type: "kernel"; readonly operation: KernelOperation }
   | { readonly type: "disabled" }
 

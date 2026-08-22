@@ -175,6 +175,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 21,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "022-shared-access-executions",
+    status: "applied",
+    version: 22,
+  },
 ]
 
 afterEach(async () => {
@@ -210,6 +217,92 @@ describe("SQLite storage migrations", () => {
       await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "current" })
     } finally {
       storage.close()
+    }
+  })
+
+  test("shared access execution migration preserves parent chains and admits shared authority", () => {
+    const db = new Database(":memory:")
+    try {
+      for (const migration of sqliteStorageMigrations.steps.slice(0, 21)) migration.up(db)
+      db.run("PRAGMA foreign_keys = ON")
+      const insert = db.query(`
+        INSERT INTO executions (
+          project_id, id, executor_kind, executor_id, source_kind, source_id,
+          correlation_id, parent_execution_id, authority_kind, authority_primitive_kind,
+          authority_primitive_id, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      insert.run(
+        "project-a",
+        "request-parent",
+        "request",
+        "request-1",
+        "http",
+        "request-1",
+        "correlation-1",
+        null,
+        "disabled",
+        null,
+        null,
+        "2026-08-22T12:00:00.000Z"
+      )
+      insert.run(
+        "project-a",
+        "action-child",
+        "action",
+        "run-1",
+        "execution",
+        "request-parent",
+        "correlation-1",
+        "request-parent",
+        "trustedPrimitive",
+        "action",
+        "approve",
+        "2026-08-22T12:00:01.000Z"
+      )
+
+      const migration = sqliteStorageMigrations.steps[21]
+      if (!migration) throw new Error("Expected shared access execution migration")
+      migration.up(db)
+
+      expect(
+        db
+          .query("PRAGMA foreign_key_list(executions)")
+          .all()
+          .filter((row) => (row as { readonly from: string }).from === "parent_execution_id")
+      ).toEqual([
+        expect.objectContaining({
+          from: "parent_execution_id",
+          table: "executions",
+          to: "id",
+        }),
+      ])
+      expect(db.query("SELECT id, parent_execution_id FROM executions ORDER BY id").all()).toEqual([
+        { id: "action-child", parent_execution_id: "request-parent" },
+        { id: "request-parent", parent_execution_id: null },
+      ])
+      db.query(`
+        INSERT INTO executions (
+          project_id, id, executor_kind, executor_id, source_kind, source_id,
+          correlation_id, authority_kind, authority_shared_grant_id,
+          authority_shared_session_id, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        "project-a",
+        "shared-request",
+        "request",
+        "request-shared",
+        "http",
+        "request-shared",
+        "correlation-shared",
+        "sharedAccess",
+        "shr_1",
+        "shs_1",
+        "2026-08-22T12:00:02.000Z"
+      )
+      expect(db.query("PRAGMA foreign_key_check").all()).toEqual([])
+    } finally {
+      db.close()
     }
   })
 

@@ -98,7 +98,10 @@ Additional rules:
 | `queue.enqueue_failed` | Yes | A job could not be handed to its queue. | Retry the unchanged request while the durable run remains in its enqueue phase. |
 | `runtime.cancelled` | No | Work was cancelled before completion. | Confirm the cancellation before requesting another run. |
 | `share.access_unavailable` | No | A shared link cannot be used, without revealing whether it is missing, invalid, expired, or revoked. | Ask for a new link. |
+| `share.action_invalid` | No | Shared Action parameters are invalid. | Fix the parameters using the registered Action definition. |
+| `share.action_unavailable` | No | The shared grant does not allow that Action. | Use an Action listed by the shared session. |
 | `share.grant_not_found` | No | The requested shared access grant does not exist. | Refresh the grant list or check its ID. |
+| `share.resource_not_found` | No | The exact resource behind an active shared link no longer exists. | Ask the link issuer to check the target. |
 | `share.type_not_found` | No | The requested ShareType is not registered. | Check its ID and deployment. |
 | `sync.execution_failed` | No | A Sync failed while reading, validating, or writing its dataset. | Inspect the `onError` report, fix the source or data, then request a new run. |
 | `webhook.delivery_failed` | Yes | A claimed webhook delivery failed retryably. | Let the provider retry; inspect the handler if it persists. |

@@ -65,6 +65,7 @@ describe("Postgres storage migrations", () => {
             "019-webhook-delivery-failure-record",
             "020-shared-access-grants",
             "021-shared-access-sessions",
+            "022-shared-access-executions",
           ],
         },
       ])
@@ -216,6 +217,13 @@ describe("Postgres storage migrations", () => {
           status: "applied",
           version: 21,
         },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "022-shared-access-executions",
+          status: "applied",
+          version: 22,
+        },
       ])
     })
   })
@@ -224,6 +232,87 @@ describe("Postgres storage migrations", () => {
     await withStorage(false, async (storage) => {
       await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
       await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "current" })
+    })
+  })
+
+  test("shared access execution migration preserves rows and enforces its authority shape", async () => {
+    await withStorage(false, async (_storage, schemaName) => {
+      const connectionString = process.env.DATABASE_URL
+      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
+      const sql = createPgClient({ connectionString, schemaName, max: 1 })
+      try {
+        const migrationIndex = postgresStorageMigrations.steps.findIndex(
+          (migration) => migration.id === "022-shared-access-executions"
+        )
+        if (migrationIndex < 0) {
+          throw new Error("PostgreSQL shared access execution migration is missing.")
+        }
+        const previousMigrations = defineMigrations({
+          adapterId: POSTGRES_STORAGE_ADAPTER_ID,
+          steps: postgresStorageMigrations.steps.slice(0, migrationIndex),
+        })
+        await createPostgresMigrator({
+          sql,
+          schemaName,
+          migrations: previousMigrations,
+        }).migrate()
+        const schema = quoteIdent(schemaName)
+        await sql.unsafe(`
+          INSERT INTO ${schema}.executions (
+            project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
+            authority_kind, created_at
+          ) VALUES (
+            'project-a', 'request-parent', 'request', 'request-1', 'http', 'request-1',
+            'correlation-1', 'disabled', '2026-08-22T12:00:00.000Z'
+          )
+        `)
+
+        await expect(
+          createPostgresMigrator({
+            sql,
+            schemaName,
+            migrations: postgresStorageMigrations,
+          }).migrate()
+        ).resolves.toMatchObject({ status: "migrated" })
+        const rows = await sql.unsafe<Array<{ id: string; authority_kind: string }>>(`
+          SELECT id, authority_kind
+          FROM ${schema}.executions
+          WHERE project_id = 'project-a'
+        `)
+        expect([...rows]).toEqual([{ id: "request-parent", authority_kind: "disabled" }])
+
+        await sql.unsafe(`
+          INSERT INTO ${schema}.executions (
+            project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
+            authority_kind, authority_shared_grant_id, authority_shared_session_id, created_at
+          ) VALUES (
+            'project-a', 'shared-request', 'request', 'shared-request-1', 'http',
+            'shared-request-1', 'correlation-shared', 'sharedAccess', 'shr_1', 'shs_1',
+            '2026-08-22T12:01:00.000Z'
+          )
+        `)
+        let invalidAuthorityError: unknown
+        try {
+          await sql.unsafe(`
+            INSERT INTO ${schema}.executions (
+              project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
+              authority_kind, authority_shared_grant_id, created_at
+            ) VALUES (
+              'project-a', 'invalid-shared-request', 'request', 'invalid-shared-request', 'http',
+              'invalid-shared-request', 'correlation-invalid', 'sharedAccess', 'shr_1',
+              '2026-08-22T12:02:00.000Z'
+            )
+          `)
+        } catch (error) {
+          invalidAuthorityError = error
+        }
+        expect(invalidAuthorityError).toMatchObject({
+          code: "23514",
+          constraint_name: "executions_authority_shape_check",
+        })
+      } finally {
+        await sql.end()
+      }
     })
   })
 
@@ -1169,6 +1258,13 @@ describe("Postgres storage migrations", () => {
           id: "021-shared-access-sessions",
           status: "applied",
           version: 21,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "022-shared-access-executions",
+          status: "applied",
+          version: 22,
         },
       ])
     } finally {

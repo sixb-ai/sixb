@@ -9,6 +9,7 @@ import {
   isRuntimeAuthorizationCapability,
   type KernelOperation,
   type RuntimeAuthorization,
+  type SharedAccessPrincipal,
   type TrustedPrimitiveKind,
   type TrustedPrimitiveRef,
 } from "./types"
@@ -23,9 +24,16 @@ export type ResolvedRuntimeAuthorization =
       readonly executionBinding?: AgentExecutionBinding
     }
   | {
+      readonly type: "sharedAccess"
+      readonly projectId: string
+      readonly principal: SharedAccessPrincipal
+      readonly grants: GrantIndex
+      readonly ref: Extract<AuthorizationRef, { readonly type: "sharedAccess" }>
+    }
+  | {
       readonly type: "unrestricted"
       readonly projectId: string
-      readonly ref: Exclude<AuthorizationRef, { readonly type: "principal" }>
+      readonly ref: Exclude<AuthorizationRef, { readonly type: "principal" | "sharedAccess" }>
     }
   | { readonly type: "denied" }
 
@@ -108,6 +116,21 @@ export function createDisabledRuntimeAuthorization(projectId: string): RuntimeAu
   return register({ type: "unrestricted", projectId, ref: Object.freeze({ type: "disabled" }) })
 }
 
+export function createSharedAccessRuntimeAuthorization(input: {
+  readonly projectId: string
+  readonly principal: SharedAccessPrincipal
+  readonly grants: GrantIndex
+}): RuntimeAuthorization {
+  const principal = snapshotSharedAccessPrincipal(input.principal)
+  return register({
+    type: "sharedAccess",
+    projectId: input.projectId,
+    principal,
+    grants: snapshotGrantIndex(input.grants),
+    ref: principal,
+  })
+}
+
 export function createTrustedPrimitiveRuntimeAuthorization(input: {
   readonly projectId: string
   readonly primitive: TrustedPrimitiveRef
@@ -177,11 +200,7 @@ function snapshotAuthorizationContext(
   context: AuthorizationContext
 ): PrincipalAuthorizationContext {
   const principal = snapshotAuthorizablePrincipal(context.principal)
-  const grants = emptyGrantSets()
-  for (const kind of GRANT_KIND_KEYS) {
-    grants[kind] = new Set(context.grants[kind])
-  }
-  const frozenGrants: GrantIndex = Object.freeze(grants)
+  const frozenGrants = snapshotGrantIndex(context.grants)
   return Object.freeze({
     principal,
     ...(context.sessionId === undefined ? {} : { sessionId: context.sessionId }),
@@ -189,6 +208,14 @@ function snapshotAuthorizationContext(
     roleIds: Object.freeze([...context.roleIds]),
     grants: frozenGrants,
   })
+}
+
+function snapshotGrantIndex(input: GrantIndex): GrantIndex {
+  const grants = emptyGrantSets()
+  for (const kind of GRANT_KIND_KEYS) {
+    grants[kind] = new Set(input[kind])
+  }
+  return Object.freeze(grants)
 }
 
 function snapshotAuthorizablePrincipal(principal: Principal): AuthorizablePrincipal {
@@ -238,6 +265,19 @@ function snapshotTrustedPrimitive(primitive: TrustedPrimitiveRef): TrustedPrimit
   return Object.freeze({ kind: primitive.kind, id: primitive.id, runId: primitive.runId })
 }
 
+function snapshotSharedAccessPrincipal(principal: SharedAccessPrincipal): SharedAccessPrincipal {
+  if (principal.type !== "sharedAccess") {
+    throw new Error(`[Sixb] Unknown shared access principal type '${principal.type}'.`)
+  }
+  assertNonEmpty(principal.grantId, "Shared access grant id")
+  assertNonEmpty(principal.sessionId, "Shared access session id")
+  return Object.freeze({
+    type: "sharedAccess",
+    grantId: principal.grantId,
+    sessionId: principal.sessionId,
+  })
+}
+
 function snapshotKernelOperation(operation: KernelOperation): KernelOperation {
   if (operation.type !== "ontology.recover") {
     throw new Error(`[Sixb] Unknown kernel operation '${operation.type}'.`)
@@ -256,6 +296,8 @@ function cloneAuthorizationRef(ref: AuthorizationRef): AuthorizationRef {
       }
     case "trustedPrimitive":
       return { type: "trustedPrimitive", primitive: { ...ref.primitive } }
+    case "sharedAccess":
+      return { type: "sharedAccess", grantId: ref.grantId, sessionId: ref.sessionId }
     case "kernel":
       return { type: "kernel", operation: { ...ref.operation } }
     case "disabled":

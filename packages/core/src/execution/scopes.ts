@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto"
-import type { AuthorizationContext } from "../authorization"
+import type { AuthorizationContext, GrantIndex } from "../authorization"
 import {
   createAgentRuntimeAuthorization,
   createDisabledRuntimeAuthorization,
   createKernelRuntimeAuthorization,
   createPrincipalRuntimeAuthorization,
+  createSharedAccessRuntimeAuthorization,
   createTrustedPrimitiveRuntimeAuthorization,
 } from "./authorization"
 import type {
@@ -14,6 +15,7 @@ import type {
   ExecutionScope,
   ExecutionSource,
   KernelOperation,
+  SharedAccessPrincipal,
   TrustedPrimitiveRef,
 } from "./types"
 
@@ -49,6 +51,23 @@ export function createDisabledRequestScope(input: {
   return Object.freeze({
     execution: createRequestExecution(input),
     authorization: createDisabledRuntimeAuthorization(input.projectId),
+  })
+}
+
+export function createSharedAccessRequestScope(input: {
+  readonly projectId: string
+  readonly requestId: string
+  readonly correlationId: string
+  readonly principal: SharedAccessPrincipal
+  readonly grants: GrantIndex
+}): ExecutionScope {
+  return Object.freeze({
+    execution: createRequestExecution(input),
+    authorization: createSharedAccessRuntimeAuthorization({
+      projectId: input.projectId,
+      principal: input.principal,
+      grants: input.grants,
+    }),
   })
 }
 

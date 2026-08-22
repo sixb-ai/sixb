@@ -47,8 +47,10 @@ export class SqliteExecutionStorage implements ExecutionStorage {
             authority_primitive_kind,
             authority_primitive_id,
             authority_kernel_operation,
+            authority_shared_grant_id,
+            authority_shared_session_id,
             created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `
         )
         .run(
@@ -70,6 +72,8 @@ export class SqliteExecutionStorage implements ExecutionStorage {
           row.authorityPrimitiveKind,
           row.authorityPrimitiveId,
           row.authorityKernelOperation,
+          row.authoritySharedGrantId,
+          row.authoritySharedSessionId,
           row.createdAt.toISOString()
         )
     } catch (error) {
@@ -124,6 +128,8 @@ function toStorageRow(row: SqliteExecutionRow): ExecutionStorageRow {
     authorityPrimitiveKind: row.authority_primitive_kind,
     authorityPrimitiveId: row.authority_primitive_id,
     authorityKernelOperation: row.authority_kernel_operation,
+    authoritySharedGrantId: row.authority_shared_grant_id,
+    authoritySharedSessionId: row.authority_shared_session_id,
     createdAt: new Date(row.created_at),
   }
 }
@@ -154,5 +160,7 @@ interface SqliteExecutionRow {
   readonly authority_primitive_kind: ExecutionStorageRow["authorityPrimitiveKind"]
   readonly authority_primitive_id: string | null
   readonly authority_kernel_operation: ExecutionStorageRow["authorityKernelOperation"]
+  readonly authority_shared_grant_id: string | null
+  readonly authority_shared_session_id: string | null
   readonly created_at: string
 }

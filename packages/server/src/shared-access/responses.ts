@@ -20,6 +20,8 @@ export function sharedBoundaryErrorResponse(
   if (isRequestInputError(context)) {
     if (route.operationId === "exchangeSharedAccess") return sharedAccessUnavailableResponse()
     if (route.operationId === "getSharedAccessSession") return sharedUnauthenticatedResponse()
+    if (route.operationId === "getSharedAccessResource") return sharedAccessUnavailableResponse()
+    if (route.operationId === "requestSharedAccessAction") return sharedInvalidActionResponse()
     if (route.operationId === "signOutSharedAccess") return sharedSignedOutResponse()
   }
 
@@ -36,13 +38,32 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
 
-export function sharedAccessUnavailableResponse(): Response {
+export function sharedAccessUnavailableResponse(setCookies: readonly string[] = []): Response {
   return sharedJsonResponse(
     {
       error: "Shared access is unavailable.",
       code: "share.access_unavailable",
     },
-    401
+    401,
+    setCookies
+  )
+}
+
+export function sharedInvalidActionResponse(error = "Shared action request is invalid."): Response {
+  return sharedJsonResponse({ error, code: "share.action_invalid" }, 400)
+}
+
+export function sharedActionUnavailableResponse(): Response {
+  return sharedJsonResponse(
+    { error: "Shared action is unavailable.", code: "share.action_unavailable" },
+    403
+  )
+}
+
+export function sharedResourceNotFoundResponse(): Response {
+  return sharedJsonResponse(
+    { error: "Shared resource not found.", code: "share.resource_not_found" },
+    404
   )
 }
 

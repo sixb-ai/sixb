@@ -7,6 +7,7 @@ export type {
   ExecutionSource,
   KernelOperation,
   RuntimeAuthorization,
+  SharedAccessPrincipal,
   TrustedPrimitiveKind,
   TrustedPrimitiveRef,
 } from "./types"

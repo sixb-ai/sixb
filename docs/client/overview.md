@@ -51,7 +51,8 @@ import { client } from "@sixb/client"
 
 const shared = client.shared(grantId)
 await shared.exchange(secret)
-await shared.getSession()
+const report = await shared.getResource()
+await shared.requestAction("acknowledge-report", { params: { note: "Reviewed" } })
 ```
 
 > `@sixb/client/hooks` re-exports the events layer and the typed-query hooks,

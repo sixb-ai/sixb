@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto"
 import { formatSessionCookieValue, parseSessionCookieValue } from "../auth/sessions"
+import type { SharedAccessPrincipal } from "../execution"
 import type { DefinitionCatalog } from "../runtime/definitions"
 import type { SharedAccessGrantRecord, SharedAccessSessionRecord, Storage } from "../storage"
 import type { SharedAccessGrantRef } from "../storage/share-grants"
@@ -8,11 +9,7 @@ import { snapshotShareTypeGrants } from "./validation"
 
 export const DEFAULT_SHARED_ACCESS_SESSION_TTL_MS = 15 * 60_000
 
-export interface SharedAccessPrincipal {
-  readonly type: "sharedAccess"
-  readonly grantId: string
-  readonly sessionId: string
-}
+export type { SharedAccessPrincipal } from "../execution"
 
 export interface SharedAccessSessionContext {
   readonly principal: SharedAccessPrincipal

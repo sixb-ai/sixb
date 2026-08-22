@@ -54,6 +54,7 @@ export function runExecutionStorageContractSuite<TStorage extends ExecutionStora
             credential: { type: "accessToken", id: "token-service" },
           }),
           disabledRequest("disabled-request"),
+          sharedAccessRequest("shared-access-request"),
           ...trustedPrimitiveKinds.map((kind) => trustedPrimitive(`${kind}-execution`, {}, kind)),
           agentExecution("agent-execution"),
           kernelExecution("kernel-execution"),
@@ -140,6 +141,10 @@ export function runExecutionStorageContractSuite<TStorage extends ExecutionStora
               type: "principal",
               principal: { type: "user", id: "user-one" },
             },
+          },
+          {
+            ...sharedAccessRequest("shared-requester"),
+            requestedBy: { type: "user", id: "user-one" },
           },
           {
             ...trustedPrimitive("untrusted-primitive"),
@@ -355,6 +360,21 @@ function disabledRequest(id: string, inputProjectId = projectId): CreateExecutio
     source: { type: "http", requestId: `request-${id}` },
     correlationId: `correlation-${id}`,
     authorizationRef: { type: "disabled" },
+  }
+}
+
+function sharedAccessRequest(id: string): CreateExecutionInput {
+  return {
+    id,
+    projectId,
+    executor: { type: "request", requestId: `request-${id}` },
+    source: { type: "http", requestId: `request-${id}` },
+    correlationId: `correlation-${id}`,
+    authorizationRef: {
+      type: "sharedAccess",
+      grantId: "share-grant-one",
+      sessionId: "share-session-one",
+    },
   }
 }
 

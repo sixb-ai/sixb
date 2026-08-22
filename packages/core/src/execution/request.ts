@@ -67,8 +67,7 @@ export function bindRequestExecution(
   host: RequestExecutionHost,
   input: BindRequestExecutionInput
 ): Sixb<readonly OntologySource[]> {
-  const requestId = requestIdentifier(input.request)
-  const correlationId = correlationIdentifier(input.request, requestId)
+  const { requestId, correlationId } = requestExecutionIdentifiers(input.request)
   const scope =
     input.authorization.type === "principal"
       ? createPrincipalRequestScope({
@@ -87,6 +86,14 @@ export function bindRequestExecution(
     throw new Error("[Sixb] Request host did not return an execution-bound Sixb SDK.")
   }
   return sixb
+}
+
+export function requestExecutionIdentifiers(request: Request): {
+  readonly requestId: string
+  readonly correlationId: string
+} {
+  const requestId = requestIdentifier(request)
+  return { requestId, correlationId: correlationIdentifier(request, requestId) }
 }
 
 function requestIdentifier(request: Request): string {

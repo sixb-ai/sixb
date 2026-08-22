@@ -103,12 +103,7 @@ export function evaluate(
   authorization: AuthorizationContext | null | undefined,
   request: AuthzRequest
 ): AuthzDecision {
-  const atoms = atomsFor(request)
-  const requirements = atoms.map(atomKey)
-  const missing = authorization
-    ? atoms.filter((atom) => !holds(authorization.grants, atom)).map(atomKey)
-    : []
-  return { allowed: missing.length === 0, requirements, missing }
+  return evaluateGrantIndex(authorization?.grants, request)
 }
 
 export function isAllowed(
@@ -120,16 +115,33 @@ export function isAllowed(
 
 export function assertAuthorized(runtime: AuthorizedRuntime, request: AuthzRequest): void {
   const resolved = assertRuntimeAuthorizationBound(runtime)
-  const authorization = resolved.type === "principal" ? resolved.context : undefined
-  const decision = evaluate(authorization, request)
+  if (resolved.type === "unrestricted") {
+    return
+  }
+  const grants = resolved.type === "principal" ? resolved.context.grants : resolved.grants
+  const decision = evaluateGrantIndex(grants, request)
   if (decision.allowed) {
     return
   }
 
+  const authority =
+    resolved.type === "sharedAccess"
+      ? `Shared access grant '${resolved.principal.grantId}'`
+      : `Principal '${resolved.context.principal.id}'`
   throw new AuthorizationError(
     decision.missing[0] ?? request.kind,
-    deniedMessage(authorization, request)
+    deniedMessage(request, grants, authority)
   )
+}
+
+function evaluateGrantIndex(
+  grants: GrantIndex | null | undefined,
+  request: AuthzRequest
+): AuthzDecision {
+  const atoms = atomsFor(request)
+  const requirements = atoms.map(atomKey)
+  const missing = grants ? atoms.filter((atom) => !holds(grants, atom)).map(atomKey) : []
+  return { allowed: missing.length === 0, requirements, missing }
 }
 
 /** Resolve registered process-local authority before a protected leaf makes a decision. */
@@ -212,7 +224,7 @@ export function assertProviderAccess(
     return
   }
 
-  const binding = resolved.executionBinding
+  const binding = resolved.type === "principal" ? resolved.executionBinding : undefined
   const executor = execution.executor
   if (
     binding?.type === "agent" &&
@@ -230,42 +242,38 @@ export function assertProviderAccess(
   )
 }
 
-function deniedMessage(
-  authorization: AuthorizationContext | null | undefined,
-  request: AuthzRequest
-): string {
-  const principalId = authorization?.principal.id ?? "unknown"
+function deniedMessage(request: AuthzRequest, grants: GrantIndex, authority: string): string {
   switch (request.kind) {
     case "application.access":
-      return `[Sixb] Principal '${principalId}' is not allowed to access application '${request.audience}'.`
+      return `[Sixb] ${authority} is not allowed to access application '${request.audience}'.`
     case "object.view":
-      return `[Sixb] Principal '${principalId}' is not allowed to view object type '${request.objectTypeId}'.`
+      return `[Sixb] ${authority} is not allowed to view object type '${request.objectTypeId}'.`
     case "dataset.view":
-      return `[Sixb] Principal '${principalId}' is not allowed to view dataset '${request.datasetId}'.`
+      return `[Sixb] ${authority} is not allowed to view dataset '${request.datasetId}'.`
     case "object.edit":
-      return `[Sixb] Principal '${principalId}' is not allowed to write object type '${request.objectTypeId}'.`
+      return `[Sixb] ${authority} is not allowed to write object type '${request.objectTypeId}'.`
     case "telemetry.append":
-      return `[Sixb] Principal '${principalId}' is not allowed to append telemetry for object type '${request.objectTypeId}'.`
+      return `[Sixb] ${authority} is not allowed to append telemetry for object type '${request.objectTypeId}'.`
     case "action.apply":
-      return `[Sixb] Principal '${principalId}' is not allowed to apply action '${request.actionId}'.`
+      return `[Sixb] ${authority} is not allowed to apply action '${request.actionId}'.`
     case "share.manage":
-      return `[Sixb] Principal '${principalId}' is not allowed to manage share type '${request.shareTypeId}'.`
+      return `[Sixb] ${authority} is not allowed to manage share type '${request.shareTypeId}'.`
     case "workflow.run":
-      return `[Sixb] Principal '${principalId}' is not allowed to run workflow '${request.workflowId}'.`
+      return `[Sixb] ${authority} is not allowed to run workflow '${request.workflowId}'.`
     case "sync.run":
-      return `[Sixb] Principal '${principalId}' is not allowed to run sync '${request.syncId}'.`
+      return `[Sixb] ${authority} is not allowed to run sync '${request.syncId}'.`
     case "pipeline.run":
-      return `[Sixb] Principal '${principalId}' is not allowed to run pipeline '${request.pipelineId}'.`
+      return `[Sixb] ${authority} is not allowed to run pipeline '${request.pipelineId}'.`
     case "agent.run":
-      return `[Sixb] Principal '${principalId}' is not allowed to run agent '${request.agentId}'.`
+      return `[Sixb] ${authority} is not allowed to run agent '${request.agentId}'.`
     case "logs.observe":
-      return `[Sixb] Principal '${principalId}' is not allowed to observe project logs.`
+      return `[Sixb] ${authority} is not allowed to observe project logs.`
     case "object.query": {
       // Name the first touched type the principal cannot view.
       const blocked = request.touchedObjectTypeIds.find(
-        (objectTypeId) => !isAllowed(authorization, { kind: "object.view", objectTypeId })
+        (objectTypeId) => !grants["view:object"].has(objectTypeId)
       )
-      return `[Sixb] Principal '${principalId}' is not allowed to view object type '${blocked}'.`
+      return `[Sixb] ${authority} is not allowed to view object type '${blocked}'.`
     }
   }
 }

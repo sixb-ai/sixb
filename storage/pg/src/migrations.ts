@@ -54,6 +54,9 @@ import sharedAccessGrantsSql from "./migrations/020-shared-access-grants.sql" wi
 import sharedAccessSessionsSql from "./migrations/021-shared-access-sessions.sql" with {
   type: "text",
 }
+import sharedAccessExecutionsSql from "./migrations/022-shared-access-executions.sql" with {
+  type: "text",
+}
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -328,6 +331,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("019-webhook-delivery-failure-record", webhookDeliveryFailureRecordSql),
     pgSql("020-shared-access-grants", sharedAccessGrantsSql),
     pgSql("021-shared-access-sessions", sharedAccessSessionsSql),
+    pgSql("022-shared-access-executions", sharedAccessExecutionsSql),
   ],
 })
 
