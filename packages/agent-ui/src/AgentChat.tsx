@@ -1,6 +1,7 @@
 import { EmptyState } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { ChevronRight, MessagesSquare } from "lucide-react"
+import { useCallback, useEffect, useState } from "react"
 import { AgentAvatar } from "./components/AgentAvatar"
 import { AgentsHome } from "./components/AgentsHome"
 import { ConversationPanel } from "./components/ConversationPanel"
@@ -8,6 +9,8 @@ import { ThreadSidebar } from "./components/ThreadSidebar"
 import { DocumentPreviewRoot } from "./document-preview/DocumentPreviewRoot"
 import { useAgentConversation } from "./hooks/useAgentConversation"
 import type { Agent, AgentContextInput } from "./types"
+
+const LAST_SELECTED_AGENT_KEY = "sixb.agent-ui.last-selected-agent"
 
 export interface AgentChatProps {
   readonly threadId?: string | null
@@ -41,6 +44,21 @@ export function AgentChat({
     pinnedAgentId,
     onThreadCreated: onNavigateThread,
   })
+  const [lastSelectedAgentId, setLastSelectedAgentId] = useState(readLastSelectedAgent)
+  const rememberAgent = useCallback((agentId: string) => {
+    setLastSelectedAgentId(agentId)
+    writeLastSelectedAgent(agentId)
+  }, [])
+  const currentAgentId = conversation.currentAgent?.id
+  const selectedAgentId =
+    currentAgentId ??
+    (lastSelectedAgentId && conversation.agentsById.has(lastSelectedAgentId)
+      ? lastSelectedAgentId
+      : null)
+
+  useEffect(() => {
+    if (!pinnedAgentId && currentAgentId) rememberAgent(currentAgentId)
+  }, [currentAgentId, pinnedAgentId, rememberAgent])
 
   if (conversation.agentsLoading) {
     return <div className={cn("h-full", className)} aria-busy="true" />
@@ -70,7 +88,17 @@ export function AgentChat({
     )
   }
 
-  const startNewChatWith = (agentId: string) => onNavigateDraft(agentId)
+  const startNewChatWith = (agentId: string) => {
+    rememberAgent(agentId)
+    onNavigateDraft(agentId)
+  }
+  const startNewThread = () => {
+    if (selectedAgentId) {
+      startNewChatWith(selectedAgentId)
+      return
+    }
+    onNavigateHome()
+  }
   const pendingUser = conversation.pendingUser
   const presentation = conversation.presentation
   const showingConversation = !conversation.home
@@ -90,14 +118,14 @@ export function AgentChat({
             threads={conversation.threads}
             agentsById={conversation.agentsById}
             currentThreadId={threadId}
+            selectedAgentId={selectedAgentId}
             threadsError={conversation.threadsError ? "Could not load threads." : null}
             totalThreads={conversation.threadTotal}
             hasMoreThreads={conversation.threadsHasMore}
             loadingMoreThreads={conversation.threadsLoadingMore}
             loadMoreThreadsError={conversation.threadsLoadMoreError}
-            activityConnected={conversation.activityConnected}
             onPickAgent={startNewChatWith}
-            onStartNewThread={onNavigateHome}
+            onStartNewThread={startNewThread}
             onSelectThread={onNavigateThread}
             onLoadMoreThreads={() => void conversation.loadMoreThreads()}
             className={cn(
@@ -179,6 +207,24 @@ export function AgentChat({
       </div>
     </DocumentPreviewRoot>
   )
+}
+
+function readLastSelectedAgent(): string | null {
+  if (typeof window === "undefined") return null
+  try {
+    return window.localStorage.getItem(LAST_SELECTED_AGENT_KEY)
+  } catch {
+    return null
+  }
+}
+
+function writeLastSelectedAgent(agentId: string): void {
+  if (typeof window === "undefined") return
+  try {
+    window.localStorage.setItem(LAST_SELECTED_AGENT_KEY, agentId)
+  } catch {
+    // A private or restricted browser context can disable storage; in-memory selection still works.
+  }
 }
 
 function WorkspaceHome({

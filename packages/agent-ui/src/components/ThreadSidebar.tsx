@@ -1,23 +1,22 @@
 import { Button, Input } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { LoaderCircle, Search, SquarePen } from "lucide-react"
+import { LoaderCircle, Pencil, Search } from "lucide-react"
 import { type ReactNode, useMemo, useState } from "react"
-import { formatRelativeTime, groupThreadsByDate } from "../format"
-import { THREAD_PAGE_SIZE, threadNavigationSections } from "../threadNavigation"
+import { groupThreadsByDate } from "../format"
+import { filterThreadNavigation, THREAD_PAGE_SIZE } from "../threadNavigation"
 import type { Agent, AgentThread } from "../types"
-import { AgentAvatar } from "./AgentAvatar"
 
 export interface ThreadSidebarProps {
   readonly agents: readonly Agent[]
   readonly threads: readonly AgentThread[]
   readonly agentsById: ReadonlyMap<string, Agent>
   readonly currentThreadId: string | null
+  readonly selectedAgentId: string | null
   readonly threadsError?: string | null
   readonly totalThreads: number
   readonly hasMoreThreads: boolean
   readonly loadingMoreThreads: boolean
   readonly loadMoreThreadsError: boolean
-  readonly activityConnected: boolean
   readonly onPickAgent: (agentId: string) => void
   readonly onStartNewThread: () => void
   readonly onSelectThread: (threadId: string) => void
@@ -31,12 +30,12 @@ export function ThreadSidebar({
   threads,
   agentsById,
   currentThreadId,
+  selectedAgentId,
   threadsError,
   totalThreads,
   hasMoreThreads,
   loadingMoreThreads,
   loadMoreThreadsError,
-  activityConnected,
   onPickAgent,
   onStartNewThread,
   onSelectThread,
@@ -44,15 +43,12 @@ export function ThreadSidebar({
   className,
 }: ThreadSidebarProps) {
   const [searchTerm, setSearchTerm] = useState("")
-  const sections = useMemo(
-    () => threadNavigationSections(threads, agentsById, searchTerm),
+  const visibleThreads = useMemo(
+    () => filterThreadNavigation(threads, agentsById, searchTerm),
     [agentsById, searchTerm, threads]
   )
-  const recentGroups = useMemo(() => groupThreadsByDate(sections.recent), [sections.recent])
-  const runningCount = threads.filter((thread) => thread.activeRunId !== null).length
-  const showAgentName = agents.length > 1
-  const noMatches =
-    searchTerm.trim().length > 0 && sections.running.length + sections.recent.length === 0
+  const threadGroups = useMemo(() => groupThreadsByDate(visibleThreads), [visibleThreads])
+  const noMatches = searchTerm.trim().length > 0 && visibleThreads.length === 0
 
   return (
     <aside
@@ -61,33 +57,13 @@ export function ThreadSidebar({
     >
       <div className="shrink-0 px-3 pt-3 pb-2">
         <div className="flex items-center gap-2">
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-[15px] font-semibold tracking-tight text-foreground">
-              Threads
-            </h1>
-            <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-              <span
-                className={cn(
-                  "size-1.5 rounded-full",
-                  activityConnected ? "bg-emerald-500" : "bg-amber-500"
-                )}
-                aria-hidden="true"
-              />
-              {runningCount > 0
-                ? `${runningCount} ${runningCount === 1 ? "thread" : "threads"} running`
-                : activityConnected
-                  ? "Live · All idle"
-                  : "Status reconnecting…"}
-            </p>
-          </div>
-          <NewChatButton
-            agents={agents}
-            onPickAgent={onPickAgent}
-            onStartNewThread={onStartNewThread}
-          />
+          <h1 className="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-tight text-foreground">
+            Threads
+          </h1>
+          <NewChatButton onStartNewThread={onStartNewThread} />
         </div>
 
-        <div className="relative mt-2.5">
+        <div className="relative mt-3">
           <Search
             className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground/80"
             aria-hidden="true"
@@ -101,6 +77,31 @@ export function ThreadSidebar({
             className="h-8 rounded-lg border-transparent bg-muted/60 pr-2 pl-8 text-xs shadow-none transition-colors hover:bg-muted focus-visible:border-input focus-visible:bg-background"
           />
         </div>
+
+        <section className="mt-3" aria-labelledby="agent-selector-heading">
+          <h2
+            id="agent-selector-heading"
+            className="px-2 pb-1 text-[11px] font-medium text-muted-foreground"
+          >
+            Agents
+          </h2>
+          <div className="space-y-0.5">
+            {agents.map((agent) => (
+              <button
+                key={agent.id}
+                type="button"
+                onClick={() => onPickAgent(agent.id)}
+                aria-current={agent.id === selectedAgentId ? "true" : undefined}
+                className={cn(
+                  "flex h-8 w-full items-center rounded-lg px-2 text-left text-[13px] font-medium outline-none transition-colors hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring",
+                  agent.id === selectedAgentId && "bg-muted text-foreground"
+                )}
+              >
+                <span className="truncate">{agent.name}</span>
+              </button>
+            ))}
+          </div>
+        </section>
       </div>
 
       <nav
@@ -122,29 +123,12 @@ export function ThreadSidebar({
           </div>
         ) : (
           <div className="space-y-4">
-            {sections.running.length > 0 ? (
-              <ThreadSection label="Running">
-                {sections.running.map((thread) => (
-                  <ThreadRow
-                    key={thread.id}
-                    thread={thread}
-                    agent={agentsById.get(thread.agentId)}
-                    showAgentName={showAgentName}
-                    selected={thread.id === currentThreadId}
-                    onSelect={onSelectThread}
-                  />
-                ))}
-              </ThreadSection>
-            ) : null}
-
-            {recentGroups.map((group) => (
+            {threadGroups.map((group) => (
               <ThreadSection key={group.label} label={group.label}>
                 {group.threads.map((thread) => (
                   <ThreadRow
                     key={thread.id}
                     thread={thread}
-                    agent={agentsById.get(thread.agentId)}
-                    showAgentName={showAgentName}
                     selected={thread.id === currentThreadId}
                     onSelect={onSelectThread}
                   />
@@ -190,28 +174,16 @@ export function ThreadSidebar({
   )
 }
 
-function NewChatButton({
-  agents,
-  onPickAgent,
-  onStartNewThread,
-}: {
-  agents: readonly Agent[]
-  onPickAgent: (agentId: string) => void
-  onStartNewThread: () => void
-}) {
-  const soleAgent = agents.length === 1 ? agents[0] : undefined
-
+function NewChatButton({ onStartNewThread }: { onStartNewThread: () => void }) {
   return (
     <Button
       type="button"
-      size="sm"
+      size="icon-sm"
       variant="ghost"
-      className="h-8 gap-1.5 px-2 text-xs"
-      onClick={() => (soleAgent ? onPickAgent(soleAgent.id) : onStartNewThread())}
+      onClick={onStartNewThread}
       aria-label="New chat"
     >
-      <SquarePen className="size-3.5" />
-      New
+      <Pencil />
     </Button>
   )
 }
@@ -232,20 +204,14 @@ function ThreadSection({ label, children }: { label: string; children: ReactNode
 
 function ThreadRow({
   thread,
-  agent,
-  showAgentName,
   selected,
   onSelect,
 }: {
   thread: AgentThread
-  agent: Agent | undefined
-  showAgentName: boolean
   selected: boolean
   onSelect: (threadId: string) => void
 }) {
-  const running = thread.activeRunId !== null
   const title = thread.title?.trim() || "Untitled chat"
-  const agentName = agent?.name ?? thread.agentId
 
   return (
     <button
@@ -253,31 +219,15 @@ function ThreadRow({
       onClick={() => onSelect(thread.id)}
       title={title}
       aria-current={selected ? "page" : undefined}
-      aria-label={`${title}, ${agentName}${running ? ", running" : ""}`}
+      aria-label={title}
       className={cn(
-        "group relative flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left outline-none transition-colors hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring",
+        "group relative flex w-full items-center rounded-lg px-2.5 py-1.5 text-left outline-none transition-colors hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring",
         selected && "bg-muted text-foreground"
       )}
     >
-      {showAgentName ? (
-        <AgentAvatar name={agentName} className="size-5 text-[8px] text-muted-foreground" />
-      ) : null}
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[13px] font-medium leading-5 text-foreground">
-          {title}
-        </span>
-        <span className="flex items-center gap-1 text-[11px] leading-4 text-muted-foreground">
-          <span className="shrink-0">
-            {running ? "Working" : formatRelativeTime(thread.lastMessageAt ?? thread.updatedAt)}
-          </span>
-        </span>
+      <span className="min-w-0 flex-1 truncate text-[13px] font-medium leading-5 text-foreground">
+        {title}
       </span>
-      {running ? (
-        <LoaderCircle
-          className="size-3.5 shrink-0 animate-spin text-emerald-600 motion-reduce:animate-none dark:text-emerald-400"
-          aria-hidden="true"
-        />
-      ) : null}
     </button>
   )
 }
