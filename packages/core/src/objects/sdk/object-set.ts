@@ -52,6 +52,7 @@ export function createObjectSet<
 
   const {
     projectId,
+    broker,
     ontology,
     actionRegistry,
     events,
@@ -71,6 +72,7 @@ export function createObjectSet<
 
   const resolvedCtx: ExecutionObjectContext = {
     projectId,
+    broker,
     ontology,
     actionRegistry,
     events,

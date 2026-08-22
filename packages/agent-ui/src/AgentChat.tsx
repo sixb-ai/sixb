@@ -1,11 +1,13 @@
 import { EmptyState } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { MessagesSquare } from "lucide-react"
+import { ChevronRight, MessagesSquare } from "lucide-react"
+import { AgentAvatar } from "./components/AgentAvatar"
 import { AgentsHome } from "./components/AgentsHome"
 import { ConversationPanel } from "./components/ConversationPanel"
+import { ThreadSidebar } from "./components/ThreadSidebar"
 import { DocumentPreviewRoot } from "./document-preview/DocumentPreviewRoot"
 import { useAgentConversation } from "./hooks/useAgentConversation"
-import type { AgentContextInput } from "./types"
+import type { Agent, AgentContextInput } from "./types"
 
 export interface AgentChatProps {
   readonly threadId?: string | null
@@ -71,6 +73,7 @@ export function AgentChat({
   const startNewChatWith = (agentId: string) => onNavigateDraft(agentId)
   const pendingUser = conversation.pendingUser
   const presentation = conversation.presentation
+  const showingConversation = !conversation.home
 
   return (
     <DocumentPreviewRoot
@@ -79,67 +82,152 @@ export function AgentChat({
     >
       <div
         data-agent-panel={compact ? "" : undefined}
-        className={cn("relative flex h-full min-h-0 flex-col", className)}
+        className={cn("relative flex h-full min-h-0", compact && "flex-col", className)}
       >
-        {conversation.home ? (
-          <AgentsHome
+        {!compact ? (
+          <ThreadSidebar
             agents={conversation.agents}
             threads={conversation.threads}
             agentsById={conversation.agentsById}
-            threadsError={conversation.threadsError ? "Could not load chats." : null}
+            currentThreadId={threadId}
+            threadsError={conversation.threadsError ? "Could not load threads." : null}
+            totalThreads={conversation.threadTotal}
+            hasMoreThreads={conversation.threadsHasMore}
+            loadingMoreThreads={conversation.threadsLoadingMore}
+            loadMoreThreadsError={conversation.threadsLoadMoreError}
+            activityConnected={conversation.activityConnected}
             onPickAgent={startNewChatWith}
+            onStartNewThread={onNavigateHome}
             onSelectThread={onNavigateThread}
+            onLoadMoreThreads={() => void conversation.loadMoreThreads()}
+            className={cn(
+              "h-full w-full md:flex md:w-64 md:shrink-0 xl:w-72",
+              showingConversation ? "hidden" : "flex"
+            )}
           />
-        ) : (
-          <ConversationPanel
-            agent={conversation.currentAgent}
-            threadId={threadId}
-            messages={conversation.messages}
-            live={conversation.live}
-            messagesLoading={conversation.messagesLoading}
-            messagesError={conversation.messagesError}
-            pendingUserText={pendingUser?.text ?? null}
-            pendingUserAttachments={pendingUser?.attachments ?? []}
-            pendingUserContext={pendingUser?.context ?? []}
-            anchorCurrentTurn={conversation.anchorCurrentTurn}
-            awaitingResponse={conversation.isRunning}
-            waitingLonger={conversation.waitingLonger}
-            failedBeforeResponse={presentation.kind === "failed"}
-            cancelledBeforeResponse={presentation.kind === "cancelled"}
-            onRetry={
-              presentation.kind === "failed"
-                ? () => conversation.retry(presentation.run)
-                : undefined
-            }
-            retrying={conversation.retrying}
-            reconnecting={conversation.reconnecting}
-            sendError={conversation.sendError}
-            agents={conversation.agents}
-            agentThreads={conversation.agentThreads}
-            canGoHome={conversation.canGoHome}
-            onSend={conversation.send}
-            onBackHome={onNavigateHome}
-            onNewChat={() => {
-              if (conversation.currentAgent) startNewChatWith(conversation.currentAgent.id)
-            }}
-            onPickAgent={startNewChatWith}
-            onSelectThread={onNavigateThread}
-            composerDisabled={conversation.isRunning}
-            composerPending={conversation.composerPending}
-            composerRunning={conversation.isRunning}
-            composerStopping={conversation.stopping}
-            onStop={conversation.stop}
-            composerPlaceholder="Ask anything"
-            composerDraft={conversation.draftReseed.text}
-            composerDraftAttachments={conversation.draftReseed.attachments}
-            composerDraftContext={conversation.draftReseed.context}
-            composerDraftNonce={conversation.draftReseed.nonce}
-            ambientContext={ambientContext}
-            compact={compact}
-          />
-        )}
+        ) : null}
+
+        <main
+          className={cn(
+            "min-h-0 min-w-0 flex-1",
+            !compact && !showingConversation && "hidden md:block"
+          )}
+        >
+          {conversation.home ? (
+            compact ? (
+              <AgentsHome
+                agents={conversation.agents}
+                threads={conversation.threads}
+                agentsById={conversation.agentsById}
+                threadsError={conversation.threadsError ? "Could not load chats." : null}
+                onPickAgent={startNewChatWith}
+                onSelectThread={onNavigateThread}
+              />
+            ) : (
+              <WorkspaceHome agents={conversation.agents} onPickAgent={startNewChatWith} />
+            )
+          ) : (
+            <ConversationPanel
+              agent={conversation.currentAgent}
+              threadId={threadId}
+              messages={conversation.messages}
+              live={conversation.live}
+              messagesLoading={conversation.messagesLoading}
+              messagesError={conversation.messagesError}
+              pendingUserText={pendingUser?.text ?? null}
+              pendingUserAttachments={pendingUser?.attachments ?? []}
+              pendingUserContext={pendingUser?.context ?? []}
+              anchorCurrentTurn={conversation.anchorCurrentTurn}
+              awaitingResponse={conversation.isRunning}
+              waitingLonger={conversation.waitingLonger}
+              failedBeforeResponse={presentation.kind === "failed"}
+              cancelledBeforeResponse={presentation.kind === "cancelled"}
+              onRetry={
+                presentation.kind === "failed"
+                  ? () => conversation.retry(presentation.run)
+                  : undefined
+              }
+              retrying={conversation.retrying}
+              reconnecting={conversation.reconnecting}
+              sendError={conversation.sendError}
+              agents={conversation.agents}
+              agentThreads={conversation.agentThreads}
+              canGoHome={compact ? conversation.canGoHome : true}
+              onSend={conversation.send}
+              onBackHome={onNavigateHome}
+              onNewChat={() => {
+                if (conversation.currentAgent) startNewChatWith(conversation.currentAgent.id)
+              }}
+              onPickAgent={startNewChatWith}
+              onSelectThread={onNavigateThread}
+              composerDisabled={conversation.isRunning}
+              composerPending={conversation.composerPending}
+              composerRunning={conversation.isRunning}
+              composerStopping={conversation.stopping}
+              onStop={conversation.stop}
+              composerPlaceholder="Ask anything"
+              composerDraft={conversation.draftReseed.text}
+              composerDraftAttachments={conversation.draftReseed.attachments}
+              composerDraftContext={conversation.draftReseed.context}
+              composerDraftNonce={conversation.draftReseed.nonce}
+              ambientContext={ambientContext}
+              compact={compact}
+              workspace={!compact}
+            />
+          )}
+        </main>
       </div>
     </DocumentPreviewRoot>
+  )
+}
+
+function WorkspaceHome({
+  agents,
+  onPickAgent,
+}: {
+  agents: readonly Agent[]
+  onPickAgent: (agentId: string) => void
+}) {
+  return (
+    <div className="flex h-full items-center justify-center px-6 pb-[10vh]">
+      <div className="w-full max-w-md">
+        <div className="text-center">
+          <h2 className="text-xl font-semibold tracking-tight text-foreground">
+            Start a new thread
+          </h2>
+          <p className="mt-1.5 text-sm text-muted-foreground">
+            Choose the agent best suited to the work.
+          </p>
+        </div>
+        <div className="mt-6 overflow-hidden rounded-xl border border-border/80 bg-card shadow-xs">
+          {agents.map((agent, index) => (
+            <button
+              key={agent.id}
+              type="button"
+              onClick={() => onPickAgent(agent.id)}
+              className={cn(
+                "group flex w-full items-center gap-3 px-4 py-3.5 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                index > 0 && "border-t border-border/70"
+              )}
+            >
+              <AgentAvatar name={agent.name} className="size-9 text-xs" />
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium text-foreground">{agent.name}</span>
+                {agent.description ? (
+                  <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
+                    {agent.description}
+                  </span>
+                ) : null}
+              </span>
+              <ChevronRight
+                className="size-4 shrink-0 text-muted-foreground/60 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground"
+                aria-hidden="true"
+              />
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
   )
 }
 

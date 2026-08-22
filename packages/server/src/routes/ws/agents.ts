@@ -1,5 +1,12 @@
 import type { OntologySource } from "@sixb/core"
-import { agentRunStreamDefinition, agentRunStreamId } from "@sixb/core/agents/streams"
+import {
+  AGENT_ACTIVITY_STREAM_ID,
+  type AgentRunActivityEvent,
+  agentActivityStreamDefinition,
+  agentRunStreamDefinition,
+  agentRunStreamId,
+  isAgentRunActivityEvent,
+} from "@sixb/core/agents/streams"
 import { BrokerCursorExpiredError, type BrokerRecord } from "@sixb/core/broker"
 import type { Sixb } from "@sixb/core/internal/request-execution"
 import type { Elysia } from "elysia"
@@ -9,6 +16,7 @@ import { decodeWsMessage, safeSend, wsRequestSixb, wsStateKey } from "../../util
 import { serializeAgentRun } from "../agents"
 
 interface AgentStreamSubscriptionState {
+  channel: "run" | "activity" | null
   runId: string | null
   unsubscribe: (() => void) | null
 }
@@ -17,6 +25,10 @@ const SubscribeSchema = z.object({
   type: z.literal("subscribe"),
   runId: z.string().min(1),
   afterCursor: z.string().min(1).optional(),
+})
+
+const SubscribeActivitySchema = z.object({
+  type: z.literal("subscribe.activity"),
 })
 
 const ReplaySchema = z.object({
@@ -31,7 +43,12 @@ const UnsubscribeSchema = z.object({
   runId: z.string().min(1).optional(),
 })
 
-const AgentStreamMessageSchema = z.union([SubscribeSchema, ReplaySchema, UnsubscribeSchema])
+const AgentStreamMessageSchema = z.union([
+  SubscribeSchema,
+  SubscribeActivitySchema,
+  ReplaySchema,
+  UnsubscribeSchema,
+])
 
 type SubscribeMessage = z.infer<typeof SubscribeSchema>
 type ReplayMessage = z.infer<typeof ReplaySchema>
@@ -72,12 +89,20 @@ export async function canAccessAgentRunStream(
   return { ok: true }
 }
 
+export async function canAccessAgentThreadActivity(
+  sixb: Sixb<readonly OntologySource[]>,
+  event: AgentRunActivityEvent
+): Promise<boolean> {
+  const thread = await sixb.agents.threads.getById(event.threadId)
+  return thread?.agentId === event.agentId
+}
+
 export function registerAgentStreamRoutes(app: Elysia, server: SixbServer) {
   const states = new WeakMap<object, AgentStreamSubscriptionState>()
 
   return app.ws("/ws/agents", {
     open(ws) {
-      states.set(wsStateKey(ws), { runId: null, unsubscribe: null })
+      states.set(wsStateKey(ws), { channel: null, runId: null, unsubscribe: null })
       safeSend(ws, { type: "connected", channel: "agents" })
     },
 
@@ -96,6 +121,11 @@ export function registerAgentStreamRoutes(app: Elysia, server: SixbServer) {
 
       if (parsed.data.type === "replay") {
         await replayAgentStream(server, ws, parsed.data)
+        return
+      }
+
+      if (parsed.data.type === "subscribe.activity") {
+        await subscribeAgentActivity(states, server, ws)
         return
       }
 
@@ -138,7 +168,11 @@ async function subscribeAgentStream(
     return
   }
 
-  const state = states.get(wsStateKey(ws)) ?? { runId: null, unsubscribe: null }
+  const state = states.get(wsStateKey(ws)) ?? {
+    channel: null,
+    runId: null,
+    unsubscribe: null,
+  }
   stopSubscription(state)
   states.set(wsStateKey(ws), state)
 
@@ -166,6 +200,7 @@ async function subscribeAgentStream(
       },
       receive
     )
+    state.channel = "run"
     state.runId = message.runId
   } catch (error) {
     // Retention can outrun a paused tab: an agent run stream keeps 5000 records and a streamed
@@ -177,16 +212,19 @@ async function subscribeAgentStream(
           { projectId: host.id, streamId, from: "earliest" },
           receive
         )
+        state.channel = "run"
         state.runId = message.runId
         resumedFromEarliest = true
       } catch (retryError) {
         state.unsubscribe = null
+        state.channel = null
         state.runId = null
         safeSend(ws, { type: "error", message: errorMessage(retryError) })
         return
       }
     } else {
       state.unsubscribe = null
+      state.channel = null
       state.runId = null
       safeSend(ws, { type: "error", message: errorMessage(error) })
       return
@@ -205,6 +243,72 @@ async function subscribeAgentStream(
   }
   live = true
   sendRecords(ws, buffered.splice(0))
+}
+
+async function subscribeAgentActivity(
+  states: WeakMap<object, AgentStreamSubscriptionState>,
+  server: SixbServer,
+  ws: { send: (message: string) => void }
+): Promise<void> {
+  const host = server.getHost()
+  const sixb = wsRequestSixb(ws)
+  if (!sixb) {
+    safeSend(ws, { type: "error", message: "Execution scope is not available." })
+    return
+  }
+
+  try {
+    await host.broker.ensureStream({
+      projectId: host.id,
+      stream: agentActivityStreamDefinition(),
+    })
+  } catch (error) {
+    safeSend(ws, { type: "error", message: errorMessage(error) })
+    return
+  }
+
+  const state = states.get(wsStateKey(ws)) ?? {
+    channel: null,
+    runId: null,
+    unsubscribe: null,
+  }
+  stopSubscription(state)
+  states.set(wsStateKey(ws), state)
+
+  try {
+    state.unsubscribe = await host.broker.subscribe(
+      {
+        projectId: host.id,
+        streamId: AGENT_ACTIVITY_STREAM_ID,
+        from: "latest",
+      },
+      (records) => {
+        void sendVisibleActivityRecords(sixb, ws, records)
+      }
+    )
+    state.channel = "activity"
+  } catch (error) {
+    state.unsubscribe = null
+    state.channel = null
+    safeSend(ws, { type: "error", message: errorMessage(error) })
+    return
+  }
+
+  // The client reconciles its durable thread query on every subscription, closing the race between
+  // the initial HTTP snapshot and this live subscription and recovering changes missed offline.
+  safeSend(ws, { type: "subscribed.activity" })
+}
+
+async function sendVisibleActivityRecords(
+  sixb: Sixb<readonly OntologySource[]>,
+  ws: { send: (message: string) => void },
+  records: readonly BrokerRecord[]
+): Promise<void> {
+  for (const record of records) {
+    if (!isAgentRunActivityEvent(record.payload)) continue
+    if (!(await canAccessAgentThreadActivity(sixb, record.payload))) continue
+    safeSend(ws, { type: "activity", event: record.payload })
+  }
 }
 
 async function replayAgentStream(
@@ -256,15 +360,18 @@ function unsubscribeAgentStream(
 ): void {
   const state = states.get(wsStateKey(ws))
   const previousRunId = state?.runId ?? null
+  const previousChannel = state?.channel ?? null
 
   if (!message.runId || previousRunId === null || message.runId === previousRunId) {
     stopSubscription(state)
   }
 
-  safeSend(ws, {
-    type: "unsubscribed",
-    runId: message.runId ?? previousRunId,
-  })
+  safeSend(
+    ws,
+    previousChannel === "activity"
+      ? { type: "unsubscribed.activity" }
+      : { type: "unsubscribed", runId: message.runId ?? previousRunId }
+  )
 }
 
 function stopSubscription(state: AgentStreamSubscriptionState | undefined): void {
@@ -273,6 +380,7 @@ function stopSubscription(state: AgentStreamSubscriptionState | undefined): void
   }
   state.unsubscribe?.()
   state.unsubscribe = null
+  state.channel = null
   state.runId = null
 }
 
