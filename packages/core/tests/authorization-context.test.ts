@@ -140,6 +140,7 @@ describe("resolveAuthorizationContext", () => {
   // here we expand by hand so the resolver can be exercised in isolation.
   const universe = {
     applicationIds: new Set(["atlas", "app"]),
+    connectorIds: new Set<string>(),
     objectTypeIds: new Set(["contract", "signed-contract", "invoice"]),
     datasetIds: new Set(["raw.contracts", "raw.invoices"]),
     actionIds: new Set(["send-contract"]),

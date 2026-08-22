@@ -5,6 +5,8 @@
  * the interface cannot be implemented from outside the package.
  */
 export type { Principal } from "../auth"
+export type { ConnectorAccountCandidate } from "../connectors"
+export type { SealedConnectorCredential } from "../connectors/credentials"
 export type { SixbFailure } from "../errors/types"
 export type { StoredRuleResolvedEvent, StoredRuleTriggeredEvent } from "../events"
 export type { ReadonlyJsonObject } from "../json"
@@ -171,6 +173,45 @@ export type {
   UserStatus,
 } from "./auth"
 export { AuthStorageError, InMemoryAuthStorage } from "./auth"
+export type {
+  ClaimConnectorCredentialMutationInput,
+  ClaimConnectorCredentialMutationResult,
+  ConnectorAuthorizationAttemptRecord,
+  ConnectorAuthorizationCredential,
+  ConnectorAuthorizationRecord,
+  ConnectorAuthorizationStatus,
+  ConnectorConnectionOwner,
+  ConnectorConnectionRecord,
+  ConnectorConnectionSelector,
+  ConnectorConnectionStorage,
+  ConnectorConnectionStorageErrorCode,
+  ConnectorCredentialMutation,
+  ConnectorCredentialMutationFence,
+  ConnectorCredentialMutationKind,
+  ConnectorCredentialMutationPhase,
+  ConnectorStagedCredentials,
+  CreateConnectorAuthorizationAttemptInput,
+  CreateConnectorAuthorizationInput,
+  DisconnectConnectorConnectionInput,
+  FinalizeConnectorReauthorizationInput,
+  GetConnectorConnectionInput,
+  InitializeConnectorAuthorizationAccountsInput,
+  InMemoryConnectorConnectionStorageOptions,
+  MarkConnectorAuthorizationNeedsReauthorizationInput,
+  MarkConnectorCredentialMutationExecutingInput,
+  ProjectConnectorConnectionOwner,
+  PutConnectorConnectionInput,
+  PutConnectorConnectionResult,
+  RecoverExpiredConnectorCredentialMutationInput,
+  ReleaseConnectorCredentialMutationInput,
+  RenewConnectorCredentialMutationInput,
+  StageConnectorCredentialMutationCredentialsInput,
+  StageConnectorCredentialMutationRevocationInput,
+} from "./connector-connections"
+export {
+  ConnectorConnectionStorageError,
+  InMemoryConnectorConnectionStorage,
+} from "./connector-connections"
 export type {
   StorageTransactionErrorCode,
   StorageTransactionErrorOptions,

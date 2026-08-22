@@ -20,7 +20,7 @@ import {
   discoverWorkflows,
 } from "../bootstrap"
 import type { Broker } from "../broker"
-import type { ConnectorDefinition } from "../connectors/types"
+import type { ConnectorConnectionOptions, ConnectorDefinition } from "../connectors/types"
 import type { DatasetDefinition } from "../datasets"
 import type { SixbErrorHandler } from "../error-reporting/types"
 import type { LakeStorage } from "../lake-storage"
@@ -63,6 +63,8 @@ export interface CreateSixbOptions {
   datasets?: readonly DatasetDefinition[]
   /** Connector definitions to register in addition to auto-discovered `connectors/` exports. */
   connectors?: readonly ConnectorDefinition[]
+  /** Required to protect OAuth credentials when connector connection storage is durable. */
+  connectorConnections?: ConnectorConnectionOptions
   schedules?: readonly ScheduleDefinition[]
   syncs?: readonly SyncDefinition[]
   pipelines?: readonly PipelineDefinition[]
@@ -148,6 +150,7 @@ export async function createSixb(
     actions: [...(options.actions ?? []), ...actions],
     datasets: [...(options.datasets ?? []), ...datasets],
     connectors: [...(options.connectors ?? []), ...connectors],
+    connectorConnections: options.connectorConnections,
     schedules: [...(options.schedules ?? []), ...schedules],
     syncs: [...(options.syncs ?? []), ...syncs],
     pipelines: [...(options.pipelines ?? []), ...pipelines],

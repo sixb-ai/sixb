@@ -17,8 +17,14 @@ import {
 } from "../auth"
 import type { BlobStorage } from "../blob-storage"
 import type { Broker } from "../broker"
+import { createConnectorCredentialProtectorFromKey } from "../connectors/credentials"
+import { createConnectorCodedError } from "../connectors/errors"
 import { ConnectorService } from "../connectors/service"
-import type { ConnectorDefinition } from "../connectors/types"
+import {
+  type ConnectorConnectionOptions,
+  type ConnectorDefinition,
+  isOAuthConnectorDefinition,
+} from "../connectors/types"
 import type { DatasetDefinition } from "../datasets/types"
 import { attachSixbErrorReporter, shareSixbErrorReporter } from "../error-reporting/capability"
 import { reportEventDeliveryFailure } from "../error-reporting/reports"
@@ -95,6 +101,8 @@ export interface SixbHostOptions<TOntologySources extends readonly OntologySourc
   datasets?: readonly DatasetDefinition[]
   /** Connector definitions registered with this host. */
   connectors?: readonly ConnectorDefinition[]
+  /** Persistent connector connection settings. Required for OAuth with durable storage. */
+  connectorConnections?: ConnectorConnectionOptions
   schedules?: readonly ScheduleDefinition[]
   syncs?: readonly SyncDefinition[]
   pipelines?: readonly PipelineDefinition[]
@@ -168,7 +176,16 @@ export class SixbHost<
     })
     validateAuthStrategySecurityReferences(this.auth.getStrategy(), definitions.security)
     const connectors = definitions.connectors.list()
-    this.connectorService = new ConnectorService(this.projectId, connectors)
+    assertConnectorConnectionSurfaces(connectors, definitions.syncs.list())
+    const hasOAuthConnectors = connectors.some(isOAuthConnectorDefinition)
+    const credentialProtector =
+      hasOAuthConnectors && options.connectorConnections?.encryptionKey !== undefined
+        ? createConnectorCredentialProtectorFromKey(options.connectorConnections.encryptionKey)
+        : undefined
+    this.connectorService = new ConnectorService(this.projectId, connectors, {
+      storage: this.storage.connectorConnections,
+      credentialProtector,
+    })
     assertWebhookDeliveryStorage(connectors, this.storage)
     this.webhookRegistry = new WebhookRegistry({ connectors })
 
@@ -340,6 +357,30 @@ function assertWebhookDeliveryStorage(
     if (webhooks.some((webhook) => webhook.idempotencyKey !== undefined)) {
       throw new WebhookValidationError(
         "[Sixb] Webhook idempotency requires storage.webhookDeliveries to be configured."
+      )
+    }
+  }
+}
+
+function assertConnectorConnectionSurfaces(
+  connectors: readonly ConnectorDefinition[],
+  syncs: readonly SyncDefinition[]
+): void {
+  for (const connector of connectors) {
+    if (!isOAuthConnectorDefinition(connector)) continue
+    if ((connector.adapter as { readonly webhooks?: unknown }).webhooks !== undefined) {
+      throw createConnectorCodedError(
+        "connector.configuration_invalid",
+        `OAuth connector '${connector.id}' cannot register webhooks until connection routing is defined.`
+      )
+    }
+  }
+
+  for (const sync of syncs) {
+    if (isOAuthConnectorDefinition(sync.connector as ConnectorDefinition)) {
+      throw createConnectorCodedError(
+        "connector.configuration_invalid",
+        `Sync '${sync.id}' cannot use OAuth connector '${sync.connector.id}' until connection fan-out is defined.`
       )
     }
   }

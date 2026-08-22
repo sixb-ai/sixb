@@ -585,7 +585,7 @@ async function claimDeliveryKey(
 
 function createClientResolver(
   sixb: ReturnType<typeof bindPrimitiveExecution>["sixb"],
-  connector: ConnectorDefinition
+  connector: ConnectorDefinition<string, ConnectorAdapter>
 ): () => Promise<ConnectorClient<ConnectorAdapter>> {
   let clientPromise: Promise<ConnectorClient<ConnectorAdapter>> | null = null
 
