@@ -212,6 +212,7 @@ function ThreadRow({
   onSelect: (threadId: string) => void
 }) {
   const title = thread.title?.trim() || "Untitled chat"
+  const running = thread.activeRunId !== null
 
   return (
     <button
@@ -219,7 +220,7 @@ function ThreadRow({
       onClick={() => onSelect(thread.id)}
       title={title}
       aria-current={selected ? "page" : undefined}
-      aria-label={title}
+      aria-label={running ? `${title}, running` : title}
       className={cn(
         "group relative flex w-full items-center rounded-lg px-2.5 py-1.5 text-left outline-none transition-colors hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring",
         selected && "bg-muted text-foreground"
@@ -228,6 +229,12 @@ function ThreadRow({
       <span className="min-w-0 flex-1 truncate text-[13px] font-medium leading-5 text-foreground">
         {title}
       </span>
+      {running ? (
+        <LoaderCircle
+          className="ml-2 size-3.5 shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none"
+          aria-hidden="true"
+        />
+      ) : null}
     </button>
   )
 }
