@@ -7,6 +7,8 @@ import { buildAtlasAssets, createAtlasApp } from "../src"
 
 let assetsRoot: string
 let assetsOutdir: string
+const atlasDevelopmentFixturePath = join(import.meta.dir, "fixtures", "atlas-development-server.ts")
+const atlasDevelopmentFixtureTimeoutMs = 30_000
 
 async function getFreePort(): Promise<number> {
   return await new Promise<number>((resolvePromise, reject) => {
@@ -132,39 +134,17 @@ describe("createAtlasApp", () => {
   })
 
   test("serves the development Atlas shell with Bun's HTML bundle", async () => {
-    const port = await getFreePort()
-    const atlas = createAtlasApp({
-      apiBaseUrl: "http://api.localhost",
-      audience: "atlas",
-      authEnabled: false,
-    })
-    const server = await atlas.start({
-      host: "127.0.0.1",
-      port,
-      development: true,
-    })
-
-    try {
-      const baseUrl = `http://127.0.0.1:${port}`
-      const rootResponse = await fetch(`${baseUrl}/`)
-      const routeResponse = await fetch(`${baseUrl}/devices`)
-      const faviconResponse = await fetch(`${baseUrl}/favicon.svg`)
-      const runtimeResponse = await fetch(`${baseUrl}/__sixb/runtime.json`)
-      const apiResponse = await fetch(`${baseUrl}/api/project`)
-
-      expect(rootResponse.status).toBe(200)
-      expect(routeResponse.status).toBe(200)
-      expect(faviconResponse.status).toBe(200)
-      expect(runtimeResponse.status).toBe(200)
-      expect(await runtimeResponse.json()).toEqual({
-        api: { baseUrl: "http://api.localhost" },
-        auth: { audience: "atlas", enabled: false },
-      })
-      expect(apiResponse.status).toBe(404)
-    } finally {
-      await server.stop()
-    }
-  })
+    // Bun 1.3.14 keeps native HTML-bundler state for the life of a bun:test worker. In the full
+    // two-file parallel suite, earlier HTML bundles can leave Atlas resolving a real
+    // @tanstack/query-core index.js as a directory, so the dev route returns 500 with EISDIR. A
+    // focused run starts with clean state and cannot reproduce it. Keep this one HTML import in a
+    // bounded child: it still exercises the real development server and HTTP contract, while a
+    // poisoned or wedged bundler is killable and cannot corrupt later tests.
+    //
+    // Guard check: move the fixture body back into this test, then run `bun run test:ci`; the Atlas
+    // development case fails with EISDIR. The fixture itself must stay a real process, not a mock.
+    await runAtlasDevelopmentFixture()
+  }, 40_000)
 
   test("does not serve Sixb API-owned routes from the Atlas origin", async () => {
     const port = await getFreePort()
@@ -218,4 +198,42 @@ function extractAssetPath(html: string, kind: "script" | "stylesheet"): string {
     throw new Error(`Could not find Atlas ${kind} asset path in shell HTML.`)
   }
   return match[1]
+}
+
+async function runAtlasDevelopmentFixture(): Promise<void> {
+  const proc = Bun.spawn([process.execPath, "run", atlasDevelopmentFixturePath], {
+    cwd: process.cwd(),
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+
+  // Drain both pipes while the child runs. Waiting for exit first can deadlock if a bundler error
+  // fills either pipe, hiding the diagnostic this process boundary exists to preserve.
+  const stdoutText = new Response(proc.stdout).text()
+  const stderrText = new Response(proc.stderr).text()
+  let timedOut = false
+  const killTimer = setTimeout(() => {
+    timedOut = true
+    proc.kill()
+  }, atlasDevelopmentFixtureTimeoutMs)
+
+  try {
+    const exitCode = await proc.exited
+    const [stdout, stderr] = await Promise.all([stdoutText, stderrText])
+    const output = [stdout.trim(), stderr.trim()].filter(Boolean).join("\n")
+
+    if (timedOut) {
+      throw new Error(
+        `[SixbAtlasTest] Development server fixture exceeded ${atlasDevelopmentFixtureTimeoutMs}ms and was stopped.${output ? `\n${output}` : ""}`
+      )
+    }
+    if (exitCode !== 0) {
+      throw new Error(
+        `[SixbAtlasTest] Development server fixture exited with code ${exitCode}.${output ? `\n${output}` : ""}`
+      )
+    }
+  } finally {
+    clearTimeout(killTimer)
+    await Promise.all([stdoutText.catch(() => ""), stderrText.catch(() => "")])
+  }
 }
