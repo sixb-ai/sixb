@@ -2597,9 +2597,11 @@ describe("AgentWorker", () => {
       tools: [selectedEcho],
     })
     let unselectedToolNames: readonly string[] = []
+    let plainModelCalls = 0
     const plain = defineAgent("plain", {
       name: "Plain",
       model: answerModel((names) => {
+        plainModelCalls += 1
         unselectedToolNames = names
       }),
       instructions: "Answer without the research tool.",
@@ -2656,6 +2658,7 @@ describe("AgentWorker", () => {
       })
       expect(unselectedToolNames).toContain("bash")
       expect(unselectedToolNames).not.toContain(selectedEcho.name)
+      expect(plainModelCalls).toBe(1)
 
       const messages = await listMessages(storage, selectedRequest.run.threadId)
       expect(

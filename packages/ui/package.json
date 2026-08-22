@@ -107,7 +107,7 @@
     }
   },
   "dependencies": {
-    "@shadcn/react": "^0.1.0",
+    "@shadcn/react": "^0.3.0",
     "@tanstack/react-table": "^8.21.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

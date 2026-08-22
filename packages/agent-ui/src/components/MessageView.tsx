@@ -7,6 +7,7 @@ import {
   MarkerIcon,
 } from "@sixb/ui/components"
 import { AlertTriangle, RotateCcw } from "lucide-react"
+import { memo } from "react"
 import { createAgentDocumentSource } from "../document-preview/source"
 import type { AgentDocumentSource } from "../document-preview/types"
 import { isAwaitingFirstToken, type LiveRunState } from "../liveRun"
@@ -22,11 +23,11 @@ import { FileAttachmentCard } from "./FileAttachmentCard"
 import { AssistantBody } from "./MessageParts"
 
 /** Render a single durable message. System messages are not shown in the reading transcript. */
-export function MessageView({ message }: { message: AgentMessage }) {
+export const MessageView = memo(function MessageView({ message }: { message: AgentMessage }) {
   if (message.role === "user") return <UserMessage message={message} />
   if (message.role === "assistant") return <AssistantMessage message={message} />
   return null
-}
+})
 
 function UserMessage({ message }: { message: AgentMessage }) {
   const text = textOf(message)
