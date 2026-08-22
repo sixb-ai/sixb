@@ -2,10 +2,14 @@ import { describe, expect, test } from "bun:test"
 import { InMemoryBroker } from "../src"
 import { publishAgentRunFinished } from "../src/agents"
 import {
+  AGENT_ACTIVITY_STREAM_ID,
+  agentRunActivityEvent,
   agentRunFinishedEvent,
   agentRunStreamId,
   agentRunStreamIdempotencyKey,
+  isAgentRunActivityEvent,
   isAgentRunStreamEvent,
+  publishAgentRunActivity,
 } from "../src/agents/streams"
 import type { AgentRunRecord } from "../src/storage"
 
@@ -35,6 +39,22 @@ function runRecord(overrides: Partial<AgentRunRecord> = {}): AgentRunRecord {
 }
 
 describe("agent run stream records", () => {
+  test("builds and validates the low-frequency project activity event", () => {
+    const event = agentRunActivityEvent(runRecord({ status: "running", attempt: 2 }), OCCURRED_AT)
+
+    expect(event).toMatchObject({
+      schemaVersion: 1,
+      type: "agent.run.activity",
+      runId: "agt_run_1",
+      threadId: "agt_thr_1",
+      status: "running",
+      attempt: 2,
+      occurredAt: OCCURRED_AT.toISOString(),
+    })
+    expect(isAgentRunActivityEvent(event)).toBe(true)
+    expect(isAgentRunActivityEvent({ ...event, status: "thinking" })).toBe(false)
+  })
+
   test("builds the finished event from a terminal run record", () => {
     const event = agentRunFinishedEvent(
       runRecord({ status: "failed", attempt: 2, finishReason: "error", error: FAILURE }),
@@ -122,6 +142,36 @@ describe("agent run stream records", () => {
       runId: run.id,
       status: "cancelled",
       attempt: 0,
+    })
+
+    const activity = await broker.read({
+      projectId: run.projectId,
+      streamId: AGENT_ACTIVITY_STREAM_ID,
+    })
+    expect(activity.records).toHaveLength(1)
+    expect(activity.records[0]?.payload).toMatchObject({
+      type: "agent.run.activity",
+      runId: run.id,
+      threadId: run.threadId,
+      status: "cancelled",
+    })
+  })
+
+  test("publishes queued activity without creating a per-run transcript stream", async () => {
+    const broker = new InMemoryBroker()
+    const run = runRecord({ status: "queued" })
+
+    await publishAgentRunActivity(broker, run)
+
+    const activity = await broker.read({
+      projectId: run.projectId,
+      streamId: AGENT_ACTIVITY_STREAM_ID,
+    })
+    expect(activity.records).toHaveLength(1)
+    expect(activity.records[0]).toMatchObject({
+      name: "agent.run.activity",
+      key: run.threadId,
+      payload: { status: "queued", runId: run.id },
     })
   })
 })

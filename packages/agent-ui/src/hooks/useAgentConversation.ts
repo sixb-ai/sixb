@@ -8,12 +8,13 @@ import {
   listAgentThreadMessagesQueryKey,
   listAgentThreadRunsOptions,
   listAgentThreadRunsQueryKey,
-  listAgentThreadsOptions,
+  listAgentThreadsInfiniteOptions,
   listAgentThreadsQueryKey,
   postAgentThreadMessageMutation,
   retryAgentRunMutation,
+  useAgentActivityStream,
 } from "@sixb/client/hooks"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
 import {
   DELAYED_WAITING_COPY_MS,
@@ -22,6 +23,7 @@ import {
   selectActiveRunId,
   shouldShowDelayedWaitingCopy,
 } from "../runPresentation"
+import { nextThreadPageOffset, THREAD_PAGE_SIZE } from "../threadNavigation"
 import type { AgentContextEntryInput, AgentFileRef, AgentRun } from "../types"
 import { useThreadStream } from "./useThreadStream"
 
@@ -53,7 +55,43 @@ export function useAgentConversation({
 }: UseAgentConversationInput) {
   const queryClient = useQueryClient()
   const agentsQuery = useQuery(listAgentsOptions())
-  const threadsQuery = useQuery(listAgentThreadsOptions({ query: { limit: "50", order: "desc" } }))
+  const refreshThreads = () =>
+    queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() })
+  const activityStream = useAgentActivityStream({
+    enabled: !pinnedAgentId,
+    onActivity: refreshThreads,
+    onSubscribed: refreshThreads,
+  })
+  const threadListQuery = {
+    limit: String(THREAD_PAGE_SIZE),
+    order: "desc" as const,
+  }
+  const threadsQuery = useInfiniteQuery({
+    ...listAgentThreadsInfiniteOptions({ query: threadListQuery }),
+    initialPageParam: { query: threadListQuery },
+    getNextPageParam: (lastPage, _pages, lastPageParam) => {
+      if (!lastPage.hasMore) return undefined
+
+      const nextOffset = nextThreadPageOffset(
+        lastPage.hasMore,
+        typeof lastPageParam === "object" && lastPageParam.query?.offset
+          ? String(lastPageParam.query.offset)
+          : 0
+      )
+      if (nextOffset === undefined) return undefined
+
+      return {
+        query: {
+          ...threadListQuery,
+          offset: String(nextOffset),
+        },
+      }
+    },
+    // The project activity feed is primary. Poll only as a focus-aware recovery path while the
+    // socket is unavailable, rather than opening one connection per background thread.
+    refetchInterval:
+      !pinnedAgentId && (!activityStream.connected || activityStream.error) ? 10_000 : false,
+  })
   const agents = useMemo(
     () =>
       pinnedAgentId
@@ -61,7 +99,11 @@ export function useAgentConversation({
         : (agentsQuery.data ?? []),
     [agentsQuery.data, pinnedAgentId]
   )
-  const threads = useMemo(() => threadsQuery.data?.threads ?? [], [threadsQuery.data?.threads])
+  const threads = useMemo(
+    () => threadsQuery.data?.pages.flatMap((page) => page.threads) ?? [],
+    [threadsQuery.data]
+  )
+  const threadTotal = threadsQuery.data?.pages[0]?.total ?? threads.length
   const agentsById = useMemo(() => new Map(agents.map((agent) => [agent.id, agent])), [agents])
   const draftAgentId =
     threadId === null
@@ -302,7 +344,13 @@ export function useAgentConversation({
     agentsLoading: agentsQuery.isLoading,
     agentsError: agentsQuery.isError,
     threads,
+    threadTotal,
     threadsError: threadsQuery.isError,
+    threadsHasMore: threadsQuery.hasNextPage,
+    threadsLoadingMore: threadsQuery.isFetchingNextPage,
+    threadsLoadMoreError: threadsQuery.isFetchNextPageError,
+    loadMoreThreads: () => threadsQuery.fetchNextPage(),
+    activityConnected: activityStream.connected && !activityStream.error,
     draftAgentId,
     home: threadId === null && draftAgentId === null,
     currentAgent,

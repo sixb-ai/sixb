@@ -105,6 +105,7 @@ export {
   retryAgentRun,
 } from "./request"
 export type {
+  AgentRunActivityEvent,
   AgentRunControlStreamId,
   AgentRunFailure,
   AgentRunFinishedEvent,
@@ -112,16 +113,23 @@ export type {
   AgentRunStreamId,
 } from "./streams"
 export {
+  AGENT_ACTIVITY_STREAM_ID,
+  AGENT_ACTIVITY_STREAM_SCHEMA_VERSION,
   AGENT_RUN_CANCEL_RECORD,
   AGENT_RUN_STREAM_SCHEMA_VERSION,
+  agentActivityStreamDefinition,
+  agentRunActivityEvent,
   agentRunControlStreamDefinition,
   agentRunControlStreamId,
   agentRunFinishedEvent,
   agentRunStreamDefinition,
   agentRunStreamId,
   agentRunStreamIdempotencyKey,
+  DEFAULT_AGENT_ACTIVITY_STREAM_RETENTION,
   DEFAULT_AGENT_RUN_STREAM_RETENTION,
+  isAgentRunActivityEvent,
   isAgentRunStreamEvent,
+  publishAgentRunActivity,
   publishAgentRunCancel,
   publishAgentRunFinished,
   subscribeAgentRunCancel,
