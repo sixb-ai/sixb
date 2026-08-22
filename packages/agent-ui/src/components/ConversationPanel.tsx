@@ -15,7 +15,7 @@ import {
   TooltipTrigger,
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { Check, ChevronLeft, History, Info, Search, SquarePen } from "lucide-react"
+import { Check, ChevronLeft, History, Info, Pencil, Search } from "lucide-react"
 import { useMemo, useState } from "react"
 import { groupThreadsByDate } from "../format"
 import type { LiveRunState } from "../liveRun"
@@ -154,8 +154,7 @@ export function ConversationPanel({
       <header
         className={cn(
           "flex shrink-0 items-center gap-1 px-2.5 py-2.5",
-          workspace && "border-b border-border/60",
-          workspace && showWelcome && "md:hidden"
+          workspace && "border-b border-border/60 md:hidden"
         )}
       >
         {canGoHome ? (
@@ -192,7 +191,7 @@ export function ConversationPanel({
             aria-label="New chat with this agent"
             className={cn(workspace && "md:hidden")}
           >
-            <SquarePen />
+            <Pencil />
           </Button>
         </div>
       </header>
