@@ -1216,16 +1216,6 @@ function linkKeyExpression(alias?: string): string {
   ])
 }
 
-export function pointSortExpression(alias?: string): string {
-  const prefix = alias ? `${alias}.` : ""
-  return utf8SortExpression([
-    `to_jsonb(${prefix}object_type_id)::text`,
-    `to_jsonb(${prefix}object_id)::text`,
-    `to_jsonb(${prefix}property_id)::text`,
-    `to_jsonb(to_char(${prefix}at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))::text`,
-  ])
-}
-
 function utf8SortExpression(parts: readonly string[]): string {
   return `encode(convert_to(${jsonTupleExpression(parts)}, 'UTF8'), 'hex')`
 }

@@ -1,10 +1,22 @@
-import { AuthorizationError, OntologyNotFoundError, OntologyValidationError } from "@sixb/core"
+import {
+  AuthorizationError,
+  OntologyNotFoundError,
+  OntologyValidationError,
+  type SixbErrorCode,
+} from "@sixb/core"
+import { isSixbError } from "@sixb/core/internal/errors"
 import {
   FileUploadSessionError,
   type FileUploadSessionErrorReason,
   ObjectNotFoundError,
 } from "@sixb/core/storage"
 import { RequestBodyTooLargeError } from "./request-body"
+
+/** Explicit transport policy for coded failures that are safe to surface as non-500 responses. */
+const HTTP_STATUS_BY_ERROR_CODE: Partial<Record<SixbErrorCode, number>> = {
+  "dataset.not_found": 404,
+  "dataset.version_not_found": 404,
+}
 
 export function toIsoString(value: Date): string {
   return value.toISOString()
@@ -58,7 +70,13 @@ export function handleRouteError(
   set: { status?: number | string }
 ): {
   error: string
+  code?: SixbErrorCode
 } {
+  if (isSixbError(error)) {
+    set.status = HTTP_STATUS_BY_ERROR_CODE[error.code] ?? 500
+    return { error: error.message, code: error.code }
+  }
+
   if (error instanceof AuthorizationError) {
     set.status = 403
     return { error: error.message }
@@ -86,12 +104,10 @@ export function handleRouteError(
     return { error: error.message }
   }
 
-  // The tail. Core still throws a bare `Error` for "Unknown sync 'x'" and its siblings, so the
-  // message is all a route has to go on; reading it is a guess that misfires whenever a validation
-  // message happens to contain one of these words. Every error that gains a class moves above this
-  // line and the guess covers less.
+  // Legacy uncoded errors remain bad requests until their primitive receives a vertical migration.
+  // Crucially, wording no longer changes transport semantics.
   const message = error instanceof Error ? error.message : String(error)
-  set.status = message.includes("not found") || message.includes("Unknown") ? 404 : 400
+  set.status = 400
   return { error: message }
 }
 

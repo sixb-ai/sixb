@@ -185,19 +185,28 @@ describe("SyncWorker", () => {
         (count) => count === 1
       )
 
+      expect(run?.error).toMatchObject({
+        code: "sync.execution_failed",
+        details: {
+          syncId: sync.id,
+          runId: "run-failed",
+          datasetId: dataset.id,
+        },
+      })
       expect(reports).toHaveLength(1)
       expect(reports[0]?.error).toBe(originalError)
       expect(reports[0]?.context).toEqual({
         type: "run.failed",
-        notificationId: `project:${sixb.id}:run:sync:run-failed:failed:${run!.finishedAt!.toISOString()}`,
+        notificationId: `project:${sixb.id}:run:sync:run-failed:failed:${run!.error!.at}`,
         projectId: sixb.id,
-        occurredAt: run!.finishedAt!.toISOString(),
+        occurredAt: run!.error!.at,
         attempt: 1,
+        runKind: "sync",
         run: {
-          kind: "sync",
           runId: "run-failed",
           syncId: sync.id,
         },
+        failure: run!.error!,
       })
 
       const claimed = await sixb.queues.syncRuns.claim({
@@ -208,6 +217,21 @@ describe("SyncWorker", () => {
     } finally {
       await worker.stop()
     }
+
+    const failedRun = await sixb.storage.syncRuns!.getById({
+      projectId: sixb.id,
+      id: "run-failed",
+    })
+    if (!failedRun) throw new Error("Expected the failed sync run to be persisted.")
+    const events = await sixb.events.read({ types: ["sync.run.finished"] })
+    expect(events).toHaveLength(1)
+    expect(events[0]?.payload).toEqual({
+      syncId: failedRun.syncId,
+      runId: failedRun.id,
+      status: "failed",
+      datasetId: failedRun.datasetId,
+      error: failedRun.error,
+    })
   })
 
   test("streams a run-scoped log line to the broker", async () => {
@@ -348,6 +372,16 @@ describe("SyncWorker", () => {
 
     expect(retried?.job.id).toBe(queued?.id)
     expect(retried?.job.attempt).toBe(2)
+    if (!cancelledRun) throw new Error("Expected the cancelled sync run to be persisted.")
+    const events = await sixb.events.read({ types: ["sync.run.finished"] })
+    expect(events).toHaveLength(1)
+    expect(events[0]?.payload).toEqual({
+      syncId: cancelledRun.syncId,
+      runId: cancelledRun.id,
+      status: "cancelled",
+      datasetId: cancelledRun.datasetId,
+      error: cancelledRun.error,
+    })
     expect(reportCount).toBe(0)
   })
 
@@ -413,7 +447,7 @@ describe("SyncWorker", () => {
 
     await worker.start()
 
-    await waitFor(
+    const run = await waitFor(
       () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-emit" }),
       (value) => value?.status === "succeeded"
     )
@@ -459,10 +493,14 @@ describe("SyncWorker", () => {
       datasetId?: string
       versionId?: string
     }
-    expect(payload.syncId).toBe("sync-orders")
-    expect(payload.runId).toBe("run-emit")
-    expect(payload.status).toBe("succeeded")
-    expect(payload.datasetId).toBe("raw.erp.orders")
+    if (!run) throw new Error("Expected the succeeded sync run to be persisted.")
+    expect(payload).toEqual({
+      syncId: run.syncId,
+      runId: run.id,
+      status: "succeeded",
+      datasetId: run.datasetId,
+      versionId: run.output?.versionId,
+    })
     expect(payload.versionId).toBe(datasetPayload.versionId)
   })
 

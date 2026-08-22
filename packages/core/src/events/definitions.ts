@@ -220,10 +220,6 @@ export function isOntologyFactType(
   )
 }
 
-export function getEventTopic(type: DomainEvent["type"]): DomainEvent["topic"] {
-  return EVENT_DEFINITIONS[type].topic
-}
-
 export function resolveEventStorage(event: DomainEventDraft): {
   readonly topic: DomainEvent["topic"]
   readonly partitionKey: string

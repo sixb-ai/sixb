@@ -50,6 +50,8 @@ import {
   resolveAgentExecutionAuthorization,
 } from "@sixb/core/internal/agents"
 import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
+import { createSixbError } from "@sixb/core/internal/errors"
+import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
 import {
   type AgentStorage,
   AgentStorageError,
@@ -69,7 +71,7 @@ import { AgentWorker, type AgentWorkerOptions } from "../src"
 import { loadAgentSkills } from "../src/agent-skills"
 import { normalizeApiBaseUrl } from "../src/api-url"
 import { prepareAgentAttachments } from "../src/attachments"
-import { AgentExecutionLostError, AgentFinalizationError, AgentWorkerError } from "../src/errors"
+import { AgentExecutionLostError, AgentFinalizationError } from "../src/errors"
 import { finishRunOrThrow } from "../src/finalize"
 import { enqueueAiModelCallRecovery } from "../src/model-call-recovery"
 import { runAgentTurn } from "../src/run-agent-turn"
@@ -621,6 +623,12 @@ const echoAgentTool = defineAgentTool("echo")
   .run(({ input }) => ({ echoed: input.value }))
 
 type TestSixb = AgentWorkerHost & { readonly blobStorage: BlobStorage }
+
+class InspectableAgentWorker extends AgentWorker {
+  decideExecutionError(claimed: ClaimedQueueJob<AgentQueueJob>, error: unknown) {
+    return this.onExecutionError(claimed, error)
+  }
+}
 
 function workerOptions(
   options: Omit<AgentWorkerOptions, "apiBaseUrl"> & { readonly apiBaseUrl?: string } = {}
@@ -1411,6 +1419,39 @@ describe("AgentWorker", () => {
     }
   })
 
+  test("fails coded non-retryable errors and retries unknown infrastructure failures", async () => {
+    const sixb = buildSixb(toolThenAnswerModel())
+    const worker = new InspectableAgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const now = new Date().toISOString()
+    const claimed: ClaimedQueueJob<AgentQueueJob> = {
+      leaseId: "lease-1",
+      claimedAt: now,
+      leaseExpiresAt: now,
+      job: {
+        id: "job-1",
+        projectId: PROJECT_ID,
+        createdAt: now,
+        availableAt: now,
+        attempt: 1,
+        type: "agent.run.requested",
+        payload: { runId: "run-1" },
+      },
+    }
+
+    await expect(
+      worker.decideExecutionError(
+        claimed,
+        createSixbError("internal.unexpected", "[SixbAgentWorker] Deterministic worker failure.", {
+          details: { agentId: "assistant", runId: "run-1" },
+        })
+      )
+    ).resolves.toEqual({ kind: "fail" })
+
+    await expect(
+      worker.decideExecutionError(claimed, new Error("storage unavailable"))
+    ).resolves.toMatchObject({ kind: "retry", availableAt: expect.any(String) })
+  })
+
   test("executes a headless workflow agent node and publishes its resume", async () => {
     let capturedSystem: string | undefined
     const model = structuredToolThenAnswerModel((system) => {
@@ -1773,7 +1814,18 @@ describe("AgentWorker", () => {
       )
 
       expect(execution.status).toBe("failed")
-      expect(execution.error).toContain("deferred to durable recovery")
+      expect(execution.error).toMatchObject({
+        code: "agent.execution_failed",
+        message: "Agent execution failed.",
+        retryable: false,
+        details: {
+          agentId: "workflow-usage-agent",
+          workflowId: "workflow-usage-test",
+          workflowRunId: "workflow-accounting-failure",
+          nodeId: "workflow-usage-step",
+          nodeRunId,
+        },
+      })
       await expect(
         runs.getById({ projectId: PROJECT_ID, id: "workflow-accounting-failure" })
       ).resolves.toMatchObject({ status: "failed" })
@@ -1857,7 +1909,18 @@ describe("AgentWorker", () => {
       )
 
       expect(execution.status).toBe("failed")
-      expect(execution.error).toContain("Could not preserve AI usage")
+      expect(execution.error).toMatchObject({
+        code: "agent.execution_failed",
+        message: "Agent execution failed.",
+        retryable: false,
+        details: {
+          agentId: "workflow-usage-agent",
+          workflowId: "workflow-usage-test",
+          workflowRunId: "workflow-final-callback-failure",
+          nodeId: "workflow-usage-step",
+          nodeRunId,
+        },
+      })
       expect(modelCalls).toBe(1)
       expect(appendAttempts).toBe(4)
       expect(recoveryAttempts).toBe(4)
@@ -1889,7 +1952,18 @@ describe("AgentWorker", () => {
       )
 
       expect(execution.status).toBe("failed")
-      expect(execution.error).toContain("workflow node finalization unavailable")
+      expect(execution.error).toMatchObject({
+        code: "agent.execution_failed",
+        message: "Agent execution failed.",
+        retryable: false,
+        details: {
+          agentId: "workflow-usage-agent",
+          workflowId: "workflow-usage-test",
+          workflowRunId: "workflow-finalization-failure",
+          nodeId: "workflow-usage-step",
+          nodeRunId,
+        },
+      })
       await expect(
         aiUsageStorageOf(sixb).summarizeExecution({
           projectId: PROJECT_ID,
@@ -1939,25 +2013,49 @@ describe("AgentWorker", () => {
     await worker.start()
     try {
       await toolStarted
+      const cancelledAt = new Date()
+      const agentCancellationFailure = {
+        code: "runtime.cancelled",
+        message: "Execution was cancelled.",
+        retryable: false,
+        at: cancelledAt.toISOString(),
+        details: {
+          agentId: "workflow-usage-agent",
+          workflowId: "workflow-usage-test",
+          workflowRunId: runId,
+          nodeRunId,
+        },
+      } as const
+      const workflowCancellationFailure = {
+        code: "runtime.cancelled",
+        message: "Execution was cancelled.",
+        retryable: false,
+        at: cancelledAt.toISOString(),
+        details: {
+          workflowId: "workflow-usage-test",
+          workflowRunId: runId,
+          nodeRunId,
+        },
+      } as const
       await sixb.storage.transaction(async (tx) => {
         const transactionalRuns = tx.workflowRuns
         if (!transactionalRuns) throw new Error("expected transactional workflow storage")
         await transactionalRuns.agentNodes.cancel({
           projectId: PROJECT_ID,
           nodeRunId,
-          error: "Workflow run cancelled.",
+          error: agentCancellationFailure,
         })
         await transactionalRuns.nodes.finish({
           projectId: PROJECT_ID,
           id: nodeRunId,
           status: "cancelled",
-          error: "Workflow run cancelled.",
+          error: workflowCancellationFailure,
         })
         await transactionalRuns.finish({
           projectId: PROJECT_ID,
           id: runId,
           status: "cancelled",
-          error: "Workflow run cancelled.",
+          error: workflowCancellationFailure,
         })
       })
       await publishAgentRunCancel(sixb.broker, { projectId: PROJECT_ID, runId: nodeRunId })
@@ -1980,6 +2078,157 @@ describe("AgentWorker", () => {
       await expect(
         runs.agentNodes.getByNodeRunId({ projectId: PROJECT_ID, nodeRunId })
       ).resolves.toMatchObject({ status: "cancelled" })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("translates a failed agent execution into the parent workflow vocabulary", async () => {
+    const originalError = new Error("workflow agent provider failed")
+    const model = new MockLanguageModelV4({
+      modelId: "mock-model",
+      doGenerate: async () => {
+        throw originalError
+      },
+    })
+    const agent = defineAgent("workflow-failure-agent", {
+      name: "Workflow failure agent",
+      model,
+      instructions: "Fail for this test.",
+      groups: [AGENT_RUNTIME_GROUP],
+    })
+    const agentStep = defineAgentStep("resolve-or-fail", agent)
+      .input({ query: "string" })
+      .output({ answer: "string" })
+      .prompt(({ input }) => `Resolve '${input.query}'.`)
+    const workflow = defineWorkflow("agent-failure-workflow")
+      .input({ query: "string" })
+      .then(agentStep)
+    const sixb = new SixbHost({
+      id: PROJECT_ID,
+      ontology: [],
+      agents: [agent],
+      workflows: [workflow],
+      groups: [AGENT_RUNTIME_GROUP],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage: new InMemoryLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+      sandboxes: new RecordingSandboxFactory(),
+    })
+    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
+    const reporter = attachSixbErrorReporter(sixb, (error, context) => {
+      reports.push({ error, context })
+    })
+    const runs = sixb.storage.workflowRuns!
+    const runId = "workflow-agent-failure-run"
+    const nodeRunId = `${runId}:node:0`
+    const executionId = await createTestWorkflowExecution(sixb.storage.executions, {
+      projectId: PROJECT_ID,
+      workflowId: workflow.id,
+      runId,
+    })
+    await runs.queue({
+      id: runId,
+      projectId: PROJECT_ID,
+      executionId,
+      workflowId: workflow.id,
+      input: { query: "alpha" },
+      requesterGroupIds: [],
+    })
+    await runs.start({ id: runId, projectId: PROJECT_ID })
+    await runs.nodes.start({
+      id: nodeRunId,
+      projectId: PROJECT_ID,
+      workflowRunId: runId,
+      workflowId: workflow.id,
+      nodeIndex: 0,
+      nodeType: "agent",
+      nodeId: agentStep.id,
+      nodeKey: "resolveOrFail",
+      input: { query: "alpha" },
+    })
+    const agentExecutionId = await createTestAgentExecution(sixb.storage, {
+      projectId: PROJECT_ID,
+      agentId: agent.id,
+      runId: nodeRunId,
+      parentExecutionId: executionId,
+    })
+    await runs.agentNodes.create({
+      projectId: PROJECT_ID,
+      nodeRunId,
+      executionId: agentExecutionId,
+      agentId: agent.id,
+      prompt: "Resolve 'alpha'.",
+    })
+    await runs.nodes.wait({ projectId: PROJECT_ID, id: nodeRunId })
+    await runs.wait({ projectId: PROJECT_ID, id: runId })
+    await sixb.queues.agents.enqueue({
+      projectId: PROJECT_ID,
+      jobs: [
+        {
+          id: `wfa_job_${nodeRunId}`,
+          type: "agent.workflow-node.requested",
+          payload: { nodeRunId },
+        },
+      ],
+    })
+
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      const execution = await waitFor(
+        async () => {
+          const record = await runs.agentNodes.getByNodeRunId({
+            projectId: PROJECT_ID,
+            nodeRunId,
+          })
+          return record?.status === "failed" ? record : null
+        },
+        { label: "workflow agent node failed" }
+      )
+      const [nodeRun, run] = await Promise.all([
+        runs.nodes.getById({ projectId: PROJECT_ID, id: nodeRunId }),
+        runs.getById({ projectId: PROJECT_ID, id: runId }),
+      ])
+
+      expect(execution.error).toMatchObject({
+        code: "agent.execution_failed",
+        message: "Agent execution failed.",
+        retryable: false,
+        details: {
+          agentId: agent.id,
+          workflowId: workflow.id,
+          workflowRunId: runId,
+          nodeId: agentStep.id,
+          nodeRunId,
+        },
+      })
+      expect(run?.status).toBe("failed")
+      expect(run?.error).toMatchObject({
+        code: "workflow.node_failed",
+        message: "Workflow node execution failed.",
+        retryable: false,
+        details: {
+          agentId: agent.id,
+          workflowId: workflow.id,
+          workflowRunId: runId,
+          nodeId: agentStep.id,
+          nodeRunId,
+        },
+      })
+      expect(nodeRun?.error).toEqual(run?.error)
+
+      await reporter.flush()
+      expect(reports).toHaveLength(1)
+      expect(reports[0]?.error).toBe(originalError)
+      expect(reports[0]?.context).toMatchObject({
+        type: "run.failed",
+        runKind: "workflow",
+        run: { runId, workflowId: workflow.id },
+        failure: run?.error,
+      })
     } finally {
       await worker.stop()
     }
@@ -3050,10 +3299,6 @@ describe("AgentWorker", () => {
       expect(run.attempt).toBe(1)
       expect(run.finishReason).toBe("stop")
       expect(run.modelId).toBe("mock-model")
-      // The legacy run aggregate remains during the staged rollout, while accounting authority is
-      // already the per-call ledger. The two tool-loop provider calls must both be present there.
-      expect(run.usage?.outputTokens).toBeGreaterThan(0)
-      expect(run.usage?.inputTokens).toBeGreaterThan(0)
       const durableExecution = await sixb.storage.executions.getById({
         projectId: PROJECT_ID,
         id: run.executionId,
@@ -3270,7 +3515,16 @@ describe("AgentWorker", () => {
       )
 
       expect(run.status).toBe("failed")
-      expect(run.error).toContain("deferred to durable recovery")
+      expect(run.error).toMatchObject({
+        code: "agent.execution_failed",
+        message: "Agent execution failed.",
+        retryable: false,
+        details: {
+          agentId: "assistant",
+          runId: request.run.id,
+          threadId: request.run.threadId,
+        },
+      })
       const summary = await waitFor(
         async () => {
           const value = await aiUsage.summarizeExecution({
@@ -3407,7 +3661,16 @@ describe("AgentWorker", () => {
       )
 
       expect(run.status).toBe("failed")
-      expect(run.error).toContain("Could not preserve AI usage")
+      expect(run.error).toMatchObject({
+        code: "agent.execution_failed",
+        message: "Agent execution failed.",
+        retryable: false,
+        details: {
+          agentId: "assistant",
+          runId: request.run.id,
+          threadId: request.run.threadId,
+        },
+      })
       expect(modelCalls).toBe(1)
       expect(appendAttempts).toBe(4)
       expect(recoveryAttempts).toBe(4)
@@ -4775,18 +5038,26 @@ describe("AgentWorker", () => {
         { label: "run failed" }
       )
       expect(run.status).toBe("failed")
-      expect(run.error).toBeDefined()
+      expect(run.error).toMatchObject({
+        code: "agent.execution_failed",
+        message: "Agent execution failed.",
+        retryable: false,
+        details: { agentId: "assistant", runId: run.id, threadId },
+      })
+      expect(run.error?.at).toBe(run.completedAt?.toISOString())
       await reporter.flush()
       expect(reports).toHaveLength(1)
       expect(reports[0]?.error).toBe(originalError)
       expect(reports[0]?.context).toMatchObject({
         type: "run.failed",
-        notificationId: `project:${PROJECT_ID}:run:agent:${run.id}:failed:${run.completedAt?.toISOString()}`,
+        notificationId: `project:${PROJECT_ID}:run:agent:${run.id}:failed:${run.error?.at}`,
         projectId: PROJECT_ID,
         attempt: 1,
-        run: { kind: "agent", runId: run.id, agentId: "assistant" },
+        runKind: "agent",
+        run: { runId: run.id, agentId: "assistant" },
+        failure: run.error,
       })
-      expect(reports[0]?.context.occurredAt).toBe(run.completedAt?.toISOString() ?? "")
+      expect(reports[0]?.context.occurredAt).toBe(run.error?.at ?? "")
       expect(
         (await listRunStreamRecords(sixb.broker, run.id)).find(
           (record) => record.name === "agent.run.finished"
@@ -4796,6 +5067,7 @@ describe("AgentWorker", () => {
         status: "failed",
         runId: run.id,
         attempt: 1,
+        error: run.error,
       })
 
       // Thread released so a later message can run.
@@ -4838,7 +5110,12 @@ describe("AgentWorker", () => {
         { label: "run failed" }
       )
       expect(run.status).toBe("failed")
-      expect(run.error).toContain("sandbox provisioning unavailable")
+      expect(run.error).toMatchObject({
+        code: "agent.execution_failed",
+        message: "Agent execution failed.",
+        retryable: false,
+        details: { agentId: "assistant", runId: run.id, threadId },
+      })
 
       // The turn threw before finalizing, so no assistant message was persisted.
       const messages = await listMessages(storage, threadId)
@@ -5060,7 +5337,12 @@ describe("AgentWorker", () => {
       )
 
       expect(run.status).toBe("failed")
-      expect(run.error).toContain("turn budget")
+      expect(run.error).toMatchObject({
+        code: "agent.execution_failed",
+        message: "Agent execution failed.",
+        retryable: false,
+        details: { agentId: "assistant", runId: run.id, threadId },
+      })
       expect(
         (await listRunStreamRecords(sixb.broker, run.id)).find(
           (record) => record.name === "agent.run.finished"
@@ -5139,15 +5421,30 @@ describe("AgentWorker", () => {
         },
         { label: "missing agent run failed" }
       )
-      expect(failed).toMatchObject({ status: "failed", attempt: 0 })
-      expect(failed.error).toContain("not registered")
+      expect(failed).toMatchObject({
+        status: "failed",
+        attempt: 0,
+        error: {
+          code: "internal.unexpected",
+          retryable: false,
+          message: "An unexpected internal error occurred.",
+          details: { agentId: "removed-agent", runId, threadId },
+        },
+      })
       await reporter.flush()
       expect(reports).toHaveLength(1)
-      expect(reports[0]?.error).toBeInstanceOf(AgentWorkerError)
+      expect(reports[0]?.error).toMatchObject({
+        code: "internal.unexpected",
+        retryable: false,
+        message: "[SixbAgentWorker] Unknown agent 'removed-agent'.",
+        details: { agentId: "removed-agent", runId, threadId },
+      })
       expect(reports[0]?.context).toMatchObject({
         projectId: PROJECT_ID,
         attempt: 1,
-        run: { kind: "agent", runId, agentId: "removed-agent" },
+        runKind: "agent",
+        run: { runId, agentId: "removed-agent" },
+        failure: failed.error,
       })
       await expect(
         storage.threads.getById({ projectId: PROJECT_ID, id: threadId })

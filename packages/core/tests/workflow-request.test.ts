@@ -141,10 +141,18 @@ describe("sixb.workflows.request", () => {
       projectId: sixb.execution.projectId,
       id: "run_enqueue_failure",
     })
-    expect(run).toMatchObject({ status: "failed", error: "workflow queue unavailable" })
+    expect(run).toMatchObject({
+      status: "failed",
+      error: {
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        retryable: false,
+        details: { workflowId: draftInvoice.id, runId: "run_enqueue_failure" },
+      },
+    })
     await flushSixbErrors(host)
     expect(reports).toEqual([
-      `project:workflow-enqueue-failure:run:workflow:run_enqueue_failure:failed:${run?.finishedAt?.toISOString()}:workflow queue unavailable`,
+      `project:workflow-enqueue-failure:run:workflow:run_enqueue_failure:failed:${run?.error?.at}:workflow queue unavailable`,
     ])
   })
 

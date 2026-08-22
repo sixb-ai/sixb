@@ -391,7 +391,18 @@ describe("WorkflowWorker", () => {
         }),
       (value) => value?.status === "failed"
     )
-    expect(run?.error).toBe("workflow exploded")
+    expect(run?.error).toMatchObject({
+      code: "workflow.node_failed",
+      message: "Workflow node execution failed.",
+      retryable: false,
+      details: {
+        workflowId: workflow.id,
+        workflowRunId: "wfrun_worker_failed",
+        nodeId: "explode",
+        nodeRunId: "wfrun_worker_failed:node:0",
+        stepId: "explode",
+      },
+    })
 
     const reported = await waitFor(
       async () => reports,
@@ -400,16 +411,17 @@ describe("WorkflowWorker", () => {
     expect(reported[0]?.error).toBe(workflowExplosion)
     expect(reported[0]?.context).toMatchObject({
       type: "run.failed",
-      notificationId: `project:${sixb.id}:run:workflow:wfrun_worker_failed:failed:${run?.finishedAt?.toISOString()}`,
+      notificationId: `project:${sixb.id}:run:workflow:wfrun_worker_failed:failed:${run?.error?.at}`,
       projectId: sixb.id,
       attempt: 1,
+      runKind: "workflow",
       run: {
-        kind: "workflow",
         runId: "wfrun_worker_failed",
         workflowId: workflow.id,
       },
+      failure: run?.error,
     })
-    expect(reported[0]?.context.occurredAt).toBe(run?.finishedAt?.toISOString() ?? "")
+    expect(reported[0]?.context.occurredAt).toBe(run?.error?.at ?? "")
 
     const events = await waitFor(
       () =>
@@ -434,14 +446,38 @@ describe("WorkflowWorker", () => {
       runId: "wfrun_worker_failed",
       nodeRunId: "wfrun_worker_failed:node:0",
       status: "failed",
-      error: "workflow exploded",
+      error: {
+        code: "workflow.node_failed",
+        message: "Workflow node execution failed.",
+        retryable: false,
+        at: expect.any(String),
+        details: {
+          workflowId: workflow.id,
+          workflowRunId: "wfrun_worker_failed",
+          nodeId: "explode",
+          nodeRunId: "wfrun_worker_failed:node:0",
+          stepId: "explode",
+        },
+      },
     })
     expect(events[3]?.payload).toMatchObject({
       workflowId: workflow.id,
       runId: "wfrun_worker_failed",
       status: "failed",
       finishedAt: expect.any(String),
-      error: "workflow exploded",
+      error: {
+        code: "workflow.node_failed",
+        message: "Workflow node execution failed.",
+        retryable: false,
+        at: expect.any(String),
+        details: {
+          workflowId: workflow.id,
+          workflowRunId: "wfrun_worker_failed",
+          nodeId: "explode",
+          nodeRunId: "wfrun_worker_failed:node:0",
+          stepId: "explode",
+        },
+      },
     })
 
     await Bun.sleep(50)
@@ -511,15 +547,16 @@ describe("WorkflowWorker", () => {
     expect(reported[0]?.error.message).toContain("Missing required field")
     expect(reported[0]?.context).toMatchObject({
       type: "run.failed",
-      notificationId: `project:${sixb.id}:run:workflow:wfrun_queued_invalid:failed:${run?.finishedAt?.toISOString()}`,
+      notificationId: `project:${sixb.id}:run:workflow:wfrun_queued_invalid:failed:${run?.error?.at}`,
       attempt: 1,
+      runKind: "workflow",
       run: {
-        kind: "workflow",
         runId: "wfrun_queued_invalid",
         workflowId: workflow.id,
       },
+      failure: run?.error,
     })
-    expect(reported[0]?.context.occurredAt).toBe(run?.finishedAt?.toISOString() ?? "")
+    expect(reported[0]?.context.occurredAt).toBe(run?.error?.at ?? "")
   })
 
   test("completes queue jobs when workflow runs suspend at intervention nodes", async () => {
@@ -769,15 +806,27 @@ describe("WorkflowWorker", () => {
       (value) => value.length === 1
     )
 
-    expect(run?.error).toBe(resumeError.message)
+    expect(run?.error).toMatchObject({
+      code: "workflow.node_failed",
+      message: "Workflow node execution failed.",
+      retryable: false,
+      details: {
+        workflowId: workflow.id,
+        workflowRunId: "wfrun_worker_resume_failed",
+        nodeId: "fail-after-resume",
+        nodeRunId: "wfrun_worker_resume_failed:node:2",
+        stepId: "fail-after-resume",
+      },
+    })
     expect(reported[0]?.error).toBe(resumeError)
     expect(reported[0]?.context).toMatchObject({
       attempt: 1,
+      runKind: "workflow",
       run: {
-        kind: "workflow",
         runId: "wfrun_worker_resume_failed",
         workflowId: workflow.id,
       },
+      failure: run?.error,
     })
   })
 

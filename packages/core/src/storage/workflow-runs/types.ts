@@ -1,7 +1,8 @@
 import type { AgentMessagePart } from "../../agents/message"
+import type { SixbErrorCode, SixbFailure } from "../../errors/types"
 import type { JsonValue } from "../../json"
 import type { WorkflowIOSnapshot } from "../../workflows/types"
-import type { AgentExecutionStatus, AgentRunFinishReason, AgentRunUsage } from "../agents"
+import type { AgentExecutionStatus, AgentRunFailureCode, AgentRunFinishReason } from "../agents"
 
 export type { WorkflowIOSnapshot } from "../../workflows/types"
 
@@ -14,6 +15,15 @@ export type WorkflowRunStatus =
   | "cancelled"
 export type WorkflowNodeRunStatus = Exclude<WorkflowRunStatus, "queued">
 export type WorkflowNodeRunType = "step" | "action" | "intervention" | "agent"
+
+/** Error codes a workflow or workflow-node run can persist and expose. */
+export const WORKFLOW_RUN_FAILURE_CODES = [
+  "internal.unexpected",
+  "runtime.cancelled",
+  "workflow.node_failed",
+] as const satisfies readonly [SixbErrorCode, ...SixbErrorCode[]]
+
+export type WorkflowRunFailureCode = (typeof WORKFLOW_RUN_FAILURE_CODES)[number]
 
 export interface WorkflowRunExecution {
   readonly token: string
@@ -37,10 +47,9 @@ export interface WorkflowAgentNodeRunRecord {
   readonly prompt: string
   readonly modelId?: string
   readonly finishReason?: AgentRunFinishReason
-  readonly usage?: AgentRunUsage
   readonly trace?: readonly AgentMessagePart[]
   readonly diagnostics?: readonly JsonValue[]
-  readonly error?: string
+  readonly error?: SixbFailure<AgentRunFailureCode>
   readonly attempt: number
   readonly execution?: WorkflowAgentNodeRunExecution
   readonly createdAt: Date
@@ -78,24 +87,30 @@ export interface ConfirmWorkflowAgentNodeRunExecutionOwnershipInput {
   readonly queueLeaseExpiresAt: Date
 }
 
-export type FinishWorkflowAgentNodeRunInput = {
+interface FinishWorkflowAgentNodeRunBaseInput {
   readonly projectId: string
   readonly nodeRunId: string
   readonly executionToken: string
-  readonly status: "succeeded" | "failed" | "cancelled"
   readonly modelId?: string
   readonly finishReason?: AgentRunFinishReason
-  readonly usage?: AgentRunUsage
   readonly trace?: readonly AgentMessagePart[]
   readonly diagnostics?: readonly JsonValue[]
-  readonly error?: string
   readonly completedAt?: Date
 }
+
+export type FinishWorkflowAgentNodeRunInput =
+  | (FinishWorkflowAgentNodeRunBaseInput & {
+      readonly status: "succeeded"
+    })
+  | (FinishWorkflowAgentNodeRunBaseInput & {
+      readonly status: "failed" | "cancelled"
+      readonly error?: SixbFailure<AgentRunFailureCode>
+    })
 
 export interface CancelWorkflowAgentNodeRunInput {
   readonly projectId: string
   readonly nodeRunId: string
-  readonly error?: string
+  readonly error?: SixbFailure<AgentRunFailureCode>
   readonly completedAt?: Date
 }
 
@@ -125,7 +140,7 @@ export interface WorkflowRunRecord {
   readonly queuedAt?: Date
   readonly startedAt: Date
   readonly finishedAt?: Date
-  readonly error?: string
+  readonly error?: SixbFailure<WorkflowRunFailureCode>
   /** Durable group memberships snapshotted when the workflow run was admitted. */
   readonly requesterGroupIds: readonly string[]
   readonly attempt: number
@@ -146,7 +161,7 @@ export interface WorkflowNodeRunRecord {
   readonly startedAt: Date
   readonly finishedAt?: Date
   readonly output?: WorkflowIOSnapshot
-  readonly error?: string
+  readonly error?: SixbFailure<WorkflowRunFailureCode>
 }
 
 export interface StartWorkflowRunInput {
@@ -207,7 +222,7 @@ export type FinishWorkflowRunInput =
       readonly projectId: string
       readonly status: "failed" | "cancelled"
       readonly finishedAt?: Date
-      readonly error?: string
+      readonly error?: SixbFailure<WorkflowRunFailureCode>
       readonly executionToken?: string
     }
 
@@ -246,7 +261,7 @@ export type FinishWorkflowNodeRunInput =
       readonly projectId: string
       readonly status: "failed" | "cancelled"
       readonly finishedAt?: Date
-      readonly error?: string
+      readonly error?: SixbFailure<WorkflowRunFailureCode>
       readonly executionToken?: string
     }
 

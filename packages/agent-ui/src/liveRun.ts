@@ -1,4 +1,4 @@
-import type { AgentRunStreamEvent } from "@sixb/client"
+import type { AgentRunFailure, AgentRunStreamEvent } from "@sixb/client"
 import type { NormalizedPart, NormalizedTool } from "./parts"
 import type { AgentRunStatus } from "./types"
 
@@ -21,8 +21,8 @@ export interface LiveRunState {
   readonly finalizedMessageId: string | null
   /** Terminal run status, or null while in-flight. */
   readonly finishStatus: AgentRunStatus | null
-  /** Error text from a failed run. */
-  readonly finishError: string | null
+  /** Exact durable failure from a failed or cancelled run. */
+  readonly finishError: AgentRunFailure | null
   /** Error text surfaced by a stream `error` chunk (not necessarily fatal). */
   readonly streamError: string | null
 }

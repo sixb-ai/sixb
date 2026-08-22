@@ -1,9 +1,12 @@
+import { parseSixbFailure } from "../../errors/internal"
 import type {
   WebhookDeliveryClaimRecord,
+  WebhookDeliveryFailure,
   WebhookDeliveryKey,
   WebhookDeliveryRecord,
   WebhookDeliveryStorage,
 } from "./types"
+import { WEBHOOK_DELIVERY_FAILURE_CODES } from "./types"
 
 function cloneDeliveryRecord(record: WebhookDeliveryRecord): WebhookDeliveryRecord {
   return structuredClone(record)
@@ -73,7 +76,7 @@ export class InMemoryWebhookDeliveryStorage implements WebhookDeliveryStorage {
       status: "completed",
       completedAt: input.completedAt,
       failedAt: undefined,
-      error: undefined,
+      failure: undefined,
     }
 
     this.deliveries.set(key, structuredClone(next))
@@ -81,7 +84,7 @@ export class InMemoryWebhookDeliveryStorage implements WebhookDeliveryStorage {
   }
 
   async fail(
-    input: WebhookDeliveryKey & { failedAt: string; error: string }
+    input: WebhookDeliveryKey & { failedAt: string; failure: WebhookDeliveryFailure }
   ): Promise<WebhookDeliveryRecord> {
     const key = serializeKey(input)
     const next: WebhookDeliveryRecord = {
@@ -92,7 +95,7 @@ export class InMemoryWebhookDeliveryStorage implements WebhookDeliveryStorage {
       ...this.deliveries.get(key),
       status: "failed",
       failedAt: input.failedAt,
-      error: input.error,
+      failure: parseSixbFailure(input.failure, WEBHOOK_DELIVERY_FAILURE_CODES),
       completedAt: undefined,
     }
 

@@ -1,3 +1,4 @@
+import { parseSixbFailure } from "@sixb/core/internal/errors"
 import type { ProjectionEntityRef } from "@sixb/core/internal/materialization"
 import { MaterializationConflictError } from "@sixb/core/internal/materialization"
 import type {
@@ -8,6 +9,7 @@ import type {
   OntologySourceRecord,
   StageSourceAssertion,
 } from "@sixb/core/storage"
+import { ONTOLOGY_OUTBOX_FAILURE_CODES } from "@sixb/core/storage"
 import type { SQLClient } from "../pg-client"
 
 export {
@@ -98,19 +100,12 @@ export interface PgOntologyOutboxRow {
   readonly lease_id: string | null
   readonly lease_expires_at: Date | string | null
   readonly published_at: Date | string | null
-  readonly last_error: string | null
+  readonly last_failure: unknown | null
   readonly created_at: Date | string
 }
 
 export function jsonParameter(sql: SQLClient, value: unknown): ReturnType<SQLClient["json"]> {
   return sql.json(value as PgJsonValue)
-}
-
-export function jsonKeyParameter(
-  sql: SQLClient,
-  canonicalKey: string
-): ReturnType<SQLClient["json"]> {
-  return jsonParameter(sql, JSON.parse(canonicalKey))
 }
 
 export function toIsoString(value: Date | string): string {
@@ -203,7 +198,10 @@ export function outboxRecord(row: PgOntologyOutboxRow): OntologyOutboxRecord {
     leaseId: row.lease_id,
     leaseExpiresAt: optionalIsoString(row.lease_expires_at),
     publishedAt: optionalIsoString(row.published_at),
-    lastError: row.last_error,
+    lastFailure:
+      row.last_failure === null
+        ? null
+        : parseSixbFailure(row.last_failure, ONTOLOGY_OUTBOX_FAILURE_CODES),
     createdAt: toIsoString(row.created_at),
   }
 }
@@ -276,15 +274,6 @@ export async function assertProjectionExecution(
       `Projection run '${input.projectionRunId}' immutable source identity does not match.`
     )
   }
-}
-
-export function requireRow<T>(
-  row: T | undefined,
-  kind: ConstructorParameters<typeof MaterializationConflictError>[0],
-  message: string
-): T {
-  if (!row) throw new MaterializationConflictError(kind, message)
-  return row
 }
 
 export function ontologyLockKey(kind: string, ...parts: readonly string[]): string {

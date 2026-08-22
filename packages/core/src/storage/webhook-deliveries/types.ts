@@ -1,5 +1,15 @@
+import type { SixbErrorCode, SixbFailure } from "../../errors/types"
+
 export type WebhookDeliveryClaimResult = "claimed" | "duplicate" | "in_progress"
 export type WebhookDeliveryStatus = "in_progress" | "completed" | "failed"
+
+/** Error codes a retryable inbound webhook delivery can persist and expose. */
+export const WEBHOOK_DELIVERY_FAILURE_CODES = [
+  "webhook.delivery_failed",
+] as const satisfies readonly [SixbErrorCode, ...SixbErrorCode[]]
+
+export type WebhookDeliveryFailureCode = (typeof WEBHOOK_DELIVERY_FAILURE_CODES)[number]
+export type WebhookDeliveryFailure = SixbFailure<WebhookDeliveryFailureCode>
 
 export interface WebhookDeliveryKey {
   readonly projectId: string
@@ -13,7 +23,7 @@ export interface WebhookDeliveryRecord extends WebhookDeliveryKey {
   readonly receivedAt?: string
   readonly completedAt?: string
   readonly failedAt?: string
-  readonly error?: string
+  readonly failure?: WebhookDeliveryFailure
 }
 
 export interface WebhookDeliveryClaimRecord extends WebhookDeliveryRecord {
@@ -36,6 +46,6 @@ export interface WebhookDeliveryStorage {
   claim(input: WebhookDeliveryKey & { receivedAt: string }): Promise<WebhookDeliveryClaimRecord>
   complete(input: WebhookDeliveryKey & { completedAt: string }): Promise<WebhookDeliveryRecord>
   fail(
-    input: WebhookDeliveryKey & { failedAt: string; error: string }
+    input: WebhookDeliveryKey & { failedAt: string; failure: WebhookDeliveryFailure }
   ): Promise<WebhookDeliveryRecord>
 }

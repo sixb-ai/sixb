@@ -1,4 +1,8 @@
 import { normalizeRequesterGroupIds } from "../../auth/attribution"
+import { parseSixbFailure } from "../../errors/internal"
+import type { SixbFailure } from "../../errors/types"
+import type { AgentRunFailureCode } from "../agents"
+import { AGENT_RUN_FAILURE_CODES } from "../agents"
 import type { ExecutionStorage } from "../executions"
 import {
   cloneRecord,
@@ -41,9 +45,23 @@ import type {
   WorkflowAgentNodeRunStorage,
   WorkflowNodeRunRecord,
   WorkflowNodeRunStorage,
+  WorkflowRunFailureCode,
   WorkflowRunRecord,
   WorkflowRunStorage,
 } from "./types"
+import { WORKFLOW_RUN_FAILURE_CODES } from "./types"
+
+function normalizeFailure(
+  failure: SixbFailure<WorkflowRunFailureCode> | undefined
+): SixbFailure<WorkflowRunFailureCode> | undefined {
+  return failure ? parseSixbFailure(failure, WORKFLOW_RUN_FAILURE_CODES) : undefined
+}
+
+function normalizeAgentFailure(
+  failure: SixbFailure<AgentRunFailureCode> | undefined
+): SixbFailure<AgentRunFailureCode> | undefined {
+  return failure ? parseSixbFailure(failure, AGENT_RUN_FAILURE_CODES) : undefined
+}
 
 function assertNonNegativeInteger(value: number, fieldName: string): void {
   if (!Number.isInteger(value) || value < 0) {
@@ -177,7 +195,7 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
         : {
             ...base,
             output: undefined,
-            error: input.error,
+            error: normalizeFailure(input.error),
           }
 
     this.runs.set(storageKey(input.projectId, input.id), cloneRecord(next))
@@ -463,7 +481,7 @@ export class InMemoryWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
         : {
             ...base,
             output: undefined,
-            error: input.error,
+            error: normalizeFailure(input.error),
           }
 
     this.nodes.set(storageKey(input.projectId, input.id), cloneRecord(next))
@@ -690,10 +708,11 @@ export class InMemoryWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRun
       status: input.status,
       ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
       ...(input.finishReason === undefined ? {} : { finishReason: input.finishReason }),
-      ...(input.usage === undefined ? {} : { usage: cloneRecord(input.usage) }),
       ...(input.trace === undefined ? {} : { trace: cloneRecord(input.trace) }),
       ...(input.diagnostics === undefined ? {} : { diagnostics: cloneRecord(input.diagnostics) }),
-      ...(input.status === "succeeded" || input.error === undefined ? {} : { error: input.error }),
+      ...(input.status === "succeeded" || input.error === undefined
+        ? {}
+        : { error: normalizeAgentFailure(input.error) }),
       execution: undefined,
       completedAt: new Date(input.completedAt ?? new Date()),
     })
@@ -710,7 +729,7 @@ export class InMemoryWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRun
       ...run,
       status: "cancelled",
       execution: undefined,
-      error: input.error,
+      error: normalizeAgentFailure(input.error),
       completedAt: new Date(input.completedAt ?? new Date()),
     })
   }

@@ -3,7 +3,7 @@ import { assertJsonValue, cloneJsonValue, isObjectActionDefinition } from "@sixb
 import type { ActionReadRecorder } from "@sixb/core/internal/actions"
 import { createActionReadFacade } from "@sixb/core/internal/actions"
 import type { ActionRunRecord } from "@sixb/core/storage"
-import { toActionRunFailure } from "../normalize"
+import { toActionRunFailure, translateActionPhaseError } from "../normalize"
 import { type BasePhaseContext, requireObjectTarget, toActionRuntimeFacade } from "./context"
 import type {
   LoadedObjectTarget,
@@ -37,6 +37,7 @@ export async function runWritebackPhase(
   })
   input.updateActiveRun(run)
 
+  let result: JsonValue
   try {
     // Reads are side-effect-free, so the writeback phase can safely enrich its
     // external payload from related objects (links, traversals) before the edit
@@ -57,29 +58,44 @@ export async function runWritebackPhase(
           ...input.baseContext,
           sixb: toActionRuntimeFacade(input.runtime),
           read,
-          target: requireObjectTarget(input.objectTarget, input.action.id).snapshot,
+          target: requireObjectTarget(input.objectTarget, {
+            actionId: input.action.id,
+            runId: input.run.id,
+          }).snapshot,
         })
       : await handler({ ...input.baseContext, sixb: toActionRuntimeFacade(input.runtime), read })
-    const result = normalizeWritebackResult(rawResult)
-    run = await input.runtime.actionRunsStorage.recordWriteback({
-      projectId: input.runtime.id,
-      id: input.run.id,
-      status: "succeeded",
-      result,
-    })
-    input.updateActiveRun(run)
-    return { run, value: result }
+    result = normalizeWritebackResult(rawResult)
   } catch (error) {
-    const failure = toActionRunFailure(error, "writeback")
+    const completedAt = new Date()
+    const phaseError = translateActionPhaseError(error, "writeback", {
+      actionId: input.action.id,
+      runId: input.run.id,
+      signal: input.signal,
+    })
+    const failure = toActionRunFailure(phaseError, "writeback", {
+      actionId: input.action.id,
+      runId: input.run.id,
+      at: completedAt,
+    })
     run = await input.runtime.actionRunsStorage.recordWriteback({
       projectId: input.runtime.id,
       id: input.run.id,
       status: "failed",
+      completedAt,
       error: failure,
     })
     input.updateActiveRun(run)
     throw error
   }
+
+  run = await input.runtime.actionRunsStorage.recordWriteback({
+    projectId: input.runtime.id,
+    id: input.run.id,
+    status: "succeeded",
+    result,
+  })
+  input.updateActiveRun(run)
+  return { run, value: result }
 }
 
 function normalizeWritebackResult(result: unknown): JsonValue {

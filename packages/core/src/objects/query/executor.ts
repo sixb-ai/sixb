@@ -123,26 +123,6 @@ const DEFAULT_MAX_EXPANSION_FANOUT = 1_000
 // opaque and should only be interpreted by the provider that returned them.
 const PAGE_TOKEN_PREFIX = "offset:"
 
-export class QueryExecutor {
-  constructor(private readonly options: QueryExecutorOptions) {}
-
-  async execute(input: ExecuteObjectQueryInput): Promise<ExecuteObjectQueryResult> {
-    return executeObjectQuery(input, this.options)
-  }
-
-  async count(input: ExecuteObjectCountInput): Promise<ExecuteObjectCountResult> {
-    return countObjects(input, this.options)
-  }
-
-  async exists(input: ExecuteObjectExistsInput): Promise<ExecuteObjectExistsResult> {
-    return existsObjects(input, this.options)
-  }
-
-  async facets(input: ExecuteObjectFacetsInput): Promise<ExecuteObjectFacetsResult> {
-    return facetObjects(input, this.options)
-  }
-}
-
 export async function executeObjectQuery(
   input: ExecuteObjectQueryInput,
   options: QueryExecutorOptions

@@ -5,6 +5,7 @@ import type {
   RestConnectorOptions,
   RestHeadersResolver,
   RestRequestContext,
+  RestRequestInit,
   RestRetryContext,
   RestRetryPolicy,
 } from "./types"
@@ -62,19 +63,20 @@ function createRestClient(options: RestConnectorOptions, context: ConnectorConte
   }
   let lastRequestAt = 0
 
-  const request = async (path: string, init: RequestInit = {}): Promise<Response> => {
+  const request = async (path: string, init: RestRequestInit = {}): Promise<Response> => {
+    const { retry = true, ...fetchInit } = init
     const baseRequestContext: RestRequestContext = {
       projectId: context.projectId,
       connectorId: context.connectorId,
       path,
-      init,
+      init: fetchInit,
     }
 
     let unauthorizedRetried = false
     // A stream body is consumed by the first attempt and can never be replayed,
     // so neither the 401 refresh nor the retry policy may re-send this request —
     // retrying would only mask the real failure behind a "stream already used" error.
-    const replayable = !(init.body instanceof ReadableStream)
+    const replayable = !(fetchInit.body instanceof ReadableStream)
 
     for (let attempt = 0; ; attempt++) {
       // Apply the same pacing to retries as the initial request.
@@ -87,7 +89,7 @@ function createRestClient(options: RestConnectorOptions, context: ConnectorConte
       )
 
       const resolvedInit = await resolveRequestInit(
-        init,
+        fetchInit,
         options.headers,
         options.timeoutMs,
         baseRequestContext
@@ -116,6 +118,7 @@ function createRestClient(options: RestConnectorOptions, context: ConnectorConte
 
       const retryContext: RestRetryContext = { attempt, response, error }
       const canRetry =
+        retry &&
         replayable &&
         attempt < retryPolicy.maxRetries &&
         retryPolicy.shouldRetry?.(retryContext) === true

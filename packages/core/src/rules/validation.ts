@@ -1,8 +1,8 @@
 import type { OntologyRegistry } from "../ontology/registry"
 import type { ObjectType } from "../ontology/types"
-import { assertPredicateShape, isPredicateValue } from "../predicates"
+import { assertPredicateShape } from "../predicates"
 import { RuleValidationError } from "./errors"
-import type { RuleDefinition, RulePredicate, RuleValue } from "./types"
+import type { RuleDefinition, RulePredicate } from "./types"
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -16,10 +16,6 @@ function assertNonEmptyString(
   if (typeof value !== "string" || value.trim().length === 0) {
     throw createError(`${field} must not be empty.`)
   }
-}
-
-export function isRuleValue(value: unknown): value is RuleValue {
-  return isPredicateValue(value)
 }
 
 /**

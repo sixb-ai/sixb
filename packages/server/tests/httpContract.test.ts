@@ -551,9 +551,15 @@ describe("SixbServer HTTP contract", () => {
       status: "failed",
       completedAt: new Date("2026-02-18T09:12:04.000Z"),
       error: {
-        name: "NotificationError",
-        message: "Notification failed",
-        phase: "effects",
+        code: "internal.unexpected",
+        message: "An unexpected internal error occurred.",
+        retryable: false,
+        at: "2026-02-18T09:12:04.000Z",
+        details: {
+          actionId: "syncDeviceLabel",
+          runId: "act_audit_previous",
+          phase: "effects",
+        },
       },
     })
     await sixb.storage.actionRuns!.finish({
@@ -728,7 +734,10 @@ describe("SixbServer HTTP contract", () => {
 
       const missingDatasetResponse = await fetch(`${baseUrl}/api/datasets/missing`)
       expect(missingDatasetResponse.status).toBe(404)
-      expect(await missingDatasetResponse.json()).toEqual({ error: "Dataset not found" })
+      expect(await missingDatasetResponse.json()).toEqual({
+        error: "Dataset not found",
+        code: "dataset.not_found",
+      })
 
       const versionsResponse = await fetch(
         `${baseUrl}/api/datasets/raw.github.events/versions?limit=5`
@@ -777,6 +786,7 @@ describe("SixbServer HTTP contract", () => {
       expect(uncommittedRowsResponse.status).toBe(404)
       expect(await uncommittedRowsResponse.json()).toEqual({
         error: "Dataset version not found",
+        code: "dataset.version_not_found",
       })
 
       const invalidRowsResponse = await fetch(
@@ -1856,7 +1866,15 @@ describe("SixbServer HTTP contract", () => {
       expect(cancelledRun).toMatchObject({
         id: pending.workflowRunId,
         status: "cancelled",
-        error: "Workflow intervention cancelled.",
+        error: {
+          code: "runtime.cancelled",
+          message: "Execution was cancelled.",
+          retryable: false,
+          details: {
+            workflowId: "review-device-health-workflow",
+            workflowRunId: pending.workflowRunId,
+          },
+        },
       })
 
       const cancelledNode = await sixb.storage.workflowRuns!.nodes.getById({
@@ -1866,7 +1884,16 @@ describe("SixbServer HTTP contract", () => {
       expect(cancelledNode).toMatchObject({
         id: pending.nodeRunId,
         status: "cancelled",
-        error: "Workflow intervention cancelled.",
+        error: {
+          code: "runtime.cancelled",
+          message: "Execution was cancelled.",
+          retryable: false,
+          details: {
+            workflowId: "review-device-health-workflow",
+            workflowRunId: pending.workflowRunId,
+            nodeRunId: pending.nodeRunId,
+          },
+        },
       })
 
       const workflowEvents = await events.read({
@@ -1891,6 +1918,105 @@ describe("SixbServer HTTP contract", () => {
           pendingInterventionId: pending.id,
         }),
       })
+      expect(workflowEvents[1]).toMatchObject({
+        payload: expect.objectContaining({ error: cancelledNode?.error }),
+      })
+      expect(workflowEvents[2]).toMatchObject({
+        payload: expect.objectContaining({ error: cancelledRun?.error }),
+      })
+    })
+  })
+
+  test("batches ledger summaries when reading workflow agent nodes", async () => {
+    await withHttpContractServer(async ({ baseUrl, sixb }) => {
+      const runs = sixb.storage.workflowRuns!
+      const runId = "workflow-agent-usage-batch"
+      const workflowExecutionId = await createTestWorkflowExecution(sixb.storage.executions, {
+        projectId: sixb.id,
+        workflowId: "review-device-health-workflow",
+        runId,
+      })
+      await runs.queue({
+        id: runId,
+        projectId: sixb.id,
+        executionId: workflowExecutionId,
+        workflowId: "review-device-health-workflow",
+        input: { deviceId: "fan-1" },
+        requesterGroupIds: [],
+      })
+      await runs.start({ id: runId, projectId: sixb.id })
+
+      const executionIds: string[] = []
+      for (const index of [0, 1]) {
+        const nodeRunId = `${runId}:node:${index}`
+        await runs.nodes.start({
+          id: nodeRunId,
+          projectId: sixb.id,
+          workflowRunId: runId,
+          workflowId: "review-device-health-workflow",
+          nodeIndex: index,
+          nodeType: "agent",
+          nodeId: `agent-step-${index}`,
+          nodeKey: `agentStep${index}`,
+          input: { deviceId: "fan-1" },
+        })
+        const executionId = await createTestAgentExecution(sixb.storage, {
+          projectId: sixb.id,
+          agentId: "device-resolver",
+          runId: nodeRunId,
+          parentExecutionId: workflowExecutionId,
+        })
+        executionIds.push(executionId)
+        await runs.agentNodes.create({
+          projectId: sixb.id,
+          nodeRunId,
+          executionId,
+          agentId: "device-resolver",
+          prompt: `Resolve node ${index}.`,
+        })
+      }
+
+      const aiUsage = sixb.storage.aiUsage
+      if (!aiUsage) throw new Error("expected AI usage storage")
+      for (const [index, executionId] of executionIds.entries()) {
+        await aiUsage.recordModelCall({
+          id: `workflow-batch-usage-${index}`,
+          projectId: sixb.id,
+          executionId,
+          attempt: 1,
+          callId: `workflow-batch-call-${index}`,
+          requesterGroupIds: [],
+          providerId: "test",
+          requestedModelId: "test-model",
+          responseId: `workflow-batch-response-${index}`,
+          usage: { inputTokens: 10 + index, outputTokens: 1 },
+          occurredAt: new Date(`2026-07-02T12:00:0${index}.000Z`),
+        })
+      }
+      const summarizeExecutions = aiUsage.summarizeExecutions.bind(aiUsage)
+      const summaryInputs: Parameters<typeof aiUsage.summarizeExecutions>[0][] = []
+      aiUsage.summarizeExecutions = (input) => {
+        summaryInputs.push(input)
+        return summarizeExecutions(input)
+      }
+
+      const response = await fetch(`${baseUrl}/api/workflow-runs/${runId}`)
+
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({
+        run: { id: runId },
+        nodes: [
+          {
+            id: `${runId}:node:0`,
+            agentExecution: { agentId: "device-resolver", usage: { inputTokens: 10 } },
+          },
+          {
+            id: `${runId}:node:1`,
+            agentExecution: { agentId: "device-resolver", usage: { inputTokens: 11 } },
+          },
+        ],
+      })
+      expect(summaryInputs).toEqual([{ projectId: sixb.id, executionIds }])
     })
   })
 
@@ -1948,6 +2074,21 @@ describe("SixbServer HTTP contract", () => {
           queueLeaseExpiresAt: new Date(Date.now() + 60_000),
         },
       })
+      const aiUsage = sixb.storage.aiUsage
+      if (!aiUsage) throw new Error("expected AI usage storage")
+      await aiUsage.recordModelCall({
+        id: "workflow-agent-usage",
+        projectId: sixb.id,
+        executionId: agentExecutionId,
+        attempt: 1,
+        callId: "workflow-agent-call",
+        requesterGroupIds: [],
+        providerId: "test",
+        requestedModelId: "test-model",
+        responseId: "workflow-agent-response",
+        usage: { inputTokens: 15, outputTokens: 5, cacheWriteInputTokens: 2 },
+        occurredAt: new Date("2026-07-02T12:00:00.000Z"),
+      })
 
       const detailResponse = await fetch(
         `${baseUrl}/api/workflow-runs/${runId}/nodes/resolveDevice/agent-execution`
@@ -1960,6 +2101,13 @@ describe("SixbServer HTTP contract", () => {
         status: "running",
         prompt: "Resolve fan-1.",
         modelId: "test-model",
+        usage: {
+          inputTokens: 15,
+          outputTokens: 5,
+          totalTokens: 20,
+          cacheWriteInputTokens: 2,
+          reportingStatus: "complete",
+        },
       })
       expect(JSON.stringify(detail)).not.toContain("secret-execution-token")
 
@@ -1975,10 +2123,37 @@ describe("SixbServer HTTP contract", () => {
           {
             id: nodeRunId,
             status: "cancelled",
-            agentExecution: { status: "cancelled", agentId: "device-resolver" },
+            agentExecution: {
+              status: "cancelled",
+              agentId: "device-resolver",
+              usage: { inputTokens: 15, outputTokens: 5 },
+            },
           },
         ],
       })
+
+      const cancelledExecutionResponse = await fetch(
+        `${baseUrl}/api/workflow-runs/${runId}/nodes/resolveDevice/agent-execution`
+      )
+      expect(cancelledExecutionResponse.status).toBe(200)
+      const cancelledExecution = (await cancelledExecutionResponse.json()) as {
+        completedAt: string
+        error: { at: string }
+      }
+      expect(cancelledExecution).toMatchObject({
+        status: "cancelled",
+        error: {
+          code: "runtime.cancelled",
+          message: "Execution was cancelled.",
+          details: {
+            agentId: "device-resolver",
+            workflowId: "review-device-health-workflow",
+            workflowRunId: runId,
+            nodeRunId,
+          },
+        },
+      })
+      expect(cancelledExecution.error.at).toBe(cancelledExecution.completedAt)
     })
   })
 
@@ -2127,9 +2302,15 @@ describe("SixbServer HTTP contract", () => {
           status: "failed",
           completedAt: "2026-02-18T09:12:04.000Z",
           error: {
-            name: "NotificationError",
-            message: "Notification failed",
-            phase: "effects",
+            code: "internal.unexpected",
+            message: "An unexpected internal error occurred.",
+            retryable: false,
+            at: "2026-02-18T09:12:04.000Z",
+            details: {
+              actionId: "syncDeviceLabel",
+              runId: "act_audit_previous",
+              phase: "effects",
+            },
           },
         },
       })

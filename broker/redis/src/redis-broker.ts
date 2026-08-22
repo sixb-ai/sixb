@@ -7,7 +7,7 @@ import {
   type BrokerStreamDefinition,
 } from "@sixb/core/broker"
 import {
-  type RedisBrokerClient,
+  type RedisBrokerCommandClient,
   type RedisBrokerConnectionOptions,
   RedisConnectionManager,
 } from "./connection"
@@ -84,8 +84,8 @@ export class RedisBroker implements Broker {
     assertPrefix(prefix)
 
     this.connectionManager = new RedisConnectionManager(options.connection)
-    this.streamManager = new StreamManager({ connectionManager: this.connectionManager, prefix })
     this.dedupeTtlMs = positiveInteger(options.dedupeTtlMs ?? DEFAULT_DEDUPE_TTL_MS)
+    this.streamManager = new StreamManager({ connectionManager: this.connectionManager, prefix })
     this.readBatchSize = positiveInteger(options.readBatchSize ?? DEFAULT_READ_BATCH_SIZE)
     this.subscribeBatchSize = positiveInteger(
       options.subscribeBatchSize ?? DEFAULT_SUBSCRIBE_BATCH_SIZE
@@ -400,13 +400,18 @@ export class RedisBroker implements Broker {
     const unsubscribe = this.subscriptionRegistry.register(pump)
 
     try {
-      // Resolve "latest" to a concrete id once. Reusing "$" after each BLOCK
-      // timeout can skip records written between two XREAD calls.
-      const cursor =
-        params.afterCursor ??
-        (params.from === "earliest"
-          ? (lastTrimmedId ?? "0-0")
-          : await this.subscriptionStartCursor(client, ensured))
+      let cursor = params.afterCursor
+      if (cursor === undefined) {
+        if (params.from === "earliest") {
+          cursor = lastTrimmedId ?? "0-0"
+        } else {
+          // Resolve "latest" to a concrete id once. Reusing "$" after each BLOCK timeout can
+          // skip records written between XREAD calls. The concrete cursor closes the gap before
+          // the pump starts from the same dedicated connection.
+          const commandClient = this.connectionManager.boundedCommandClient(client)
+          cursor = await this.subscriptionStartCursor(commandClient, ensured)
+        }
+      }
       this.assertOpen()
       pump.start(cursor)
       return unsubscribe
@@ -429,7 +434,7 @@ export class RedisBroker implements Broker {
   }
 
   private async appendBatch(params: {
-    client: RedisBrokerClient
+    client: RedisBrokerCommandClient
     ensured: EnsuredStream
     records: readonly EncodedAppendRecord[]
   }): Promise<readonly AppendBatchResult[]> {
@@ -473,7 +478,10 @@ export class RedisBroker implements Broker {
     return results
   }
 
-  private async trimRetention(client: RedisBrokerClient, ensured: EnsuredStream): Promise<void> {
+  private async trimRetention(
+    client: RedisBrokerCommandClient,
+    ensured: EnsuredStream
+  ): Promise<void> {
     try {
       await client.send("EVAL", [
         TRIM_STREAM_RETENTION_SCRIPT,
@@ -487,7 +495,7 @@ export class RedisBroker implements Broker {
   }
 
   private async fetchRecordByCursor(
-    client: RedisBrokerClient,
+    client: RedisBrokerCommandClient,
     ensured: EnsuredStream,
     cursor: string
   ): Promise<BrokerRecord> {
@@ -508,7 +516,7 @@ export class RedisBroker implements Broker {
   }
 
   private async readRange(
-    client: RedisBrokerClient,
+    client: RedisBrokerCommandClient,
     ensured: EnsuredStream,
     start: string,
     count: number,
@@ -530,7 +538,7 @@ export class RedisBroker implements Broker {
   }
 
   private async enforceAgeRetention(
-    client: RedisBrokerClient,
+    client: RedisBrokerCommandClient,
     ensured: EnsuredStream
   ): Promise<void> {
     try {
@@ -550,7 +558,7 @@ export class RedisBroker implements Broker {
   }
 
   private async subscriptionStartCursor(
-    client: RedisBrokerClient,
+    client: RedisBrokerCommandClient,
     ensured: EnsuredStream
   ): Promise<string> {
     const entries = await this.readReverseRange(client, ensured, "+", "-", 1)
@@ -564,7 +572,7 @@ export class RedisBroker implements Broker {
   }
 
   private async readReverseRange(
-    client: RedisBrokerClient,
+    client: RedisBrokerCommandClient,
     ensured: EnsuredStream,
     start: string,
     end: string,
@@ -586,7 +594,7 @@ export class RedisBroker implements Broker {
   }
 
   private async readLastTrimmedId(
-    client: RedisBrokerClient,
+    client: RedisBrokerCommandClient,
     ensured: EnsuredStream
   ): Promise<string | undefined> {
     const metadata = await this.streamManager.readMetadata(client, ensured, ["lastTrimmedId"])

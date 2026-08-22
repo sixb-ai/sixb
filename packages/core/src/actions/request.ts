@@ -174,13 +174,22 @@ export async function waitForActionRun(
     let settled = false
     let checking = false
 
+    const releaseSubscription = (release: (() => void) | undefined) => {
+      if (!release) return
+      try {
+        release()
+      } catch (error) {
+        console.error("[Sixb] Failed to release action run wait subscription:", error)
+      }
+    }
+
     const cleanup = () => {
       if (settled) return
       settled = true
       clearTimer(timer)
       clearTimer(pollTimer)
-      unsubscribe?.()
       signal?.removeEventListener("abort", onAbort)
+      releaseSubscription(unsubscribe)
     }
 
     const rejectWith = (error: unknown) => {
@@ -248,10 +257,22 @@ export async function waitForActionRun(
         }
       })
       .then((unsubscribeEvents) => {
+        // Timeout or abort can settle the wait before the asynchronous subscription resolves.
+        // `cleanup()` had no handle to release in that case, so release the late handle here.
+        if (settled) {
+          releaseSubscription(unsubscribeEvents)
+          return
+        }
         unsubscribe = unsubscribeEvents
         void check()
       })
-      .catch(rejectWith)
+      .catch((error: unknown) => {
+        if (settled) {
+          console.error("[Sixb] Action run wait subscription failed after the wait settled:", error)
+          return
+        }
+        rejectWith(error)
+      })
   })
 }
 

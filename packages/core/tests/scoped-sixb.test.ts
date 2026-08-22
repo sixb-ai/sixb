@@ -469,8 +469,13 @@ describe("bound Sixb operational access", () => {
     // The authorization context carries only "operations". Attribution resolves the complete
     // durable membership set so a token-scoped caller cannot avoid the commercial group quota.
     expect(run?.requesterGroupIds).toEqual(["commercial", "operations"])
+    await expect(runner.workflows.runs.listNodes(result.runId)).resolves.toMatchObject({
+      nodes: [],
+      total: 0,
+    })
 
     const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
+    await expect(operator.workflows.runs.listNodes(result.runId)).resolves.toBeNull()
     expect(operator.workflows.requestById(input)).rejects.toThrow(AuthorizationError)
   })
 
@@ -680,9 +685,32 @@ describe("bound Sixb operational access", () => {
     })
     expect(result.run.id).toBeString()
     expect(result.run.requesterGroupIds).toEqual(["commercial", "operations"])
+    expect(result.run.usage).toBeUndefined()
     await expect(
       host.storage.executions.getById({ projectId: host.id, id: result.run.executionId })
     ).resolves.toMatchObject({ requestedBy: principal })
+
+    await host.storage.aiUsage?.recordModelCall({
+      id: "usage_contract_agent",
+      projectId: host.id,
+      executionId: result.run.executionId,
+      attempt: 1,
+      callId: "call_contract_agent",
+      requesterGroupIds: result.run.requesterGroupIds,
+      providerId: "gateway",
+      requestedModelId: "openai/gpt-5",
+      responseId: "response_contract_agent",
+      usage: { inputTokens: 12, outputTokens: 3 },
+      occurredAt: new Date("2026-07-01T12:00:00.000Z"),
+    })
+    await expect(runner.agents.runs.getById(result.run.id)).resolves.toMatchObject({
+      usage: {
+        inputTokens: 12,
+        outputTokens: 3,
+        totalTokens: 15,
+        reportingStatus: "complete",
+      },
+    })
 
     await host.storage.auth?.groupMemberships.remove({
       projectId: host.id,
@@ -694,6 +722,7 @@ describe("bound Sixb operational access", () => {
       id: result.run.id,
     })
     expect(stored?.requesterGroupIds).toEqual(["commercial", "operations"])
+    expect(stored).not.toHaveProperty("usage")
 
     const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
     expect(

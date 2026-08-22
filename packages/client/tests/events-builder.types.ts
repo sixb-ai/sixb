@@ -269,7 +269,49 @@ events
   .run("run-1")
   .subscribe((event) => {
     const runId: string = event.payload.runId
+    if (
+      (event.type === "workflow.run.finished" || event.type === "workflow.run.node.finished") &&
+      event.payload.error
+    ) {
+      const code: "internal.unexpected" | "runtime.cancelled" | "workflow.node_failed" =
+        event.payload.error.code
+      const message: string = event.payload.error.message
+      // @ts-expect-error — workflow lifecycle failures expose only their primitive's code union.
+      const datasetCode: "dataset.not_found" = event.payload.error.code
+      void [code, message, datasetCode]
+    }
     void runId
+  })
+
+events
+  .pipelines()
+  .run("run-1")
+  .subscribe((event) => {
+    if (
+      (event.type === "pipeline.run.finished" || event.type === "pipeline.run.step.finished") &&
+      event.payload.error
+    ) {
+      const code: "internal.unexpected" | "runtime.cancelled" | "pipeline.step_failed" =
+        event.payload.error.code
+      const message: string = event.payload.error.message
+      // @ts-expect-error — pipeline lifecycle failures expose only their primitive's code union.
+      const datasetCode: "dataset.not_found" = event.payload.error.code
+      void [code, message, datasetCode]
+    }
+  })
+
+events
+  .syncs()
+  .run("run-1")
+  .subscribe((event) => {
+    if (event.type === "sync.run.finished" && event.payload.error) {
+      const code: "internal.unexpected" | "runtime.cancelled" | "sync.execution_failed" =
+        event.payload.error.code
+      const message: string = event.payload.error.message
+      // @ts-expect-error — sync lifecycle failures expose only their primitive's code union.
+      const datasetCode: "dataset.not_found" = event.payload.error.code
+      void [code, message, datasetCode]
+    }
   })
 
 events
@@ -294,8 +336,15 @@ events
   .byId("sensor-1")
   .failed()
   .subscribe((event) => {
+    const code:
+      | "internal.unexpected"
+      | "runtime.cancelled"
+      | "queue.enqueue_failed"
+      | "action.phase_failed" = event.payload.error.code
     const message: string = event.payload.error.message
-    void message
+    // @ts-expect-error — Action lifecycle failures expose only their primitive's code union.
+    const datasetCode: "dataset.not_found" = event.payload.error.code
+    void [code, message, datasetCode]
   })
 
 events

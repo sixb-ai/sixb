@@ -30,6 +30,32 @@ import agentExecutionsSql from "./migrations/009-agent-executions.sql" with { ty
 import aiUsageAccountingFoundationSql from "./migrations/010-ai-usage-accounting-foundation.sql" with {
   type: "text",
 }
+import syncFailureRecordSql from "./migrations/011-sync-failure-record.sql" with { type: "text" }
+import pipelineFailureRecordSql from "./migrations/012-pipeline-failure-record.sql" with {
+  type: "text",
+}
+import workflowFailureRecordSql from "./migrations/013-workflow-failure-record.sql" with {
+  type: "text",
+}
+import agentFailureRecordSql from "./migrations/014-agent-failure-record.sql" with { type: "text" }
+import projectionFailureRecordSql from "./migrations/015-projection-failure-record.sql" with {
+  type: "text",
+}
+import webhookRunFailureRecordSql from "./migrations/016-webhook-run-failure-record.sql" with {
+  type: "text",
+}
+import actionFailureRecordSql from "./migrations/017-action-failure-record.sql" with {
+  type: "text",
+}
+import ontologyOutboxFailureRecordSql from "./migrations/018-ontology-outbox-failure-record.sql" with {
+  type: "text",
+}
+import webhookDeliveryFailureRecordSql from "./migrations/019-webhook-delivery-failure-record.sql" with {
+  type: "text",
+}
+import dropRunUsageProjectionsSql from "./migrations/020-drop-run-usage-projections.sql" with {
+  type: "text",
+}
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -60,6 +86,16 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("008-action-executions", actionExecutionsSql),
     sqliteSql("009-agent-executions", agentExecutionsSql),
     sqliteSql("010-ai-usage-accounting-foundation", aiUsageAccountingFoundationSql),
+    sqliteSql("011-sync-failure-record", syncFailureRecordSql),
+    sqliteSql("012-pipeline-failure-record", pipelineFailureRecordSql),
+    sqliteSql("013-workflow-failure-record", workflowFailureRecordSql),
+    sqliteSql("014-agent-failure-record", agentFailureRecordSql),
+    sqliteSql("015-projection-failure-record", projectionFailureRecordSql),
+    sqliteSql("016-webhook-run-failure-record", webhookRunFailureRecordSql),
+    sqliteSql("017-action-failure-record", actionFailureRecordSql),
+    sqliteSql("018-ontology-outbox-failure-record", ontologyOutboxFailureRecordSql),
+    sqliteSql("019-webhook-delivery-failure-record", webhookDeliveryFailureRecordSql),
+    sqliteSql("020-drop-run-usage-projections", dropRunUsageProjectionsSql),
   ],
 })
 
@@ -136,10 +172,6 @@ export async function migrateSqliteStorage(basePath: string): Promise<void> {
   for (const migrator of createSqliteStorageMigrators(basePath)) {
     await migrator.migrate()
   }
-}
-
-export async function migrateSqliteDatabase(path: string): Promise<void> {
-  await createSqliteMigrator({ path, migrations: sqliteStorageMigrations }).migrate()
 }
 
 function sqliteMigrationHistoryStore(db: Database): MigrationHistoryStore {

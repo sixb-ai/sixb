@@ -5276,9 +5276,14 @@
                   "properties": {
                     "error": {
                       "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["dataset.not_found"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
                     }
                   },
-                  "required": ["error"],
+                  "required": ["error", "code"],
                   "additionalProperties": false
                 }
               }
@@ -5457,9 +5462,14 @@
                   "properties": {
                     "error": {
                       "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["dataset.not_found"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
                     }
                   },
-                  "required": ["error"],
+                  "required": ["error", "code"],
                   "additionalProperties": false
                 }
               }
@@ -5626,9 +5636,14 @@
                   "properties": {
                     "error": {
                       "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["dataset.not_found", "dataset.version_not_found"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
                     }
                   },
-                  "required": ["error"],
+                  "required": ["error", "code"],
                   "additionalProperties": false
                 }
               }
@@ -5869,9 +5884,14 @@
                   "properties": {
                     "error": {
                       "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["dataset.not_found", "dataset.version_not_found"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
                     }
                   },
-                  "required": ["error"],
+                  "required": ["error", "code"],
                   "additionalProperties": false
                 }
               }
@@ -6067,14 +6087,54 @@
                           "error": {
                             "type": "object",
                             "properties": {
-                              "name": {
-                                "type": "string"
+                              "code": {
+                                "type": "string",
+                                "enum": [
+                                  "internal.unexpected",
+                                  "runtime.cancelled",
+                                  "sync.execution_failed"
+                                ]
                               },
                               "message": {
-                                "type": "string"
+                                "type": "string",
+                                "maxLength": 4096
+                              },
+                              "retryable": {
+                                "type": "boolean"
+                              },
+                              "at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "details": {
+                                "description": "Any JSON-compatible value.",
+                                "nullable": true,
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {}
+                                  },
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                  }
+                                ]
+                              },
+                              "truncated": {
+                                "type": "boolean",
+                                "enum": [true]
                               }
                             },
-                            "required": ["message"],
+                            "required": ["code", "message", "retryable", "at"],
                             "additionalProperties": false
                           }
                         },
@@ -6297,14 +6357,54 @@
                         "error": {
                           "type": "object",
                           "properties": {
-                            "name": {
-                              "type": "string"
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "sync.execution_failed"
+                              ]
                             },
                             "message": {
-                              "type": "string"
+                              "type": "string",
+                              "maxLength": 4096
+                            },
+                            "retryable": {
+                              "type": "boolean"
+                            },
+                            "at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "details": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              ]
+                            },
+                            "truncated": {
+                              "type": "boolean",
+                              "enum": [true]
                             }
                           },
-                          "required": ["message"],
+                          "required": ["code", "message", "retryable", "at"],
                           "additionalProperties": false
                         }
                       },
@@ -6484,14 +6584,54 @@
                           "error": {
                             "type": "object",
                             "properties": {
-                              "name": {
-                                "type": "string"
+                              "code": {
+                                "type": "string",
+                                "enum": [
+                                  "internal.unexpected",
+                                  "runtime.cancelled",
+                                  "sync.execution_failed"
+                                ]
                               },
                               "message": {
-                                "type": "string"
+                                "type": "string",
+                                "maxLength": 4096
+                              },
+                              "retryable": {
+                                "type": "boolean"
+                              },
+                              "at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "details": {
+                                "description": "Any JSON-compatible value.",
+                                "nullable": true,
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {}
+                                  },
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                  }
+                                ]
+                              },
+                              "truncated": {
+                                "type": "boolean",
+                                "enum": [true]
                               }
                             },
-                            "required": ["message"],
+                            "required": ["code", "message", "retryable", "at"],
                             "additionalProperties": false
                           }
                         },
@@ -7001,14 +7141,54 @@
                           "error": {
                             "type": "object",
                             "properties": {
-                              "name": {
-                                "type": "string"
+                              "code": {
+                                "type": "string",
+                                "enum": [
+                                  "internal.unexpected",
+                                  "runtime.cancelled",
+                                  "pipeline.step_failed"
+                                ]
                               },
                               "message": {
-                                "type": "string"
+                                "type": "string",
+                                "maxLength": 4096
+                              },
+                              "retryable": {
+                                "type": "boolean"
+                              },
+                              "at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "details": {
+                                "description": "Any JSON-compatible value.",
+                                "nullable": true,
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {}
+                                  },
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                  }
+                                ]
+                              },
+                              "truncated": {
+                                "type": "boolean",
+                                "enum": [true]
                               }
                             },
-                            "required": ["message"],
+                            "required": ["code", "message", "retryable", "at"],
                             "additionalProperties": false
                           }
                         },
@@ -7331,14 +7511,54 @@
                         "error": {
                           "type": "object",
                           "properties": {
-                            "name": {
-                              "type": "string"
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "pipeline.step_failed"
+                              ]
                             },
                             "message": {
-                              "type": "string"
+                              "type": "string",
+                              "maxLength": 4096
+                            },
+                            "retryable": {
+                              "type": "boolean"
+                            },
+                            "at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "details": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              ]
+                            },
+                            "truncated": {
+                              "type": "boolean",
+                              "enum": [true]
                             }
                           },
-                          "required": ["message"],
+                          "required": ["code", "message", "retryable", "at"],
                           "additionalProperties": false
                         }
                       },
@@ -7486,14 +7706,54 @@
                           "error": {
                             "type": "object",
                             "properties": {
-                              "name": {
-                                "type": "string"
+                              "code": {
+                                "type": "string",
+                                "enum": [
+                                  "internal.unexpected",
+                                  "runtime.cancelled",
+                                  "pipeline.step_failed"
+                                ]
                               },
                               "message": {
-                                "type": "string"
+                                "type": "string",
+                                "maxLength": 4096
+                              },
+                              "retryable": {
+                                "type": "boolean"
+                              },
+                              "at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "details": {
+                                "description": "Any JSON-compatible value.",
+                                "nullable": true,
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {}
+                                  },
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                  }
+                                ]
+                              },
+                              "truncated": {
+                                "type": "boolean",
+                                "enum": [true]
                               }
                             },
-                            "required": ["message"],
+                            "required": ["code", "message", "retryable", "at"],
                             "additionalProperties": false
                           }
                         },
@@ -7613,14 +7873,54 @@
                         "error": {
                           "type": "object",
                           "properties": {
-                            "name": {
-                              "type": "string"
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "pipeline.step_failed"
+                              ]
                             },
                             "message": {
-                              "type": "string"
+                              "type": "string",
+                              "maxLength": 4096
+                            },
+                            "retryable": {
+                              "type": "boolean"
+                            },
+                            "at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "details": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              ]
+                            },
+                            "truncated": {
+                              "type": "boolean",
+                              "enum": [true]
                             }
                           },
-                          "required": ["message"],
+                          "required": ["code", "message", "retryable", "at"],
                           "additionalProperties": false
                         }
                       },
@@ -7699,14 +7999,54 @@
                           "error": {
                             "type": "object",
                             "properties": {
-                              "name": {
-                                "type": "string"
+                              "code": {
+                                "type": "string",
+                                "enum": [
+                                  "internal.unexpected",
+                                  "runtime.cancelled",
+                                  "pipeline.step_failed"
+                                ]
                               },
                               "message": {
-                                "type": "string"
+                                "type": "string",
+                                "maxLength": 4096
+                              },
+                              "retryable": {
+                                "type": "boolean"
+                              },
+                              "at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "details": {
+                                "description": "Any JSON-compatible value.",
+                                "nullable": true,
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {}
+                                  },
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                  }
+                                ]
+                              },
+                              "truncated": {
+                                "type": "boolean",
+                                "enum": [true]
                               }
                             },
-                            "required": ["message"],
+                            "required": ["code", "message", "retryable", "at"],
                             "additionalProperties": false
                           }
                         },
@@ -8253,7 +8593,57 @@
                             "type": "string"
                           },
                           "error": {
-                            "type": "string"
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": [
+                                  "internal.unexpected",
+                                  "runtime.cancelled",
+                                  "workflow.node_failed"
+                                ]
+                              },
+                              "message": {
+                                "type": "string",
+                                "maxLength": 4096
+                              },
+                              "retryable": {
+                                "type": "boolean"
+                              },
+                              "at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "details": {
+                                "description": "Any JSON-compatible value.",
+                                "nullable": true,
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {}
+                                  },
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                  }
+                                ]
+                              },
+                              "truncated": {
+                                "type": "boolean",
+                                "enum": [true]
+                              }
+                            },
+                            "required": ["code", "message", "retryable", "at"],
+                            "additionalProperties": false
                           },
                           "requestedBy": {
                             "type": "object",
@@ -8667,7 +9057,57 @@
                           "type": "string"
                         },
                         "error": {
-                          "type": "string"
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "workflow.node_failed"
+                              ]
+                            },
+                            "message": {
+                              "type": "string",
+                              "maxLength": 4096
+                            },
+                            "retryable": {
+                              "type": "boolean"
+                            },
+                            "at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "details": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              ]
+                            },
+                            "truncated": {
+                              "type": "boolean",
+                              "enum": [true]
+                            }
+                          },
+                          "required": ["code", "message", "retryable", "at"],
+                          "additionalProperties": false
                         },
                         "requestedBy": {
                           "type": "object",
@@ -10102,7 +10542,57 @@
                             "type": "string"
                           },
                           "error": {
-                            "type": "string"
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": [
+                                  "internal.unexpected",
+                                  "runtime.cancelled",
+                                  "workflow.node_failed"
+                                ]
+                              },
+                              "message": {
+                                "type": "string",
+                                "maxLength": 4096
+                              },
+                              "retryable": {
+                                "type": "boolean"
+                              },
+                              "at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "details": {
+                                "description": "Any JSON-compatible value.",
+                                "nullable": true,
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {}
+                                  },
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                  }
+                                ]
+                              },
+                              "truncated": {
+                                "type": "boolean",
+                                "enum": [true]
+                              }
+                            },
+                            "required": ["code", "message", "retryable", "at"],
+                            "additionalProperties": false
                           },
                           "requestedBy": {
                             "type": "object",
@@ -10243,7 +10733,57 @@
                           "type": "string"
                         },
                         "error": {
-                          "type": "string"
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "workflow.node_failed"
+                              ]
+                            },
+                            "message": {
+                              "type": "string",
+                              "maxLength": 4096
+                            },
+                            "retryable": {
+                              "type": "boolean"
+                            },
+                            "at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "details": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              ]
+                            },
+                            "truncated": {
+                              "type": "boolean",
+                              "enum": [true]
+                            }
+                          },
+                          "required": ["code", "message", "retryable", "at"],
+                          "additionalProperties": false
                         },
                         "requestedBy": {
                           "type": "object",
@@ -10417,7 +10957,57 @@
                             }
                           },
                           "error": {
-                            "type": "string"
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": [
+                                  "internal.unexpected",
+                                  "runtime.cancelled",
+                                  "workflow.node_failed"
+                                ]
+                              },
+                              "message": {
+                                "type": "string",
+                                "maxLength": 4096
+                              },
+                              "retryable": {
+                                "type": "boolean"
+                              },
+                              "at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "details": {
+                                "description": "Any JSON-compatible value.",
+                                "nullable": true,
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {}
+                                  },
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                  }
+                                ]
+                              },
+                              "truncated": {
+                                "type": "boolean",
+                                "enum": [true]
+                              }
+                            },
+                            "required": ["code", "message", "retryable", "at"],
+                            "additionalProperties": false
                           },
                           "agentExecution": {
                             "type": "object",
@@ -10441,7 +11031,46 @@
                               },
                               "usage": {
                                 "type": "object",
-                                "additionalProperties": {}
+                                "properties": {
+                                  "inputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "outputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "totalTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "uncachedInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "cacheReadInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "cacheWriteInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "textOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "reasoningOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "reportingStatus": {
+                                    "type": "string",
+                                    "enum": ["complete", "partial", "unavailable"]
+                                  }
+                                },
+                                "required": ["reportingStatus"],
+                                "additionalProperties": false
                               },
                               "startedAt": {
                                 "type": "string"
@@ -10588,7 +11217,46 @@
                     },
                     "usage": {
                       "type": "object",
-                      "additionalProperties": {}
+                      "properties": {
+                        "inputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "outputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "totalTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "uncachedInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "cacheReadInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "cacheWriteInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "textOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "reasoningOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "reportingStatus": {
+                          "type": "string",
+                          "enum": ["complete", "partial", "unavailable"]
+                        }
+                      },
+                      "required": ["reportingStatus"],
+                      "additionalProperties": false
                     },
                     "startedAt": {
                       "type": "string"
@@ -10611,7 +11279,57 @@
                       "items": {}
                     },
                     "error": {
-                      "type": "string"
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "internal.unexpected",
+                            "runtime.cancelled",
+                            "agent.execution_failed"
+                          ]
+                        },
+                        "message": {
+                          "type": "string",
+                          "maxLength": 4096
+                        },
+                        "retryable": {
+                          "type": "boolean"
+                        },
+                        "at": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "details": {
+                          "description": "Any JSON-compatible value.",
+                          "nullable": true,
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "array",
+                              "items": {}
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": true
+                            }
+                          ]
+                        },
+                        "truncated": {
+                          "type": "boolean",
+                          "enum": [true]
+                        }
+                      },
+                      "required": ["code", "message", "retryable", "at"],
+                      "additionalProperties": false
                     },
                     "createdAt": {
                       "type": "string"
@@ -10771,7 +11489,57 @@
                           "type": "string"
                         },
                         "error": {
-                          "type": "string"
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "workflow.node_failed"
+                              ]
+                            },
+                            "message": {
+                              "type": "string",
+                              "maxLength": 4096
+                            },
+                            "retryable": {
+                              "type": "boolean"
+                            },
+                            "at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "details": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              ]
+                            },
+                            "truncated": {
+                              "type": "boolean",
+                              "enum": [true]
+                            }
+                          },
+                          "required": ["code", "message", "retryable", "at"],
+                          "additionalProperties": false
                         },
                         "requestedBy": {
                           "type": "object",
@@ -10945,7 +11713,57 @@
                             }
                           },
                           "error": {
-                            "type": "string"
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": [
+                                  "internal.unexpected",
+                                  "runtime.cancelled",
+                                  "workflow.node_failed"
+                                ]
+                              },
+                              "message": {
+                                "type": "string",
+                                "maxLength": 4096
+                              },
+                              "retryable": {
+                                "type": "boolean"
+                              },
+                              "at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "details": {
+                                "description": "Any JSON-compatible value.",
+                                "nullable": true,
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {}
+                                  },
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                  }
+                                ]
+                              },
+                              "truncated": {
+                                "type": "boolean",
+                                "enum": [true]
+                              }
+                            },
+                            "required": ["code", "message", "retryable", "at"],
+                            "additionalProperties": false
                           },
                           "agentExecution": {
                             "type": "object",
@@ -10969,7 +11787,46 @@
                               },
                               "usage": {
                                 "type": "object",
-                                "additionalProperties": {}
+                                "properties": {
+                                  "inputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "outputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "totalTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "uncachedInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "cacheReadInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "cacheWriteInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "textOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "reasoningOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "reportingStatus": {
+                                    "type": "string",
+                                    "enum": ["complete", "partial", "unavailable"]
+                                  }
+                                },
+                                "required": ["reportingStatus"],
+                                "additionalProperties": false
                               },
                               "startedAt": {
                                 "type": "string"
@@ -16004,27 +16861,58 @@
                           "error": {
                             "type": "object",
                             "properties": {
-                              "name": {
-                                "type": "string"
-                              },
-                              "message": {
-                                "type": "string"
-                              },
-                              "phase": {
+                              "code": {
                                 "type": "string",
                                 "enum": [
-                                  "request",
-                                  "enqueue",
-                                  "validation",
-                                  "writeback",
-                                  "edits",
-                                  "commit",
-                                  "effects",
-                                  "cancelled"
+                                  "internal.unexpected",
+                                  "runtime.cancelled",
+                                  "queue.enqueue_failed",
+                                  "action.phase_failed"
                                 ]
+                              },
+                              "message": {
+                                "type": "string",
+                                "maxLength": 4096
+                              },
+                              "retryable": {
+                                "type": "boolean"
+                              },
+                              "at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "details": {
+                                "type": "object",
+                                "properties": {
+                                  "actionId": {
+                                    "type": "string"
+                                  },
+                                  "runId": {
+                                    "type": "string"
+                                  },
+                                  "phase": {
+                                    "type": "string",
+                                    "enum": [
+                                      "request",
+                                      "enqueue",
+                                      "validation",
+                                      "writeback",
+                                      "edits",
+                                      "commit",
+                                      "effects",
+                                      "cancelled"
+                                    ]
+                                  }
+                                },
+                                "required": ["actionId", "runId", "phase"],
+                                "additionalProperties": false
+                              },
+                              "truncated": {
+                                "type": "boolean",
+                                "enum": [true]
                               }
                             },
-                            "required": ["message"],
+                            "required": ["code", "message", "retryable", "at", "details"],
                             "additionalProperties": false
                           }
                         },
@@ -16190,27 +17078,58 @@
                     "error": {
                       "type": "object",
                       "properties": {
-                        "name": {
-                          "type": "string"
-                        },
-                        "message": {
-                          "type": "string"
-                        },
-                        "phase": {
+                        "code": {
                           "type": "string",
                           "enum": [
-                            "request",
-                            "enqueue",
-                            "validation",
-                            "writeback",
-                            "edits",
-                            "commit",
-                            "effects",
-                            "cancelled"
+                            "internal.unexpected",
+                            "runtime.cancelled",
+                            "queue.enqueue_failed",
+                            "action.phase_failed"
                           ]
+                        },
+                        "message": {
+                          "type": "string",
+                          "maxLength": 4096
+                        },
+                        "retryable": {
+                          "type": "boolean"
+                        },
+                        "at": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "details": {
+                          "type": "object",
+                          "properties": {
+                            "actionId": {
+                              "type": "string"
+                            },
+                            "runId": {
+                              "type": "string"
+                            },
+                            "phase": {
+                              "type": "string",
+                              "enum": [
+                                "request",
+                                "enqueue",
+                                "validation",
+                                "writeback",
+                                "edits",
+                                "commit",
+                                "effects",
+                                "cancelled"
+                              ]
+                            }
+                          },
+                          "required": ["actionId", "runId", "phase"],
+                          "additionalProperties": false
+                        },
+                        "truncated": {
+                          "type": "boolean",
+                          "enum": [true]
                         }
                       },
-                      "required": ["message"],
+                      "required": ["code", "message", "retryable", "at", "details"],
                       "additionalProperties": false
                     },
                     "params": {
@@ -16218,85 +17137,187 @@
                       "additionalProperties": {}
                     },
                     "writeback": {
-                      "type": "object",
-                      "properties": {
-                        "status": {
-                          "type": "string",
-                          "enum": ["succeeded", "failed"]
-                        },
-                        "completedAt": {
-                          "type": "string"
-                        },
-                        "result": {},
-                        "error": {
+                      "anyOf": [
+                        {
                           "type": "object",
                           "properties": {
-                            "name": {
-                              "type": "string"
-                            },
-                            "message": {
-                              "type": "string"
-                            },
-                            "phase": {
+                            "status": {
                               "type": "string",
-                              "enum": [
-                                "request",
-                                "enqueue",
-                                "validation",
-                                "writeback",
-                                "edits",
-                                "commit",
-                                "effects",
-                                "cancelled"
+                              "enum": ["succeeded"]
+                            },
+                            "completedAt": {
+                              "type": "string"
+                            },
+                            "result": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
                               ]
                             }
                           },
-                          "required": ["message"],
+                          "required": ["status", "completedAt", "result"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": ["failed"]
+                            },
+                            "completedAt": {
+                              "type": "string"
+                            },
+                            "error": {
+                              "type": "object",
+                              "properties": {
+                                "code": {
+                                  "type": "string",
+                                  "enum": [
+                                    "internal.unexpected",
+                                    "runtime.cancelled",
+                                    "queue.enqueue_failed",
+                                    "action.phase_failed"
+                                  ]
+                                },
+                                "message": {
+                                  "type": "string",
+                                  "maxLength": 4096
+                                },
+                                "retryable": {
+                                  "type": "boolean"
+                                },
+                                "at": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "details": {
+                                  "type": "object",
+                                  "properties": {
+                                    "actionId": {
+                                      "type": "string"
+                                    },
+                                    "runId": {
+                                      "type": "string"
+                                    },
+                                    "phase": {
+                                      "type": "string",
+                                      "enum": ["writeback"]
+                                    }
+                                  },
+                                  "required": ["actionId", "runId", "phase"],
+                                  "additionalProperties": false
+                                },
+                                "truncated": {
+                                  "type": "boolean",
+                                  "enum": [true]
+                                }
+                              },
+                              "required": ["code", "message", "retryable", "at", "details"],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": ["status", "completedAt", "error"],
                           "additionalProperties": false
                         }
-                      },
-                      "required": ["status", "completedAt"],
-                      "additionalProperties": false
+                      ]
                     },
                     "effects": {
-                      "type": "object",
-                      "properties": {
-                        "status": {
-                          "type": "string",
-                          "enum": ["succeeded", "failed"]
-                        },
-                        "completedAt": {
-                          "type": "string"
-                        },
-                        "error": {
+                      "anyOf": [
+                        {
                           "type": "object",
                           "properties": {
-                            "name": {
-                              "type": "string"
-                            },
-                            "message": {
-                              "type": "string"
-                            },
-                            "phase": {
+                            "status": {
                               "type": "string",
-                              "enum": [
-                                "request",
-                                "enqueue",
-                                "validation",
-                                "writeback",
-                                "edits",
-                                "commit",
-                                "effects",
-                                "cancelled"
-                              ]
+                              "enum": ["succeeded"]
+                            },
+                            "completedAt": {
+                              "type": "string"
                             }
                           },
-                          "required": ["message"],
+                          "required": ["status", "completedAt"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": ["failed"]
+                            },
+                            "completedAt": {
+                              "type": "string"
+                            },
+                            "error": {
+                              "type": "object",
+                              "properties": {
+                                "code": {
+                                  "type": "string",
+                                  "enum": [
+                                    "internal.unexpected",
+                                    "runtime.cancelled",
+                                    "queue.enqueue_failed",
+                                    "action.phase_failed"
+                                  ]
+                                },
+                                "message": {
+                                  "type": "string",
+                                  "maxLength": 4096
+                                },
+                                "retryable": {
+                                  "type": "boolean"
+                                },
+                                "at": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "details": {
+                                  "type": "object",
+                                  "properties": {
+                                    "actionId": {
+                                      "type": "string"
+                                    },
+                                    "runId": {
+                                      "type": "string"
+                                    },
+                                    "phase": {
+                                      "type": "string",
+                                      "enum": ["effects"]
+                                    }
+                                  },
+                                  "required": ["actionId", "runId", "phase"],
+                                  "additionalProperties": false
+                                },
+                                "truncated": {
+                                  "type": "boolean",
+                                  "enum": [true]
+                                }
+                              },
+                              "required": ["code", "message", "retryable", "at", "details"],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": ["status", "completedAt", "error"],
                           "additionalProperties": false
                         }
-                      },
-                      "required": ["status", "completedAt"],
-                      "additionalProperties": false
+                      ]
                     }
                   },
                   "required": [
@@ -18446,21 +19467,43 @@
                           "type": "object",
                           "properties": {
                             "inputTokens": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": 0
                             },
                             "outputTokens": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": 0
                             },
                             "totalTokens": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": 0
                             },
-                            "reasoningTokens": {
-                              "type": "number"
+                            "uncachedInputTokens": {
+                              "type": "integer",
+                              "minimum": 0
                             },
-                            "cachedInputTokens": {
-                              "type": "number"
+                            "cacheReadInputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "cacheWriteInputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "textOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "reasoningOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "reportingStatus": {
+                              "type": "string",
+                              "enum": ["complete", "partial", "unavailable"]
                             }
                           },
+                          "required": ["reportingStatus"],
                           "additionalProperties": false
                         },
                         "diagnostics": {
@@ -18499,7 +19542,57 @@
                           }
                         },
                         "error": {
-                          "type": "string"
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "agent.execution_failed"
+                              ]
+                            },
+                            "message": {
+                              "type": "string",
+                              "maxLength": 4096
+                            },
+                            "retryable": {
+                              "type": "boolean"
+                            },
+                            "at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "details": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              ]
+                            },
+                            "truncated": {
+                              "type": "boolean",
+                              "enum": [true]
+                            }
+                          },
+                          "required": ["code", "message", "retryable", "at"],
+                          "additionalProperties": false
                         },
                         "attempt": {
                           "type": "number"
@@ -18950,21 +20043,43 @@
                           "type": "object",
                           "properties": {
                             "inputTokens": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": 0
                             },
                             "outputTokens": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": 0
                             },
                             "totalTokens": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": 0
                             },
-                            "reasoningTokens": {
-                              "type": "number"
+                            "uncachedInputTokens": {
+                              "type": "integer",
+                              "minimum": 0
                             },
-                            "cachedInputTokens": {
-                              "type": "number"
+                            "cacheReadInputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "cacheWriteInputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "textOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "reasoningOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "reportingStatus": {
+                              "type": "string",
+                              "enum": ["complete", "partial", "unavailable"]
                             }
                           },
+                          "required": ["reportingStatus"],
                           "additionalProperties": false
                         },
                         "diagnostics": {
@@ -19003,7 +20118,57 @@
                           }
                         },
                         "error": {
-                          "type": "string"
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "agent.execution_failed"
+                              ]
+                            },
+                            "message": {
+                              "type": "string",
+                              "maxLength": 4096
+                            },
+                            "retryable": {
+                              "type": "boolean"
+                            },
+                            "at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "details": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              ]
+                            },
+                            "truncated": {
+                              "type": "boolean",
+                              "enum": [true]
+                            }
+                          },
+                          "required": ["code", "message", "retryable", "at"],
+                          "additionalProperties": false
                         },
                         "attempt": {
                           "type": "number"
@@ -19206,21 +20371,43 @@
                           "type": "object",
                           "properties": {
                             "inputTokens": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": 0
                             },
                             "outputTokens": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": 0
                             },
                             "totalTokens": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": 0
                             },
-                            "reasoningTokens": {
-                              "type": "number"
+                            "uncachedInputTokens": {
+                              "type": "integer",
+                              "minimum": 0
                             },
-                            "cachedInputTokens": {
-                              "type": "number"
+                            "cacheReadInputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "cacheWriteInputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "textOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "reasoningOutputTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "reportingStatus": {
+                              "type": "string",
+                              "enum": ["complete", "partial", "unavailable"]
                             }
                           },
+                          "required": ["reportingStatus"],
                           "additionalProperties": false
                         },
                         "diagnostics": {
@@ -19259,7 +20446,57 @@
                           }
                         },
                         "error": {
-                          "type": "string"
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "agent.execution_failed"
+                              ]
+                            },
+                            "message": {
+                              "type": "string",
+                              "maxLength": 4096
+                            },
+                            "retryable": {
+                              "type": "boolean"
+                            },
+                            "at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "details": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              ]
+                            },
+                            "truncated": {
+                              "type": "boolean",
+                              "enum": [true]
+                            }
+                          },
+                          "required": ["code", "message", "retryable", "at"],
+                          "additionalProperties": false
                         },
                         "attempt": {
                           "type": "number"
@@ -19484,21 +20721,43 @@
                             "type": "object",
                             "properties": {
                               "inputTokens": {
-                                "type": "number"
+                                "type": "integer",
+                                "minimum": 0
                               },
                               "outputTokens": {
-                                "type": "number"
+                                "type": "integer",
+                                "minimum": 0
                               },
                               "totalTokens": {
-                                "type": "number"
+                                "type": "integer",
+                                "minimum": 0
                               },
-                              "reasoningTokens": {
-                                "type": "number"
+                              "uncachedInputTokens": {
+                                "type": "integer",
+                                "minimum": 0
                               },
-                              "cachedInputTokens": {
-                                "type": "number"
+                              "cacheReadInputTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "cacheWriteInputTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "textOutputTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "reasoningOutputTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "reportingStatus": {
+                                "type": "string",
+                                "enum": ["complete", "partial", "unavailable"]
                               }
                             },
+                            "required": ["reportingStatus"],
                             "additionalProperties": false
                           },
                           "diagnostics": {
@@ -19537,7 +20796,57 @@
                             }
                           },
                           "error": {
-                            "type": "string"
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": [
+                                  "internal.unexpected",
+                                  "runtime.cancelled",
+                                  "agent.execution_failed"
+                                ]
+                              },
+                              "message": {
+                                "type": "string",
+                                "maxLength": 4096
+                              },
+                              "retryable": {
+                                "type": "boolean"
+                              },
+                              "at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "details": {
+                                "description": "Any JSON-compatible value.",
+                                "nullable": true,
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {}
+                                  },
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                  }
+                                ]
+                              },
+                              "truncated": {
+                                "type": "boolean",
+                                "enum": [true]
+                              }
+                            },
+                            "required": ["code", "message", "retryable", "at"],
+                            "additionalProperties": false
                           },
                           "attempt": {
                             "type": "number"
@@ -19713,21 +21022,43 @@
                       "type": "object",
                       "properties": {
                         "inputTokens": {
-                          "type": "number"
+                          "type": "integer",
+                          "minimum": 0
                         },
                         "outputTokens": {
-                          "type": "number"
+                          "type": "integer",
+                          "minimum": 0
                         },
                         "totalTokens": {
-                          "type": "number"
+                          "type": "integer",
+                          "minimum": 0
                         },
-                        "reasoningTokens": {
-                          "type": "number"
+                        "uncachedInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
                         },
-                        "cachedInputTokens": {
-                          "type": "number"
+                        "cacheReadInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "cacheWriteInputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "textOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "reasoningOutputTokens": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "reportingStatus": {
+                          "type": "string",
+                          "enum": ["complete", "partial", "unavailable"]
                         }
                       },
+                      "required": ["reportingStatus"],
                       "additionalProperties": false
                     },
                     "diagnostics": {
@@ -19766,7 +21097,57 @@
                       }
                     },
                     "error": {
-                      "type": "string"
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "internal.unexpected",
+                            "runtime.cancelled",
+                            "agent.execution_failed"
+                          ]
+                        },
+                        "message": {
+                          "type": "string",
+                          "maxLength": 4096
+                        },
+                        "retryable": {
+                          "type": "boolean"
+                        },
+                        "at": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "details": {
+                          "description": "Any JSON-compatible value.",
+                          "nullable": true,
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "array",
+                              "items": {}
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": true
+                            }
+                          ]
+                        },
+                        "truncated": {
+                          "type": "boolean",
+                          "enum": [true]
+                        }
+                      },
+                      "required": ["code", "message", "retryable", "at"],
+                      "additionalProperties": false
                     },
                     "attempt": {
                       "type": "number"
@@ -24164,8 +25545,58 @@
                                   "finishedAt": {
                                     "type": "string"
                                   },
-                                  "errorMessage": {
-                                    "type": "string"
+                                  "error": {
+                                    "type": "object",
+                                    "properties": {
+                                      "code": {
+                                        "type": "string",
+                                        "enum": [
+                                          "internal.unexpected",
+                                          "runtime.cancelled",
+                                          "projection.execution_failed"
+                                        ]
+                                      },
+                                      "message": {
+                                        "type": "string",
+                                        "maxLength": 4096
+                                      },
+                                      "retryable": {
+                                        "type": "boolean"
+                                      },
+                                      "at": {
+                                        "type": "string",
+                                        "format": "date-time"
+                                      },
+                                      "details": {
+                                        "description": "Any JSON-compatible value.",
+                                        "nullable": true,
+                                        "anyOf": [
+                                          {
+                                            "type": "string"
+                                          },
+                                          {
+                                            "type": "number"
+                                          },
+                                          {
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "type": "array",
+                                            "items": {}
+                                          },
+                                          {
+                                            "type": "object",
+                                            "additionalProperties": true
+                                          }
+                                        ]
+                                      },
+                                      "truncated": {
+                                        "type": "boolean",
+                                        "enum": [true]
+                                      }
+                                    },
+                                    "required": ["code", "message", "retryable", "at"],
+                                    "additionalProperties": false
                                   },
                                   "identity": {
                                     "type": "object",
@@ -24276,8 +25707,58 @@
                                   "finishedAt": {
                                     "type": "string"
                                   },
-                                  "errorMessage": {
-                                    "type": "string"
+                                  "error": {
+                                    "type": "object",
+                                    "properties": {
+                                      "code": {
+                                        "type": "string",
+                                        "enum": [
+                                          "internal.unexpected",
+                                          "runtime.cancelled",
+                                          "projection.execution_failed"
+                                        ]
+                                      },
+                                      "message": {
+                                        "type": "string",
+                                        "maxLength": 4096
+                                      },
+                                      "retryable": {
+                                        "type": "boolean"
+                                      },
+                                      "at": {
+                                        "type": "string",
+                                        "format": "date-time"
+                                      },
+                                      "details": {
+                                        "description": "Any JSON-compatible value.",
+                                        "nullable": true,
+                                        "anyOf": [
+                                          {
+                                            "type": "string"
+                                          },
+                                          {
+                                            "type": "number"
+                                          },
+                                          {
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "type": "array",
+                                            "items": {}
+                                          },
+                                          {
+                                            "type": "object",
+                                            "additionalProperties": true
+                                          }
+                                        ]
+                                      },
+                                      "truncated": {
+                                        "type": "boolean",
+                                        "enum": [true]
+                                      }
+                                    },
+                                    "required": ["code", "message", "retryable", "at"],
+                                    "additionalProperties": false
                                   },
                                   "identity": {
                                     "type": "object",
@@ -24391,8 +25872,58 @@
                                   "finishedAt": {
                                     "type": "string"
                                   },
-                                  "errorMessage": {
-                                    "type": "string"
+                                  "error": {
+                                    "type": "object",
+                                    "properties": {
+                                      "code": {
+                                        "type": "string",
+                                        "enum": [
+                                          "internal.unexpected",
+                                          "runtime.cancelled",
+                                          "projection.execution_failed"
+                                        ]
+                                      },
+                                      "message": {
+                                        "type": "string",
+                                        "maxLength": 4096
+                                      },
+                                      "retryable": {
+                                        "type": "boolean"
+                                      },
+                                      "at": {
+                                        "type": "string",
+                                        "format": "date-time"
+                                      },
+                                      "details": {
+                                        "description": "Any JSON-compatible value.",
+                                        "nullable": true,
+                                        "anyOf": [
+                                          {
+                                            "type": "string"
+                                          },
+                                          {
+                                            "type": "number"
+                                          },
+                                          {
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "type": "array",
+                                            "items": {}
+                                          },
+                                          {
+                                            "type": "object",
+                                            "additionalProperties": true
+                                          }
+                                        ]
+                                      },
+                                      "truncated": {
+                                        "type": "boolean",
+                                        "enum": [true]
+                                      }
+                                    },
+                                    "required": ["code", "message", "retryable", "at"],
+                                    "additionalProperties": false
                                   },
                                   "identity": {
                                     "type": "object",
@@ -24551,8 +26082,58 @@
                                   "finishedAt": {
                                     "type": "string"
                                   },
-                                  "errorMessage": {
-                                    "type": "string"
+                                  "error": {
+                                    "type": "object",
+                                    "properties": {
+                                      "code": {
+                                        "type": "string",
+                                        "enum": [
+                                          "internal.unexpected",
+                                          "runtime.cancelled",
+                                          "projection.execution_failed"
+                                        ]
+                                      },
+                                      "message": {
+                                        "type": "string",
+                                        "maxLength": 4096
+                                      },
+                                      "retryable": {
+                                        "type": "boolean"
+                                      },
+                                      "at": {
+                                        "type": "string",
+                                        "format": "date-time"
+                                      },
+                                      "details": {
+                                        "description": "Any JSON-compatible value.",
+                                        "nullable": true,
+                                        "anyOf": [
+                                          {
+                                            "type": "string"
+                                          },
+                                          {
+                                            "type": "number"
+                                          },
+                                          {
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "type": "array",
+                                            "items": {}
+                                          },
+                                          {
+                                            "type": "object",
+                                            "additionalProperties": true
+                                          }
+                                        ]
+                                      },
+                                      "truncated": {
+                                        "type": "boolean",
+                                        "enum": [true]
+                                      }
+                                    },
+                                    "required": ["code", "message", "retryable", "at"],
+                                    "additionalProperties": false
                                   },
                                   "identity": {
                                     "type": "object",
@@ -24663,8 +26244,58 @@
                                   "finishedAt": {
                                     "type": "string"
                                   },
-                                  "errorMessage": {
-                                    "type": "string"
+                                  "error": {
+                                    "type": "object",
+                                    "properties": {
+                                      "code": {
+                                        "type": "string",
+                                        "enum": [
+                                          "internal.unexpected",
+                                          "runtime.cancelled",
+                                          "projection.execution_failed"
+                                        ]
+                                      },
+                                      "message": {
+                                        "type": "string",
+                                        "maxLength": 4096
+                                      },
+                                      "retryable": {
+                                        "type": "boolean"
+                                      },
+                                      "at": {
+                                        "type": "string",
+                                        "format": "date-time"
+                                      },
+                                      "details": {
+                                        "description": "Any JSON-compatible value.",
+                                        "nullable": true,
+                                        "anyOf": [
+                                          {
+                                            "type": "string"
+                                          },
+                                          {
+                                            "type": "number"
+                                          },
+                                          {
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "type": "array",
+                                            "items": {}
+                                          },
+                                          {
+                                            "type": "object",
+                                            "additionalProperties": true
+                                          }
+                                        ]
+                                      },
+                                      "truncated": {
+                                        "type": "boolean",
+                                        "enum": [true]
+                                      }
+                                    },
+                                    "required": ["code", "message", "retryable", "at"],
+                                    "additionalProperties": false
                                   },
                                   "identity": {
                                     "type": "object",
@@ -24778,8 +26409,58 @@
                                   "finishedAt": {
                                     "type": "string"
                                   },
-                                  "errorMessage": {
-                                    "type": "string"
+                                  "error": {
+                                    "type": "object",
+                                    "properties": {
+                                      "code": {
+                                        "type": "string",
+                                        "enum": [
+                                          "internal.unexpected",
+                                          "runtime.cancelled",
+                                          "projection.execution_failed"
+                                        ]
+                                      },
+                                      "message": {
+                                        "type": "string",
+                                        "maxLength": 4096
+                                      },
+                                      "retryable": {
+                                        "type": "boolean"
+                                      },
+                                      "at": {
+                                        "type": "string",
+                                        "format": "date-time"
+                                      },
+                                      "details": {
+                                        "description": "Any JSON-compatible value.",
+                                        "nullable": true,
+                                        "anyOf": [
+                                          {
+                                            "type": "string"
+                                          },
+                                          {
+                                            "type": "number"
+                                          },
+                                          {
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "type": "array",
+                                            "items": {}
+                                          },
+                                          {
+                                            "type": "object",
+                                            "additionalProperties": true
+                                          }
+                                        ]
+                                      },
+                                      "truncated": {
+                                        "type": "boolean",
+                                        "enum": [true]
+                                      }
+                                    },
+                                    "required": ["code", "message", "retryable", "at"],
+                                    "additionalProperties": false
                                   },
                                   "identity": {
                                     "type": "object",
@@ -24943,8 +26624,58 @@
                                   "finishedAt": {
                                     "type": "string"
                                   },
-                                  "errorMessage": {
-                                    "type": "string"
+                                  "error": {
+                                    "type": "object",
+                                    "properties": {
+                                      "code": {
+                                        "type": "string",
+                                        "enum": [
+                                          "internal.unexpected",
+                                          "runtime.cancelled",
+                                          "projection.execution_failed"
+                                        ]
+                                      },
+                                      "message": {
+                                        "type": "string",
+                                        "maxLength": 4096
+                                      },
+                                      "retryable": {
+                                        "type": "boolean"
+                                      },
+                                      "at": {
+                                        "type": "string",
+                                        "format": "date-time"
+                                      },
+                                      "details": {
+                                        "description": "Any JSON-compatible value.",
+                                        "nullable": true,
+                                        "anyOf": [
+                                          {
+                                            "type": "string"
+                                          },
+                                          {
+                                            "type": "number"
+                                          },
+                                          {
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "type": "array",
+                                            "items": {}
+                                          },
+                                          {
+                                            "type": "object",
+                                            "additionalProperties": true
+                                          }
+                                        ]
+                                      },
+                                      "truncated": {
+                                        "type": "boolean",
+                                        "enum": [true]
+                                      }
+                                    },
+                                    "required": ["code", "message", "retryable", "at"],
+                                    "additionalProperties": false
                                   },
                                   "identity": {
                                     "type": "object",
@@ -25055,8 +26786,58 @@
                                   "finishedAt": {
                                     "type": "string"
                                   },
-                                  "errorMessage": {
-                                    "type": "string"
+                                  "error": {
+                                    "type": "object",
+                                    "properties": {
+                                      "code": {
+                                        "type": "string",
+                                        "enum": [
+                                          "internal.unexpected",
+                                          "runtime.cancelled",
+                                          "projection.execution_failed"
+                                        ]
+                                      },
+                                      "message": {
+                                        "type": "string",
+                                        "maxLength": 4096
+                                      },
+                                      "retryable": {
+                                        "type": "boolean"
+                                      },
+                                      "at": {
+                                        "type": "string",
+                                        "format": "date-time"
+                                      },
+                                      "details": {
+                                        "description": "Any JSON-compatible value.",
+                                        "nullable": true,
+                                        "anyOf": [
+                                          {
+                                            "type": "string"
+                                          },
+                                          {
+                                            "type": "number"
+                                          },
+                                          {
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "type": "array",
+                                            "items": {}
+                                          },
+                                          {
+                                            "type": "object",
+                                            "additionalProperties": true
+                                          }
+                                        ]
+                                      },
+                                      "truncated": {
+                                        "type": "boolean",
+                                        "enum": [true]
+                                      }
+                                    },
+                                    "required": ["code", "message", "retryable", "at"],
+                                    "additionalProperties": false
                                   },
                                   "identity": {
                                     "type": "object",
@@ -25170,8 +26951,58 @@
                                   "finishedAt": {
                                     "type": "string"
                                   },
-                                  "errorMessage": {
-                                    "type": "string"
+                                  "error": {
+                                    "type": "object",
+                                    "properties": {
+                                      "code": {
+                                        "type": "string",
+                                        "enum": [
+                                          "internal.unexpected",
+                                          "runtime.cancelled",
+                                          "projection.execution_failed"
+                                        ]
+                                      },
+                                      "message": {
+                                        "type": "string",
+                                        "maxLength": 4096
+                                      },
+                                      "retryable": {
+                                        "type": "boolean"
+                                      },
+                                      "at": {
+                                        "type": "string",
+                                        "format": "date-time"
+                                      },
+                                      "details": {
+                                        "description": "Any JSON-compatible value.",
+                                        "nullable": true,
+                                        "anyOf": [
+                                          {
+                                            "type": "string"
+                                          },
+                                          {
+                                            "type": "number"
+                                          },
+                                          {
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "type": "array",
+                                            "items": {}
+                                          },
+                                          {
+                                            "type": "object",
+                                            "additionalProperties": true
+                                          }
+                                        ]
+                                      },
+                                      "truncated": {
+                                        "type": "boolean",
+                                        "enum": [true]
+                                      }
+                                    },
+                                    "required": ["code", "message", "retryable", "at"],
+                                    "additionalProperties": false
                                   },
                                   "identity": {
                                     "type": "object",
@@ -25379,8 +27210,58 @@
                                 "finishedAt": {
                                   "type": "string"
                                 },
-                                "errorMessage": {
-                                  "type": "string"
+                                "error": {
+                                  "type": "object",
+                                  "properties": {
+                                    "code": {
+                                      "type": "string",
+                                      "enum": [
+                                        "internal.unexpected",
+                                        "runtime.cancelled",
+                                        "projection.execution_failed"
+                                      ]
+                                    },
+                                    "message": {
+                                      "type": "string",
+                                      "maxLength": 4096
+                                    },
+                                    "retryable": {
+                                      "type": "boolean"
+                                    },
+                                    "at": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "details": {
+                                      "description": "Any JSON-compatible value.",
+                                      "nullable": true,
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "type": "array",
+                                          "items": {}
+                                        },
+                                        {
+                                          "type": "object",
+                                          "additionalProperties": true
+                                        }
+                                      ]
+                                    },
+                                    "truncated": {
+                                      "type": "boolean",
+                                      "enum": [true]
+                                    }
+                                  },
+                                  "required": ["code", "message", "retryable", "at"],
+                                  "additionalProperties": false
                                 },
                                 "identity": {
                                   "type": "object",
@@ -25491,8 +27372,58 @@
                                 "finishedAt": {
                                   "type": "string"
                                 },
-                                "errorMessage": {
-                                  "type": "string"
+                                "error": {
+                                  "type": "object",
+                                  "properties": {
+                                    "code": {
+                                      "type": "string",
+                                      "enum": [
+                                        "internal.unexpected",
+                                        "runtime.cancelled",
+                                        "projection.execution_failed"
+                                      ]
+                                    },
+                                    "message": {
+                                      "type": "string",
+                                      "maxLength": 4096
+                                    },
+                                    "retryable": {
+                                      "type": "boolean"
+                                    },
+                                    "at": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "details": {
+                                      "description": "Any JSON-compatible value.",
+                                      "nullable": true,
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "type": "array",
+                                          "items": {}
+                                        },
+                                        {
+                                          "type": "object",
+                                          "additionalProperties": true
+                                        }
+                                      ]
+                                    },
+                                    "truncated": {
+                                      "type": "boolean",
+                                      "enum": [true]
+                                    }
+                                  },
+                                  "required": ["code", "message", "retryable", "at"],
+                                  "additionalProperties": false
                                 },
                                 "identity": {
                                   "type": "object",
@@ -25606,8 +27537,58 @@
                                 "finishedAt": {
                                   "type": "string"
                                 },
-                                "errorMessage": {
-                                  "type": "string"
+                                "error": {
+                                  "type": "object",
+                                  "properties": {
+                                    "code": {
+                                      "type": "string",
+                                      "enum": [
+                                        "internal.unexpected",
+                                        "runtime.cancelled",
+                                        "projection.execution_failed"
+                                      ]
+                                    },
+                                    "message": {
+                                      "type": "string",
+                                      "maxLength": 4096
+                                    },
+                                    "retryable": {
+                                      "type": "boolean"
+                                    },
+                                    "at": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "details": {
+                                      "description": "Any JSON-compatible value.",
+                                      "nullable": true,
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "type": "array",
+                                          "items": {}
+                                        },
+                                        {
+                                          "type": "object",
+                                          "additionalProperties": true
+                                        }
+                                      ]
+                                    },
+                                    "truncated": {
+                                      "type": "boolean",
+                                      "enum": [true]
+                                    }
+                                  },
+                                  "required": ["code", "message", "retryable", "at"],
+                                  "additionalProperties": false
                                 },
                                 "identity": {
                                   "type": "object",
@@ -25763,8 +27744,58 @@
                                 "finishedAt": {
                                   "type": "string"
                                 },
-                                "errorMessage": {
-                                  "type": "string"
+                                "error": {
+                                  "type": "object",
+                                  "properties": {
+                                    "code": {
+                                      "type": "string",
+                                      "enum": [
+                                        "internal.unexpected",
+                                        "runtime.cancelled",
+                                        "projection.execution_failed"
+                                      ]
+                                    },
+                                    "message": {
+                                      "type": "string",
+                                      "maxLength": 4096
+                                    },
+                                    "retryable": {
+                                      "type": "boolean"
+                                    },
+                                    "at": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "details": {
+                                      "description": "Any JSON-compatible value.",
+                                      "nullable": true,
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "type": "array",
+                                          "items": {}
+                                        },
+                                        {
+                                          "type": "object",
+                                          "additionalProperties": true
+                                        }
+                                      ]
+                                    },
+                                    "truncated": {
+                                      "type": "boolean",
+                                      "enum": [true]
+                                    }
+                                  },
+                                  "required": ["code", "message", "retryable", "at"],
+                                  "additionalProperties": false
                                 },
                                 "identity": {
                                   "type": "object",
@@ -25875,8 +27906,58 @@
                                 "finishedAt": {
                                   "type": "string"
                                 },
-                                "errorMessage": {
-                                  "type": "string"
+                                "error": {
+                                  "type": "object",
+                                  "properties": {
+                                    "code": {
+                                      "type": "string",
+                                      "enum": [
+                                        "internal.unexpected",
+                                        "runtime.cancelled",
+                                        "projection.execution_failed"
+                                      ]
+                                    },
+                                    "message": {
+                                      "type": "string",
+                                      "maxLength": 4096
+                                    },
+                                    "retryable": {
+                                      "type": "boolean"
+                                    },
+                                    "at": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "details": {
+                                      "description": "Any JSON-compatible value.",
+                                      "nullable": true,
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "type": "array",
+                                          "items": {}
+                                        },
+                                        {
+                                          "type": "object",
+                                          "additionalProperties": true
+                                        }
+                                      ]
+                                    },
+                                    "truncated": {
+                                      "type": "boolean",
+                                      "enum": [true]
+                                    }
+                                  },
+                                  "required": ["code", "message", "retryable", "at"],
+                                  "additionalProperties": false
                                 },
                                 "identity": {
                                   "type": "object",
@@ -25990,8 +28071,58 @@
                                 "finishedAt": {
                                   "type": "string"
                                 },
-                                "errorMessage": {
-                                  "type": "string"
+                                "error": {
+                                  "type": "object",
+                                  "properties": {
+                                    "code": {
+                                      "type": "string",
+                                      "enum": [
+                                        "internal.unexpected",
+                                        "runtime.cancelled",
+                                        "projection.execution_failed"
+                                      ]
+                                    },
+                                    "message": {
+                                      "type": "string",
+                                      "maxLength": 4096
+                                    },
+                                    "retryable": {
+                                      "type": "boolean"
+                                    },
+                                    "at": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "details": {
+                                      "description": "Any JSON-compatible value.",
+                                      "nullable": true,
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "type": "array",
+                                          "items": {}
+                                        },
+                                        {
+                                          "type": "object",
+                                          "additionalProperties": true
+                                        }
+                                      ]
+                                    },
+                                    "truncated": {
+                                      "type": "boolean",
+                                      "enum": [true]
+                                    }
+                                  },
+                                  "required": ["code", "message", "retryable", "at"],
+                                  "additionalProperties": false
                                 },
                                 "identity": {
                                   "type": "object",
@@ -26152,8 +28283,58 @@
                                 "finishedAt": {
                                   "type": "string"
                                 },
-                                "errorMessage": {
-                                  "type": "string"
+                                "error": {
+                                  "type": "object",
+                                  "properties": {
+                                    "code": {
+                                      "type": "string",
+                                      "enum": [
+                                        "internal.unexpected",
+                                        "runtime.cancelled",
+                                        "projection.execution_failed"
+                                      ]
+                                    },
+                                    "message": {
+                                      "type": "string",
+                                      "maxLength": 4096
+                                    },
+                                    "retryable": {
+                                      "type": "boolean"
+                                    },
+                                    "at": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "details": {
+                                      "description": "Any JSON-compatible value.",
+                                      "nullable": true,
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "type": "array",
+                                          "items": {}
+                                        },
+                                        {
+                                          "type": "object",
+                                          "additionalProperties": true
+                                        }
+                                      ]
+                                    },
+                                    "truncated": {
+                                      "type": "boolean",
+                                      "enum": [true]
+                                    }
+                                  },
+                                  "required": ["code", "message", "retryable", "at"],
+                                  "additionalProperties": false
                                 },
                                 "identity": {
                                   "type": "object",
@@ -26264,8 +28445,58 @@
                                 "finishedAt": {
                                   "type": "string"
                                 },
-                                "errorMessage": {
-                                  "type": "string"
+                                "error": {
+                                  "type": "object",
+                                  "properties": {
+                                    "code": {
+                                      "type": "string",
+                                      "enum": [
+                                        "internal.unexpected",
+                                        "runtime.cancelled",
+                                        "projection.execution_failed"
+                                      ]
+                                    },
+                                    "message": {
+                                      "type": "string",
+                                      "maxLength": 4096
+                                    },
+                                    "retryable": {
+                                      "type": "boolean"
+                                    },
+                                    "at": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "details": {
+                                      "description": "Any JSON-compatible value.",
+                                      "nullable": true,
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "type": "array",
+                                          "items": {}
+                                        },
+                                        {
+                                          "type": "object",
+                                          "additionalProperties": true
+                                        }
+                                      ]
+                                    },
+                                    "truncated": {
+                                      "type": "boolean",
+                                      "enum": [true]
+                                    }
+                                  },
+                                  "required": ["code", "message", "retryable", "at"],
+                                  "additionalProperties": false
                                 },
                                 "identity": {
                                   "type": "object",
@@ -26379,8 +28610,58 @@
                                 "finishedAt": {
                                   "type": "string"
                                 },
-                                "errorMessage": {
-                                  "type": "string"
+                                "error": {
+                                  "type": "object",
+                                  "properties": {
+                                    "code": {
+                                      "type": "string",
+                                      "enum": [
+                                        "internal.unexpected",
+                                        "runtime.cancelled",
+                                        "projection.execution_failed"
+                                      ]
+                                    },
+                                    "message": {
+                                      "type": "string",
+                                      "maxLength": 4096
+                                    },
+                                    "retryable": {
+                                      "type": "boolean"
+                                    },
+                                    "at": {
+                                      "type": "string",
+                                      "format": "date-time"
+                                    },
+                                    "details": {
+                                      "description": "Any JSON-compatible value.",
+                                      "nullable": true,
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "type": "array",
+                                          "items": {}
+                                        },
+                                        {
+                                          "type": "object",
+                                          "additionalProperties": true
+                                        }
+                                      ]
+                                    },
+                                    "truncated": {
+                                      "type": "boolean",
+                                      "enum": [true]
+                                    }
+                                  },
+                                  "required": ["code", "message", "retryable", "at"],
+                                  "additionalProperties": false
                                 },
                                 "identity": {
                                   "type": "object",
@@ -26635,8 +28916,58 @@
                               "finishedAt": {
                                 "type": "string"
                               },
-                              "errorMessage": {
-                                "type": "string"
+                              "error": {
+                                "type": "object",
+                                "properties": {
+                                  "code": {
+                                    "type": "string",
+                                    "enum": [
+                                      "internal.unexpected",
+                                      "runtime.cancelled",
+                                      "projection.execution_failed"
+                                    ]
+                                  },
+                                  "message": {
+                                    "type": "string",
+                                    "maxLength": 4096
+                                  },
+                                  "retryable": {
+                                    "type": "boolean"
+                                  },
+                                  "at": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  },
+                                  "details": {
+                                    "description": "Any JSON-compatible value.",
+                                    "nullable": true,
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {}
+                                      },
+                                      {
+                                        "type": "object",
+                                        "additionalProperties": true
+                                      }
+                                    ]
+                                  },
+                                  "truncated": {
+                                    "type": "boolean",
+                                    "enum": [true]
+                                  }
+                                },
+                                "required": ["code", "message", "retryable", "at"],
+                                "additionalProperties": false
                               },
                               "identity": {
                                 "type": "object",
@@ -26747,8 +29078,58 @@
                               "finishedAt": {
                                 "type": "string"
                               },
-                              "errorMessage": {
-                                "type": "string"
+                              "error": {
+                                "type": "object",
+                                "properties": {
+                                  "code": {
+                                    "type": "string",
+                                    "enum": [
+                                      "internal.unexpected",
+                                      "runtime.cancelled",
+                                      "projection.execution_failed"
+                                    ]
+                                  },
+                                  "message": {
+                                    "type": "string",
+                                    "maxLength": 4096
+                                  },
+                                  "retryable": {
+                                    "type": "boolean"
+                                  },
+                                  "at": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  },
+                                  "details": {
+                                    "description": "Any JSON-compatible value.",
+                                    "nullable": true,
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {}
+                                      },
+                                      {
+                                        "type": "object",
+                                        "additionalProperties": true
+                                      }
+                                    ]
+                                  },
+                                  "truncated": {
+                                    "type": "boolean",
+                                    "enum": [true]
+                                  }
+                                },
+                                "required": ["code", "message", "retryable", "at"],
+                                "additionalProperties": false
                               },
                               "identity": {
                                 "type": "object",
@@ -26862,8 +29243,58 @@
                               "finishedAt": {
                                 "type": "string"
                               },
-                              "errorMessage": {
-                                "type": "string"
+                              "error": {
+                                "type": "object",
+                                "properties": {
+                                  "code": {
+                                    "type": "string",
+                                    "enum": [
+                                      "internal.unexpected",
+                                      "runtime.cancelled",
+                                      "projection.execution_failed"
+                                    ]
+                                  },
+                                  "message": {
+                                    "type": "string",
+                                    "maxLength": 4096
+                                  },
+                                  "retryable": {
+                                    "type": "boolean"
+                                  },
+                                  "at": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  },
+                                  "details": {
+                                    "description": "Any JSON-compatible value.",
+                                    "nullable": true,
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "type": "array",
+                                        "items": {}
+                                      },
+                                      {
+                                        "type": "object",
+                                        "additionalProperties": true
+                                      }
+                                    ]
+                                  },
+                                  "truncated": {
+                                    "type": "boolean",
+                                    "enum": [true]
+                                  }
+                                },
+                                "required": ["code", "message", "retryable", "at"],
+                                "additionalProperties": false
                               },
                               "identity": {
                                 "type": "object",
@@ -27050,8 +29481,58 @@
                         "finishedAt": {
                           "type": "string"
                         },
-                        "errorMessage": {
-                          "type": "string"
+                        "error": {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "projection.execution_failed"
+                              ]
+                            },
+                            "message": {
+                              "type": "string",
+                              "maxLength": 4096
+                            },
+                            "retryable": {
+                              "type": "boolean"
+                            },
+                            "at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "details": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              ]
+                            },
+                            "truncated": {
+                              "type": "boolean",
+                              "enum": [true]
+                            }
+                          },
+                          "required": ["code", "message", "retryable", "at"],
+                          "additionalProperties": false
                         },
                         "identity": {
                           "type": "object",
@@ -27162,8 +29643,58 @@
                         "finishedAt": {
                           "type": "string"
                         },
-                        "errorMessage": {
-                          "type": "string"
+                        "error": {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "projection.execution_failed"
+                              ]
+                            },
+                            "message": {
+                              "type": "string",
+                              "maxLength": 4096
+                            },
+                            "retryable": {
+                              "type": "boolean"
+                            },
+                            "at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "details": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              ]
+                            },
+                            "truncated": {
+                              "type": "boolean",
+                              "enum": [true]
+                            }
+                          },
+                          "required": ["code", "message", "retryable", "at"],
+                          "additionalProperties": false
                         },
                         "identity": {
                           "type": "object",
@@ -27277,8 +29808,58 @@
                         "finishedAt": {
                           "type": "string"
                         },
-                        "errorMessage": {
-                          "type": "string"
+                        "error": {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "internal.unexpected",
+                                "runtime.cancelled",
+                                "projection.execution_failed"
+                              ]
+                            },
+                            "message": {
+                              "type": "string",
+                              "maxLength": 4096
+                            },
+                            "retryable": {
+                              "type": "boolean"
+                            },
+                            "at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "details": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              ]
+                            },
+                            "truncated": {
+                              "type": "boolean",
+                              "enum": [true]
+                            }
+                          },
+                          "required": ["code", "message", "retryable", "at"],
+                          "additionalProperties": false
                         },
                         "identity": {
                           "type": "object",
@@ -27549,7 +30130,53 @@
                             "enum": ["claimed", "duplicate", "in_progress"]
                           },
                           "error": {
-                            "type": "string"
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["internal.unexpected", "webhook.delivery_failed"]
+                              },
+                              "message": {
+                                "type": "string",
+                                "maxLength": 4096
+                              },
+                              "retryable": {
+                                "type": "boolean"
+                              },
+                              "at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "details": {
+                                "description": "Any JSON-compatible value.",
+                                "nullable": true,
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {}
+                                  },
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                  }
+                                ]
+                              },
+                              "truncated": {
+                                "type": "boolean",
+                                "enum": [true]
+                              }
+                            },
+                            "required": ["code", "message", "retryable", "at"],
+                            "additionalProperties": false
                           }
                         },
                         "required": [

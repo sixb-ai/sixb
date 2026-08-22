@@ -1,5 +1,6 @@
 import type { AgentMessage, AgentMessagePart, AgentMessageRole } from "../../agents/message"
 import type { Principal } from "../../auth"
+import type { SixbErrorCode, SixbFailure } from "../../errors/types"
 import type { JsonValue } from "../../json"
 
 // ── agent_threads — one conversation with an agent ──────────────────────────────────────────────
@@ -58,6 +59,15 @@ export type AgentExecutionStatus = "queued" | "running" | "succeeded" | "failed"
 
 export type AgentRunStatus = AgentExecutionStatus
 
+/** Error codes an agent execution can persist and expose through its public contract. */
+export const AGENT_RUN_FAILURE_CODES = [
+  "internal.unexpected",
+  "runtime.cancelled",
+  "agent.execution_failed",
+] as const satisfies readonly [SixbErrorCode, ...SixbErrorCode[]]
+
+export type AgentRunFailureCode = (typeof AGENT_RUN_FAILURE_CODES)[number]
+
 /**
  * Why a run ended — our own SDK-independent vocabulary (it mirrors the AI SDK unified finish
  * reasons), so reads are typed and exhaustive without core depending on `ai`. `other`/`unknown` are
@@ -88,14 +98,6 @@ export function coerceAgentRunFinishReason(
   return (AGENT_RUN_FINISH_REASONS as readonly string[]).includes(value)
     ? (value as AgentRunFinishReason)
     : "unknown"
-}
-
-export interface AgentRunUsage {
-  readonly inputTokens?: number
-  readonly outputTokens?: number
-  readonly totalTokens?: number
-  readonly reasoningTokens?: number
-  readonly cachedInputTokens?: number
 }
 
 /** Stable, user-facing diagnostics emitted by the platform while executing a run. */
@@ -153,11 +155,10 @@ export interface AgentRunRecord {
   readonly modelId?: string
   /** Why the run ended (our own SDK-independent enum). */
   readonly finishReason?: AgentRunFinishReason
-  readonly usage?: AgentRunUsage
   /** Platform diagnostics are transcript annotations, never agent-authored message content. */
   readonly diagnostics?: readonly AgentRunDiagnostic[]
-  /** Failure message when the run did not succeed. */
-  readonly error?: string
+  /** Portable failure snapshot when the run did not succeed. */
+  readonly error?: SixbFailure<AgentRunFailureCode>
   /** Execution attempts: `0` while queued, `1` on first start, incremented on redelivery. */
   readonly attempt: number
   readonly execution?: AgentRunExecution
@@ -189,7 +190,7 @@ export interface FinishQueuedAgentRunInput {
   readonly id: string
   readonly projectId: string
   readonly status: "failed" | "cancelled"
-  readonly error?: string
+  readonly error?: SixbFailure<AgentRunFailureCode>
   readonly completedAt?: Date
 }
 
@@ -215,7 +216,6 @@ export type FinishAgentRunInput =
       readonly status: "succeeded"
       readonly modelId?: string
       readonly finishReason?: AgentRunFinishReason
-      readonly usage?: AgentRunUsage
       readonly diagnostics?: readonly AgentRunDiagnostic[]
       readonly completedAt?: Date
     }
@@ -226,9 +226,8 @@ export type FinishAgentRunInput =
       readonly status: "failed" | "cancelled"
       readonly modelId?: string
       readonly finishReason?: AgentRunFinishReason
-      readonly usage?: AgentRunUsage
       readonly diagnostics?: readonly AgentRunDiagnostic[]
-      readonly error?: string
+      readonly error?: SixbFailure<AgentRunFailureCode>
       readonly completedAt?: Date
     }
 

@@ -1,7 +1,9 @@
 import type { Database } from "bun:sqlite"
 import { assertAgentRunExecution } from "@sixb/core/internal/agent-run-storage-provider"
 import { normalizeRequesterGroupIds } from "@sixb/core/internal/auth"
+import { serializeSixbFailure } from "@sixb/core/internal/errors"
 import {
+  AGENT_RUN_FAILURE_CODES,
   type AgentRunRecord,
   type AgentRunStore,
   AgentStorageError,
@@ -155,7 +157,9 @@ export class SqliteAgentRunStore implements AgentRunStore {
         )
         .run(
           input.status,
-          input.error ?? null,
+          input.error === undefined
+            ? null
+            : serializeSixbFailure(input.error, AGENT_RUN_FAILURE_CODES),
           completedAt.toISOString(),
           input.projectId,
           input.id
@@ -217,7 +221,10 @@ export class SqliteAgentRunStore implements AgentRunStore {
 
   async finish(input: FinishAgentRunInput): Promise<AgentRunRecord> {
     const completedAt = input.completedAt ?? new Date()
-    const errorValue = input.status === "succeeded" ? null : (input.error ?? null)
+    const errorValue =
+      input.status === "succeeded" || input.error === undefined
+        ? null
+        : serializeSixbFailure(input.error, AGENT_RUN_FAILURE_CODES)
 
     return this.db.transaction(() => {
       const run = this.requireRunning(input.projectId, input.id)
@@ -237,11 +244,6 @@ export class SqliteAgentRunStore implements AgentRunStore {
             status = ?,
             model_id = COALESCE(?, model_id),
             finish_reason = ?,
-            usage_input_tokens = ?,
-            usage_output_tokens = ?,
-            usage_total_tokens = ?,
-            usage_reasoning_tokens = ?,
-            usage_cached_input_tokens = ?,
             error = ?,
             diagnostics = ?,
             execution_token = NULL,
@@ -254,11 +256,6 @@ export class SqliteAgentRunStore implements AgentRunStore {
           input.status,
           input.modelId ?? null,
           input.finishReason ?? null,
-          input.usage?.inputTokens ?? null,
-          input.usage?.outputTokens ?? null,
-          input.usage?.totalTokens ?? null,
-          input.usage?.reasoningTokens ?? null,
-          input.usage?.cachedInputTokens ?? null,
           errorValue,
           input.diagnostics === undefined ? null : JSON.stringify(input.diagnostics),
           completedAt.toISOString(),

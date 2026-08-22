@@ -1,8 +1,17 @@
 import { AGENT_REASONING_LEVELS, MAX_AGENT_CONTEXT_ENTRIES } from "@sixb/core"
-import { AGENT_RUN_DIAGNOSTIC_CODES } from "@sixb/core/storage"
+import {
+  AGENT_RUN_DIAGNOSTIC_CODES,
+  AGENT_RUN_FAILURE_CODES,
+  type AgentRunFailureCode,
+  type SixbFailure,
+} from "@sixb/core/storage"
 import { z } from "zod"
-import { JsonValueSchema } from "./common"
+import { AiUsageSummarySchema } from "./ai-usage"
+import { JsonValueSchema, sixbFailureSchema } from "./common"
 import { FileRefSchema } from "./files"
+
+export const AgentRunFailureSchema: z.ZodType<SixbFailure<AgentRunFailureCode>> =
+  sixbFailureSchema(AGENT_RUN_FAILURE_CODES)
 
 export const AgentIdParamsSchema = z.object({
   agentId: z.string().min(1),
@@ -243,14 +252,6 @@ export const AgentRunFinishReasonSchema = z.enum([
   "unknown",
 ])
 
-export const AgentRunUsageSchema = z.object({
-  inputTokens: z.number().optional(),
-  outputTokens: z.number().optional(),
-  totalTokens: z.number().optional(),
-  reasoningTokens: z.number().optional(),
-  cachedInputTokens: z.number().optional(),
-})
-
 export const AgentRunSchema = z.object({
   id: z.string(),
   projectId: z.string(),
@@ -261,9 +262,9 @@ export const AgentRunSchema = z.object({
   status: AgentRunStatusSchema,
   modelId: z.string().optional(),
   finishReason: AgentRunFinishReasonSchema.optional(),
-  usage: AgentRunUsageSchema.optional(),
+  usage: AiUsageSummarySchema.optional(),
   diagnostics: z.array(AgentRunDiagnosticSchema).optional(),
-  error: z.string().optional(),
+  error: AgentRunFailureSchema.optional(),
   attempt: z.number(),
   streamId: z.string(),
   createdAt: z.string(),

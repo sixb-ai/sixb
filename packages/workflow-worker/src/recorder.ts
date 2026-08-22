@@ -2,9 +2,11 @@ import { isDeepStrictEqual } from "node:util"
 import type { WorkflowDefinition } from "@sixb/core"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type {
+  SixbFailure,
   WorkflowInterventionRecord,
   WorkflowNodeRunRecord,
   WorkflowRunExecution,
+  WorkflowRunFailureCode,
   WorkflowRunRecord,
   WorkflowRunStorage,
 } from "@sixb/core/storage"
@@ -178,7 +180,7 @@ export class WorkflowRunRecorder {
 
   async finishActiveNodeAfterError(params: {
     readonly status: "failed" | "cancelled"
-    readonly error: string
+    readonly error: SixbFailure<WorkflowRunFailureCode>
   }): Promise<void> {
     if (!this.activeNodeRunId) {
       return
@@ -238,7 +240,7 @@ export class WorkflowRunRecorder {
 
   async finishRunAfterError(params: {
     readonly status: "failed" | "cancelled"
-    readonly error: string
+    readonly error: SixbFailure<WorkflowRunFailureCode>
     readonly onTransition?: (run: WorkflowRunRecord) => void
   }): Promise<WorkflowRunRecord> {
     const run = await this.dependencies.workflowRuns.finish({

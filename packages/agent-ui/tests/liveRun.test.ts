@@ -163,13 +163,20 @@ describe("liveRunReducer", () => {
   })
 
   test("captures a failed run's terminal status and error", () => {
+    const failure = {
+      code: "internal.unexpected" as const,
+      message: "nope",
+      retryable: false,
+      at: "2026-01-02T03:04:05.000Z",
+      details: { agentId: "assistant", runId: "run" },
+    }
     const state = liveRunReducer(createLiveRunState("run"), {
       type: "event",
-      event: event({ type: "agent.run.finished", status: "failed", error: "nope" }),
+      event: event({ type: "agent.run.finished", status: "failed", error: failure }),
     })
     expect(state.active).toBe(false)
     expect(state.finishStatus).toBe("failed")
-    expect(state.finishError).toBe("nope")
+    expect(state.finishError).toEqual(failure)
   })
 
   test("surfaces stream errors from both the action and error chunks", () => {

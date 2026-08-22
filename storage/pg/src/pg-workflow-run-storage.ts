@@ -1,4 +1,6 @@
+import type { JsonValue } from "@sixb/core"
 import { normalizeRequesterGroupIds } from "@sixb/core/internal/auth"
+import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/internal/errors"
 import {
   assertWorkflowAgentNodeRunExecution,
   assertWorkflowRunExecution,
@@ -37,7 +39,11 @@ import type {
   WorkflowRunRecord,
   WorkflowRunStorage,
 } from "@sixb/core/storage"
-import { WorkflowRunError } from "@sixb/core/storage"
+import {
+  AGENT_RUN_FAILURE_CODES,
+  WORKFLOW_RUN_FAILURE_CODES,
+  WorkflowRunError,
+} from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import type { SqlParameter } from "./pg-client"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"
@@ -217,7 +223,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
                 status = ${input.status},
                 finished_at = ${input.finishedAt ?? new Date()},
                 output = ${null},
-                error = ${input.error ?? null},
+                error = ${input.error === undefined ? null : serializeSixbFailure(input.error, WORKFLOW_RUN_FAILURE_CODES)}::text::jsonb,
                 execution_token = ${null},
                 execution_queue_lease_expires_at = ${null}
               WHERE project_id = ${input.projectId} AND id = ${input.id}
@@ -488,10 +494,9 @@ export class PgWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunStorag
           status = ${input.status},
           model_id = COALESCE(${input.modelId ?? null}, model_id),
           finish_reason = ${input.finishReason ?? null},
-          usage = ${input.usage ? JSON.stringify(input.usage) : null}::text::jsonb,
           trace = ${input.trace ? JSON.stringify(input.trace) : null}::text::jsonb,
           diagnostics = ${input.diagnostics ? JSON.stringify(input.diagnostics) : null}::text::jsonb,
-          error = ${input.status === "succeeded" ? null : (input.error ?? null)},
+          error = ${input.status === "succeeded" || input.error === undefined ? null : serializeSixbFailure(input.error, AGENT_RUN_FAILURE_CODES)}::text::jsonb,
           execution_token = ${null},
           execution_queue_lease_expires_at = ${null},
           completed_at = ${input.completedAt ?? new Date()}
@@ -522,7 +527,7 @@ export class PgWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunStorag
       const [updated] = await tx<WorkflowAgentNodeRunDatabaseRow[]>`
         UPDATE workflow_agent_node_runs SET
           status = ${"cancelled"},
-          error = ${input.error ?? null},
+          error = ${input.error === undefined ? null : serializeSixbFailure(input.error, AGENT_RUN_FAILURE_CODES)}::text::jsonb,
           execution_token = ${null},
           execution_queue_lease_expires_at = ${null},
           completed_at = ${input.completedAt ?? new Date()}
@@ -682,7 +687,7 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
                 status = ${input.status},
                 finished_at = ${input.finishedAt ?? new Date()},
                 output = ${null},
-                error = ${input.error ?? null}
+                error = ${input.error === undefined ? null : serializeSixbFailure(input.error, WORKFLOW_RUN_FAILURE_CODES)}::text::jsonb
               WHERE project_id = ${input.projectId} AND id = ${input.id}
               RETURNING *
             `
@@ -816,7 +821,7 @@ function rowToWorkflowRunRecord(row: WorkflowRunDatabaseRow): WorkflowRunRecord 
     queuedAt: row.queued_at ? new Date(row.queued_at) : undefined,
     startedAt: new Date(row.started_at),
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
-    error: row.error ?? undefined,
+    error: row.error === null ? undefined : parseSixbFailure(row.error, WORKFLOW_RUN_FAILURE_CODES),
     requesterGroupIds: parseJson(row.requester_group_ids),
     attempt: Number(row.attempt),
     ...(row.execution_token && row.execution_queue_lease_expires_at
@@ -845,7 +850,7 @@ function rowToWorkflowNodeRunRecord(row: WorkflowNodeRunDatabaseRow): WorkflowNo
     startedAt: new Date(row.started_at),
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     output: row.output ? parseRecord(row.output) : undefined,
-    error: row.error ?? undefined,
+    error: row.error === null ? undefined : parseSixbFailure(row.error, WORKFLOW_RUN_FAILURE_CODES),
   }
 }
 
@@ -877,7 +882,7 @@ interface WorkflowRunDatabaseRow {
   queued_at: Date | string | null
   started_at: Date | string
   finished_at: Date | string | null
-  error: string | null
+  error: JsonValue | null
   requester_group_ids: string[] | string
   attempt: number | string
   execution_token: string | null
@@ -898,7 +903,7 @@ interface WorkflowNodeRunDatabaseRow {
   started_at: Date | string
   finished_at: Date | string | null
   output: WorkflowIOSnapshot | string | null
-  error: string | null
+  error: JsonValue | null
 }
 
 interface WorkflowAgentNodeRunDatabaseRow {
@@ -910,10 +915,9 @@ interface WorkflowAgentNodeRunDatabaseRow {
   prompt: string
   model_id: string | null
   finish_reason: WorkflowAgentNodeRunRecord["finishReason"] | null
-  usage: WorkflowAgentNodeRunRecord["usage"] | string | null
   trace: WorkflowAgentNodeRunRecord["trace"] | string | null
   diagnostics: WorkflowAgentNodeRunRecord["diagnostics"] | string | null
-  error: string | null
+  error: JsonValue | null
   attempt: number | string
   execution_token: string | null
   execution_queue_lease_expires_at: Date | string | null
@@ -969,10 +973,9 @@ function rowToWorkflowAgentNodeRunRecord(
     prompt: row.prompt,
     ...(row.model_id ? { modelId: row.model_id } : {}),
     ...(row.finish_reason ? { finishReason: row.finish_reason } : {}),
-    ...(row.usage ? { usage: parseJson(row.usage) } : {}),
     ...(row.trace ? { trace: parseJson(row.trace) } : {}),
     ...(row.diagnostics ? { diagnostics: parseJson(row.diagnostics) } : {}),
-    ...(row.error ? { error: row.error } : {}),
+    ...(row.error ? { error: parseSixbFailure(row.error, AGENT_RUN_FAILURE_CODES) } : {}),
     attempt: Number(row.attempt),
     ...(row.execution_token && row.execution_queue_lease_expires_at
       ? {

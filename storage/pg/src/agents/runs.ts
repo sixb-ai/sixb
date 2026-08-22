@@ -1,6 +1,8 @@
 import { assertAgentRunExecution } from "@sixb/core/internal/agent-run-storage-provider"
 import { normalizeRequesterGroupIds } from "@sixb/core/internal/auth"
+import { serializeSixbFailure } from "@sixb/core/internal/errors"
 import {
+  AGENT_RUN_FAILURE_CODES,
   type AgentRunRecord,
   type AgentRunStore,
   AgentStorageError,
@@ -132,7 +134,10 @@ export class PgAgentRunStore implements AgentRunStore {
       const run = await this.lockStatus(tx, input.projectId, input.id, "queued")
       const [row] = await tx<AgentRunRow[]>`
         UPDATE agent_runs
-        SET status = ${input.status}, error = ${input.error ?? null}, completed_at = ${completedAt}
+        SET
+          status = ${input.status},
+          error = ${input.error === undefined ? null : serializeSixbFailure(input.error, AGENT_RUN_FAILURE_CODES)}::text::jsonb,
+          completed_at = ${completedAt}
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
       `
@@ -185,7 +190,10 @@ export class PgAgentRunStore implements AgentRunStore {
 
   async finish(input: FinishAgentRunInput): Promise<AgentRunRecord> {
     const completedAt = input.completedAt ?? new Date()
-    const errorValue = input.status === "succeeded" ? null : (input.error ?? null)
+    const errorValue =
+      input.status === "succeeded" || input.error === undefined
+        ? null
+        : serializeSixbFailure(input.error, AGENT_RUN_FAILURE_CODES)
 
     return runPgTransaction(this.sql, async (tx) => {
       const run = await this.lockRunning(tx, input.projectId, input.id)
@@ -203,12 +211,7 @@ export class PgAgentRunStore implements AgentRunStore {
           status = ${input.status},
           model_id = COALESCE(${input.modelId ?? null}, model_id),
           finish_reason = ${input.finishReason ?? null},
-          usage_input_tokens = ${input.usage?.inputTokens ?? null},
-          usage_output_tokens = ${input.usage?.outputTokens ?? null},
-          usage_total_tokens = ${input.usage?.totalTokens ?? null},
-          usage_reasoning_tokens = ${input.usage?.reasoningTokens ?? null},
-          usage_cached_input_tokens = ${input.usage?.cachedInputTokens ?? null},
-          error = ${errorValue},
+          error = ${errorValue}::text::jsonb,
           diagnostics = ${input.diagnostics === undefined ? null : JSON.stringify(input.diagnostics)}::text::jsonb,
           execution_token = ${null},
           execution_queue_lease_expires_at = ${null},

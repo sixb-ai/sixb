@@ -5,12 +5,12 @@ import {
   bindPrimitiveExecution,
   type PrimitiveExecutionHost,
 } from "@sixb/core/internal/primitive-execution"
-import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
+import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type { ClaimedQueueJob, SyncRunRequestedQueueJob } from "@sixb/core/queues"
-import type { SyncRunRecord } from "@sixb/core/storage"
+import { SYNC_RUN_FAILURE_CODES, type SyncRunRecord, type SyncRunStatus } from "@sixb/core/storage"
 import { runSyncJob, SyncRunAlreadyStartedError } from "./run-sync-job"
-import type { SyncJob, SyncRunResult, SyncWorkerContext } from "./types"
+import type { SyncJob, SyncWorkerContext } from "./types"
 
 const SOURCE = "SixbSyncWorker"
 
@@ -23,7 +23,10 @@ export interface SyncWorkerHost extends PrimitiveExecutionHost {
   readonly definitions: Pick<SixbDefinitions, "syncs" | "datasets">
 }
 
-export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
+export class SyncWorker extends QueueWorker<
+  SyncRunRequestedQueueJob,
+  typeof SYNC_RUN_FAILURE_CODES
+> {
   private readonly host: SyncWorkerHost
 
   constructor(host: SyncWorkerHost) {
@@ -34,6 +37,7 @@ export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
     super({
       projectId: host.id,
       queue: host.queues.syncRuns,
+      failureCodes: SYNC_RUN_FAILURE_CODES,
       workerId: `sync-worker-${host.id}`,
     })
 
@@ -58,23 +62,24 @@ export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
     })
     const context = buildSyncContext(this.host, execution.sixb)
 
-    let result: SyncRunResult
     try {
-      result = await runSyncJob({
+      await runSyncJob({
         runtime: context,
         job: syncJob,
         signal,
         onRunStarted: (run) => emitSyncRunStarted(this.host, run),
-        onRunFailed: (error, run) => {
+        onRunFinished: (run, createdVersion) =>
+          emitSyncRunFinishedEvents(this.host, run, createdVersion),
+        onRunFailed: (error, run, failure) => {
           reportRunFailure(this.host, error, {
             projectId: this.host.id,
-            occurredAt: run.finishedAt,
             attempt: job.attempt,
+            runKind: "sync",
             run: {
-              kind: "sync",
               runId: run.id,
               syncId: run.syncId,
             },
+            failure,
           })
         },
       })
@@ -82,21 +87,6 @@ export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
       if (error instanceof SyncRunAlreadyStartedError) return
       throw error
     }
-
-    await emitSyncSucceededEvents(this.host, syncJob, result)
-  }
-
-  protected override async onExecutionError(
-    claimed: ClaimedQueueJob<SyncRunRequestedQueueJob>,
-    _error: unknown
-  ): Promise<QueueWorkerFailureDecision> {
-    const { job } = claimed
-    await emitSyncRunFinished(this.host, {
-      id: job.payload.runId ?? `${job.id}:attempt:${job.attempt}`,
-      syncId: job.payload.syncId,
-    })
-
-    return { kind: "fail" }
   }
 }
 
@@ -121,26 +111,26 @@ async function emitSyncRunStarted(
   )
 }
 
-async function emitSyncSucceededEvents(
+async function emitSyncRunFinishedEvents(
   host: SyncWorkerHost,
-  job: Pick<SyncJob, "id" | "syncId">,
-  result: SyncRunResult
+  run: Pick<SyncRunRecord, "id" | "syncId" | "datasetId" | "status" | "output" | "error">,
+  createdVersion?: DatasetVersion
 ): Promise<void> {
   await host.events?.emit(
     {
       events: [
-        ...(result.versionCreated
+        ...(createdVersion
           ? [
               {
                 type: "dataset.version.committed" as const,
                 payload: {
-                  datasetId: result.datasetId,
-                  versionId: result.version.versionId,
-                  createdAt: result.version.createdAt.toISOString(),
+                  datasetId: createdVersion.datasetId,
+                  versionId: createdVersion.versionId,
+                  createdAt: createdVersion.createdAt.toISOString(),
                   producer: {
                     kind: "sync" as const,
-                    id: job.syncId,
-                    runId: job.id,
+                    id: run.syncId,
+                    runId: run.id,
                   },
                 },
               },
@@ -149,11 +139,12 @@ async function emitSyncSucceededEvents(
         {
           type: "sync.run.finished",
           payload: {
-            syncId: job.syncId,
-            runId: job.id,
-            status: "succeeded",
-            datasetId: result.datasetId,
-            ...(result.version ? { versionId: result.version.versionId } : {}),
+            syncId: run.syncId,
+            runId: run.id,
+            status: requireTerminalStatus(run.status, `Sync run '${run.id}'`),
+            datasetId: run.datasetId,
+            ...(run.output ? { versionId: run.output.versionId } : {}),
+            ...(run.error ? { error: run.error } : {}),
           },
         },
       ],
@@ -162,25 +153,15 @@ async function emitSyncSucceededEvents(
   )
 }
 
-async function emitSyncRunFinished(
-  host: SyncWorkerHost,
-  job: Pick<SyncJob, "id" | "syncId">
-): Promise<void> {
-  await host.events?.emit(
-    {
-      events: [
-        {
-          type: "sync.run.finished",
-          payload: {
-            syncId: job.syncId,
-            runId: job.id,
-            status: "failed",
-          },
-        },
-      ],
-    },
-    { source: SOURCE }
-  )
+function requireTerminalStatus(
+  status: SyncRunStatus,
+  context: string
+): Exclude<SyncRunStatus, "running"> {
+  if (status === "running") {
+    throw new Error(`[SixbSyncWorker] ${context} is still running.`)
+  }
+
+  return status
 }
 
 function assertSyncStorage(host: SyncWorkerHost): void {

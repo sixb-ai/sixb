@@ -1796,6 +1796,10 @@ export type GetDatasetErrors = {
    */
   404: {
     error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "dataset.not_found"
   }
 }
 
@@ -1867,6 +1871,10 @@ export type ListDatasetVersionsErrors = {
    */
   404: {
     error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "dataset.not_found"
   }
 }
 
@@ -1940,6 +1948,10 @@ export type GetDatasetVersionErrors = {
    */
   404: {
     error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "dataset.not_found" | "dataset.version_not_found"
   }
 }
 
@@ -2013,6 +2025,10 @@ export type ListDatasetRowsErrors = {
    */
   404: {
     error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "dataset.not_found" | "dataset.version_not_found"
   }
 }
 
@@ -2137,8 +2153,23 @@ export type ListSyncsResponses = {
       expectedLatestVersionId?: string
       commitMessage?: string
       error?: {
-        name?: string
+        code: "internal.unexpected" | "runtime.cancelled" | "sync.execution_failed"
         message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
       }
     } | null
   }>
@@ -2223,8 +2254,23 @@ export type GetSyncResponses = {
       expectedLatestVersionId?: string
       commitMessage?: string
       error?: {
-        name?: string
+        code: "internal.unexpected" | "runtime.cancelled" | "sync.execution_failed"
         message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
       }
     } | null
   }
@@ -2287,8 +2333,23 @@ export type ListSyncRunsResponses = {
       expectedLatestVersionId?: string
       commitMessage?: string
       error?: {
-        name?: string
+        code: "internal.unexpected" | "runtime.cancelled" | "sync.execution_failed"
         message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
       }
     }>
     hasMore: boolean
@@ -2441,8 +2502,23 @@ export type ListPipelinesResponses = {
         versionId: string
       }
       error?: {
-        name?: string
+        code: "internal.unexpected" | "runtime.cancelled" | "pipeline.step_failed"
         message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
       }
     } | null
   }>
@@ -2557,8 +2633,23 @@ export type GetPipelineResponses = {
         versionId: string
       }
       error?: {
-        name?: string
+        code: "internal.unexpected" | "runtime.cancelled" | "pipeline.step_failed"
         message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
       }
     } | null
   }
@@ -2615,8 +2706,23 @@ export type ListPipelineRunsResponses = {
         versionId: string
       }
       error?: {
-        name?: string
+        code: "internal.unexpected" | "runtime.cancelled" | "pipeline.step_failed"
         message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
       }
     }>
     hasMore: boolean
@@ -2675,8 +2781,23 @@ export type GetPipelineRunResponses = {
         versionId: string
       }
       error?: {
-        name?: string
+        code: "internal.unexpected" | "runtime.cancelled" | "pipeline.step_failed"
         message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
       }
     }
     steps: Array<{
@@ -2700,8 +2821,23 @@ export type GetPipelineRunResponses = {
       }
       rowsWritten?: number
       error?: {
-        name?: string
+        code: "internal.unexpected" | "runtime.cancelled" | "pipeline.step_failed"
         message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
       }
     }>
   }
@@ -2894,7 +3030,25 @@ export type ListWorkflowsResponses = {
       queuedAt?: string
       startedAt: string
       finishedAt?: string
-      error?: string
+      error?: {
+        code: "internal.unexpected" | "runtime.cancelled" | "workflow.node_failed"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
+      }
       requestedBy: {
         principalType: "user" | "serviceAccount" | "system"
         principalId: string
@@ -3056,7 +3210,25 @@ export type GetWorkflowResponses = {
       queuedAt?: string
       startedAt: string
       finishedAt?: string
-      error?: string
+      error?: {
+        code: "internal.unexpected" | "runtime.cancelled" | "workflow.node_failed"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
+      }
       requestedBy: {
         principalType: "user" | "serviceAccount" | "system"
         principalId: string
@@ -3540,7 +3712,25 @@ export type ListWorkflowRunsResponses = {
       queuedAt?: string
       startedAt: string
       finishedAt?: string
-      error?: string
+      error?: {
+        code: "internal.unexpected" | "runtime.cancelled" | "workflow.node_failed"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
+      }
       requestedBy: {
         principalType: "user" | "serviceAccount" | "system"
         principalId: string
@@ -3598,7 +3788,25 @@ export type GetWorkflowRunResponses = {
       queuedAt?: string
       startedAt: string
       finishedAt?: string
-      error?: string
+      error?: {
+        code: "internal.unexpected" | "runtime.cancelled" | "workflow.node_failed"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
+      }
       requestedBy: {
         principalType: "user" | "serviceAccount" | "system"
         principalId: string
@@ -3660,7 +3868,25 @@ export type GetWorkflowRunResponses = {
             }
           | null
       }
-      error?: string
+      error?: {
+        code: "internal.unexpected" | "runtime.cancelled" | "workflow.node_failed"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
+      }
       agentExecution?: {
         agentId: string
         status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
@@ -3668,7 +3894,15 @@ export type GetWorkflowRunResponses = {
         modelId?: string
         finishReason?: string
         usage?: {
-          [key: string]: unknown
+          inputTokens?: number
+          outputTokens?: number
+          totalTokens?: number
+          uncachedInputTokens?: number
+          cacheReadInputTokens?: number
+          cacheWriteInputTokens?: number
+          textOutputTokens?: number
+          reasoningOutputTokens?: number
+          reportingStatus: "complete" | "partial" | "unavailable"
         }
         startedAt?: string
         completedAt?: string
@@ -3724,7 +3958,15 @@ export type GetWorkflowAgentNodeExecutionResponses = {
     modelId?: string
     finishReason?: string
     usage?: {
-      [key: string]: unknown
+      inputTokens?: number
+      outputTokens?: number
+      totalTokens?: number
+      uncachedInputTokens?: number
+      cacheReadInputTokens?: number
+      cacheWriteInputTokens?: number
+      textOutputTokens?: number
+      reasoningOutputTokens?: number
+      reportingStatus: "complete" | "partial" | "unavailable"
     }
     startedAt?: string
     completedAt?: string
@@ -3732,7 +3974,25 @@ export type GetWorkflowAgentNodeExecutionResponses = {
     prompt: string
     trace?: Array<unknown>
     diagnostics?: Array<unknown>
-    error?: string
+    error?: {
+      code: "internal.unexpected" | "runtime.cancelled" | "agent.execution_failed"
+      message: string
+      retryable: boolean
+      at: string
+      /**
+       * Any JSON-compatible value.
+       */
+      details?:
+        | string
+        | number
+        | boolean
+        | Array<unknown>
+        | {
+            [key: string]: unknown
+          }
+        | null
+      truncated?: true
+    }
     createdAt: string
   }
 }
@@ -3787,7 +4047,25 @@ export type CancelWorkflowRunResponses = {
       queuedAt?: string
       startedAt: string
       finishedAt?: string
-      error?: string
+      error?: {
+        code: "internal.unexpected" | "runtime.cancelled" | "workflow.node_failed"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
+      }
       requestedBy: {
         principalType: "user" | "serviceAccount" | "system"
         principalId: string
@@ -3849,7 +4127,25 @@ export type CancelWorkflowRunResponses = {
             }
           | null
       }
-      error?: string
+      error?: {
+        code: "internal.unexpected" | "runtime.cancelled" | "workflow.node_failed"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
+      }
       agentExecution?: {
         agentId: string
         status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
@@ -3857,7 +4153,15 @@ export type CancelWorkflowRunResponses = {
         modelId?: string
         finishReason?: string
         usage?: {
-          [key: string]: unknown
+          inputTokens?: number
+          outputTokens?: number
+          totalTokens?: number
+          uncachedInputTokens?: number
+          cacheReadInputTokens?: number
+          cacheWriteInputTokens?: number
+          textOutputTokens?: number
+          reasoningOutputTokens?: number
+          reportingStatus: "complete" | "partial" | "unavailable"
         }
         startedAt?: string
         completedAt?: string
@@ -5584,17 +5888,28 @@ export type ListActionRunsResponses = {
       startedAt?: string
       finishedAt?: string
       error?: {
-        name?: string
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "queue.enqueue_failed"
+          | "action.phase_failed"
         message: string
-        phase?:
-          | "request"
-          | "enqueue"
-          | "validation"
-          | "writeback"
-          | "edits"
-          | "commit"
-          | "effects"
-          | "cancelled"
+        retryable: boolean
+        at: string
+        details: {
+          actionId: string
+          runId: string
+          phase:
+            | "request"
+            | "enqueue"
+            | "validation"
+            | "writeback"
+            | "edits"
+            | "commit"
+            | "effects"
+            | "cancelled"
+        }
+        truncated?: true
       }
     }>
     hasMore: boolean
@@ -5667,56 +5982,94 @@ export type GetActionRunResponses = {
     startedAt?: string
     finishedAt?: string
     error?: {
-      name?: string
+      code:
+        | "internal.unexpected"
+        | "runtime.cancelled"
+        | "queue.enqueue_failed"
+        | "action.phase_failed"
       message: string
-      phase?:
-        | "request"
-        | "enqueue"
-        | "validation"
-        | "writeback"
-        | "edits"
-        | "commit"
-        | "effects"
-        | "cancelled"
+      retryable: boolean
+      at: string
+      details: {
+        actionId: string
+        runId: string
+        phase:
+          | "request"
+          | "enqueue"
+          | "validation"
+          | "writeback"
+          | "edits"
+          | "commit"
+          | "effects"
+          | "cancelled"
+      }
+      truncated?: true
     }
     params: {
       [key: string]: unknown
     }
-    writeback?: {
-      status: "succeeded" | "failed"
-      completedAt: string
-      result?: unknown
-      error?: {
-        name?: string
-        message: string
-        phase?:
-          | "request"
-          | "enqueue"
-          | "validation"
-          | "writeback"
-          | "edits"
-          | "commit"
-          | "effects"
-          | "cancelled"
-      }
-    }
-    effects?: {
-      status: "succeeded" | "failed"
-      completedAt: string
-      error?: {
-        name?: string
-        message: string
-        phase?:
-          | "request"
-          | "enqueue"
-          | "validation"
-          | "writeback"
-          | "edits"
-          | "commit"
-          | "effects"
-          | "cancelled"
-      }
-    }
+    writeback?:
+      | {
+          status: "succeeded"
+          completedAt: string
+          /**
+           * Any JSON-compatible value.
+           */
+          result:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+        }
+      | {
+          status: "failed"
+          completedAt: string
+          error: {
+            code:
+              | "internal.unexpected"
+              | "runtime.cancelled"
+              | "queue.enqueue_failed"
+              | "action.phase_failed"
+            message: string
+            retryable: boolean
+            at: string
+            details: {
+              actionId: string
+              runId: string
+              phase: "writeback"
+            }
+            truncated?: true
+          }
+        }
+    effects?:
+      | {
+          status: "succeeded"
+          completedAt: string
+        }
+      | {
+          status: "failed"
+          completedAt: string
+          error: {
+            code:
+              | "internal.unexpected"
+              | "runtime.cancelled"
+              | "queue.enqueue_failed"
+              | "action.phase_failed"
+            message: string
+            retryable: boolean
+            at: string
+            details: {
+              actionId: string
+              runId: string
+              phase: "effects"
+            }
+            truncated?: true
+          }
+        }
   }
 }
 
@@ -6436,8 +6789,12 @@ export type PostAgentThreadMessageResponses = {
         inputTokens?: number
         outputTokens?: number
         totalTokens?: number
-        reasoningTokens?: number
-        cachedInputTokens?: number
+        uncachedInputTokens?: number
+        cacheReadInputTokens?: number
+        cacheWriteInputTokens?: number
+        textOutputTokens?: number
+        reasoningOutputTokens?: number
+        reportingStatus: "complete" | "partial" | "unavailable"
       }
       diagnostics?: Array<{
         code:
@@ -6452,7 +6809,25 @@ export type PostAgentThreadMessageResponses = {
         path?: string
         message: string
       }>
-      error?: string
+      error?: {
+        code: "internal.unexpected" | "runtime.cancelled" | "agent.execution_failed"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
+      }
       attempt: number
       streamId: string
       createdAt: string
@@ -6629,8 +7004,12 @@ export type CancelAgentRunResponses = {
         inputTokens?: number
         outputTokens?: number
         totalTokens?: number
-        reasoningTokens?: number
-        cachedInputTokens?: number
+        uncachedInputTokens?: number
+        cacheReadInputTokens?: number
+        cacheWriteInputTokens?: number
+        textOutputTokens?: number
+        reasoningOutputTokens?: number
+        reportingStatus: "complete" | "partial" | "unavailable"
       }
       diagnostics?: Array<{
         code:
@@ -6645,7 +7024,25 @@ export type CancelAgentRunResponses = {
         path?: string
         message: string
       }>
-      error?: string
+      error?: {
+        code: "internal.unexpected" | "runtime.cancelled" | "agent.execution_failed"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
+      }
       attempt: number
       streamId: string
       createdAt: string
@@ -6725,8 +7122,12 @@ export type RetryAgentRunResponses = {
         inputTokens?: number
         outputTokens?: number
         totalTokens?: number
-        reasoningTokens?: number
-        cachedInputTokens?: number
+        uncachedInputTokens?: number
+        cacheReadInputTokens?: number
+        cacheWriteInputTokens?: number
+        textOutputTokens?: number
+        reasoningOutputTokens?: number
+        reportingStatus: "complete" | "partial" | "unavailable"
       }
       diagnostics?: Array<{
         code:
@@ -6741,7 +7142,25 @@ export type RetryAgentRunResponses = {
         path?: string
         message: string
       }>
-      error?: string
+      error?: {
+        code: "internal.unexpected" | "runtime.cancelled" | "agent.execution_failed"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
+      }
       attempt: number
       streamId: string
       createdAt: string
@@ -6819,8 +7238,12 @@ export type ListAgentThreadRunsResponses = {
         inputTokens?: number
         outputTokens?: number
         totalTokens?: number
-        reasoningTokens?: number
-        cachedInputTokens?: number
+        uncachedInputTokens?: number
+        cacheReadInputTokens?: number
+        cacheWriteInputTokens?: number
+        textOutputTokens?: number
+        reasoningOutputTokens?: number
+        reportingStatus: "complete" | "partial" | "unavailable"
       }
       diagnostics?: Array<{
         code:
@@ -6835,7 +7258,25 @@ export type ListAgentThreadRunsResponses = {
         path?: string
         message: string
       }>
-      error?: string
+      error?: {
+        code: "internal.unexpected" | "runtime.cancelled" | "agent.execution_failed"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
+      }
       attempt: number
       streamId: string
       createdAt: string
@@ -6910,8 +7351,12 @@ export type GetAgentRunResponses = {
       inputTokens?: number
       outputTokens?: number
       totalTokens?: number
-      reasoningTokens?: number
-      cachedInputTokens?: number
+      uncachedInputTokens?: number
+      cacheReadInputTokens?: number
+      cacheWriteInputTokens?: number
+      textOutputTokens?: number
+      reasoningOutputTokens?: number
+      reportingStatus: "complete" | "partial" | "unavailable"
     }
     diagnostics?: Array<{
       code:
@@ -6926,7 +7371,25 @@ export type GetAgentRunResponses = {
       path?: string
       message: string
     }>
-    error?: string
+    error?: {
+      code: "internal.unexpected" | "runtime.cancelled" | "agent.execution_failed"
+      message: string
+      retryable: boolean
+      at: string
+      /**
+       * Any JSON-compatible value.
+       */
+      details?:
+        | string
+        | number
+        | boolean
+        | Array<unknown>
+        | {
+            [key: string]: unknown
+          }
+        | null
+      truncated?: true
+    }
     attempt: number
     streamId: string
     createdAt: string
@@ -8382,7 +8845,25 @@ export type ListProjectionsResponses = {
             }
             startedAt: string
             finishedAt?: string
-            errorMessage?: string
+            error?: {
+              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              message: string
+              retryable: boolean
+              at: string
+              /**
+               * Any JSON-compatible value.
+               */
+              details?:
+                | string
+                | number
+                | boolean
+                | Array<unknown>
+                | {
+                    [key: string]: unknown
+                  }
+                | null
+              truncated?: true
+            }
             identity: {
               projectionId: string
               datasetVersion: {
@@ -8411,7 +8892,25 @@ export type ListProjectionsResponses = {
             }
             startedAt: string
             finishedAt?: string
-            errorMessage?: string
+            error?: {
+              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              message: string
+              retryable: boolean
+              at: string
+              /**
+               * Any JSON-compatible value.
+               */
+              details?:
+                | string
+                | number
+                | boolean
+                | Array<unknown>
+                | {
+                    [key: string]: unknown
+                  }
+                | null
+              truncated?: true
+            }
             identity: {
               projectionId: string
               datasetVersion: {
@@ -8441,7 +8940,25 @@ export type ListProjectionsResponses = {
             }
             startedAt: string
             finishedAt?: string
-            errorMessage?: string
+            error?: {
+              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              message: string
+              retryable: boolean
+              at: string
+              /**
+               * Any JSON-compatible value.
+               */
+              details?:
+                | string
+                | number
+                | boolean
+                | Array<unknown>
+                | {
+                    [key: string]: unknown
+                  }
+                | null
+              truncated?: true
+            }
             identity: {
               projectionId: string
               datasetVersion: {
@@ -8482,7 +8999,25 @@ export type ListProjectionsResponses = {
             }
             startedAt: string
             finishedAt?: string
-            errorMessage?: string
+            error?: {
+              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              message: string
+              retryable: boolean
+              at: string
+              /**
+               * Any JSON-compatible value.
+               */
+              details?:
+                | string
+                | number
+                | boolean
+                | Array<unknown>
+                | {
+                    [key: string]: unknown
+                  }
+                | null
+              truncated?: true
+            }
             identity: {
               projectionId: string
               datasetVersion: {
@@ -8511,7 +9046,25 @@ export type ListProjectionsResponses = {
             }
             startedAt: string
             finishedAt?: string
-            errorMessage?: string
+            error?: {
+              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              message: string
+              retryable: boolean
+              at: string
+              /**
+               * Any JSON-compatible value.
+               */
+              details?:
+                | string
+                | number
+                | boolean
+                | Array<unknown>
+                | {
+                    [key: string]: unknown
+                  }
+                | null
+              truncated?: true
+            }
             identity: {
               projectionId: string
               datasetVersion: {
@@ -8541,7 +9094,25 @@ export type ListProjectionsResponses = {
             }
             startedAt: string
             finishedAt?: string
-            errorMessage?: string
+            error?: {
+              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              message: string
+              retryable: boolean
+              at: string
+              /**
+               * Any JSON-compatible value.
+               */
+              details?:
+                | string
+                | number
+                | boolean
+                | Array<unknown>
+                | {
+                    [key: string]: unknown
+                  }
+                | null
+              truncated?: true
+            }
             identity: {
               projectionId: string
               datasetVersion: {
@@ -8583,7 +9154,25 @@ export type ListProjectionsResponses = {
             }
             startedAt: string
             finishedAt?: string
-            errorMessage?: string
+            error?: {
+              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              message: string
+              retryable: boolean
+              at: string
+              /**
+               * Any JSON-compatible value.
+               */
+              details?:
+                | string
+                | number
+                | boolean
+                | Array<unknown>
+                | {
+                    [key: string]: unknown
+                  }
+                | null
+              truncated?: true
+            }
             identity: {
               projectionId: string
               datasetVersion: {
@@ -8612,7 +9201,25 @@ export type ListProjectionsResponses = {
             }
             startedAt: string
             finishedAt?: string
-            errorMessage?: string
+            error?: {
+              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              message: string
+              retryable: boolean
+              at: string
+              /**
+               * Any JSON-compatible value.
+               */
+              details?:
+                | string
+                | number
+                | boolean
+                | Array<unknown>
+                | {
+                    [key: string]: unknown
+                  }
+                | null
+              truncated?: true
+            }
             identity: {
               projectionId: string
               datasetVersion: {
@@ -8642,7 +9249,25 @@ export type ListProjectionsResponses = {
             }
             startedAt: string
             finishedAt?: string
-            errorMessage?: string
+            error?: {
+              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              message: string
+              retryable: boolean
+              at: string
+              /**
+               * Any JSON-compatible value.
+               */
+              details?:
+                | string
+                | number
+                | boolean
+                | Array<unknown>
+                | {
+                    [key: string]: unknown
+                  }
+                | null
+              truncated?: true
+            }
             identity: {
               projectionId: string
               datasetVersion: {
@@ -8720,7 +9345,25 @@ export type GetProjectionResponses = {
               }
               startedAt: string
               finishedAt?: string
-              errorMessage?: string
+              error?: {
+                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                message: string
+                retryable: boolean
+                at: string
+                /**
+                 * Any JSON-compatible value.
+                 */
+                details?:
+                  | string
+                  | number
+                  | boolean
+                  | Array<unknown>
+                  | {
+                      [key: string]: unknown
+                    }
+                  | null
+                truncated?: true
+              }
               identity: {
                 projectionId: string
                 datasetVersion: {
@@ -8749,7 +9392,25 @@ export type GetProjectionResponses = {
               }
               startedAt: string
               finishedAt?: string
-              errorMessage?: string
+              error?: {
+                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                message: string
+                retryable: boolean
+                at: string
+                /**
+                 * Any JSON-compatible value.
+                 */
+                details?:
+                  | string
+                  | number
+                  | boolean
+                  | Array<unknown>
+                  | {
+                      [key: string]: unknown
+                    }
+                  | null
+                truncated?: true
+              }
               identity: {
                 projectionId: string
                 datasetVersion: {
@@ -8779,7 +9440,25 @@ export type GetProjectionResponses = {
               }
               startedAt: string
               finishedAt?: string
-              errorMessage?: string
+              error?: {
+                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                message: string
+                retryable: boolean
+                at: string
+                /**
+                 * Any JSON-compatible value.
+                 */
+                details?:
+                  | string
+                  | number
+                  | boolean
+                  | Array<unknown>
+                  | {
+                      [key: string]: unknown
+                    }
+                  | null
+                truncated?: true
+              }
               identity: {
                 projectionId: string
                 datasetVersion: {
@@ -8820,7 +9499,25 @@ export type GetProjectionResponses = {
               }
               startedAt: string
               finishedAt?: string
-              errorMessage?: string
+              error?: {
+                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                message: string
+                retryable: boolean
+                at: string
+                /**
+                 * Any JSON-compatible value.
+                 */
+                details?:
+                  | string
+                  | number
+                  | boolean
+                  | Array<unknown>
+                  | {
+                      [key: string]: unknown
+                    }
+                  | null
+                truncated?: true
+              }
               identity: {
                 projectionId: string
                 datasetVersion: {
@@ -8849,7 +9546,25 @@ export type GetProjectionResponses = {
               }
               startedAt: string
               finishedAt?: string
-              errorMessage?: string
+              error?: {
+                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                message: string
+                retryable: boolean
+                at: string
+                /**
+                 * Any JSON-compatible value.
+                 */
+                details?:
+                  | string
+                  | number
+                  | boolean
+                  | Array<unknown>
+                  | {
+                      [key: string]: unknown
+                    }
+                  | null
+                truncated?: true
+              }
               identity: {
                 projectionId: string
                 datasetVersion: {
@@ -8879,7 +9594,25 @@ export type GetProjectionResponses = {
               }
               startedAt: string
               finishedAt?: string
-              errorMessage?: string
+              error?: {
+                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                message: string
+                retryable: boolean
+                at: string
+                /**
+                 * Any JSON-compatible value.
+                 */
+                details?:
+                  | string
+                  | number
+                  | boolean
+                  | Array<unknown>
+                  | {
+                      [key: string]: unknown
+                    }
+                  | null
+                truncated?: true
+              }
               identity: {
                 projectionId: string
                 datasetVersion: {
@@ -8921,7 +9654,25 @@ export type GetProjectionResponses = {
               }
               startedAt: string
               finishedAt?: string
-              errorMessage?: string
+              error?: {
+                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                message: string
+                retryable: boolean
+                at: string
+                /**
+                 * Any JSON-compatible value.
+                 */
+                details?:
+                  | string
+                  | number
+                  | boolean
+                  | Array<unknown>
+                  | {
+                      [key: string]: unknown
+                    }
+                  | null
+                truncated?: true
+              }
               identity: {
                 projectionId: string
                 datasetVersion: {
@@ -8950,7 +9701,25 @@ export type GetProjectionResponses = {
               }
               startedAt: string
               finishedAt?: string
-              errorMessage?: string
+              error?: {
+                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                message: string
+                retryable: boolean
+                at: string
+                /**
+                 * Any JSON-compatible value.
+                 */
+                details?:
+                  | string
+                  | number
+                  | boolean
+                  | Array<unknown>
+                  | {
+                      [key: string]: unknown
+                    }
+                  | null
+                truncated?: true
+              }
               identity: {
                 projectionId: string
                 datasetVersion: {
@@ -8980,7 +9749,25 @@ export type GetProjectionResponses = {
               }
               startedAt: string
               finishedAt?: string
-              errorMessage?: string
+              error?: {
+                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                message: string
+                retryable: boolean
+                at: string
+                /**
+                 * Any JSON-compatible value.
+                 */
+                details?:
+                  | string
+                  | number
+                  | boolean
+                  | Array<unknown>
+                  | {
+                      [key: string]: unknown
+                    }
+                  | null
+                truncated?: true
+              }
               identity: {
                 projectionId: string
                 datasetVersion: {
@@ -9056,7 +9843,25 @@ export type ListProjectionRunsResponses = {
           }
           startedAt: string
           finishedAt?: string
-          errorMessage?: string
+          error?: {
+            code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+            message: string
+            retryable: boolean
+            at: string
+            /**
+             * Any JSON-compatible value.
+             */
+            details?:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+            truncated?: true
+          }
           identity: {
             projectionId: string
             datasetVersion: {
@@ -9085,7 +9890,25 @@ export type ListProjectionRunsResponses = {
           }
           startedAt: string
           finishedAt?: string
-          errorMessage?: string
+          error?: {
+            code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+            message: string
+            retryable: boolean
+            at: string
+            /**
+             * Any JSON-compatible value.
+             */
+            details?:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+            truncated?: true
+          }
           identity: {
             projectionId: string
             datasetVersion: {
@@ -9115,7 +9938,25 @@ export type ListProjectionRunsResponses = {
           }
           startedAt: string
           finishedAt?: string
-          errorMessage?: string
+          error?: {
+            code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+            message: string
+            retryable: boolean
+            at: string
+            /**
+             * Any JSON-compatible value.
+             */
+            details?:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+            truncated?: true
+          }
           identity: {
             projectionId: string
             datasetVersion: {
@@ -9190,7 +10031,25 @@ export type GetProjectionRunResponses = {
         }
         startedAt: string
         finishedAt?: string
-        errorMessage?: string
+        error?: {
+          code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+          message: string
+          retryable: boolean
+          at: string
+          /**
+           * Any JSON-compatible value.
+           */
+          details?:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+          truncated?: true
+        }
         identity: {
           projectionId: string
           datasetVersion: {
@@ -9219,7 +10078,25 @@ export type GetProjectionRunResponses = {
         }
         startedAt: string
         finishedAt?: string
-        errorMessage?: string
+        error?: {
+          code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+          message: string
+          retryable: boolean
+          at: string
+          /**
+           * Any JSON-compatible value.
+           */
+          details?:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+          truncated?: true
+        }
         identity: {
           projectionId: string
           datasetVersion: {
@@ -9249,7 +10126,25 @@ export type GetProjectionRunResponses = {
         }
         startedAt: string
         finishedAt?: string
-        errorMessage?: string
+        error?: {
+          code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+          message: string
+          retryable: boolean
+          at: string
+          /**
+           * Any JSON-compatible value.
+           */
+          details?:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+          truncated?: true
+        }
         identity: {
           projectionId: string
           datasetVersion: {
@@ -9324,7 +10219,25 @@ export type ListWebhookRunsResponses = {
       responseStatus?: number
       idempotencyKey?: string
       deliveryClaimResult?: "claimed" | "duplicate" | "in_progress"
-      error?: string
+      error?: {
+        code: "internal.unexpected" | "webhook.delivery_failed"
+        message: string
+        retryable: boolean
+        at: string
+        /**
+         * Any JSON-compatible value.
+         */
+        details?:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+        truncated?: true
+      }
     }>
     hasMore: boolean
     total: number

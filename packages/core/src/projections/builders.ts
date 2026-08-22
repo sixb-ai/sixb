@@ -718,15 +718,6 @@ export function isProjectionDefinition(value: unknown): value is ProjectionDefin
   )
 }
 
-/** Returns the queue/runtime kind for a projection definition. */
-export function projectionKindOf(
-  projection: ProjectionDefinition
-): "object" | "link" | "telemetry" {
-  if (projection._tag === "ObjectProjectionDefinition") return "object"
-  if (projection._tag === "LinkProjectionDefinition") return "link"
-  return "telemetry"
-}
-
 /**
  * Extracts the object type id(s) a projection targets, used to authorize run
  * visibility (`object.view`). Link projections require both ends; object and

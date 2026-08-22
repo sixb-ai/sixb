@@ -93,7 +93,7 @@ export async function emitPipelineRunStepFinished(
             finishedAt: requireFinishedAt(step.id, step.finishedAt).toISOString(),
             ...(step.output ? { versionId: step.output.versionId } : {}),
             ...(step.rowsWritten !== undefined ? { rowsWritten: step.rowsWritten } : {}),
-            ...(step.error ? { error: step.error.message } : {}),
+            ...(step.error ? { error: step.error } : {}),
           },
         },
       ],
@@ -135,37 +135,28 @@ export async function emitDatasetVersionCommitted(
 
 export async function emitPipelineRunFinished(
   events: DomainEventLog | undefined,
-  job: {
-    readonly id: string
-    readonly pipelineId: string
-    readonly status: "succeeded" | "failed" | "cancelled"
-    readonly datasetId?: string
-    readonly versionId?: string
-  }
+  run: Pick<PipelineRunRecord, "id" | "pipelineId" | "status" | "output" | "error">
 ): Promise<void> {
   await events?.emit(
-    { events: [{ type: "pipeline.run.finished", payload: buildPipelineRunFinishedPayload(job) }] },
+    { events: [{ type: "pipeline.run.finished", payload: buildPipelineRunFinishedPayload(run) }] },
     { source: SOURCE }
   )
 }
 
-function buildPipelineRunFinishedPayload(job: {
-  readonly id: string
-  readonly pipelineId: string
-  readonly status: "succeeded" | "failed" | "cancelled"
-  readonly datasetId?: string
-  readonly versionId?: string
-}) {
+function buildPipelineRunFinishedPayload(
+  run: Pick<PipelineRunRecord, "id" | "pipelineId" | "status" | "output" | "error">
+) {
   return {
-    pipelineId: job.pipelineId,
-    runId: job.id,
-    status: job.status,
-    ...(job.datasetId && job.versionId
+    pipelineId: run.pipelineId,
+    runId: run.id,
+    status: requireTerminalStatus(run.status, `Pipeline run '${run.id}'`),
+    ...(run.output
       ? {
-          datasetId: job.datasetId,
-          versionId: job.versionId,
+          datasetId: run.output.datasetId,
+          versionId: run.output.versionId,
         }
       : {}),
+    ...(run.error ? { error: run.error } : {}),
   }
 }
 

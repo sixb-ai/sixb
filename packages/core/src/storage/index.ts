@@ -5,6 +5,7 @@
  * the interface cannot be implemented from outside the package.
  */
 export type { Principal } from "../auth"
+export type { SixbFailure } from "../errors/types"
 export type { StoredRuleResolvedEvent, StoredRuleTriggeredEvent } from "../events"
 export type { ReadonlyJsonObject } from "../json"
 export { stableJsonStringify } from "../json"
@@ -16,6 +17,8 @@ export type {
 export type {
   ActionRunEffectsRecord,
   ActionRunFailure,
+  ActionRunFailureCode,
+  ActionRunFailureDetails,
   ActionRunParams,
   ActionRunPhase,
   ActionRunPhaseRecord,
@@ -35,6 +38,8 @@ export type {
   StartActionRunInput,
 } from "./action-runs"
 export {
+  ACTION_RUN_FAILURE_CODES,
+  ACTION_RUN_PHASES,
   ActionRunError,
   actionRunParamsEqual,
   actionRunPhaseRecordsEqual,
@@ -53,11 +58,11 @@ export type {
   AgentRunDiagnosticCode,
   AgentRunDiagnosticSeverity,
   AgentRunExecution,
+  AgentRunFailureCode,
   AgentRunFinishReason,
   AgentRunRecord,
   AgentRunStatus,
   AgentRunStore,
-  AgentRunUsage,
   AgentStorage,
   AgentStorageErrorCode,
   AgentThreadRecord,
@@ -80,6 +85,7 @@ export type {
 } from "./agents"
 export {
   AGENT_RUN_DIAGNOSTIC_CODES,
+  AGENT_RUN_FAILURE_CODES,
   AGENT_RUN_FINISH_REASONS,
   AgentStorageError,
   coerceAgentRunFinishReason,
@@ -323,6 +329,8 @@ export type {
   OntologyMaterializationEvent,
   OntologyMaterializationEventDraft,
   OntologyMaterializationStorage,
+  OntologyOutboxFailure,
+  OntologyOutboxFailureCode,
   OntologyOutboxRecord,
   OntologyOutboxStorage,
   OntologyOutboxSummary,
@@ -359,6 +367,7 @@ export type {
   TelemetryOntologyCommitIntent,
   TerminalSourceMaterializationSummary,
 } from "./ontology"
+export { ONTOLOGY_OUTBOX_FAILURE_CODES } from "./ontology"
 export type {
   FinishPipelineRunInput,
   FinishPipelineStepRunInput,
@@ -368,7 +377,7 @@ export type {
   ListPipelineRunsResult,
   ListPipelineStepRunsInput,
   ListPipelineStepRunsResult,
-  PipelineRunFailure,
+  PipelineRunFailureCode,
   PipelineRunRecord,
   PipelineRunStatus,
   PipelineRunStorage,
@@ -376,7 +385,11 @@ export type {
   StartPipelineRunInput,
   StartPipelineStepRunInput,
 } from "./pipeline-runs"
-export { InMemoryPipelineRunStorage, PipelineRunError } from "./pipeline-runs"
+export {
+  InMemoryPipelineRunStorage,
+  PIPELINE_RUN_FAILURE_CODES,
+  PipelineRunError,
+} from "./pipeline-runs"
 export type {
   AdvanceProjectionTelemetryCheckpointInput,
   FinishProjectionRunInput,
@@ -392,6 +405,7 @@ export type {
   ProjectionKind,
   ProjectionMissingTarget,
   ProjectionRunClaim,
+  ProjectionRunFailureCode,
   ProjectionRunProgress,
   ProjectionRunRecord,
   ProjectionRunStatus,
@@ -405,6 +419,7 @@ export type {
 } from "./projection-runs"
 export {
   InMemoryProjectionRunStorage,
+  PROJECTION_RUN_FAILURE_CODES,
   PROJECTION_RUN_PROGRESS_KEYS,
   ProjectionRunError,
   projectionRunObjectTypesVisible,
@@ -429,13 +444,13 @@ export type {
   ListSyncRunsInput,
   ListSyncRunsResult,
   StartSyncRunInput,
-  SyncRunFailure,
+  SyncRunFailureCode,
   SyncRunMode,
   SyncRunRecord,
   SyncRunStatus,
   SyncRunStorage,
 } from "./sync-runs"
-export { InMemorySyncRunStorage, SyncRunError } from "./sync-runs"
+export { InMemorySyncRunStorage, SYNC_RUN_FAILURE_CODES, SyncRunError } from "./sync-runs"
 export type {
   TimeseriesHistoryBatchInput,
   TimeseriesHistoryBatchResult,
@@ -452,23 +467,33 @@ export type { Storage, StorageTransactionOptions } from "./types"
 export type {
   WebhookDeliveryClaimRecord,
   WebhookDeliveryClaimResult,
+  WebhookDeliveryFailure,
+  WebhookDeliveryFailureCode,
   WebhookDeliveryKey,
   WebhookDeliveryRecord,
   WebhookDeliveryStatus,
   WebhookDeliveryStorage,
 } from "./webhook-deliveries"
-export { InMemoryWebhookDeliveryStorage } from "./webhook-deliveries"
+export {
+  InMemoryWebhookDeliveryStorage,
+  WEBHOOK_DELIVERY_FAILURE_CODES,
+} from "./webhook-deliveries"
 export type {
   FinishWebhookRunInput,
   FinishWebhookRunStatus,
   ListWebhookRunsInput,
   ListWebhookRunsResult,
   StartWebhookRunInput,
+  WebhookRunFailureCode,
   WebhookRunRecord,
   WebhookRunStatus,
   WebhookRunStorage,
 } from "./webhook-runs"
-export { InMemoryWebhookRunStorage, WebhookRunError } from "./webhook-runs"
+export {
+  InMemoryWebhookRunStorage,
+  WEBHOOK_RUN_FAILURE_CODES,
+  WebhookRunError,
+} from "./webhook-runs"
 export type {
   CancelWorkflowInterventionInput,
   CreateWorkflowInterventionInput,
@@ -520,6 +545,7 @@ export type {
   WorkflowNodeRunStorage,
   WorkflowNodeRunType,
   WorkflowRunExecution,
+  WorkflowRunFailureCode,
   WorkflowRunRecord,
   WorkflowRunStatus,
   WorkflowRunStorage,
@@ -528,5 +554,6 @@ export {
   InMemoryWorkflowAgentNodeRunStorage,
   InMemoryWorkflowNodeRunStorage,
   InMemoryWorkflowRunStorage,
+  WORKFLOW_RUN_FAILURE_CODES,
   WorkflowRunError,
 } from "./workflow-runs"

@@ -1,16 +1,25 @@
 import { findActionEditCommit } from "@sixb/core/internal/actions"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
+import { createSixbError } from "@sixb/core/internal/errors"
 import type { ActionRunFailure, ActionRunRecord } from "@sixb/core/storage"
 import { isTerminalActionRun } from "@sixb/core/storage"
-import { ActionWorkerError } from "../errors"
+import { toActionRunFailure } from "../normalize"
 import type { ActionRunResult, RunActionJobInput } from "../types"
 
-export function requireFinishedAt(runId: string, finishedAt: Date | undefined): Date {
-  if (finishedAt) {
-    return finishedAt
+export function requireFinishedAt(input: {
+  readonly actionId: string
+  readonly runId: string
+  readonly finishedAt: Date | undefined
+}): Date {
+  if (input.finishedAt) {
+    return input.finishedAt
   }
 
-  throw new ActionWorkerError(`Action run '${runId}' finished without a finishedAt timestamp.`)
+  throw createSixbError(
+    "internal.unexpected",
+    `[SixbActionWorker] Action run '${input.runId}' finished without a finishedAt timestamp.`,
+    { details: { actionId: input.actionId, runId: input.runId } }
+  )
 }
 
 /**
@@ -41,7 +50,7 @@ export async function resolveRedeliveredRunningRun(
   }
 
   if (resolution.kind === "resume") return resolution
-  reportRedeliveryFailure(input, resolution.run)
+  reportRedeliveryFailure(input, resolution.run, resolution.failure)
   return {
     kind: "finished",
     result: failedResult(input.job.id, input.job.actionId, resolution.run, resolution.failure),
@@ -52,8 +61,10 @@ async function resolveRunningRunUnderFence(input: RunActionJobInput, run: Action
   return input.runtime.storage.transaction(
     async (storage) => {
       if (!storage.actionRuns) {
-        throw new ActionWorkerError(
-          "Action workers require transactional Action materialization fencing."
+        throw createSixbError(
+          "internal.unexpected",
+          "[SixbActionWorker] Action workers require transactional Action materialization fencing.",
+          { details: { actionId: input.job.actionId, runId: input.job.id } }
         )
       }
       const locked = await storage.actionRuns.lockForMaterialization({
@@ -70,12 +81,13 @@ async function resolveRunningRunUnderFence(input: RunActionJobInput, run: Action
         return { kind: "resume" as const, run: locked }
       }
 
-      const failure = redeliveryFailure(input.job.id, locked)
+      const failedAt = new Date()
+      const failure = redeliveryFailure(input.job.id, locked, failedAt)
       const finished = await storage.actionRuns.finish({
         projectId: input.runtime.id,
         id: input.job.id,
         status: "failed",
-        phase: failure.phase,
+        finishedAt: failedAt,
         error: failure,
       })
       return { kind: "failed" as const, run: finished, failure }
@@ -96,33 +108,46 @@ export function failedResult(
     subject: run.subject,
     status: "failed",
     startedAt: run.startedAt ?? run.queuedAt,
-    finishedAt: requireFinishedAt(runId, run.finishedAt),
+    finishedAt: requireFinishedAt({ actionId, runId, finishedAt: run.finishedAt }),
     error: failure,
     record: run,
   }
 }
 
-function redeliveryFailure(runId: string, run: ActionRunRecord): ActionRunFailure {
-  return {
-    name: "ActionRunLeaseLostError",
-    message: `Action run '${runId}' was redelivered while already running. The previous worker may have lost its queue lease or crashed before reaching a resumable phase boundary.`,
-    phase: run.phase ?? "validation",
-  }
+function redeliveryFailure(runId: string, run: ActionRunRecord, failedAt: Date): ActionRunFailure {
+  return toActionRunFailure(
+    {
+      name: "ActionRunLeaseLostError",
+      message: `Action run '${runId}' was redelivered while already running. The previous worker may have lost its queue lease or crashed before reaching a resumable phase boundary.`,
+    },
+    run.phase ?? "validation",
+    {
+      actionId: run.actionId,
+      runId,
+      at: failedAt,
+    }
+  )
 }
 
-function reportRedeliveryFailure(input: RunActionJobInput, run: ActionRunRecord): void {
-  const error = new ActionWorkerError(
-    run.error?.message ?? `Action run '${run.id}' lost its lease.`
+function reportRedeliveryFailure(
+  input: RunActionJobInput,
+  run: ActionRunRecord,
+  failure: ActionRunFailure
+): void {
+  const error = createSixbError(
+    "internal.unexpected",
+    `[SixbActionWorker] ${run.error?.message ?? `Action run '${run.id}' lost its lease.`}`,
+    { details: { actionId: input.job.actionId, runId: input.job.id } }
   )
   reportRunFailure(input.runtime.errorReporterHost, error, {
     projectId: input.runtime.id,
-    occurredAt: run.finishedAt,
     attempt: input.attempt,
+    runKind: "action",
     run: {
-      kind: "action",
       runId: input.job.id,
       actionId: input.job.actionId,
     },
+    failure,
   })
 }
 

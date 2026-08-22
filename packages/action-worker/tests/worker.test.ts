@@ -19,7 +19,6 @@ import { LOGS_STREAM } from "@sixb/core/internal/logging"
 import type { ActionRunRecord } from "@sixb/core/storage"
 import { createTestSixb } from "@sixb/core/testing"
 import { ActionWorker } from "../src"
-import { ActionWorkerError } from "../src/errors"
 import type { ActionExecutionFacade } from "../src/types"
 import { waitFor } from "./helpers"
 
@@ -68,6 +67,15 @@ function createSixb(
   return { host, sixb: createTestSixb(host) }
 }
 
+function captureThrown(callback: () => unknown): unknown {
+  try {
+    callback()
+  } catch (error) {
+    return error
+  }
+  throw new Error("Expected callback to throw")
+}
+
 describe("ActionWorker", () => {
   test("idles without action definitions or action-run storage", async () => {
     const storage = createStorageWithoutActionRuns()
@@ -77,14 +85,20 @@ describe("ActionWorker", () => {
     await worker.stop()
   })
 
-  test("throws ActionWorkerError when action-run storage is missing", () => {
+  test("throws a coded internal error when action-run storage is missing", () => {
     const noop = defineAction("noop")
       .on(Device)
       .params({})
       .writeback(() => {})
     const storage = createStorageWithoutActionRuns()
 
-    expect(() => new ActionWorker(createSixb([noop], storage).host)).toThrow(ActionWorkerError)
+    const error = captureThrown(() => new ActionWorker(createSixb([noop], storage).host))
+
+    expect(error).toMatchObject({
+      code: "internal.unexpected",
+      message: "[SixbActionWorker] Action workers require storage.actionRuns support.",
+      retryable: false,
+    })
   })
 
   test("streams a run-scoped log line to the broker", async () => {
@@ -257,20 +271,25 @@ describe("ActionWorker", () => {
     await reporter.flush()
 
     expect(failed.status).toBe("failed")
+    expect(failed.error).toMatchObject({
+      code: "action.phase_failed",
+      details: { actionId: "fail", runId: failed.id, phase: "writeback" },
+    })
     expect(reports).toHaveLength(1)
     expect(reports[0]?.error).toBe(originalError)
     expect(reports[0]?.context).toMatchObject({
       type: "run.failed",
-      notificationId: `project:${host.id}:run:action:${failed.id}:failed:${failed.finishedAt?.toISOString()}`,
+      notificationId: `project:${host.id}:run:action:${failed.id}:failed:${failed.error?.at}`,
       projectId: host.id,
       attempt: 1,
+      runKind: "action",
       run: {
-        kind: "action",
         runId: failed.id,
         actionId: "fail",
       },
+      failure: failed.error,
     })
-    expect(reports[0]?.context.occurredAt).toBe(failed.finishedAt?.toISOString() ?? "")
+    expect(reports[0]?.context.occurredAt).toBe(failed.error?.at ?? "")
   })
 
   test("requestActionAndWait resolves with the terminal action run", async () => {
@@ -309,7 +328,7 @@ describe("ActionWorker", () => {
       actionId: "fail",
     })
     expect(failed.status).toBe("failed")
-    expect(failed.error?.message).toBe("writeback failed")
+    expect(failed.error?.message).toBe("Action execution failed.")
 
     await worker.stop()
   })

@@ -149,6 +149,29 @@ describe("rest connector", () => {
     expect(attempts).toBe(2)
   })
 
+  test("allows an individual request to opt out of retries", async () => {
+    let attempts = 0
+
+    mockFetch(() => {
+      attempts += 1
+      return Promise.resolve(new Response("busy", { status: 503 }))
+    })
+
+    const client = await rest({
+      baseUrl: "https://api.example.com",
+      retry: { maxRetries: 3, delayMs: () => 0 },
+    }).connect({
+      projectId: "demo",
+      connectorId: "hubspot",
+      signal: new AbortController().signal,
+    })
+
+    const response = await client.post("/mutation", {}, { retry: false })
+
+    expect(response.status).toBe(503)
+    expect(attempts).toBe(1)
+  })
+
   test("never retries a request with a stream body — it cannot be replayed", async () => {
     let attempts = 0
 

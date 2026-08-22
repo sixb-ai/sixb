@@ -1,5 +1,9 @@
 import type { Database } from "bun:sqlite"
 import type { ActionSubject, JsonValue } from "@sixb/core"
+import {
+  parseActionRunFailure,
+  serializeActionRunFailure,
+} from "@sixb/core/internal/action-run-storage"
 import { assertActionRunExecution } from "@sixb/core/internal/action-run-storage-provider"
 import type {
   ActionRunEffectsRecord,
@@ -122,22 +126,16 @@ export class SqliteActionRunStorage implements ActionRunStorage {
             writeback_status,
             writeback_completed_at,
             writeback_result,
-            writeback_error_name,
-            writeback_error_message,
-            writeback_error_phase,
+            writeback_error,
             effects_status,
             effects_completed_at,
-            effects_error_name,
-            effects_error_message,
-            effects_error_phase,
-            error_name,
-            error_message,
-            error_phase
+            effects_error,
+            error
           ) VALUES (
             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?,
-            NULL, NULL, NULL, NULL, NULL, NULL,
-            NULL, NULL, NULL, NULL, NULL,
-            NULL, NULL, NULL
+            NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL,
+            NULL
           )
         `
         )
@@ -204,17 +202,11 @@ export class SqliteActionRunStorage implements ActionRunStorage {
             writeback_status = NULL,
             writeback_completed_at = NULL,
             writeback_result = NULL,
-            writeback_error_name = NULL,
-            writeback_error_message = NULL,
-            writeback_error_phase = NULL,
+            writeback_error = NULL,
             effects_status = NULL,
             effects_completed_at = NULL,
-            effects_error_name = NULL,
-            effects_error_message = NULL,
-            effects_error_phase = NULL,
-            error_name = NULL,
-            error_message = NULL,
-            error_phase = NULL
+            effects_error = NULL,
+            error = NULL
           WHERE project_id = ? AND id = ?
         `
         )
@@ -254,9 +246,7 @@ export class SqliteActionRunStorage implements ActionRunStorage {
             status = ?,
             phase = ?,
             started_at = ?,
-            error_name = NULL,
-            error_message = NULL,
-            error_phase = NULL
+            error = NULL
           WHERE project_id = ? AND id = ?
         `
         )
@@ -323,9 +313,7 @@ export class SqliteActionRunStorage implements ActionRunStorage {
             writeback_status = ?,
             writeback_completed_at = ?,
             writeback_result = ?,
-            writeback_error_name = ?,
-            writeback_error_message = ?,
-            writeback_error_phase = ?
+            writeback_error = ?
           WHERE project_id = ? AND id = ?
         `
         )
@@ -334,9 +322,7 @@ export class SqliteActionRunStorage implements ActionRunStorage {
           input.status,
           nextWriteback.completedAt.toISOString(),
           input.status === "succeeded" ? serializeJsonValue(input.result) : null,
-          input.status === "failed" ? (input.error.name ?? null) : null,
-          input.status === "failed" ? input.error.message : null,
-          input.status === "failed" ? (input.error.phase ?? "writeback") : null,
+          input.status === "failed" ? serializeActionRunFailure(input.error, "writeback") : null,
           input.projectId,
           input.id
         )
@@ -373,9 +359,7 @@ export class SqliteActionRunStorage implements ActionRunStorage {
             phase = ?,
             effects_status = ?,
             effects_completed_at = ?,
-            effects_error_name = ?,
-            effects_error_message = ?,
-            effects_error_phase = ?
+            effects_error = ?
           WHERE project_id = ? AND id = ?
         `
         )
@@ -383,9 +367,7 @@ export class SqliteActionRunStorage implements ActionRunStorage {
           "effects",
           input.status,
           nextEffects.completedAt.toISOString(),
-          input.status === "failed" ? (input.error.name ?? null) : null,
-          input.status === "failed" ? input.error.message : null,
-          input.status === "failed" ? (input.error.phase ?? "effects") : null,
+          input.status === "failed" ? serializeActionRunFailure(input.error, "effects") : null,
           input.projectId,
           input.id
         )
@@ -426,9 +408,7 @@ export class SqliteActionRunStorage implements ActionRunStorage {
             status = ?,
             phase = ?,
             finished_at = ?,
-            error_name = ?,
-            error_message = ?,
-            error_phase = ?
+            error = ?
           WHERE project_id = ? AND id = ?
         `
         )
@@ -436,9 +416,7 @@ export class SqliteActionRunStorage implements ActionRunStorage {
           input.status,
           phase,
           (input.finishedAt ?? new Date()).toISOString(),
-          input.status === "succeeded" ? null : (input.error?.name ?? null),
-          input.status === "succeeded" ? null : (input.error?.message ?? null),
-          input.status === "succeeded" ? null : (input.error?.phase ?? phase),
+          input.status === "succeeded" ? null : serializeActionRunFailure(input.error),
           input.projectId,
           input.id
         )
@@ -599,23 +577,14 @@ function serializeJsonValue(value: JsonValue): string {
 }
 
 function toActionRunFailure(row: DatabaseRow): ActionRunFailure | undefined {
-  return toFailure(row.error_name, row.error_message, row.error_phase)
+  return row.error === null ? undefined : parseActionRunFailure(row.error)
 }
 
-function toFailure(
-  name: string | null,
-  message: string | null,
-  phase: ActionRunPhase | null
-): ActionRunFailure | undefined {
-  if (!message) {
-    return undefined
-  }
-
-  return {
-    name: name ?? undefined,
-    message,
-    phase: phase ?? undefined,
-  }
+function parsePhaseFailure<TPhase extends Extract<ActionRunPhase, "writeback" | "effects">>(
+  value: string | null,
+  expectedPhase: TPhase
+): ActionRunFailure<TPhase> {
+  return parseActionRunFailure(value, expectedPhase)
 }
 
 function toActionRunWritebackRecord(row: DatabaseRow): ActionRunWritebackRecord | undefined {
@@ -639,11 +608,7 @@ function toActionRunWritebackRecord(row: DatabaseRow): ActionRunWritebackRecord 
   return {
     status: "failed",
     completedAt,
-    error: toFailure(
-      row.writeback_error_name,
-      row.writeback_error_message,
-      row.writeback_error_phase
-    ),
+    error: parsePhaseFailure(row.writeback_error, "writeback"),
   }
 }
 
@@ -666,7 +631,7 @@ function toActionRunEffectsRecord(row: DatabaseRow): ActionRunEffectsRecord | un
   return {
     status: "failed",
     completedAt,
-    error: toFailure(row.effects_error_name, row.effects_error_message, row.effects_error_phase),
+    error: parsePhaseFailure(row.effects_error, "effects"),
   }
 }
 
@@ -765,15 +730,9 @@ interface DatabaseRow {
   writeback_status: ActionRunWritebackRecord["status"] | null
   writeback_completed_at: string | null
   writeback_result: string | null
-  writeback_error_name: string | null
-  writeback_error_message: string | null
-  writeback_error_phase: ActionRunPhase | null
+  writeback_error: string | null
   effects_status: ActionRunEffectsRecord["status"] | null
   effects_completed_at: string | null
-  effects_error_name: string | null
-  effects_error_message: string | null
-  effects_error_phase: ActionRunPhase | null
-  error_name: string | null
-  error_message: string | null
-  error_phase: ActionRunPhase | null
+  effects_error: string | null
+  error: string | null
 }

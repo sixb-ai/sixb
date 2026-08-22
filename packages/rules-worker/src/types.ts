@@ -82,14 +82,6 @@ export interface EvaluateRulePredicateInput {
   readonly links: RuleLinkMap
 }
 
-export interface EvaluateRuleEventInput {
-  readonly runtime: RulesWorkerContext
-  readonly rules: readonly RuleDefinition[]
-  readonly index: RuleDependencyIndex
-  readonly event: OntologyRuleEvent
-  readonly evaluatedAt?: string
-}
-
 export interface EvaluateRuleEventsInput {
   readonly runtime: RulesWorkerContext
   readonly rules: readonly RuleDefinition[]

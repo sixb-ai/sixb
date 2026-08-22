@@ -1,7 +1,14 @@
+import type { SixbErrorCode, SixbFailure } from "../errors/types"
 import type { JsonValue } from "../json"
 import type { ProjectionMaterializationIdentity } from "../materialization/model"
+import type { ProjectionRunFailureCode } from "../projections/types"
 import type { ProviderScope } from "../provider-scope"
+import type { ActionRunFailureCode } from "../storage/action-runs/types"
+import type { AgentRunFailureCode } from "../storage/agents/types"
 import type { RecordAiModelCallInput } from "../storage/ai-usage"
+import type { PipelineRunFailureCode } from "../storage/pipeline-runs/types"
+import type { SyncRunFailureCode } from "../storage/sync-runs/types"
+import type { WorkflowRunFailureCode } from "../storage/workflow-runs/types"
 
 export interface QueueJobEnvelope {
   readonly id: string
@@ -31,10 +38,16 @@ export type NewQueueJob<TQueueJob extends QueueJob> =
       }
     : never
 
-export interface QueueJobError {
-  readonly name?: string
-  readonly message: string
-}
+/** Portable terminal failure handed to a queue provider when a claimed job is abandoned. */
+export type QueueJobFailure<TCode extends SixbErrorCode = SixbErrorCode> = SixbFailure<TCode>
+
+/** Lane-specific aliases keep each primitive free to evolve its failure vocabulary independently. */
+export type SyncQueueJobFailureCode = SyncRunFailureCode
+export type PipelineQueueJobFailureCode = PipelineRunFailureCode
+export type ProjectionQueueJobFailureCode = ProjectionRunFailureCode
+export type WorkflowQueueJobFailureCode = WorkflowRunFailureCode
+export type ActionQueueJobFailureCode = ActionRunFailureCode
+export type AgentQueueJobFailureCode = AgentRunFailureCode
 
 export interface ClaimedQueueJob<TQueueJob extends QueueJob = QueueJob> {
   /** Opaque acknowledgement token for this specific claim attempt. */
@@ -45,7 +58,10 @@ export interface ClaimedQueueJob<TQueueJob extends QueueJob = QueueJob> {
   readonly job: TQueueJob
 }
 
-export interface Queue<TQueueJob extends QueueJob> {
+export interface Queue<
+  TQueueJob extends QueueJob,
+  TFailureCode extends SixbErrorCode = SixbErrorCode,
+> {
   /**
    * Adds durable work to the lane. Jobs become claimable at `availableAt`, or immediately.
    * Repeating a caller-supplied job id is idempotent while that job remains in the provider.
@@ -85,15 +101,20 @@ export interface Queue<TQueueJob extends QueueJob> {
     jobId: string
     leaseId: string
     availableAt?: string
-    error?: QueueJobError
   }): Promise<void>
 
-  /** Marks the claimed job as terminally failed so it will not be delivered again. */
+  /**
+   * Marks the claimed job as terminally failed so it will not be delivered again.
+   *
+   * The failure explains this terminal settlement; `retryable` may still be true when a worker's
+   * policy exhausted its attempts. Queue providers may project the record into their native failed
+   * job diagnostics. A queryable dead-letter history is deliberately a separate contract.
+   */
   fail(params: {
     projectId: string
     jobId: string
     leaseId: string
-    error: QueueJobError
+    failure: QueueJobFailure<TFailureCode>
   }): Promise<void>
 
   /** Extends an active lease. Returns `null` if the lease was already lost, expired, or completed. */
@@ -211,12 +232,12 @@ export type AgentQueueJob =
   | AgentAiUsageRecordRequestedQueueJob
 
 export interface Queues {
-  readonly syncRuns: Queue<SyncRunRequestedQueueJob>
-  readonly pipelines: Queue<PipelineRunRequestedQueueJob>
-  readonly projections: Queue<ProjectionRunRequestedQueueJob>
-  readonly workflows: Queue<WorkflowQueueJob>
-  readonly actions: Queue<ActionRunRequestedQueueJob>
-  readonly agents: Queue<AgentQueueJob>
+  readonly syncRuns: Queue<SyncRunRequestedQueueJob, SyncQueueJobFailureCode>
+  readonly pipelines: Queue<PipelineRunRequestedQueueJob, PipelineQueueJobFailureCode>
+  readonly projections: Queue<ProjectionRunRequestedQueueJob, ProjectionQueueJobFailureCode>
+  readonly workflows: Queue<WorkflowQueueJob, WorkflowQueueJobFailureCode>
+  readonly actions: Queue<ActionRunRequestedQueueJob, ActionQueueJobFailureCode>
+  readonly agents: Queue<AgentQueueJob, AgentQueueJobFailureCode>
 
   /**
    * Whether these queues can be shared across processes.

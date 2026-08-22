@@ -1,3 +1,5 @@
+import { parseSixbFailure } from "../../errors/internal"
+import type { SixbFailure } from "../../errors/types"
 import {
   cloneRecord,
   compareStartedAt,
@@ -18,16 +20,19 @@ import type {
   ListPipelineRunsResult,
   ListPipelineStepRunsInput,
   ListPipelineStepRunsResult,
-  PipelineRunFailure,
+  PipelineRunFailureCode,
   PipelineRunRecord,
   PipelineRunStorage,
   PipelineStepRunRecord,
   StartPipelineRunInput,
   StartPipelineStepRunInput,
 } from "./types"
+import { PIPELINE_RUN_FAILURE_CODES } from "./types"
 
-function normalizeError(error: PipelineRunFailure | undefined): PipelineRunFailure | undefined {
-  return error ? cloneRecord(error) : undefined
+function normalizeError(
+  error: SixbFailure<PipelineRunFailureCode> | undefined
+): SixbFailure<PipelineRunFailureCode> | undefined {
+  return error ? parseSixbFailure(error, PIPELINE_RUN_FAILURE_CODES) : undefined
 }
 
 function assertNonNegativeInteger(value: number | undefined, fieldName: string): void {

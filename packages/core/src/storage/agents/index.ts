@@ -11,11 +11,11 @@ export type {
   AgentRunDiagnosticCode,
   AgentRunDiagnosticSeverity,
   AgentRunExecution,
+  AgentRunFailureCode,
   AgentRunFinishReason,
   AgentRunRecord,
   AgentRunStatus,
   AgentRunStore,
-  AgentRunUsage,
   AgentStorage,
   AgentThreadRecord,
   AgentThreadStatus,
@@ -37,6 +37,7 @@ export type {
 } from "./types"
 export {
   AGENT_RUN_DIAGNOSTIC_CODES,
+  AGENT_RUN_FAILURE_CODES,
   AGENT_RUN_FINISH_REASONS,
   coerceAgentRunFinishReason,
 } from "./types"

@@ -1,6 +1,9 @@
+import { captureSixbFailure } from "@sixb/core/internal/errors"
+import { unwrapWorkflowNodeFailure } from "@sixb/core/internal/workflows"
+import { WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { workflowNodeExecutors } from "./execution/node-executors"
 import { WorkflowRunSession } from "./execution/workflow-run-session"
-import { statusForFailure, toWorkflowRunError } from "./normalize"
+import { statusForFailure } from "./normalize"
 import type { RunWorkflowJobInput, RunWorkflowResumeJobInput, WorkflowRunResult } from "./types"
 
 export async function runWorkflowJob(input: RunWorkflowJobInput): Promise<WorkflowRunResult> {
@@ -41,7 +44,7 @@ export async function runWorkflowJob(input: RunWorkflowJobInput): Promise<Workfl
     }
     await session.finishAfterError(error)
     await failQueuedRun(input, error)
-    throw error
+    throw unwrapWorkflowNodeFailure(error)
   } finally {
     await session.flushLogs()
   }
@@ -69,7 +72,7 @@ export async function runWorkflowResumeJob(
       throw error
     }
     await session.finishAfterError(error)
-    throw error
+    throw unwrapWorkflowNodeFailure(error)
   } finally {
     await session.flushLogs()
   }
@@ -117,15 +120,21 @@ async function failQueuedRun(input: RunWorkflowJobInput, error: unknown): Promis
     return
   }
 
+  const status = statusForFailure(input.signal ?? new AbortController().signal, error)
+  const failure = captureSixbFailure(error, {
+    allowedCodes: WORKFLOW_RUN_FAILURE_CODES,
+    defaultCode: status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
+    details: { workflowId: input.job.workflowId, runId: input.job.id },
+  })
   const failed = await input.runtime.workflowRuns.finish({
     projectId: input.runtime.projectId,
     id: input.job.id,
-    status: statusForFailure(input.signal ?? new AbortController().signal, error),
-    error: toWorkflowRunError(error),
+    status,
+    error: failure,
   })
 
   if (failed.status === "failed") {
-    input.onRunFailed?.(error, failed)
+    input.onRunFailed?.(error, failed, failure)
   }
 
   try {

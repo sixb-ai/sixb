@@ -18,8 +18,13 @@ import type {
   ExecuteSqlTransformInput,
   LakeSqlTransformCapabilities,
 } from "@sixb/core/lake-storage"
-import type { PipelineRunStorage } from "@sixb/core/storage"
+import type {
+  FinishPipelineRunInput,
+  PipelineRunRecord,
+  PipelineRunStorage,
+} from "@sixb/core/storage"
 import { InMemoryPipelineRunStorage } from "@sixb/core/storage"
+import { createPipelineBookkeepingError, createStepBookkeepingError } from "../src/errors"
 import { runPipelineJob } from "../src/run-pipeline-job"
 import type { PipelineWorkerContext } from "../src/types"
 
@@ -127,6 +132,12 @@ class SqlTransformLakeStorage extends InMemoryLakeStorage implements LakeStorage
   }
 }
 
+class RejectingFinishPipelineRunStorage extends InMemoryPipelineRunStorage {
+  override async finish(_input: FinishPipelineRunInput): Promise<PipelineRunRecord> {
+    throw new Error("pipeline run storage unavailable")
+  }
+}
+
 describe("runPipelineJob", () => {
   test("fails clearly when the pipeline is missing", async () => {
     const runtime = createRuntime({})
@@ -139,7 +150,116 @@ describe("runPipelineJob", () => {
           pipelineId: "missing",
         },
       })
-    ).rejects.toThrow("[SixbPipelineWorker] Unknown pipeline 'missing'.")
+    ).rejects.toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      message: "[SixbPipelineWorker] Unknown pipeline 'missing'.",
+      details: { pipelineId: "missing", runId: "run_1" },
+    })
+  })
+
+  test("preserves causes and correlation details for post-commit bookkeeping failures", async () => {
+    const lakeStorage = new InMemoryLakeStorage()
+    const { outcome: _outcome, ...version } = await seedDatasetVersion(
+      lakeStorage,
+      customersDataset,
+      [{ id: "cust_1", name: "Ada" }]
+    )
+    const stepCause = new Error("step finish unavailable")
+    const stepError = createStepBookkeepingError({
+      pipelineId: "customers",
+      pipelineRunId: "run_1",
+      stepId: "clean-customers",
+      stepRunId: "run_1:step:1:clean-customers",
+      version,
+      cause: stepCause,
+    })
+
+    expect(stepError).toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      cause: stepCause,
+      details: {
+        pipelineId: "customers",
+        pipelineRunId: "run_1",
+        stepId: "clean-customers",
+        stepRunId: "run_1:step:1:clean-customers",
+        datasetId: "customers",
+        versionId: version.versionId,
+      },
+    })
+
+    const runCause = new Error("pipeline finish unavailable")
+    const runError = createPipelineBookkeepingError({
+      pipelineId: "customers",
+      runId: "run_1",
+      version,
+      cause: runCause,
+    })
+    expect(runError).toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      cause: runCause,
+      details: {
+        pipelineId: "customers",
+        runId: "run_1",
+        datasetId: "customers",
+        versionId: version.versionId,
+      },
+    })
+  })
+
+  test("keeps step finalization failures out of the step-failed vocabulary", async () => {
+    const lakeStorage = new InMemoryLakeStorage()
+    await seedDatasetVersion(lakeStorage, rawCustomersDataset, [{ id: "cust_1", name: "Ada" }])
+    const step = definePipelineStep("clean-customers")
+      .inputs({ rawCustomers: rawCustomersDataset })
+      .output(customersDataset)
+      .run(async ({ inputs, output }) => {
+        await output.writeRows(inputs.rawCustomers.readRows({ columns: ["id", "name"] }))
+      })
+    const pipeline = definePipeline("customers").then(step)
+    const pipelineRunsStorage = new InMemoryPipelineRunStorage()
+    const finishStep = pipelineRunsStorage.finishStep.bind(pipelineRunsStorage)
+    const finishCause = new Error("step finish unavailable")
+    pipelineRunsStorage.finishStep = async (input) => {
+      if (input.status === "succeeded") throw finishCause
+      return finishStep(input)
+    }
+    const runtime = createRuntime({
+      pipelines: [pipeline],
+      datasets: [rawCustomersDataset, customersDataset],
+      lakeStorage,
+      pipelineRunsStorage,
+    })
+
+    await expect(
+      runPipelineJob({ runtime, job: { id: "run_step_finish_failed", pipelineId: pipeline.id } })
+    ).rejects.toMatchObject({
+      code: "internal.unexpected",
+      cause: finishCause,
+      details: {
+        pipelineId: pipeline.id,
+        pipelineRunId: "run_step_finish_failed",
+        stepId: step.id,
+        stepRunId: "run_step_finish_failed:step:1:clean-customers",
+      },
+    })
+
+    const run = await pipelineRunsStorage.getById({
+      projectId: runtime.id,
+      id: "run_step_finish_failed",
+    })
+    expect(run?.error).toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      details: {
+        pipelineId: pipeline.id,
+        pipelineRunId: "run_step_finish_failed",
+        stepId: step.id,
+        stepRunId: "run_step_finish_failed:step:1:clean-customers",
+      },
+    })
   })
 
   test("fails clearly when an input has no committed version", async () => {
@@ -163,22 +283,69 @@ describe("runPipelineJob", () => {
           pipelineId: "customers",
         },
       })
-    ).rejects.toThrow(
-      "[SixbPipelineWorker] Pipeline 'customers' step 'clean-customers' input 'rawCustomers' dataset 'raw.customers' has no committed version."
-    )
+    ).rejects.toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      message:
+        "[SixbPipelineWorker] Pipeline 'customers' step 'clean-customers' input 'rawCustomers' dataset 'raw.customers' has no committed version.",
+      details: {
+        pipelineId: "customers",
+        pipelineRunId: "run_missing_input",
+        stepId: "clean-customers",
+        datasetId: "raw.customers",
+      },
+    })
 
     const run = await pipelineRunsStorage.getById({
       projectId: runtime.id,
       id: "run_missing_input",
     })
     expect(run?.status).toBe("failed")
-    expect(run?.error?.message).toContain("has no committed version")
+    expect(run?.error).toMatchObject({
+      code: "pipeline.step_failed",
+      retryable: false,
+      details: {
+        pipelineId: "customers",
+        pipelineRunId: "run_missing_input",
+        stepId: "clean-customers",
+      },
+    })
+    expect(run?.error?.message).toBe("Pipeline step execution failed.")
 
     const steps = await pipelineRunsStorage.listSteps({
       projectId: runtime.id,
       pipelineRunId: "run_missing_input",
     })
     expect(steps.steps).toHaveLength(0)
+  })
+
+  test("does not notify a terminal run when the durable transition fails", async () => {
+    const cleanStep = definePipelineStep("clean-customers")
+      .inputs({ rawCustomers: rawCustomersDataset })
+      .output(customersDataset)
+      .run(async () => {})
+    const pipelineRunsStorage = new RejectingFinishPipelineRunStorage()
+    const runtime = createRuntime({
+      pipelines: [definePipeline("customers").then(cleanStep)],
+      datasets: [rawCustomersDataset, customersDataset],
+      pipelineRunsStorage,
+    })
+    const finishedRuns: PipelineRunRecord[] = []
+
+    await expect(
+      runPipelineJob({
+        runtime,
+        job: { id: "run_finish_rejected", pipelineId: "customers" },
+        onRunFinished(run) {
+          finishedRuns.push(run)
+        },
+      })
+    ).rejects.toThrow("has no committed version")
+
+    expect(finishedRuns).toHaveLength(0)
+    expect(
+      await pipelineRunsStorage.getById({ projectId: runtime.id, id: "run_finish_rejected" })
+    ).toMatchObject({ status: "running" })
   })
 
   test("runs a JS step with pinned input readers and commits one output version", async () => {
@@ -214,12 +381,16 @@ describe("runPipelineJob", () => {
       lakeStorage,
       pipelineRunsStorage,
     })
+    const finishedRuns: PipelineRunRecord[] = []
 
     const result = await runPipelineJob({
       runtime,
       job: {
         id: "run_clean",
         pipelineId: "customers",
+      },
+      onRunFinished(run) {
+        finishedRuns.push(run)
       },
     })
 
@@ -263,6 +434,8 @@ describe("runPipelineJob", () => {
         versionId: result.version?.versionId,
       },
     })
+    if (!run) throw new Error("Expected the pipeline run to be persisted.")
+    expect(finishedRuns).toEqual([run])
 
     const stepRuns = await pipelineRunsStorage.listSteps({
       projectId: runtime.id,
@@ -357,6 +530,7 @@ describe("runPipelineJob", () => {
       lakeStorage,
       pipelineRunsStorage,
     })
+    const finishedRuns: PipelineRunRecord[] = []
 
     await expect(
       runPipelineJob({
@@ -364,6 +538,9 @@ describe("runPipelineJob", () => {
         job: {
           id: "run_failure",
           pipelineId: "customers",
+        },
+        onRunFinished(run) {
+          finishedRuns.push(run)
         },
       })
     ).rejects.toThrow("stats exploded")
@@ -374,6 +551,8 @@ describe("runPipelineJob", () => {
     })
     expect(run?.status).toBe("failed")
     expect(run?.output).toBeUndefined()
+    if (!run) throw new Error("Expected the failed pipeline run to be persisted.")
+    expect(finishedRuns).toEqual([run])
 
     const stepRuns = await pipelineRunsStorage.listSteps({
       projectId: runtime.id,
@@ -381,7 +560,27 @@ describe("runPipelineJob", () => {
       order: "asc",
     })
     expect(stepRuns.steps.map((step) => step.status)).toEqual(["succeeded", "failed"])
-    expect(stepRuns.steps[1]?.error?.message).toBe("stats exploded")
+    expect(run?.error).toMatchObject({
+      code: "pipeline.step_failed",
+      retryable: false,
+      details: {
+        pipelineId: "customers",
+        pipelineRunId: "run_failure",
+        stepId: "customer-stats",
+        stepRunId: "run_failure:step:2:customer-stats",
+      },
+    })
+    expect(stepRuns.steps[1]?.error).toMatchObject({
+      code: "pipeline.step_failed",
+      retryable: false,
+      details: {
+        pipelineId: "customers",
+        pipelineRunId: "run_failure",
+        stepId: "customer-stats",
+        stepRunId: "run_failure:step:2:customer-stats",
+      },
+    })
+    expect(stepRuns.steps[1]?.error?.message).toBe("Pipeline step execution failed.")
 
     const committedRows = await collectRows(lakeStorage.readRows({ datasetId: "customers" }))
     expect(committedRows).toEqual([{ id: "cust_1", name: "Ada" }])
@@ -411,7 +610,18 @@ describe("runPipelineJob", () => {
 
     await expect(
       runPipelineJob({ runtime, job: { id: "run_sql", pipelineId: "customers" } })
-    ).rejects.toThrow("writes in 'append' mode, which the duckdb SQL executor does not support")
+    ).rejects.toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      message:
+        "[SixbPipelineWorker] Pipeline 'customers' step 'customer-stats' writes in 'append' mode, which the duckdb SQL executor does not support.",
+      details: {
+        pipelineId: "customers",
+        pipelineRunId: "run_sql",
+        stepId: "customer-stats",
+        datasetId: "customer_stats",
+      },
+    })
     // Refused before the provider was asked to do it, so nothing was written or committed.
     expect(lakeStorage.executeCalls).toHaveLength(0)
   })
@@ -514,15 +724,34 @@ describe("runPipelineJob", () => {
           pipelineId: "customers",
         },
       })
-    ).rejects.toThrow(
-      "[SixbPipelineWorker] Pipeline 'customers' step 'customer-stats' requires SQL transform support, but lake storage does not provide lakeStorage.sql.execute(...)."
-    )
+    ).rejects.toMatchObject({
+      code: "internal.unexpected",
+      retryable: false,
+      message:
+        "[SixbPipelineWorker] Pipeline 'customers' step 'customer-stats' requires SQL transform support, but lake storage does not provide lakeStorage.sql.execute(...).",
+      details: {
+        pipelineId: "customers",
+        pipelineRunId: "run_sql_no_support",
+        stepId: "customer-stats",
+        datasetId: "customer_stats",
+      },
+    })
 
     const run = await pipelineRunsStorage.getById({
       projectId: runtime.id,
       id: "run_sql_no_support",
     })
     expect(run?.status).toBe("failed")
+    expect(run?.error).toMatchObject({
+      code: "pipeline.step_failed",
+      retryable: false,
+      details: {
+        pipelineId: "customers",
+        pipelineRunId: "run_sql_no_support",
+        stepId: "customer-stats",
+        stepRunId: "run_sql_no_support:step:1:customer-stats",
+      },
+    })
 
     const stepRuns = await pipelineRunsStorage.listSteps({
       projectId: runtime.id,
@@ -532,9 +761,16 @@ describe("runPipelineJob", () => {
       stepId: "customer-stats",
       status: "failed",
       error: {
-        name: "PipelineWorkerError",
+        code: "pipeline.step_failed",
+        retryable: false,
+        details: {
+          pipelineId: "customers",
+          pipelineRunId: "run_sql_no_support",
+          stepId: "customer-stats",
+          stepRunId: "run_sql_no_support:step:1:customer-stats",
+        },
       },
     })
-    expect(stepRuns.steps[0]?.error?.message).toContain("requires SQL transform support")
+    expect(stepRuns.steps[0]?.error?.message).toBe("Pipeline step execution failed.")
   })
 })

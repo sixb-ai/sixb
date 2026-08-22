@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite"
 import { normalizeRequesterGroupIds } from "@sixb/core/internal/auth"
+import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/internal/errors"
 import {
   assertWorkflowAgentNodeRunExecution,
   assertWorkflowRunExecution,
@@ -38,7 +39,11 @@ import type {
   WorkflowRunRecord,
   WorkflowRunStorage,
 } from "@sixb/core/storage"
-import { WorkflowRunError } from "@sixb/core/storage"
+import {
+  AGENT_RUN_FAILURE_CODES,
+  WORKFLOW_RUN_FAILURE_CODES,
+  WorkflowRunError,
+} from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import { installFreshSqliteSchema } from "./migrations"
 import {
@@ -259,7 +264,9 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
           input.status,
           (input.finishedAt ?? new Date()).toISOString(),
           input.status === "succeeded" ? serializeRecord(input.output) : null,
-          input.status === "succeeded" ? null : (input.error ?? null),
+          input.status === "succeeded" || input.error === undefined
+            ? null
+            : serializeSixbFailure(input.error, WORKFLOW_RUN_FAILURE_CODES),
           input.projectId,
           input.id
         )
@@ -589,7 +596,7 @@ export class SqliteWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunSt
       this.db
         .query(`
         UPDATE workflow_agent_node_runs SET
-          status = ?, model_id = COALESCE(?, model_id), finish_reason = ?, usage = ?, trace = ?,
+          status = ?, model_id = COALESCE(?, model_id), finish_reason = ?, trace = ?,
           diagnostics = ?, error = ?, execution_token = NULL,
           execution_queue_lease_expires_at = NULL, completed_at = ?
         WHERE project_id = ? AND node_run_id = ?
@@ -598,10 +605,11 @@ export class SqliteWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunSt
           input.status,
           input.modelId ?? null,
           input.finishReason ?? null,
-          input.usage ? JSON.stringify(input.usage) : null,
           input.trace ? JSON.stringify(input.trace) : null,
           input.diagnostics ? JSON.stringify(input.diagnostics) : null,
-          input.status === "succeeded" ? null : (input.error ?? null),
+          input.status === "succeeded" || input.error === undefined
+            ? null
+            : serializeSixbFailure(input.error, AGENT_RUN_FAILURE_CODES),
           (input.completedAt ?? new Date()).toISOString(),
           input.projectId,
           input.nodeRunId
@@ -626,7 +634,9 @@ export class SqliteWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunSt
         )
         .run(
           "cancelled",
-          input.error ?? null,
+          input.error === undefined
+            ? null
+            : serializeSixbFailure(input.error, AGENT_RUN_FAILURE_CODES),
           (input.completedAt ?? new Date()).toISOString(),
           input.projectId,
           input.nodeRunId
@@ -823,7 +833,9 @@ export class SqliteWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
           input.status,
           (input.finishedAt ?? new Date()).toISOString(),
           input.status === "succeeded" && input.output ? serializeRecord(input.output) : null,
-          input.status === "succeeded" ? null : (input.error ?? null),
+          input.status === "succeeded" || input.error === undefined
+            ? null
+            : serializeSixbFailure(input.error, WORKFLOW_RUN_FAILURE_CODES),
           input.projectId,
           input.id
         )
@@ -970,7 +982,7 @@ function rowToWorkflowRunRecord(row: WorkflowRunDatabaseRow): WorkflowRunRecord 
     queuedAt: row.queued_at ? new Date(row.queued_at) : undefined,
     startedAt: new Date(row.started_at),
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
-    error: row.error ?? undefined,
+    error: row.error === null ? undefined : parseSixbFailure(row.error, WORKFLOW_RUN_FAILURE_CODES),
     requesterGroupIds: JSON.parse(row.requester_group_ids) as string[],
     attempt: row.attempt,
     ...(row.execution_token && row.execution_queue_lease_expires_at
@@ -999,7 +1011,7 @@ function rowToWorkflowNodeRunRecord(row: WorkflowNodeRunDatabaseRow): WorkflowNo
     startedAt: new Date(row.started_at),
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     output: row.output ? parseRecord(row.output) : undefined,
-    error: row.error ?? undefined,
+    error: row.error === null ? undefined : parseSixbFailure(row.error, WORKFLOW_RUN_FAILURE_CODES),
   }
 }
 
@@ -1066,7 +1078,6 @@ interface WorkflowAgentNodeRunDatabaseRow {
   prompt: string
   model_id: string | null
   finish_reason: WorkflowAgentNodeRunRecord["finishReason"] | null
-  usage: string | null
   trace: string | null
   diagnostics: string | null
   error: string | null
@@ -1101,10 +1112,9 @@ function rowToWorkflowAgentNodeRunRecord(
     prompt: row.prompt,
     ...(row.model_id ? { modelId: row.model_id } : {}),
     ...(row.finish_reason ? { finishReason: row.finish_reason } : {}),
-    ...(row.usage ? { usage: JSON.parse(row.usage) } : {}),
     ...(row.trace ? { trace: JSON.parse(row.trace) } : {}),
     ...(row.diagnostics ? { diagnostics: JSON.parse(row.diagnostics) } : {}),
-    ...(row.error ? { error: row.error } : {}),
+    ...(row.error ? { error: parseSixbFailure(row.error, AGENT_RUN_FAILURE_CODES) } : {}),
     attempt: row.attempt,
     ...(row.execution_token && row.execution_queue_lease_expires_at
       ? {

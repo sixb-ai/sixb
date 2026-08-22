@@ -128,14 +128,6 @@ export async function getUserRowByEmail(
   return row ?? null
 }
 
-export async function getUserByEmail(
-  sql: SQLClient,
-  params: { readonly projectId: string; readonly email: string }
-): Promise<UserRecord | null> {
-  const row = await getUserRowByEmail(sql, params)
-  return row ? rowToUserRecord(row) : null
-}
-
 export async function requireUserById(
   sql: SQLClient,
   params: { readonly projectId: string; readonly id: string }

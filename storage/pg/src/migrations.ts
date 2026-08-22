@@ -27,6 +27,32 @@ import agentExecutionsSql from "./migrations/009-agent-executions.sql" with { ty
 import aiUsageAccountingFoundationSql from "./migrations/010-ai-usage-accounting-foundation.sql" with {
   type: "text",
 }
+import syncFailureRecordSql from "./migrations/011-sync-failure-record.sql" with { type: "text" }
+import pipelineFailureRecordSql from "./migrations/012-pipeline-failure-record.sql" with {
+  type: "text",
+}
+import workflowFailureRecordSql from "./migrations/013-workflow-failure-record.sql" with {
+  type: "text",
+}
+import agentFailureRecordSql from "./migrations/014-agent-failure-record.sql" with { type: "text" }
+import projectionFailureRecordSql from "./migrations/015-projection-failure-record.sql" with {
+  type: "text",
+}
+import webhookRunFailureRecordSql from "./migrations/016-webhook-run-failure-record.sql" with {
+  type: "text",
+}
+import actionFailureRecordSql from "./migrations/017-action-failure-record.sql" with {
+  type: "text",
+}
+import ontologyOutboxFailureRecordSql from "./migrations/018-ontology-outbox-failure-record.sql" with {
+  type: "text",
+}
+import webhookDeliveryFailureRecordSql from "./migrations/019-webhook-delivery-failure-record.sql" with {
+  type: "text",
+}
+import dropRunUsageProjectionsSql from "./migrations/020-drop-run-usage-projections.sql" with {
+  type: "text",
+}
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -290,6 +316,16 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("008-action-executions", actionExecutionsSql),
     pgSql("009-agent-executions", agentExecutionsSql),
     pgSql("010-ai-usage-accounting-foundation", aiUsageAccountingFoundationSql),
+    pgSql("011-sync-failure-record", syncFailureRecordSql),
+    pgSql("012-pipeline-failure-record", pipelineFailureRecordSql),
+    pgSql("013-workflow-failure-record", workflowFailureRecordSql),
+    pgSql("014-agent-failure-record", agentFailureRecordSql),
+    pgSql("015-projection-failure-record", projectionFailureRecordSql),
+    pgSql("016-webhook-run-failure-record", webhookRunFailureRecordSql),
+    pgSql("017-action-failure-record", actionFailureRecordSql),
+    pgSql("018-ontology-outbox-failure-record", ontologyOutboxFailureRecordSql),
+    pgSql("019-webhook-delivery-failure-record", webhookDeliveryFailureRecordSql),
+    pgSql("020-drop-run-usage-projections", dropRunUsageProjectionsSql),
   ],
 })
 

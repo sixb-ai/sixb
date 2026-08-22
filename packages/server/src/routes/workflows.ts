@@ -3,21 +3,23 @@ import {
   type Principal,
   type SixbHostView,
   SYSTEM_PRINCIPAL,
+  type WorkflowAgentNodeRunView,
   type WorkflowDefinition,
+  type WorkflowNodeRunView,
 } from "@sixb/core"
 import { publishAgentRunCancel } from "@sixb/core/internal/agents"
+import { createSixbError, toSixbFailure } from "@sixb/core/internal/errors"
 import type { Sixb, WorkflowRunView } from "@sixb/core/internal/request-execution"
 import {
   snapshotWorkflowInterventionResponse,
   type WorkflowInterventionNodeDefinition,
 } from "@sixb/core/internal/workflows"
 import type {
-  WorkflowAgentNodeRunRecord,
   WorkflowInterventionRecord,
   WorkflowNodeRunRecord,
   WorkflowRunRecord,
-  WorkflowRunStorage,
 } from "@sixb/core/storage"
+import { AGENT_RUN_FAILURE_CODES, WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { z } from "zod"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
@@ -109,10 +111,7 @@ function serializeWorkflowRunDetail(run: WorkflowRunView) {
 
 type SerializedWorkflowRun = ReturnType<typeof serializeWorkflowRunSummary>
 
-function serializeWorkflowNodeRun(
-  node: WorkflowNodeRunRecord,
-  agentExecution?: WorkflowAgentNodeRunRecord | null
-) {
+function serializeWorkflowNodeRun(node: WorkflowNodeRunView) {
   return {
     id: node.id,
     projectId: node.projectId,
@@ -128,8 +127,8 @@ function serializeWorkflowNodeRun(
     finishedAt: node.finishedAt ? toIsoString(node.finishedAt) : undefined,
     output: node.output,
     error: node.error,
-    ...(agentExecution
-      ? { agentExecution: serializeWorkflowAgentExecutionSummary(agentExecution) }
+    ...(node.agentExecution
+      ? { agentExecution: serializeWorkflowAgentExecutionSummary(node.agentExecution) }
       : {}),
   }
 }
@@ -138,7 +137,7 @@ function serializePrincipal(principal: Principal) {
   return { principalType: principal.type, principalId: principal.id }
 }
 
-function serializeWorkflowAgentExecutionSummary(execution: WorkflowAgentNodeRunRecord) {
+function serializeWorkflowAgentExecutionSummary(execution: WorkflowAgentNodeRunView) {
   return {
     agentId: execution.agentId,
     status: execution.status,
@@ -151,7 +150,7 @@ function serializeWorkflowAgentExecutionSummary(execution: WorkflowAgentNodeRunR
   }
 }
 
-function serializeWorkflowAgentExecution(execution: WorkflowAgentNodeRunRecord) {
+function serializeWorkflowAgentExecution(execution: WorkflowAgentNodeRunView) {
   return {
     ...serializeWorkflowAgentExecutionSummary(execution),
     nodeRunId: execution.nodeRunId,
@@ -163,24 +162,53 @@ function serializeWorkflowAgentExecution(execution: WorkflowAgentNodeRunRecord) 
   }
 }
 
-async function serializeWorkflowNodeWithExecution(
-  storage: WorkflowRunStorage,
-  node: WorkflowNodeRunRecord
-) {
-  const execution =
-    node.nodeType === "agent"
-      ? await storage.agentNodes.getByNodeRunId({
-          projectId: node.projectId,
-          nodeRunId: node.id,
-        })
-      : null
-  return serializeWorkflowNodeRun(node, execution)
-}
-
 function principalForExecution(sixb: Sixb<readonly OntologySource[]>): Principal {
   return sixb.execution.requestedBy ?? SYSTEM_PRINCIPAL
 }
 
+function toWorkflowCancellationFailure(input: {
+  readonly message: string
+  readonly at: Date
+  readonly workflowId: string
+  readonly runId: string
+  readonly nodeRunId?: string
+}) {
+  const details: Readonly<Record<string, string>> = input.nodeRunId
+    ? {
+        workflowId: input.workflowId,
+        workflowRunId: input.runId,
+        nodeRunId: input.nodeRunId,
+      }
+    : { workflowId: input.workflowId, workflowRunId: input.runId }
+  return toSixbFailure(createSixbError("runtime.cancelled", input.message, { details }), {
+    allowedCodes: WORKFLOW_RUN_FAILURE_CODES,
+    at: input.at,
+  })
+}
+
+function toAgentCancellationFailure(input: {
+  readonly message: string
+  readonly at: Date
+  readonly agentId: string
+  readonly workflowId: string
+  readonly runId: string
+  readonly nodeRunId: string
+}) {
+  return toSixbFailure(
+    createSixbError("runtime.cancelled", input.message, {
+      details: {
+        agentId: input.agentId,
+        workflowId: input.workflowId,
+        workflowRunId: input.runId,
+        nodeRunId: input.nodeRunId,
+      },
+    }),
+    {
+      allowedCodes: AGENT_RUN_FAILURE_CODES,
+      at: input.at,
+    }
+  )
+}
 function serializeWorkflowIntervention(intervention: WorkflowInterventionRecord) {
   return {
     id: intervention.id,
@@ -267,14 +295,12 @@ async function workflowNodeFileContentResponse(
         return null
       }
 
-      const result = await storage.nodes.list({
-        projectId: host.id,
-        workflowRunId: run.id,
+      const result = await sixb.workflows.runs.listNodes(run.id, {
         nodeKey: context.params.nodeKey,
         limit: 1,
         order: "asc",
       })
-      const [node] = result.nodes
+      const [node] = result?.nodes ?? []
       if (!node) {
         return null
       }
@@ -796,6 +822,7 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
 
           CancelWorkflowInterventionBodySchema.parse(body ?? {})
           const cancelledAt = new Date()
+          const cancellationMessage = "Workflow intervention cancelled."
           const { cancelled, cancelledNode, cancelledRun } = await host.storage.transaction(
             async (tx) => {
               if (!tx.workflowInterventions || !tx.workflowRuns) {
@@ -812,14 +839,25 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
                 id: intervention.nodeRunId,
                 status: "cancelled",
                 finishedAt: cancelledAt,
-                error: "Workflow intervention cancelled.",
+                error: toWorkflowCancellationFailure({
+                  message: cancellationMessage,
+                  at: cancelledAt,
+                  workflowId: intervention.workflowId,
+                  runId: intervention.workflowRunId,
+                  nodeRunId: intervention.nodeRunId,
+                }),
               })
               const cancelledRun = await tx.workflowRuns.finish({
                 projectId: host.id,
                 id: intervention.workflowRunId,
                 status: "cancelled",
                 finishedAt: cancelledAt,
-                error: "Workflow intervention cancelled.",
+                error: toWorkflowCancellationFailure({
+                  message: cancellationMessage,
+                  at: cancelledAt,
+                  workflowId: intervention.workflowId,
+                  runId: intervention.workflowRunId,
+                }),
               })
               return { cancelled, cancelledNode, cancelledRun }
             }
@@ -929,17 +967,16 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
             return WorkflowRunDetailResponseSchema.parse({ run: serializedRun, nodes: [] })
           }
 
-          const nodes = await storage.nodes.list({
-            projectId: host.id,
-            workflowRunId: run.id,
-            order: "asc",
-          })
+          const nodes = await sixb.workflows.runs.listNodes(run.id, { order: "asc" })
+          if (!nodes) {
+            throw new Error(
+              `[SixbServer] Authorized workflow run '${run.id}' lost its execution view.`
+            )
+          }
 
           return WorkflowRunDetailResponseSchema.parse({
             run: serializedRun,
-            nodes: await Promise.all(
-              nodes.nodes.map((node) => serializeWorkflowNodeWithExecution(storage, node))
-            ),
+            nodes: nodes.nodes.map(serializeWorkflowNodeRun),
           })
         } catch (error) {
           return handleRouteError(error, set)
@@ -976,22 +1013,13 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
             set.status = 404
             return { error: "Workflow agent execution not found" }
           }
-          const listed = await storage.nodes.list({
-            projectId: host.id,
-            workflowRunId: run.id,
+          const listed = await sixb.workflows.runs.listNodes(run.id, {
             nodeKey: params.nodeKey,
             limit: 1,
             order: "asc",
           })
-          const node = listed.nodes[0]
-          if (!node || node.nodeType !== "agent") {
-            set.status = 404
-            return { error: "Workflow agent execution not found" }
-          }
-          const execution = await storage.agentNodes.getByNodeRunId({
-            projectId: host.id,
-            nodeRunId: node.id,
-          })
+          const node = listed?.nodes[0]
+          const execution = node?.nodeType === "agent" ? node.agentExecution : undefined
           if (!execution) {
             set.status = 404
             return { error: "Workflow agent execution not found" }
@@ -1038,26 +1066,30 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
             set.status = 404
             return { error: "Workflow not found" }
           }
-          const listed = await storage.nodes.list({
-            projectId: host.id,
-            workflowRunId: existing.id,
-            order: "asc",
-          })
           if (existing.status === "cancelled") {
+            const nodes = await sixb.workflows.runs.listNodes(existing.id, { order: "asc" })
+            if (!nodes) {
+              throw new Error(
+                `[SixbServer] Authorized workflow run '${existing.id}' lost its execution view.`
+              )
+            }
             return CancelWorkflowRunResponseSchema.parse({
               run: serializeWorkflowRunDetail(existing),
-              nodes: await Promise.all(
-                listed.nodes.map((node) => serializeWorkflowNodeWithExecution(storage, node))
-              ),
+              nodes: nodes.nodes.map(serializeWorkflowNodeRun),
             })
           }
           if (existing.status === "succeeded" || existing.status === "failed") {
             set.status = 400
             return { error: `Workflow run is already ${existing.status}` }
           }
+          const listed = await storage.nodes.list({
+            projectId: host.id,
+            workflowRunId: existing.id,
+            order: "asc",
+          })
 
           const cancelledAt = new Date()
-          const cancellationError = "Workflow run cancelled."
+          const cancellationMessage = "Workflow run cancelled."
           const result = await host.storage.transaction(async (tx) => {
             const runs = tx.workflowRuns
             if (!runs) {
@@ -1081,7 +1113,14 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
                   projectId: host.id,
                   nodeRunId: active.id,
                   completedAt: cancelledAt,
-                  error: cancellationError,
+                  error: toAgentCancellationFailure({
+                    message: cancellationMessage,
+                    at: cancelledAt,
+                    agentId: execution.agentId,
+                    workflowId: run.workflowId,
+                    runId: run.id,
+                    nodeRunId: active.id,
+                  }),
                 })
               }
             }
@@ -1109,7 +1148,13 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
                 id: active.id,
                 status: "cancelled",
                 finishedAt: cancelledAt,
-                error: cancellationError,
+                error: toWorkflowCancellationFailure({
+                  message: cancellationMessage,
+                  at: cancelledAt,
+                  workflowId: run.workflowId,
+                  runId: run.id,
+                  nodeRunId: active.id,
+                }),
                 executionToken: run.execution?.token,
               })
             }
@@ -1118,7 +1163,12 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
               id: run.id,
               status: "cancelled",
               finishedAt: cancelledAt,
-              error: cancellationError,
+              error: toWorkflowCancellationFailure({
+                message: cancellationMessage,
+                at: cancelledAt,
+                workflowId: run.workflowId,
+                runId: run.id,
+              }),
               executionToken: run.execution?.token,
             })
             return { run: cancelledRun, node: cancelledNode }
@@ -1136,19 +1186,18 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
               )
             })
           }
-          const nodes = await storage.nodes.list({
-            projectId: host.id,
-            workflowRunId: existing.id,
-            order: "asc",
-          })
+          const nodes = await sixb.workflows.runs.listNodes(existing.id, { order: "asc" })
+          if (!nodes) {
+            throw new Error(
+              `[SixbServer] Authorized workflow run '${existing.id}' lost its execution view.`
+            )
+          }
           return CancelWorkflowRunResponseSchema.parse({
             run: serializeWorkflowRunDetail({
               ...result.run,
               ...(existing.requestedBy === undefined ? {} : { requestedBy: existing.requestedBy }),
             }),
-            nodes: await Promise.all(
-              nodes.nodes.map((node) => serializeWorkflowNodeWithExecution(storage, node))
-            ),
+            nodes: nodes.nodes.map(serializeWorkflowNodeRun),
           })
         } catch (error) {
           return handleRouteError(error, set)

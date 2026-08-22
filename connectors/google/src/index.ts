@@ -1,11 +1,31 @@
 export type { GoogleAuthOptions, ServiceAccountKey, TokenSource } from "./auth"
 export { createTokenSource } from "./auth"
-export type { CalendarSurface, DriveSurface, GmailSurface, GoogleClient } from "./client"
+export type {
+  AnalyticsSurface,
+  CalendarSurface,
+  DriveSurface,
+  GmailSurface,
+  GoogleClient,
+} from "./client"
 export { createGoogleClient } from "./client"
 export { GoogleApiError, GoogleAuthError } from "./errors"
 export type { GoogleConnector } from "./google"
 export { google } from "./google"
 export type { GoogleHttp, GoogleSurface, GoogleUploadOptions, HttpMethod } from "./http"
+export type { AnalyticsAdminSurface } from "./surfaces/analytics/admin"
+export type { AnalyticsAccountSummariesResource } from "./surfaces/analytics/admin/accountSummaries"
+export type { AnalyticsAccountsResource } from "./surfaces/analytics/admin/accounts"
+export type { AnalyticsCustomDimensionsResource } from "./surfaces/analytics/admin/customDimensions"
+export type { AnalyticsCustomMetricsResource } from "./surfaces/analytics/admin/customMetrics"
+export type { AnalyticsDataStreamsResource } from "./surfaces/analytics/admin/dataStreams"
+export type { AnalyticsFirebaseLinksResource } from "./surfaces/analytics/admin/firebaseLinks"
+export type { AnalyticsGoogleAdsLinksResource } from "./surfaces/analytics/admin/googleAdsLinks"
+export type { AnalyticsKeyEventsResource } from "./surfaces/analytics/admin/keyEvents"
+export type { AnalyticsMeasurementProtocolSecretsResource } from "./surfaces/analytics/admin/measurementProtocolSecrets"
+export type { AnalyticsAdminPropertiesResource } from "./surfaces/analytics/admin/properties"
+export type { AnalyticsDataSurface } from "./surfaces/analytics/data"
+export type { AnalyticsAudienceExportsResource } from "./surfaces/analytics/data/audienceExports"
+export type { AnalyticsDataPropertiesResource } from "./surfaces/analytics/data/properties"
 export type { AclResource } from "./surfaces/calendar/acl"
 export type { CalendarListResource } from "./surfaces/calendar/calendarList"
 export type { CalendarsResource } from "./surfaces/calendar/calendars"
