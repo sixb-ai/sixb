@@ -180,6 +180,14 @@ export class InMemoryBroker implements Broker {
     assertCursor(params.afterCursor)
     const storedStream = this.getEnsuredStream(params.projectId, params.streamId)
 
+    // Retention may have trimmed past the caller's cursor. Reject that here rather than let
+    // `readForward` skip silently to the oldest retained record: a resuming subscriber would be
+    // fast-forwarded over the gap and would believe it had seen everything. `read` and `tail`
+    // already reject it, and so does the Redis provider, so this keeps the three consistent.
+    // Checked before the subscription is registered so a throw cannot leave one behind.
+    this.applyRetention(storedStream)
+    this.assertCursorInRetainedRange(storedStream, params.afterCursor)
+
     const subscription: Subscription = {
       projectId: params.projectId,
       streamId: params.streamId,
@@ -191,7 +199,6 @@ export class InMemoryBroker implements Broker {
 
     const startMode = params.afterCursor !== undefined ? undefined : (params.from ?? "latest")
     if (params.afterCursor !== undefined || startMode === "earliest") {
-      this.applyRetention(storedStream)
       const initial = this.readForward(storedStream.records, {
         afterCursor: params.afterCursor,
         names: params.names,
