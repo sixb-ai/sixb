@@ -39,6 +39,7 @@ import {
 } from "react-router-dom"
 import { SidebarDataContext } from "../components/layout/sidebarData"
 import { KNOWN_VIEWS } from "../components/layout/viewMode"
+import { SettingsAccessGate } from "../components/SettingsAccessGate"
 import {
   getObjectSortPreference,
   type ObjectSortPreference,
@@ -403,10 +404,38 @@ export function ProjectWorkspace() {
               <Route path="rules" element={<RulesPage />} />
               <Route path="rules/:ruleId" element={<RuleDetailPage />} />
               <Route path="settings" element={<Navigate to="/settings/members" replace />} />
-              <Route path="settings/tokens" element={<SettingsTokensPage />} />
-              <Route path="settings/members" element={<SettingsMembersPage />} />
-              <Route path="settings/service-accounts" element={<SettingsServiceAccountsPage />} />
-              <Route path="settings/sessions" element={<SettingsSessionsPage />} />
+              <Route
+                path="settings/tokens"
+                element={
+                  <SettingsAccessGate>
+                    <SettingsTokensPage />
+                  </SettingsAccessGate>
+                }
+              />
+              <Route
+                path="settings/members"
+                element={
+                  <SettingsAccessGate>
+                    <SettingsMembersPage />
+                  </SettingsAccessGate>
+                }
+              />
+              <Route
+                path="settings/service-accounts"
+                element={
+                  <SettingsAccessGate>
+                    <SettingsServiceAccountsPage />
+                  </SettingsAccessGate>
+                }
+              />
+              <Route
+                path="settings/sessions"
+                element={
+                  <SettingsAccessGate>
+                    <SettingsSessionsPage />
+                  </SettingsAccessGate>
+                }
+              />
               <Route
                 path="ontology"
                 element={

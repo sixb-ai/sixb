@@ -170,8 +170,8 @@ export function renderBuiltInUiShell(config: BuiltInUiShellConfig): string {
     <base href="/" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#09090b" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#101216" media="(prefers-color-scheme: dark)" />
     <title>Sixb Atlas</title>
     <style data-sixb-loading-shell>
       .sixb-loading-shell{position:fixed;inset:0;display:grid;place-items:center;background:#f6f7fb;color:#71717a}

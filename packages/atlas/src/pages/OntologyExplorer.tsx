@@ -1,6 +1,6 @@
 import type { ListObjectTypesResponse } from "@sixb/client"
 import { listObjectTypesOptions } from "@sixb/client/hooks"
-import { Badge, Input } from "@sixb/ui/components"
+import { CollectionHeader, Input } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
 import { CornerDownRight, Link2, Rows3, Search, Zap } from "lucide-react"
@@ -41,26 +41,22 @@ export function OntologyExplorer({ onSelectType }: OntologyExplorerProps) {
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-4">
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="text-lg font-semibold text-foreground">Ontology</h1>
-          <Badge variant="outline" className="text-xs">
-            {objectTypes.length} {objectTypes.length === 1 ? "type" : "types"}
-          </Badge>
-        </div>
-
-        <div className="relative w-full sm:w-64">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            type="text"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search types..."
-            className="pl-9"
-          />
-        </div>
-      </div>
+      <CollectionHeader
+        title="Ontology"
+        count={objectTypes.length}
+        actions={
+          <div className="relative w-full sm:w-64">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              type="text"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search types..."
+              className="pl-9"
+            />
+          </div>
+        }
+      />
 
       {/* List */}
       {objectTypes.length === 0 ? (
