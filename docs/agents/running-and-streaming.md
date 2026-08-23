@@ -127,7 +127,10 @@ Each `record` frame carries an `AgentRunStreamEvent`:
 | `agent.run.finished` | The run ended. | `status`, `finishReason`, `error` |
 
 Records carry a **cursor**. Persist the last one you saw and pass it as `afterCursor` to resume
-where you left off — a client that reconnects mid-run replays the gap. `agent.ui.chunk` events are
+where you left off — a client that reconnects mid-run replays the gap. A cursor older than the
+stream's retention is rejected rather than quietly skipped, so a client that was away long enough
+for its resume point to be trimmed is resubscribed from the oldest retained record and told so by a
+`subscribed` frame carrying `afterCursor: null`. `agent.ui.chunk` events are
 live; the durable copy of the turn is the persisted assistant message, read back with
 `GET /api/agent-threads/:threadId/messages`.
 

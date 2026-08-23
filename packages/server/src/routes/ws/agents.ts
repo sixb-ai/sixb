@@ -1,6 +1,6 @@
 import type { OntologySource } from "@sixb/core"
 import { agentRunStreamDefinition, agentRunStreamId } from "@sixb/core/agents/streams"
-import type { BrokerRecord } from "@sixb/core/broker"
+import { BrokerCursorExpiredError, type BrokerRecord } from "@sixb/core/broker"
 import type { Sixb } from "@sixb/core/internal/request-execution"
 import type { Elysia } from "elysia"
 import { z } from "zod"
@@ -144,6 +144,17 @@ async function subscribeAgentStream(
 
   const buffered: BrokerRecord[] = []
   let live = false
+  const receive = (records: readonly BrokerRecord[]): void => {
+    if (!live) {
+      buffered.push(...records)
+      return
+    }
+    sendRecords(ws, records)
+  }
+
+  // Set when the requested cursor had already been trimmed, so the client learns its resume point
+  // is gone instead of silently receiving a stream that starts after the gap.
+  let resumedFromEarliest = false
   try {
     state.unsubscribe = await host.broker.subscribe(
       {
@@ -153,26 +164,39 @@ async function subscribeAgentStream(
           ? { from: "earliest" as const }
           : { afterCursor: message.afterCursor }),
       },
-      (records) => {
-        if (!live) {
-          buffered.push(...records)
-          return
-        }
-        sendRecords(ws, records)
-      }
+      receive
     )
     state.runId = message.runId
   } catch (error) {
-    state.unsubscribe = null
-    state.runId = null
-    safeSend(ws, { type: "error", message: errorMessage(error) })
-    return
+    // Retention can outrun a paused tab: an agent run stream keeps 5000 records and a streamed
+    // turn writes one per chunk. Replaying everything still retained beats leaving the socket
+    // open with a cursor the broker will reject forever.
+    if (error instanceof BrokerCursorExpiredError) {
+      try {
+        state.unsubscribe = await host.broker.subscribe(
+          { projectId: host.id, streamId, from: "earliest" },
+          receive
+        )
+        state.runId = message.runId
+        resumedFromEarliest = true
+      } catch (retryError) {
+        state.unsubscribe = null
+        state.runId = null
+        safeSend(ws, { type: "error", message: errorMessage(retryError) })
+        return
+      }
+    } else {
+      state.unsubscribe = null
+      state.runId = null
+      safeSend(ws, { type: "error", message: errorMessage(error) })
+      return
+    }
   }
 
   safeSend(ws, {
     type: "subscribed",
     runId: message.runId,
-    afterCursor: message.afterCursor ?? null,
+    afterCursor: resumedFromEarliest ? null : (message.afterCursor ?? null),
   })
   sendRecords(ws, buffered.splice(0))
   if (!(await sendRunSnapshot(sixb, ws, message.runId))) {

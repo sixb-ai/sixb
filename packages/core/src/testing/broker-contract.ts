@@ -707,7 +707,9 @@ export function runBrokerContractSuite<TBroker extends Broker>(
           ).rejects.toBeInstanceOf(BrokerError)
 
           // A resuming subscriber must be told the gap exists rather than silently fast-forwarded
-          // to the oldest retained record, which would look like a complete stream.
+          // to the oldest retained record, which would look like a complete stream. To prove this
+          // still guards, drop the `assertCursorInRetainedRange` call from `subscribe` in
+          // `broker/in-memory.ts` (or from `nats-broker.ts`) and only this expectation fails.
           await expect(
             broker.subscribe(
               {
