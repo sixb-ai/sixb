@@ -124,37 +124,9 @@ export function Sidebar({
     return undefined
   }
 
-  const session = useQuery(getAuthSessionOptions()).data
-  const signOut = useMutation(signOutMutation())
-  const user =
-    session?.authenticated === true
-      ? {
-          name: session.user.displayName ?? session.user.email,
-          email: session.user.displayName ? session.user.email : undefined,
-          avatarUrl: session.user.avatarUrl,
-        }
-      : null
-  const handleSignOut = () => {
-    signOut.mutate({}, { onSettled: () => window.location.reload() })
-  }
-
   return (
     <ShadcnSidebar collapsible="icon">
-      <SidebarHeader className="border-b border-sidebar-border">
-        <div className="flex items-center gap-3 px-2 py-2 group-data-[collapsible=icon]:px-0 group-data-[collapsible=icon]:justify-center">
-          {/* App icon */}
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-sidebar-border bg-sidebar-accent text-sidebar-accent-foreground">
-            <Globe className="h-4 w-4" />
-          </div>
-          {/* App name + project slug */}
-          <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
-            <p className="truncate text-sm font-semibold text-sidebar-foreground">Atlas</p>
-            <p className="truncate text-xs text-sidebar-foreground">
-              {selectedProject ? selectedProject.name : "Loading project"}
-            </p>
-          </div>
-        </div>
-      </SidebarHeader>
+      <AtlasSidebarHeader selectedProject={selectedProject} />
 
       <SidebarContent>
         <SidebarGroup>
@@ -197,11 +169,50 @@ export function Sidebar({
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="border-t border-sidebar-border">
-        <SidebarUserMenu user={user} apiHref={apiDocsUrl()} onSignOut={handleSignOut} />
-      </SidebarFooter>
+      <AtlasSidebarFooter />
 
       <SidebarRail />
     </ShadcnSidebar>
+  )
+}
+
+export function AtlasSidebarHeader({ selectedProject }: { selectedProject: ProjectInfo | null }) {
+  return (
+    <SidebarHeader className="border-b border-sidebar-border">
+      <div className="flex items-center gap-3 px-2 py-2 group-data-[collapsible=icon]:px-0 group-data-[collapsible=icon]:justify-center">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-sidebar-border bg-sidebar-accent text-sidebar-accent-foreground">
+          <Globe className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
+          <p className="truncate text-sm font-semibold text-sidebar-foreground">Atlas</p>
+          <p className="truncate text-xs text-sidebar-foreground">
+            {selectedProject ? selectedProject.name : "Loading project"}
+          </p>
+        </div>
+      </div>
+    </SidebarHeader>
+  )
+}
+
+export function AtlasSidebarFooter() {
+  const session = useQuery(getAuthSessionOptions()).data
+  const signOut = useMutation(signOutMutation())
+  const user =
+    session?.authenticated === true
+      ? {
+          name: session.user.displayName ?? session.user.email,
+          email: session.user.displayName ? session.user.email : undefined,
+          avatarUrl: session.user.avatarUrl,
+        }
+      : null
+
+  return (
+    <SidebarFooter className="border-t border-sidebar-border">
+      <SidebarUserMenu
+        user={user}
+        apiHref={apiDocsUrl()}
+        onSignOut={() => signOut.mutate({}, { onSettled: () => window.location.reload() })}
+      />
+    </SidebarFooter>
   )
 }

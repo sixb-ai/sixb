@@ -9,7 +9,7 @@ import {
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { ChevronRight, MessagesSquare, PanelLeft } from "lucide-react"
-import { useCallback, useEffect, useState } from "react"
+import { type CSSProperties, type ReactNode, useCallback, useEffect, useState } from "react"
 import { AgentAvatar } from "./components/AgentAvatar"
 import { AgentsHome } from "./components/AgentsHome"
 import { ConversationPanel } from "./components/ConversationPanel"
@@ -33,6 +33,12 @@ export interface AgentChatProps {
   readonly pinnedAgentId?: string
   readonly ambientContext?: readonly AgentContextInput[]
   readonly compact?: boolean
+  /** Host chrome rendered above the workspace thread navigation. */
+  readonly sidebarHeader?: ReactNode
+  /** Host chrome rendered below the workspace thread navigation. */
+  readonly sidebarFooter?: ReactNode
+  /** Desktop workspace sidebar width. Mobile keeps its responsive sheet width. */
+  readonly sidebarWidth?: CSSProperties["width"]
 }
 
 /** Route-independent conversation view; routing and embedded panels only adapt its callbacks. */
@@ -48,6 +54,9 @@ export function AgentChat({
   pinnedAgentId,
   ambientContext = [],
   compact = false,
+  sidebarHeader,
+  sidebarFooter,
+  sidebarWidth,
 }: AgentChatProps) {
   const threadId = threadIdInput ?? null
   const conversation = useAgentConversation({
@@ -79,37 +88,6 @@ export function AgentChat({
     }
   }, [compact, conversation.home, onNavigateDraft, pinnedAgentId, selectedAgentId])
 
-  if (conversation.agentsLoading) {
-    return <div className={cn("h-full", className)} aria-busy="true" />
-  }
-  if (conversation.agentsError) {
-    return (
-      <ErrorState
-        className={className}
-        title="Agents unavailable"
-        description="Could not load registered agents."
-      />
-    )
-  }
-  if (conversation.agents.length === 0) {
-    return (
-      <div className={cn("flex h-full items-center justify-center p-6", className)}>
-        <EmptyState
-          icon={<MessagesSquare className="size-12 stroke-1" />}
-          title={pinnedAgentId ? "Agent unavailable" : "No agents registered"}
-          description={
-            pinnedAgentId
-              ? `The agent '${pinnedAgentId}' is not registered or is not available to this user.`
-              : "Agents are discovered from your project's agents/ directory. Define one to start a chat."
-          }
-        />
-      </div>
-    )
-  }
-  if (!compact && !pinnedAgentId && conversation.home && selectedAgentId) {
-    return <div className={cn("h-full", className)} aria-busy="true" />
-  }
-
   const startNewChatWith = (agentId: string) => {
     setMobileSidebarOpen(false)
     rememberAgent(agentId)
@@ -135,14 +113,21 @@ export function AgentChat({
     : undefined
   const pendingUser = conversation.pendingUser
   const presentation = conversation.presentation
-  const renderThreadSidebar = (sidebarClassName: string) => (
+  const renderThreadSidebar = (sidebarClassName: string, width?: CSSProperties["width"]) => (
     <ThreadSidebar
       agents={conversation.agents}
       threads={conversation.threads}
       agentsById={conversation.agentsById}
       currentThreadId={threadId}
       selectedAgentId={selectedAgentId}
-      threadsError={conversation.threadsError ? "Could not load threads." : null}
+      loading={conversation.agentsLoading}
+      threadsError={
+        conversation.agentsError
+          ? "Agents unavailable."
+          : conversation.threadsError
+            ? "Could not load threads."
+            : null
+      }
       totalThreads={conversation.threadTotal}
       hasMoreThreads={conversation.threadsHasMore}
       loadingMoreThreads={conversation.threadsLoadingMore}
@@ -153,9 +138,103 @@ export function AgentChat({
       onLoadMoreThreads={() => void conversation.loadMoreThreads()}
       onExit={exitWorkspace}
       exitLabel={exitLabel}
+      header={sidebarHeader}
+      footer={sidebarFooter}
       className={sidebarClassName}
+      width={width}
     />
   )
+
+  let content: ReactNode
+  if (conversation.agentsLoading) {
+    content = <div className="h-full" aria-busy="true" />
+  } else if (conversation.agentsError) {
+    content = (
+      <ErrorState title="Agents unavailable" description="Could not load registered agents." />
+    )
+  } else if (conversation.agents.length === 0) {
+    content = (
+      <div className="flex h-full items-center justify-center p-6">
+        <EmptyState
+          icon={<MessagesSquare className="size-12 stroke-1" />}
+          title={pinnedAgentId ? "Agent unavailable" : "No agents registered"}
+          description={
+            pinnedAgentId
+              ? `The agent '${pinnedAgentId}' is not registered or is not available to this user.`
+              : "Agents are discovered from your project's agents/ directory. Define one to start a chat."
+          }
+        />
+      </div>
+    )
+  } else if (!compact && !pinnedAgentId && conversation.home && selectedAgentId) {
+    content = <div className="h-full" aria-busy="true" />
+  } else if (conversation.home) {
+    content = compact ? (
+      <AgentsHome
+        agents={conversation.agents}
+        threads={conversation.threads}
+        agentsById={conversation.agentsById}
+        threadsError={conversation.threadsError ? "Could not load chats." : null}
+        onPickAgent={startNewChatWith}
+        onSelectThread={selectThread}
+      />
+    ) : (
+      <WorkspaceHome
+        agents={conversation.agents}
+        onPickAgent={startNewChatWith}
+        onOpenNavigation={() => setMobileSidebarOpen(true)}
+      />
+    )
+  } else {
+    content = (
+      <ConversationPanel
+        agent={conversation.currentAgent}
+        threadId={threadId}
+        messages={conversation.messages}
+        live={conversation.live}
+        messagesLoading={conversation.messagesLoading}
+        messagesError={conversation.messagesError}
+        pendingUserText={pendingUser?.text ?? null}
+        pendingUserAttachments={pendingUser?.attachments ?? []}
+        pendingUserContext={pendingUser?.context ?? []}
+        anchorCurrentTurn={conversation.anchorCurrentTurn}
+        awaitingResponse={conversation.isRunning}
+        waitingLonger={conversation.waitingLonger}
+        failedBeforeResponse={presentation.kind === "failed"}
+        cancelledBeforeResponse={presentation.kind === "cancelled"}
+        onRetry={
+          presentation.kind === "failed" ? () => conversation.retry(presentation.run) : undefined
+        }
+        retrying={conversation.retrying}
+        reconnecting={conversation.reconnecting}
+        sendError={conversation.sendError}
+        agents={conversation.agents}
+        agentThreads={conversation.agentThreads}
+        canGoHome={compact ? conversation.canGoHome : true}
+        onSend={conversation.send}
+        onBackHome={onNavigateHome}
+        onOpenWorkspaceNavigation={() => setMobileSidebarOpen(true)}
+        onNewChat={() => {
+          if (conversation.currentAgent) startNewChatWith(conversation.currentAgent.id)
+        }}
+        onPickAgent={startNewChatWith}
+        onSelectThread={selectThread}
+        composerDisabled={conversation.isRunning}
+        composerPending={conversation.composerPending}
+        composerRunning={conversation.isRunning}
+        composerStopping={conversation.stopping}
+        onStop={conversation.stop}
+        composerPlaceholder="Ask anything"
+        composerDraft={conversation.draftReseed.text}
+        composerDraftAttachments={conversation.draftReseed.attachments}
+        composerDraftContext={conversation.draftReseed.context}
+        composerDraftNonce={conversation.draftReseed.nonce}
+        ambientContext={ambientContext}
+        compact={compact}
+        workspace={!compact}
+      />
+    )
+  }
 
   return (
     <DocumentPreviewRoot
@@ -169,7 +248,7 @@ export function AgentChat({
       >
         {!compact ? (
           <>
-            {renderThreadSidebar("hidden h-full w-64 shrink-0 md:flex xl:w-72")}
+            {renderThreadSidebar("hidden h-full w-64 shrink-0 md:flex xl:w-72", sidebarWidth)}
             <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
               <SheetContent
                 side="left"
@@ -188,75 +267,7 @@ export function AgentChat({
           </>
         ) : null}
 
-        <main className="min-h-0 min-w-0 flex-1">
-          {conversation.home ? (
-            compact ? (
-              <AgentsHome
-                agents={conversation.agents}
-                threads={conversation.threads}
-                agentsById={conversation.agentsById}
-                threadsError={conversation.threadsError ? "Could not load chats." : null}
-                onPickAgent={startNewChatWith}
-                onSelectThread={selectThread}
-              />
-            ) : (
-              <WorkspaceHome
-                agents={conversation.agents}
-                onPickAgent={startNewChatWith}
-                onOpenNavigation={() => setMobileSidebarOpen(true)}
-              />
-            )
-          ) : (
-            <ConversationPanel
-              agent={conversation.currentAgent}
-              threadId={threadId}
-              messages={conversation.messages}
-              live={conversation.live}
-              messagesLoading={conversation.messagesLoading}
-              messagesError={conversation.messagesError}
-              pendingUserText={pendingUser?.text ?? null}
-              pendingUserAttachments={pendingUser?.attachments ?? []}
-              pendingUserContext={pendingUser?.context ?? []}
-              anchorCurrentTurn={conversation.anchorCurrentTurn}
-              awaitingResponse={conversation.isRunning}
-              waitingLonger={conversation.waitingLonger}
-              failedBeforeResponse={presentation.kind === "failed"}
-              cancelledBeforeResponse={presentation.kind === "cancelled"}
-              onRetry={
-                presentation.kind === "failed"
-                  ? () => conversation.retry(presentation.run)
-                  : undefined
-              }
-              retrying={conversation.retrying}
-              reconnecting={conversation.reconnecting}
-              sendError={conversation.sendError}
-              agents={conversation.agents}
-              agentThreads={conversation.agentThreads}
-              canGoHome={compact ? conversation.canGoHome : true}
-              onSend={conversation.send}
-              onBackHome={onNavigateHome}
-              onOpenWorkspaceNavigation={() => setMobileSidebarOpen(true)}
-              onNewChat={() => {
-                if (conversation.currentAgent) startNewChatWith(conversation.currentAgent.id)
-              }}
-              onPickAgent={startNewChatWith}
-              onSelectThread={selectThread}
-              composerDisabled={conversation.isRunning}
-              composerPending={conversation.composerPending}
-              composerRunning={conversation.isRunning}
-              composerStopping={conversation.stopping}
-              onStop={conversation.stop}
-              composerPlaceholder="Ask anything"
-              composerDraft={conversation.draftReseed.text}
-              composerDraftAttachments={conversation.draftReseed.attachments}
-              composerDraftContext={conversation.draftReseed.context}
-              composerDraftNonce={conversation.draftReseed.nonce}
-              ambientContext={ambientContext}
-              compact={compact}
-              workspace={!compact}
-            />
-          )}
-        </main>
+        <main className="min-h-0 min-w-0 flex-1">{content}</main>
       </div>
     </DocumentPreviewRoot>
   )
@@ -342,17 +353,9 @@ function WorkspaceHome({
   )
 }
 
-function ErrorState({
-  title,
-  description,
-  className,
-}: {
-  title: string
-  description: string
-  className?: string
-}) {
+function ErrorState({ title, description }: { title: string; description: string }) {
   return (
-    <div className={cn("flex h-full items-center justify-center p-6 text-center", className)}>
+    <div className="flex h-full items-center justify-center p-6 text-center">
       <div className="max-w-md space-y-1">
         <p className="text-sm font-medium text-foreground">{title}</p>
         <p className="text-sm text-muted-foreground">{description}</p>

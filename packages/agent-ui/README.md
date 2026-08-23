@@ -77,6 +77,11 @@ import { AgentChatPage } from "@sixb/agent-ui/react-router"
 
 `routeBase` defaults to `/agents` and must match the path you mount it on.
 
+`AgentChatPage` covers the viewport and owns its responsive sidebar. Hosts can match that sidebar
+to the rest of their app with `sidebarHeader`, `sidebarFooter`, and `sidebarWidth`. The header and
+footer accept React nodes; the width accepts any React CSS width value and applies on desktop while
+mobile keeps its responsive sheet width.
+
 ## Document previews
 
 Durable files attached by a user or produced by an agent open directly from the conversation when
