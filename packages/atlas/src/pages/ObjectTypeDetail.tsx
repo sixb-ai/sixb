@@ -20,7 +20,7 @@ import {
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
-import { ChevronRight } from "lucide-react"
+import { ChevronRight, Network } from "lucide-react"
 import { Fragment, type ReactNode, useMemo } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { BackNav, LetterAvatar, LoadingState } from "../components/common"
@@ -34,10 +34,29 @@ function isTabValue(value: string | null): value is TabValue {
   return value !== null && (TAB_VALUES as readonly string[]).includes(value)
 }
 
-export function ObjectTypeDetail() {
-  const { typeId } = useParams<{ typeId: string }>()
+interface ObjectTypeDetailProps {
+  objectTypeId?: string
+  embedded?: boolean
+  onSelectType?: (typeId: string) => void
+}
+
+export function ObjectTypeDetail({
+  objectTypeId,
+  embedded = false,
+  onSelectType,
+}: ObjectTypeDetailProps = {}) {
+  const { typeId: routeTypeId } = useParams<{ typeId: string }>()
+  const typeId = objectTypeId ?? routeTypeId
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
+
+  const selectType = (nextTypeId: string) => {
+    if (onSelectType) {
+      onSelectType(nextTypeId)
+    } else {
+      navigate(`/ontology/${nextTypeId}`)
+    }
+  }
 
   const tabParam = searchParams.get("tab")
   const activeTab: TabValue = isTabValue(tabParam) ? tabParam : DEFAULT_TAB
@@ -117,7 +136,18 @@ export function ObjectTypeDetail() {
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6">
-      <BackNav to="/ontology" label="Ontology" />
+      {!embedded ? (
+        <div className="flex items-center justify-between gap-3">
+          <BackNav to="/ontology" label="Ontology" />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate(`/ontology?type=${encodeURIComponent(objectType.id)}`)}
+          >
+            <Network /> Show in graph
+          </Button>
+        </div>
+      ) : null}
 
       {/* Header */}
       <header className="space-y-4">
@@ -143,7 +173,7 @@ export function ObjectTypeDetail() {
                   <Button
                     variant="link"
                     className="h-auto p-0 text-xs"
-                    onClick={() => navigate(`/ontology/${ancestor.id}`)}
+                    onClick={() => selectType(ancestor.id)}
                   >
                     {humanizeIdentifier(ancestor.name || ancestor.id)}
                   </Button>
@@ -166,7 +196,7 @@ export function ObjectTypeDetail() {
                   key={subtype.id}
                   variant="link"
                   className="h-auto p-0 text-xs"
-                  onClick={() => navigate(`/ontology/${subtype.id}`)}
+                  onClick={() => selectType(subtype.id)}
                 >
                   {humanizeIdentifier(subtype.name || subtype.id)}
                 </Button>
@@ -262,7 +292,7 @@ export function ObjectTypeDetail() {
                                   key={targetId}
                                   variant="link"
                                   className="h-auto p-0 font-mono text-xs"
-                                  onClick={() => navigate(`/ontology/${targetId}`)}
+                                  onClick={() => selectType(targetId)}
                                 >
                                   {targetId}
                                 </Button>
@@ -357,10 +387,7 @@ export function ObjectTypeDetail() {
                     <Card key={proj.id} className="space-y-4 p-4">
                       <ProjectionHeader id={proj.id} datasetId={proj.datasetId} />
                       <PropertyMappings entries={Object.entries(proj.properties)} />
-                      <ForeignKeys
-                        links={proj.links}
-                        onSelectType={(id) => navigate(`/ontology/${id}`)}
-                      />
+                      <ForeignKeys links={proj.links} onSelectType={selectType} />
                     </Card>
                   ))}
                 </div>
@@ -383,7 +410,7 @@ export function ObjectTypeDetail() {
                           <Button
                             variant="link"
                             className="h-auto p-0 font-mono text-xs"
-                            onClick={() => navigate(`/ontology/${proj.sourceObjectTypeId}`)}
+                            onClick={() => selectType(proj.sourceObjectTypeId)}
                           >
                             {proj.sourceObjectTypeId}
                           </Button>
@@ -394,7 +421,7 @@ export function ObjectTypeDetail() {
                           <Button
                             variant="link"
                             className="h-auto p-0 font-mono text-xs"
-                            onClick={() => navigate(`/ontology/${proj.targetObjectTypeId}`)}
+                            onClick={() => selectType(proj.targetObjectTypeId)}
                           >
                             {proj.targetObjectTypeId}
                           </Button>
