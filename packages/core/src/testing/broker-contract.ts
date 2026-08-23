@@ -677,7 +677,7 @@ export function runBrokerContractSuite<TBroker extends Broker>(
         })
       })
 
-      test("rejects reads when the requested cursor predates the retained range", async () => {
+      test("rejects resuming from a cursor that predates the retained range", async () => {
         await withBroker(async (broker) => {
           const [first] = await appendRecords(broker, {
             projectId: "project-a",
@@ -704,6 +704,19 @@ export function runBrokerContractSuite<TBroker extends Broker>(
               streamId: retainedStream.id,
               beforeCursor: first?.cursor,
             })
+          ).rejects.toBeInstanceOf(BrokerError)
+
+          // A resuming subscriber must be told the gap exists rather than silently fast-forwarded
+          // to the oldest retained record, which would look like a complete stream.
+          await expect(
+            broker.subscribe(
+              {
+                projectId: "project-a",
+                streamId: retainedStream.id,
+                afterCursor: first?.cursor,
+              },
+              () => undefined
+            )
           ).rejects.toBeInstanceOf(BrokerError)
         })
       })
