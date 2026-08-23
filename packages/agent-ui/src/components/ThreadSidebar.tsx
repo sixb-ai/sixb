@@ -9,7 +9,7 @@ import {
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { ArrowLeft, LoaderCircle, Pencil, Search } from "lucide-react"
-import { type ReactNode, useMemo, useState } from "react"
+import { type CSSProperties, type ReactNode, useMemo, useState } from "react"
 import { groupThreadsByDate } from "../format"
 import { filterThreadNavigation, THREAD_PAGE_SIZE } from "../threadNavigation"
 import type { Agent, AgentThread } from "../types"
@@ -20,6 +20,7 @@ export interface ThreadSidebarProps {
   readonly agentsById: ReadonlyMap<string, Agent>
   readonly currentThreadId: string | null
   readonly selectedAgentId: string | null
+  readonly loading?: boolean
   readonly threadsError?: string | null
   readonly totalThreads: number
   readonly hasMoreThreads: boolean
@@ -31,7 +32,10 @@ export interface ThreadSidebarProps {
   readonly onLoadMoreThreads: () => void
   readonly onExit?: () => void
   readonly exitLabel?: string
+  readonly header?: ReactNode
+  readonly footer?: ReactNode
   readonly className?: string
+  readonly width?: CSSProperties["width"]
 }
 
 /** Persistent command rail for starting and switching Agent conversations. */
@@ -41,6 +45,7 @@ export function ThreadSidebar({
   agentsById,
   currentThreadId,
   selectedAgentId,
+  loading = false,
   threadsError,
   totalThreads,
   hasMoreThreads,
@@ -52,7 +57,10 @@ export function ThreadSidebar({
   onLoadMoreThreads,
   onExit,
   exitLabel = "Back to app",
+  header,
+  footer,
   className,
+  width,
 }: ThreadSidebarProps) {
   const [searchTerm, setSearchTerm] = useState("")
   const [searchOpen, setSearchOpen] = useState(false)
@@ -82,8 +90,12 @@ export function ThreadSidebar({
         className
       )}
       aria-label="Agent threads"
+      aria-busy={loading || undefined}
+      style={width === undefined ? undefined : { width }}
     >
-      <div className="shrink-0 px-2 pt-2 pb-2">
+      {header ? <div className="shrink-0">{header}</div> : null}
+
+      <div className="shrink-0 px-2 pt-2 pb-2 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-left-1 motion-safe:duration-200">
         <nav className="flex flex-col gap-0.5" aria-label="Agent workspace actions">
           {onExit ? (
             <div className="mb-2">
@@ -104,6 +116,7 @@ export function ThreadSidebar({
             variant="ghost"
             size="sm"
             onClick={onStartNewThread}
+            disabled={loading || agents.length === 0}
             className="h-9 w-full justify-start gap-3 px-2.5 text-[13px] font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:border-transparent focus-visible:ring-0 focus-visible:underline focus-visible:underline-offset-4"
           >
             <Pencil aria-hidden="true" />
@@ -114,6 +127,7 @@ export function ThreadSidebar({
             variant="ghost"
             size="sm"
             onClick={() => setSearchOpen(true)}
+            disabled={loading || agents.length === 0}
             aria-haspopup="dialog"
             aria-expanded={searchOpen}
             className="h-9 w-full justify-start gap-3 px-2.5 text-[13px] font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:border-transparent focus-visible:ring-0 focus-visible:underline focus-visible:underline-offset-4"
@@ -207,10 +221,10 @@ export function ThreadSidebar({
       </div>
 
       <nav
-        className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-2 py-2.5"
+        className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-2 py-2.5 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-left-1 motion-safe:duration-200"
         aria-label="Threads"
       >
-        {threadsError ? (
+        {loading ? null : threadsError ? (
           <p className="px-2 py-4 text-sm text-destructive">{threadsError}</p>
         ) : threads.length === 0 ? (
           <div className="px-3 py-10 text-center">
@@ -268,6 +282,7 @@ export function ThreadSidebar({
           </Button>
         </div>
       ) : null}
+      {footer ? <div className="shrink-0">{footer}</div> : null}
     </aside>
   )
 }

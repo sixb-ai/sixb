@@ -6,10 +6,10 @@ import { ProjectWorkspace } from "./pages/ProjectWorkspace"
 export default function App() {
   return (
     <Routes>
-      <Route path="agents" element={<AgentsPage />} />
-      <Route path="agents/new/:agentId" element={<AgentsPage />} />
-      <Route path="agents/:threadId" element={<AgentsPage />} />
       <Route element={<AppLayout />}>
+        <Route path="agents" element={<AgentsPage />} />
+        <Route path="agents/new/:agentId" element={<AgentsPage />} />
+        <Route path="agents/:threadId" element={<AgentsPage />} />
         <Route path="*" element={<ProjectWorkspace />} />
       </Route>
     </Routes>
