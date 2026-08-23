@@ -42,10 +42,15 @@ export interface AgentRunStreamUnsubscribeMessage {
   readonly runId?: string
 }
 
+export interface AgentActivityStreamSubscribeMessage {
+  readonly type: "subscribe.activity"
+}
+
 export type AgentRunStreamClientMessage =
   | AgentRunStreamSubscribeMessage
   | AgentRunStreamReplayMessage
   | AgentRunStreamUnsubscribeMessage
+  | AgentActivityStreamSubscribeMessage
 
 export type AgentRunStreamServerMessage =
   | { readonly type: "connected"; readonly channel?: string }
@@ -145,7 +150,8 @@ export function createAgentActivitySocket(options: AgentActivitySocketOptions): 
     connectionErrorMessage: "Agent activity websocket connection failed.",
     onError: options.onError,
     onStateChange: options.onStateChange,
-    subscribeMessage: () => ({ type: "subscribe.activity" }),
+    subscribeMessage: () =>
+      ({ type: "subscribe.activity" }) satisfies AgentActivityStreamSubscribeMessage,
     onMessage: (data, sink) => {
       const message = parseAgentRunStreamServerMessage(data)
       if (!message) return

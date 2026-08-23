@@ -13,6 +13,7 @@ import {
   parseDelimitedText,
 } from "../src/document-preview/delimited"
 import { buildSafeHtmlPreviewDocument, HTML_PREVIEW_SANDBOX } from "../src/document-preview/html"
+import { parseDocumentPreviewState } from "../src/document-preview/persistence"
 import { documentPreviewPresentation } from "../src/document-preview/presentation"
 import { agentDocumentPreviewRenderer } from "../src/document-preview/rendering"
 import { createAgentDocumentSource } from "../src/document-preview/source"
@@ -264,6 +265,47 @@ describe("document preview tabs", () => {
     state = documentPreviewReducer(state, { type: "close", id: "first" })
 
     expect(state.activeId).toBe("second")
+  })
+
+  test("keeps the thread's panel width after its document tabs are closed", () => {
+    let state = documentPreviewReducer(EMPTY_DOCUMENT_PREVIEW_STATE, {
+      type: "set-panel-width",
+      width: 640,
+    })
+    state = documentPreviewReducer(state, { type: "open", document: document("first", "first.md") })
+    state = documentPreviewReducer(state, { type: "close-all" })
+
+    expect(state).toEqual({ documents: [], activeId: null, panelWidth: 640 })
+    expect(parseDocumentPreviewState(JSON.stringify(state), "thread-1")).toEqual(state)
+  })
+
+  test("restores only valid, unique documents from the current thread", () => {
+    const first = document("first", "first.md")
+    const second = document("second", "second.md")
+    const state = parseDocumentPreviewState(
+      JSON.stringify({
+        documents: [first, first, { ...second, threadId: "another-thread" }, second],
+        activeId: "second",
+        panelWidth: 640,
+      }),
+      "thread-1"
+    )
+
+    expect(state.documents.map((item) => item.id)).toEqual(["first", "second"])
+    expect(state.activeId).toBe("second")
+    expect(state.panelWidth).toBe(640)
+  })
+
+  test("falls back safely when persisted preview state is stale or malformed", () => {
+    const first = document("first", "first.md")
+
+    expect(
+      parseDocumentPreviewState(
+        JSON.stringify({ documents: [first], activeId: "missing" }),
+        "thread-1"
+      )
+    ).toEqual({ documents: [first], activeId: "first", panelWidth: null })
+    expect(parseDocumentPreviewState("not-json", "thread-1")).toBe(EMPTY_DOCUMENT_PREVIEW_STATE)
   })
 })
 

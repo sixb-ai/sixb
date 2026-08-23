@@ -114,7 +114,7 @@ export function Transcript({
         <MessageScrollerViewport>
           <MessageScrollerContent
             aria-busy={live.active || showThinking}
-            className="mx-auto w-full max-w-3xl px-4 py-6"
+            className="mx-auto w-full max-w-3xl px-4 pt-12 pb-6"
           >
             {messages.map((message) => (
               <TranscriptMessage

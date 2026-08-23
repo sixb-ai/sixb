@@ -1,6 +1,14 @@
-import { Button, Input } from "@sixb/ui/components"
+import {
+  Button,
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { LoaderCircle, Pencil, Search } from "lucide-react"
+import { ArrowLeft, LoaderCircle, Pencil, Search } from "lucide-react"
 import { type ReactNode, useMemo, useState } from "react"
 import { groupThreadsByDate } from "../format"
 import { filterThreadNavigation, THREAD_PAGE_SIZE } from "../threadNavigation"
@@ -21,6 +29,8 @@ export interface ThreadSidebarProps {
   readonly onStartNewThread: () => void
   readonly onSelectThread: (threadId: string) => void
   readonly onLoadMoreThreads: () => void
+  readonly onExit?: () => void
+  readonly exitLabel?: string
   readonly className?: string
 }
 
@@ -40,68 +50,157 @@ export function ThreadSidebar({
   onStartNewThread,
   onSelectThread,
   onLoadMoreThreads,
+  onExit,
+  exitLabel = "Back to app",
   className,
 }: ThreadSidebarProps) {
   const [searchTerm, setSearchTerm] = useState("")
-  const visibleThreads = useMemo(
-    () => filterThreadNavigation(threads, agentsById, searchTerm),
-    [agentsById, searchTerm, threads]
+  const [searchOpen, setSearchOpen] = useState(false)
+  const threadGroups = useMemo(() => groupThreadsByDate(threads), [threads])
+  const searchGroups = useMemo(
+    () =>
+      searchOpen ? groupThreadsByDate(filterThreadNavigation(threads, agentsById, searchTerm)) : [],
+    [agentsById, searchOpen, searchTerm, threads]
   )
-  const threadGroups = useMemo(() => groupThreadsByDate(visibleThreads), [visibleThreads])
-  const noMatches = searchTerm.trim().length > 0 && visibleThreads.length === 0
+
+  const updateSearchOpen = (open: boolean) => {
+    setSearchOpen(open)
+    if (!open) {
+      setSearchTerm("")
+    }
+  }
+
+  const selectSearchResult = (threadId: string) => {
+    updateSearchOpen(false)
+    onSelectThread(threadId)
+  }
 
   return (
     <aside
       className={cn("min-h-0 flex-col border-r border-border/70 bg-background", className)}
       aria-label="Agent threads"
     >
-      <div className="shrink-0 px-3 pt-3 pb-2">
-        <div className="flex items-center gap-2">
-          <h1 className="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-tight text-foreground">
-            Threads
-          </h1>
-          <NewChatButton onStartNewThread={onStartNewThread} />
-        </div>
-
-        <div className="relative mt-3">
-          <Search
-            className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground/80"
-            aria-hidden="true"
-          />
-          <Input
-            type="search"
-            value={searchTerm}
-            onChange={(event) => setSearchTerm(event.target.value)}
-            placeholder="Search threads"
-            aria-label="Search agent threads"
-            className="h-8 rounded-lg border-transparent bg-muted/60 pr-2 pl-8 text-xs shadow-none transition-colors hover:bg-muted focus-visible:border-input focus-visible:bg-background"
-          />
-        </div>
-
-        <section className="mt-3" aria-labelledby="agent-selector-heading">
-          <h2
-            id="agent-selector-heading"
-            className="px-2 pb-1 text-[11px] font-medium text-muted-foreground"
-          >
-            Agents
-          </h2>
-          <div className="space-y-0.5">
-            {agents.map((agent) => (
-              <button
-                key={agent.id}
+      <div className="shrink-0 px-2 pt-2 pb-2">
+        <nav className="flex flex-col gap-0.5" aria-label="Agent workspace actions">
+          {onExit ? (
+            <div className="mb-2">
+              <Button
                 type="button"
-                onClick={() => onPickAgent(agent.id)}
-                aria-current={agent.id === selectedAgentId ? "true" : undefined}
-                className={cn(
-                  "flex h-8 w-full items-center rounded-lg px-2 text-left text-[13px] font-medium outline-none transition-colors hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring",
-                  agent.id === selectedAgentId && "bg-muted text-foreground"
-                )}
+                variant="ghost"
+                size="sm"
+                onClick={onExit}
+                className="h-9 w-full justify-start gap-3 px-2.5 text-[13px] font-semibold text-foreground focus-visible:border-transparent focus-visible:ring-0 focus-visible:underline focus-visible:underline-offset-4"
               >
-                <span className="truncate">{agent.name}</span>
-              </button>
+                <ArrowLeft aria-hidden="true" />
+                {exitLabel}
+              </Button>
+            </div>
+          ) : null}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onStartNewThread}
+            className="h-9 w-full justify-start gap-3 px-2.5 text-[13px] font-medium text-foreground focus-visible:border-transparent focus-visible:ring-0 focus-visible:underline focus-visible:underline-offset-4"
+          >
+            <Pencil aria-hidden="true" />
+            New thread
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setSearchOpen(true)}
+            aria-haspopup="dialog"
+            aria-expanded={searchOpen}
+            className="h-9 w-full justify-start gap-3 px-2.5 text-[13px] font-medium text-foreground focus-visible:border-transparent focus-visible:ring-0 focus-visible:underline focus-visible:underline-offset-4"
+          >
+            <Search aria-hidden="true" />
+            Search
+          </Button>
+        </nav>
+
+        <CommandDialog
+          open={searchOpen}
+          onOpenChange={updateSearchOpen}
+          title="Search threads"
+          description="Search threads by title or agent."
+          shouldFilter={false}
+          className="max-w-xl"
+        >
+          <CommandInput
+            autoFocus
+            value={searchTerm}
+            onValueChange={setSearchTerm}
+            placeholder="Search threads..."
+            aria-label="Search agent threads"
+          />
+          <CommandList className="max-h-[min(28rem,70vh)] p-2">
+            <CommandEmpty>
+              {threadsError
+                ? "Could not load threads."
+                : threads.length === 0
+                  ? "No threads yet."
+                  : "No matching threads."}
+            </CommandEmpty>
+            {searchGroups.map((group) => (
+              <CommandGroup key={group.label} heading={group.label}>
+                {group.threads.map((thread) => {
+                  const title = thread.title?.trim() || "Untitled chat"
+                  const agentName = agentsById.get(thread.agentId)?.name ?? thread.agentId
+
+                  return (
+                    <CommandItem
+                      key={thread.id}
+                      value={thread.id}
+                      onSelect={() => selectSearchResult(thread.id)}
+                      aria-label={`${title}, ${agentName}`}
+                      className="items-center rounded-lg px-3 py-2.5"
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-medium">{title}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {agentName}
+                        </span>
+                      </span>
+                    </CommandItem>
+                  )
+                })}
+              </CommandGroup>
             ))}
-          </div>
-        </section>
+          </CommandList>
+        </CommandDialog>
+
+        {agents.length > 1 ? (
+          <section className="mt-4" aria-labelledby="agent-selector-heading">
+            <h2
+              id="agent-selector-heading"
+              className="px-2 pb-1 text-[11px] font-medium text-muted-foreground"
+            >
+              Agents
+            </h2>
+            <div className="space-y-0.5">
+              {agents.map((agent) => (
+                <button
+                  key={agent.id}
+                  type="button"
+                  onClick={() => onPickAgent(agent.id)}
+                  aria-current={
+                    currentThreadId === null && agent.id === selectedAgentId ? "true" : undefined
+                  }
+                  className={cn(
+                    "flex h-8 w-full items-center rounded-lg px-2 text-left text-[13px] font-medium outline-none transition-colors hover:bg-muted/70 focus-visible:underline focus-visible:underline-offset-2",
+                    currentThreadId === null &&
+                      agent.id === selectedAgentId &&
+                      "bg-muted text-foreground"
+                  )}
+                >
+                  <span className="truncate">{agent.name}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        ) : null}
       </div>
 
       <nav
@@ -110,10 +209,6 @@ export function ThreadSidebar({
       >
         {threadsError ? (
           <p className="px-2 py-4 text-sm text-destructive">{threadsError}</p>
-        ) : noMatches ? (
-          <p className="px-2 py-8 text-center text-sm text-muted-foreground">
-            No matching threads.
-          </p>
         ) : threads.length === 0 ? (
           <div className="px-3 py-10 text-center">
             <p className="text-sm font-medium text-foreground">No threads yet</p>
@@ -174,20 +269,6 @@ export function ThreadSidebar({
   )
 }
 
-function NewChatButton({ onStartNewThread }: { onStartNewThread: () => void }) {
-  return (
-    <Button
-      type="button"
-      size="icon-sm"
-      variant="ghost"
-      onClick={onStartNewThread}
-      aria-label="New chat"
-    >
-      <Pencil />
-    </Button>
-  )
-}
-
 function ThreadSection({ label, children }: { label: string; children: ReactNode }) {
   return (
     <section aria-labelledby={`agent-threads-${sectionId(label)}`}>
@@ -222,7 +303,7 @@ function ThreadRow({
       aria-current={selected ? "page" : undefined}
       aria-label={running ? `${title}, running` : title}
       className={cn(
-        "group relative flex w-full items-center rounded-lg px-2.5 py-1.5 text-left outline-none transition-colors hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring",
+        "group relative flex w-full items-center rounded-lg px-2.5 py-1.5 text-left outline-none transition-colors hover:bg-muted/70 focus-visible:underline focus-visible:underline-offset-2",
         selected && "bg-muted text-foreground"
       )}
     >

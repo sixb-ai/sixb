@@ -1,6 +1,14 @@
-import { EmptyState } from "@sixb/ui/components"
+import {
+  Button,
+  EmptyState,
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { ChevronRight, MessagesSquare } from "lucide-react"
+import { ChevronRight, MessagesSquare, PanelLeft } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 import { AgentAvatar } from "./components/AgentAvatar"
 import { AgentsHome } from "./components/AgentsHome"
@@ -18,6 +26,8 @@ export interface AgentChatProps {
   readonly onNavigateHome: () => void
   readonly onNavigateDraft: (agentId: string) => void
   readonly onNavigateThread: (threadId: string) => void
+  readonly onExit?: () => void
+  readonly exitLabel?: string
   readonly className?: string
   /** Restrict the conversation surface to one agent (used by embedded AgentPanel). */
   readonly pinnedAgentId?: string
@@ -32,6 +42,8 @@ export function AgentChat({
   onNavigateHome,
   onNavigateDraft,
   onNavigateThread,
+  onExit,
+  exitLabel = "Back to app",
   className,
   pinnedAgentId,
   ambientContext = [],
@@ -45,6 +57,7 @@ export function AgentChat({
     onThreadCreated: onNavigateThread,
   })
   const [lastSelectedAgentId, setLastSelectedAgentId] = useState(readLastSelectedAgent)
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const rememberAgent = useCallback((agentId: string) => {
     setLastSelectedAgentId(agentId)
     writeLastSelectedAgent(agentId)
@@ -98,58 +111,84 @@ export function AgentChat({
   }
 
   const startNewChatWith = (agentId: string) => {
+    setMobileSidebarOpen(false)
     rememberAgent(agentId)
     onNavigateDraft(agentId)
+  }
+  const selectThread = (nextThreadId: string) => {
+    setMobileSidebarOpen(false)
+    onNavigateThread(nextThreadId)
   }
   const startNewThread = () => {
     if (selectedAgentId) {
       startNewChatWith(selectedAgentId)
       return
     }
+    setMobileSidebarOpen(false)
     onNavigateHome()
   }
+  const exitWorkspace = onExit
+    ? () => {
+        setMobileSidebarOpen(false)
+        onExit()
+      }
+    : undefined
   const pendingUser = conversation.pendingUser
   const presentation = conversation.presentation
-  const showingConversation = !conversation.home
+  const renderThreadSidebar = (sidebarClassName: string) => (
+    <ThreadSidebar
+      agents={conversation.agents}
+      threads={conversation.threads}
+      agentsById={conversation.agentsById}
+      currentThreadId={threadId}
+      selectedAgentId={selectedAgentId}
+      threadsError={conversation.threadsError ? "Could not load threads." : null}
+      totalThreads={conversation.threadTotal}
+      hasMoreThreads={conversation.threadsHasMore}
+      loadingMoreThreads={conversation.threadsLoadingMore}
+      loadMoreThreadsError={conversation.threadsLoadMoreError}
+      onPickAgent={startNewChatWith}
+      onStartNewThread={startNewThread}
+      onSelectThread={selectThread}
+      onLoadMoreThreads={() => void conversation.loadMoreThreads()}
+      onExit={exitWorkspace}
+      exitLabel={exitLabel}
+      className={sidebarClassName}
+    />
+  )
 
   return (
     <DocumentPreviewRoot
       compact={compact}
       scopeKey={threadId ?? (draftAgentIdInput ? `draft:${draftAgentIdInput}` : "home")}
+      persistenceKey={threadId}
     >
       <div
         data-agent-panel={compact ? "" : undefined}
         className={cn("relative flex h-full min-h-0", compact && "flex-col", className)}
       >
         {!compact ? (
-          <ThreadSidebar
-            agents={conversation.agents}
-            threads={conversation.threads}
-            agentsById={conversation.agentsById}
-            currentThreadId={threadId}
-            selectedAgentId={selectedAgentId}
-            threadsError={conversation.threadsError ? "Could not load threads." : null}
-            totalThreads={conversation.threadTotal}
-            hasMoreThreads={conversation.threadsHasMore}
-            loadingMoreThreads={conversation.threadsLoadingMore}
-            loadMoreThreadsError={conversation.threadsLoadMoreError}
-            onPickAgent={startNewChatWith}
-            onStartNewThread={startNewThread}
-            onSelectThread={onNavigateThread}
-            onLoadMoreThreads={() => void conversation.loadMoreThreads()}
-            className={cn(
-              "h-full w-full md:flex md:w-64 md:shrink-0 xl:w-72",
-              showingConversation ? "hidden" : "flex"
-            )}
-          />
+          <>
+            {renderThreadSidebar("hidden h-full w-64 shrink-0 md:flex xl:w-72")}
+            <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
+              <SheetContent
+                side="left"
+                showCloseButton={false}
+                className="w-72 max-w-[calc(100vw-3rem)] gap-0 p-0 md:hidden"
+              >
+                <SheetHeader className="sr-only">
+                  <SheetTitle>Agent navigation</SheetTitle>
+                  <SheetDescription>
+                    Switch agents and threads or start a new thread.
+                  </SheetDescription>
+                </SheetHeader>
+                {renderThreadSidebar("flex h-full w-full border-r-0")}
+              </SheetContent>
+            </Sheet>
+          </>
         ) : null}
 
-        <main
-          className={cn(
-            "min-h-0 min-w-0 flex-1",
-            !compact && !showingConversation && "hidden md:block"
-          )}
-        >
+        <main className="min-h-0 min-w-0 flex-1">
           {conversation.home ? (
             compact ? (
               <AgentsHome
@@ -158,10 +197,14 @@ export function AgentChat({
                 agentsById={conversation.agentsById}
                 threadsError={conversation.threadsError ? "Could not load chats." : null}
                 onPickAgent={startNewChatWith}
-                onSelectThread={onNavigateThread}
+                onSelectThread={selectThread}
               />
             ) : (
-              <WorkspaceHome agents={conversation.agents} onPickAgent={startNewChatWith} />
+              <WorkspaceHome
+                agents={conversation.agents}
+                onPickAgent={startNewChatWith}
+                onOpenNavigation={() => setMobileSidebarOpen(true)}
+              />
             )
           ) : (
             <ConversationPanel
@@ -192,11 +235,12 @@ export function AgentChat({
               canGoHome={compact ? conversation.canGoHome : true}
               onSend={conversation.send}
               onBackHome={onNavigateHome}
+              onOpenWorkspaceNavigation={() => setMobileSidebarOpen(true)}
               onNewChat={() => {
                 if (conversation.currentAgent) startNewChatWith(conversation.currentAgent.id)
               }}
               onPickAgent={startNewChatWith}
-              onSelectThread={onNavigateThread}
+              onSelectThread={selectThread}
               composerDisabled={conversation.isRunning}
               composerPending={conversation.composerPending}
               composerRunning={conversation.isRunning}
@@ -239,12 +283,24 @@ function writeLastSelectedAgent(agentId: string): void {
 function WorkspaceHome({
   agents,
   onPickAgent,
+  onOpenNavigation,
 }: {
   agents: readonly Agent[]
   onPickAgent: (agentId: string) => void
+  onOpenNavigation: () => void
 }) {
   return (
-    <div className="flex h-full items-center justify-center px-6 pb-[10vh]">
+    <div className="relative flex h-full items-center justify-center px-6 pb-[10vh]">
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        onClick={onOpenNavigation}
+        aria-label="Open agent navigation"
+        className="absolute top-2 left-2 md:hidden"
+      >
+        <PanelLeft />
+      </Button>
       <div className="w-full max-w-md">
         <div className="text-center">
           <h2 className="text-xl font-semibold tracking-tight text-foreground">

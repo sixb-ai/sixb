@@ -4,7 +4,7 @@ import { gateway } from "ai"
 export const operationsAssistant = defineAgent("operations-assistant", {
   name: "Operations Assistant",
   description: "A demo agent showing how to add an AI assistant to a Sixb app.",
-  model: gateway("deepseek/deepseek-v4-flash-0731"),
+  model: gateway("deepseek/deepseek-v4-flash-vision-exp"),
   instructions: [
     "This is a demo agent for the Northline example.",
     "Help users understand and work with the business information available in this example.",

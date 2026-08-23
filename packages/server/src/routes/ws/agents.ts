@@ -283,7 +283,13 @@ async function subscribeAgentActivity(
         from: "latest",
       },
       (records) => {
-        void sendVisibleActivityRecords(sixb, ws, records)
+        void sendVisibleActivityRecords(sixb, ws, records).catch((error) => {
+          console.error("[SixbServer] Agent activity visibility check failed:", error)
+          safeSend(ws, {
+            type: "error",
+            message: "Could not verify agent activity visibility.",
+          })
+        })
       }
     )
     state.channel = "activity"
@@ -304,10 +310,15 @@ async function sendVisibleActivityRecords(
   ws: { send: (message: string) => void },
   records: readonly BrokerRecord[]
 ): Promise<void> {
+  const events: AgentRunActivityEvent[] = []
   for (const record of records) {
-    if (!isAgentRunActivityEvent(record.payload)) continue
-    if (!(await canAccessAgentThreadActivity(sixb, record.payload))) continue
-    safeSend(ws, { type: "activity", event: record.payload })
+    if (isAgentRunActivityEvent(record.payload)) events.push(record.payload)
+  }
+  const visible = await Promise.all(
+    events.map((event) => canAccessAgentThreadActivity(sixb, event))
+  )
+  for (const [index, event] of events.entries()) {
+    if (visible[index]) safeSend(ws, { type: "activity", event })
   }
 }
 
