@@ -124,12 +124,9 @@ export function ObjectTypeDetail() {
         <div className="flex items-start gap-4">
           <LetterAvatar label={displayTitle} size="md" />
           <div className="min-w-0 flex-1 space-y-1">
-            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-                {displayTitle}
-              </h1>
-              <code className="font-mono text-xs text-muted-foreground">{objectType.id}</code>
-            </div>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+              {displayTitle}
+            </h1>
             {objectType.description ? (
               <p className="text-sm leading-6 text-muted-foreground">{objectType.description}</p>
             ) : null}
@@ -181,26 +178,34 @@ export function ObjectTypeDetail() {
 
       {/* Tabs */}
       <Tabs value={resolvedTab} onValueChange={setActiveTab}>
-        <TabsList variant="line">
-          <TabsTrigger value="properties">
-            Properties
-            <Count value={objectType.properties.length} />
-          </TabsTrigger>
-          <TabsTrigger value="links">
-            Links
-            <Count value={objectType.links.length} />
-          </TabsTrigger>
-          <TabsTrigger value="actions">
-            Actions
-            <Count value={objectType.actions.length} />
-          </TabsTrigger>
-          {projectionCount > 0 ? (
-            <TabsTrigger value="projections">
-              Projections
-              <Count value={projectionCount} />
-            </TabsTrigger>
-          ) : null}
-        </TabsList>
+        <div className="relative">
+          <div className="atlas-tabs-scroll overflow-x-auto overscroll-x-contain pr-8 sm:pr-0">
+            <TabsList variant="line" className="min-w-max">
+              <TabsTrigger value="properties">
+                Properties
+                <Count value={objectType.properties.length} />
+              </TabsTrigger>
+              <TabsTrigger value="links">
+                Links
+                <Count value={objectType.links.length} />
+              </TabsTrigger>
+              <TabsTrigger value="actions">
+                Actions
+                <Count value={objectType.actions.length} />
+              </TabsTrigger>
+              {projectionCount > 0 ? (
+                <TabsTrigger value="projections">
+                  Projections
+                  <Count value={projectionCount} />
+                </TabsTrigger>
+              ) : null}
+            </TabsList>
+          </div>
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-background to-transparent sm:hidden"
+          />
+        </div>
 
         {/* Properties */}
         <TabsContent value="properties" className="space-y-6 pt-4">
