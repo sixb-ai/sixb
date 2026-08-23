@@ -64,6 +64,8 @@ interface EdgeHandles {
   target: GraphHandleLayout
 }
 
+type GraphRoutingMode = "focus" | "overview"
+
 const PORT_MIN = 18
 const PORT_MAX = 82
 const ROUTE_GAP = 14
@@ -74,7 +76,7 @@ export function layoutOntologyGraph(
   nodes: GraphNodeInput[],
   edges: GraphEdgeInput[],
   focusId: string,
-  { nodeWidth, nodeHeight, columnGap = 260, rowGap = 70 }: GraphLayoutOptions
+  { nodeWidth, nodeHeight, columnGap = 400, rowGap = 120 }: GraphLayoutOptions
 ): { nodes: GraphNodeLayout[]; edges: GraphEdgeLayout[]; bounds: Rect } {
   const columns = partitionNodes(nodes, edges, focusId)
   orderColumns(columns, edges)
@@ -99,7 +101,38 @@ export function layoutOntologyGraph(
     focusId,
     { nodeWidth, nodeHeight },
     positions,
-    columnById
+    columnById,
+    "focus"
+  )
+}
+
+export function layoutOntologyOverviewGraph(
+  nodes: GraphNodeInput[],
+  edges: GraphEdgeInput[],
+  { nodeWidth, nodeHeight, columnGap = 240, rowGap = 140 }: GraphLayoutOptions
+): { nodes: GraphNodeLayout[]; edges: GraphEdgeLayout[]; bounds: Rect } {
+  const columns = partitionOverviewNodes(nodes, edges)
+  orderOverviewColumns(columns, edges)
+
+  const positions = new Map<string, GraphPoint>()
+  const columnById = new Map<string, number>()
+  const columnPitch = nodeWidth + columnGap
+  const rowPitch = nodeHeight + rowGap
+  columns.forEach((column, columnIndex) => {
+    column.forEach((nodeId, rowIndex) => {
+      positions.set(nodeId, { x: columnIndex * columnPitch, y: rowIndex * rowPitch })
+      columnById.set(nodeId, columnIndex)
+    })
+  })
+
+  return routePositionedGraph(
+    nodes,
+    edges,
+    null,
+    { nodeWidth, nodeHeight },
+    positions,
+    columnById,
+    "overview"
   )
 }
 
@@ -128,26 +161,51 @@ export function routeOntologyGraph(
     focusId,
     { nodeWidth, nodeHeight },
     positions,
-    columnById
+    columnById,
+    "focus"
+  )
+}
+
+export function routeOntologyOverviewGraph(
+  nodes: GraphPositionedNodeInput[],
+  edges: GraphEdgeInput[],
+  { nodeWidth, nodeHeight }: GraphLayoutOptions
+): { nodes: GraphNodeLayout[]; edges: GraphEdgeLayout[]; bounds: Rect } {
+  const positions = new Map(nodes.map((node) => [node.id, node.position]))
+  const orderedColumns = [...new Set(nodes.map((node) => node.position.x))].sort(
+    (left, right) => left - right
+  )
+  const columnByX = new Map(orderedColumns.map((x, index) => [x, index]))
+  const columnById = new Map(nodes.map((node) => [node.id, columnByX.get(node.position.x) ?? 0]))
+
+  return routePositionedGraph(
+    nodes,
+    edges,
+    null,
+    { nodeWidth, nodeHeight },
+    positions,
+    columnById,
+    "overview"
   )
 }
 
 function routePositionedGraph(
   nodes: GraphNodeInput[],
   edges: GraphEdgeInput[],
-  focusId: string,
+  focusId: string | null,
   { nodeWidth, nodeHeight }: Pick<GraphLayoutOptions, "nodeWidth" | "nodeHeight">,
   positions: ReadonlyMap<string, GraphPoint>,
-  columnById: ReadonlyMap<string, number>
+  columnById: ReadonlyMap<string, number>,
+  mode: GraphRoutingMode
 ): { nodes: GraphNodeLayout[]; edges: GraphEdgeLayout[]; bounds: Rect } {
-  const handles = assignHandles(edges, positions, columnById, focusId)
+  const handles = assignHandles(edges, positions, columnById, focusId, mode)
   const nodeRects = new Map(
     nodes.map((node) => [
       node.id,
       { ...positions.get(node.id)!, width: nodeWidth, height: nodeHeight },
     ])
   )
-  const routed = routeEdges(edges, handles, nodeRects, columnById, focusId)
+  const routed = routeEdges(edges, handles, nodeRects, columnById, focusId, mode)
   const labelWidths = new Map(edges.map((edge) => [edge.id, edge.labelWidth]))
   const bounds = layoutBounds([...nodeRects.values()], routed, labelWidths)
 
@@ -240,6 +298,87 @@ function partitionNodes(
   )
 }
 
+function partitionOverviewNodes(nodes: GraphNodeInput[], edges: GraphEdgeInput[]): string[][] {
+  if (nodes.length === 0) return []
+  const nodeIds = new Set(nodes.map((node) => node.id))
+  const nodeById = new Map(nodes.map((node) => [node.id, node]))
+  const orderedNodes = [...nodes].sort((left, right) => left.label.localeCompare(right.label))
+  const graphEdges = edges.filter(
+    (edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target) && edge.source !== edge.target
+  )
+  if (graphEdges.length === 0) {
+    const columnCount = Math.max(1, Math.ceil(Math.sqrt(nodes.length)))
+    const columns = Array.from({ length: columnCount }, () => [] as string[])
+    orderedNodes.forEach((node, index) => {
+      columns[index % columnCount]!.push(node.id)
+    })
+    return columns
+  }
+
+  const outgoing = new Map(nodes.map((node) => [node.id, [] as GraphEdgeInput[]]))
+  const indegree = new Map(nodes.map((node) => [node.id, 0]))
+  for (const edge of graphEdges) {
+    outgoing.get(edge.source)!.push(edge)
+    indegree.set(edge.target, (indegree.get(edge.target) ?? 0) + 1)
+  }
+
+  const ranks = new Map<string, number>()
+  const queue = orderedNodes.filter((node) => indegree.get(node.id) === 0)
+  for (const node of queue) ranks.set(node.id, 0)
+  while (queue.length > 0) {
+    const node = queue.shift()!
+    const rank = ranks.get(node.id) ?? 0
+    for (const edge of outgoing.get(node.id) ?? []) {
+      ranks.set(edge.target, Math.max(ranks.get(edge.target) ?? 0, rank + 1))
+      indegree.set(edge.target, (indegree.get(edge.target) ?? 1) - 1)
+      if (indegree.get(edge.target) === 0) {
+        queue.push(nodeById.get(edge.target)!)
+        queue.sort((left, right) => left.label.localeCompare(right.label))
+      }
+    }
+  }
+
+  for (const node of orderedNodes) {
+    if (ranks.has(node.id)) continue
+    const incomingRanks = graphEdges
+      .filter((edge) => edge.target === node.id)
+      .map((edge) => ranks.get(edge.source))
+      .filter((rank): rank is number => rank !== undefined)
+    ranks.set(node.id, incomingRanks.length > 0 ? Math.max(...incomingRanks) + 1 : 0)
+  }
+
+  const maxRank = Math.max(...ranks.values(), 0)
+  const desiredColumns = Math.min(5, Math.max(2, Math.ceil(Math.sqrt(nodes.length))))
+  const columnCount = Math.min(desiredColumns, maxRank + 1)
+  const columns = Array.from({ length: Math.max(columnCount, 1) }, () => [] as string[])
+  const rankedNodes = [...orderedNodes].sort(
+    (left, right) =>
+      (ranks.get(left.id) ?? 0) - (ranks.get(right.id) ?? 0) ||
+      left.label.localeCompare(right.label)
+  )
+  rankedNodes.forEach((node) => {
+    const rank = ranks.get(node.id) ?? 0
+    const column = maxRank === 0 ? 0 : Math.round((rank * (columns.length - 1)) / maxRank)
+    columns[column]!.push(node.id)
+  })
+  return columns.filter((column) => column.length > 0)
+}
+
+function orderOverviewColumns(columns: string[][], edges: GraphEdgeInput[]): void {
+  for (let pass = 0; pass < 10; pass += 1) {
+    let improved = false
+    for (const column of columns) {
+      for (let index = 0; index < column.length - 1; index += 1) {
+        const before = orderScore(columns, edges)
+        ;[column[index], column[index + 1]] = [column[index + 1]!, column[index]!]
+        if (orderScore(columns, edges) < before) improved = true
+        else [column[index], column[index + 1]] = [column[index + 1]!, column[index]!]
+      }
+    }
+    if (!improved) break
+  }
+}
+
 function orderColumns(columns: string[][], edges: GraphEdgeInput[]): void {
   for (let pass = 0; pass < 8; pass += 1) {
     let improved = false
@@ -298,7 +437,8 @@ function assignHandles(
   edges: GraphEdgeInput[],
   positions: ReadonlyMap<string, GraphPoint>,
   columns: ReadonlyMap<string, number>,
-  focusId: string
+  focusId: string | null,
+  mode: GraphRoutingMode
 ): Map<string, EdgeHandles> {
   const sides = new Map<string, { source: GraphHandleSide; target: GraphHandleSide }>()
   for (const edge of edges) {
@@ -306,7 +446,15 @@ function assignHandles(
     const targetColumn = columns.get(edge.target) ?? 0
     if (sourceColumn < targetColumn) sides.set(edge.id, { source: "right", target: "left" })
     else if (sourceColumn > targetColumn) sides.set(edge.id, { source: "left", target: "right" })
-    else {
+    else if (mode === "overview") {
+      const source = positions.get(edge.source)
+      const target = positions.get(edge.target)
+      const sourceAbove = (source?.y ?? 0) <= (target?.y ?? 0)
+      sides.set(edge.id, {
+        source: sourceAbove ? "bottom" : "top",
+        target: sourceAbove ? "top" : "bottom",
+      })
+    } else {
       const outside = sourceColumn === 2 ? "right" : "left"
       sides.set(edge.id, { source: outside, target: outside })
     }
@@ -330,7 +478,7 @@ function assignHandles(
       return (leftOther?.y ?? 0) - (rightOther?.y ?? 0) || left.edge.id.localeCompare(right.edge.id)
     })
     const nodeId = group[0]?.edge[group[0].role]
-    const spreadFocus = nodeId === focusId && group.length >= 3
+    const spreadFocus = focusId !== null && nodeId === focusId && group.length >= 3
     const min = spreadFocus ? 10 : PORT_MIN
     const max = spreadFocus ? 90 : PORT_MAX
     group.forEach(({ edge, role }, index) => {
@@ -349,18 +497,31 @@ function routeEdges(
   handles: ReadonlyMap<string, EdgeHandles>,
   nodes: ReadonlyMap<string, Rect>,
   columns: ReadonlyMap<string, number>,
-  focusId: string
+  focusId: string | null,
+  mode: GraphRoutingMode
 ): GraphEdgeLayout[] {
   const allRects = [...nodes.values()]
   const bounds = graphBounds(allRects)
-  const focusRect = nodes.get(focusId)
-  const focusLanes = assignFocusLanes(edges, nodes, columns, focusId)
+  const focusRect = focusId ? nodes.get(focusId) : undefined
+  const focusLanes = focusId ? assignFocusLanes(edges, nodes, columns, focusId) : new Map()
+  const overviewLanes = mode === "overview" ? horizontalOverviewLanes(allRects, bounds) : []
   const usedSegments: Segment[] = []
   const usedLabels: Rect[] = []
   const groupIndex = new Map<string, number>()
 
   return [...edges]
     .sort((left, right) => {
+      if (mode === "overview") {
+        const leftSpan = Math.abs((columns.get(left.source) ?? 0) - (columns.get(left.target) ?? 0))
+        const rightSpan = Math.abs(
+          (columns.get(right.source) ?? 0) - (columns.get(right.target) ?? 0)
+        )
+        return (
+          rightSpan - leftSpan ||
+          right.labelWidth - left.labelWidth ||
+          left.id.localeCompare(right.id)
+        )
+      }
       const leftFocus = left.source === focusId || left.target === focusId ? 0 : 1
       const rightFocus = right.source === focusId || right.target === focusId ? 0 : 1
       return (
@@ -370,7 +531,7 @@ function routeEdges(
       )
     })
     .map((edge) => {
-      const focused = edge.source === focusId || edge.target === focusId
+      const focused = focusId !== null && (edge.source === focusId || edge.target === focusId)
       const edgeHandles = handles.get(edge.id)!
       const sourceRect = nodes.get(edge.source)!
       const targetRect = nodes.get(edge.target)!
@@ -393,16 +554,27 @@ function routeEdges(
         focusRect,
         edge.labelWidth,
         focused,
-        focusLanes.get(edge.id)
+        focusLanes.get(edge.id),
+        mode,
+        overviewLanes
       )
       const obstacles = allRects.filter((rect) => rect !== sourceRect && rect !== targetRect)
-      const points = candidates
+      const selected = candidates
         .map(simplifyRoute)
-        .map((route) => ({ route, score: routeScore(route, obstacles, usedSegments) }))
-        .sort((left, right) => left.score - right.score)[0]?.route ?? [start, end]
+        .map((route) => {
+          const segments = routeSegments(route)
+          const labelPosition = findLabelPosition(segments, edge.labelWidth, allRects, usedLabels)
+          return {
+            route,
+            labelPosition,
+            score: routeScore(route, obstacles, usedSegments) + (labelPosition ? 0 : 100_000),
+          }
+        })
+        .sort((left, right) => left.score - right.score)[0]
+      const points = selected?.route ?? [start, end]
       const segments = routeSegments(points)
       usedSegments.push(...segments)
-      const labelPosition = placeLabel(segments, edge.labelWidth, allRects, usedLabels)
+      const labelPosition = selected?.labelPosition ?? fallbackLabelPosition(segments)
       usedLabels.push({
         x: labelPosition.x - edge.labelWidth / 2,
         y: labelPosition.y - 11,
@@ -433,11 +605,41 @@ function routeCandidates(
   focus: Rect | undefined,
   labelWidth: number,
   focused: boolean,
-  preferredLane?: number
+  preferredLane: number | undefined,
+  mode: GraphRoutingMode,
+  overviewLanes: number[]
 ): GraphPoint[][] {
   const gap = focused ? FOCUS_ROUTE_GAP : ROUTE_GAP
-  const track = (points: GraphPoint[]) => (focused ? points : trackEndpoints(points, index))
+  const track = (points: GraphPoint[]) =>
+    focused || mode === "overview" ? points : trackEndpoints(points, index)
   if (sourceColumn === targetColumn) {
+    if (mode === "overview") {
+      const direction = Math.sign(end.y - start.y) || 1
+      const upper = direction > 0 ? source : target
+      const lower = direction > 0 ? target : source
+      const middle = (upper.y + upper.height + lower.y) / 2
+      const direct = Array.from({ length: 7 }, (_, lane) => {
+        const y = middle + (lane - 3) * ROUTE_GAP
+        return [start, { x: start.x, y }, { x: end.x, y }, end]
+      })
+      const startStubY = start.y + direction * 22
+      const endStubY = end.y - direction * 22
+      const sideRoutes = [-1, 1].flatMap((side) =>
+        Array.from({ length: 5 }, (_, lane) => {
+          const x =
+            source.x + (side < 0 ? -(32 + lane * ROUTE_GAP) : source.width + 32 + lane * ROUTE_GAP)
+          return [
+            start,
+            { x: start.x, y: startStubY },
+            { x, y: startStubY },
+            { x, y: endStubY },
+            { x: end.x, y: endStubY },
+            end,
+          ]
+        })
+      )
+      return [...direct, ...sideRoutes]
+    }
     const direction = sourceColumn === 2 ? 1 : -1
     const labelClearance = Math.max(72, labelWidth / 2 + 22)
     return Array.from({ length: 5 }, (_, lane) => {
@@ -459,6 +661,27 @@ function routeCandidates(
       : [preferredLane, ...fallbackLanes.filter((lane) => Math.abs(lane - preferredLane) > 1)]
   const adjacent = Math.abs(sourceColumn - targetColumn) === 1
   const direct = lanes.map((x) => track([start, { x, y: start.y }, { x, y: end.y }, end]))
+  if (mode === "overview") {
+    const direction = sourceColumn < targetColumn ? 1 : -1
+    const sourceTrack = Math.round(((start.y - source.y) / source.height) * 10)
+    const targetTrack = Math.round(((end.y - target.y) / target.height) * 10)
+    const startLane = start.x + direction * (22 + sourceTrack * 5)
+    const endLane = end.x - direction * (22 + targetTrack * 5)
+    const channels = overviewLanes.flatMap((center) =>
+      [-28, -14, 0, 14, 28].map((offset) => {
+        const y = center + offset
+        return [
+          start,
+          { x: startLane, y: start.y },
+          { x: startLane, y },
+          { x: endLane, y },
+          { x: endLane, y: end.y },
+          end,
+        ]
+      })
+    )
+    return [...direct, ...channels]
+  }
   if (adjacent) {
     if (focused) return direct
     const direction = sourceColumn < targetColumn ? 1 : -1
@@ -508,6 +731,20 @@ function routeCandidates(
   )
 }
 
+function horizontalOverviewLanes(nodes: Rect[], bounds: Rect): number[] {
+  const rows = [...new Set(nodes.map((node) => node.y))].sort((left, right) => left - right)
+  const lanes = [bounds.y - 48, bounds.y + bounds.height + 48]
+  for (let index = 0; index < rows.length - 1; index += 1) {
+    const upper = rows[index]!
+    const lower = rows[index + 1]!
+    const upperBottom = Math.max(
+      ...nodes.filter((node) => node.y === upper).map((node) => node.y + node.height)
+    )
+    if (lower - upperBottom >= 44) lanes.push((upperBottom + lower) / 2)
+  }
+  return lanes
+}
+
 function assignFocusLanes(
   edges: GraphEdgeInput[],
   nodes: ReadonlyMap<string, Rect>,
@@ -548,10 +785,25 @@ function assignFocusLanes(
     const right = side === 0 ? focus.x : Math.min(...otherRects.map((node) => node.x))
     const available = right - left - NODE_CLEARANCE * 2
     if (available <= 0) continue
-    const step = group.length === 1 ? 0 : Math.min(FOCUS_ROUTE_GAP, available / (group.length - 1))
+    const labelStep = Math.max(...group.map(({ labelWidth }) => labelWidth / 2 + 8))
+    const step =
+      group.length === 1
+        ? 0
+        : Math.min(Math.max(FOCUS_ROUTE_GAP, labelStep), available / (group.length - 1))
     const center = (left + right) / 2
-    group.forEach((edge, index) => {
-      lanes.set(edge.id, center + ((group.length - 1) / 2 - index) * step)
+    const slots = group.map((_, index) => center + (index - (group.length - 1) / 2) * step)
+    const focusCenter = focus.y + focus.height / 2
+    const upper = group.filter((edge) => {
+      const otherId = edge.source === focusId ? edge.target : edge.source
+      const other = nodes.get(otherId)!
+      return other.y + other.height / 2 <= focusCenter
+    })
+    const lower = group.filter((edge) => !upper.includes(edge))
+    upper.forEach((edge, index) => {
+      lanes.set(edge.id, slots[side === 0 ? group.length - 1 - index : index]!)
+    })
+    lower.forEach((edge, index) => {
+      lanes.set(edge.id, slots[side === 0 ? index : group.length - 1 - index]!)
     })
   }
   return lanes
@@ -591,22 +843,25 @@ function routeScore(candidate: GraphPoint[], obstacles: Rect[], used: Segment[])
     )
   )
     return Number.POSITIVE_INFINITY
-  if (segments.some((segment) => used.some((existing) => segmentsOverlap(segment, existing))))
-    return Number.POSITIVE_INFINITY
+  const overlaps = segments.reduce(
+    (total, segment) =>
+      total + used.filter((existing) => segmentsOverlap(segment, existing)).length,
+    0
+  )
   const length = segments.reduce((total, segment) => total + segmentLength(segment), 0)
   const crossings = segments.reduce(
     (total, segment) => total + used.filter((existing) => segmentsCross(segment, existing)).length,
     0
   )
-  return length + Math.max(0, segments.length - 1) * 48 + crossings * 420
+  return length + Math.max(0, segments.length - 1) * 48 + crossings * 420 + overlaps * 10_000
 }
 
-function placeLabel(
+function findLabelPosition(
   segments: Segment[],
   width: number,
   obstacles: Rect[],
   usedLabels: Rect[]
-): GraphPoint {
+): GraphPoint | undefined {
   for (const segment of [...segments].sort(
     (left, right) => segmentLength(right) - segmentLength(left)
   )) {
@@ -634,6 +889,10 @@ function placeLabel(
       return point
     }
   }
+  return undefined
+}
+
+function fallbackLabelPosition(segments: Segment[]): GraphPoint {
   const longest = [...segments].sort((left, right) => segmentLength(right) - segmentLength(left))[0]
   return longest
     ? { x: (longest.a.x + longest.b.x) / 2, y: (longest.a.y + longest.b.y) / 2 }

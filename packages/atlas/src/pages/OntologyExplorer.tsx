@@ -29,14 +29,16 @@ import { CornerDownRight, Link2, Rows3, Search, X, Zap } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { LetterAvatar } from "../components/common"
 import { humanizeIdentifier } from "../lib/labels"
-import { getCollectionViewStyle, setCollectionViewStyle } from "../lib/userPreferences"
-import { ObjectTypeDetail } from "./ObjectTypeDetail"
 import {
   type GraphHandleLayout,
   type GraphPoint,
   layoutOntologyGraph,
+  layoutOntologyOverviewGraph,
   routeOntologyGraph,
-} from "./ontologyGraphLayout"
+  routeOntologyOverviewGraph,
+} from "../lib/ontologyGraphLayout"
+import { getCollectionViewStyle, setCollectionViewStyle } from "../lib/userPreferences"
+import { ObjectTypeDetail } from "./ObjectTypeDetail"
 
 type ObjectTypeSummary = ListObjectTypesResponse[number]
 type PropertySummary = ObjectTypeSummary["properties"][number]
@@ -335,24 +337,32 @@ function OntologyGraph({
     () => buildOntologyTopology(objectTypes, objectTypeCounts),
     [objectTypeCounts, objectTypes]
   )
-  const layout = useMemo(
-    () => layoutOntology(topology, selectedTypeId ?? mostConnectedNodeId(topology) ?? ""),
-    [selectedTypeId, topology]
-  )
+  const layout = useMemo(() => layoutOntology(topology, selectedTypeId), [selectedTypeId, topology])
+  const [hoveredTypeId, setHoveredTypeId] = useState<string | null>(null)
   const [nodes, setNodes, onNodesChange] = useNodesState<OntologyNode>(layout.nodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState<OntologyEdge>(layout.edges)
-  const { fitBounds, getNodes, getZoom, setCenter } = useReactFlow<OntologyNode, OntologyEdge>()
+  const { fitBounds, getNodes } = useReactFlow<OntologyNode, OntologyEdge>()
   const initialSavedViewport = useRef(savedViewport)
   const nodesRef = useRef(nodes)
   const edgesRef = useRef(edges)
   const layoutFrame = useRef<number | null>(null)
   const previousLayoutSelection = useRef<string | null | undefined>(undefined)
   const previousSelection = useRef<string | null | undefined>(undefined)
+  const draggingRef = useRef(false)
+  const presentationRef = useRef({ objectTypes, search, selectedTypeId, hoveredTypeId })
   nodesRef.current = nodes
   edgesRef.current = edges
+  presentationRef.current = { objectTypes, search, selectedTypeId, hoveredTypeId }
 
   useEffect(() => {
-    const target = presentOntologyLayout(layout, objectTypes, search, selectedTypeId)
+    const presentation = presentationRef.current
+    const target = presentOntologyLayout(
+      layout,
+      presentation.objectTypes,
+      presentation.search,
+      presentation.selectedTypeId,
+      presentation.hoveredTypeId
+    )
     const selectionChanged =
       previousLayoutSelection.current !== undefined &&
       previousLayoutSelection.current !== selectedTypeId
@@ -361,6 +371,8 @@ function OntologyGraph({
 
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches
     if (!selectionChanged || reduceMotion) {
+      nodesRef.current = target.nodes
+      edgesRef.current = target.edges
       setNodes(target.nodes)
       setEdges(target.edges)
       return
@@ -396,7 +408,22 @@ function OntologyGraph({
       if (layoutFrame.current !== null) window.cancelAnimationFrame(layoutFrame.current)
       layoutFrame.current = null
     }
-  }, [layout, objectTypes, search, selectedTypeId, setEdges, setNodes])
+  }, [layout, selectedTypeId, setEdges, setNodes])
+
+  useEffect(() => {
+    const currentLayout = { ...layout, nodes: nodesRef.current, edges: edgesRef.current }
+    const presented = presentOntologyLayout(
+      currentLayout,
+      objectTypes,
+      search,
+      selectedTypeId,
+      hoveredTypeId
+    )
+    nodesRef.current = presented.nodes
+    edgesRef.current = presented.edges
+    setNodes(presented.nodes)
+    setEdges(presented.edges)
+  }, [hoveredTypeId, layout, objectTypes, search, selectedTypeId, setEdges, setNodes])
 
   useEffect(() => {
     const initialView = previousSelection.current === undefined
@@ -409,23 +436,19 @@ function OntologyGraph({
         ? layout.nodes.find((node) => node.id === selectedTypeId)
         : undefined
       if (selectedNode) {
-        void setCenter(
-          selectedNode.position.x + GRAPH_NODE_WIDTH / 2,
-          selectedNode.position.y + GRAPH_NODE_HEIGHT / 2,
-          {
-            zoom: Math.max(getZoom(), 0.95),
-            duration: reduceMotion ? 0 : GRAPH_LAYOUT_DURATION,
-          }
-        )
+        void fitBounds(focusNeighborhoodBounds(layout, selectedNode.id), {
+          padding: 0.14,
+          duration: reduceMotion ? 0 : GRAPH_LAYOUT_DURATION,
+        })
       } else {
         void fitBounds(layout.bounds, {
-          padding: 0.06,
+          padding: 0.08,
           duration: reduceMotion ? 0 : GRAPH_LAYOUT_DURATION,
         })
       }
     }, 80)
     return () => window.clearTimeout(timer)
-  }, [fitBounds, getZoom, layout, selectedTypeId, setCenter])
+  }, [fitBounds, layout, selectedTypeId])
 
   return (
     <div
@@ -438,6 +461,8 @@ function OntologyGraph({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeDragStart={(_event, node) => {
+          draggingRef.current = true
+          setHoveredTypeId(null)
           setEdges((current) =>
             current.map((edge) =>
               edge.source === node.id || edge.target === node.id
@@ -450,21 +475,32 @@ function OntologyGraph({
           )
         }}
         onNodeDragStop={(_event, node) => {
+          draggingRef.current = false
           const currentNodes = getNodes().map((current) =>
             current.id === node.id ? { ...current, position: node.position } : current
           )
-          const rerouted = routeOntologyAtPositions(
-            topology,
-            currentNodes,
-            selectedTypeId ?? mostConnectedNodeId(topology) ?? ""
+          const rerouted = routeOntologyAtPositions(topology, currentNodes, selectedTypeId)
+          const presented = presentOntologyLayout(
+            rerouted,
+            objectTypes,
+            search,
+            selectedTypeId,
+            hoveredTypeId
           )
-          const presented = presentOntologyLayout(rerouted, objectTypes, search, selectedTypeId)
+          nodesRef.current = presented.nodes
+          edgesRef.current = presented.edges
           setNodes(presented.nodes)
           setEdges(presented.edges)
         }}
         onMoveEnd={(_event, viewport) => onViewportChange(viewport)}
         nodeTypes={ontologyNodeTypes}
         edgeTypes={ontologyEdgeTypes}
+        onNodeMouseEnter={(_event, node) => {
+          if (!selectedTypeId && !draggingRef.current) setHoveredTypeId(node.id)
+        }}
+        onNodeMouseLeave={() => {
+          if (!draggingRef.current) setHoveredTypeId(null)
+        }}
         onNodeClick={(_event, node) => onSelectType(node.id === selectedTypeId ? null : node.id)}
         onPaneClick={() => onSelectType(null)}
         defaultViewport={savedViewport ?? undefined}
@@ -488,53 +524,80 @@ function layoutOntology(
     nodes: OntologyNode[]
     edges: OntologyEdge[]
   },
-  focusId: string
+  focusId: string | null
 ): {
   nodes: OntologyNode[]
   edges: OntologyEdge[]
   bounds: { x: number; y: number; width: number; height: number }
 } {
-  const routed = layoutOntologyGraph(
-    topology.nodes.map((node) => ({ id: node.id, label: node.data.label })),
-    topology.edges.map((edge) => {
-      const label = edge.data ? relationshipLabel(edge.data) : ""
-      return {
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        labelWidth: Math.max(48, label.length * 6.2 + 16),
-      }
-    }),
-    focusId,
-    { nodeWidth: GRAPH_NODE_WIDTH, nodeHeight: GRAPH_NODE_HEIGHT }
-  )
+  const graphNodes = topology.nodes.map((node) => ({ id: node.id, label: node.data.label }))
+  const graphEdges = topology.edges.map((edge) => {
+    const label = edge.data ? relationshipLabel(edge.data) : ""
+    return {
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      labelWidth: Math.max(48, label.length * 6.2 + 16),
+    }
+  })
+  const routed = focusId
+    ? layoutOntologyGraph(graphNodes, graphEdges, focusId, {
+        nodeWidth: GRAPH_NODE_WIDTH,
+        nodeHeight: GRAPH_NODE_HEIGHT,
+      })
+    : layoutOntologyOverviewGraph(graphNodes, graphEdges, {
+        nodeWidth: GRAPH_NODE_WIDTH,
+        nodeHeight: GRAPH_NODE_HEIGHT,
+      })
   return applyOntologyRouting(topology, routed)
+}
+
+function focusNeighborhoodBounds(
+  layout: ReturnType<typeof layoutOntology>,
+  focusId: string
+): { x: number; y: number; width: number; height: number } {
+  const visibleIds = new Set([focusId])
+  for (const edge of layout.edges) {
+    if (edge.source === focusId) visibleIds.add(edge.target)
+    if (edge.target === focusId) visibleIds.add(edge.source)
+  }
+  const visibleNodes = layout.nodes.filter((node) => visibleIds.has(node.id))
+  const x = Math.min(...visibleNodes.map((node) => node.position.x))
+  const y = Math.min(...visibleNodes.map((node) => node.position.y))
+  const right = Math.max(...visibleNodes.map((node) => node.position.x + GRAPH_NODE_WIDTH))
+  const bottom = Math.max(...visibleNodes.map((node) => node.position.y + GRAPH_NODE_HEIGHT))
+  return { x, y, width: right - x, height: bottom - y }
 }
 
 function routeOntologyAtPositions(
   topology: { nodes: OntologyNode[]; edges: OntologyEdge[] },
   nodes: OntologyNode[],
-  focusId: string
+  focusId: string | null
 ): ReturnType<typeof layoutOntology> {
   const positions = new Map(nodes.map((node) => [node.id, node.position]))
-  const routed = routeOntologyGraph(
-    topology.nodes.map((node) => ({
-      id: node.id,
-      label: node.data.label,
-      position: positions.get(node.id) ?? node.position,
-    })),
-    topology.edges.map((edge) => {
-      const label = edge.data ? relationshipLabel(edge.data) : ""
-      return {
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        labelWidth: Math.max(48, label.length * 6.2 + 16),
-      }
-    }),
-    focusId,
-    { nodeWidth: GRAPH_NODE_WIDTH, nodeHeight: GRAPH_NODE_HEIGHT }
-  )
+  const graphNodes = topology.nodes.map((node) => ({
+    id: node.id,
+    label: node.data.label,
+    position: positions.get(node.id) ?? node.position,
+  }))
+  const graphEdges = topology.edges.map((edge) => {
+    const label = edge.data ? relationshipLabel(edge.data) : ""
+    return {
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      labelWidth: Math.max(48, label.length * 6.2 + 16),
+    }
+  })
+  const routed = focusId
+    ? routeOntologyGraph(graphNodes, graphEdges, focusId, {
+        nodeWidth: GRAPH_NODE_WIDTH,
+        nodeHeight: GRAPH_NODE_HEIGHT,
+      })
+    : routeOntologyOverviewGraph(graphNodes, graphEdges, {
+        nodeWidth: GRAPH_NODE_WIDTH,
+        nodeHeight: GRAPH_NODE_HEIGHT,
+      })
   return applyOntologyRouting(topology, routed)
 }
 
@@ -594,25 +657,29 @@ function presentOntologyLayout(
   layout: ReturnType<typeof layoutOntology>,
   objectTypes: ObjectTypeSummary[],
   search: string,
-  selectedTypeId: string | null
+  selectedTypeId: string | null,
+  hoveredTypeId: string | null = null
 ): { nodes: OntologyNode[]; edges: OntologyEdge[] } {
   const query = search.trim().toLowerCase()
   const searchMatches = new Set(
     objectTypes.filter((type) => !query || matchesType(type, query)).map((type) => type.id)
   )
   const connected = new Set<string>()
-  if (selectedTypeId) {
+  const activeTypeId = selectedTypeId ?? hoveredTypeId
+  if (activeTypeId) {
     for (const edge of layout.edges) {
-      if (edge.source === selectedTypeId) connected.add(edge.target)
-      if (edge.target === selectedTypeId) connected.add(edge.source)
+      if (edge.source === activeTypeId) connected.add(edge.target)
+      if (edge.target === activeTypeId) connected.add(edge.source)
     }
   }
   return {
     nodes: layout.nodes.map((node) => {
-      const relationshipState: OntologyNodeData["relationshipState"] = !selectedTypeId
+      const relationshipState: OntologyNodeData["relationshipState"] = !activeTypeId
         ? "overview"
-        : node.id === selectedTypeId
-          ? "selected"
+        : node.id === activeTypeId
+          ? selectedTypeId
+            ? "selected"
+            : "connected"
           : connected.has(node.id)
             ? "connected"
             : "unrelated"
@@ -627,29 +694,13 @@ function presentOntologyLayout(
       }
     }),
     edges: layout.edges
-      .map((edge) => presentOntologyEdge(edge, selectedTypeId, query ? searchMatches : null))
+      .map((edge) => presentOntologyEdge(edge, activeTypeId, query ? searchMatches : null))
       .sort(
         (left, right) =>
           Number(left.data?.emphasized) - Number(right.data?.emphasized) ||
           left.id.localeCompare(right.id)
       ),
   }
-}
-
-function mostConnectedNodeId(topology: {
-  nodes: OntologyNode[]
-  edges: OntologyEdge[]
-}): string | undefined {
-  const degree = new Map(topology.nodes.map((node) => [node.id, 0]))
-  for (const edge of topology.edges) {
-    degree.set(edge.source, (degree.get(edge.source) ?? 0) + 1)
-    degree.set(edge.target, (degree.get(edge.target) ?? 0) + 1)
-  }
-  return [...topology.nodes].sort(
-    (left, right) =>
-      (degree.get(right.id) ?? 0) - (degree.get(left.id) ?? 0) ||
-      left.data.label.localeCompare(right.data.label)
-  )[0]?.id
 }
 
 function buildOntologyTopology(

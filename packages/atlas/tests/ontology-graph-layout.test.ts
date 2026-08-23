@@ -3,8 +3,10 @@ import {
   type GraphEdgeInput,
   type GraphPoint,
   layoutOntologyGraph,
+  layoutOntologyOverviewGraph,
   routeOntologyGraph,
-} from "../src/pages/ontologyGraphLayout"
+  routeOntologyOverviewGraph,
+} from "../src/lib/ontologyGraphLayout"
 
 const NODE_WIDTH = 216
 const NODE_HEIGHT = 82
@@ -54,6 +56,57 @@ const edges: GraphEdgeInput[] = relationships.map(([source, target, label], inde
 }))
 
 describe("ontology graph layout", () => {
+  test("lays out the overview in a compact forward-reading graph", () => {
+    const layout = layoutOntologyOverviewGraph(nodes, edges, {
+      nodeWidth: NODE_WIDTH,
+      nodeHeight: NODE_HEIGHT,
+    })
+    const positions = new Map(layout.nodes.map((node) => [node.id, node.position]))
+    const columns = new Set(layout.nodes.map((node) => node.position.x))
+    const backwardEdges = edges.filter(
+      (edge) => positions.get(edge.source)!.x > positions.get(edge.target)!.x
+    )
+    const nodeBounds = boundsForNodes(layout.nodes)
+
+    expect(columns.size).toBeGreaterThanOrEqual(3)
+    expect(columns.size).toBeLessThanOrEqual(5)
+    expect(backwardEdges).toEqual([])
+    expect(layout.bounds.x).toBeGreaterThanOrEqual(nodeBounds.x - 90)
+    expect(layout.bounds.y).toBeGreaterThanOrEqual(nodeBounds.y - 90)
+    expect(layout.bounds.x + layout.bounds.width).toBeLessThanOrEqual(
+      nodeBounds.x + nodeBounds.width + 90
+    )
+    expect(layout.bounds.y + layout.bounds.height).toBeLessThanOrEqual(
+      nodeBounds.y + nodeBounds.height + 90
+    )
+    expectColumnSpacing(layout, 240, 140)
+    expectReadable(layout)
+  })
+
+  test("reroutes the overview after manual node movement", () => {
+    const canonical = layoutOntologyOverviewGraph(nodes, edges, {
+      nodeWidth: NODE_WIDTH,
+      nodeHeight: NODE_HEIGHT,
+    })
+    const movedNodes = nodes.map((node) => {
+      const position = canonical.nodes.find((candidate) => candidate.id === node.id)!.position
+      return {
+        ...node,
+        position:
+          node.id === "service-case" ? { x: position.x + 38, y: position.y + 52 } : position,
+      }
+    })
+    const rerouted = routeOntologyOverviewGraph(movedNodes, edges, {
+      nodeWidth: NODE_WIDTH,
+      nodeHeight: NODE_HEIGHT,
+    })
+
+    expect(rerouted.nodes.find((node) => node.id === "service-case")?.position).toEqual(
+      movedNodes.find((node) => node.id === "service-case")?.position
+    )
+    expectReadable(rerouted)
+  })
+
   test("leaves room between rows for relationship badges", () => {
     const layout = layoutOntologyGraph(nodes, edges, "equipment", {
       nodeWidth: NODE_WIDTH,
@@ -69,7 +122,7 @@ describe("ontology graph layout", () => {
     for (const column of columns.values()) {
       const rows = column.sort((left, right) => left - right)
       for (let index = 1; index < rows.length; index += 1) {
-        expect(rows[index]! - rows[index - 1]!).toBeGreaterThanOrEqual(NODE_HEIGHT + 70)
+        expect(rows[index]! - rows[index - 1]!).toBeGreaterThanOrEqual(NODE_HEIGHT + 120)
       }
     }
   })
@@ -83,7 +136,8 @@ describe("ontology graph layout", () => {
 
       expect(layout.nodes).toHaveLength(nodes.length)
       expect(layout.edges).toHaveLength(edges.length)
-      expect(layout.nodes.find((node) => node.id === focusId)?.position.x).toBe(NODE_WIDTH + 260)
+      expect(layout.nodes.find((node) => node.id === focusId)?.position.x).toBe(NODE_WIDTH + 400)
+      expectColumnSpacing(layout, 400, 120)
       for (const edge of layout.edges) {
         const input = edges.find((candidate) => candidate.id === edge.id)!
         if (input.source === focusId || input.target === focusId) {
@@ -174,7 +228,98 @@ describe("ontology graph layout", () => {
 
     expect(crossings).toEqual([])
   })
+
+  for (const focusId of nodes
+    .map((node) => node.id)
+    .filter((nodeId) => edges.filter((edge) => edge.source === nodeId).length >= 2)) {
+    test(`keeps ${focusId} output routes and badges separate`, () => {
+      const layout = layoutOntologyGraph(nodes, edges, focusId, {
+        nodeWidth: NODE_WIDTH,
+        nodeHeight: NODE_HEIGHT,
+      })
+      const outgoingIds = edges.filter((edge) => edge.source === focusId).map((edge) => edge.id)
+
+      expect(routeConflicts(layout, outgoingIds)).toEqual([])
+    })
+  }
 })
+
+function boundsForNodes(layoutNodes: ReturnType<typeof layoutOntologyGraph>["nodes"]): {
+  x: number
+  y: number
+  width: number
+  height: number
+} {
+  const x = Math.min(...layoutNodes.map((node) => node.position.x))
+  const y = Math.min(...layoutNodes.map((node) => node.position.y))
+  const right = Math.max(...layoutNodes.map((node) => node.position.x + NODE_WIDTH))
+  const bottom = Math.max(...layoutNodes.map((node) => node.position.y + NODE_HEIGHT))
+  return { x, y, width: right - x, height: bottom - y }
+}
+
+function expectColumnSpacing(
+  layout: ReturnType<typeof layoutOntologyGraph>,
+  columnGap: number,
+  rowGap: number
+): void {
+  const columns = new Map<number, number[]>()
+  for (const node of layout.nodes) {
+    columns.set(node.position.x, [...(columns.get(node.position.x) ?? []), node.position.y])
+  }
+  const xPositions = [...columns.keys()].sort((left, right) => left - right)
+  for (let index = 1; index < xPositions.length; index += 1) {
+    expect(xPositions[index]! - xPositions[index - 1]!).toBeGreaterThanOrEqual(
+      NODE_WIDTH + columnGap
+    )
+  }
+  for (const yPositions of columns.values()) {
+    yPositions.sort((left, right) => left - right)
+    for (let index = 1; index < yPositions.length; index += 1) {
+      expect(yPositions[index]! - yPositions[index - 1]!).toBeGreaterThanOrEqual(
+        NODE_HEIGHT + rowGap
+      )
+    }
+  }
+}
+
+function routeConflicts(
+  layout: ReturnType<typeof layoutOntologyGraph>,
+  edgeIds: string[]
+): string[] {
+  const routed = edgeIds.map((edgeId) => layout.edges.find((edge) => edge.id === edgeId)!)
+  const conflicts: string[] = []
+  for (let left = 0; left < routed.length; left += 1) {
+    for (let right = left + 1; right < routed.length; right += 1) {
+      const leftSegments = segments(routed[left]!.points)
+      const rightSegments = segments(routed[right]!.points)
+      if (
+        leftSegments.some((first) =>
+          rightSegments.some((second) => crosses(first, second) || overlaps(first, second))
+        )
+      ) {
+        conflicts.push(`${routed[left]!.id}:${routed[right]!.id}`)
+      }
+    }
+  }
+
+  for (let labelIndex = 0; labelIndex < routed.length; labelIndex += 1) {
+    const labeled = routed[labelIndex]!
+    const width = edges.find((edge) => edge.id === labeled.id)!.labelWidth
+    const label = {
+      x: labeled.labelPosition.x - width / 2,
+      y: labeled.labelPosition.y - 11,
+      width,
+      height: 22,
+    }
+    for (let routeIndex = 0; routeIndex < routed.length; routeIndex += 1) {
+      if (labelIndex === routeIndex) continue
+      if (segments(routed[routeIndex]!.points).some((segment) => hitsRect(segment, label))) {
+        conflicts.push(`${labeled.id}:${routed[routeIndex]!.id}`)
+      }
+    }
+  }
+  return conflicts
+}
 
 function expectReadable(layout: ReturnType<typeof layoutOntologyGraph>): void {
   const nodeRects = new Map(
