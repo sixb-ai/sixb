@@ -77,7 +77,10 @@ export function ThreadSidebar({
 
   return (
     <aside
-      className={cn("min-h-0 flex-col border-r border-border/70 bg-background", className)}
+      className={cn(
+        "min-h-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground",
+        className
+      )}
       aria-label="Agent threads"
     >
       <div className="shrink-0 px-2 pt-2 pb-2">
@@ -89,7 +92,7 @@ export function ThreadSidebar({
                 variant="ghost"
                 size="sm"
                 onClick={onExit}
-                className="h-9 w-full justify-start gap-3 px-2.5 text-[13px] font-semibold text-foreground focus-visible:border-transparent focus-visible:ring-0 focus-visible:underline focus-visible:underline-offset-4"
+                className="h-9 w-full justify-start gap-3 px-2.5 text-[13px] font-semibold text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:border-transparent focus-visible:ring-0 focus-visible:underline focus-visible:underline-offset-4"
               >
                 <ArrowLeft aria-hidden="true" />
                 {exitLabel}
@@ -101,7 +104,7 @@ export function ThreadSidebar({
             variant="ghost"
             size="sm"
             onClick={onStartNewThread}
-            className="h-9 w-full justify-start gap-3 px-2.5 text-[13px] font-medium text-foreground focus-visible:border-transparent focus-visible:ring-0 focus-visible:underline focus-visible:underline-offset-4"
+            className="h-9 w-full justify-start gap-3 px-2.5 text-[13px] font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:border-transparent focus-visible:ring-0 focus-visible:underline focus-visible:underline-offset-4"
           >
             <Pencil aria-hidden="true" />
             New thread
@@ -113,7 +116,7 @@ export function ThreadSidebar({
             onClick={() => setSearchOpen(true)}
             aria-haspopup="dialog"
             aria-expanded={searchOpen}
-            className="h-9 w-full justify-start gap-3 px-2.5 text-[13px] font-medium text-foreground focus-visible:border-transparent focus-visible:ring-0 focus-visible:underline focus-visible:underline-offset-4"
+            className="h-9 w-full justify-start gap-3 px-2.5 text-[13px] font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:border-transparent focus-visible:ring-0 focus-visible:underline focus-visible:underline-offset-4"
           >
             <Search aria-hidden="true" />
             Search
@@ -175,7 +178,7 @@ export function ThreadSidebar({
           <section className="mt-4" aria-labelledby="agent-selector-heading">
             <h2
               id="agent-selector-heading"
-              className="px-2 pb-1 text-[11px] font-medium text-muted-foreground"
+              className="px-2 pb-1 text-[11px] font-medium text-sidebar-foreground/60"
             >
               Agents
             </h2>
@@ -189,10 +192,10 @@ export function ThreadSidebar({
                     currentThreadId === null && agent.id === selectedAgentId ? "true" : undefined
                   }
                   className={cn(
-                    "flex h-8 w-full items-center rounded-lg px-2 text-left text-[13px] font-medium outline-none transition-colors hover:bg-muted/70 focus-visible:underline focus-visible:underline-offset-2",
+                    "flex h-8 w-full items-center rounded-lg px-2 text-left text-[13px] font-medium outline-none transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:underline focus-visible:underline-offset-2",
                     currentThreadId === null &&
                       agent.id === selectedAgentId &&
-                      "bg-muted text-foreground"
+                      "bg-sidebar-accent text-sidebar-accent-foreground"
                   )}
                 >
                   <span className="truncate">{agent.name}</span>
@@ -211,8 +214,8 @@ export function ThreadSidebar({
           <p className="px-2 py-4 text-sm text-destructive">{threadsError}</p>
         ) : threads.length === 0 ? (
           <div className="px-3 py-10 text-center">
-            <p className="text-sm font-medium text-foreground">No threads yet</p>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            <p className="text-sm font-medium text-sidebar-foreground">No threads yet</p>
+            <p className="mt-1 text-xs leading-5 text-sidebar-foreground/60">
               Start a chat and it will stay here while the agent works.
             </p>
           </div>
@@ -237,15 +240,15 @@ export function ThreadSidebar({
       {!threadsError &&
       threads.length > 0 &&
       (hasMoreThreads || loadingMoreThreads || loadMoreThreadsError) ? (
-        <div className="flex shrink-0 items-center gap-2 border-t border-border/60 px-3 py-2">
-          <span className="text-[11px] tabular-nums text-muted-foreground">
+        <div className="flex shrink-0 items-center gap-2 border-t border-sidebar-border px-3 py-2">
+          <span className="text-[11px] tabular-nums text-sidebar-foreground/60">
             {threads.length} of {totalThreads}
           </span>
           <Button
             type="button"
             variant="ghost"
             size="sm"
-            className="ml-auto h-7 px-2 text-xs"
+            className="ml-auto h-7 px-2 text-xs text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
             disabled={loadingMoreThreads}
             onClick={onLoadMoreThreads}
           >
@@ -274,7 +277,7 @@ function ThreadSection({ label, children }: { label: string; children: ReactNode
     <section aria-labelledby={`agent-threads-${sectionId(label)}`}>
       <h2
         id={`agent-threads-${sectionId(label)}`}
-        className="px-2.5 pb-1.5 text-[11px] font-medium text-muted-foreground"
+        className="px-2.5 pb-1.5 text-[11px] font-medium text-sidebar-foreground/60"
       >
         {label}
       </h2>
@@ -303,16 +306,14 @@ function ThreadRow({
       aria-current={selected ? "page" : undefined}
       aria-label={running ? `${title}, running` : title}
       className={cn(
-        "group relative flex w-full items-center rounded-lg px-2.5 py-1.5 text-left outline-none transition-colors hover:bg-muted/70 focus-visible:underline focus-visible:underline-offset-2",
-        selected && "bg-muted text-foreground"
+        "group relative flex w-full items-center rounded-lg px-2.5 py-1.5 text-left outline-none transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:underline focus-visible:underline-offset-2",
+        selected && "bg-sidebar-accent text-sidebar-accent-foreground"
       )}
     >
-      <span className="min-w-0 flex-1 truncate text-[13px] font-medium leading-5 text-foreground">
-        {title}
-      </span>
+      <span className="min-w-0 flex-1 truncate text-[13px] font-medium leading-5">{title}</span>
       {running ? (
         <LoaderCircle
-          className="ml-2 size-3.5 shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none"
+          className="ml-2 size-3.5 shrink-0 animate-spin text-sidebar-foreground/60 motion-reduce:animate-none"
           aria-hidden="true"
         />
       ) : null}
