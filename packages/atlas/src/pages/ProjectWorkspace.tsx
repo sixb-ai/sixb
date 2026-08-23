@@ -55,7 +55,6 @@ import {
   DatasetsPage,
   LogsPage,
   ObjectDetailPage,
-  ObjectTypeDetail,
   OntologyExplorer,
   PipelineDetailPage,
   PipelinesPage,
@@ -88,6 +87,45 @@ export function ProjectWorkspace() {
   const [objectSortBy, setObjectSortBy] = useState<ObjectSortPreference>(getObjectSortPreference)
   const [searchParams, setSearchParams] = useSearchParams()
   const classFilter = searchParams.get("class") || null
+  const selectedOntologyTypeId = location.pathname === "/ontology" ? searchParams.get("type") : null
+  const ontologyDetailsOpen =
+    location.pathname === "/ontology" &&
+    selectedOntologyTypeId !== null &&
+    searchParams.get("view") === "details"
+
+  const setOntologyState = useCallback(
+    (typeId: string | null, details: boolean, options?: { replace?: boolean }) => {
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev)
+          if (typeId) {
+            params.set("type", typeId)
+          } else {
+            params.delete("type")
+          }
+          if (typeId && details) {
+            params.set("view", "details")
+          } else {
+            params.delete("view")
+          }
+          if (!typeId) params.delete("tab")
+          return params
+        },
+        { replace: options?.replace ?? true }
+      )
+    },
+    [setSearchParams]
+  )
+
+  const setSelectedOntologyTypeId = useCallback(
+    (typeId: string | null) => setOntologyState(typeId, false),
+    [setOntologyState]
+  )
+
+  const openOntologyTypeDetails = useCallback(
+    (typeId: string) => setOntologyState(typeId, true, { replace: false }),
+    [setOntologyState]
+  )
 
   const setClassFilter = useCallback(
     (next: string | null, options?: { replace?: boolean }) => {
@@ -348,8 +386,17 @@ export function ProjectWorkspace() {
     )
   }
 
+  const ontologyWorkspace = location.pathname === "/ontology"
   const constrained = (children: ReactNode) => (
-    <div className={cn("mx-auto w-full max-w-7xl min-w-0 p-3 sm:p-4 lg:p-6")}>{children}</div>
+    <div
+      className={cn(
+        ontologyWorkspace
+          ? "h-full min-h-0 w-full"
+          : "mx-auto w-full max-w-7xl min-w-0 p-3 sm:p-4 lg:p-6"
+      )}
+    >
+      {children}
+    </div>
   )
 
   // BrowserRouter transitions keep the current route visible while an intent-preloaded chunk
@@ -440,11 +487,18 @@ export function ProjectWorkspace() {
                 path="ontology"
                 element={
                   <OntologyExplorer
-                    onSelectType={(typeId) => navigate(toProjectPath(`ontology/${typeId}`))}
+                    objectTypeCounts={objectTypeCounts}
+                    selectedTypeId={selectedOntologyTypeId}
+                    detailsOpen={ontologyDetailsOpen}
+                    onSelectedTypeChange={setSelectedOntologyTypeId}
+                    onOpenType={openOntologyTypeDetails}
+                    onViewObjects={(typeId) => {
+                      navigate(toProjectPath(`?class=${encodeURIComponent(typeId)}`))
+                    }}
                   />
                 }
               />
-              <Route path="ontology/:typeId" element={<ObjectTypeDetail />} />
+              <Route path="ontology/:typeId" element={<OntologyTypeRedirect />} />
               <Route
                 path=":objectId"
                 element={
@@ -458,6 +512,13 @@ export function ProjectWorkspace() {
       </Routes>
     </Suspense>
   )
+}
+
+function OntologyTypeRedirect() {
+  const { typeId } = useParams<{ typeId: string }>()
+  if (!typeId) return <Navigate to="/ontology" replace />
+  const params = new URLSearchParams({ type: typeId, view: "details" })
+  return <Navigate to={`/ontology?${params.toString()}`} replace />
 }
 
 function RunsTabRedirect() {
