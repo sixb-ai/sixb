@@ -48,7 +48,6 @@ import { ObjectsWorkbench, type ObjectTypePreviewSection } from "./ObjectsWorkbe
 import {
   ActionRunDetailPage,
   ActionsPage,
-  AgentsPage,
   ConnectorDetailPage,
   ConnectorsPage,
   DatasetDetailPage,
@@ -361,9 +360,6 @@ export function ProjectWorkspace() {
         <Route path="datasets/:datasetId" element={<DatasetDetailPage />} />
         <Route path="actions" element={<ActionsPage />} />
         <Route path="actions/runs/:runId" element={<ActionRunDetailPage />} />
-        <Route path="agents" element={<AgentsPage />} />
-        <Route path="agents/new/:agentId" element={<AgentsPage />} />
-        <Route path="agents/:threadId" element={<AgentsPage />} />
         <Route path="workflows" element={<WorkflowsPage />} />
         <Route path="workflows/:workflowId" element={<WorkflowDetailPage />} />
         <Route path="logs" element={<LogsPage />} />

@@ -23,7 +23,7 @@ import {
   selectActiveRunId,
   shouldShowDelayedWaitingCopy,
 } from "../runPresentation"
-import { nextThreadPageOffset, THREAD_PAGE_SIZE } from "../threadNavigation"
+import { THREAD_PAGE_SIZE } from "../threadNavigation"
 import type { AgentContextEntryInput, AgentFileRef, AgentRun } from "../types"
 import { useThreadStream } from "./useThreadStream"
 
@@ -37,6 +37,11 @@ interface PendingUser {
   readonly attachments: readonly AgentFileRef[]
   readonly context: readonly AgentContextEntryInput[]
   messageId: string | null
+}
+
+const THREAD_LIST_QUERY = {
+  limit: String(THREAD_PAGE_SIZE),
+  order: "desc" as const,
 }
 
 export interface UseAgentConversationInput {
@@ -62,28 +67,16 @@ export function useAgentConversation({
     onActivity: refreshThreads,
     onSubscribed: refreshThreads,
   })
-  const threadListQuery = {
-    limit: String(THREAD_PAGE_SIZE),
-    order: "desc" as const,
-  }
   const threadsQuery = useInfiniteQuery({
-    ...listAgentThreadsInfiniteOptions({ query: threadListQuery }),
-    initialPageParam: { query: threadListQuery },
-    getNextPageParam: (lastPage, _pages, lastPageParam) => {
+    ...listAgentThreadsInfiniteOptions({ query: THREAD_LIST_QUERY }),
+    initialPageParam: { query: THREAD_LIST_QUERY },
+    getNextPageParam: (lastPage, pages) => {
       if (!lastPage.hasMore) return undefined
-
-      const nextOffset = nextThreadPageOffset(
-        lastPage.hasMore,
-        typeof lastPageParam === "object" && lastPageParam.query?.offset
-          ? String(lastPageParam.query.offset)
-          : 0
-      )
-      if (nextOffset === undefined) return undefined
 
       return {
         query: {
-          ...threadListQuery,
-          offset: String(nextOffset),
+          ...THREAD_LIST_QUERY,
+          offset: String(pages.length * THREAD_PAGE_SIZE),
         },
       }
     },

@@ -61,8 +61,17 @@ const groups = [
 export function AppShell({ children }: PropsWithChildren) {
   const location = useLocation()
   const agentsActive = location.pathname.startsWith("/agents")
-  useInvalidateOnEvent(events.objects(), () => [objectQueryKeys.all()], { debounceMs: 75 })
-  useInvalidateOnEvent(events.links(), () => [objectQueryKeys.all()], { debounceMs: 75 })
+  useInvalidateOnEvent(events.objects(), () => [objectQueryKeys.all()], {
+    debounceMs: 75,
+    enabled: !agentsActive,
+  })
+  useInvalidateOnEvent(events.links(), () => [objectQueryKeys.all()], {
+    debounceMs: 75,
+    enabled: !agentsActive,
+  })
+
+  if (agentsActive) return children
+
   return (
     <SidebarProvider
       style={{ "--sidebar-width": "12.5rem" } as CSSProperties}
@@ -124,29 +133,15 @@ export function AppShell({ children }: PropsWithChildren) {
         </SidebarFooter>
       </Sidebar>
       <SidebarInset className="h-svh min-h-0 overflow-hidden">
-        {agentsActive ? (
-          <SidebarTrigger className="absolute top-2 right-12 z-30 md:hidden" />
-        ) : (
-          <header className="flex h-12 shrink-0 items-center gap-3 bg-background px-3 sm:px-4">
-            <SidebarTrigger className="md:hidden" />
-            <GlobalSearch />
-            <div className="ml-auto">
-              <ThemeSwitcher />
-            </div>
-          </header>
-        )}
-        <div
-          className={
-            agentsActive ? "min-h-0 flex-1 overflow-hidden" : "min-h-0 flex-1 overflow-y-auto"
-          }
-        >
-          <div
-            className={
-              agentsActive
-                ? "h-full min-h-0 w-full"
-                : "mx-auto w-full max-w-[1320px] px-6 py-8 max-sm:px-4 max-sm:py-5"
-            }
-          >
+        <header className="flex h-12 shrink-0 items-center gap-3 bg-background px-3 sm:px-4">
+          <SidebarTrigger className="md:hidden" />
+          <GlobalSearch />
+          <div className="ml-auto">
+            <ThemeSwitcher />
+          </div>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-[1320px] px-6 py-8 max-sm:px-4 max-sm:py-5">
             {children}
           </div>
         </div>

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { filterThreadNavigation, nextThreadPageOffset } from "../src/threadNavigation"
+import { filterThreadNavigation } from "../src/threadNavigation"
 import type { Agent, AgentThread } from "../src/types"
 
 const agents = new Map<string, Agent>([
@@ -64,14 +64,5 @@ describe("filterThreadNavigation", () => {
     expect(filterThreadNavigation(threads, agents, "operations").map((item) => item.id)).toEqual([
       "ops",
     ])
-  })
-})
-
-describe("nextThreadPageOffset", () => {
-  test("advances in stable 50-thread pages until the API is exhausted", () => {
-    expect(nextThreadPageOffset(true, undefined)).toBe(50)
-    expect(nextThreadPageOffset(true, "50")).toBe(100)
-    expect(nextThreadPageOffset(true, "invalid")).toBe(50)
-    expect(nextThreadPageOffset(false, "100")).toBeUndefined()
   })
 })

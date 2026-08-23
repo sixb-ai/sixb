@@ -15,7 +15,7 @@ import {
   TooltipTrigger,
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { Check, ChevronLeft, History, Info, Pencil, Search } from "lucide-react"
+import { Check, ChevronLeft, History, Info, PanelLeft, Pencil, Search } from "lucide-react"
 import { useMemo, useState } from "react"
 import { groupThreadsByDate } from "../format"
 import type { LiveRunState } from "../liveRun"
@@ -67,6 +67,7 @@ export interface ConversationPanelProps {
     context: readonly AgentContextEntryInput[]
   ) => void
   readonly onBackHome: () => void
+  readonly onOpenWorkspaceNavigation?: () => void
   readonly onNewChat: () => void
   readonly onPickAgent: (agentId: string) => void
   readonly onSelectThread: (threadId: string) => void
@@ -113,6 +114,7 @@ export function ConversationPanel({
   canGoHome,
   onSend,
   onBackHome,
+  onOpenWorkspaceNavigation,
   onNewChat,
   onPickAgent,
   onSelectThread,
@@ -139,32 +141,49 @@ export function ConversationPanel({
     pendingUserContext.length > 0 ||
     live.parts.length > 0 ||
     awaitingResponse
-  const showWelcome =
-    !messagesLoading &&
-    !messagesError &&
-    !hasActivity &&
-    messages.length === 0 &&
-    live.parts.length === 0 &&
-    !pendingUserText &&
-    pendingUserAttachments.length === 0 &&
-    pendingUserContext.length === 0
+  const showWelcome = !messagesLoading && !messagesError && !hasActivity && messages.length === 0
+  const renderSendError = (className?: string) =>
+    sendError ? (
+      <div className={cn("mx-auto w-full max-w-3xl px-4 pb-1", className)}>
+        <RunErrorMarker message={sendError} />
+      </div>
+    ) : null
+  const renderComposer = (workspaceClassName?: string) => (
+    <Composer
+      onSend={onSend}
+      disabled={composerDisabled}
+      pending={composerPending}
+      running={composerRunning}
+      stopping={composerStopping}
+      onStop={onStop}
+      placeholder={composerPlaceholder}
+      className={compact ? "px-4 pt-2 pb-4" : workspaceClassName}
+      draft={composerDraft}
+      draftAttachments={composerDraftAttachments}
+      draftContext={composerDraftContext}
+      draftNonce={composerDraftNonce}
+      ambientContext={ambientContext}
+      compact={compact}
+    />
+  )
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       <header
-        className={cn(
-          "flex shrink-0 items-center gap-1 px-2.5 py-2.5",
-          workspace && "border-b border-border/60 md:hidden"
-        )}
+        className={cn("flex shrink-0 items-center gap-1 px-2.5 py-2.5", workspace && "md:hidden")}
       >
-        {canGoHome ? (
+        {workspace && onOpenWorkspaceNavigation ? (
           <Button
             variant="ghost"
             size="icon-sm"
-            onClick={onBackHome}
-            aria-label="Back to threads"
-            className={cn(workspace && "md:hidden")}
+            onClick={onOpenWorkspaceNavigation}
+            aria-label="Open agent navigation"
+            className="md:hidden"
           >
+            <PanelLeft />
+          </Button>
+        ) : canGoHome ? (
+          <Button variant="ghost" size="icon-sm" onClick={onBackHome} aria-label="Back to chats">
             <ChevronLeft />
           </Button>
         ) : null}
@@ -200,33 +219,13 @@ export function ConversationPanel({
         <div
           className={cn(
             "flex min-h-0 flex-1 flex-col",
-            !compact && "md:justify-center md:px-8 md:pb-[12vh]"
+            !compact && "md:justify-center md:px-8 md:pb-[25vh] lg:pb-[27vh]"
           )}
         >
           <Welcome agent={agent} compact={compact} />
           <div className="shrink-0">
-            {sendError ? (
-              <div className="mx-auto w-full max-w-3xl px-4 pb-1 md:px-0">
-                <RunErrorMarker message={sendError} />
-              </div>
-            ) : null}
-
-            <Composer
-              onSend={onSend}
-              disabled={composerDisabled}
-              pending={composerPending}
-              running={composerRunning}
-              stopping={composerStopping}
-              onStop={onStop}
-              placeholder={composerPlaceholder}
-              className={compact ? "px-4 pt-2 pb-4" : "md:bg-transparent md:px-0 md:pt-0 md:pb-0"}
-              draft={composerDraft}
-              draftAttachments={composerDraftAttachments}
-              draftContext={composerDraftContext}
-              draftNonce={composerDraftNonce}
-              ambientContext={ambientContext}
-              compact={compact}
-            />
+            {renderSendError("md:px-0")}
+            {renderComposer("md:bg-transparent md:px-0 md:pt-0 md:pb-0")}
           </div>
         </div>
       ) : (
@@ -261,28 +260,8 @@ export function ConversationPanel({
           </div>
 
           <div className="shrink-0">
-            {sendError ? (
-              <div className="mx-auto w-full max-w-3xl px-4 pb-1">
-                <RunErrorMarker message={sendError} />
-              </div>
-            ) : null}
-
-            <Composer
-              onSend={onSend}
-              disabled={composerDisabled}
-              pending={composerPending}
-              running={composerRunning}
-              stopping={composerStopping}
-              onStop={onStop}
-              placeholder={composerPlaceholder}
-              className={compact ? "px-4 pt-2 pb-4" : undefined}
-              draft={composerDraft}
-              draftAttachments={composerDraftAttachments}
-              draftContext={composerDraftContext}
-              draftNonce={composerDraftNonce}
-              ambientContext={ambientContext}
-              compact={compact}
-            />
+            {renderSendError()}
+            {renderComposer()}
           </div>
         </>
       )}
@@ -438,9 +417,10 @@ function Welcome({ agent, compact }: { agent: Agent | undefined; compact: boolea
 
   if (!compact) {
     return (
-      <div className="flex-none px-4 pb-6 text-center md:px-0">
-        <div className="inline-flex max-w-full items-center justify-center gap-1.5">
-          <p className="min-w-0 truncate text-xl font-semibold tracking-tight text-foreground">
+      <div className="flex min-h-0 flex-1 items-center justify-center px-4 text-center md:flex-none md:px-0 md:pb-8">
+        <div className="inline-flex max-w-full items-center justify-center gap-1.5 md:gap-3">
+          <AgentAvatar name={name} className="hidden size-10 text-sm md:flex" />
+          <p className="min-w-0 truncate text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
             {name}
           </p>
           {description ? <AgentInfo name={name} description={description} /> : null}

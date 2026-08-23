@@ -30,6 +30,12 @@ import {
 import { useDelimitedTextDocument, useHtmlDocument, useMarkdownDocument } from "./content"
 import { DelimitedTextParseError, type DelimitedTextPreview, parseDelimitedText } from "./delimited"
 import { buildSafeHtmlPreviewDocument, HTML_PREVIEW_SANDBOX } from "./html"
+import {
+  documentPreviewStorageKey,
+  parseDocumentPreviewState,
+  readDocumentPreviewState,
+  writeDocumentPreviewState,
+} from "./persistence"
 import { documentPreviewPresentation } from "./presentation"
 import { agentDocumentPreviewRenderer } from "./rendering"
 import {
@@ -56,6 +62,7 @@ interface DocumentViewerProps {
 interface PreviewPanelHandle {
   collapse(): void
   expand(): void
+  getSize(): { readonly asPercentage: number; readonly inPixels: number }
   isCollapsed(): boolean
   resize(size: number | string): void
 }
@@ -66,24 +73,59 @@ export function DocumentPreviewRoot({
   children,
   compact = false,
   scopeKey,
+  persistenceKey,
 }: {
   readonly children: ReactNode
   readonly compact?: boolean
-  /** Changing conversations closes inspector content that belongs to the previous thread. */
+  /** Selects the isolated preview state for the current conversation or draft. */
   readonly scopeKey?: string | null
+  /** Persist open tabs, the active document, and panel width for a durable thread. */
+  readonly persistenceKey?: string | null
 }) {
   const idPrefix = useId()
-  const [state, dispatch] = useReducer(documentPreviewReducer, EMPTY_DOCUMENT_PREVIEW_STATE)
+  const previewScopeKey = persistenceKey ? `thread:${persistenceKey}` : `scope:${scopeKey ?? ""}`
+  const restoredState = useMemo(
+    () =>
+      persistenceKey ? readDocumentPreviewState(persistenceKey) : EMPTY_DOCUMENT_PREVIEW_STATE,
+    [persistenceKey]
+  )
+  const [state, dispatch] = useReducer(documentPreviewReducer, restoredState)
   const [revealVersion, revealDocument] = useReducer((version: number) => version + 1, 0)
   const openerRef = useRef<HTMLElement | null>(null)
-  const activeDocument = state.documents.find((document) => document.id === state.activeId) ?? null
+  const revealScopeRef = useRef<string | null>(null)
+  const stateScopeRef = useRef(previewScopeKey)
+  const visibleState = stateScopeRef.current === previewScopeKey ? state : restoredState
+  const activeDocument =
+    visibleState.documents.find((document) => document.id === visibleState.activeId) ?? null
   const presentation = documentPreviewPresentation(compact, useIsMobile())
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only when conversation scope changes
   useLayoutEffect(() => {
-    dispatch({ type: "close-all" })
+    stateScopeRef.current = previewScopeKey
+    dispatch({ type: "restore", state: restoredState })
     openerRef.current = null
-  }, [scopeKey])
+  }, [previewScopeKey, restoredState])
+
+  useEffect(() => {
+    if (!persistenceKey || stateScopeRef.current !== previewScopeKey || state !== visibleState)
+      return
+    writeDocumentPreviewState(persistenceKey, state)
+  }, [persistenceKey, previewScopeKey, state, visibleState])
+
+  useEffect(() => {
+    if (!persistenceKey || typeof window === "undefined") return
+
+    const storageKey = documentPreviewStorageKey(persistenceKey)
+    const syncPreviewState = (event: StorageEvent) => {
+      if (event.storageArea !== window.localStorage || event.key !== storageKey) return
+      dispatch({
+        type: "restore",
+        state: parseDocumentPreviewState(event.newValue, persistenceKey),
+      })
+    }
+
+    window.addEventListener("storage", syncPreviewState)
+    return () => window.removeEventListener("storage", syncPreviewState)
+  }, [persistenceKey])
 
   const restoreOpenerFocus = useCallback(() => {
     const opener = openerRef.current
@@ -93,46 +135,57 @@ export function DocumentPreviewRoot({
   }, [])
   const openDocument = useCallback(
     (source: AgentDocumentSource) => {
-      if (state.documents.length === 0 && typeof window !== "undefined") {
+      if (visibleState.documents.length === 0 && typeof window !== "undefined") {
         const activeElement = window.document.activeElement
         openerRef.current = activeElement instanceof HTMLElement ? activeElement : null
       }
       dispatch({ type: "open", document: source })
+      revealScopeRef.current = previewScopeKey
       revealDocument()
     },
-    [state.documents.length]
+    [previewScopeKey, visibleState.documents.length]
   )
   const closeDocument = useCallback(
     (id: string) => {
-      const closesLastDocument = state.documents.length === 1 && state.documents[0]?.id === id
+      const closesLastDocument =
+        visibleState.documents.length === 1 && visibleState.documents[0]?.id === id
       dispatch({ type: "close", id })
       if (closesLastDocument) restoreOpenerFocus()
     },
-    [restoreOpenerFocus, state.documents]
+    [restoreOpenerFocus, visibleState.documents]
   )
   const closeAllDocuments = useCallback(() => {
     dispatch({ type: "close-all" })
     restoreOpenerFocus()
   }, [restoreOpenerFocus])
   const selectDocument = useCallback((id: string) => dispatch({ type: "select", id }), [])
+  const savePanelWidth = useCallback(
+    (width: number) => dispatch({ type: "set-panel-width", width }),
+    []
+  )
   const context = useMemo<DocumentPreviewContextValue>(() => ({ openDocument }), [openDocument])
   const viewerProps = useMemo<DocumentViewerProps>(
     () => ({
       idPrefix,
-      state,
+      state: visibleState,
       onSelect: selectDocument,
       onClose: closeDocument,
       onCloseAll: closeAllDocuments,
     }),
-    [closeAllDocuments, closeDocument, idPrefix, selectDocument, state]
+    [closeAllDocuments, closeDocument, idPrefix, selectDocument, visibleState]
   )
 
   return (
     <DocumentPreviewContext.Provider value={context}>
       {presentation === "panel" ? (
         <DocumentPreviewWorkspace
-          open={activeDocument !== null}
-          revealVersion={revealVersion}
+          revealKey={
+            activeDocument ? `${previewScopeKey}:${activeDocument.id}:${revealVersion}` : null
+          }
+          scopeKey={previewScopeKey}
+          panelWidth={visibleState.panelWidth}
+          onPanelResize={savePanelWidth}
+          focusActiveTab={revealVersion > 0 && revealScopeRef.current === previewScopeKey}
           viewerProps={viewerProps}
         >
           {children}
@@ -160,40 +213,70 @@ const ConversationPane = memo(function ConversationPane({ children }: { children
 
 function DocumentPreviewWorkspace({
   children,
-  open,
-  revealVersion,
+  revealKey,
+  scopeKey,
+  panelWidth,
+  onPanelResize,
+  focusActiveTab,
   viewerProps,
 }: {
   children: ReactNode
-  open: boolean
-  revealVersion: number
+  revealKey: string | null
+  scopeKey: string
+  panelWidth: number | null
+  onPanelResize: (width: number) => void
+  focusActiveTab: boolean
   viewerProps: DocumentViewerProps
 }) {
+  const open = revealKey !== null
   const panelRef = useRef<PreviewPanelHandle | null>(null)
-  const openedOnceRef = useRef(false)
+  const scopeRef = useRef(scopeKey)
+  const appliedWidthRef = useRef<number | null>(null)
+  const needsWidthRef = useRef(true)
+
+  const persistPanelWidth = useCallback(() => {
+    const size = panelRef.current?.getSize()
+    if (!open || !size || size.inPixels <= 0) return
+
+    const width = Math.round(size.inPixels)
+    appliedWidthRef.current = width
+    onPanelResize(width)
+  }, [onPanelResize, open])
 
   useEffect(() => {
     const panel = panelRef.current
     if (!panel) return
 
-    if (!open) {
+    if (scopeRef.current !== scopeKey) {
+      scopeRef.current = scopeKey
+      appliedWidthRef.current = null
+      needsWidthRef.current = true
+    }
+
+    if (revealKey === null) {
       panel.collapse()
       return
     }
 
-    if (!openedOnceRef.current) {
-      openedOnceRef.current = true
-      panel.resize("28rem")
+    if (needsWidthRef.current || (panelWidth !== null && panelWidth !== appliedWidthRef.current)) {
+      needsWidthRef.current = false
+      appliedWidthRef.current = panelWidth
+      panel.resize(panelWidth ?? "50%")
       return
     }
 
     // Reopening or clicking an already-open document should restore a pane the user collapsed by
-    // dragging the separator. `revealVersion` makes repeated clicks reach this effect.
-    if (revealVersion > 0 && panel.isCollapsed()) panel.expand()
-  }, [open, revealVersion])
+    // dragging the separator. `revealKey` changes for a new scope, tab, or repeated file click.
+    if (panel.isCollapsed()) panel.expand()
+  }, [panelWidth, revealKey, scopeKey])
 
   return (
-    <ResizablePanelGroup id="agent-document-workspace" orientation="horizontal" className="min-h-0">
+    <ResizablePanelGroup
+      id="agent-document-workspace"
+      orientation="horizontal"
+      onLayoutChanged={persistPanelWidth}
+      className="min-h-0"
+    >
       <ResizablePanel id="agent-conversation" defaultSize="100%" minSize="30%">
         <ConversationPane>{children}</ConversationPane>
       </ResizablePanel>
@@ -217,7 +300,11 @@ function DocumentPreviewWorkspace({
       >
         <div className="flex h-full min-h-0 min-w-0 flex-col bg-background">
           {open ? (
-            <DocumentViewer {...viewerProps} showActionLabels={false} focusActiveTab />
+            <DocumentViewer
+              {...viewerProps}
+              showActionLabels={false}
+              focusActiveTab={focusActiveTab}
+            />
           ) : null}
         </div>
       </ResizablePanel>
@@ -367,7 +454,7 @@ function DocumentTabs({
       <div
         role="tablist"
         aria-label="Open documents"
-        className="scrollbar-thin flex h-full min-w-0 flex-1 overflow-x-auto"
+        className="scrollbar-thin flex h-full min-w-0 flex-1 overflow-x-auto overflow-y-hidden"
       >
         {documents.map((document) => {
           const active = document.id === activeId
