@@ -165,6 +165,19 @@ describe("read tool", () => {
     )
   })
 
+  test("reports missing files when realpath accepts a missing final component", async () => {
+    const shimRoot = await tempRoot()
+    await writeFile(join(shimRoot, "realpath"), "#!/bin/sh\nprintf '%s\\n' \"$1\"\n", {
+      mode: 0o755,
+    })
+    const path = [shimRoot, process.env.PATH].filter(Boolean).join(":")
+    const { read } = await createHarness({ PATH: path })
+
+    // GNU realpath permits a missing final component by default. Removing READ_SCRIPT's explicit
+    // existence check reproduces the Linux regression: this becomes "not a regular file."
+    await expect(read({ path: "missing.txt" })).rejects.toThrow("does not exist")
+  })
+
   test("uses the run environment without writes and forwards cancellation", async () => {
     const { root, read, sandbox } = await createHarness({ SIXB_RUN_ID: "run-1" })
     await writeFile(join(root, "file.txt"), "content")
