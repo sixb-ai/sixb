@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto"
 import { watch } from "node:fs"
 import { access, cp, mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path"
@@ -8,10 +9,17 @@ import {
   buildApp,
   prepareAppHtmlBundleEntry,
   restoreAppStaticUrls,
+  SHARED_APP_SHELL_FILE_NAME,
 } from "./build"
-import { type BuiltInRouteManifestEntry, generateAppEntry, generateRouteManifest } from "./codegen"
+import {
+  type BuiltInRouteManifestEntry,
+  generateAppEntry,
+  generateRouteManifest,
+  generateSharedAppEntry,
+  generateSharedRouteManifest,
+} from "./codegen"
 import { renderCustomAppRuntimeScript } from "./runtime"
-import { type PageRoute, scanPages } from "./scanner"
+import { type PageRoute, partitionAppRoutes, scanPages } from "./scanner"
 import { type CustomAppStylesheet, resolveCustomAppStylesheet } from "./styles"
 import { createTailwindCssCompiler, type TailwindCssCompiler } from "./tailwind"
 
@@ -67,6 +75,7 @@ const builtInAgentRoutePaths = ["/agents", "/agents/new/:agentId", "/agents/:thr
 const builtInAgentRouteSourcePath = join(packageRoot, "src", "agents.ts")
 const customAppManifestRoute = "/app.webmanifest"
 const internalAppShellRoute = "/__sixb/generated/app-shell"
+const internalSharedAppShellRoute = "/__sixb/generated/shared-app-shell"
 
 export async function createCustomApp(options: CreateCustomAppOptions): Promise<CustomAppInstance> {
   const rootDir = resolve(options.rootDir)
@@ -214,6 +223,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
 
   async function prepareGeneratedApp(): Promise<{
     htmlPath: string
+    sharedHtmlPath: string | null
     manifestPath: string
     routes: PageRoute[]
   }> {
@@ -222,9 +232,13 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
       throw new Error(`[SixbCustomApp] No app routes found in ${appDir}`)
     }
 
-    const builtInRoutes = agentRoutesEnabled ? builtInAgentRoutesFor(routes) : []
+    const { applicationRoutes, sharedRoutes } = partitionAppRoutes(routes)
+    const builtInRoutes =
+      agentRoutesEnabled && applicationRoutes.length > 0
+        ? builtInAgentRoutesFor(applicationRoutes)
+        : []
     const stylesheets = await prepareStylesheets(builtInRoutes)
-    await generateRouteManifest(routes, generatedDir, { builtInRoutes })
+    await generateRouteManifest(applicationRoutes, generatedDir, { builtInRoutes })
     const { htmlPath, manifestPath } = await generateAppEntry(rootDir, generatedDir, {
       apiBaseUrl,
       audience,
@@ -234,7 +248,19 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
       frameworkStylesheetPaths: stylesheets.frameworkStylesheetPaths,
       stylesheetPath: stylesheets.stylesheetPath,
     })
-    return { htmlPath, manifestPath, routes }
+    let sharedHtmlPath: string | null = null
+    if (sharedRoutes.length > 0) {
+      await generateSharedRouteManifest(sharedRoutes, generatedDir)
+      sharedHtmlPath = (
+        await generateSharedAppEntry(rootDir, generatedDir, {
+          apiBaseUrl,
+          appDir,
+          publicDir,
+          stylesheetPath: stylesheets.stylesheetPath,
+        })
+      ).htmlPath
+    }
+    return { htmlPath, sharedHtmlPath, manifestPath, routes }
   }
 
   return {
@@ -250,12 +276,16 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     async dev(devOptions: CustomAppDevOptions = {}) {
       const host = devOptions.host ?? "0.0.0.0"
       const port = devOptions.port ?? 3001
-      const { htmlPath, manifestPath } = await prepareGeneratedApp()
+      const { htmlPath, sharedHtmlPath, manifestPath } = await prepareGeneratedApp()
       let htmlImportVersion = 0
       let htmlBundle = await importHtmlBundle(htmlPath, htmlImportVersion)
+      let sharedHtmlBundle = sharedHtmlPath
+        ? await importHtmlBundle(sharedHtmlPath, htmlImportVersion)
+        : null
+      const privateSharedAppShellRoute = `${internalSharedAppShellRoute}-${randomBytes(18).toString("base64url")}`
       const publicRoutes = (await pathExists(publicDir)) ? await createPublicRoutes(publicDir) : {}
       let internalOrigin = ""
-      const serveOptions = (bundle: Bun.HTMLBundle) =>
+      const serveOptions = (bundle: Bun.HTMLBundle, sharedBundle: Bun.HTMLBundle | null) =>
         ({
           port,
           hostname: host,
@@ -265,11 +295,20 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
             ...reservedSixbRoutes(),
             [customAppManifestRoute]: manifestRoute(manifestPath),
             [internalAppShellRoute]: htmlBundleRoute(bundle),
+            ...(sharedBundle
+              ? { [privateSharedAppShellRoute]: htmlBundleRoute(sharedBundle) }
+              : {}),
+            ...sharedAppDevRoutes(
+              sharedBundle,
+              () => internalOrigin,
+              privateSharedAppShellRoute,
+              apiBaseUrl
+            ),
             "/": spaHtmlRoute(() => internalOrigin),
             "/*": spaHtmlRoute(() => internalOrigin),
           },
         }) as Parameters<typeof Bun.serve>[0]
-      const server = Bun.serve(serveOptions(htmlBundle))
+      const server = Bun.serve(serveOptions(htmlBundle, sharedHtmlBundle))
       internalOrigin = devServerInternalOrigin(host, server.port ?? port)
 
       // .ts/.tsx edits can change Tailwind's scanned classes and .css edits
@@ -280,10 +319,14 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
       const enqueueRebuild = () => {
         rebuildChain = rebuildChain
           .then(async () => {
-            const { htmlPath: nextHtmlPath } = await prepareGeneratedApp()
+            const { htmlPath: nextHtmlPath, sharedHtmlPath: nextSharedHtmlPath } =
+              await prepareGeneratedApp()
             htmlImportVersion++
             htmlBundle = await importHtmlBundle(nextHtmlPath, htmlImportVersion)
-            server.reload(serveOptions(htmlBundle))
+            sharedHtmlBundle = nextSharedHtmlPath
+              ? await importHtmlBundle(nextSharedHtmlPath, htmlImportVersion)
+              : null
+            server.reload(serveOptions(htmlBundle, sharedHtmlBundle))
           })
           .catch((error) => {
             // Keep serving the last good build, but tell the user why styles
@@ -338,18 +381,23 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
 
     async build(buildOptions: CustomAppBuildOptions = {}) {
       const outdir = resolve(rootDir, buildOptions.outdir ?? join(".sixb", "dist", "app"))
-      const { htmlPath, manifestPath } = await prepareGeneratedApp()
+      const { htmlPath, sharedHtmlPath, manifestPath } = await prepareGeneratedApp()
       const result = await buildApp({
         entryPath: htmlPath,
+        ...(sharedHtmlPath ? { sharedEntryPath: sharedHtmlPath } : {}),
         manifestPath,
         outdir,
       })
 
       if (result.success && (await pathExists(publicDir))) {
+        const reservedOutputPaths = new Set([
+          join(publicDir, "app.webmanifest"),
+          join(publicDir, SHARED_APP_SHELL_FILE_NAME),
+        ])
         await cp(publicDir, outdir, {
           recursive: true,
           force: true,
-          filter: (source) => resolve(source) !== join(publicDir, "app.webmanifest"),
+          filter: (source) => !reservedOutputPaths.has(resolve(source)),
         })
       }
 
@@ -361,6 +409,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
       const port = startOptions.port ?? 3001
       const outdir = resolve(rootDir, startOptions.outdir ?? join(".sixb", "dist", "app"))
       const indexPath = join(outdir, "index.html")
+      const sharedIndexPath = join(outdir, SHARED_APP_SHELL_FILE_NAME)
 
       if (!(await pathExists(indexPath))) {
         throw new Error(`[SixbCustomApp] No built app found in ${outdir}`)
@@ -371,6 +420,14 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
         audience: startOptions.audience ?? audience,
         authEnabled: startOptions.authEnabled ?? authEnabled,
       })
+      const sharedIndexHtml = (await pathExists(sharedIndexPath))
+        ? injectRuntimeConfig(await Bun.file(sharedIndexPath).text(), {
+            apiBaseUrl: startOptions.apiBaseUrl ?? apiBaseUrl,
+            audience: "app",
+            authEnabled: false,
+          })
+        : null
+      const runtimeApiBaseUrl = startOptions.apiBaseUrl ?? apiBaseUrl
       const server = Bun.serve({
         port,
         hostname: host,
@@ -381,8 +438,19 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
             return notFoundResponse()
           }
 
+          if (url.pathname === `/${SHARED_APP_SHELL_FILE_NAME}`) {
+            return notFoundResponse()
+          }
+
           if (req.method !== "GET" && req.method !== "HEAD") {
             return notFoundResponse()
+          }
+
+          if (isSharedAppRoute(url.pathname)) {
+            if (!sharedIndexHtml || isAssetRequest(url.pathname)) {
+              return notFoundResponse()
+            }
+            return sharedHtmlResponse(req, sharedIndexHtml, runtimeApiBaseUrl)
           }
 
           if (url.pathname === "/" || url.pathname === "") {
@@ -499,6 +567,7 @@ async function createPublicRoutes(publicDir: string): Promise<BunServeRoutes> {
 function reservedSixbRoutes(): BunServeRoutes {
   const handler = () => notFoundResponse()
   return {
+    [internalSharedAppShellRoute]: allMethodsRoute(handler),
     "/api": allMethodsRoute(handler),
     "/api/*": allMethodsRoute(handler),
     "/auth": allMethodsRoute(handler),
@@ -508,6 +577,34 @@ function reservedSixbRoutes(): BunServeRoutes {
     "/docs": allMethodsRoute(handler),
     "/docs/*": allMethodsRoute(handler),
   }
+}
+
+function sharedAppDevRoutes(
+  bundle: Bun.HTMLBundle | null,
+  internalOrigin: () => string,
+  shellRoute: string,
+  apiBaseUrl: string | undefined
+): BunServeRoutes {
+  if (!bundle) {
+    const handler = () => notFoundResponse()
+    return {
+      "/shared": allMethodsRoute(handler),
+      "/shared/*": allMethodsRoute(handler),
+    }
+  }
+
+  const handler = spaHtmlRoute(internalOrigin, {
+    shellRoute,
+    shared: { apiBaseUrl, development: true },
+  })
+  return {
+    "/shared": rejectMutations(handler),
+    "/shared/*": rejectMutations(handler),
+  }
+}
+
+function isSharedAppRoute(pathname: string): boolean {
+  return pathname === "/shared" || pathname.startsWith("/shared/")
 }
 
 function isReservedSixbRoute(pathname: string): boolean {
@@ -633,6 +730,65 @@ function htmlResponse(request: Request, html: string): Response {
   })
 }
 
+function sharedHtmlResponse(
+  request: Request,
+  html: string,
+  apiBaseUrl: string | undefined
+): Response {
+  const secured = secureSharedHtml(html, request, { apiBaseUrl, development: false })
+  return new Response(request.method === "HEAD" ? null : secured.html, {
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      ...secured.headers,
+    },
+  })
+}
+
+function secureSharedHtml(
+  html: string,
+  request: Request,
+  options: { readonly apiBaseUrl?: string; readonly development: boolean }
+): { readonly html: string; readonly headers: Record<string, string> } {
+  const nonce = randomBytes(18).toString("base64url")
+  const requestOrigin = new URL(request.url).origin
+  let apiOrigin = requestOrigin
+  try {
+    apiOrigin = new URL(options.apiBaseUrl ?? requestOrigin, requestOrigin).origin
+  } catch {
+    // The client will surface the invalid runtime URL. Keep CSP fail-closed meanwhile.
+  }
+  const connectSources = ["'self'", ...(apiOrigin === requestOrigin ? [] : [apiOrigin])]
+  if (options.development) connectSources.push("ws:", "wss:")
+  const scriptSources = ["'self'", `'nonce-${nonce}'`]
+  if (options.development) scriptSources.push("'unsafe-eval'")
+  const contentSecurityPolicy = [
+    "default-src 'self'",
+    "base-uri 'none'",
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+    "form-action 'none'",
+    `script-src ${scriptSources.join(" ")}`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https:",
+    "font-src 'self' data: https:",
+    `connect-src ${connectSources.join(" ")}`,
+    "manifest-src 'none'",
+  ].join("; ")
+
+  return {
+    html: html.replace(/<script(?![^>]*\snonce=)/g, `<script nonce="${nonce}"`),
+    headers: {
+      "cache-control": "no-store",
+      "content-security-policy": contentSecurityPolicy,
+      "permissions-policy": "camera=(), geolocation=(), microphone=()",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "DENY",
+      "x-robots-tag": "noindex, nofollow, noarchive",
+    },
+  }
+}
+
 // Bun.build emits content-hashed bundles named `chunk-<hash>.<ext>` (see buildApp).
 // Their contents can never change under the same URL, so they are safe to cache
 // forever — matching how Atlas serves its hashed assets. Files copied
@@ -695,6 +851,23 @@ function allMethodsRoute(handler: (request: Request) => Response): BunServeRoute
   } as unknown as BunServeRoute
 }
 
+function rejectMutations(route: BunServeRoute): BunServeRoute {
+  const reject = () => notFoundResponse()
+  const getHead = route as unknown as {
+    readonly GET: (request: Request) => Response | Promise<Response>
+    readonly HEAD: (request: Request) => Response | Promise<Response>
+  }
+  return {
+    GET: getHead.GET,
+    HEAD: getHead.HEAD,
+    POST: reject,
+    PUT: reject,
+    PATCH: reject,
+    DELETE: reject,
+    OPTIONS: reject,
+  } as unknown as BunServeRoute
+}
+
 async function importHtmlBundle(htmlPath: string, version: number): Promise<Bun.HTMLBundle> {
   const bundleEntryPath = await prepareAppHtmlBundleEntry(htmlPath)
   const url = pathToFileURL(bundleEntryPath)
@@ -728,14 +901,20 @@ function devServerInternalOrigin(host: string, port: number): string {
   return `http://${urlHost}:${port}`
 }
 
-function spaHtmlRoute(internalOrigin: () => string): BunServeRoute {
+function spaHtmlRoute(
+  internalOrigin: () => string,
+  options: {
+    readonly shellRoute?: string
+    readonly shared?: { readonly apiBaseUrl?: string; readonly development: boolean }
+  } = {}
+): BunServeRoute {
   return getHeadRoute(async (request) => {
     const publicUrl = new URL(request.url)
     if (publicUrl.pathname !== "/" && isAssetRequest(publicUrl.pathname)) {
       return notFoundResponse()
     }
 
-    const url = new URL(internalAppShellRoute, internalOrigin())
+    const url = new URL(options.shellRoute ?? internalAppShellRoute, internalOrigin())
     url.search = publicUrl.search
     const requestHeaders = new Headers(request.headers)
     for (const header of [
@@ -753,6 +932,18 @@ function spaHtmlRoute(internalOrigin: () => string): BunServeRoute {
     const responseHeaders = new Headers(bundleResponse.headers)
     responseHeaders.delete("content-length")
     responseHeaders.delete("etag")
+    let nonceSecuredHtml: string | null = null
+    if (options.shared) {
+      const secured = secureSharedHtml(
+        request.method === "HEAD" ? "" : restoreAppStaticUrls(await bundleResponse.text()),
+        request,
+        options.shared
+      )
+      nonceSecuredHtml = secured.html
+      for (const [name, value] of Object.entries(secured.headers)) {
+        responseHeaders.set(name, value)
+      }
+    }
     if (request.method === "HEAD") {
       return new Response(null, {
         status: bundleResponse.status,
@@ -761,7 +952,7 @@ function spaHtmlRoute(internalOrigin: () => string): BunServeRoute {
       })
     }
 
-    return new Response(restoreAppStaticUrls(await bundleResponse.text()), {
+    return new Response(nonceSecuredHtml ?? restoreAppStaticUrls(await bundleResponse.text()), {
       status: bundleResponse.status,
       statusText: bundleResponse.statusText,
       headers: responseHeaders,

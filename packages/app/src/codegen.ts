@@ -4,7 +4,7 @@ import type { AuthSessionAudience } from "@sixb/core"
 import { renderAppManifest } from "./manifest"
 import { resolveAppMetadata } from "./metadata"
 import { renderCustomAppRuntimeScript } from "./runtime"
-import type { PageRoute } from "./scanner"
+import type { PageRoute, SharedPageRoute } from "./scanner"
 
 export interface BuiltInRouteManifestEntry {
   readonly path: string
@@ -65,6 +65,37 @@ ${routeEntries}
 `
 
   const outPath = join(generatedDir, "routes.ts")
+  await writeFileIfChanged(outPath, content)
+  return outPath
+}
+
+/** Generates the isolated route table consumed only by the shared entry point. */
+export async function generateSharedRouteManifest(
+  routes: readonly SharedPageRoute[],
+  generatedDir: string
+): Promise<string> {
+  await mkdir(generatedDir, { recursive: true })
+
+  const imports = routes
+    .map(
+      (route, index) =>
+        `import SharedPage${index} from ${JSON.stringify(relativeTo(generatedDir, route.filePath))}`
+    )
+    .join("\n")
+  const entries = routes
+    .map(
+      (route, index) =>
+        `  { path: ${JSON.stringify(route.path)}, shareTypeId: ${JSON.stringify(route.shareTypeId)}, component: SharedPage${index} },`
+    )
+    .join("\n")
+  const content = `${imports}
+
+export const sharedRoutes = [
+${entries}
+]
+`
+
+  const outPath = join(generatedDir, "shared-routes.ts")
   await writeFileIfChanged(outPath, content)
   return outPath
 }
@@ -263,6 +294,20 @@ function InternalLinkInterceptor() {
   return null
 }
 
+// React Router links can bypass the plain-anchor interceptor. Crossing into the
+// shared boundary must still load its separate entry point and runtime.
+function SharedBoundaryReload() {
+  const location = useLocation()
+
+  React.useEffect(() => {
+    if (location.pathname === "/shared" || location.pathname.startsWith("/shared/")) {
+      window.location.reload()
+    }
+  }, [location.pathname])
+
+  return null
+}
+
 // Shared presentational fallback used by the not-found view and the error
 // boundary. Styled with @sixb/ui design tokens (var(--token)) so it adopts the
 // app's theme when those tokens are loaded, but every token has a hardcoded
@@ -451,6 +496,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <InternalLinkInterceptor />
+        <SharedBoundaryReload />
         <RoutedErrorBoundary>
           ${layoutWrapperStart}
             <Routes>
@@ -522,14 +568,295 @@ ${metadataHead}
   return { htmlPath, mainPath, manifestPath }
 }
 
-function renderMetadataHead(metadata: Awaited<ReturnType<typeof resolveAppMetadata>>): string {
+/**
+ * Generates a second browser entry for public shared links. It imports neither
+ * the application auth bootstrap nor the global client, and it uses its own
+ * layout and query cache through `SharedAccessBoundary`.
+ */
+export async function generateSharedAppEntry(
+  projectRoot: string,
+  generatedDir: string,
+  options: {
+    apiBaseUrl?: string
+    appDir?: string
+    publicDir?: string
+    stylesheetPath?: string | null
+  } = {}
+): Promise<{ htmlPath: string; mainPath: string }> {
+  await mkdir(generatedDir, { recursive: true })
+
+  const appDir = options.appDir ? resolve(projectRoot, options.appDir) : join(projectRoot, "app")
+  const publicDir = options.publicDir
+    ? resolve(projectRoot, options.publicDir)
+    : join(appDir, "public")
+  const globalsCssPath = join(appDir, "globals.css")
+  const applicationLayoutPath = join(appDir, "layout.tsx")
+  const sharedLayoutPath = join(appDir, "shared", "layout.tsx")
+  const metadata = await resolveAppMetadata({ layoutPath: applicationLayoutPath, publicDir })
+  const stylesheetPath =
+    options.stylesheetPath !== undefined
+      ? options.stylesheetPath
+      : (await fileExists(globalsCssPath))
+        ? globalsCssPath
+        : null
+  const stylesheetImport = stylesheetPath
+    ? `import ${JSON.stringify(relativeTo(generatedDir, stylesheetPath))}`
+    : ""
+  const hasLayout = await fileExists(sharedLayoutPath)
+  const layoutImport = hasLayout
+    ? `import SharedLayout from ${JSON.stringify(relativeTo(generatedDir, sharedLayoutPath))}\n`
+    : ""
+  const layoutWrapperStart = hasLayout ? "<SharedLayout>" : "<>"
+  const layoutWrapperEnd = hasLayout ? "</SharedLayout>" : "</>"
+  const runtimeConfigScript = options.apiBaseUrl
+    ? renderCustomAppRuntimeScript({
+        api: { baseUrl: options.apiBaseUrl },
+        // This value is documentary for the HTML payload. The shared entry does
+        // not import or initialize the application authentication runtime.
+        auth: { audience: "app", enabled: false },
+      })
+    : ""
+
+  const mainContent = `import React from "react"
+import { createRoot, type Root } from "react-dom/client"
+import { BrowserRouter, Route, Routes, useLocation, useParams } from "react-router-dom"
+import {
+  readSharedAppRuntimeConfig,
+  SharedAccessBoundary,
+} from "@sixb/app/shared"
+import { sharedRoutes } from "./shared-routes"
+${stylesheetImport}
+${layoutImport}
+
+interface SharedAppHotData {
+  root?: Root
+}
+
+const runtimeConfig = readSharedAppRuntimeConfig()
+
+if (import.meta.hot) import.meta.hot.accept()
+
+function getRoot(): Root {
+  const element = document.getElementById("root")
+  if (!element) throw new Error("[SixbSharedApp] Could not find the root element.")
+
+  if (import.meta.hot) {
+    const data = import.meta.hot.data as SharedAppHotData
+    data.root ??= createRoot(element)
+    return data.root
+  }
+
+  return createRoot(element)
+}
+
+function ApplicationBoundaryReload() {
+  const location = useLocation()
+
+  React.useEffect(() => {
+    if (location.pathname !== "/shared" && !location.pathname.startsWith("/shared/")) {
+      window.location.reload()
+    }
+  }, [location.pathname])
+
+  return null
+}
+
+function SharedFallback({ title, detail }: { title: string; detail: string }) {
+  return (
+    <main
+      role="alert"
+      style={{
+        minHeight: "100dvh",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "0.75rem",
+        padding: "2rem",
+        textAlign: "center",
+        fontFamily:
+          "var(--font-sans, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif)",
+        background: "var(--background, #ffffff)",
+        color: "var(--foreground, #1f2933)",
+      }}
+    >
+      <h1 style={{ margin: 0, fontSize: "1.5rem" }}>{title}</h1>
+      <p style={{ margin: 0, maxWidth: "32rem", color: "var(--muted-foreground, #52606d)" }}>
+        {detail}
+      </p>
+    </main>
+  )
+}
+
+function SharedRoute({
+  route,
+  consumeFragmentSecret,
+}: {
+  route: (typeof sharedRoutes)[number]
+  consumeFragmentSecret: () => string | null
+}) {
+  const { grantId } = useParams<{ grantId: string }>()
+  if (!grantId) {
+    return <SharedFallback title="Link unavailable" detail="This shared link is invalid." />
+  }
+
+  return (
+    <SharedPageErrorBoundary resetKey={route.shareTypeId + ":" + grantId}>
+      <SharedAccessBoundary
+        key={route.shareTypeId + ":" + grantId}
+        apiBaseUrl={runtimeConfig.apiBaseUrl}
+        grantId={grantId}
+        shareTypeId={route.shareTypeId}
+        consumeFragmentSecret={consumeFragmentSecret}
+      >
+        ${layoutWrapperStart}
+          <route.component />
+        ${layoutWrapperEnd}
+      </SharedAccessBoundary>
+    </SharedPageErrorBoundary>
+  )
+}
+
+class SharedPageErrorBoundary extends React.Component<
+  { resetKey: string; children: React.ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false }
+
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error("[SixbSharedApp] Uncaught shared page error:", error)
+  }
+
+  componentDidUpdate(previous: { resetKey: string }) {
+    if (this.state.failed && previous.resetKey !== this.props.resetKey) {
+      this.setState({ failed: false })
+    }
+  }
+
+  render() {
+    return this.state.failed ? (
+      <SharedFallback title="Something went wrong" detail="The shared page could not be displayed." />
+    ) : (
+      this.props.children
+    )
+  }
+}
+
+function SharedApp({
+  consumeFragmentSecret,
+}: {
+  consumeFragmentSecret: () => string | null
+}) {
+  return (
+    <BrowserRouter>
+      <ApplicationBoundaryReload />
+      <Routes>
+        {sharedRoutes.map((route) => (
+          <Route
+            key={route.path}
+            path={route.path}
+            element={
+              <SharedRoute route={route} consumeFragmentSecret={consumeFragmentSecret} />
+            }
+          />
+        ))}
+        <Route
+          path="*"
+          element={<SharedFallback title="Link unavailable" detail="This shared link is invalid." />}
+        />
+      </Routes>
+    </BrowserRouter>
+  )
+}
+
+export function startSharedApp(fragmentSecret: string | null) {
+  const consumeFragmentSecret = () => {
+    const value = fragmentSecret
+    fragmentSecret = null
+    return value
+  }
+  if (import.meta.hot) {
+    ;(import.meta.hot.data as SharedAppHotData & { started?: boolean }).started = true
+  }
+  getRoot().render(<SharedApp consumeFragmentSecret={consumeFragmentSecret} />)
+}
+
+if (import.meta.hot && (import.meta.hot.data as SharedAppHotData & { started?: boolean }).started) {
+  startSharedApp(null)
+}
+`
+
+  const mainPath = join(generatedDir, "shared-main.tsx")
+  await writeFileIfChanged(mainPath, mainContent)
+
+  // This bootstrap has no imports on purpose: it clears the bearer fragment
+  // before loading the authored page or any of its transitive dependencies.
+  const bootstrapContent = `function consumeFragmentSecret(): string | null {
+  const rawFragment = window.location.hash
+  if (!rawFragment) return null
+
+  const secret = rawFragment.startsWith("#") ? rawFragment.slice(1) : rawFragment
+  window.history.replaceState(
+    window.history.state,
+    "",
+    window.location.pathname + window.location.search
+  )
+  return secret || null
+}
+
+let fragmentSecret = consumeFragmentSecret()
+void import("./shared-main").then(({ startSharedApp }) => {
+  const secret = fragmentSecret
+  fragmentSecret = null
+  startSharedApp(secret)
+})
+`
+  const bootstrapPath = join(generatedDir, "shared-bootstrap.ts")
+  await writeFileIfChanged(bootstrapPath, bootstrapContent)
+
+  const metadataHead = renderMetadataHead(metadata, { manifest: false })
+  const htmlContent = `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="robots" content="noindex, nofollow, noarchive" />
+    <meta name="referrer" content="no-referrer" />
+${metadataHead}
+    ${runtimeConfigScript}
+    <style>
+      * { box-sizing: border-box; }
+      html, body, #root { margin: 0; min-height: 100%; }
+      body, #root { min-height: 100vh; min-height: 100dvh; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./shared-bootstrap.ts"></script>
+  </body>
+</html>
+`
+
+  const htmlPath = join(generatedDir, "shared-index.html")
+  await writeFileIfChanged(htmlPath, htmlContent)
+  return { htmlPath, mainPath }
+}
+
+function renderMetadataHead(
+  metadata: Awaited<ReturnType<typeof resolveAppMetadata>>,
+  options: { readonly manifest?: boolean } = {}
+): string {
   const tags = [
     `    <title>${escapeHtmlText(metadata.title)}</title>`,
     ...(metadata.description
       ? [`    <meta name="description" content="${escapeHtmlAttribute(metadata.description)}" />`]
       : []),
     `    <meta name="theme-color" content="${escapeHtmlAttribute(metadata.themeColor)}" />`,
-    '    <link rel="manifest" href="/app.webmanifest" />',
+    ...(options.manifest === false ? [] : ['    <link rel="manifest" href="/app.webmanifest" />']),
     ...(metadata.favicon
       ? [`    <link rel="icon" href="${escapeHtmlAttribute(metadata.favicon)}" />`]
       : []),

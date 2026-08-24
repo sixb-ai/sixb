@@ -33,6 +33,12 @@
       "bun": "./src/agents.ts",
       "import": "./dist/agents.js",
       "default": "./dist/agents.js"
+    },
+    "./shared": {
+      "types": "./dist/shared.d.ts",
+      "bun": "./src/shared.ts",
+      "import": "./dist/shared.js",
+      "default": "./dist/shared.js"
     }
   },
   "scripts": {
@@ -42,6 +48,7 @@
   },
   "dependencies": {
     "@sixb/agent-ui": "workspace:^",
+    "@sixb/client": "workspace:^",
     "@sixb/core": "workspace:^",
     "@sixb/ui": "workspace:^",
     "@tailwindcss/cli": "^4.2.2",

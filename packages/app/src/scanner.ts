@@ -10,6 +10,52 @@ export interface PageRoute {
   relativePath: string
 }
 
+export interface SharedPageRoute extends PageRoute {
+  /** ShareType selected by the static directory below `app/shared/`. */
+  shareTypeId: string
+}
+
+export interface PartitionedAppRoutes {
+  applicationRoutes: PageRoute[]
+  sharedRoutes: SharedPageRoute[]
+}
+
+/**
+ * Reserves `app/shared/` for the isolated shared-access entry point.
+ *
+ * Keeping one canonical shape makes public exposure explicit and lets the
+ * generated runtime bind the static ShareType to the grant returned by the API.
+ */
+export function partitionAppRoutes(routes: readonly PageRoute[]): PartitionedAppRoutes {
+  const applicationRoutes: PageRoute[] = []
+  const sharedRoutes: SharedPageRoute[] = []
+
+  for (const route of routes) {
+    const segments = route.relativePath.split(/[\\/]+/)
+    if (segments[0] !== "shared") {
+      applicationRoutes.push(route)
+      continue
+    }
+
+    const shareTypeId = segments[1]
+    if (
+      segments.length !== 4 ||
+      !shareTypeId ||
+      shareTypeId.startsWith("[") ||
+      segments[2] !== "[grantId]" ||
+      (segments[3] !== "page.tsx" && segments[3] !== "page.ts")
+    ) {
+      throw new Error(
+        `[SixbCustomApp] Shared pages must use app/shared/<shareTypeId>/[grantId]/page.tsx; found app/${route.relativePath.split("\\").join("/")}.`
+      )
+    }
+
+    sharedRoutes.push({ ...route, shareTypeId })
+  }
+
+  return { applicationRoutes, sharedRoutes }
+}
+
 /**
  * Recursively scans an `app/` directory for `page.tsx`/`page.ts` files and
  * converts them to React Router route paths.

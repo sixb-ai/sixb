@@ -55,6 +55,17 @@ const report = await shared.getResource()
 await shared.requestAction("acknowledge-report", { params: { note: "Reviewed" } })
 ```
 
+Inside `app/shared/<shareTypeId>/[grantId]/page.tsx`, the generated shared runtime owns that
+bootstrap and exposes the ready, exact-target handle:
+
+```ts
+import { useSharedAccess } from "@sixb/app/shared"
+
+const shared = useSharedAccess()
+shared.resource
+await shared.requestAction("acknowledge-report")
+```
+
 > `@sixb/client/hooks` re-exports the events layer and the typed-query hooks,
 > so a React app usually only imports from `/hooks`.
 

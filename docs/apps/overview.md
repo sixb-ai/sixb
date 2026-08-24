@@ -60,6 +60,43 @@ Routing rules:
   helpers, or routes you do not want mounted.
 - The route component is the page module's `default` export.
 
+### Shared pages
+
+A ShareType gets a public, grant-bound page through one explicit convention:
+
+```text
+app/shared/published-report/[grantId]/page.tsx
+app/shared/layout.tsx                              # optional shared-only layout
+```
+
+The directory name must match the ShareType ID. Other shapes below `app/shared/` fail the build so
+a page cannot cross the public boundary accidentally.
+
+```tsx
+import { useSharedAccess } from "@sixb/app/shared"
+
+export default function PublishedReportPage() {
+  const shared = useSharedAccess()
+
+  return (
+    <main>
+      <h1>{String(shared.resource.properties.title)}</h1>
+      <button
+        type="button"
+        onClick={() => shared.requestAction("acknowledge-report", { params: { note: "Reviewed" } })}
+      >
+        Acknowledge
+      </button>
+    </main>
+  )
+}
+```
+
+Sixb removes the URL fragment before loading page code, exchanges it, restores an existing shared
+session on reload, and loads the exact resource before rendering the page. The shared entry has no
+OIDC bootstrap or normal client; its client and TanStack Query cache are recreated per grant and
+cleared when access ends. Crossing between normal and shared pages always performs a full reload.
+
 Here's a projects listing page. It builds a typed query for active projects and
 renders each one as a card:
 

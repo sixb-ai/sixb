@@ -9,6 +9,7 @@
       "@sixb/agent-worker": ["./packages/agent-worker/src/index.ts"],
       "@sixb/app": ["./packages/app/src/index.ts"],
       "@sixb/app/agents": ["./packages/app/src/agents.ts"],
+      "@sixb/app/shared": ["./packages/app/src/shared.ts"],
       "@sixb/atlas": ["./packages/atlas/src/index.ts"],
       "@sixb/auth-magic-link": ["./auth/magic-link/src/index.ts"],
       "@sixb/auth-oidc": ["./auth/oidc/src/index.ts"],

@@ -2,10 +2,13 @@ import { copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promis
 import { basename, dirname, join } from "node:path"
 
 const STATIC_ASSET_ORIGIN = "https://sixb-static.invalid"
+export const SHARED_APP_SHELL_FILE_NAME = "shared-index.html"
 
 export interface BuildAppOptions {
   /** Path to the generated index.html entry point */
   entryPath: string
+  /** Optional isolated shared-link HTML entry point. */
+  sharedEntryPath?: string
   /** Generated manifest copied to the stable `/app.webmanifest` output path. */
   manifestPath?: string
   /** Output directory, defaults to `.sixb/dist/app` */
@@ -29,38 +32,63 @@ export async function buildApp(options: BuildAppOptions): Promise<BuildAppResult
   await rm(outdir, { recursive: true, force: true })
   await mkdir(outdir, { recursive: true })
 
-  const bundleEntryPath = await prepareAppHtmlBundleEntry(options.entryPath)
-  let result: Awaited<ReturnType<typeof Bun.build>>
+  const entries = [
+    {
+      bundlePath: await prepareAppHtmlBundleEntry(options.entryPath),
+      outputName: "index.html",
+    },
+    ...(options.sharedEntryPath
+      ? [
+          {
+            bundlePath: await prepareAppHtmlBundleEntry(options.sharedEntryPath),
+            outputName: SHARED_APP_SHELL_FILE_NAME,
+          },
+        ]
+      : []),
+  ]
+  const failedLogs: string[] = []
+  let buildFailed = false
   try {
-    result = await Bun.build({
-      entrypoints: [bundleEntryPath],
-      outdir,
-      target: "browser",
-      conditions: ["bun"],
-      publicPath: "/",
-      minify: true,
-      // React is bundled into this browser output, so without pinning NODE_ENV the production build
-      // of a user's app ships React's development build: dev-only checks on every render, and the
-      // warnings that go with them. This is also the only knob that selects the production JSX
-      // runtime — an ambient NODE_ENV does not.
-      define: { "process.env.NODE_ENV": '"production"' },
-      sourcemap: "external",
-    })
+    // Build the two HTML entries independently. Bun currently mis-resolves some
+    // package-relative imports when separate HTML graphs share one build call;
+    // sequential builds still share content-hashed assets safely in one outdir.
+    for (const entry of entries) {
+      const result = await Bun.build({
+        entrypoints: [entry.bundlePath],
+        outdir,
+        target: "browser",
+        conditions: ["bun"],
+        publicPath: "/",
+        minify: true,
+        // React is bundled into this browser output, so without pinning NODE_ENV the production build
+        // of a user's app ships React's development build: dev-only checks on every render, and the
+        // warnings that go with them. This is also the only knob that selects the production JSX
+        // runtime — an ambient NODE_ENV does not.
+        define: { "process.env.NODE_ENV": '"production"' },
+        sourcemap: "external",
+      })
+      if (!result.success) {
+        buildFailed = true
+        failedLogs.push(...result.logs.map(String))
+        break
+      }
+      await rename(join(outdir, basename(entry.bundlePath)), join(outdir, entry.outputName))
+    }
   } finally {
-    await rm(bundleEntryPath, { force: true })
+    await Promise.all(entries.map((entry) => rm(entry.bundlePath, { force: true })))
   }
 
-  if (!result.success) {
+  if (buildFailed) {
     return {
       success: false,
       outdir,
-      logs: result.logs.map(String),
+      logs: failedLogs,
     }
   }
 
-  const bundleHtmlPath = join(outdir, basename(bundleEntryPath))
-  await rename(bundleHtmlPath, join(outdir, "index.html"))
-  await rewriteIndexAssetPaths(outdir)
+  for (const entry of entries) {
+    await rewriteHtmlAssetPaths(outdir, entry.outputName)
+  }
   if (options.manifestPath) {
     await copyFile(options.manifestPath, join(outdir, "app.webmanifest"))
   }
@@ -77,7 +105,8 @@ export async function prepareAppHtmlBundleEntry(entryPath: string): Promise<stri
     /(<link\s+rel=["'](?:manifest|icon|apple-touch-icon)["']\s+href=["'])(\/[^"']*)(["'][^>]*>)/g,
     `$1${STATIC_ASSET_ORIGIN}$2$3`
   )
-  const bundleEntryPath = join(dirname(entryPath), "index.sixb-bundle.html")
+  const entryName = basename(entryPath, ".html")
+  const bundleEntryPath = join(dirname(entryPath), `${entryName}.sixb-bundle.html`)
   await writeFile(bundleEntryPath, bundleHtml, "utf-8")
   return bundleEntryPath
 }
@@ -86,8 +115,8 @@ export function restoreAppStaticUrls(html: string): string {
   return html.replaceAll(STATIC_ASSET_ORIGIN, "")
 }
 
-async function rewriteIndexAssetPaths(outdir: string): Promise<void> {
-  const indexPath = join(outdir, "index.html")
+async function rewriteHtmlAssetPaths(outdir: string, fileName: string): Promise<void> {
+  const indexPath = join(outdir, fileName)
   const originalHtml = await readFile(indexPath, "utf-8")
   const html = restoreAppStaticUrls(originalHtml)
 

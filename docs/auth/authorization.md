@@ -121,6 +121,11 @@ Object or Action endpoints.
 same fixed object as their subject; callers can provide only the Action ID and its parameters. The
 request execution records `grantId` and `sessionId` as authority without inventing a user identity.
 
+Pages under `app/shared/<shareTypeId>/[grantId]/page.tsx` run in a separate browser entry point.
+The bootstrap removes the fragment before loading page code, exchanges it, validates that the grant
+matches the static ShareType page, and creates a client and query cache scoped to that grant. It
+never initializes OIDC, even when an application session already exists on the same origin.
+
 > **Only `can.view(Type)` reaches subtypes.** `can.edit` and `can.append` cover exactly the types
 > you name, so adding a type under one you granted never makes it writable on its own.
 

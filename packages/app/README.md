@@ -34,6 +34,14 @@ The generated entry also intercepts plain same-origin `<a href="/...">` clicks a
 
 If `app/layout.tsx` exists, it is used as a root layout wrapper. It can also export a `metadata` object (`title`, `description`, `favicon`, `themeColor`, and `backgroundColor`). Metadata is loaded during generation and written into the static HTML and manifest, so it is available before auth and client startup. The layout module must therefore be import-safe in Bun: do not access `window` or `document` at module scope. An `app/globals.css` file is imported automatically when present.
 
+### Shared Pages
+
+`app/shared/<shareTypeId>/[grantId]/page.tsx` creates a separate public entry point for an active
+shared grant. It never starts application auth, and `app/shared/layout.tsx` wraps only shared pages.
+Use `useSharedAccess()` from `@sixb/app/shared` to read the exact resource and request an allowed
+Action. The generated runtime owns fragment exchange, session restoration, and a grant-scoped
+client and query cache. Any other page shape below `app/shared/` fails generation.
+
 ### Built-in Agent Routes
 
 Custom apps automatically receive the shared Sixb agent chat UI at:
@@ -170,3 +178,4 @@ A file at `app/public/app.webmanifest` is ignored because the generated manifest
 | `AppMetadata` | Metadata shape exported by `app/layout.tsx` |
 | `createTailwindCssCompiler(options)` | Shared Tailwind v4 build pipeline (also used by Atlas) |
 | `@sixb/app/agents` | Full-page agent route plus `AgentPanel`, context provider/hooks, and helpers |
+| `@sixb/app/shared` | Grant-bound shared page runtime and `useSharedAccess()` hook |
