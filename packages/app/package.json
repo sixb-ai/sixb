@@ -44,6 +44,7 @@
   "scripts": {
     "build": "bun ../../scripts/build-package.ts",
     "typecheck": "tsc --noEmit",
+    "test:e2e": "bun ../../scripts/ci-guard.ts --stall 60 --max 240 bun test ./tests/shared-app.e2e.ts",
     "prepack": "bun run build"
   },
   "dependencies": {

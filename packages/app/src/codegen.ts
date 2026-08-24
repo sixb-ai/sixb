@@ -809,11 +809,54 @@ if (import.meta.hot && (import.meta.hot.data as SharedAppHotData & { started?: b
 }
 
 let fragmentSecret = consumeFragmentSecret()
-void import("./shared-main").then(({ startSharedApp }) => {
-  const secret = fragmentSecret
-  fragmentSecret = null
-  startSharedApp(secret)
-})
+let importPending = false
+
+function showImportFailure(): void {
+  const root = document.getElementById("root")
+  if (!root) return
+
+  const main = document.createElement("main")
+  main.setAttribute("role", "alert")
+  main.style.cssText =
+    "min-height:100dvh;display:flex;flex-direction:column;align-items:center;" +
+    "justify-content:center;gap:.75rem;padding:2rem;text-align:center;" +
+    "font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"
+
+  const title = document.createElement("h1")
+  title.textContent = "Unable to open this link"
+  title.style.cssText = "margin:0;font-size:1.5rem"
+  const detail = document.createElement("p")
+  detail.textContent = "A temporary problem occurred. Please try again."
+  detail.style.cssText = "margin:0;max-width:32rem"
+  const retry = document.createElement("button")
+  retry.type = "button"
+  retry.textContent = "Try again"
+  retry.style.cssText =
+    "margin-top:.25rem;padding:.625rem 1rem;border:1px solid currentColor;" +
+    "border-radius:.375rem;background:transparent;color:inherit;cursor:pointer;font:inherit"
+  retry.addEventListener("click", () => void loadSharedApp())
+
+  main.append(title, detail, retry)
+  root.replaceChildren(main)
+}
+
+async function loadSharedApp(): Promise<void> {
+  if (importPending) return
+  importPending = true
+  try {
+    const { startSharedApp } = await import("./shared-main")
+    const secret = fragmentSecret
+    startSharedApp(secret)
+    fragmentSecret = null
+  } catch (error) {
+    console.error("[SixbSharedApp] Failed to load the shared app entry; retry is available.", error)
+    showImportFailure()
+  } finally {
+    importPending = false
+  }
+}
+
+void loadSharedApp()
 `
   const bootstrapPath = join(generatedDir, "shared-bootstrap.ts")
   await writeFileIfChanged(bootstrapPath, bootstrapContent)

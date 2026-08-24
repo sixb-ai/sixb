@@ -10,6 +10,7 @@ export type {
   ShareTypeReference,
 } from "./execution"
 export { createSharesRuntime } from "./execution"
+export { isRouteSafeShareTypeId, SHARE_TYPE_ID_REQUIREMENT } from "./id"
 export type {
   DefineShareTypeOptions,
   ShareTypeDefinition,

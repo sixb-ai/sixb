@@ -3,6 +3,7 @@ import type { OntologyDefinitionCatalog } from "../ontology"
 import { assertGrantDefinition, type GrantDefinition } from "../security"
 import type { SharedAccessGrantRef } from "../storage/share-grants"
 import { ShareError } from "./errors"
+import { isRouteSafeShareTypeId, SHARE_TYPE_ID_REQUIREMENT } from "./id"
 import type { ShareTypeDefinition } from "./types"
 
 export function validateShareTypesAtStartup(input: {
@@ -16,8 +17,8 @@ export function validateShareTypesAtStartup(input: {
     if (share.kind !== "share") {
       throw invalid("Share type kind must be 'share'.")
     }
-    if (typeof share.id !== "string" || !share.id.trim()) {
-      throw invalid("Share type id must not be empty.")
+    if (!isRouteSafeShareTypeId(share.id)) {
+      throw invalid(`Share type id ${SHARE_TYPE_ID_REQUIREMENT}.`)
     }
     if (byId.has(share.id)) {
       throw invalid(`Duplicate share type id: ${share.id}`)

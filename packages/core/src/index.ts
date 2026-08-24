@@ -478,7 +478,13 @@ export type {
   ShareTypeGrant,
   ShareTypeReference,
 } from "./shares"
-export { defineShareType, isShareTypeDefinition, ShareError } from "./shares"
+export {
+  defineShareType,
+  isRouteSafeShareTypeId,
+  isShareTypeDefinition,
+  SHARE_TYPE_ID_REQUIREMENT,
+  ShareError,
+} from "./shares"
 
 // ── Storage ────────────────────────────────────────────────
 // Config contract + operator migration API + in-memory dev providers.

@@ -1,5 +1,6 @@
 import { readdir } from "node:fs/promises"
 import { join, relative } from "node:path"
+import { isRouteSafeShareTypeId, SHARE_TYPE_ID_REQUIREMENT } from "@sixb/core"
 
 export interface PageRoute {
   /** React Router path, e.g. "/" or "/remote/:id" */
@@ -41,12 +42,16 @@ export function partitionAppRoutes(routes: readonly PageRoute[]): PartitionedApp
     if (
       segments.length !== 4 ||
       !shareTypeId ||
-      shareTypeId.startsWith("[") ||
       segments[2] !== "[grantId]" ||
       (segments[3] !== "page.tsx" && segments[3] !== "page.ts")
     ) {
       throw new Error(
         `[SixbCustomApp] Shared pages must use app/shared/<shareTypeId>/[grantId]/page.tsx; found app/${route.relativePath.split("\\").join("/")}.`
+      )
+    }
+    if (!isRouteSafeShareTypeId(shareTypeId)) {
+      throw new Error(
+        `[SixbCustomApp] Shared page ShareType id '${shareTypeId}' ${SHARE_TYPE_ID_REQUIREMENT}.`
       )
     }
 

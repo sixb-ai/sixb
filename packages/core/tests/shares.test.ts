@@ -72,6 +72,21 @@ function publisherContext(roles: readonly ResolvedRole[], principalId = "usr_pub
 }
 
 describe("shared access grants", () => {
+  test.each([
+    "sales/report",
+    ":report",
+    ".report",
+    "report name",
+  ])("rejects route-unsafe ShareType id %s", (id) => {
+    expect(() =>
+      defineShareType({
+        id,
+        target: Report,
+        grants: [can.view(Report)],
+      })
+    ).toThrow("route-safe")
+  })
+
   test("issues once, lists by exact target, and preserves the first revocation", async () => {
     const host = createHost()
     const setup = createTestSixb(host)

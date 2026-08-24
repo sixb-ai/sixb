@@ -1,7 +1,9 @@
-import type {
-  SharedAccessClient,
-  SharedAccessContext,
-  SharedAccessResource,
+import {
+  isSixbApiError,
+  isValidSharedAccessSecret,
+  type SharedAccessClient,
+  type SharedAccessContext,
+  type SharedAccessResource,
 } from "@sixb/client/shared"
 
 export interface SharedAppBrowserLocation {
@@ -20,6 +22,8 @@ export interface BootstrapSharedAppAccessOptions {
   readonly grantId: string
   readonly fragmentSecret: string | null
   readonly client: SharedAccessClient
+  /** Called once the secret has been exchanged or an existing session validated. */
+  readonly onAccessEstablished?: () => void
 }
 
 export interface BootstrappedSharedAppAccess {
@@ -42,6 +46,10 @@ export class SharedAppUnavailableError extends Error {
 export async function bootstrapSharedAppAccess(
   options: BootstrapSharedAppAccessOptions
 ): Promise<BootstrappedSharedAppAccess> {
+  if (options.fragmentSecret !== null && !isValidSharedAccessSecret(options.fragmentSecret)) {
+    throw new SharedAppUnavailableError()
+  }
+
   const access = options.fragmentSecret
     ? await options.client.exchange(options.fragmentSecret)
     : await options.client.getSession()
@@ -53,6 +61,7 @@ export async function bootstrapSharedAppAccess(
   ) {
     throw new SharedAppUnavailableError()
   }
+  options.onAccessEstablished?.()
 
   const resource = await options.client.getResource()
   if (
@@ -63,6 +72,23 @@ export async function bootstrapSharedAppAccess(
   }
 
   return { access, resource }
+}
+
+export type SharedAppFailureKind = "terminal" | "retryable" | "unexpected"
+
+/** Keeps public failures generic while preserving enough signal for a safe retry. */
+export function classifySharedAppFailure(error: unknown): SharedAppFailureKind {
+  if (error instanceof SharedAppUnavailableError) return "terminal"
+
+  if (isSixbApiError(error)) {
+    if (error.status === 408 || error.status === 429 || error.status >= 500) {
+      return "retryable"
+    }
+    return "terminal"
+  }
+
+  if (error instanceof TypeError) return "retryable"
+  return "unexpected"
 }
 
 export function consumeSharedAppFragmentSecret(

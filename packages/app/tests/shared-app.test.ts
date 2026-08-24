@@ -1,15 +1,13 @@
 import { afterEach, describe, expect, mock, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
-import { createServer } from "node:net"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join, resolve } from "node:path"
+import { join } from "node:path"
 import type { SharedAccessClient } from "@sixb/client/shared"
-import { buildApp } from "../src/build"
 import { generateSharedAppEntry, generateSharedRouteManifest } from "../src/codegen"
-import { createCustomApp } from "../src/createCustomApp"
 import { type PageRoute, partitionAppRoutes } from "../src/scanner"
 import {
   bootstrapSharedAppAccess,
+  classifySharedAppFailure,
   consumeSharedAppFragmentSecret,
   SharedAppUnavailableError,
 } from "../src/shared-runtime"
@@ -18,39 +16,6 @@ const publishedReportRoute: PageRoute = {
   path: "/shared/published-report/:grantId",
   filePath: "/project/app/shared/published-report/[grantId]/page.tsx",
   relativePath: "shared/published-report/[grantId]/page.tsx",
-}
-
-async function getFreePort(): Promise<number> {
-  return await new Promise<number>((resolvePort, reject) => {
-    const server = createServer()
-    server.on("error", reject)
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address()
-      if (!address || typeof address === "string") {
-        reject(new Error("Could not resolve an open port"))
-        return
-      }
-      server.close((error) => (error ? reject(error) : resolvePort(address.port)))
-    })
-  })
-}
-
-async function linkSharedAppDependencies(projectRoot: string): Promise<void> {
-  const appPackageRoot = resolve(import.meta.dir, "..")
-  const targets = new Map<string, string>([
-    ["@sixb/app", appPackageRoot],
-    ["@sixb/client", resolve(appPackageRoot, "../client")],
-    ["@tanstack/react-query", join(appPackageRoot, "node_modules", "@tanstack/react-query")],
-    ["react", join(appPackageRoot, "node_modules", "react")],
-    ["react-dom", join(appPackageRoot, "node_modules", "react-dom")],
-    ["react-router-dom", join(appPackageRoot, "node_modules", "react-router-dom")],
-  ])
-
-  for (const [name, source] of targets) {
-    const target = join(projectRoot, "node_modules", ...name.split("/"))
-    await mkdir(resolve(target, ".."), { recursive: true })
-    await symlink(source, target, "dir")
-  }
 }
 
 describe("shared app route boundary", () => {
@@ -71,7 +36,6 @@ describe("shared app route boundary", () => {
     "shared/page.tsx",
     "shared/published-report/page.tsx",
     "shared/published-report/[token]/page.tsx",
-    "shared/[shareTypeId]/[grantId]/page.tsx",
     "shared/published-report/[grantId]/details/page.tsx",
   ])("rejects malformed public shared route %s", (relativePath) => {
     expect(() =>
@@ -83,6 +47,23 @@ describe("shared app route boundary", () => {
         },
       ])
     ).toThrow("Shared pages must use app/shared/<shareTypeId>/[grantId]/page.tsx")
+  })
+
+  test.each([
+    ":report",
+    ".report",
+    "report name",
+    "[shareTypeId]",
+  ])("rejects route-unsafe ShareType id %s", (shareTypeId) => {
+    expect(() =>
+      partitionAppRoutes([
+        {
+          path: `/shared/${shareTypeId}/:grantId`,
+          filePath: `/project/app/shared/${shareTypeId}/[grantId]/page.tsx`,
+          relativePath: `shared/${shareTypeId}/[grantId]/page.tsx`,
+        },
+      ])
+    ).toThrow("ShareType id")
   })
 
   test("generates a manifest that binds each page to its declared ShareType", async () => {
@@ -211,6 +192,53 @@ describe("shared app bootstrap", () => {
       })
     ).rejects.toBeInstanceOf(SharedAppUnavailableError)
   })
+
+  test("rejects a malformed fragment without attempting an exchange", async () => {
+    const sharedClient = client()
+    await expect(
+      bootstrapSharedAppAccess({
+        expectedShareTypeId: "published-report",
+        grantId: "shr_1",
+        fragmentSecret: "not-a-secret",
+        client: sharedClient,
+      })
+    ).rejects.toBeInstanceOf(SharedAppUnavailableError)
+
+    expect(sharedClient.exchange).not.toHaveBeenCalled()
+  })
+
+  test("signals an established session before loading the resource", async () => {
+    const established: string[] = []
+    await expect(
+      bootstrapSharedAppAccess({
+        expectedShareTypeId: "published-report",
+        grantId: "shr_1",
+        fragmentSecret: "abcdefghijklmnopqrstuvwxyz0123456789_-ABCDE",
+        client: client({
+          getResource: mock(async () => {
+            throw { name: "SixbApiError", status: 503 }
+          }),
+        }),
+        onAccessEstablished: () => established.push("established"),
+      })
+    ).rejects.toEqual({ name: "SixbApiError", status: 503 })
+
+    expect(established).toEqual(["established"])
+  })
+
+  test("separates terminal, retryable, and unexpected bootstrap failures", () => {
+    expect(classifySharedAppFailure(new SharedAppUnavailableError())).toBe("terminal")
+    expect(
+      classifySharedAppFailure({
+        name: "SixbApiError",
+        status: 401,
+        code: "share.access_unavailable",
+      })
+    ).toBe("terminal")
+    expect(classifySharedAppFailure({ name: "SixbApiError", status: 503 })).toBe("retryable")
+    expect(classifySharedAppFailure(new TypeError("fetch failed"))).toBe("retryable")
+    expect(classifySharedAppFailure(new Error("unexpected"))).toBe("unexpected")
+  })
 })
 
 describe("shared app entry", () => {
@@ -252,166 +280,10 @@ describe("shared app entry", () => {
     expect(bootstrap.indexOf("history.replaceState")).toBeLessThan(
       bootstrap.indexOf('import("./shared-main")')
     )
-    expect(bootstrap.indexOf("fragmentSecret = null")).toBeLessThan(
-      bootstrap.indexOf("startSharedApp(secret)")
+    expect(bootstrap.indexOf("startSharedApp(secret)")).toBeLessThan(
+      bootstrap.indexOf("fragmentSecret = null")
     )
-  })
-
-  test("serves separate dev shells and secures the public shared response", async () => {
-    const workspaceTempDir = resolve(import.meta.dir, "../../..", ".local", "test-tmp")
-    await mkdir(workspaceTempDir, { recursive: true })
-    root = await mkdtemp(join(workspaceTempDir, "sixb-shared-dev-"))
-    await mkdir(join(root, "app", "shared", "published-report", "[grantId]"), {
-      recursive: true,
-    })
-    await writeFile(
-      join(root, "app", "page.tsx"),
-      "export default function AppPage() { return <main>Application shell</main> }\n"
-    )
-    await writeFile(
-      join(root, "app", "shared", "published-report", "[grantId]", "page.tsx"),
-      "export default function SharedPage() { return <main>Shared shell</main> }\n"
-    )
-    await linkSharedAppDependencies(root)
-
-    const port = await getFreePort()
-    const app = await createCustomApp({
-      rootDir: root,
-      apiBaseUrl: "https://api.example.com",
-      authEnabled: true,
-      agentRoutes: false,
-    })
-    const server = await app.dev({ host: "127.0.0.1", port })
-
-    try {
-      const application = await fetch(`http://127.0.0.1:${port}/`)
-      const shared = await fetch(`http://127.0.0.1:${port}/shared/published-report/shr_1`)
-      const internalSharedShell = await fetch(
-        `http://127.0.0.1:${port}/__sixb/generated/shared-app-shell`
-      )
-
-      expect(application.status).toBe(200)
-      expect(shared.status).toBe(200)
-      expect(internalSharedShell.status).toBe(404)
-      const applicationHtml = await application.text()
-      const sharedHtml = await shared.text()
-      const sharedCsp = shared.headers.get("content-security-policy") ?? ""
-      const scriptNonce = sharedHtml.match(/<script nonce="([^"]+)"/)?.[1]
-      expect(applicationHtml).not.toBe(sharedHtml)
-      expect(scriptNonce).toBeTruthy()
-      expect(sharedCsp).toContain(`'nonce-${scriptNonce}'`)
-      expect(shared.headers.get("cache-control")).toBe("no-store")
-      expect(shared.headers.get("referrer-policy")).toBe("no-referrer")
-      expect(shared.headers.get("x-robots-tag")).toBe("noindex, nofollow, noarchive")
-      expect(sharedCsp).toContain("connect-src 'self' https://api.example.com")
-      expect(
-        await fetch(`http://127.0.0.1:${port}/shared/published-report/shr_1`, {
-          method: "POST",
-        })
-      ).toHaveProperty("status", 404)
-
-      const applicationRoutes = await readFile(
-        join(root, ".sixb", "generated", "routes.ts"),
-        "utf-8"
-      )
-      const sharedRoutes = await readFile(
-        join(root, ".sixb", "generated", "shared-routes.ts"),
-        "utf-8"
-      )
-      expect(applicationRoutes).not.toContain("published-report")
-      expect(sharedRoutes).toContain("published-report")
-    } finally {
-      await server.stop()
-    }
-  }, 30_000)
-
-  test("builds and serves the shared entry separately in production", async () => {
-    const workspaceTempDir = resolve(import.meta.dir, "../../..", ".local", "test-tmp")
-    await mkdir(workspaceTempDir, { recursive: true })
-    root = await mkdtemp(join(workspaceTempDir, "sixb-shared-build-"))
-    await mkdir(join(root, "app", "shared", "published-report", "[grantId]"), {
-      recursive: true,
-    })
-    await writeFile(
-      join(root, "app", "page.tsx"),
-      "export default function AppPage() { return <main>Application shell</main> }\n"
-    )
-    await writeFile(
-      join(root, "app", "shared", "published-report", "[grantId]", "page.tsx"),
-      "export default function SharedPage() { return <main>Shared shell</main> }\n"
-    )
-    await linkSharedAppDependencies(root)
-
-    const outdir = join(root, ".sixb", "dist", "app")
-    await mkdir(join(root, "app", "public"), { recursive: true })
-    await writeFile(
-      join(root, "app", "public", "shared-index.html"),
-      "<!doctype html><p>Public file must not replace the shared shell.</p>\n"
-    )
-
-    const app = await createCustomApp({ rootDir: root, authEnabled: true, agentRoutes: false })
-    const build = await app.build({ outdir })
-    expect(build.success).toBe(true)
-    expect(await readFile(join(outdir, "shared-index.html"), "utf-8")).not.toContain(
-      "Public file must not replace"
-    )
-
-    const port = await getFreePort()
-    const server = await app.start({
-      host: "127.0.0.1",
-      port,
-      outdir,
-      apiBaseUrl: "https://api.example.com",
-      authEnabled: true,
-    })
-    try {
-      const application = await fetch(`http://127.0.0.1:${port}/`)
-      const shared = await fetch(`http://127.0.0.1:${port}/shared/published-report/shr_1`)
-      const rawSharedShell = await fetch(`http://127.0.0.1:${port}/shared-index.html`)
-      expect(application.status).toBe(200)
-      expect(shared.status).toBe(200)
-      expect(rawSharedShell.status).toBe(404)
-      expect(await application.text()).not.toBe(await shared.text())
-      expect(shared.headers.get("content-security-policy")).toContain(
-        "connect-src 'self' https://api.example.com"
-      )
-    } finally {
-      await server.stop()
-    }
-  }, 30_000)
-
-  test("builds both HTML entries with root-relative assets", async () => {
-    root = await mkdtemp(join(tmpdir(), "sixb-shared-build-entries-"))
-    const generatedDir = join(root, "generated")
-    const outdir = join(root, "dist")
-    await mkdir(generatedDir, { recursive: true })
-    await writeFile(join(generatedDir, "main.ts"), 'document.body.dataset.entry = "app"\n')
-    await writeFile(
-      join(generatedDir, "shared-main.ts"),
-      'document.body.dataset.entry = "shared"\n'
-    )
-    await writeFile(
-      join(generatedDir, "index.html"),
-      '<!doctype html><body><script type="module" src="./main.ts"></script></body>\n'
-    )
-    await writeFile(
-      join(generatedDir, "shared-index.html"),
-      '<!doctype html><body><script type="module" src="./shared-main.ts"></script></body>\n'
-    )
-
-    const result = await buildApp({
-      entryPath: join(generatedDir, "index.html"),
-      sharedEntryPath: join(generatedDir, "shared-index.html"),
-      outdir,
-    })
-
-    expect(result.success).toBe(true)
-    const applicationHtml = await readFile(join(outdir, "index.html"), "utf-8")
-    const sharedHtml = await readFile(join(outdir, "shared-index.html"), "utf-8")
-    expect(applicationHtml).toMatch(/src=["']\/[^"']+\.js["']/)
-    expect(sharedHtml).toMatch(/src=["']\/[^"']+\.js["']/)
-    expect(applicationHtml).not.toBe(sharedHtml)
-    expect(await Bun.file(join(generatedDir, "index.sixb-bundle.html")).exists()).toBe(false)
-    expect(await Bun.file(join(generatedDir, "shared-index.sixb-bundle.html")).exists()).toBe(false)
+    expect(bootstrap).toContain("Failed to load the shared app entry")
+    expect(bootstrap).toContain("Try again")
   })
 })

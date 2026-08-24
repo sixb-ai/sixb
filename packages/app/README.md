@@ -40,7 +40,8 @@ If `app/layout.tsx` exists, it is used as a root layout wrapper. It can also exp
 shared grant. It never starts application auth, and `app/shared/layout.tsx` wraps only shared pages.
 Use `useSharedAccess()` from `@sixb/app/shared` to read the exact resource and request an allowed
 Action. The generated runtime owns fragment exchange, session restoration, and a grant-scoped
-client and query cache. Any other page shape below `app/shared/` fails generation.
+client and query cache. ShareType IDs must start with an ASCII letter or number and contain only
+letters, numbers, `.`, `_`, or `-`. Any other page shape below `app/shared/` fails generation.
 
 ### Built-in Agent Routes
 

@@ -20,6 +20,7 @@ export type SharedAccessSession = GetSharedAccessSessionResponse
 export type SharedAccessResource = GetSharedAccessResourceResponse
 export type SharedAccessActionInput = RequestSharedAccessActionData["body"]
 export type SharedAccessActionResult = RequestSharedAccessActionResponse
+export { isSixbApiError } from "./api"
 
 export interface SharedAccessClientOptions {
   readonly grantId: string
@@ -39,6 +40,12 @@ export interface SharedAccessClient {
   signOut(): Promise<SignOutSharedAccessResponse>
 }
 
+const SHARED_ACCESS_SECRET_PATTERN = /^[A-Za-z0-9_-]{43}$/
+
+export function isValidSharedAccessSecret(value: unknown): value is string {
+  return typeof value === "string" && SHARED_ACCESS_SECRET_PATTERN.test(value)
+}
+
 /**
  * Creates an isolated client that can call only the shared protocol.
  *
@@ -56,7 +63,7 @@ export function createSharedAccessClient(options: SharedAccessClientOptions): Sh
 
   return {
     async exchange(secret) {
-      if (!/^[A-Za-z0-9_-]{43}$/.test(secret)) {
+      if (!isValidSharedAccessSecret(secret)) {
         throw new Error("[SixbClient] Shared access secret is invalid.")
       }
       const { data } = await exchangeSharedAccess({

@@ -69,8 +69,9 @@ app/shared/published-report/[grantId]/page.tsx
 app/shared/layout.tsx                              # optional shared-only layout
 ```
 
-The directory name must match the ShareType ID. Other shapes below `app/shared/` fail the build so
-a page cannot cross the public boundary accidentally.
+The directory name must match the ShareType ID. IDs are route-safe segments: they start with an
+ASCII letter or number and contain only letters, numbers, `.`, `_`, or `-`. Other shapes below
+`app/shared/` fail the build so a page cannot cross the public boundary accidentally.
 
 ```tsx
 import { useSharedAccess } from "@sixb/app/shared"
@@ -95,7 +96,9 @@ export default function PublishedReportPage() {
 Sixb removes the URL fragment before loading page code, exchanges it, restores an existing shared
 session on reload, and loads the exact resource before rendering the page. The shared entry has no
 OIDC bootstrap or normal client; its client and TanStack Query cache are recreated per grant and
-cleared when access ends. Crossing between normal and shared pages always performs a full reload.
+cleared when access ends. Temporary bootstrap failures offer a retry while retaining the link
+secret only in memory; the secret is discarded as soon as a session exists. Crossing between normal
+and shared pages always performs a full reload.
 
 Here's a projects listing page. It builds a typed query for active projects and
 renders each one as a card:

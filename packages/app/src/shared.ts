@@ -1,5 +1,6 @@
 import {
   createSharedAccessClient,
+  isSixbApiError,
   type SharedAccessActionInput,
   type SharedAccessActionResult,
   type SharedAccessContext,
@@ -13,9 +14,14 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react"
-import { bootstrapSharedAppAccess, SharedAppUnavailableError } from "./shared-runtime"
+import {
+  bootstrapSharedAppAccess,
+  classifySharedAppFailure,
+  SharedAppUnavailableError,
+} from "./shared-runtime"
 
 export interface SharedAppRuntimeConfig {
   readonly apiBaseUrl: string
@@ -45,6 +51,7 @@ export interface SharedAccessBoundaryProps {
 
 type SharedAccessState =
   | { readonly status: "loading" }
+  | { readonly status: "retryable" }
   | { readonly status: "unavailable" }
   | {
       readonly status: "ready"
@@ -53,6 +60,8 @@ type SharedAccessState =
     }
 
 const SharedAccessContextValue = createContext<SharedAccessValue | null>(null)
+
+type SharedBootstrapOutcome = Exclude<SharedAccessState, { readonly status: "loading" }>
 
 /** Reads only the API origin injected into the shared HTML entry. */
 export function readSharedAppRuntimeConfig(): SharedAppRuntimeConfig {
@@ -89,29 +98,61 @@ export function SharedAccessBoundary(props: SharedAccessBoundaryProps) {
   )
   const [queryClient] = useState(createSharedQueryClient)
   const [state, setState] = useState<SharedAccessState>({ status: "loading" })
+  const [bootstrapAttempt, setBootstrapAttempt] = useState(0)
+  const fragmentSecret = useRef<string | null | undefined>(undefined)
+  const bootstrap = useRef<{
+    readonly attempt: number
+    readonly promise: Promise<SharedBootstrapOutcome>
+  } | null>(null)
 
   useEffect(() => {
     let cancelled = false
     setState({ status: "loading" })
 
-    void bootstrapSharedAppAccess({
-      expectedShareTypeId: props.shareTypeId,
-      grantId: props.grantId,
-      fragmentSecret: props.consumeFragmentSecret(),
-      client,
-    }).then(
-      (result) => {
-        if (!cancelled) setState({ status: "ready", ...result })
-      },
-      () => {
-        if (!cancelled) setState({ status: "unavailable" })
+    let current = bootstrap.current
+    if (!current || current.attempt !== bootstrapAttempt) {
+      if (fragmentSecret.current === undefined) {
+        fragmentSecret.current = props.consumeFragmentSecret()
       }
-    )
+
+      const promise = bootstrapSharedAppAccess({
+        expectedShareTypeId: props.shareTypeId,
+        grantId: props.grantId,
+        fragmentSecret: fragmentSecret.current,
+        client,
+        // Once exchange succeeds, the short-lived session is sufficient even
+        // if loading the resource fails and the user retries.
+        onAccessEstablished: () => {
+          fragmentSecret.current = null
+        },
+      }).then<SharedBootstrapOutcome, SharedBootstrapOutcome>(
+        (result) => {
+          fragmentSecret.current = null
+          return { status: "ready", ...result }
+        },
+        (error) => {
+          const kind = classifySharedAppFailure(error)
+          if (kind === "terminal") {
+            fragmentSecret.current = null
+            return { status: "unavailable" }
+          }
+
+          console.error("[SixbSharedApp] Could not open shared access; retry is available.", error)
+          return { status: "retryable" }
+        }
+      )
+      current = { attempt: bootstrapAttempt, promise }
+      bootstrap.current = current
+    }
+
+    void current.promise.then((result) => {
+      if (!cancelled) setState(result)
+    })
 
     return () => {
       cancelled = true
     }
-  }, [client, props.consumeFragmentSecret, props.grantId, props.shareTypeId])
+  }, [bootstrapAttempt, client, props.consumeFragmentSecret, props.grantId, props.shareTypeId])
 
   useEffect(() => {
     return () => queryClient.clear()
@@ -187,13 +228,20 @@ export function SharedAccessBoundary(props: SharedAccessBoundaryProps) {
           title: "Opening shared access…",
           detail: "Please wait while this link is verified.",
         })
-      : state.status === "unavailable" || !value
+      : state.status === "retryable"
         ? createElement(SharedAppFallback, {
             role: "alert",
-            title: "Link unavailable",
-            detail: "This shared link is invalid, expired, or no longer available.",
+            title: "Unable to open this link",
+            detail: "A temporary problem occurred. Please try again.",
+            onRetry: () => setBootstrapAttempt((attempt) => attempt + 1),
           })
-        : createElement(SharedAccessContextValue.Provider, { value }, props.children)
+        : state.status === "unavailable" || !value
+          ? createElement(SharedAppFallback, {
+              role: "alert",
+              title: "Link unavailable",
+              detail: "This shared link is invalid, expired, or no longer available.",
+            })
+          : createElement(SharedAccessContextValue.Provider, { value }, props.children)
 
   return createElement(QueryClientProvider, { client: queryClient }, content)
 }
@@ -221,11 +269,8 @@ function assertExactResource(resource: SharedAccessResource, access: SharedAcces
 function isUnavailableError(error: unknown): boolean {
   if (error instanceof SharedAppUnavailableError) return true
   return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    ((error as { readonly code?: unknown }).code === "share.access_unavailable" ||
-      (error as { readonly code?: unknown }).code === "share.resource_not_found")
+    isSixbApiError(error) &&
+    (error.code === "share.access_unavailable" || error.code === "share.resource_not_found")
   )
 }
 
@@ -233,6 +278,7 @@ function SharedAppFallback(props: {
   readonly role: "alert" | "status"
   readonly title: string
   readonly detail: string
+  readonly onRetry?: () => void
 }) {
   return createElement(
     "main",
@@ -258,6 +304,26 @@ function SharedAppFallback(props: {
       "p",
       { style: { margin: 0, maxWidth: "32rem", color: "var(--muted-foreground, #52606d)" } },
       props.detail
-    )
+    ),
+    props.onRetry
+      ? createElement(
+          "button",
+          {
+            type: "button",
+            onClick: props.onRetry,
+            style: {
+              marginTop: "0.25rem",
+              padding: "0.625rem 1rem",
+              border: "1px solid currentColor",
+              borderRadius: "0.375rem",
+              background: "transparent",
+              color: "inherit",
+              cursor: "pointer",
+              font: "inherit",
+            },
+          },
+          "Try again"
+        )
+      : null
   )
 }
