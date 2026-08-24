@@ -208,6 +208,7 @@ base64_bin="$(command -v base64)" || exit 18
 root="$(pwd -P)"
 target="$("$realpath_bin" "$root/$1")" || exit 10
 case "$target" in "$root"|"$root"/*) ;; *) exit 11 ;; esac
+[ -e "$target" ] || exit 10
 [ ! -d "$target" ] || exit 12
 [ -f "$target" ] || exit 13
 [ -r "$target" ] || exit 14
