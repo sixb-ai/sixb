@@ -1,3 +1,18 @@
+export type { GoogleAdsClient, GoogleAdsCustomerScope } from "./ads/client"
+export {
+  DEFAULT_GOOGLE_ADS_API_VERSION,
+  GOOGLE_ADS_SCOPE,
+  type GoogleAdsConnector,
+  googleAds,
+} from "./ads/connector"
+export {
+  GoogleAdsApiError,
+  GoogleAdsConfigurationError,
+  GoogleAdsProtocolError,
+} from "./ads/errors"
+export type { GoogleAdsCustomersResource } from "./ads/resources/customers"
+export type { GoogleAdsReportsResource } from "./ads/resources/reports"
+export type * from "./ads/types"
 export type { GoogleAuthOptions, ServiceAccountKey, TokenSource } from "./auth"
 export { createTokenSource } from "./auth"
 export type {

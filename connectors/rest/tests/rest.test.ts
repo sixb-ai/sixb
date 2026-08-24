@@ -117,6 +117,32 @@ describe("rest connector", () => {
     expect(attempts).toBe(2)
   })
 
+  test("does not charge an unauthorized refresh against the transient retry budget", async () => {
+    let attempts = 0
+
+    mockFetch(() => {
+      attempts += 1
+      const status = [401, 503, 503, 200][attempts - 1] ?? 500
+      return Promise.resolve(new Response(String(status), { status }))
+    })
+
+    const adapter = rest({
+      baseUrl: "https://api.example.com",
+      onUnauthorized: () => Promise.resolve(),
+      retry: { maxRetries: 2, delayMs: () => 0 },
+    })
+    const client = await adapter.connect({
+      projectId: "demo",
+      connectorId: "hubspot",
+      signal: new AbortController().signal,
+    })
+
+    const response = await client.get("/contacts")
+
+    expect(response.status).toBe(200)
+    expect(attempts).toBe(4)
+  })
+
   test("retries based on retry policy", async () => {
     let attempts = 0
 
@@ -170,6 +196,68 @@ describe("rest connector", () => {
 
     expect(response.status).toBe(503)
     expect(attempts).toBe(1)
+  })
+
+  test("aborts while waiting for retry backoff", async () => {
+    const controller = new AbortController()
+    let attempts = 0
+    let markFetched: (() => void) | undefined
+    const fetched = new Promise<void>((resolve) => {
+      markFetched = resolve
+    })
+
+    mockFetch(() => {
+      attempts += 1
+      markFetched?.()
+      return Promise.resolve(new Response("busy", { status: 503 }))
+    })
+
+    const client = await rest({
+      baseUrl: "https://api.example.com",
+      retry: { maxRetries: 1, delayMs: () => 1_000 },
+    }).connect({
+      projectId: "demo",
+      connectorId: "hubspot",
+      signal: controller.signal,
+    })
+
+    const request = client.get("/contacts", { signal: controller.signal })
+    await fetched
+    await Promise.resolve()
+    controller.abort(new DOMException("Stopped", "AbortError"))
+
+    const settled = Promise.race([
+      request.then(
+        () => "resolved",
+        (error: unknown) => error
+      ),
+      new Promise<string>((resolve) => setTimeout(() => resolve("timed-out"), 50)),
+    ])
+    expect(await settled).toBeInstanceOf(DOMException)
+    expect(attempts).toBe(1)
+  })
+
+  test("spaces concurrent requests when minDelayMs is configured", async () => {
+    const starts: number[] = []
+    mockFetch(() => {
+      starts.push(Date.now())
+      return Promise.resolve(new Response("ok", { status: 200 }))
+    })
+
+    const client = await rest({
+      baseUrl: "https://api.example.com",
+      minDelayMs: 20,
+    }).connect({
+      projectId: "demo",
+      connectorId: "hubspot",
+      signal: new AbortController().signal,
+    })
+
+    await Promise.all([client.get("/one"), client.get("/two"), client.get("/three")])
+
+    expect(starts).toHaveLength(3)
+    expect((starts[1] ?? 0) - (starts[0] ?? 0)).toBeGreaterThanOrEqual(15)
+    expect((starts[2] ?? 0) - (starts[1] ?? 0)).toBeGreaterThanOrEqual(15)
   })
 
   test("never retries a request with a stream body — it cannot be replayed", async () => {
