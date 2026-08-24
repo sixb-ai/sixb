@@ -195,7 +195,8 @@ to `defineConnector`, and most ship a matching webhook helper for the [Webhooks]
 | --- | --- | --- | --- |
 | `@sixb/connector-exa` | `exa(...)` | Exa web search and page contents | — |
 | `@sixb/connector-github` | `github(...)` | GitHub REST API | `githubEventsWebhook` |
-| `@sixb/connector-google` | `google(...)` | Google APIs (Drive, Calendar, Meet) | — |
+| `@sixb/connector-google` | `google(...)` | Google APIs (Drive, Calendar, Gmail, Analytics) | — |
+| `@sixb/connector-google` | `googleAds(...)` | Google Ads manager-account reporting | — |
 | `@sixb/connector-meta` | `meta(...)` | Meta Graph API (Facebook/Instagram) | — |
 | `@sixb/connector-pipedrive` | `pipedrive(...)` | Pipedrive CRM | `pipedriveEventsWebhook` |
 | `@sixb/connector-teamleader` | `teamleader(...)` | Teamleader CRM, invoicing, quotations | `defineTeamleaderWebhook` |

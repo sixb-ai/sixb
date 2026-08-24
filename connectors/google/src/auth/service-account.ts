@@ -1,4 +1,5 @@
-import { GoogleAuthError, isRecord } from "../errors"
+import { GoogleAuthError } from "../errors"
+import { isRecord } from "../guards"
 import type { ServiceAccountKey, TokenSource } from "./types"
 
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"

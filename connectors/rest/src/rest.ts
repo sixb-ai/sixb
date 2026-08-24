@@ -78,14 +78,16 @@ function createRestClient(options: RestConnectorOptions, context: ConnectorConte
     // retrying would only mask the real failure behind a "stream already used" error.
     const replayable = !(fetchInit.body instanceof ReadableStream)
 
-    for (let attempt = 0; ; attempt++) {
+    let retryAttempt = 0
+    for (;;) {
       // Apply the same pacing to retries as the initial request.
       await applyMinDelay(
         options.minDelayMs,
         () => lastRequestAt,
         (value) => {
           lastRequestAt = value
-        }
+        },
+        fetchInit.signal
       )
 
       const resolvedInit = await resolveRequestInit(
@@ -116,15 +118,16 @@ function createRestClient(options: RestConnectorOptions, context: ConnectorConte
         continue
       }
 
-      const retryContext: RestRetryContext = { attempt, response, error }
+      const retryContext: RestRetryContext = { attempt: retryAttempt, response, error }
       const canRetry =
         retry &&
         replayable &&
-        attempt < retryPolicy.maxRetries &&
+        retryAttempt < retryPolicy.maxRetries &&
         retryPolicy.shouldRetry?.(retryContext) === true
 
       if (canRetry) {
-        await sleep(retryPolicy.delayMs?.(retryContext) ?? 0)
+        retryAttempt += 1
+        await sleep(retryPolicy.delayMs?.(retryContext) ?? 0, fetchInit.signal)
         continue
       }
 
@@ -198,7 +201,8 @@ async function resolveHeaders(
 async function applyMinDelay(
   minDelayMs: number | undefined,
   getLastRequestAt: () => number,
-  setLastRequestAt: (value: number) => void
+  setLastRequestAt: (value: number) => void,
+  signal: AbortSignal | null | undefined
 ): Promise<void> {
   if (!minDelayMs || minDelayMs <= 0) {
     setLastRequestAt(Date.now())
@@ -206,12 +210,11 @@ async function applyMinDelay(
   }
 
   const now = Date.now()
-  const elapsed = now - getLastRequestAt()
-  if (elapsed < minDelayMs) {
-    await sleep(minDelayMs - elapsed)
-  }
-
-  setLastRequestAt(Date.now())
+  // Reserve the next start time synchronously so concurrent callers cannot all claim
+  // the same slot and burst together after one shared delay.
+  const scheduledAt = Math.max(now, getLastRequestAt() + minDelayMs)
+  setLastRequestAt(scheduledAt)
+  await sleep(scheduledAt - now, signal)
 }
 
 function serializeBody(body: unknown, headers: Headers): BodyInit | undefined {
@@ -252,10 +255,31 @@ function assertNonEmpty(value: string, field: string): void {
   }
 }
 
-function sleep(ms: number): Promise<void> {
+function sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(abortReason(signal))
+  }
   if (ms <= 0) {
     return Promise.resolve()
   }
+  if (!signal) {
+    return new Promise((resolve) => setTimeout(resolve, ms))
+  }
 
-  return new Promise((resolve) => setTimeout(resolve, ms))
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer)
+      signal.removeEventListener("abort", onAbort)
+      reject(abortReason(signal))
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort)
+      resolve()
+    }, ms)
+    signal.addEventListener("abort", onAbort, { once: true })
+  })
+}
+
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException("The operation was aborted.", "AbortError")
 }
