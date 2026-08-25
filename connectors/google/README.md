@@ -105,9 +105,9 @@ Writes need a write scope — `drive.file` (files the app created or opened) or 
 ### Google Sheets (v4)
 
 Sheets is exposed separately from Drive: use Drive to discover spreadsheet files, then pass the
-Drive file id as the Sheets `spreadsheetId`. `spreadsheets.get` returns workbook and sheet metadata;
-ordinary cell reads should use `spreadsheets.values.get` or `batchGet` rather than requesting full
-grid data.
+Drive file id as the Sheets `spreadsheetId`. The complete v4 REST surface is available: spreadsheet
+creation and structural batch updates, values reads and writes, data-filter variants, developer
+metadata, and cross-spreadsheet sheet copies.
 
 ```ts
 const spreadsheet = await client.sheets.spreadsheets.get(fileId, {
@@ -124,15 +124,43 @@ const ranges = await client.sheets.spreadsheets.values.batchGet(fileId, {
   ranges: ["Sales!A:Z", "Targets!A:D"],
   valueRenderOption: "FORMULA",
 })
+
+await client.sheets.spreadsheets.values.update(
+  fileId,
+  "Sales!A2:C2",
+  { values: [["Widget", 12, 1250.5]] },
+  { valueInputOption: "USER_ENTERED" },
+)
+
+await client.sheets.spreadsheets.values.append(
+  fileId,
+  "Sales!A:C",
+  { values: [["Gadget", 8, 640]] },
+  { valueInputOption: "RAW", insertDataOption: "INSERT_ROWS" },
+)
+
+await client.sheets.spreadsheets.batchUpdate(fileId, {
+  requests: [{ addSheet: { properties: { title: "Forecast" } } }],
+})
+
+const tagged = await client.sheets.spreadsheets.values.batchGetByDataFilter(fileId, {
+  dataFilters: [{ developerMetadataLookup: { metadataKey: "region" } }],
+})
 ```
 
 Google omits empty trailing rows and columns from `ValueRange.values`; callers must not assume that
 the returned matrix is rectangular. The render options are passed through unchanged: formatted
 values are strings by default, while `UNFORMATTED_VALUE` can return strings, numbers, and booleans.
 
+`spreadsheets.values.batchUpdate` changes cell values; `spreadsheets.batchUpdate` applies structural
+and formatting operations atomically. Mutations are single-attempt so an automatic retry cannot
+duplicate an append, copy, or structural operation. Read-only `POST` methods such as
+`getByDataFilter` remain retryable.
+
 Enable the Google Sheets API in the credential's Cloud project. Reads accept
-`spreadsheets.readonly`, `drive.readonly`, or another compatible Sheets/Drive scope. As with Drive,
-the authenticated principal must have access to the target spreadsheet.
+`spreadsheets.readonly`, `drive.readonly`, or another compatible Sheets/Drive scope. Writes need
+`spreadsheets`, `drive.file`, or another compatible write scope. As with Drive, the authenticated
+principal must have access to the target spreadsheet.
 
 ### Calendar (v3)
 
