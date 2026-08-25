@@ -18,6 +18,7 @@ import {
   ReconnectingMarker,
   RunCancelledMarker,
   RunFailureMarker,
+  RunTimeoutMarker,
   ThinkingMarker,
   UserFileAttachment,
 } from "./MessageView"
@@ -39,8 +40,11 @@ export interface TranscriptProps {
   /** The newest run failed before it produced a durable assistant message. */
   readonly failedBeforeResponse?: boolean
   readonly cancelledBeforeResponse?: boolean
+  readonly timeout?: { readonly hasProgress: boolean; readonly timeoutMs?: number }
   readonly onRetry?: () => void
+  readonly onContinue?: () => void
   readonly retrying?: boolean
+  readonly continuing?: boolean
   /** The active run's stream dropped and is re-subscribing — surface a transient notice. */
   readonly reconnecting?: boolean
 }
@@ -57,8 +61,11 @@ export function Transcript({
   waitingLonger,
   failedBeforeResponse,
   cancelledBeforeResponse,
+  timeout,
   onRetry,
+  onContinue,
   retrying,
+  continuing,
   reconnecting,
 }: TranscriptProps) {
   // Keep the live row until the finalized assistant message is present in durable state, so the
@@ -153,13 +160,27 @@ export function Transcript({
                 <LiveAssistant
                   live={live}
                   keepWorkOpen={handoffPending}
+                  timeout={timeout}
                   onRetry={onRetry}
+                  onContinue={onContinue}
                   retrying={retrying}
+                  continuing={continuing}
                 />
               </MessageScrollerItem>
             ) : showThinking ? (
               <MessageScrollerItem messageId="thinking">
                 <ThinkingMarker takingLonger={waitingLonger} />
+              </MessageScrollerItem>
+            ) : timeout ? (
+              <MessageScrollerItem messageId="run-timeout">
+                <RunTimeoutMarker
+                  hasProgress={timeout.hasProgress}
+                  timeoutMs={timeout.timeoutMs}
+                  onRetry={onRetry}
+                  onContinue={onContinue}
+                  retrying={retrying}
+                  continuing={continuing}
+                />
               </MessageScrollerItem>
             ) : failedBeforeResponse ? (
               <MessageScrollerItem messageId="run-failed">

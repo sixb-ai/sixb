@@ -69,15 +69,17 @@ export const AGENT_RUN_FAILURE_CODES = [
 export type AgentRunFailureCode = (typeof AGENT_RUN_FAILURE_CODES)[number]
 
 /**
- * Why a run ended — our own SDK-independent vocabulary (it mirrors the AI SDK unified finish
- * reasons), so reads are typed and exhaustive without core depending on `ai`. `other`/`unknown` are
- * catch-alls: a provider value we don't recognise still records *that* the run ended.
+ * Why a run ended — our own SDK-independent vocabulary. It includes the AI SDK's unified finish
+ * reasons plus platform-level endings such as `timeout`, so reads are typed and exhaustive without
+ * core depending on `ai`. `other`/`unknown` are catch-alls: an unrecognised provider value still
+ * records *that* the run ended.
  */
 export const AGENT_RUN_FINISH_REASONS = [
   "stop",
   "length",
   "content-filter",
   "tool-calls",
+  "timeout",
   "error",
   "other",
   "unknown",

@@ -172,10 +172,16 @@ describe("liveRunReducer", () => {
     }
     const state = liveRunReducer(createLiveRunState("run"), {
       type: "event",
-      event: event({ type: "agent.run.finished", status: "failed", error: failure }),
+      event: event({
+        type: "agent.run.finished",
+        status: "failed",
+        finishReason: "timeout",
+        error: failure,
+      }),
     })
     expect(state.active).toBe(false)
     expect(state.finishStatus).toBe("failed")
+    expect(state.finishReason).toBe("timeout")
     expect(state.finishError).toEqual(failure)
   })
 

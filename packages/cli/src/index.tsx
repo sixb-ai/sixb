@@ -103,6 +103,7 @@ const flagsWithValues = new Set([
   "api-port",
   "api-host",
   "api-public-origin",
+  "agent-turn-timeout",
   "atlas-public-origin",
   "app-public-origin",
   "outdir",
@@ -175,6 +176,7 @@ async function main(): Promise<void> {
         apiPublicOrigin: getFlag("api-public-origin"),
         atlasPublicOrigin: getFlag("atlas-public-origin"),
         appPublicOrigin: getFlag("app-public-origin"),
+        agentTurnTimeout: getFlag("agent-turn-timeout"),
       })
       break
     }
@@ -190,6 +192,7 @@ async function main(): Promise<void> {
         noMigrate: hasFlag("no-migrate"),
         workerType: getCommandPositionals()[0],
         apiPublicOrigin: getFlag("api-public-origin"),
+        agentTurnTimeout: getFlag("agent-turn-timeout"),
       })
       break
     }
@@ -201,6 +204,7 @@ async function main(): Promise<void> {
         noMigrate: hasFlag("no-migrate"),
         workerTypes: getCommandPositionals(),
         apiPublicOrigin: getFlag("api-public-origin"),
+        agentTurnTimeout: getFlag("agent-turn-timeout"),
       })
       break
     }

@@ -1,4 +1,5 @@
 import type { Worker } from "@sixb/core/internal/workers"
+import { resolveAgentTurnTimeoutMs } from "../lib/agent-turn-timeout"
 import { type LoadedSixbHost, loadSixbFromEntry } from "../lib/loadSixb"
 import { resolveRuntimeEntry } from "../lib/production"
 import {
@@ -22,6 +23,7 @@ export interface WorkerGroupOptions {
   noMigrate?: boolean
   workerTypes?: readonly string[]
   apiPublicOrigin?: string
+  agentTurnTimeout?: string
 }
 
 export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
@@ -30,6 +32,7 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
   // Validate explicit worker types before loading the runtime so an unknown type
   // fails fast, just like `sixb worker`.
   const requestedTypes = (options.workerTypes ?? []).map(resolveWorkerTypeToStart)
+  const agentTurnTimeoutMs = resolveAgentTurnTimeoutMs(options.agentTurnTimeout)
   const entry = await resolveRuntimeEntry({ entry: options.entry })
 
   const app = renderPersistent(
@@ -85,6 +88,7 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
     workers = workerTypes.map((workerType) =>
       createWorkerForType(host, workerType, {
         agentApiBaseUrl: options.apiPublicOrigin,
+        agentTurnTimeoutMs,
       })
     )
     await Promise.all(workers.map((worker) => worker.start()))

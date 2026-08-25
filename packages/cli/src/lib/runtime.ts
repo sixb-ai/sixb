@@ -56,6 +56,7 @@ export interface RunningSixbRuntime {
 export interface StartSixbRuntimeOptions {
   readonly cohostWorkers?: boolean
   readonly agentApiBaseUrl?: string
+  readonly agentTurnTimeoutMs?: number
 }
 
 export interface RunningRulesRuntime {
@@ -243,6 +244,7 @@ export async function startSixbRuntime(
       if (sixb.definitions.agents.list().length > 0 && sixb.storage.agents) {
         agentWorker = new AgentWorker(sixb, {
           apiBaseUrl: requireAgentApiBaseUrl(options.agentApiBaseUrl),
+          turnTimeoutMs: options.agentTurnTimeoutMs,
         })
         await agentWorker.start()
       }

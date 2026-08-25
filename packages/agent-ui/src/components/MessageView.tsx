@@ -6,7 +6,7 @@ import {
   MarkerContent,
   MarkerIcon,
 } from "@sixb/ui/components"
-import { AlertTriangle, RotateCcw } from "lucide-react"
+import { AlertTriangle, ArrowRight, Clock3, RotateCcw } from "lucide-react"
 import { memo } from "react"
 import { createAgentDocumentSource } from "../document-preview/source"
 import type { AgentDocumentSource } from "../document-preview/types"
@@ -98,16 +98,49 @@ function AssistantMessage({ message }: { message: AgentMessage }) {
 export function LiveAssistant({
   live,
   keepWorkOpen = false,
+  timeout,
   onRetry,
+  onContinue,
   retrying = false,
+  continuing = false,
 }: {
   live: LiveRunState
   keepWorkOpen?: boolean
+  timeout?: { readonly hasProgress: boolean; readonly timeoutMs?: number }
   onRetry?: () => void
+  onContinue?: () => void
   retrying?: boolean
+  continuing?: boolean
 }) {
   if (isAwaitingFirstToken(live)) {
     return <ThinkingMarker />
+  }
+  if (timeout) {
+    if (live.parts.length === 0) {
+      return (
+        <RunTimeoutMarker
+          hasProgress={timeout.hasProgress}
+          timeoutMs={timeout.timeoutMs}
+          onRetry={onRetry}
+          onContinue={onContinue}
+          retrying={retrying}
+          continuing={continuing}
+        />
+      )
+    }
+    return (
+      <div className="flex flex-col gap-2">
+        <AssistantBody parts={live.parts} live={live.active || keepWorkOpen} />
+        <RunTimeoutMarker
+          hasProgress={timeout.hasProgress}
+          timeoutMs={timeout.timeoutMs}
+          onRetry={onRetry}
+          onContinue={onContinue}
+          retrying={retrying}
+          continuing={continuing}
+        />
+      </div>
+    )
   }
   if (live.finishStatus === "failed" && live.parts.length === 0) {
     return <RunFailureMarker onRetry={onRetry} retrying={retrying} />
@@ -144,6 +177,50 @@ export function ThinkingMarker({ takingLonger = false }: { takingLonger?: boolea
 
 export function RunCancelledMarker() {
   return <p className="text-sm text-muted-foreground">Stopped.</p>
+}
+
+export function RunTimeoutMarker({
+  hasProgress,
+  timeoutMs,
+  onRetry,
+  onContinue,
+  retrying = false,
+  continuing = false,
+}: {
+  hasProgress: boolean
+  timeoutMs?: number
+  onRetry?: () => void
+  onContinue?: () => void
+  retrying?: boolean
+  continuing?: boolean
+}) {
+  const limit = formatTurnTimeout(timeoutMs)
+  return (
+    <div className="flex flex-wrap items-center gap-2" role="status">
+      <Marker className="text-amber-700 dark:text-amber-400">
+        <MarkerIcon>
+          <Clock3 className="text-amber-600 dark:text-amber-400" />
+        </MarkerIcon>
+        <MarkerContent>
+          {hasProgress
+            ? `Stopped after reaching ${limit}.`
+            : `The response reached ${limit} before producing an answer.`}
+        </MarkerContent>
+      </Marker>
+      {hasProgress && onContinue ? (
+        <Button size="sm" onClick={onContinue} disabled={continuing}>
+          <ArrowRight aria-hidden="true" />
+          {continuing ? "Continuing…" : "Continue"}
+        </Button>
+      ) : null}
+      {!hasProgress && onRetry ? (
+        <Button variant="outline" size="sm" onClick={onRetry} disabled={retrying}>
+          <RotateCcw aria-hidden="true" />
+          {retrying ? "Retrying…" : "Try again"}
+        </Button>
+      ) : null}
+    </div>
+  )
 }
 
 export function RunFailureMarker({
@@ -194,6 +271,24 @@ export function RunErrorMarker({ message }: { message: string }) {
       <MarkerContent>{message}</MarkerContent>
     </Marker>
   )
+}
+
+function formatTurnTimeout(timeoutMs: number | undefined): string {
+  if (!timeoutMs || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return "the configured turn limit"
+  }
+  const units = [
+    { label: "hour", ms: 60 * 60_000 },
+    { label: "minute", ms: 60_000 },
+    { label: "second", ms: 1_000 },
+  ] as const
+  for (const unit of units) {
+    if (timeoutMs % unit.ms === 0) {
+      const amount = timeoutMs / unit.ms
+      return `the ${amount}-${unit.label} turn limit`
+    }
+  }
+  return "the configured turn limit"
 }
 
 function textOf(message: AgentMessage): string {

@@ -69,6 +69,17 @@ describe("sixb worker-group", () => {
     expect(result.stdout).toContain("InMemoryQueues")
   })
 
+  test("validates the shared agent turn timeout before loading providers", async () => {
+    const result = await runOnce(
+      ["worker-group", "agent", "--agent-turn-timeout", "eventually"],
+      "valid-project"
+    )
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toContain("Invalid agent turn timeout 'eventually'")
+    expect(result.stdout).not.toContain("requires a queues provider")
+  })
+
   test("refuses without migrating, so a bad command leaves no schema behind", async () => {
     // The fixture registers agents, so auto-selection picks the `agent` worker, whose construction
     // needs an API origin. The refusal is right; running a schema change first was not.

@@ -392,6 +392,10 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
           { label: "--api-port <port>", value: "API port (default: Atlas port + 2)" },
           { label: "--api-host <host>", value: "API bind host (default: --host)" },
           { label: "--api-public-origin <origin>", value: "Public API origin" },
+          {
+            label: "--agent-turn-timeout <duration>",
+            value: "Agent turn wall-clock budget (default: 10m)",
+          },
           { label: "--atlas-public-origin <origin>", value: "Public Atlas origin" },
           { label: "--app-public-origin <origin>", value: "Public custom app origin" },
           { label: "--api-url <url>", value: "API origin for auth/token commands" },

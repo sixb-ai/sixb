@@ -1,4 +1,5 @@
 import type { Worker } from "@sixb/core/internal/workers"
+import { resolveAgentTurnTimeoutMs } from "../lib/agent-turn-timeout"
 import { SixbCliError } from "../lib/errors"
 import { type LoadedSixbHost, loadSixbFromEntry } from "../lib/loadSixb"
 import { resolveRuntimeEntry } from "../lib/production"
@@ -22,12 +23,14 @@ export interface WorkerOptions {
   noMigrate?: boolean
   workerType?: string
   apiPublicOrigin?: string
+  agentTurnTimeout?: string
 }
 
 export async function runWorker(options: WorkerOptions = {}) {
   process.env.NODE_ENV = "production"
 
   const workerType = resolveWorkerTypeToStart(options.workerType)
+  const agentTurnTimeoutMs = resolveAgentTurnTimeoutMs(options.agentTurnTimeout)
   const entry = await resolveRuntimeEntry({ entry: options.entry })
 
   const app = renderPersistent(
@@ -66,6 +69,7 @@ export async function runWorker(options: WorkerOptions = {}) {
 
     worker = createWorkerForType(sixb, workerType, {
       agentApiBaseUrl: options.apiPublicOrigin,
+      agentTurnTimeoutMs,
     })
     await worker.start()
 

@@ -130,6 +130,19 @@ describe("sixb worker", () => {
     expect(result.stderr).toBe("")
   })
 
+  test("validates the agent turn timeout before loading providers", () => {
+    const result = runWorkerFixture("valid-project", [
+      "agent",
+      "--agent-turn-timeout",
+      "eventually",
+    ])
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toContain("Invalid agent turn timeout 'eventually'")
+    expect(result.stdout).not.toContain("requires a queues provider")
+    expect(result.stderr).toBe("")
+  })
+
   test("refuses without migrating, so a bad command leaves no schema behind", async () => {
     // `sixb worker agent` cannot start without an API origin, and used to find that out after
     // bringing the schema up to date.
@@ -168,6 +181,7 @@ describe("sixb worker", () => {
     expect(result.stdout).not.toContain("--worker <type>")
     expect(result.stdout).toContain("sync, action, agent")
     expect(result.stdout).toContain("pipeline, projection, workflow")
+    expect(result.stdout).toContain("--agent-turn-timeout <duration>")
     expect(result.stderr).toBe("")
   })
 

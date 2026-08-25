@@ -13,11 +13,12 @@ import {
 } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { isAbortError, QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
-import type { AgentRunRecord, AgentStorage } from "@sixb/core/storage"
+import type { AgentRunFinishReason, AgentRunRecord, AgentStorage } from "@sixb/core/storage"
 import { type ModelMessage, stepCountIs, streamText, toUIMessageStream } from "ai"
 import { agentToolErrorText } from "./ai-sdk-adapters"
 import { attachmentKey, modelSupportsInlineImages, prepareAgentAttachments } from "./attachments"
 import { AgentTurnTimeoutError } from "./errors"
+import { type AgentRunFailure, toAgentExecutionFailure } from "./failure"
 import { appendMessageAndFinishRunOrThrow, finishRunOrThrow } from "./finalize"
 import { AiModelCallRecorder } from "./model-call-recorder"
 import {
@@ -46,8 +47,9 @@ export interface RunAgentTurnInput {
  * fenced by the delivery's execution token; completed provider-call usage remains billable and is
  * recorded even when queue ownership is later lost.
  *
- * On success it returns the finalized (`succeeded`) run record. Model/tool failures and shutdown
- * aborts propagate to the caller (the worker), which records the run's terminal fate.
+ * It returns the finalized run for success, cancellation, and a wall-clock timeout (including any
+ * coherent partial response). Model/tool failures and exceptional shutdown paths propagate to the
+ * caller, which records the run's terminal fate.
  */
 export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRecord> {
   const { context, agent, run, signal } = input
@@ -188,12 +190,35 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       throw provisionError
     }
     if (timedOut) {
-      throw new AgentTurnTimeoutError(runId, turnTimeoutMs)
+      const completedAt = new Date()
+      return finalizeInterruptedTurn({
+        storage,
+        agents,
+        context,
+        run,
+        executionToken,
+        projectId,
+        modelId: agent.model.modelId,
+        status: "failed",
+        finishReason: "timeout",
+        error: toAgentExecutionFailure(new AgentTurnTimeoutError(runId, turnTimeoutMs), {
+          status: "failed",
+          at: completedAt,
+          details: {
+            agentId: run.agentId,
+            runId,
+            threadId: run.threadId,
+            timeoutMs: String(turnTimeoutMs),
+          },
+        }),
+        completedAt,
+        partial: responseMessage,
+      })
     }
     if (!streamAborted && !abortSignal.aborted && (error === undefined || !isAbortError(error))) {
       return null
     }
-    return finalizeCancelledTurn({
+    return finalizeInterruptedTurn({
       storage,
       agents,
       context,
@@ -201,6 +226,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       executionToken,
       projectId,
       modelId: agent.model.modelId,
+      status: "cancelled",
       partial: responseMessage,
     })
   }
@@ -339,11 +365,12 @@ function hasVisibleText(parts: AgentMessage["parts"]): boolean {
 }
 
 /**
- * Persist an aborted turn as `cancelled`, keeping whatever coherently streamed. When the partial has
- * usable content it is written as the assistant message in the same transaction as the run finish
- * (mirroring the success path); otherwise the run is just finalized with no message.
+ * Persist an interrupted turn, keeping whatever coherently streamed. When the partial has usable
+ * content it is written as the assistant message in the same transaction as the run finish
+ * (mirroring the success path); otherwise the run is just finalized with no message. User stops are
+ * `cancelled`; a wall-clock timeout is `failed` with a stable `timeout` finish reason.
  */
-async function finalizeCancelledTurn(input: {
+async function finalizeInterruptedTurn(input: {
   readonly storage: Storage
   readonly agents: AgentStorage
   readonly context: AgentTurnContext
@@ -351,9 +378,26 @@ async function finalizeCancelledTurn(input: {
   readonly executionToken: string
   readonly projectId: string
   readonly modelId?: string
+  readonly status: "failed" | "cancelled"
+  readonly finishReason?: AgentRunFinishReason
+  readonly error?: AgentRunFailure
+  readonly completedAt?: Date
   readonly partial: AgentInboundLike | undefined
 }): Promise<AgentRunRecord> {
-  const { storage, agents, context, run, executionToken, projectId, modelId, partial } = input
+  const {
+    storage,
+    agents,
+    context,
+    run,
+    executionToken,
+    projectId,
+    modelId,
+    status,
+    finishReason,
+    error,
+    completedAt,
+    partial,
+  } = input
 
   // A malformed partial must not turn a cancel into a failure: fall back to a message-less cancel.
   let assistant: AgentMessage | null = null
@@ -368,8 +412,11 @@ async function finalizeCancelledTurn(input: {
       projectId,
       id: run.id,
       executionToken,
-      status: "cancelled",
+      status,
       ...(modelId === undefined ? {} : { modelId }),
+      ...(finishReason === undefined ? {} : { finishReason }),
+      ...(error === undefined ? {} : { error }),
+      ...(completedAt === undefined ? {} : { completedAt }),
     })
     await context.streamSink.publishRunFinished(finalizedRun)
     return finalizedRun
@@ -391,8 +438,11 @@ async function finalizeCancelledTurn(input: {
       projectId,
       id: run.id,
       executionToken,
-      status: "cancelled",
+      status,
       ...(modelId === undefined ? {} : { modelId }),
+      ...(finishReason === undefined ? {} : { finishReason }),
+      ...(error === undefined ? {} : { error }),
+      ...(completedAt === undefined ? {} : { completedAt }),
     },
   })
   await context.streamSink.publishMessageFinalized({ run, messageId: assistantMessageId })
@@ -447,7 +497,9 @@ function coercePartialAssistantMessage(message: AgentInboundLike): AgentMessage 
       // `input-streaming` (input never finished) is dropped: its input is not valid JSON yet.
     }
   }
-  if (parts.length === 0) {
+  // A bare step boundary is structural, not usable progress. Do not create an assistant message
+  // that renders empty and would make clients offer Continue after a pre-content timeout.
+  if (parts.every((part) => part.type === "step-start")) {
     return null
   }
   return fromAiSdk({

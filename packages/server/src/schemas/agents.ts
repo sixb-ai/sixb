@@ -247,6 +247,7 @@ export const AgentRunFinishReasonSchema = z.enum([
   "length",
   "content-filter",
   "tool-calls",
+  "timeout",
   "error",
   "other",
   "unknown",

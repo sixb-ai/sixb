@@ -164,6 +164,94 @@ describe("presentActiveTurn", () => {
     expect(presentation).toEqual({ kind: "failed", run: failed })
   })
 
+  test("a timeout with durable progress offers continuation with its configured duration", () => {
+    const timedOut = run({
+      id: "r1",
+      status: "failed",
+      finishReason: "timeout",
+      error: {
+        code: "agent.execution_failed",
+        message: "Agent execution failed.",
+        retryable: false,
+        at: "2026-07-12T10:10:00.000Z",
+        details: { timeoutMs: "600000" },
+      },
+    })
+    const presentation = presentActiveTurn(
+      sources({ runs: [timedOut], messages: [assistantMessage(timedOut.id)] })
+    )
+
+    expect(presentation).toEqual({
+      kind: "timeout",
+      run: timedOut,
+      hasProgress: true,
+      timeoutMs: 600_000,
+    })
+  })
+
+  test("a timeout without coherent progress offers retry", () => {
+    const timedOut = run({ id: "r1", status: "failed", finishReason: "timeout" })
+
+    expect(presentActiveTurn(sources({ runs: [timedOut] }))).toEqual({
+      kind: "timeout",
+      run: timedOut,
+      hasProgress: false,
+    })
+  })
+
+  test("a durable timeout waits for messages before deciding between continue and retry", () => {
+    const timedOut = run({ id: "r1", status: "failed", finishReason: "timeout" })
+
+    expect(presentActiveTurn(sources({ runs: [timedOut], messagesLoading: true }))).toEqual({
+      kind: "idle",
+    })
+  })
+
+  test("a live timeout keeps streamed progress visible before durable state catches up", () => {
+    const running = run({ id: "r1", status: "running" })
+    const presentation = presentActiveTurn(
+      sources({
+        activeRunId: running.id,
+        pendingRun: running,
+        live: liveState({
+          runId: running.id,
+          finishStatus: "failed",
+          finishReason: "timeout",
+          parts: [{ kind: "text", text: "partial" }],
+          partKeys: ["t1"],
+        }),
+      })
+    )
+
+    expect(presentation).toEqual({ kind: "timeout", run: running, hasProgress: true })
+  })
+
+  test("a live timeout does not treat unsafe streaming fragments as resumable progress", () => {
+    const running = run({ id: "r1", status: "running" })
+    const presentation = presentActiveTurn(
+      sources({
+        activeRunId: running.id,
+        pendingRun: running,
+        live: liveState({
+          runId: running.id,
+          finishStatus: "failed",
+          finishReason: "timeout",
+          parts: [
+            { kind: "reasoning", text: "unfinished", streaming: true },
+            {
+              kind: "tool",
+              tool: { toolName: "bash", state: "input-streaming", inputText: "curl" },
+            },
+            { kind: "step-start" },
+          ],
+          partKeys: ["r1", "tool1", "step1"],
+        }),
+      })
+    )
+
+    expect(presentation).toEqual({ kind: "timeout", run: running, hasProgress: false })
+  })
+
   test("an old failure stays hidden after a successful retry", () => {
     const failed = run({ id: "r1", status: "failed" })
     const retried = run({ id: "r2", status: "succeeded" })

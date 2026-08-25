@@ -11,6 +11,7 @@ import { configuredOrigin } from "./public-origin"
 
 export interface WorkerCreationOptions {
   readonly agentApiBaseUrl?: string
+  readonly agentTurnTimeoutMs?: number
 }
 
 interface WorkerFactory {
@@ -39,6 +40,7 @@ const workerFactories: Record<string, WorkerFactory> = {
     create: (sixb, options) =>
       new AgentWorker(sixb, {
         apiBaseUrl: resolveAgentApiBaseUrl(options.agentApiBaseUrl),
+        turnTimeoutMs: options.agentTurnTimeoutMs,
       }),
     unmetRequirement: (options) =>
       agentApiBaseUrl(options.agentApiBaseUrl) ? null : AGENT_ORIGIN_REQUIRED,

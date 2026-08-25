@@ -49,8 +49,11 @@ export interface ConversationPanelProps {
   readonly waitingLonger?: boolean
   readonly failedBeforeResponse?: boolean
   readonly cancelledBeforeResponse?: boolean
+  readonly timeout?: { readonly hasProgress: boolean; readonly timeoutMs?: number }
   readonly onRetry?: () => void
+  readonly onContinue?: () => void
   readonly retrying?: boolean
+  readonly continuing?: boolean
   /** The active run's stream dropped and is re-subscribing. */
   readonly reconnecting: boolean
   /** A failed send to surface above the composer, or null. English, user-facing. */
@@ -105,8 +108,11 @@ export function ConversationPanel({
   waitingLonger,
   failedBeforeResponse,
   cancelledBeforeResponse,
+  timeout,
   onRetry,
+  onContinue,
   retrying,
+  continuing,
   reconnecting,
   sendError,
   agents,
@@ -252,8 +258,11 @@ export function ConversationPanel({
                 waitingLonger={waitingLonger}
                 failedBeforeResponse={failedBeforeResponse}
                 cancelledBeforeResponse={cancelledBeforeResponse}
+                timeout={timeout}
                 onRetry={onRetry}
+                onContinue={onContinue}
                 retrying={retrying}
+                continuing={continuing}
                 reconnecting={reconnecting}
               />
             )}

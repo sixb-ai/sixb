@@ -22747,6 +22747,7 @@
                             "length",
                             "content-filter",
                             "tool-calls",
+                            "timeout",
                             "error",
                             "other",
                             "unknown"
@@ -23323,6 +23324,7 @@
                             "length",
                             "content-filter",
                             "tool-calls",
+                            "timeout",
                             "error",
                             "other",
                             "unknown"
@@ -23651,6 +23653,7 @@
                             "length",
                             "content-filter",
                             "tool-calls",
+                            "timeout",
                             "error",
                             "other",
                             "unknown"
@@ -24001,6 +24004,7 @@
                               "length",
                               "content-filter",
                               "tool-calls",
+                              "timeout",
                               "error",
                               "other",
                               "unknown"
@@ -24302,6 +24306,7 @@
                         "length",
                         "content-filter",
                         "tool-calls",
+                        "timeout",
                         "error",
                         "other",
                         "unknown"
