@@ -307,7 +307,19 @@ export function createSixbApi(server: SixbServer) {
     resolveInvitationRedirectContext: (request, input) =>
       server.resolveInvitationRedirectContext(request, input),
   })
-  registerHttpRoutes(app, host)
+  registerHttpRoutes(app, host, {
+    connectorConnections: {
+      resolveReturnTo: (request, returnTo) => {
+        const authContext = server.resolveAuthContext(request)
+        return server.resolveAuthRedirectContext(request, {
+          audience: authContext.audience,
+          returnTo,
+        }).returnTo
+      },
+      resolveCallbackUrl: (request) =>
+        new URL("/auth/connectors/callback", server.resolveAuthRequestOrigin(request)).toString(),
+    },
+  })
   registerWebhookRoutes(app, host)
   registerWebSocketRoutes(app, server)
 

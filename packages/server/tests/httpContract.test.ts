@@ -630,6 +630,7 @@ describe("SixbServer HTTP contract", () => {
         {
           id: "github",
           type: "test",
+          connection: null,
           syncIds: ["sync-github-events"],
           webhooks: [
             {
@@ -649,6 +650,7 @@ describe("SixbServer HTTP contract", () => {
       expect(await connectorResponse.json()).toEqual({
         id: "github",
         type: "test",
+        connection: null,
         syncIds: ["sync-github-events"],
         webhooks: [
           {

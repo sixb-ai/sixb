@@ -51,6 +51,7 @@ Each boundary exposes only the codes it can persist.
 | Action run or phase | `action.phase_failed`, `internal.unexpected`, `queue.enqueue_failed`, `runtime.cancelled` |
 | Sync run | `internal.unexpected`, `queue.enqueue_failed`, `runtime.cancelled`, `sync.execution_failed` |
 | Agent execution | `agent.execution_failed`, `internal.unexpected`, `runtime.cancelled` |
+| Connector connection run | `connector.adapter_invalid`, `connector.authorization_invalid`, `connector.authorization_required`, `connector.credentials_unavailable`, `connector.not_found`, `connector.operation_conflict`, `connector.operation_in_progress`, `connector.provider_failed`, `connector.provider_unavailable`, `internal.unexpected` |
 | Projection run | `internal.unexpected`, `projection.execution_failed`, `queue.enqueue_failed`, `runtime.cancelled` |
 | Pipeline run or step | `internal.unexpected`, `pipeline.step_failed`, `queue.enqueue_failed`, `runtime.cancelled` |
 | Workflow run or node | `internal.unexpected`, `runtime.cancelled`, `workflow.node_failed` |
@@ -84,7 +85,7 @@ Additional rules:
 | `action.phase_failed` | No | An Action phase could not complete successfully. | Inspect `details.phase` and the native error reported to `onError`. |
 | `agent.execution_failed` | No | An active Agent execution failed. | Inspect the run identity and the native error reported to `onError`. |
 | `connector.adapter_invalid` | No | A connector adapter returned data that violates its Sixb contract. | Fix or upgrade the adapter before retrying. |
-| `connector.authorization_invalid` | No | An OAuth attempt or authorization transition is no longer valid. | Restart the authorization flow from its beginning. |
+| `connector.authorization_invalid` | No | An OAuth connection run or authorization transition is no longer valid. | Start a new connector connection run. |
 | `connector.authorization_required` | No | The connection cannot provide credentials in its current state. | Reauthorize the connector and select an account when requested. |
 | `connector.configuration_invalid` | No | Connector definitions, storage, or credential protection are misconfigured. | Fix the connector runtime configuration and restart Sixb. |
 | `connector.credentials_unavailable` | No | Stored connector credentials failed validation or authenticated decryption. | Verify the encryption key and reauthorize affected connections. |

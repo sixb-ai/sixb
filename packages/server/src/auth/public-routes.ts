@@ -83,5 +83,11 @@ export function isPublicRoute(pathname: string, method: string): boolean {
     return true
   }
 
+  // The callback proves one-use OAuth state plus a dedicated HttpOnly browser binding. PKCE then
+  // binds the code exchange to the attempt created by the authorized initiating request.
+  if (pathname === "/auth/connectors/callback" && normalizedMethod === "GET") {
+    return true
+  }
+
   return false
 }

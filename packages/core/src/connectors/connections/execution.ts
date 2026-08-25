@@ -8,15 +8,38 @@ import type {
   CompleteConnectorAuthorizationResult,
   ConnectorConnectionCommandContext,
   ConnectorConnectionProcess,
+  ConnectorConnectionRunView,
   ConnectorConnectionView,
   RevokeConnectorAuthorizationResult,
   SelectConnectorAccountInput,
+  SelectConnectorConnectionRunAccountInput,
   StartConnectorAuthorizationInput,
   StartConnectorAuthorizationResult,
+  StartConnectorConnectionRunInput,
+  StartConnectorConnectionRunResult,
 } from "./contracts"
 
 /** Internal connector-connection lifecycle API bound to one authenticated request execution. */
 export interface ConnectorConnectionsRuntime {
+  listConnections(connectorId: string): Promise<readonly ConnectorConnectionView[]>
+  startConnectionRun(
+    connectorId: string,
+    input: StartConnectorConnectionRunInput
+  ): Promise<StartConnectorConnectionRunResult>
+  getConnectionRun(connectorId: string, runId: string): Promise<ConnectorConnectionRunView | null>
+  selectConnectionRunAccount(
+    connectorId: string,
+    input: SelectConnectorConnectionRunAccountInput
+  ): Promise<ConnectorConnectionRunView>
+  startReauthorization(
+    connectorId: string,
+    connectionId: string,
+    input: Pick<StartConnectorConnectionRunInput, "redirectUri" | "returnTo">
+  ): Promise<StartConnectorConnectionRunResult>
+  revokeConnection(
+    connectorId: string,
+    connectionId: string
+  ): Promise<RevokeConnectorAuthorizationResult>
   startAuthorization(
     connectorId: string,
     input: StartConnectorAuthorizationInput
@@ -44,6 +67,17 @@ export function createConnectorConnectionsRuntime(
   const contextFor = (connectorId: string) => commandContext(runtime, execution, connectorId)
 
   const connections: ConnectorConnectionsRuntime = {
+    listConnections: (connectorId) => process.listConnections(contextFor(connectorId), connectorId),
+    startConnectionRun: (connectorId, input) =>
+      process.startConnectionRun(contextFor(connectorId), connectorId, input),
+    getConnectionRun: (connectorId, runId) =>
+      process.getConnectionRun(contextFor(connectorId), connectorId, runId),
+    selectConnectionRunAccount: (connectorId, input) =>
+      process.selectConnectionRunAccount(contextFor(connectorId), connectorId, input),
+    startReauthorization: (connectorId, connectionId, input) =>
+      process.startReauthorization(contextFor(connectorId), connectorId, connectionId, input),
+    revokeConnection: (connectorId, connectionId) =>
+      process.revokeConnection(contextFor(connectorId), connectorId, connectionId),
     startAuthorization: (connectorId, input) =>
       process.startAuthorization(contextFor(connectorId), connectorId, input),
     completeAuthorization: (connectorId, input) =>

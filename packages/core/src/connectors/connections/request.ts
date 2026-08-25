@@ -6,6 +6,7 @@ import type {
   ConnectorAuthorizationRecord,
   ConnectorConnectionRecord,
   ConnectorConnectionStorage,
+  CreateConnectorAuthorizationAttemptInput,
   Storage,
 } from "../../storage"
 import type { ConnectorCredentialProtector } from "../credentials"
@@ -99,6 +100,15 @@ export interface ConnectorAuthorizationRequestHandlerOptions {
   readonly hostSignal: () => AbortSignal
 }
 
+export interface PreparedConnectorAuthorizationRequest {
+  readonly definition: OAuthConnectorDefinition
+  readonly actor: ConnectorConnectionCommandActor
+  readonly state: string
+  readonly authorizationUrl: string
+  readonly attempt: CreateConnectorAuthorizationAttemptInput
+  readonly affectedConnections: readonly ConnectorConnectionView[]
+}
+
 /** Owns OAuth request state, PKCE, callback binding, and durable attempt provenance. */
 export class ConnectorAuthorizationRequestHandler {
   private readonly projectId: string
@@ -132,11 +142,40 @@ export class ConnectorAuthorizationRequestHandler {
     connectorId: string,
     input: StartConnectorAuthorizationInput
   ): Promise<StartConnectorAuthorizationResult> {
+    const prepared = await this.prepareAuthorizationRequest(command, connectorId, input)
+
+    try {
+      await this.storage.transaction(
+        async (tx) => {
+          await ensureExecutionRecord(tx.executions, command.execution)
+          await requireConnectorConnectionStorage(tx).createAuthorizationAttempt(prepared.attempt)
+        },
+        { isolation: "serializable" }
+      )
+    } catch (error) {
+      throw storageBoundaryError(error, "Connector authorization attempt could not be persisted.")
+    }
+
+    return {
+      authorizationUrl: prepared.authorizationUrl,
+      affectedConnections: prepared.affectedConnections,
+    }
+  }
+
+  async prepareAuthorizationRequest(
+    command: ConnectorConnectionCommandContext,
+    connectorId: string,
+    input: StartConnectorAuthorizationInput
+  ): Promise<PreparedConnectorAuthorizationRequest> {
     const definition = this.resolveDefinition(nonblank(connectorId, "connector id"))
     const actor = requireConnectorConnectionCommandActor(command.execution, this.projectId)
     assertConnectorConnectionSelector(input)
     const redirectUri = normalizedHttpUrl(input.redirectUri, "OAuth callback URL")
-    const prepared = await this.prepareReauthorization(definition, actor, input.reauthorizationId)
+    const reauthorization = await this.prepareReauthorization(
+      definition,
+      actor,
+      input.reauthorizationId
+    )
 
     const attemptId = `cat_${randomUUID()}`
     const state = `${attemptId}.${randomBytes(32).toString("base64url")}`
@@ -179,46 +218,41 @@ export class ConnectorAuthorizationRequestHandler {
       "connector.adapter_invalid"
     )
     assertAuthorizationUrlParameters(authorizationUrl, { state, codeChallenge })
-    const sealedVerifier = await this.credentialProtector.seal(textEncoder.encode(codeVerifier), {
-      projectId: this.projectId,
-      connectorId: definition.id,
-      recordId: attemptId,
-      purpose: "pkce-verifier",
-    })
-
-    try {
-      await this.storage.transaction(
-        async (tx) => {
-          await ensureExecutionRecord(tx.executions, command.execution)
-          await requireConnectorConnectionStorage(tx).createAuthorizationAttempt({
-            id: attemptId,
-            projectId: this.projectId,
-            connectorId: definition.id,
-            owner: input.owner,
-            slot: input.slot,
-            redirectUri,
-            ...(prepared === undefined
-              ? {}
-              : {
-                  reauthorizationId: prepared.authorization.id,
-                  reauthorizationRevision: prepared.authorization.revision,
-                  reauthorizationConnectionIds: prepared.connectionIds,
-                }),
-            initiatedByExecutionId: command.execution.id,
-            stateHash: hashSecret(state),
-            codeVerifier: sealedVerifier,
-            ttlMs: this.authorizationAttemptTtlMs,
-          })
-        },
-        { isolation: "serializable" }
-      )
-    } catch (error) {
-      throw storageBoundaryError(error, "Connector authorization attempt could not be persisted.")
-    }
+    const codeVerifierEnvelope = await this.credentialProtector.seal(
+      textEncoder.encode(codeVerifier),
+      {
+        projectId: this.projectId,
+        connectorId: definition.id,
+        recordId: attemptId,
+        purpose: "pkce-verifier",
+      }
+    )
 
     return {
+      definition,
+      actor,
+      state,
       authorizationUrl,
-      affectedConnections: prepared?.affectedConnections ?? [],
+      attempt: {
+        id: attemptId,
+        projectId: this.projectId,
+        connectorId: definition.id,
+        owner: input.owner,
+        slot: input.slot,
+        initiatedByExecutionId: command.execution.id,
+        stateHash: hashSecret(state),
+        codeVerifier: codeVerifierEnvelope,
+        redirectUri,
+        ...(reauthorization === undefined
+          ? {}
+          : {
+              reauthorizationId: reauthorization.authorization.id,
+              reauthorizationRevision: reauthorization.authorization.revision,
+              reauthorizationConnectionIds: reauthorization.connectionIds,
+            }),
+        ttlMs: this.authorizationAttemptTtlMs,
+      },
+      affectedConnections: reauthorization?.affectedConnections ?? [],
     }
   }
 
@@ -233,20 +267,11 @@ export class ConnectorAuthorizationRequestHandler {
     const code = nonblank(input.code, "OAuth authorization code", "connector.authorization_invalid")
     const redirectUri = normalizedHttpUrl(input.redirectUri, "OAuth callback URL")
     const attempt = await this.consumeAuthorizationAttempt(definition.id, actor, state, redirectUri)
-    const verifierBytes = await this.credentialProtector.open(attempt.codeVerifier, {
-      projectId: this.projectId,
-      connectorId: definition.id,
-      recordId: attempt.id,
-      purpose: "pkce-verifier",
-    })
-    const codeVerifier = textDecoder.decode(verifierBytes)
-
-    const completed = await this.completeGrant({
+    const completed = await this.completeAuthorizationAttempt({
       definition,
       attempt,
       principal: actor.principal,
       code,
-      codeVerifier,
       redirectUri,
     })
 
@@ -256,6 +281,25 @@ export class ConnectorAuthorizationRequestHandler {
       slot: attempt.slot,
       accounts: completed.accounts,
     }
+  }
+
+  async completeAuthorizationAttempt(input: {
+    readonly definition: OAuthConnectorDefinition
+    readonly attempt: ConnectorAuthorizationAttemptRecord
+    readonly principal: AuthorizablePrincipal
+    readonly code: string
+    readonly redirectUri: string
+  }): Promise<ConnectorAuthorizationRecord> {
+    const verifierBytes = await this.credentialProtector.open(input.attempt.codeVerifier, {
+      projectId: this.projectId,
+      connectorId: input.definition.id,
+      recordId: input.attempt.id,
+      purpose: "pkce-verifier",
+    })
+    return this.completeGrant({
+      ...input,
+      codeVerifier: textDecoder.decode(verifierBytes),
+    })
   }
 
   private async prepareReauthorization(

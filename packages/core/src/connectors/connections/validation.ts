@@ -303,7 +303,12 @@ function sameSingleParameter(parameters: URLSearchParams, name: string, expected
 }
 
 function isLoopbackHost(hostname: string): boolean {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]"
+  return (
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    hostname === "127.0.0.1" ||
+    hostname === "[::1]"
+  )
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

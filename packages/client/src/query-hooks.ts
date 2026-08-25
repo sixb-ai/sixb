@@ -29,7 +29,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
-import { createContext, createElement, type ReactNode, useContext, useMemo } from "react"
+import { useMemo } from "react"
 import {
   type ActionRunDetail,
   ActionRunFailedError,
@@ -37,6 +37,7 @@ import {
   type RequestActionAndWaitInput,
   requestActionAndWait,
 } from "./actions"
+import { SixbProvider, useSixbProviderClient } from "./client-provider"
 import { type SixbFileUploadError, type UploadFileInput, uploadFile } from "./file"
 import {
   getActionRunQueryKey,
@@ -279,14 +280,7 @@ export function objectQueryInfiniteOptions<TObject>(
   })
 }
 
-// Optional transport override. Without a provider, hooks use the global
-// hey-api client, matching the rest of @sixb/client.
-
-const SixbClientContext = createContext<Client | undefined>(undefined)
-
-export function SixbProvider(props: { client: Client; children?: ReactNode }) {
-  return createElement(SixbClientContext.Provider, { value: props.client }, props.children)
-}
+export { SixbProvider }
 
 export type UseUploadFileInput = UploadFileInput
 
@@ -295,7 +289,7 @@ export function useUploadFile(): UseMutationResult<
   SixbFileUploadError,
   UseUploadFileInput
 > {
-  const client = useContext(SixbClientContext)
+  const client = useSixbProviderClient()
 
   return useMutation({
     mutationFn: ({
@@ -455,7 +449,7 @@ export function useActionRunMutation<TContext = unknown>(
 export function useActionRunMutation<TVariables, TContext>(
   options?: InternalActionRunMutationOptions<TVariables, TContext>
 ): UseMutationResult<ActionRunDetail, Error, TVariables, TContext> {
-  const providerClient = useContext(SixbClientContext)
+  const providerClient = useSixbProviderClient()
   const queryClient = useQueryClient()
   return useMutation(
     createActionRunMutationOptions({
@@ -850,7 +844,7 @@ export function bulkTelemetryHistoryQueryOptions<
  * (`objects(Type, { client })`) does not apply inside hooks.
  */
 function useClientQueryExecutor(): ObjectQueryExecutor {
-  const client = useContext(SixbClientContext)
+  const client = useSixbProviderClient()
   return useMemo(() => createHttpQueryExecutor(client), [client])
 }
 
@@ -860,7 +854,7 @@ export function useTelemetryHistoryQuery<
 >(
   options: TelemetryHistoryHookOptions<TObjectType, TProperty>
 ): UseQueryResult<TelemetryHistoryPoints<TProperty>, Error> {
-  const client = useContext(SixbClientContext)
+  const client = useSixbProviderClient()
   const {
     enabled,
     staleTime,
@@ -893,7 +887,7 @@ export function useBulkTelemetryHistoryQuery<
 >(
   options: BulkTelemetryHistoryHookOptions<TObjectType, TProperties>
 ): UseQueryResult<BulkTelemetryHistory<TProperties>, Error> {
-  const client = useContext(SixbClientContext)
+  const client = useSixbProviderClient()
   const {
     enabled,
     staleTime,

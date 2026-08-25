@@ -1,6 +1,9 @@
 import { timingSafeEqual } from "node:crypto"
+import { parseSixbFailure } from "../../errors/internal"
 import { ConnectorConnectionStorageError } from "./errors"
 import type {
+  ClaimConnectorConnectionRunCallbackInput,
+  ClaimConnectorConnectionRunCallbackResult,
   ClaimConnectorCredentialMutationInput,
   ClaimConnectorCredentialMutationResult,
   ConnectorAuthorizationAttemptRecord,
@@ -8,15 +11,24 @@ import type {
   ConnectorAuthorizationRecord,
   ConnectorConnectionKey,
   ConnectorConnectionRecord,
+  ConnectorConnectionRunAwaitingProviderRecord,
+  ConnectorConnectionRunRecord,
+  ConnectorConnectionRunSucceededRecord,
   ConnectorConnectionStorage,
   ConnectorCredentialMutationFence,
   CreateConnectorAuthorizationAttemptInput,
   CreateConnectorAuthorizationInput,
+  CreateConnectorConnectionRunInput,
   FinalizeConnectorReauthorizationInput,
+  FinishConnectorConnectionRunInput,
   GetConnectorConnectionInput,
+  GetConnectorConnectionRunInput,
   InitializeConnectorAuthorizationAccountsInput,
+  ListConnectorConnectionsInput,
   MarkConnectorAuthorizationNeedsReauthorizationInput,
   MarkConnectorCredentialMutationExecutingInput,
+  PutConnectorConnectionFromRunInput,
+  PutConnectorConnectionFromRunResult,
   PutConnectorConnectionInput,
   PutConnectorConnectionResult,
   RecoverExpiredConnectorCredentialMutationInput,
@@ -24,12 +36,40 @@ import type {
   RenewConnectorCredentialMutationInput,
   StageConnectorCredentialMutationCredentialsInput,
   StageConnectorCredentialMutationRevocationInput,
+  WaitForConnectorConnectionRunSelectionInput,
 } from "./types"
+import { CONNECTOR_CONNECTION_RUN_FAILURE_CODES } from "./types"
 
 export interface InMemoryConnectorConnectionStorageSnapshot {
   readonly attempts: Map<string, ConnectorAuthorizationAttemptRecord>
+  readonly connectionRuns: Map<string, ConnectorConnectionRunRecord>
   readonly authorizations: Map<string, ConnectorAuthorizationRecord>
   readonly connections: Map<string, ConnectorConnectionRecord>
+}
+
+function connectionRunBase(record: ConnectorConnectionRunRecord, updatedAt: Date) {
+  return {
+    id: record.id,
+    projectId: record.projectId,
+    connectorId: record.connectorId,
+    kind: record.kind,
+    owner: structuredClone(record.owner),
+    slot: record.slot,
+    initiatedByExecutionId: record.initiatedByExecutionId,
+    createdAt: new Date(record.createdAt),
+    updatedAt: new Date(updatedAt),
+  }
+}
+
+function expireConnectionRun(
+  record: Extract<ConnectorConnectionRunRecord, { readonly status: "waiting" }>,
+  now: Date
+) {
+  return {
+    ...connectionRunBase(record, now),
+    status: "expired" as const,
+    finishedAt: new Date(now),
+  }
 }
 
 export interface InMemoryConnectorConnectionStorageOptions {
@@ -40,6 +80,7 @@ export interface InMemoryConnectorConnectionStorageOptions {
 export class InMemoryConnectorConnectionStorage implements ConnectorConnectionStorage {
   readonly durability = "ephemeral" as const
   private readonly attempts = new Map<string, ConnectorAuthorizationAttemptRecord>()
+  private readonly connectionRuns = new Map<string, ConnectorConnectionRunRecord>()
   private readonly authorizations = new Map<string, ConnectorAuthorizationRecord>()
   private readonly connections = new Map<string, ConnectorConnectionRecord>()
 
@@ -66,6 +107,11 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
       stateHash: input.stateHash,
       codeVerifier: structuredClone(input.codeVerifier),
       redirectUri: input.redirectUri,
+      ...(input.connectionRunId === undefined ? {} : { connectionRunId: input.connectionRunId }),
+      ...(input.returnTo === undefined ? {} : { returnTo: input.returnTo }),
+      ...(input.callbackBindingHash === undefined
+        ? {}
+        : { callbackBindingHash: input.callbackBindingHash }),
       ...(input.reauthorizationId === undefined
         ? {}
         : { reauthorizationId: input.reauthorizationId }),
@@ -102,6 +148,140 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
 
     this.attempts.delete(input.id)
     return structuredClone(record)
+  }
+
+  async createConnectionRun(
+    input: CreateConnectorConnectionRunInput
+  ): Promise<ConnectorConnectionRunRecord> {
+    assertPositiveDuration(input.ttlMs, "connection run TTL")
+    if (this.connectionRuns.has(input.id)) {
+      throw new ConnectorConnectionStorageError(
+        "run_conflict",
+        "[Sixb] Connector connection run already exists."
+      )
+    }
+    const now = this.now()
+    const record: ConnectorConnectionRunAwaitingProviderRecord = {
+      id: input.id,
+      projectId: input.projectId,
+      connectorId: input.connectorId,
+      kind: input.kind,
+      owner: structuredClone(input.owner),
+      slot: input.slot,
+      initiatedByExecutionId: input.initiatedByExecutionId,
+      status: "waiting",
+      waitingFor: "provider_authorization",
+      authorizationAttemptId: input.authorizationAttemptId,
+      createdAt: now,
+      updatedAt: now,
+      expiresAt: new Date(now.getTime() + input.ttlMs),
+    }
+    this.connectionRuns.set(record.id, record)
+    return structuredClone(record)
+  }
+
+  async claimConnectionRunCallback(
+    input: ClaimConnectorConnectionRunCallbackInput
+  ): Promise<ClaimConnectorConnectionRunCallbackResult | null> {
+    const attempt = this.attempts.get(input.attemptId)
+    if (
+      !attempt ||
+      attempt.projectId !== input.projectId ||
+      attempt.connectionRunId === undefined ||
+      attempt.returnTo === undefined ||
+      attempt.callbackBindingHash === undefined ||
+      attempt.redirectUri !== input.redirectUri ||
+      !safeEqual(attempt.stateHash, input.stateHash) ||
+      !safeEqual(attempt.callbackBindingHash, input.callbackBindingHash)
+    ) {
+      return null
+    }
+
+    const run = this.connectionRuns.get(attempt.connectionRunId)
+    if (
+      !run ||
+      run.projectId !== input.projectId ||
+      run.connectorId !== attempt.connectorId ||
+      run.status !== "waiting" ||
+      run.waitingFor !== "provider_authorization" ||
+      run.authorizationAttemptId !== attempt.id ||
+      run.initiatedByExecutionId !== attempt.initiatedByExecutionId
+    ) {
+      return null
+    }
+
+    const now = this.now()
+    this.attempts.delete(attempt.id)
+    if (attempt.expiresAt.getTime() <= now.getTime() || run.expiresAt.getTime() <= now.getTime()) {
+      const expired = expireConnectionRun(run, now)
+      this.connectionRuns.set(run.id, expired)
+      return { type: "expired", run: structuredClone(expired), returnTo: attempt.returnTo }
+    }
+
+    const processing = {
+      ...connectionRunBase(run, now),
+      status: "running" as const,
+      callbackStartedAt: now,
+    }
+    this.connectionRuns.set(run.id, processing)
+    return {
+      type: "claimed",
+      run: structuredClone(processing),
+      attempt: structuredClone(attempt),
+      returnTo: attempt.returnTo,
+    }
+  }
+
+  async waitForConnectionRunSelection(input: WaitForConnectorConnectionRunSelectionInput) {
+    const run = this.connectionRuns.get(input.runId)
+    if (!sameConnectionRunScope(run, input) || run.status !== "running" || run.kind !== "connect") {
+      return null
+    }
+    const now = this.now()
+    const waiting = {
+      ...connectionRunBase(run, now),
+      status: "waiting" as const,
+      waitingFor: "account_selection" as const,
+      authorizationId: input.authorizationId,
+      expiresAt: new Date(input.expiresAt),
+    }
+    this.connectionRuns.set(run.id, waiting)
+    return structuredClone(waiting)
+  }
+
+  async finishConnectionRun(
+    input: FinishConnectorConnectionRunInput
+  ): Promise<ConnectorConnectionRunRecord | null> {
+    const run = this.connectionRuns.get(input.runId)
+    if (!sameConnectionRunScope(run, input) || run.status !== "running") return null
+    const now = this.now()
+    const base = connectionRunBase(run, now)
+    const finished: ConnectorConnectionRunRecord =
+      input.status === "succeeded"
+        ? {
+            ...base,
+            status: "succeeded",
+            authorizationId: input.authorizationId,
+            connections: structuredClone(input.connections),
+            finishedAt: now,
+          }
+        : input.status === "failed"
+          ? {
+              ...base,
+              status: "failed",
+              error: parseSixbFailure(input.error, CONNECTOR_CONNECTION_RUN_FAILURE_CODES),
+              finishedAt: now,
+            }
+          : { ...base, status: "cancelled", finishedAt: now }
+    this.connectionRuns.set(run.id, finished)
+    return structuredClone(finished)
+  }
+
+  async getConnectionRun(
+    input: GetConnectorConnectionRunInput
+  ): Promise<ConnectorConnectionRunRecord | null> {
+    const run = this.currentConnectionRun(input.runId)
+    return sameConnectionRunScope(run, input) ? structuredClone(run) : null
   }
 
   async createAuthorization(
@@ -165,6 +345,27 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
     return sameAuthorizationScope(authorization, input) ? structuredClone(authorization) : null
   }
 
+  async getAuthorizationByConnectionId(
+    input: ConnectorConnectionKey
+  ): Promise<ConnectorAuthorizationRecord | null> {
+    const connection = this.connections.get(input.connectionId)
+    if (sameConnectionScope(connection, input)) {
+      const authorization = this.authorizations.get(connection.authorizationId)
+      return sameAuthorizationScope(authorization, input) ? structuredClone(authorization) : null
+    }
+    for (const authorization of this.authorizations.values()) {
+      if (
+        sameAuthorizationScope(authorization, input) &&
+        authorization.revocationConnections?.some(
+          (candidate) => candidate.id === input.connectionId
+        )
+      ) {
+        return structuredClone(authorization)
+      }
+    }
+    return null
+  }
+
   async claimCredentialMutation(
     input: ClaimConnectorCredentialMutationInput
   ): Promise<ClaimConnectorCredentialMutationResult | null> {
@@ -210,12 +411,19 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
     }
     const startsRevocation =
       input.mutation.kind === "revocation" && record.status !== "revocation_pending"
+    const revocationConnections =
+      input.mutation.kind === "revocation"
+        ? (record.revocationConnections ?? attached)
+        : record.revocationConnections
     const updated: ConnectorAuthorizationRecord = {
       ...record,
       status: input.mutation.kind === "revocation" ? "revocation_pending" : record.status,
       selectionExpiresAt:
         input.mutation.kind === "revocation" ? undefined : record.selectionExpiresAt,
       revision: startsRevocation ? record.revision + 1 : record.revision,
+      ...(revocationConnections === undefined
+        ? {}
+        : { revocationConnections: structuredClone(revocationConnections) }),
       credentialMutation: mutation,
       updatedAt: now,
     }
@@ -223,6 +431,7 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
 
     const disconnected: ConnectorConnectionRecord[] = []
     if (input.mutation.kind === "revocation") {
+      disconnected.push(...structuredClone(revocationConnections ?? []))
       for (const connection of attached) {
         const updated = disconnectConnectionRecord(connection, now)
         this.connections.set(connection.id, updated)
@@ -484,7 +693,49 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
   }
 
   async putConnection(input: PutConnectorConnectionInput): Promise<PutConnectorConnectionResult> {
+    return this.putConnectionNow(input, this.now())
+  }
+
+  async putConnectionFromRun(
+    input: PutConnectorConnectionFromRunInput
+  ): Promise<PutConnectorConnectionFromRunResult> {
+    const run = this.currentConnectionRun(input.runId)
+    if (
+      !sameConnectionRunScope(run, input) ||
+      run.status !== "waiting" ||
+      run.waitingFor !== "account_selection"
+    ) {
+      throw invalidRun()
+    }
     const now = this.now()
+    const result = this.putConnectionNow(
+      {
+        id: input.id,
+        projectId: input.projectId,
+        connectorId: input.connectorId,
+        owner: run.owner,
+        slot: run.slot,
+        authorizationId: run.authorizationId,
+        account: input.account,
+        replace: input.replace,
+      },
+      now
+    )
+    const succeeded: ConnectorConnectionRunSucceededRecord = {
+      ...connectionRunBase(run, now),
+      status: "succeeded",
+      authorizationId: run.authorizationId,
+      connections: [structuredClone(result.connection)],
+      finishedAt: now,
+    }
+    this.connectionRuns.set(run.id, succeeded)
+    return { ...result, run: structuredClone(succeeded) }
+  }
+
+  private putConnectionNow(
+    input: PutConnectorConnectionInput,
+    now: Date
+  ): PutConnectorConnectionResult {
     let authorization = this.authorizations.get(input.authorizationId)
     if (
       !sameAuthorizationScope(authorization, input) ||
@@ -613,10 +864,9 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
     return sameConnectionScope(connection, input) ? structuredClone(connection) : null
   }
 
-  async listConnections(input: {
-    readonly projectId: string
-    readonly connectorId: string
-  }): Promise<readonly ConnectorConnectionRecord[]> {
+  async listConnections(
+    input: ListConnectorConnectionsInput
+  ): Promise<readonly ConnectorConnectionRecord[]> {
     return [...this.connections.values()]
       .filter((connection) => sameConnectionScope(connection, input))
       .map((connection) => structuredClone(connection))
@@ -698,6 +948,7 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
   snapshot(): InMemoryConnectorConnectionStorageSnapshot {
     return {
       attempts: structuredClone(this.attempts),
+      connectionRuns: structuredClone(this.connectionRuns),
       authorizations: structuredClone(this.authorizations),
       connections: structuredClone(this.connections),
     }
@@ -705,12 +956,28 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
 
   restore(snapshot: InMemoryConnectorConnectionStorageSnapshot): void {
     replaceMap(this.attempts, snapshot.attempts)
+    replaceMap(this.connectionRuns, snapshot.connectionRuns)
     replaceMap(this.authorizations, snapshot.authorizations)
     replaceMap(this.connections, snapshot.connections)
   }
 
   private now(): Date {
     return new Date(this.options.now?.() ?? new Date())
+  }
+
+  private currentConnectionRun(runId: string): ConnectorConnectionRunRecord | undefined {
+    const run = this.connectionRuns.get(runId)
+    if (!run || run.status !== "waiting") return run
+
+    const now = this.now()
+    if (run.expiresAt.getTime() > now.getTime()) return run
+
+    if (run.waitingFor === "provider_authorization") {
+      this.attempts.delete(run.authorizationAttemptId)
+    }
+    const expired = expireConnectionRun(run, now)
+    this.connectionRuns.set(run.id, expired)
+    return expired
   }
 
   private findConnectionRecord(
@@ -804,6 +1071,12 @@ function safeEqual(left: string, right: string): boolean {
   return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes)
 }
 
+function invalidRun(): ConnectorConnectionStorageError {
+  return new ConnectorConnectionStorageError(
+    "run_invalid",
+    "[Sixb] Connector connection run is invalid, expired, or already used."
+  )
+}
 function replaceMap<TKey, TValue>(target: Map<TKey, TValue>, source: Map<TKey, TValue>): void {
   target.clear()
   for (const [key, value] of structuredClone(source)) target.set(key, value)
@@ -856,6 +1129,17 @@ function sameConnectionScope(
   record: ConnectorConnectionRecord | undefined,
   input: { readonly projectId: string; readonly connectorId: string }
 ): record is ConnectorConnectionRecord {
+  return (
+    record !== undefined &&
+    record.projectId === input.projectId &&
+    record.connectorId === input.connectorId
+  )
+}
+
+function sameConnectionRunScope(
+  record: ConnectorConnectionRunRecord | undefined,
+  input: { readonly projectId: string; readonly connectorId: string }
+): record is ConnectorConnectionRunRecord {
   return (
     record !== undefined &&
     record.projectId === input.projectId &&

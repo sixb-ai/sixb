@@ -174,6 +174,8 @@ export type {
 } from "./auth"
 export { AuthStorageError, InMemoryAuthStorage } from "./auth"
 export type {
+  ClaimConnectorConnectionRunCallbackInput,
+  ClaimConnectorConnectionRunCallbackResult,
   ClaimConnectorCredentialMutationInput,
   ClaimConnectorCredentialMutationResult,
   ConnectorAuthorizationAttemptRecord,
@@ -183,6 +185,17 @@ export type {
   ConnectorConnectionKey,
   ConnectorConnectionOwner,
   ConnectorConnectionRecord,
+  ConnectorConnectionRunAwaitingProviderRecord,
+  ConnectorConnectionRunAwaitingSelectionRecord,
+  ConnectorConnectionRunCancelledRecord,
+  ConnectorConnectionRunExpiredRecord,
+  ConnectorConnectionRunFailedRecord,
+  ConnectorConnectionRunFailure,
+  ConnectorConnectionRunFailureCode,
+  ConnectorConnectionRunKind,
+  ConnectorConnectionRunProcessingRecord,
+  ConnectorConnectionRunRecord,
+  ConnectorConnectionRunSucceededRecord,
   ConnectorConnectionSelector,
   ConnectorConnectionStatus,
   ConnectorConnectionStorage,
@@ -196,8 +209,11 @@ export type {
   CreateConnectorAuthorizationAttemptInput,
   CreateConnectorAuthorizationInput,
   DisconnectConnectorConnectionResult,
+  CreateConnectorConnectionRunInput,
   FinalizeConnectorReauthorizationInput,
+  FinishConnectorConnectionRunInput,
   GetConnectorConnectionInput,
+  GetConnectorConnectionRunInput,
   InitializeConnectorAuthorizationAccountsInput,
   InMemoryConnectorConnectionStorageOptions,
   InMemoryConnectorConnectionStorageSnapshot,
@@ -205,6 +221,8 @@ export type {
   MarkConnectorAuthorizationNeedsReauthorizationInput,
   MarkConnectorCredentialMutationExecutingInput,
   ProjectConnectorConnectionOwner,
+  PutConnectorConnectionFromRunInput,
+  PutConnectorConnectionFromRunResult,
   PutConnectorConnectionInput,
   PutConnectorConnectionResult,
   RecoverExpiredConnectorCredentialMutationInput,
@@ -212,8 +230,10 @@ export type {
   RenewConnectorCredentialMutationInput,
   StageConnectorCredentialMutationCredentialsInput,
   StageConnectorCredentialMutationRevocationInput,
+  WaitForConnectorConnectionRunSelectionInput,
 } from "./connector-connections"
 export {
+  CONNECTOR_CONNECTION_RUN_FAILURE_CODES,
   ConnectorConnectionStorageError,
   InMemoryConnectorConnectionStorage,
 } from "./connector-connections"

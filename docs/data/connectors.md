@@ -174,8 +174,7 @@ can.manage(socialConnector)
 // or: can.manage(every.connector())
 ```
 
-> **Current scope.** Core provides the OAuth connection foundation; the headless HTTP management
-> API is added separately. OAuth-backed sync fan-out and webhook routing remain rejected until their
+> **Current scope.** OAuth-backed sync fan-out and webhook routing remain rejected until their
 > connection routing contracts are defined.
 
 ## Protect OAuth credentials
@@ -210,6 +209,77 @@ replace, or lose it: existing OAuth credentials would become unreadable.
 Static connectors do not need this setting. It can also be omitted with ephemeral connector
 storage, where both the stored credentials and Sixb's process-local protection disappear on
 restart.
+
+## Connect an OAuth account from an app
+
+Sixb owns the OAuth callback, state and PKCE exchange. The app starts the connection and redirects
+the browser to the provider:
+
+```tsx
+import { useConnectConnector } from "@sixb/client/hooks"
+
+export function ConnectSocialButton() {
+  const connect = useConnectConnector({
+    connectorId: "social",
+    slot: "organic-marketing",
+    returnTo: "/settings/connectors",
+    onSuccess: ({ authorizationUrl }) => window.location.assign(authorizationUrl),
+  })
+
+  return <button onClick={() => connect.mutate()}>Connect social account</button>
+}
+```
+
+`slot` is the stable application role filled by the connection, not the provider account id. For
+example, `organic-marketing`, `customer-support`, or `brand-france` can each resolve a different
+account later through `sixb.connector(...)`.
+
+Register this server-owned callback URL with the OAuth provider:
+
+```text
+https://<sixb-api-origin>/auth/connectors/callback
+```
+
+After OAuth, Sixb redirects to `returnTo` with `connectionRunId`. Read the run and select the account
+that should fill the slot:
+
+```tsx
+import { useConnectorConnectionRun, useSelectConnectorAccount } from "@sixb/client/hooks"
+
+export function SocialConnectionResult() {
+  const runId = new URLSearchParams(window.location.search).get("connectionRunId")
+  return runId ? <SocialConnectionRun runId={runId} /> : null
+}
+
+function SocialConnectionRun({ runId }: { runId: string }) {
+  const run = useConnectorConnectionRun({ connectorId: "social", runId })
+  const selectAccount = useSelectConnectorAccount({
+    connectorId: "social",
+    runId,
+  })
+
+  if (run.data?.status !== "waiting" || run.data.waitingFor !== "account_selection") return null
+
+  return run.data.accounts.map((account) => (
+    <button key={account.id} onClick={() => selectAccount.mutate({ accountId: account.id })}>
+      {account.label}
+    </button>
+  ))
+}
+```
+
+A connection run records the interactive execution: `waiting`, `running`, then a terminal status.
+Its terminal record is secret-free and retained without automatic cleanup in V1.
+
+| Client operation | Effect |
+| --- | --- |
+| `listConnectorConnections()` | Lists the accounts connected to one connector. |
+| `disconnectConnectorConnection()` | Removes one Sixb connection but keeps its provider grant. |
+| `reauthorizeConnectorConnection()` | Starts a new OAuth run for an existing grant. |
+| `revokeConnectorConnection()` | Revokes the grant and disconnects every account sharing it. |
+
+Management routes require a browser session, CSRF protection, and `can.manage(connector)`.
+Authorization ids and OAuth credentials are never exposed.
 
 ## ConnectorContext
 

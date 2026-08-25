@@ -1,4 +1,5 @@
 import type { OntologySource, SixbHostView } from "@sixb/core"
+import { isOAuthConnectorDefinition } from "@sixb/core/internal/connector-connections"
 import type { Sixb } from "@sixb/core/internal/request-execution"
 import type { Elysia } from "elysia"
 import { requireRequestSixb } from "../auth/scope"
@@ -14,6 +15,9 @@ function serializeConnector(
   return {
     id: connector.id,
     type: connector.adapter.type,
+    connection: isOAuthConnectorDefinition(connector)
+      ? { authentication: "oauth2" as const }
+      : null,
     syncIds: execution.syncs
       .list()
       .filter((sync) => sync.connector.id === connector.id)

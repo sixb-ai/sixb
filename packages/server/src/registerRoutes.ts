@@ -4,6 +4,11 @@ import { registerActionRunRoutes } from "./routes/action-runs"
 import { registerActionRoutes } from "./routes/actions"
 import { registerAgentApiGatewayRoutes } from "./routes/agent-api-gateway"
 import { registerAgentRoutes } from "./routes/agents"
+import {
+  type ConnectorConnectionRouteOptions,
+  registerConnectorConnectionRunRoutes,
+} from "./routes/connector-connection-runs"
+import { registerConnectorConnectionRoutes } from "./routes/connector-connections"
 import { registerConnectorRoutes } from "./routes/connectors"
 import { registerDatasetRoutes } from "./routes/datasets"
 import { registerEventRoutes } from "./routes/events"
@@ -22,11 +27,17 @@ import { registerTelemetryRoutes } from "./routes/telemetry"
 import { registerWebhookRunRoutes } from "./routes/webhook-runs"
 import { registerWorkflowRoutes } from "./routes/workflows"
 
-export function registerHttpRoutes(app: Elysia, host: SixbHostView) {
+export interface HttpRouteOptions {
+  readonly connectorConnections: ConnectorConnectionRouteOptions
+}
+
+export function registerHttpRoutes(app: Elysia, host: SixbHostView, options: HttpRouteOptions) {
   registerAgentApiGatewayRoutes(app, host)
   registerProjectRoutes(app, host)
   registerStatusRoutes(app, host)
   registerConnectorRoutes(app, host)
+  registerConnectorConnectionRoutes(app, host)
+  registerConnectorConnectionRunRoutes(app, host, options.connectorConnections)
   registerDatasetRoutes(app, host)
   registerSyncRoutes(app, host)
   registerPipelineRoutes(app, host)

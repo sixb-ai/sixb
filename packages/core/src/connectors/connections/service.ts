@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { isSixbError } from "../../errors/internal"
 import type {
+  ConnectorConnectionRecord,
   ConnectorConnectionStorage,
   PutConnectorConnectionResult,
   Storage,
@@ -31,16 +32,24 @@ import { requireConnectorConnectionCommandActor } from "./command-context"
 import type {
   CompleteConnectorAuthorizationInput,
   CompleteConnectorAuthorizationResult,
+  CompleteConnectorConnectionRunInput,
+  CompleteConnectorConnectionRunResult,
+  ConnectorConnectionCallbackProcess,
   ConnectorConnectionCommandContext,
   ConnectorConnectionProcess,
+  ConnectorConnectionRunView,
   ConnectorConnectionView,
   RevokeConnectorAuthorizationResult,
   SelectConnectorAccountInput,
+  SelectConnectorConnectionRunAccountInput,
   StartConnectorAuthorizationInput,
   StartConnectorAuthorizationResult,
+  StartConnectorConnectionRunInput,
+  StartConnectorConnectionRunResult,
 } from "./contracts"
 import { connectorAuthorizationStatusError } from "./credential-mutations"
 import { ConnectorAuthorizationRequestHandler } from "./request"
+import { ConnectorConnectionRunService } from "./runs"
 import { withConnectorStorageBoundary } from "./storage-boundary"
 import { nonblank } from "./validation"
 import { assertConnectorConnectionSelector, connectorConnectionView } from "./views"
@@ -69,6 +78,8 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
   private readonly connectionStorage: ConnectorConnectionStorage
   private readonly authorizations: DefaultConnectorAuthorizationLifecycle
   private readonly requests: ConnectorAuthorizationRequestHandler
+  private readonly runs: ConnectorConnectionRunService
+  readonly callbackProcess: ConnectorConnectionCallbackProcess
 
   constructor(
     private readonly projectId: string,
@@ -81,6 +92,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
     const credentialProtector = credentialProtectorFor(storage.connectorConnections, options)
     const resolveDefinition = (connectorId: string) => this.requireOAuthDefinition(connectorId)
     const hostSignal = () => this.abortController.signal
+    const now = options.now ?? (() => new Date())
 
     this.authorizations = new DefaultConnectorAuthorizationLifecycle({
       projectId,
@@ -94,7 +106,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
       providerOperationTimeoutMs:
         options.providerOperationTimeoutMs ?? DEFAULT_PROVIDER_OPERATION_TIMEOUT_MS,
       refreshSkewMs: options.refreshSkewMs ?? DEFAULT_REFRESH_SKEW_MS,
-      now: options.now ?? (() => new Date()),
+      now,
     })
     this.requests = new ConnectorAuthorizationRequestHandler({
       projectId,
@@ -106,6 +118,18 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
       resolveDefinition,
       lifecycle: this.authorizations,
       hostSignal,
+    })
+    this.runs = new ConnectorConnectionRunService({
+      projectId,
+      storage: storage.root,
+      requestHandler: this.requests,
+      authorizations: this.authorizations,
+      resolveDefinition,
+      now,
+    })
+    this.callbackProcess = Object.freeze({
+      completeConnectionRun: (input: CompleteConnectorConnectionRunInput) =>
+        this.completeConnectionRun(input),
     })
   }
 
@@ -151,6 +175,113 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
         "Connector connection client creation failed."
       )
     }
+  }
+
+  async listConnections(
+    command: ConnectorConnectionCommandContext,
+    connectorId: string
+  ): Promise<readonly ConnectorConnectionView[]> {
+    const definition = this.requireOAuthDefinition(connectorId)
+    requireConnectorConnectionCommandActor(command.execution, this.projectId)
+    let connections: readonly ConnectorConnectionRecord[]
+    try {
+      connections = await this.connectionStorage.listConnections({
+        projectId: this.projectId,
+        connectorId: definition.id,
+      })
+    } catch (error) {
+      throw storageBoundaryError(error, "Connector connections could not be listed.")
+    }
+    return Promise.all(
+      connections.map(async (connection) => {
+        const authorization = await this.connectionStorage.getAuthorization({
+          projectId: this.projectId,
+          connectorId: definition.id,
+          authorizationId: connection.authorizationId,
+        })
+        if (!authorization) {
+          throw createConnectorCodedError(
+            "internal.unexpected",
+            "Connector connection references an unavailable authorization."
+          )
+        }
+        return connectorConnectionView(connection, authorization.status)
+      })
+    )
+  }
+
+  startConnectionRun(
+    command: ConnectorConnectionCommandContext,
+    connectorId: string,
+    input: StartConnectorConnectionRunInput
+  ): Promise<StartConnectorConnectionRunResult> {
+    return this.runs.start(command, connectorId, input)
+  }
+
+  getConnectionRun(
+    command: ConnectorConnectionCommandContext,
+    connectorId: string,
+    runId: string
+  ): Promise<ConnectorConnectionRunView | null> {
+    this.requireOAuthDefinition(connectorId)
+    return this.runs.get(command, connectorId, runId)
+  }
+
+  selectConnectionRunAccount(
+    command: ConnectorConnectionCommandContext,
+    connectorId: string,
+    input: SelectConnectorConnectionRunAccountInput
+  ): Promise<ConnectorConnectionRunView> {
+    return this.runs.selectAccount(command, connectorId, input)
+  }
+
+  async startReauthorization(
+    command: ConnectorConnectionCommandContext,
+    connectorId: string,
+    connectionId: string,
+    input: Pick<StartConnectorConnectionRunInput, "redirectUri" | "returnTo">
+  ): Promise<StartConnectorConnectionRunResult> {
+    const definition = this.requireOAuthDefinition(connectorId)
+    requireConnectorConnectionCommandActor(command.execution, this.projectId)
+    const connection = await this.connectionStorage.getConnectionById({
+      projectId: this.projectId,
+      connectorId: definition.id,
+      connectionId: nonblank(connectionId, "connection id"),
+    })
+    if (!connection) {
+      throw createConnectorCodedError("connector.not_found", "Connector connection was not found.")
+    }
+    return this.runs.start(command, definition.id, {
+      owner: connection.owner,
+      slot: connection.slot,
+      redirectUri: input.redirectUri,
+      returnTo: input.returnTo,
+      reauthorizationId: connection.authorizationId,
+    })
+  }
+
+  async revokeConnection(
+    command: ConnectorConnectionCommandContext,
+    connectorId: string,
+    connectionId: string
+  ): Promise<RevokeConnectorAuthorizationResult> {
+    const definition = this.requireOAuthDefinition(connectorId)
+    requireConnectorConnectionCommandActor(command.execution, this.projectId)
+    const authorization = await this.connectionStorage.getAuthorizationByConnectionId({
+      projectId: this.projectId,
+      connectorId: definition.id,
+      connectionId: nonblank(connectionId, "connection id"),
+    })
+    if (!authorization) {
+      throw createConnectorCodedError("connector.not_found", "Connector connection was not found.")
+    }
+    return this.revokeAuthorization(command, definition.id, authorization.id)
+  }
+
+  completeConnectionRun(
+    input: CompleteConnectorConnectionRunInput
+  ): Promise<CompleteConnectorConnectionRunResult> {
+    return this.runs.complete(input)
   }
 
   startAuthorization(

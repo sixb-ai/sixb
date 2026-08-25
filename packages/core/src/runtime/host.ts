@@ -17,6 +17,7 @@ import {
 } from "../auth"
 import type { BlobStorage } from "../blob-storage"
 import type { Broker } from "../broker"
+import { registerConnectorConnectionCallbackProcess } from "../connectors/connections/capability"
 import { createConnectorCredentialProtectorFromKey } from "../connectors/credentials"
 import { createConnectorCodedError } from "../connectors/errors"
 import { ConnectorService } from "../connectors/service"
@@ -184,6 +185,12 @@ export class SixbHost<
       storage: this.storage,
       credentialProtector,
     })
+    if (this.connectorService.connectionProcess) {
+      registerConnectorConnectionCallbackProcess(
+        this,
+        this.connectorService.connectionProcess.callbackProcess
+      )
+    }
     assertWebhookRunStorage(connectors, this.storage)
     this.webhookRegistry = new WebhookRegistry({ connectors })
 

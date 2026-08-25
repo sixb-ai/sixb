@@ -149,6 +149,12 @@
       "import": "./dist/bootstrap/index.js",
       "default": "./dist/bootstrap/index.js"
     },
+    "./internal/connector-connections": {
+      "types": "./dist/connectors/connections/internal.d.ts",
+      "bun": "./src/connectors/connections/internal.ts",
+      "import": "./dist/connectors/connections/internal.js",
+      "default": "./dist/connectors/connections/internal.js"
+    },
     "./internal/edits": {
       "types": "./dist/edits/index.d.ts",
       "bun": "./src/edits/index.ts",

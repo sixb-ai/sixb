@@ -62,6 +62,9 @@
       "@sixb/core/internal/auth": ["./packages/core/src/auth/index.ts"],
       "@sixb/core/internal/authorization": ["./packages/core/src/authorization/index.ts"],
       "@sixb/core/internal/bootstrap": ["./packages/core/src/bootstrap/index.ts"],
+      "@sixb/core/internal/connector-connections": [
+        "./packages/core/src/connectors/connections/internal.ts"
+      ],
       "@sixb/core/internal/edits": ["./packages/core/src/edits/index.ts"],
       "@sixb/core/internal/error-reporting": ["./packages/core/src/error-reporting/internal.ts"],
       "@sixb/core/internal/errors": ["./packages/core/src/errors/internal.ts"],
