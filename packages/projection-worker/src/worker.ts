@@ -20,6 +20,11 @@ import { projectionRetryAvailableAt } from "./retry-backoff"
 import { isPermanentProjectionFailure, runProjectionJob } from "./run-projection-job"
 import type { ProjectionWorkerContext } from "./types"
 
+export interface ProjectionWorkerOptions {
+  /** Maximum projection run jobs this worker claims and executes at once. Defaults to 1. */
+  readonly concurrency?: number
+}
+
 export class ProjectionWorker extends QueueWorker<
   ProjectionRunRequestedQueueJob,
   typeof PROJECTION_RUN_FAILURE_CODES
@@ -27,7 +32,7 @@ export class ProjectionWorker extends QueueWorker<
   private readonly host: ProjectionWorkerHost
   private readonly projectionRunsStorage: ProjectionRunStorage
 
-  constructor(host: ProjectionWorkerHost) {
+  constructor(host: ProjectionWorkerHost, options: ProjectionWorkerOptions = {}) {
     const projectionCount = host.definitions.projections.list().length
     if (projectionCount === 0) {
       throw new Error("[SixbProjectionWorker] No projection definitions are registered.")
@@ -43,6 +48,7 @@ export class ProjectionWorker extends QueueWorker<
       queue: host.queues.projections,
       failureCodes: PROJECTION_RUN_FAILURE_CODES,
       workerId: `projection-worker-${host.id}`,
+      claimLimit: options.concurrency,
     })
     this.host = host
     this.projectionRunsStorage = projectionRunsStorage

@@ -14,6 +14,11 @@ import {
 import { PipelineRunAlreadyStartedError, runPipelineJob } from "./run-pipeline-job"
 import type { PipelineJob, PipelineWorkerContext, PipelineWorkerHost } from "./types"
 
+export interface PipelineWorkerOptions {
+  /** Maximum pipeline run jobs this worker claims and executes at once. Defaults to 1. */
+  readonly concurrency?: number
+}
+
 export class PipelineWorker extends QueueWorker<
   PipelineRunRequestedQueueJob,
   typeof PIPELINE_RUN_FAILURE_CODES
@@ -21,7 +26,7 @@ export class PipelineWorker extends QueueWorker<
   private readonly context: PipelineWorkerContext
   private readonly host: PipelineWorkerHost
 
-  constructor(host: PipelineWorkerHost) {
+  constructor(host: PipelineWorkerHost, options: PipelineWorkerOptions = {}) {
     if (host.definitions.pipelines.list().length === 0) {
       throw new Error("[SixbPipelineWorker] No pipeline definitions are registered.")
     }
@@ -36,6 +41,7 @@ export class PipelineWorker extends QueueWorker<
       queue: host.queues.pipelines,
       failureCodes: PIPELINE_RUN_FAILURE_CODES,
       workerId: `pipeline-worker-${host.id}`,
+      claimLimit: options.concurrency,
     })
 
     this.context = buildPipelineContext(host, pipelineRunsStorage)

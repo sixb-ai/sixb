@@ -66,9 +66,14 @@ export abstract class QueueWorker<
       failureCodes: config.failureCodes,
       workerId: config.workerId,
       leaseMs: config.leaseMs ?? DEFAULT_LEASE_MS,
-      claimLimit: config.claimLimit ?? DEFAULT_CLAIM_LIMIT,
+      claimLimit: normalizeClaimLimit(config.claimLimit),
       idlePollMs: config.idlePollMs ?? DEFAULT_IDLE_POLL_MS,
     }
+  }
+
+  /** Maximum jobs this worker process claims and executes at once. */
+  get concurrency(): number {
+    return this.config.claimLimit
   }
 
   protected async run(signal: AbortSignal): Promise<void> {
@@ -241,6 +246,14 @@ export abstract class QueueWorker<
       })
     await delivery.fail(failure)
   }
+}
+
+function normalizeClaimLimit(value: number | undefined): number {
+  const claimLimit = value ?? DEFAULT_CLAIM_LIMIT
+  if (!Number.isSafeInteger(claimLimit) || claimLimit < 1) {
+    throw new Error("[SixbQueueWorker] Worker concurrency must be a positive safe integer.")
+  }
+  return claimLimit
 }
 
 async function settleOrLog<TJob extends QueueJob, TFailureCode extends SixbErrorCode>(

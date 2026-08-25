@@ -126,6 +126,13 @@ async function waitFor<T>(
 }
 
 describe("ProjectionWorker", () => {
+  test("defaults to one concurrent job and accepts an explicit limit", () => {
+    const sixb = createSixb({ datasets: [roomsDataset], projections: [roomProjection] })
+
+    expect(new ProjectionWorker(sixb).concurrency).toBe(1)
+    expect(new ProjectionWorker(sixb, { concurrency: 3 }).concurrency).toBe(3)
+  })
+
   test("processes queued projection jobs end-to-end", async () => {
     const sixb = createSixb({
       datasets: [roomsDataset],
