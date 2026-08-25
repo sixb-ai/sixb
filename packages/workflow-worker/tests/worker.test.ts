@@ -152,6 +152,16 @@ async function waitFor<T>(
 }
 
 describe("WorkflowWorker", () => {
+  test("defaults to one concurrent job and accepts an explicit limit", () => {
+    const workflow = defineWorkflow("concurrency-options")
+      .input({ transaction: ref(Transaction) })
+      .then(findBestInvoice)
+    const sixb = createSixb({ workflows: [workflow] })
+
+    expect(new WorkflowWorker(sixb).concurrency).toBe(1)
+    expect(new WorkflowWorker(sixb, { concurrency: 3 }).concurrency).toBe(3)
+  })
+
   test("requires registered workflows and workflow storage", () => {
     expect(() => new WorkflowWorker(createSixb({}))).toThrow("No workflow definitions")
 

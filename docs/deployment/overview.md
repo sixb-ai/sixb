@@ -122,6 +122,28 @@ sixb worker agent --agent-turn-timeout 20m
 SIXB_AGENT_TURN_TIMEOUT=20m sixb worker-group
 ```
 
+Queue workers execute a bounded number of jobs in each process. Agent workers default to `4`;
+sync, pipeline, projection, workflow, and action workers default to `1`. Set a scalar count for a
+single worker process:
+
+```bash
+sixb worker agent --concurrency 8
+sixb worker sync --concurrency 2
+```
+
+For `sixb worker-group` and `sixb dev`, repeat `--concurrency <type>=<count>` so each lane keeps an
+independent resource budget:
+
+```bash
+sixb worker-group sync agent --concurrency sync=2 --concurrency agent=8
+sixb dev --concurrency agent=1
+```
+
+The flag wins over `SIXB_<TYPE>_WORKER_CONCURRENCY`, such as
+`SIXB_AGENT_WORKER_CONCURRENCY=8`. Action execution remains serial and rejects a concurrency
+override. Concurrency is jobs inside one process; use deployment replicas to run more worker
+processes.
+
 A role process is **idle**, not an error, when it has nothing to do — an
 orchestrator with no routes, a rules process with no rules, or a worker group
 with no registered worker types prints a warning and stays running.
@@ -316,6 +338,10 @@ orchestrator, scheduler, and rules roles must each run as a **single process**.
 | `sixb rules`                       | **one**  | reconciliation has no cross-process lease               |
 
 Running two of a single-process role does not corrupt data — it duplicates runs.
+
+Worker concurrency and replicas multiply. For example, three agent-worker replicas at concurrency
+`8` can run up to 24 agent jobs. Size that total for model-provider limits, sandbox capacity,
+connector quotas, and storage write contention.
 
 ## Related
 

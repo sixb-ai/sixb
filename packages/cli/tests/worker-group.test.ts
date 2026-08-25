@@ -80,6 +80,26 @@ describe("sixb worker-group", () => {
     expect(result.stdout).not.toContain("requires a queues provider")
   })
 
+  test("validates typed worker concurrency before loading providers", async () => {
+    const result = await runOnce(
+      ["worker-group", "sync", "--concurrency", "sync=0"],
+      "valid-project"
+    )
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toContain("Invalid worker concurrency '0'")
+    expect(result.stdout).not.toContain("requires a queues provider")
+  })
+
+  test("rejects a missing typed worker concurrency value", async () => {
+    const result = await runOnce(["worker-group", "sync", "--concurrency"], "valid-project")
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toContain("Invalid worker concurrency ''")
+    expect(result.stdout).not.toContain("Unknown worker")
+    expect(result.stdout).not.toContain("requires a queues provider")
+  })
+
   test("refuses without migrating, so a bad command leaves no schema behind", async () => {
     // The fixture registers agents, so auto-selection picks the `agent` worker, whose construction
     // needs an API origin. The refusal is right; running a schema change first was not.

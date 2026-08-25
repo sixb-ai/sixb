@@ -22,6 +22,31 @@ async function waitFor(fn: () => Promise<boolean> | boolean, timeoutMs = 1_000):
 }
 
 describe("QueueWorker", () => {
+  test("defaults to one concurrent job and rejects invalid claim limits", () => {
+    const queues = new InMemoryQueues()
+    class InspectableWorker extends QueueWorker<
+      SyncRunRequestedQueueJob,
+      typeof SYNC_RUN_FAILURE_CODES
+    > {
+      protected async execute(): Promise<void> {}
+    }
+
+    const defaults = {
+      projectId: PROJECT_ID,
+      queue: queues.syncRuns,
+      failureCodes: SYNC_RUN_FAILURE_CODES,
+      workerId: "w",
+    }
+    expect(new InspectableWorker(defaults).concurrency).toBe(1)
+    expect(new InspectableWorker({ ...defaults, claimLimit: 3 }).concurrency).toBe(3)
+
+    for (const claimLimit of [0, -1, 1.5, Number.POSITIVE_INFINITY]) {
+      expect(() => new InspectableWorker({ ...defaults, claimLimit })).toThrow(
+        "Worker concurrency must be a positive safe integer"
+      )
+    }
+  })
+
   test("processes claimed jobs and completes them", async () => {
     const queues = new InMemoryQueues()
     const processed: string[] = []

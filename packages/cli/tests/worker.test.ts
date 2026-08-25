@@ -143,6 +143,24 @@ describe("sixb worker", () => {
     expect(result.stderr).toBe("")
   })
 
+  test("validates worker concurrency before loading providers", () => {
+    const result = runWorkerFixture("valid-project", ["sync", "--concurrency", "0"])
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toContain("Invalid worker concurrency '0'")
+    expect(result.stdout).not.toContain("requires a queues provider")
+    expect(result.stderr).toBe("")
+  })
+
+  test("rejects a missing worker concurrency value", () => {
+    const result = runWorkerFixture("valid-project", ["sync", "--concurrency"])
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toContain("Invalid worker concurrency ''")
+    expect(result.stdout).not.toContain("requires a queues provider")
+    expect(result.stderr).toBe("")
+  })
+
   test("refuses without migrating, so a bad command leaves no schema behind", async () => {
     // `sixb worker agent` cannot start without an API origin, and used to find that out after
     // bringing the schema up to date.
@@ -177,6 +195,7 @@ describe("sixb worker", () => {
 
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("worker <type>")
+    expect(result.stdout).toContain("--concurrency <value>")
     expect(result.stdout).not.toContain("--type <type>")
     expect(result.stdout).not.toContain("--worker <type>")
     expect(result.stdout).toContain("sync, action, agent")

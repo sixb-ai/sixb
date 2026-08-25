@@ -155,6 +155,18 @@ async function enqueueSyncRun(
 }
 
 describe("SyncWorker", () => {
+  test("defaults to one concurrent job and accepts an explicit limit", () => {
+    const dataset = makeDataset("raw.erp.concurrency-options")
+    const sync = defineSync("sync-concurrency-options")
+      .from(erpDb)
+      .read(() => [])
+      .intoDataset(dataset)
+    const sixb = createSixbForSync(sync)
+
+    expect(new SyncWorker(sixb).concurrency).toBe(1)
+    expect(new SyncWorker(sixb, { concurrency: 3 }).concurrency).toBe(3)
+  })
+
   test("processes queued sync jobs end-to-end", async () => {
     const rawOrdersDataset = makeDataset("raw.erp.orders")
     const sync = defineSync("sync-orders")

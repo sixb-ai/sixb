@@ -1,4 +1,3 @@
-import type { Worker } from "@sixb/core/internal/workers"
 import { resolveAgentTurnTimeoutMs } from "../lib/agent-turn-timeout"
 import { type LoadedSixbHost, loadSixbFromEntry } from "../lib/loadSixb"
 import { resolveRuntimeEntry } from "../lib/production"
@@ -10,9 +9,11 @@ import {
 } from "../lib/runtime"
 import { assertShareableProviders } from "../lib/shareable-providers"
 import { migrateStorageForRole } from "../lib/storage-migration"
+import { resolveWorkerConcurrency } from "../lib/worker-concurrency"
 import {
   assertWorkerInputs,
   createWorkerForType,
+  type QueueWorkerProcess,
   resolveRegisteredWorkerTypes,
   resolveWorkerTypeToStart,
 } from "../lib/worker-registry"
@@ -24,6 +25,7 @@ export interface WorkerGroupOptions {
   workerTypes?: readonly string[]
   apiPublicOrigin?: string
   agentTurnTimeout?: string
+  concurrency?: readonly string[]
 }
 
 export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
@@ -33,6 +35,7 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
   // fails fast, just like `sixb worker`.
   const requestedTypes = (options.workerTypes ?? []).map(resolveWorkerTypeToStart)
   const agentTurnTimeoutMs = resolveAgentTurnTimeoutMs(options.agentTurnTimeout)
+  const workerConcurrency = resolveWorkerConcurrency(options.concurrency)
   const entry = await resolveRuntimeEntry({ entry: options.entry })
 
   const app = renderPersistent(
@@ -40,7 +43,7 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
   )
 
   let sixb: LoadedSixbHost | null = null
-  let workers: Worker[] = []
+  let workers: QueueWorkerProcess[] = []
 
   async function stopWorkersAndProviders() {
     await Promise.all(workers.map((worker) => stopQuietly(() => worker.stop())))
@@ -89,6 +92,7 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
       createWorkerForType(host, workerType, {
         agentApiBaseUrl: options.apiPublicOrigin,
         agentTurnTimeoutMs,
+        workerConcurrency,
       })
     )
     await Promise.all(workers.map((worker) => worker.start()))
@@ -101,7 +105,10 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
     app.rerender(
       <WorkerGroupView
         name={sixb.id}
-        workerTypes={workerTypes}
+        workers={workerTypes.map((workerType, index) => ({
+          type: workerType,
+          concurrency: workers[index]?.concurrency ?? 1,
+        }))}
         storage={migration.summary}
         warnings={warnings}
       />

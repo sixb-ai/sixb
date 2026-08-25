@@ -9,13 +9,27 @@ import { SixbCliError } from "./errors"
 import type { LoadedSixbHost } from "./loadSixb"
 import { configuredOrigin } from "./public-origin"
 
+export const WORKER_TYPES = [
+  "sync",
+  "action",
+  "agent",
+  "pipeline",
+  "projection",
+  "workflow",
+] as const
+
+export type WorkerType = (typeof WORKER_TYPES)[number]
+export type WorkerConcurrency = Readonly<Partial<Record<WorkerType, number>>>
+export type QueueWorkerProcess = Worker & { readonly concurrency: number }
+
 export interface WorkerCreationOptions {
   readonly agentApiBaseUrl?: string
   readonly agentTurnTimeoutMs?: number
+  readonly workerConcurrency?: WorkerConcurrency
 }
 
 interface WorkerFactory {
-  readonly create: (sixb: LoadedSixbHost, options: WorkerCreationOptions) => Worker
+  readonly create: (sixb: LoadedSixbHost, options: WorkerCreationOptions) => QueueWorkerProcess
   /**
    * Why this worker cannot be constructed with the given options, or `null` when it can.
    * Asked before anything is constructed, so a group names every reason at once.
@@ -29,9 +43,10 @@ interface WorkerFactory {
 const AGENT_ORIGIN_REQUIRED =
   "requires --api-public-origin or SIXB_API_PUBLIC_ORIGIN (agent workers call the API)"
 
-const workerFactories: Record<string, WorkerFactory> = {
+const workerFactories: Record<WorkerType, WorkerFactory> = {
   sync: {
-    create: (sixb) => new SyncWorker(sixb),
+    create: (sixb, options) =>
+      new SyncWorker(sixb, { concurrency: options.workerConcurrency?.sync }),
   },
   action: {
     create: (sixb) => new ActionWorker(sixb),
@@ -40,19 +55,23 @@ const workerFactories: Record<string, WorkerFactory> = {
     create: (sixb, options) =>
       new AgentWorker(sixb, {
         apiBaseUrl: resolveAgentApiBaseUrl(options.agentApiBaseUrl),
+        concurrency: options.workerConcurrency?.agent,
         turnTimeoutMs: options.agentTurnTimeoutMs,
       }),
     unmetRequirement: (options) =>
       agentApiBaseUrl(options.agentApiBaseUrl) ? null : AGENT_ORIGIN_REQUIRED,
   },
   pipeline: {
-    create: (sixb) => new PipelineWorker(sixb),
+    create: (sixb, options) =>
+      new PipelineWorker(sixb, { concurrency: options.workerConcurrency?.pipeline }),
   },
   projection: {
-    create: (sixb) => new ProjectionWorker(sixb),
+    create: (sixb, options) =>
+      new ProjectionWorker(sixb, { concurrency: options.workerConcurrency?.projection }),
   },
   workflow: {
-    create: (sixb) => new WorkflowWorker(sixb),
+    create: (sixb, options) =>
+      new WorkflowWorker(sixb, { concurrency: options.workerConcurrency?.workflow }),
   },
 }
 
@@ -60,8 +79,8 @@ export function createWorkerForType(
   sixb: LoadedSixbHost,
   workerType: string,
   options: WorkerCreationOptions = {}
-): Worker {
-  const factory = workerFactories[workerType]
+): QueueWorkerProcess {
+  const factory = isWorkerType(workerType) ? workerFactories[workerType] : undefined
   if (!factory) {
     throw new Error(`[SixbWorker] Unknown worker '${workerType}'. Available: ${knownWorkers()}`)
   }
@@ -69,12 +88,12 @@ export function createWorkerForType(
   return factory.create(sixb, options)
 }
 
-export function resolveWorkerTypeToStart(requestedWorker?: string): string {
+export function resolveWorkerTypeToStart(requestedWorker?: string): WorkerType {
   if (!requestedWorker) {
     throw new Error(`[SixbWorker] Usage: sixb worker <${knownWorkers().replaceAll(", ", "|")}>`)
   }
 
-  if (!workerFactories[requestedWorker]) {
+  if (!isWorkerType(requestedWorker)) {
     throw new Error(
       `[SixbWorker] Unknown worker '${requestedWorker}'. Available: ${knownWorkers()}`
     )
@@ -91,7 +110,9 @@ export function unmetWorkerRequirement(
   workerType: string,
   options: WorkerCreationOptions
 ): string | null {
-  return workerFactories[workerType]?.unmetRequirement?.(options) ?? null
+  return isWorkerType(workerType)
+    ? (workerFactories[workerType].unmetRequirement?.(options) ?? null)
+    : null
 }
 
 export interface WorkerGroupInputs {
@@ -141,8 +162,8 @@ export function assertWorkerInputs(input: WorkerGroupInputs): void {
   })
 }
 
-export function resolveRegisteredWorkerTypes(sixb: LoadedSixbHost): readonly string[] {
-  const workerTypes: string[] = []
+export function resolveRegisteredWorkerTypes(sixb: LoadedSixbHost): readonly WorkerType[] {
+  const workerTypes: WorkerType[] = []
 
   if (sixb.definitions.syncs.list().length > 0) {
     workerTypes.push("sync")
@@ -172,7 +193,11 @@ export function resolveRegisteredWorkerTypes(sixb: LoadedSixbHost): readonly str
 }
 
 function knownWorkers(): string {
-  return Object.keys(workerFactories).join(", ")
+  return WORKER_TYPES.join(", ")
+}
+
+function isWorkerType(value: string): value is WorkerType {
+  return WORKER_TYPES.some((workerType) => workerType === value)
 }
 
 function agentApiBaseUrl(value: string | undefined): string | null {

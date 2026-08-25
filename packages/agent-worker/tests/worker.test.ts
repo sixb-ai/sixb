@@ -1392,6 +1392,13 @@ function hangingModel(): MockLanguageModelV4 {
 }
 
 describe("AgentWorker", () => {
+  test("uses four concurrent jobs by default and accepts an explicit limit", () => {
+    const sixb = buildSixb(toolThenAnswerModel())
+
+    expect(new AgentWorker(sixb, workerOptions()).concurrency).toBe(4)
+    expect(new AgentWorker(sixb, workerOptions({ concurrency: 7 })).concurrency).toBe(7)
+  })
+
   test("requires an API base URL", () => {
     const sixb = buildSixb(toolThenAnswerModel())
 

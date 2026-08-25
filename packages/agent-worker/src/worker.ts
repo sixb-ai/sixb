@@ -88,7 +88,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       queue: host.queues.agents,
       failureCodes: AGENT_RUN_FAILURE_CODES,
       workerId: `agent-worker-${host.id}`,
-      claimLimit: normalizeConcurrency(options.concurrency),
+      claimLimit: options.concurrency ?? DEFAULT_AGENT_CONCURRENCY,
       leaseMs,
       idlePollMs: options.idlePollMs,
     })
@@ -783,20 +783,6 @@ async function waitForAbort(ms: number, signal: AbortSignal): Promise<void> {
     signal.addEventListener("abort", finish, { once: true })
   })
 }
-
-function normalizeConcurrency(value: number | undefined): number {
-  if (value === undefined) {
-    return DEFAULT_AGENT_CONCURRENCY
-  }
-  if (!Number.isFinite(value) || value < 1) {
-    throw createSixbError(
-      "internal.unexpected",
-      "[SixbAgentWorker] Agent worker concurrency must be at least 1."
-    )
-  }
-  return Math.floor(value)
-}
-
 function normalizeTurnTimeoutMs(value: number | undefined): number {
   const timeoutMs = value ?? DEFAULT_TURN_TIMEOUT_MS
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_TIMER_DURATION_MS) {

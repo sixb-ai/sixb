@@ -1,2 +1,2 @@
-export type { SyncWorkerHost } from "./worker"
+export type { SyncWorkerHost, SyncWorkerOptions } from "./worker"
 export { SyncWorker } from "./worker"

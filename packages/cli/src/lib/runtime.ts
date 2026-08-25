@@ -23,6 +23,7 @@ import { RulesWorker } from "@sixb/rules-worker"
 import { SyncWorker } from "@sixb/sync-worker"
 import { WorkflowWorker } from "@sixb/workflow-worker"
 import type { LoadedSixbHost } from "./loadSixb"
+import type { WorkerConcurrency } from "./worker-registry"
 
 export function waitForWorkerFailure(worker: Worker | null | undefined): Promise<never> {
   return new Promise<never>((_resolve, reject) => {
@@ -57,6 +58,7 @@ export interface StartSixbRuntimeOptions {
   readonly cohostWorkers?: boolean
   readonly agentApiBaseUrl?: string
   readonly agentTurnTimeoutMs?: number
+  readonly workerConcurrency?: WorkerConcurrency
 }
 
 export interface RunningRulesRuntime {
@@ -244,6 +246,7 @@ export async function startSixbRuntime(
       if (sixb.definitions.agents.list().length > 0 && sixb.storage.agents) {
         agentWorker = new AgentWorker(sixb, {
           apiBaseUrl: requireAgentApiBaseUrl(options.agentApiBaseUrl),
+          concurrency: options.workerConcurrency?.agent,
           turnTimeoutMs: options.agentTurnTimeoutMs,
         })
         await agentWorker.start()
@@ -251,22 +254,28 @@ export async function startSixbRuntime(
 
       const projectionCount = sixb.definitions.projections.list().length
       if (projectionCount > 0) {
-        projectionWorker = new ProjectionWorker(sixb)
+        projectionWorker = new ProjectionWorker(sixb, {
+          concurrency: options.workerConcurrency?.projection,
+        })
         await projectionWorker.start()
       }
 
       if (sixb.definitions.pipelines.list().length > 0) {
-        pipelineWorker = new PipelineWorker(sixb)
+        pipelineWorker = new PipelineWorker(sixb, {
+          concurrency: options.workerConcurrency?.pipeline,
+        })
         await pipelineWorker.start()
       }
 
       if (sixb.definitions.workflows.list().length > 0) {
-        workflowWorker = new WorkflowWorker(sixb)
+        workflowWorker = new WorkflowWorker(sixb, {
+          concurrency: options.workerConcurrency?.workflow,
+        })
         await workflowWorker.start()
       }
 
       if (sixb.definitions.syncs.list().length > 0) {
-        syncWorker = new SyncWorker(sixb)
+        syncWorker = new SyncWorker(sixb, { concurrency: options.workerConcurrency?.sync })
         await syncWorker.start()
       }
 

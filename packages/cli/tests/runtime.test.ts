@@ -346,9 +346,13 @@ describe("startSixbRuntime", () => {
       syncs: [sync],
     })
 
-    const runtime = await startSixbRuntime(sixb, { cohostWorkers: true })
+    const runtime = await startSixbRuntime(sixb, {
+      cohostWorkers: true,
+      workerConcurrency: { sync: 3 },
+    })
 
     expect(runtime.syncWorker).not.toBeNull()
+    expect(runtime.syncWorker?.concurrency).toBe(3)
 
     await new SyncRunDispatcher({
       id: sixb.id,

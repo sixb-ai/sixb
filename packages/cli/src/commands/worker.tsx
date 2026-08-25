@@ -1,4 +1,3 @@
-import type { Worker } from "@sixb/core/internal/workers"
 import { resolveAgentTurnTimeoutMs } from "../lib/agent-turn-timeout"
 import { SixbCliError } from "../lib/errors"
 import { type LoadedSixbHost, loadSixbFromEntry } from "../lib/loadSixb"
@@ -11,8 +10,10 @@ import {
 } from "../lib/runtime"
 import { assertShareableProviders } from "../lib/shareable-providers"
 import { migrateStorageForRole } from "../lib/storage-migration"
+import { resolveSingleWorkerConcurrency } from "../lib/worker-concurrency"
 import {
   createWorkerForType,
+  type QueueWorkerProcess,
   resolveWorkerTypeToStart,
   unmetWorkerRequirement,
 } from "../lib/worker-registry"
@@ -24,6 +25,7 @@ export interface WorkerOptions {
   workerType?: string
   apiPublicOrigin?: string
   agentTurnTimeout?: string
+  concurrency?: string
 }
 
 export async function runWorker(options: WorkerOptions = {}) {
@@ -31,6 +33,7 @@ export async function runWorker(options: WorkerOptions = {}) {
 
   const workerType = resolveWorkerTypeToStart(options.workerType)
   const agentTurnTimeoutMs = resolveAgentTurnTimeoutMs(options.agentTurnTimeout)
+  const workerConcurrency = resolveSingleWorkerConcurrency(workerType, options.concurrency)
   const entry = await resolveRuntimeEntry({ entry: options.entry })
 
   const app = renderPersistent(
@@ -38,7 +41,7 @@ export async function runWorker(options: WorkerOptions = {}) {
   )
 
   let sixb: LoadedSixbHost | null = null
-  let worker: Worker | null = null
+  let worker: QueueWorkerProcess | null = null
 
   try {
     sixb = await loadSixbFromEntry(entry)
@@ -70,11 +73,19 @@ export async function runWorker(options: WorkerOptions = {}) {
     worker = createWorkerForType(sixb, workerType, {
       agentApiBaseUrl: options.apiPublicOrigin,
       agentTurnTimeoutMs,
+      workerConcurrency,
     })
     await worker.start()
 
     const workerId = `${workerType}-worker-${sixb.id}`
-    app.rerender(<WorkerView name={sixb.id} workerId={workerId} storage={migration.summary} />)
+    app.rerender(
+      <WorkerView
+        name={sixb.id}
+        workerId={workerId}
+        concurrency={worker.concurrency}
+        storage={migration.summary}
+      />
+    )
 
     await Promise.race([
       runUntilSignal(async () => {

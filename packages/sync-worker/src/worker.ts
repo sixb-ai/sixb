@@ -25,13 +25,18 @@ export interface SyncWorkerHost extends PrimitiveExecutionHost {
   readonly definitions: Pick<SixbDefinitions, "syncs" | "datasets">
 }
 
+export interface SyncWorkerOptions {
+  /** Maximum sync run jobs this worker claims and executes at once. Defaults to 1. */
+  readonly concurrency?: number
+}
+
 export class SyncWorker extends QueueWorker<
   SyncRunRequestedQueueJob,
   typeof SYNC_RUN_FAILURE_CODES
 > {
   private readonly host: SyncWorkerHost
 
-  constructor(host: SyncWorkerHost) {
+  constructor(host: SyncWorkerHost, options: SyncWorkerOptions = {}) {
     if (host.definitions.syncs.list().length === 0) {
       throw new Error("[SixbSyncWorker] No sync definitions are registered.")
     }
@@ -41,6 +46,7 @@ export class SyncWorker extends QueueWorker<
       queue: host.queues.syncRuns,
       failureCodes: SYNC_RUN_FAILURE_CODES,
       workerId: `sync-worker-${host.id}`,
+      claimLimit: options.concurrency,
     })
 
     assertSyncStorage(host)

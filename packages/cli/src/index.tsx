@@ -69,7 +69,7 @@ function getFlag(name: string): string | undefined {
   return undefined
 }
 
-function getFlags(name: string): string[] {
+function getFlags(name: string, options: { readonly includeMissing?: boolean } = {}): string[] {
   const values: string[] = []
 
   for (let index = 0; index < args.length; index++) {
@@ -79,6 +79,8 @@ function getFlags(name: string): string[] {
       if (value && !value.startsWith("--")) {
         values.push(value)
         index++
+      } else if (options.includeMissing) {
+        values.push("")
       }
     } else if (arg?.startsWith(`--${name}=`)) {
       values.push(arg.slice(name.length + 3))
@@ -86,6 +88,11 @@ function getFlags(name: string): string[] {
   }
 
   return values
+}
+
+function getFlagRequiringValue(name: string): string | undefined {
+  const value = getFlag(name)
+  return value ?? (hasFlagValue(name) ? "" : undefined)
 }
 
 function hasFlag(name: string): boolean {
@@ -104,6 +111,7 @@ const flagsWithValues = new Set([
   "api-host",
   "api-public-origin",
   "agent-turn-timeout",
+  "concurrency",
   "atlas-public-origin",
   "app-public-origin",
   "outdir",
@@ -129,7 +137,8 @@ function getCommandPositionals(): string[] {
 
     if (arg.startsWith("--")) {
       const flagName = arg.slice(2).split("=")[0] ?? ""
-      if (!arg.includes("=") && flagsWithValues.has(flagName)) {
+      const next = args[index + 1]
+      if (!arg.includes("=") && flagsWithValues.has(flagName) && next && !next.startsWith("--")) {
         index++
       }
       continue
@@ -177,6 +186,7 @@ async function main(): Promise<void> {
         atlasPublicOrigin: getFlag("atlas-public-origin"),
         appPublicOrigin: getFlag("app-public-origin"),
         agentTurnTimeout: getFlag("agent-turn-timeout"),
+        concurrency: getFlags("concurrency", { includeMissing: true }),
       })
       break
     }
@@ -193,6 +203,7 @@ async function main(): Promise<void> {
         workerType: getCommandPositionals()[0],
         apiPublicOrigin: getFlag("api-public-origin"),
         agentTurnTimeout: getFlag("agent-turn-timeout"),
+        concurrency: getFlagRequiringValue("concurrency"),
       })
       break
     }
@@ -205,6 +216,7 @@ async function main(): Promise<void> {
         workerTypes: getCommandPositionals(),
         apiPublicOrigin: getFlag("api-public-origin"),
         agentTurnTimeout: getFlag("agent-turn-timeout"),
+        concurrency: getFlags("concurrency", { includeMissing: true }),
       })
       break
     }

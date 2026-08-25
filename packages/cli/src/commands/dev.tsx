@@ -7,6 +7,7 @@ import { apiDocsUrl, apiEventsUrl, apiUrl, resolveBrowserTopology } from "../lib
 import { type LoadedSixbHost, loadSixbFromEntry } from "../lib/loadSixb"
 import { runUntilSignal, startSixbRuntime, stopQuietly } from "../lib/runtime"
 import { generateProjectTypes } from "../lib/typegen"
+import { resolveWorkerConcurrency } from "../lib/worker-concurrency"
 import { DevView, LoadingView, renderCliError, renderPersistent } from "../ui"
 
 export interface DevOptions {
@@ -19,12 +20,14 @@ export interface DevOptions {
   atlasPublicOrigin?: string
   appPublicOrigin?: string
   agentTurnTimeout?: string
+  concurrency?: readonly string[]
 }
 
 export async function runDev(options: DevOptions = {}) {
   process.env.NODE_ENV = "development"
 
   const agentTurnTimeoutMs = resolveAgentTurnTimeoutMs(options.agentTurnTimeout)
+  const workerConcurrency = resolveWorkerConcurrency(options.concurrency)
   const entry = resolve(options.entry ?? "sixb.config.ts")
 
   const app = renderPersistent(
@@ -61,6 +64,7 @@ export async function runDev(options: DevOptions = {}) {
       cohostWorkers: true,
       agentApiBaseUrl: topology.apiPublicOrigin,
       agentTurnTimeoutMs,
+      workerConcurrency,
     })
     const authEnabled = host.auth.isEnabled()
 
@@ -117,6 +121,16 @@ export async function runDev(options: DevOptions = {}) {
         wsUrl={apiEventsUrl(topology)}
         uiUrl={topology.atlasPublicOrigin}
         appUrl={appUrl}
+        workers={[
+          { type: "action", worker: runtime.actionWorker },
+          { type: "agent", worker: runtime.agentWorker },
+          { type: "projection", worker: runtime.projectionWorker },
+          { type: "pipeline", worker: runtime.pipelineWorker },
+          { type: "workflow", worker: runtime.workflowWorker },
+          { type: "sync", worker: runtime.syncWorker },
+        ].flatMap(({ type, worker }) =>
+          worker ? [{ type, concurrency: worker.concurrency }] : []
+        )}
         warnings={runtime.warnings}
       />
     )

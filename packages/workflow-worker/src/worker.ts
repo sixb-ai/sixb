@@ -33,6 +33,11 @@ import type {
 const MAX_WORKFLOW_DELIVERY_ATTEMPTS = 5
 const WORKFLOW_RETRY_BACKOFF_MS = 1_000
 
+export interface WorkflowWorkerOptions {
+  /** Maximum workflow run jobs this worker claims and executes at once. Defaults to 1. */
+  readonly concurrency?: number
+}
+
 export class WorkflowWorker extends QueueWorker<
   WorkflowQueueJob,
   typeof WORKFLOW_RUN_FAILURE_CODES
@@ -41,7 +46,7 @@ export class WorkflowWorker extends QueueWorker<
   private readonly observer: WorkflowRunObserver
   private readonly workflowRuns: WorkflowRunStorage
 
-  constructor(host: WorkflowWorkerHost) {
+  constructor(host: WorkflowWorkerHost, options: WorkflowWorkerOptions = {}) {
     if (host.definitions.workflows.list().length === 0) {
       throw new Error("[SixbWorkflowWorker] No workflow definitions are registered.")
     }
@@ -62,6 +67,7 @@ export class WorkflowWorker extends QueueWorker<
       queue: host.queues.workflows,
       failureCodes: WORKFLOW_RUN_FAILURE_CODES,
       workerId: `workflow-worker-${host.id}`,
+      claimLimit: options.concurrency,
     })
 
     this.host = host

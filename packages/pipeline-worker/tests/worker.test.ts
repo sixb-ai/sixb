@@ -148,6 +148,20 @@ async function seedDatasetVersion(
 }
 
 describe("PipelineWorker", () => {
+  test("defaults to one concurrent job and accepts an explicit limit", () => {
+    const cleanStep = definePipelineStep("concurrency-options")
+      .inputs({ rawCustomers: rawCustomersDataset })
+      .output(customersDataset)
+      .run(async () => {})
+    const sixb = createSixbForPipeline({
+      pipeline: definePipeline("concurrency-options").then(cleanStep),
+      datasets: [rawCustomersDataset, customersDataset],
+    })
+
+    expect(new PipelineWorker(sixb).concurrency).toBe(1)
+    expect(new PipelineWorker(sixb, { concurrency: 3 }).concurrency).toBe(3)
+  })
+
   test("requires registered pipelines and pipeline run storage", () => {
     const emptySixb = new SixbHost({
       id: "pipeline-worker-tests",
