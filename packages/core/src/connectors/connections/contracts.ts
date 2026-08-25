@@ -1,5 +1,4 @@
 import type {
-  ConnectorAuthorizationStatus,
   ConnectorConnectionRunFailure,
   ConnectorConnectionRunKind,
 } from "../../storage/connector-connections/types"
@@ -82,6 +81,10 @@ export interface SelectConnectorConnectionRunAccountInput {
   readonly replace?: boolean
 }
 
+export interface AddConnectorConnectionInput extends ConnectorConnectionSelector {
+  readonly fromConnectionId: string
+}
+
 export interface ConnectorConnectionView extends ConnectorConnectionSelector {
   readonly id: string
   readonly connectorId: string
@@ -149,6 +152,11 @@ export interface ConnectorConnectionProcess {
     connectorId: string,
     input: StartConnectorConnectionRunInput
   ): Promise<StartConnectorConnectionRunResult>
+  addConnection(
+    context: ConnectorConnectionCommandContext,
+    connectorId: string,
+    input: AddConnectorConnectionInput
+  ): Promise<ConnectorConnectionRunView>
   getConnectionRun(
     context: ConnectorConnectionCommandContext,
     connectorId: string,

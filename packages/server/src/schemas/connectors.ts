@@ -140,6 +140,10 @@ export const StartConnectorConnectionRunBodySchema = z.object({
   returnTo: z.string().url(),
 })
 
+export const AddConnectorConnectionBodySchema = z.object({
+  slot: z.string().trim().min(1),
+})
+
 export const StartConnectorReauthorizationBodySchema = z.object({
   returnTo: z.string().url(),
 })

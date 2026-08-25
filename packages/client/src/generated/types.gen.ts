@@ -2292,6 +2292,213 @@ export type GetConnectorConnectionRunResponses = {
 export type GetConnectorConnectionRunResponse =
   GetConnectorConnectionRunResponses[keyof GetConnectorConnectionRunResponses]
 
+export type AddConnectorConnectionData = {
+  body: {
+    slot: string
+  }
+  path: {
+    connectorId: string
+    connectionId: string
+  }
+  query?: never
+  url: "/api/connectors/{connectorId}/connections/{connectionId}/connection-runs"
+}
+
+export type AddConnectorConnectionErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "connector.authorization_invalid" | "connector.configuration_invalid"
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "connector.not_found"
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?:
+      | "connector.authorization_required"
+      | "connector.operation_conflict"
+      | "connector.operation_in_progress"
+      | "connector.revocation_pending"
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "internal.unexpected"
+  }
+}
+
+export type AddConnectorConnectionError =
+  AddConnectorConnectionErrors[keyof AddConnectorConnectionErrors]
+
+export type AddConnectorConnectionResponses = {
+  /**
+   * Response for status 201
+   */
+  201:
+    | {
+        id: string
+        connectorId: string
+        kind: "connect" | "reauthorize"
+        owner: {
+          type: "project"
+        }
+        slot: string
+        createdAt: string
+        updatedAt: string
+        status: "waiting"
+        waitingFor: "provider_authorization"
+        expiresAt: string
+      }
+    | {
+        id: string
+        connectorId: string
+        kind: "connect" | "reauthorize"
+        owner: {
+          type: "project"
+        }
+        slot: string
+        createdAt: string
+        updatedAt: string
+        status: "running"
+      }
+    | {
+        id: string
+        connectorId: string
+        kind: "connect" | "reauthorize"
+        owner: {
+          type: "project"
+        }
+        slot: string
+        createdAt: string
+        updatedAt: string
+        status: "waiting"
+        waitingFor: "account_selection"
+        accounts: Array<{
+          id: string
+          label: string
+          description?: string
+          avatarUrl?: string
+        }>
+        expiresAt: string
+      }
+    | {
+        id: string
+        connectorId: string
+        kind: "connect" | "reauthorize"
+        owner: {
+          type: "project"
+        }
+        slot: string
+        createdAt: string
+        updatedAt: string
+        status: "succeeded"
+        connections: Array<{
+          id: string
+          connectorId: string
+          owner: {
+            type: "project"
+          }
+          slot: string
+          account: {
+            id: string
+            label: string
+            description?: string
+            avatarUrl?: string
+          }
+          status: "connected" | "needs_reauthorization" | "disconnected"
+        }>
+        finishedAt: string
+      }
+    | {
+        id: string
+        connectorId: string
+        kind: "connect" | "reauthorize"
+        owner: {
+          type: "project"
+        }
+        slot: string
+        createdAt: string
+        updatedAt: string
+        status: "failed"
+        error: {
+          code:
+            | "internal.unexpected"
+            | "connector.adapter_invalid"
+            | "connector.authorization_invalid"
+            | "connector.authorization_required"
+            | "connector.credentials_unavailable"
+            | "connector.not_found"
+            | "connector.operation_conflict"
+            | "connector.operation_in_progress"
+            | "connector.provider_failed"
+            | "connector.provider_unavailable"
+          message: string
+          retryable: boolean
+          at: string
+          /**
+           * Any JSON-compatible value.
+           */
+          details?:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+          truncated?: true
+        }
+        finishedAt: string
+      }
+    | {
+        id: string
+        connectorId: string
+        kind: "connect" | "reauthorize"
+        owner: {
+          type: "project"
+        }
+        slot: string
+        createdAt: string
+        updatedAt: string
+        status: "cancelled" | "expired"
+        finishedAt: string
+      }
+}
+
+export type AddConnectorConnectionResponse =
+  AddConnectorConnectionResponses[keyof AddConnectorConnectionResponses]
+
 export type SelectConnectorConnectionRunAccountData = {
   body: {
     accountId: string

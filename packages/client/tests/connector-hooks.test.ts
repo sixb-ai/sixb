@@ -6,11 +6,13 @@ import {
 } from "../src/generated/@tanstack/react-query.gen"
 import { createClient, createConfig } from "../src/generated/client"
 import type {
+  AddConnectorConnectionResponse,
   GetConnectorConnectionRunResponse,
   SelectConnectorConnectionRunAccountResponse,
   StartConnectorConnectionRunResponse,
 } from "../src/generated/types.gen"
 import {
+  addConnectorConnectionMutationOptions,
   connectConnectorMutationOptions,
   connectorConnectionRunQueryOptions,
   selectConnectorAccountMutationOptions,
@@ -34,6 +36,12 @@ const waitingRun: GetConnectorConnectionRunResponse = {
   waitingFor: "account_selection",
   accounts: [{ id: "octocat", label: "Octocat" }],
   expiresAt: "2026-08-24T12:10:00.000Z",
+}
+
+const additionalConnectionRun: AddConnectorConnectionResponse = {
+  ...waitingRun,
+  id: "ccr_2",
+  slot: "ads",
 }
 
 const succeededRun: SelectConnectorConnectionRunAccountResponse = {
@@ -68,6 +76,12 @@ function createConnectorTestClient() {
         const body = request.method === "POST" ? await request.json() : undefined
         requests.push({ method: request.method, path: url.pathname, body })
 
+        if (
+          request.method === "POST" &&
+          url.pathname === "/api/connectors/github/connections/ccn_1/connection-runs"
+        ) {
+          return Response.json(additionalConnectionRun, { status: 201 })
+        }
         if (
           request.method === "POST" &&
           url.pathname === "/api/connectors/github/connection-runs"
@@ -142,6 +156,38 @@ describe("connector connection hooks", () => {
     } finally {
       Reflect.deleteProperty(globalThis, "location")
     }
+  })
+
+  test("adds a connection from an existing grant through domain inputs", async () => {
+    const { client, requests } = createConnectorTestClient()
+    const queryClient = new QueryClient()
+    const options = addConnectorConnectionMutationOptions({
+      client,
+      queryClient,
+      connectorId: "github",
+      fromConnectionId: "ccn_1",
+      slot: "ads",
+    })
+    const mutationFn = options.mutationFn as () => Promise<AddConnectorConnectionResponse>
+
+    const result = await mutationFn()
+    await options.onSuccess?.(result, undefined, undefined, {} as never)
+
+    expect(result).toEqual(additionalConnectionRun)
+    expect(requests).toEqual([
+      {
+        method: "POST",
+        path: "/api/connectors/github/connections/ccn_1/connection-runs",
+        body: { slot: "ads" },
+      },
+    ])
+    expect(
+      queryClient.getQueryData<AddConnectorConnectionResponse>(
+        getConnectorConnectionRunQueryKey({
+          path: { connectorId: "github", runId: "ccr_2" },
+        })
+      )
+    ).toEqual(additionalConnectionRun)
   })
 
   test("reads the resumed run through the generated cache key", async () => {

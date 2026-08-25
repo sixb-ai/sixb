@@ -11,6 +11,9 @@ import type {
   AbortFileUploadData,
   AbortFileUploadErrors,
   AbortFileUploadResponses,
+  AddConnectorConnectionData,
+  AddConnectorConnectionErrors,
+  AddConnectorConnectionResponses,
   AppendTelemetryData,
   AppendTelemetryErrors,
   AppendTelemetryResponses,
@@ -879,6 +882,26 @@ export const getConnectorConnectionRun = <ThrowOnError extends boolean = false>(
     GetConnectorConnectionRunErrors,
     ThrowOnError
   >({ url: "/api/connectors/{connectorId}/connection-runs/{runId}", ...options })
+
+/**
+ * Add a connector connection from an existing authorization
+ */
+export const addConnectorConnection = <ThrowOnError extends boolean = false>(
+  options: Options<AddConnectorConnectionData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    AddConnectorConnectionResponses,
+    AddConnectorConnectionErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/connectors/{connectorId}/connections/{connectionId}/connection-runs",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
 
 /**
  * Select a connector account

@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto"
-import { captureSixbFailure } from "../../errors/internal"
+import { captureSixbFailure, isSixbError } from "../../errors/internal"
 import { ensureExecutionRecord } from "../../execution/durable"
 import {
   CONNECTOR_CONNECTION_RUN_FAILURE_CODES,
@@ -31,8 +31,18 @@ import type {
   ConnectorAuthorizationRequestHandler,
   ResolveOAuthConnectorDefinition,
 } from "./request"
-import { hashSecret, nonblank, normalizedHttpUrl, parseAttemptId } from "./validation"
+import { withConnectorStorageBoundary } from "./storage-boundary"
+import {
+  hashSecret,
+  nonblank,
+  normalizedHttpUrl,
+  parseAttemptId,
+  positiveDuration,
+} from "./validation"
 import { connectorConnectionView } from "./views"
+
+const CLEANUP_RETRY_DELAY_MS = 30_000
+const MAX_TIMER_DELAY_MS = 2_147_483_647
 
 export interface ConnectorConnectionRunServiceOptions {
   readonly projectId: string
@@ -40,6 +50,8 @@ export interface ConnectorConnectionRunServiceOptions {
   readonly requestHandler: ConnectorAuthorizationRequestHandler
   readonly authorizations: DefaultConnectorAuthorizationLifecycle
   readonly resolveDefinition: ResolveOAuthConnectorDefinition
+  readonly processingTtlMs: number
+  readonly selectionTtlMs: number
   readonly now: () => Date
 }
 
@@ -51,7 +63,10 @@ export class ConnectorConnectionRunService {
   private readonly requests: ConnectorAuthorizationRequestHandler
   private readonly authorizations: DefaultConnectorAuthorizationLifecycle
   private readonly resolveDefinition: ResolveOAuthConnectorDefinition
+  private readonly processingTtlMs: number
+  private readonly selectionTtlMs: number
   private readonly now: () => Date
+  private readonly maintenanceTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
   constructor(options: ConnectorConnectionRunServiceOptions) {
     this.projectId = options.projectId
@@ -60,7 +75,47 @@ export class ConnectorConnectionRunService {
     this.requests = options.requestHandler
     this.authorizations = options.authorizations
     this.resolveDefinition = options.resolveDefinition
+    this.processingTtlMs = positiveDuration(
+      options.processingTtlMs,
+      "connection run processing TTL"
+    )
+    this.selectionTtlMs = positiveDuration(options.selectionTtlMs, "account selection TTL")
     this.now = options.now
+  }
+
+  async startSelection(
+    command: ConnectorConnectionCommandContext,
+    connectorId: string,
+    input: {
+      readonly owner: StartConnectorConnectionRunInput["owner"]
+      readonly slot: string
+      readonly authorizationId: string
+    }
+  ): Promise<ConnectorConnectionRunView> {
+    const runId = `ccr_${randomUUID()}`
+    let run: ConnectorConnectionRunRecord
+    try {
+      run = await this.storage.transaction(
+        async (tx) => {
+          await ensureExecutionRecord(tx.executions, command.execution)
+          return requireConnectorConnectionStorage(tx).createConnectionSelectionRun({
+            id: runId,
+            projectId: this.projectId,
+            connectorId,
+            owner: input.owner,
+            slot: input.slot,
+            initiatedByExecutionId: command.execution.id,
+            authorizationId: input.authorizationId,
+            ttlMs: this.selectionTtlMs,
+          })
+        },
+        { isolation: "serializable" }
+      )
+    } catch (error) {
+      throw storageBoundaryError(error, "Connector account-selection run could not be persisted.")
+    }
+    this.scheduleRunMaintenance(run, this.selectionTtlMs + 1)
+    return this.view(run)
   }
 
   async start(
@@ -132,6 +187,7 @@ export class ConnectorConnectionRunService {
     }
 
     const { run, attempt, principal, returnTo } = claimed
+    this.scheduleRunMaintenance(run, this.processingTtlMs + 1)
     if ("error" in input) {
       const finished =
         input.error === "access_denied"
@@ -140,6 +196,7 @@ export class ConnectorConnectionRunService {
       return { runId: finished.id, returnTo }
     }
 
+    let authorizationId = run.authorizationId
     try {
       const definition = this.resolveDefinition(attempt.connectorId)
       const authorization = await this.requests.completeAuthorizationAttempt({
@@ -148,11 +205,31 @@ export class ConnectorConnectionRunService {
         principal,
         code: nonblank(input.code, "OAuth authorization code", "connector.authorization_invalid"),
         redirectUri,
+        onAuthorizationPersisted: async (persisted) => {
+          authorizationId = persisted.id
+          const attached = await withConnectorStorageBoundary(
+            "Connector authorization could not be attached to its run.",
+            () =>
+              this.connectionStorage.attachConnectionRunAuthorization({
+                projectId: this.projectId,
+                connectorId: run.connectorId,
+                runId: run.id,
+                processingId: run.processingId,
+                authorizationId: persisted.id,
+              })
+          )
+          if (!attached) {
+            throw createConnectorCodedError(
+              "internal.unexpected",
+              "Connector authorization arrived after its run stopped accepting results."
+            )
+          }
+        },
       })
       const finished = await this.finalizeCompletedRun(run, authorization)
       return { runId: finished.id, returnTo }
     } catch (error) {
-      const failed = await this.failRun(run, error)
+      const failed = await this.failRun(run, error, authorizationId)
       return { runId: failed.id, returnTo }
     }
   }
@@ -166,6 +243,13 @@ export class ConnectorConnectionRunService {
     const run = await this.readRun(connectorId, id)
     if (!run) return null
     await this.assertRunActor(command, run)
+    if (run.status === "waiting" || run.status === "running") {
+      if (!this.maintenanceTimers.has(run.id)) this.scheduleRunMaintenance(run)
+    } else if (!(await this.continueRunCleanup(run))) {
+      this.scheduleRunMaintenance(run, CLEANUP_RETRY_DELAY_MS)
+    } else {
+      this.cancelRunMaintenance(run.id)
+    }
     return this.view(run)
   }
 
@@ -201,8 +285,9 @@ export class ConnectorConnectionRunService {
       )
     }
 
+    let selected: Awaited<ReturnType<ConnectorConnectionStorage["putConnectionFromRun"]>>
     try {
-      const selected = await this.connectionStorage.putConnectionFromRun({
+      selected = await this.connectionStorage.putConnectionFromRun({
         id: `ccn_${randomUUID()}`,
         projectId: this.projectId,
         connectorId: definition.id,
@@ -210,9 +295,10 @@ export class ConnectorConnectionRunService {
         account,
         replace: input.replace === true,
       })
-      return this.view(selected.run)
     } catch (error) {
       if (isConnectorStorageError(error, "run_invalid")) {
+        const latest = await this.readRun(definition.id, run.id)
+        if (latest) await this.continueRunCleanup(latest)
         throw createConnectorCodedError(
           "connector.operation_conflict",
           "Connector connection run is no longer waiting for account selection.",
@@ -235,6 +321,18 @@ export class ConnectorConnectionRunService {
       }
       throw storageBoundaryError(error, "Connector account selection could not be persisted.")
     }
+    const cleanupCompleted = selected.revocationPendingAuthorizationId
+      ? await this.continuePendingRevocation(
+          definition.id,
+          selected.revocationPendingAuthorizationId
+        )
+      : true
+    if (cleanupCompleted) {
+      this.cancelRunMaintenance(run.id)
+    } else {
+      this.scheduleRunMaintenance(selected.run, CLEANUP_RETRY_DELAY_MS)
+    }
+    return this.view(selected.run)
   }
 
   private async claimCallback(state: string, callbackBinding: string, redirectUri: string) {
@@ -264,6 +362,8 @@ export class ConnectorConnectionRunService {
             stateHash: hashSecret(state),
             callbackBindingHash: hashSecret(callbackBinding),
             redirectUri,
+            processingId: `ccp_${randomUUID()}`,
+            processingTtlMs: this.processingTtlMs,
           })
           if (!result || result.type === "expired") return result
           const execution = await tx.executions.getById({
@@ -305,29 +405,50 @@ export class ConnectorConnectionRunService {
           "Connector authorization is missing its account-selection deadline."
         )
       }
-      const waiting = await this.connectionStorage.waitForConnectionRunSelection({
-        projectId: this.projectId,
-        connectorId: run.connectorId,
-        runId: run.id,
-        authorizationId: authorization.id,
-        expiresAt: authorization.selectionExpiresAt,
-      })
-      if (waiting) return waiting
+      const selectionExpiresAt = authorization.selectionExpiresAt
+      const waiting = await withConnectorStorageBoundary(
+        "Connector connection run could not wait for account selection.",
+        () =>
+          this.connectionStorage.waitForConnectionRunSelection({
+            projectId: this.projectId,
+            connectorId: run.connectorId,
+            runId: run.id,
+            processingId: run.processingId,
+            authorizationId: authorization.id,
+            expiresAt: selectionExpiresAt,
+          })
+      )
+      if (waiting) {
+        this.scheduleRunMaintenance(waiting, this.selectionTtlMs + 1)
+        return waiting
+      }
     } else {
-      const connections = await this.connectionStorage.listConnectionsByAuthorization({
-        projectId: this.projectId,
-        connectorId: run.connectorId,
-        authorizationId: authorization.id,
-      })
-      const succeeded = await this.connectionStorage.finishConnectionRun({
-        projectId: this.projectId,
-        connectorId: run.connectorId,
-        runId: run.id,
-        status: "succeeded",
-        authorizationId: authorization.id,
-        connections,
-      })
-      if (succeeded) return succeeded
+      const connections = await withConnectorStorageBoundary(
+        "Reauthorized connector connections could not be read.",
+        () =>
+          this.connectionStorage.listConnectionsByAuthorization({
+            projectId: this.projectId,
+            connectorId: run.connectorId,
+            authorizationId: authorization.id,
+          })
+      )
+      const succeeded = await withConnectorStorageBoundary(
+        "Connector reauthorization run could not be finalized.",
+        () =>
+          this.connectionStorage.finishConnectionRun({
+            projectId: this.projectId,
+            connectorId: run.connectorId,
+            runId: run.id,
+            processingId: run.processingId,
+            status: "succeeded",
+            authorizationId: authorization.id,
+            connections,
+          })
+      )
+      if (succeeded) {
+        this.cancelRunMaintenance(run.id)
+        return succeeded
+      }
     }
     throw createConnectorCodedError(
       "internal.unexpected",
@@ -337,20 +458,33 @@ export class ConnectorConnectionRunService {
 
   private async failRun(
     run: ConnectorConnectionRunProcessingRecord,
-    error: unknown
+    error: unknown,
+    authorizationId = run.authorizationId
   ): Promise<ConnectorConnectionRunRecord> {
-    const failed = await this.connectionStorage.finishConnectionRun({
-      projectId: this.projectId,
-      connectorId: run.connectorId,
-      runId: run.id,
-      status: "failed",
-      error: captureSixbFailure(error, {
-        allowedCodes: CONNECTOR_CONNECTION_RUN_FAILURE_CODES,
-        defaultCode: "internal.unexpected",
-        at: this.now(),
-      }),
-    })
-    if (failed) return failed
+    const failed = await withConnectorStorageBoundary(
+      "Connector connection run failure could not be persisted.",
+      () =>
+        this.connectionStorage.finishConnectionRun({
+          projectId: this.projectId,
+          connectorId: run.connectorId,
+          runId: run.id,
+          processingId: run.processingId,
+          status: "failed",
+          ...(authorizationId === undefined ? {} : { authorizationId }),
+          error: captureSixbFailure(error, {
+            allowedCodes: CONNECTOR_CONNECTION_RUN_FAILURE_CODES,
+            defaultCode: "internal.unexpected",
+            at: this.now(),
+          }),
+        })
+    )
+    if (failed) {
+      this.cancelRunMaintenance(run.id)
+      if (!(await this.continueRunCleanup(failed))) {
+        this.scheduleRunMaintenance(failed, CLEANUP_RETRY_DELAY_MS)
+      }
+      return failed
+    }
     throw createConnectorCodedError(
       "internal.unexpected",
       "Connector connection run failure could not be persisted.",
@@ -361,13 +495,21 @@ export class ConnectorConnectionRunService {
   private async cancelRun(
     run: ConnectorConnectionRunProcessingRecord
   ): Promise<ConnectorConnectionRunRecord> {
-    const cancelled = await this.connectionStorage.finishConnectionRun({
-      projectId: this.projectId,
-      connectorId: run.connectorId,
-      runId: run.id,
-      status: "cancelled",
-    })
-    if (cancelled) return cancelled
+    const cancelled = await withConnectorStorageBoundary(
+      "Connector connection run cancellation could not be persisted.",
+      () =>
+        this.connectionStorage.finishConnectionRun({
+          projectId: this.projectId,
+          connectorId: run.connectorId,
+          runId: run.id,
+          processingId: run.processingId,
+          status: "cancelled",
+        })
+    )
+    if (cancelled) {
+      this.cancelRunMaintenance(run.id)
+      return cancelled
+    }
     throw createConnectorCodedError(
       "internal.unexpected",
       "Connector connection run cancellation could not be persisted."
@@ -394,10 +536,14 @@ export class ConnectorConnectionRunService {
     run: ConnectorConnectionRunRecord
   ) {
     const actor = requireConnectorConnectionCommandActor(command.execution, this.projectId)
-    const initiating = await this.storage.executions.getById({
-      projectId: this.projectId,
-      id: run.initiatedByExecutionId,
-    })
+    const initiating = await withConnectorStorageBoundary(
+      "Connector connection run initiating execution could not be read.",
+      () =>
+        this.storage.executions.getById({
+          projectId: this.projectId,
+          id: run.initiatedByExecutionId,
+        })
+    )
     assertConnectorConnectionRunInitiator(initiating, actor, run.connectorId)
     return actor
   }
@@ -448,6 +594,88 @@ export class ConnectorConnectionRunService {
       return { ...base, status: "failed", error: run.error, finishedAt: run.finishedAt }
     }
     return { ...base, status: run.status, finishedAt: run.finishedAt }
+  }
+
+  close(): void {
+    for (const timer of this.maintenanceTimers.values()) clearTimeout(timer)
+    this.maintenanceTimers.clear()
+  }
+
+  private async continueRunCleanup(run: ConnectorConnectionRunRecord): Promise<boolean> {
+    if (run.kind !== "connect") return true
+    const authorizationId =
+      run.status === "succeeded"
+        ? run.cleanupAuthorizationId
+        : run.status === "failed" || run.status === "expired" || run.status === "cancelled"
+          ? run.authorizationId
+          : undefined
+    if (authorizationId === undefined) return true
+    const authorization = await this.authorizations.requireAuthorization(
+      run.connectorId,
+      authorizationId
+    )
+    if (authorization.status !== "revocation_pending") return true
+    return this.continuePendingRevocation(run.connectorId, authorization.id)
+  }
+
+  private async continuePendingRevocation(
+    connectorId: string,
+    authorizationId: string
+  ): Promise<boolean> {
+    try {
+      await this.authorizations.continuePendingRevocation(
+        this.resolveDefinition(connectorId),
+        authorizationId
+      )
+      return true
+    } catch (error) {
+      if (isSixbError(error) && error.code === "connector.revocation_pending") return false
+      throw error
+    }
+  }
+
+  private scheduleRunMaintenance(
+    run: ConnectorConnectionRunRecord,
+    delayMs = run.status === "waiting" || run.status === "running"
+      ? Math.max(1_000, run.expiresAt.getTime() - this.now().getTime())
+      : CLEANUP_RETRY_DELAY_MS
+  ): void {
+    this.cancelRunMaintenance(run.id)
+    const timer = setTimeout(
+      () => void this.maintainRun(run.connectorId, run.id),
+      Math.min(delayMs, MAX_TIMER_DELAY_MS)
+    )
+    timer.unref?.()
+    this.maintenanceTimers.set(run.id, timer)
+  }
+
+  private cancelRunMaintenance(runId: string): void {
+    const timer = this.maintenanceTimers.get(runId)
+    if (timer) clearTimeout(timer)
+    this.maintenanceTimers.delete(runId)
+  }
+
+  private async maintainRun(connectorId: string, runId: string): Promise<void> {
+    this.maintenanceTimers.delete(runId)
+    try {
+      const run = await this.readRun(connectorId, runId)
+      if (!run) return
+      if (run.status === "waiting" || run.status === "running") {
+        this.scheduleRunMaintenance(run)
+        return
+      }
+      if (!(await this.continueRunCleanup(run))) {
+        this.scheduleRunMaintenance(run, CLEANUP_RETRY_DELAY_MS)
+      }
+    } catch {
+      console.warn("[Sixb] Connector connection run cleanup failed and will be retried.")
+      const timer = setTimeout(
+        () => void this.maintainRun(connectorId, runId),
+        CLEANUP_RETRY_DELAY_MS
+      )
+      timer.unref?.()
+      this.maintenanceTimers.set(runId, timer)
+    }
   }
 }
 

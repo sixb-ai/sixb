@@ -45,12 +45,7 @@ export function serializeConnectorConnection(
     owner: connection.owner,
     slot: connection.slot,
     account: connection.account,
-    status:
-      connection.status === "active"
-        ? "connected"
-        : connection.status === "revoked" || connection.status === "revocation_pending"
-          ? "disconnected"
-          : "needs_reauthorization",
+    status: connection.status,
   }
 }
 

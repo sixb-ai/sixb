@@ -11,6 +11,7 @@ import {
 import { client } from "../client.gen"
 import {
   abortFileUpload,
+  addConnectorConnection,
   appendTelemetry,
   cancelAgentRun,
   cancelWorkflowIntervention,
@@ -130,6 +131,9 @@ import type {
   AbortFileUploadData,
   AbortFileUploadError,
   AbortFileUploadResponse,
+  AddConnectorConnectionData,
+  AddConnectorConnectionError,
+  AddConnectorConnectionResponse,
   AppendTelemetryData,
   AppendTelemetryError,
   AppendTelemetryResponse,
@@ -1473,6 +1477,33 @@ export const getConnectorConnectionRunOptions = (options: Options<GetConnectorCo
     },
     queryKey: getConnectorConnectionRunQueryKey(options),
   })
+
+/**
+ * Add a connector connection from an existing authorization
+ */
+export const addConnectorConnectionMutation = (
+  options?: Partial<Options<AddConnectorConnectionData>>
+): UseMutationOptions<
+  AddConnectorConnectionResponse,
+  AddConnectorConnectionError,
+  Options<AddConnectorConnectionData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    AddConnectorConnectionResponse,
+    AddConnectorConnectionError,
+    Options<AddConnectorConnectionData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await addConnectorConnection({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
 
 /**
  * Select a connector account

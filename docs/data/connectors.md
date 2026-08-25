@@ -268,13 +268,31 @@ function SocialConnectionRun({ runId }: { runId: string }) {
 }
 ```
 
+To expose another account from the same OAuth grant, start a selection run from an existing
+connection. The provider authorization is not repeated:
+
+```tsx
+import { useAddConnectorConnection } from "@sixb/client/hooks"
+
+const addAccount = useAddConnectorConnection({
+  connectorId: "social",
+  fromConnectionId: socialConnection.id,
+  slot: "paid-marketing",
+})
+
+addAccount.mutate()
+```
+
+The returned run is already waiting for `account_selection` and uses the same selection UI.
+
 A connection run records the interactive execution: `waiting`, `running`, then a terminal status.
 Its terminal record is secret-free and retained without automatic cleanup in V1.
 
 | Client operation | Effect |
 | --- | --- |
-| `listConnectorConnections()` | Lists the accounts connected to one connector. |
-| `disconnectConnectorConnection()` | Removes one Sixb connection but keeps its provider grant. |
+| `listConnectorConnections()` | Lists known connections and their current lifecycle status. |
+| `addConnectorConnection()` | Selects another account through an existing OAuth grant. |
+| `disconnectConnectorConnection()` | Disconnects one account; the last usage also schedules grant revocation. |
 | `reauthorizeConnectorConnection()` | Starts a new OAuth run for an existing grant. |
 | `revokeConnectorConnection()` | Revokes the grant and disconnects every account sharing it. |
 

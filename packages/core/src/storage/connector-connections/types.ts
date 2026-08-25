@@ -47,7 +47,12 @@ export interface ConnectorConnectionRunAwaitingProviderRecord extends ConnectorC
 
 export interface ConnectorConnectionRunProcessingRecord extends ConnectorConnectionRunBase {
   readonly status: "running"
+  /** Fences every callback-side write after the one-shot OAuth attempt was consumed. */
+  readonly processingId: string
   readonly callbackStartedAt: Date
+  readonly expiresAt: Date
+  /** Internal grant handle, attached as soon as a new authorization is durably persisted. */
+  readonly authorizationId?: string
 }
 
 export interface ConnectorConnectionRunAwaitingSelectionRecord extends ConnectorConnectionRunBase {
@@ -60,6 +65,8 @@ export interface ConnectorConnectionRunAwaitingSelectionRecord extends Connector
 export interface ConnectorConnectionRunSucceededRecord extends ConnectorConnectionRunBase {
   readonly status: "succeeded"
   readonly authorizationId: string
+  /** Internal handle for a replaced grant whose provider cleanup is still retryable. */
+  readonly cleanupAuthorizationId?: string
   readonly connections: readonly ConnectorConnectionRecord[]
   readonly finishedAt: Date
 }
@@ -67,16 +74,20 @@ export interface ConnectorConnectionRunSucceededRecord extends ConnectorConnecti
 export interface ConnectorConnectionRunFailedRecord extends ConnectorConnectionRunBase {
   readonly status: "failed"
   readonly error: ConnectorConnectionRunFailure
+  /** Internal cleanup handle; never serialized by the Headless API. */
+  readonly authorizationId?: string
   readonly finishedAt: Date
 }
 
 export interface ConnectorConnectionRunCancelledRecord extends ConnectorConnectionRunBase {
   readonly status: "cancelled"
+  readonly authorizationId?: string
   readonly finishedAt: Date
 }
 
 export interface ConnectorConnectionRunExpiredRecord extends ConnectorConnectionRunBase {
   readonly status: "expired"
+  readonly authorizationId?: string
   readonly finishedAt: Date
 }
 
@@ -99,12 +110,23 @@ export interface CreateConnectorConnectionRunInput extends ConnectorConnectionSe
   readonly ttlMs: number
 }
 
+export interface CreateConnectorConnectionSelectionRunInput extends ConnectorConnectionSelector {
+  readonly id: string
+  readonly projectId: string
+  readonly connectorId: string
+  readonly initiatedByExecutionId: string
+  readonly authorizationId: string
+  readonly ttlMs: number
+}
+
 export interface ClaimConnectorConnectionRunCallbackInput {
   readonly projectId: string
   readonly attemptId: string
   readonly stateHash: string
   readonly callbackBindingHash: string
   readonly redirectUri: string
+  readonly processingId: string
+  readonly processingTtlMs: number
 }
 
 export type ClaimConnectorConnectionRunCallbackResult =
@@ -124,8 +146,17 @@ export interface WaitForConnectorConnectionRunSelectionInput {
   readonly projectId: string
   readonly connectorId: string
   readonly runId: string
+  readonly processingId: string
   readonly authorizationId: string
   readonly expiresAt: Date
+}
+
+export interface AttachConnectorConnectionRunAuthorizationInput {
+  readonly projectId: string
+  readonly connectorId: string
+  readonly runId: string
+  readonly processingId: string
+  readonly authorizationId: string
 }
 
 export type FinishConnectorConnectionRunInput =
@@ -133,21 +164,26 @@ export type FinishConnectorConnectionRunInput =
       readonly projectId: string
       readonly connectorId: string
       readonly runId: string
+      readonly processingId: string
       readonly status: "succeeded"
       readonly authorizationId: string
+      readonly cleanupAuthorizationId?: string
       readonly connections: readonly ConnectorConnectionRecord[]
     }
   | {
       readonly projectId: string
       readonly connectorId: string
       readonly runId: string
+      readonly processingId: string
       readonly status: "failed"
       readonly error: ConnectorConnectionRunFailure
+      readonly authorizationId?: string
     }
   | {
       readonly projectId: string
       readonly connectorId: string
       readonly runId: string
+      readonly processingId: string
       readonly status: "cancelled"
     }
 
@@ -244,8 +280,6 @@ export interface ConnectorAuthorizationRecord {
   readonly scopes: readonly string[]
   readonly accounts: readonly ConnectorAccountCandidate[]
   readonly status: ConnectorAuthorizationStatus
-  /** Secret-free snapshots retained so revocation stays addressable by former connection IDs. */
-  readonly revocationConnections?: readonly ConnectorConnectionRecord[]
   /** Storage-authoritative deadline for the first account selection. */
   readonly selectionExpiresAt?: Date
   readonly revision: number
@@ -368,7 +402,6 @@ export interface PutConnectorConnectionInput extends ConnectorConnectionSelector
 export interface PutConnectorConnectionResult {
   readonly connection: ConnectorConnectionRecord
   readonly authorization: ConnectorAuthorizationRecord
-  /** Previous grant made unreachable by this atomic slot replacement. */
   readonly revocationPendingAuthorizationId?: string
   readonly created: boolean
   readonly replaced: boolean
@@ -377,7 +410,6 @@ export interface PutConnectorConnectionResult {
 export interface DisconnectConnectorConnectionResult {
   readonly connection: ConnectorConnectionRecord
   readonly authorization: ConnectorAuthorizationRecord
-  /** Present when disconnecting this record removed the grant's last connected usage. */
   readonly revocationPendingAuthorizationId?: string
 }
 
@@ -432,9 +464,15 @@ export interface ConnectorConnectionStorage {
   createConnectionRun(
     input: CreateConnectorConnectionRunInput
   ): Promise<ConnectorConnectionRunRecord>
+  createConnectionSelectionRun(
+    input: CreateConnectorConnectionSelectionRunInput
+  ): Promise<ConnectorConnectionRunAwaitingSelectionRecord>
   claimConnectionRunCallback(
     input: ClaimConnectorConnectionRunCallbackInput
   ): Promise<ClaimConnectorConnectionRunCallbackResult | null>
+  attachConnectionRunAuthorization(
+    input: AttachConnectorConnectionRunAuthorizationInput
+  ): Promise<ConnectorConnectionRunProcessingRecord | null>
   waitForConnectionRunSelection(
     input: WaitForConnectorConnectionRunSelectionInput
   ): Promise<ConnectorConnectionRunAwaitingSelectionRecord | null>
@@ -498,11 +536,9 @@ export interface ConnectorConnectionStorage {
   ): Promise<PutConnectorConnectionFromRunResult>
   getConnection(input: GetConnectorConnectionInput): Promise<ConnectorConnectionRecord | null>
   getConnectionById(input: ConnectorConnectionKey): Promise<ConnectorConnectionRecord | null>
-  /** Lists durable connection identities, including disconnected records. */
   listConnections(
     input: ListConnectorConnectionsInput
   ): Promise<readonly ConnectorConnectionRecord[]>
-  /** Lists only connections currently attached to the authorization. */
   listConnectionsByAuthorization(
     input: ConnectorAuthorizationKey
   ): Promise<readonly ConnectorConnectionRecord[]>

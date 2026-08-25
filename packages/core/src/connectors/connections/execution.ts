@@ -4,6 +4,7 @@ import { executionRecordInputFromRuntime } from "../../execution/durable"
 import type { ExecutionContext } from "../../execution/types"
 import type { SixbRuntimeContext } from "../../runtime/types"
 import type {
+  AddConnectorConnectionInput,
   CompleteConnectorAuthorizationInput,
   CompleteConnectorAuthorizationResult,
   ConnectorConnectionCommandContext,
@@ -26,6 +27,10 @@ export interface ConnectorConnectionsRuntime {
     connectorId: string,
     input: StartConnectorConnectionRunInput
   ): Promise<StartConnectorConnectionRunResult>
+  addConnection(
+    connectorId: string,
+    input: AddConnectorConnectionInput
+  ): Promise<ConnectorConnectionRunView>
   getConnectionRun(connectorId: string, runId: string): Promise<ConnectorConnectionRunView | null>
   selectConnectionRunAccount(
     connectorId: string,
@@ -70,6 +75,8 @@ export function createConnectorConnectionsRuntime(
     listConnections: (connectorId) => process.listConnections(contextFor(connectorId), connectorId),
     startConnectionRun: (connectorId, input) =>
       process.startConnectionRun(contextFor(connectorId), connectorId, input),
+    addConnection: (connectorId, input) =>
+      process.addConnection(contextFor(connectorId), connectorId, input),
     getConnectionRun: (connectorId, runId) =>
       process.getConnectionRun(contextFor(connectorId), connectorId, runId),
     selectConnectionRunAccount: (connectorId, input) =>

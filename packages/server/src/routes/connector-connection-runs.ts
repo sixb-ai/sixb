@@ -17,6 +17,7 @@ import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
+  AddConnectorConnectionBodySchema,
   ConnectorBadGatewayResponseSchema,
   ConnectorBadRequestResponseSchema,
   ConnectorConflictResponseSchema,
@@ -135,6 +136,47 @@ export function registerConnectorConnectionRunRoutes(
           summary: "Get a connector connection run",
           tags: [OPENAPI_TAGS.connectorConnectionRuns.name],
           operationId: "getConnectorConnectionRun",
+        },
+      }
+    )
+    .post(
+      "/api/connectors/:connectorId/connections/:connectionId/connection-runs",
+      async (context) => {
+        const { params, body, set } = context
+        try {
+          const runtime = connectorRouteRuntime(
+            host,
+            requireRequestSixb(context),
+            params.connectorId
+          )
+          const parsed = AddConnectorConnectionBodySchema.parse(body)
+          const run = await runtime.addConnection(params.connectorId, {
+            fromConnectionId: params.connectionId,
+            owner: { type: "project" },
+            slot: parsed.slot,
+          })
+          set.status = 201
+          return serializeConnectorConnectionRun(run)
+        } catch (error) {
+          return handleConnectorRouteError(error, set)
+        }
+      },
+      {
+        params: ConnectorConnectionParamsSchema,
+        body: AddConnectorConnectionBodySchema,
+        response: {
+          201: ConnectorConnectionRunSchema,
+          400: ConnectorBadRequestResponseSchema,
+          403: ErrorResponseSchema,
+          404: ConnectorNotFoundResponseSchema,
+          409: ConnectorConflictResponseSchema,
+          500: ConnectorInternalErrorResponseSchema,
+        },
+        detail: {
+          summary: "Add a connector connection from an existing authorization",
+          tags: [OPENAPI_TAGS.connectorConnectionRuns.name],
+          operationId: "addConnectorConnection",
+          security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
       }
     )

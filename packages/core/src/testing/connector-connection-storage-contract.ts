@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type {
+  ClaimConnectorConnectionRunCallbackInput,
   ClaimConnectorCredentialMutationResult,
   ConnectorAuthorizationRecord,
   ConnectorConnectionStorage,
@@ -196,22 +197,18 @@ export function runConnectorConnectionStorageContractSuite<
         )
 
         await expect(
-          storage.claimConnectionRunCallback({
-            projectId,
-            attemptId: "attempt-a",
-            stateHash: "state-hash",
-            callbackBindingHash: "wrong-binding",
-            redirectUri: "https://example.com/oauth/callback",
-          })
+          storage.claimConnectionRunCallback(
+            connectionRunCallbackClaim({
+              callbackBindingHash: "wrong-binding",
+            })
+          )
         ).resolves.toBeNull()
 
-        const claimed = await storage.claimConnectionRunCallback({
-          projectId,
-          attemptId: "attempt-a",
-          stateHash: "state-hash",
-          callbackBindingHash: "binding-hash",
-          redirectUri: "https://example.com/oauth/callback",
-        })
+        const claimed = await storage.claimConnectionRunCallback(
+          connectionRunCallbackClaim({
+            callbackBindingHash: "binding-hash",
+          })
+        )
         expect(claimed).toMatchObject({
           type: "claimed",
           run: { id: "run-a", status: "running" },
@@ -220,13 +217,11 @@ export function runConnectorConnectionStorageContractSuite<
         })
         expect(claimed && "returnTo" in claimed.run).toBe(false)
         await expect(
-          storage.claimConnectionRunCallback({
-            projectId,
-            attemptId: "attempt-a",
-            stateHash: "state-hash",
-            callbackBindingHash: "binding-hash",
-            redirectUri: "https://example.com/oauth/callback",
-          })
+          storage.claimConnectionRunCallback(
+            connectionRunCallbackClaim({
+              callbackBindingHash: "binding-hash",
+            })
+          )
         ).resolves.toBeNull()
       })
     })
@@ -247,12 +242,58 @@ export function runConnectorConnectionStorageContractSuite<
           storage.getConnectionRun({ projectId, connectorId, runId: "run-a" })
         ).resolves.toMatchObject({ status: "expired" })
         await expect(
-          storage.claimConnectionRunCallback({
-            projectId,
-            attemptId: "attempt-a",
-            stateHash: "state-hash",
+          storage.claimConnectionRunCallback(
+            connectionRunCallbackClaim({
+              callbackBindingHash: "binding-hash",
+            })
+          )
+        ).resolves.toBeNull()
+      })
+    })
+
+    test("fails an expired processing run and fences its late result", async () => {
+      await withStorage(async (storage, root) => {
+        await storage.createConnectionRun(connectionRun())
+        await storage.createAuthorizationAttempt(
+          authorizationAttempt({
+            connectionRunId: "run-a",
+            returnTo: "https://app.example.com/connectors",
             callbackBindingHash: "binding-hash",
-            redirectUri: "https://example.com/oauth/callback",
+          })
+        )
+        const claimed = await storage.claimConnectionRunCallback(
+          connectionRunCallbackClaim({ processingTtlMs: 1_000 })
+        )
+        if (!claimed || claimed.type !== "claimed") throw new Error("Expected callback claim.")
+        const authorization = await createAuthorization(storage, "authorization-a", "account-a")
+        await expect(
+          storage.attachConnectionRunAuthorization({
+            projectId,
+            connectorId,
+            runId: "run-a",
+            processingId: claimed.run.processingId,
+            authorizationId: authorization.id,
+          })
+        ).resolves.not.toBeNull()
+
+        await options.advanceTime(root, 1_000)
+        await expect(
+          storage.getConnectionRun({ projectId, connectorId, runId: "run-a" })
+        ).resolves.toMatchObject({
+          status: "failed",
+          authorizationId: authorization.id,
+          error: { code: "internal.unexpected" },
+        })
+        await expect(
+          storage.getAuthorization(authorizationKey(authorization.id))
+        ).resolves.toMatchObject({ status: "revocation_pending" })
+        await expect(
+          storage.finishConnectionRun({
+            projectId,
+            connectorId,
+            runId: "run-a",
+            processingId: claimed.run.processingId,
+            status: "cancelled",
           })
         ).resolves.toBeNull()
       })
@@ -780,22 +821,40 @@ async function createSelectionRun(
       callbackBindingHash: "binding-hash",
     })
   )
-  const claimed = await storage.claimConnectionRunCallback({
+  const claimed = await storage.claimConnectionRunCallback(connectionRunCallbackClaim())
+  if (!claimed || claimed.type !== "claimed") throw new Error("Expected callback claim.")
+  const attached = await storage.attachConnectionRunAuthorization({
+    projectId,
+    connectorId,
+    runId: "run-a",
+    processingId: claimed.run.processingId,
+    authorizationId: authorization.id,
+  })
+  if (!attached) throw new Error("Expected authorization to be attached to the run.")
+  const waiting = await storage.waitForConnectionRunSelection({
+    projectId,
+    connectorId,
+    runId: "run-a",
+    processingId: claimed.run.processingId,
+    authorizationId: authorization.id,
+    expiresAt: authorization.selectionExpiresAt!,
+  })
+  if (!waiting) throw new Error("Expected account-selection run.")
+}
+
+function connectionRunCallbackClaim(
+  overrides: Partial<ClaimConnectorConnectionRunCallbackInput> = {}
+): ClaimConnectorConnectionRunCallbackInput {
+  return {
     projectId,
     attemptId: "attempt-a",
     stateHash: "state-hash",
     callbackBindingHash: "binding-hash",
     redirectUri: "https://example.com/oauth/callback",
-  })
-  if (!claimed || claimed.type !== "claimed") throw new Error("Expected callback claim.")
-  const waiting = await storage.waitForConnectionRunSelection({
-    projectId,
-    connectorId,
-    runId: "run-a",
-    authorizationId: authorization.id,
-    expiresAt: authorization.selectionExpiresAt!,
-  })
-  if (!waiting) throw new Error("Expected account-selection run.")
+    processingId: "processing-a",
+    processingTtlMs: 60_000,
+    ...overrides,
+  }
 }
 
 function authorizationKey(
