@@ -179,6 +179,21 @@
         "@sixb/core": "workspace:^",
       },
     },
+    "connectors/linkedin": {
+      "name": "@sixb/connector-linkedin",
+      "version": "0.1.1",
+      "dependencies": {
+        "@sixb/connector-rest": "workspace:^",
+      },
+      "devDependencies": {
+        "@sixb/core": "workspace:*",
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
+      },
+    },
     "connectors/mercury": {
       "name": "@sixb/connector-mercury",
       "version": "0.1.1",
@@ -1402,6 +1417,8 @@
     "@sixb/connector-google": ["@sixb/connector-google@workspace:connectors/google"],
 
     "@sixb/connector-imap": ["@sixb/connector-imap@workspace:connectors/imap"],
+
+    "@sixb/connector-linkedin": ["@sixb/connector-linkedin@workspace:connectors/linkedin"],
 
     "@sixb/connector-mercury": ["@sixb/connector-mercury@workspace:connectors/mercury"],
 

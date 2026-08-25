@@ -30,6 +30,7 @@
       "@sixb/connector-github": ["./connectors/github/src/index.ts"],
       "@sixb/connector-google": ["./connectors/google/src/index.ts"],
       "@sixb/connector-imap": ["./connectors/imap/src/index.ts"],
+      "@sixb/connector-linkedin": ["./connectors/linkedin/src/index.ts"],
       "@sixb/connector-mercury": ["./connectors/mercury/src/index.ts"],
       "@sixb/connector-meta": ["./connectors/meta/src/index.ts"],
       "@sixb/connector-pandadoc": ["./connectors/pandadoc/src/index.ts"],
