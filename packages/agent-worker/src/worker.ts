@@ -319,6 +319,9 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
               delegation: {
                 host: this.host,
                 execution: durableExecution,
+                // Rebuilt rather than reused from `resolved.context`: a main-agent turn with no
+                // human behind it runs as its own account, and must not be able to delegate under
+                // that authority. This returns null there, denying delegation outright.
                 requesterAuthorization: resolveRequesterAuthorization({
                   execution: durableExecution,
                   run,

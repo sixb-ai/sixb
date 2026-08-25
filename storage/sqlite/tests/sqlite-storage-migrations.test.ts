@@ -272,9 +272,9 @@ describe("SQLite storage migrations", () => {
 
       // ...accepted after it, and the pre-existing row survived the table rebuild.
       insertExecution("exec_delegated", "authority_user_id", "usr_ada")
-      const ids = db
-        .query("SELECT id FROM executions ORDER BY id")
-        .all() as { readonly id: string }[]
+      const ids = db.query("SELECT id FROM executions ORDER BY id").all() as {
+        readonly id: string
+      }[]
       expect(ids.map((row) => row.id)).toEqual(["exec_delegated", "exec_own"])
 
       // A third-party human is still refused.

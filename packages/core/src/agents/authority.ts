@@ -1,5 +1,6 @@
 import { SYSTEM_PRINCIPAL } from "../auth"
 import { normalizeRequesterGroupIds } from "../auth/attribution"
+import { principalsEqual } from "../auth/types"
 import type { AuthorizationContext } from "../authorization"
 import { resolveAuthorizationContext } from "../authorization"
 import type { AuthorizablePrincipal, AuthorizationRef } from "../execution"
@@ -273,13 +274,16 @@ export async function resolveAgentRunAuthorization(input: {
     return { context: resolved.context, principal: resolved.identity.principal }
   }
 
+  // Anything that is not the agent's own account must be exactly its requester. `withScope` checks
+  // this again against the durable record, but this function is reachable on its own, so it does
+  // not rely on a caller running that check afterwards.
   const requestedBy = input.execution.requestedBy
   const context = resolveRequesterAuthorization({
     execution: input.execution,
     run: input.run,
     security: input.security,
   })
-  if (!context || !requestedBy) {
+  if (!context || !requestedBy || !principalsEqual(authority.principal, requestedBy)) {
     throw new Error(
       `[Sixb] Agent '${input.agentId}' delegated authority must reference its requested-by principal.`
     )

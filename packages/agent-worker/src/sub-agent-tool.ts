@@ -1,10 +1,6 @@
 import type { AgentDefinition, AuthorizationContext } from "@sixb/core"
 import { AgentToolPublicError, isAllowed } from "@sixb/core"
-import {
-  agentServiceAccountId,
-  requestSubAgentRun,
-  resolveAgentExecutionAuthorization,
-} from "@sixb/core/internal/agents"
+import { requestSubAgentRun, resolveAgentExecutionAuthorization } from "@sixb/core/internal/agents"
 import type { AgentRunRecord, ExecutionRecord } from "@sixb/core/storage"
 import { jsonSchema, type Tool, tool } from "ai"
 import { AgentExecutionLostError, AgentFinalizationError } from "./errors"
@@ -28,6 +24,8 @@ export interface SubAgentToolOutput {
   readonly executionId: string
   readonly status: AgentRunRecord["status"]
   readonly result: string
+  /** Set when `result` was cut, so the model does not treat a partial answer as complete. */
+  readonly resultTruncated: boolean
 }
 
 export interface CreateSubAgentToolInput {
@@ -181,10 +179,6 @@ async function runSubAgent(
     parentExecution: deps.parentExecution,
     parentRun: deps.parentRun,
     prompt: toolInput.task,
-    // The delegating *agent's* managed identity — deliberately not `context.agentPrincipal`, which
-    // for a delegated main-agent turn is the human. Owning child threads by the user would surface
-    // every one of them in their thread list, since `threads.list` filters on ownership.
-    ownerPrincipal: { type: "serviceAccount", id: agentServiceAccountId(deps.parentRun.agentId) },
     // Mirrors the delegating run's queue lease: the child lives inside the parent's turn, so the
     // parent's ownership window is the child's too.
     queueLeaseExpiresAt: requireParentLease(deps.parentRun),
@@ -278,13 +272,14 @@ async function readSubAgentOutcome(
     .join("\n")
     .trim()
 
+  const truncated = text.length > MAX_SUB_AGENT_OUTPUT_CHARS
   return {
     agent: agent.id,
     runId,
     executionId: finished?.executionId ?? "",
     status: finished?.status ?? "failed",
-    result:
-      text.length > MAX_SUB_AGENT_OUTPUT_CHARS ? text.slice(0, MAX_SUB_AGENT_OUTPUT_CHARS) : text,
+    result: truncated ? text.slice(0, MAX_SUB_AGENT_OUTPUT_CHARS) : text,
+    resultTruncated: truncated,
   }
 }
 

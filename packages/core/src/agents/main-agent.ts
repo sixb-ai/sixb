@@ -13,8 +13,8 @@ export const MAIN_AGENT_ID = "main"
  *
  * A `Pick` of {@link DefineAgentConfig} rather than a standalone interface so the two cannot drift.
  * `tools` and `groups` are deliberately absent: the main agent receives the injected `sub_agent`
- * tool and nothing else, and it reaches other agents through the requester's grants rather than
- * its own. See `docs/agents/main-agent.md`.
+ * tool and nothing else, and it runs under the authority of whoever is talking to it rather than
+ * an identity of its own. See `docs/agents/main-agent.md`.
  */
 export type MainAgentConfig = Pick<
   DefineAgentConfig,

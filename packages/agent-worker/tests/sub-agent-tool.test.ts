@@ -24,7 +24,7 @@ import {
   type SandboxFileRecord,
   SixbHost,
 } from "@sixb/core"
-import { agentRunQueueJobId } from "@sixb/core/internal/agents"
+import { agentRunQueueJobId, publishAgentRunCancel } from "@sixb/core/internal/agents"
 import { createTestSixb } from "@sixb/core/testing"
 import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test"
 import { AgentWorker } from "../src"
@@ -153,6 +153,7 @@ function buildHost(input: {
   readonly specialistModel: LanguageModelV4
   readonly sandboxes: SandboxFactory
   readonly queues?: InMemoryQueues
+  readonly broker?: InMemoryBroker
 }) {
   const researcher = defineAgent("researcher", {
     name: "Researcher",
@@ -179,7 +180,7 @@ function buildHost(input: {
         grants: [can.run(every.agent())],
       }),
     ],
-    broker: new InMemoryBroker(),
+    broker: input.broker ?? new InMemoryBroker(),
     storage: new InMemoryStorage(),
     lakeStorage: new InMemoryLakeStorage(),
     blobStorage: new InMemoryBlobStorage(),
@@ -379,21 +380,63 @@ describe("sub_agent", () => {
     ).toEqual([])
   })
 
-  // TODO(you): what should happen to a running child when its parent is cancelled?
-  //
-  // Setup you already have: `buildHost`, `requestMainTurn`, and a specialist model whose
-  // `doStream` you can make hang (`await new Promise(() => {})`) so the child is still running
-  // when you act. Cancel with `publishAgentRunCancel` from `@sixb/core/internal/agents`, or just
-  // call `worker.stop()`.
-  //
-  // The decision this test pins down — `runSubAgent`'s catch block records
-  // `signal.aborted ? "cancelled" : "failed"` (packages/agent-worker/src/sub-agent-tool.ts):
-  //   - Is `cancelled` right for a child the user never knew existed?
-  //   - Must the child reach a terminal status at all before the parent's turn returns, or is
-  //     leaving it `running` acceptable given its thread is single-use?
-  //   - The child's thread holds `activeRunId` until it finalizes. Does that matter here?
-  //
-  // Whatever you assert, prove it: change the recorded status in `runSubAgent` and watch this
-  // fail. A test that passes either way pins nothing.
-  test.todo("releases the child when the delegating turn is cancelled", () => {})
+  test("cancels the child and releases its thread when the delegating turn is cancelled", async () => {
+    const broker = new InMemoryBroker()
+    const sixb = buildHost({
+      mainModel: delegatingModel("researcher"),
+      // Hangs until aborted, so the child is still running when the cancel lands.
+      specialistModel: new MockLanguageModelV4({
+        modelId: "specialist-model",
+        doStream: async ({ abortSignal }) =>
+          new Promise((_resolve, reject) => {
+            abortSignal?.addEventListener(
+              "abort",
+              () => reject(new DOMException("Aborted", "AbortError")),
+              { once: true }
+            )
+          }),
+      }),
+      sandboxes: new CountingSandboxFactory(),
+      broker,
+    })
+
+    const requested = await requestMainTurn(sixb, ["agent-users"])
+    const worker = new AgentWorker(sixb, {
+      apiBaseUrl: API_BASE_URL,
+      idlePollMs: 5,
+      skillsDir: false,
+    })
+    await worker.start()
+    try {
+      const child = await waitFor(async () => {
+        const runs = await sixb.storage.agents?.runs.list({ projectId: PROJECT_ID })
+        return runs?.runs.find((run) => run.agentId === "researcher" && run.status === "running")
+      })
+      await publishAgentRunCancel(broker, { projectId: PROJECT_ID, runId: requested.run.id })
+
+      const finished = await waitFor(async () => {
+        const run = await sixb.storage.agents?.runs.getById({ projectId: PROJECT_ID, id: child.id })
+        return run && run.status !== "running" ? run : undefined
+      })
+      // A cancel is not a failure: the child stopped because its parent did.
+      //
+      // This is a characterization test, not a guard on one line: the finalize comes from
+      // `runAgentTurn`'s own cancel path, and it still passes if the tool's catch block is removed,
+      // if its recorded status is hard-coded, or if `parentSignal` is dropped from the child's
+      // abort sources (the AI SDK forwards its own signal into `execute`). It is here because the
+      // end-to-end outcome matters and nothing else covers it — an in-process child has no queue
+      // job, so a leak on this path would never be reclaimed.
+      expect(finished.status).toBe("cancelled")
+
+      // The child must not be left holding its thread. Nothing else reclaims an in-process child,
+      // so a thread pinned here would stay pinned for the life of the project.
+      const thread = await sixb.storage.agents?.threads.getById({
+        projectId: PROJECT_ID,
+        id: child.threadId,
+      })
+      expect(thread?.activeRunId).toBeNull()
+    } finally {
+      await worker.stop()
+    }
+  })
 })

@@ -134,7 +134,6 @@ function delegate(
     parentExecution: parent.execution,
     parentRun: parent.run,
     prompt: "do the thing",
-    ownerPrincipal: { type: "serviceAccount", id: "svc_agent_main" },
     queueLeaseExpiresAt: new Date("2026-08-25T10:01:00.000Z"),
   })
 }

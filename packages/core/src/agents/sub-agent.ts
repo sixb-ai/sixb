@@ -7,6 +7,7 @@ import type { AgentRunRecord, AgentStorage } from "../storage/agents"
 import type { ExecutionRecord } from "../storage/executions"
 import type { Storage } from "../storage/types"
 import {
+  agentServiceAccountId,
   ensureAgentExecutionIdentity,
   resolveAgentExecutionAuthorization,
   resolveRequesterAuthorization,
@@ -33,11 +34,6 @@ export interface RequestSubAgentRunInput {
   readonly parentRun: AgentRunRecord
   /** The task handed to the child, persisted as the trigger message on its thread. */
   readonly prompt: string
-  /**
-   * Owner of the child's thread. The delegating agent's service account, so the thread stays out of
-   * the requester's own thread list (`threads.list` filters on `ownerPrincipal`).
-   */
-  readonly ownerPrincipal: Principal
   /** Bounds the child's execution token, mirroring the delegating run's queue lease. */
   readonly queueLeaseExpiresAt: Date
 }
@@ -99,6 +95,13 @@ export async function requestSubAgentRun(
     security: input.security,
   })
 
+  // Derived, not accepted from the caller. The child's thread is owned by the *delegating agent*,
+  // never by the run's own principal — which for a delegated main-agent turn is the human, and
+  // would put every delegated conversation in their thread list (`threads.list` filters on owner).
+  const ownerPrincipal: Principal = {
+    type: "serviceAccount",
+    id: agentServiceAccountId(input.parentRun.agentId),
+  }
   const runId = createAgentRunId()
   const threadId = createAgentThreadId()
   const triggerMessageId = createAgentMessageId()
@@ -119,7 +122,7 @@ export async function requestSubAgentRun(
       id: threadId,
       projectId,
       agentId: agent.id,
-      ownerPrincipal: input.ownerPrincipal,
+      ownerPrincipal,
     })
     await agents.messages.append({
       id: triggerMessageId,
@@ -128,7 +131,7 @@ export async function requestSubAgentRun(
       runId: null,
       role: "user",
       parts: [{ type: "text", text: input.prompt }],
-      authorPrincipal: input.ownerPrincipal,
+      authorPrincipal: ownerPrincipal,
     })
     await agents.runs.create({
       id: runId,

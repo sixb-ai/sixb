@@ -73,7 +73,7 @@ export interface AgentWorkerContext {
 /** The identity a run executes as: its own service account, or the human it acts for. */
 export type AgentPrincipal = AuthorizablePrincipal
 
-/** Provider ports activated only after an agent service-account scope is bound. */
+/** Provider ports activated only after the run's execution scope is bound. */
 export interface AgentExecutionContext extends AgentWorkerContext {
   readonly agentPrincipal: AgentPrincipal
   readonly blobStorage: BlobStorage
