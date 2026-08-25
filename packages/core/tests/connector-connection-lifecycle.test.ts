@@ -49,7 +49,7 @@ describe("connector connection lifecycle", () => {
       authorization.authorizationId
     )
     expect(revoked.affectedConnections.map((connection) => connection.slot)).toEqual(["ads"])
-    expect(revoked.affectedConnections[0].status).toBe("revoked")
+    expect(revoked.affectedConnections[0].status).toBe("disconnected")
     expect(
       await listAuthorizationConnections(harness.connectionStorage, authorization.authorizationId)
     ).toHaveLength(0)
@@ -57,6 +57,80 @@ describe("connector connection lifecycle", () => {
       (await getAuthorization(harness.connectionStorage, authorization.authorizationId))?.status
     ).toBe("revoked")
     expect(harness.counts().revokeCount).toBe(1)
+  })
+
+  test("revokes an authorization after its last durable connection is disconnected", async () => {
+    const harness = createHarness()
+    const authorization = await authorize(harness)
+    const connection = await harness.process.selectAccount(
+      managementCommand(),
+      harness.connector.id,
+      {
+        authorizationId: authorization.authorizationId,
+        accountId: "account-a",
+        owner: projectOwner,
+        slot: "social",
+      }
+    )
+
+    const disconnected = await harness.process.disconnect(
+      managementCommand(),
+      harness.connector.id,
+      connection.id
+    )
+    expect(disconnected).toMatchObject({ id: connection.id, status: "disconnected" })
+    expect(
+      await harness.connectionStorage.getConnectionById({
+        projectId: "project",
+        connectorId: harness.connector.id,
+        connectionId: connection.id,
+      })
+    ).toMatchObject({ id: connection.id, status: "disconnected" })
+    expect(
+      await getAuthorization(harness.connectionStorage, authorization.authorizationId)
+    ).toMatchObject({ status: "revoked", credentials: undefined })
+    expect(harness.counts().revokeCount).toBe(1)
+  })
+
+  test("keeps the last disconnected connection durable while provider cleanup is retryable", async () => {
+    const harness = createHarness()
+    const authorization = await authorize(harness)
+    const connection = await harness.process.selectAccount(
+      managementCommand(),
+      harness.connector.id,
+      {
+        authorizationId: authorization.authorizationId,
+        accountId: "account-a",
+        owner: projectOwner,
+        slot: "social",
+      }
+    )
+    harness.setRevokeError(new Error("temporary provider failure"))
+
+    await expect(
+      harness.process.disconnect(managementCommand(), harness.connector.id, connection.id)
+    ).resolves.toMatchObject({ id: connection.id, status: "disconnected" })
+    expect(
+      await getAuthorization(harness.connectionStorage, authorization.authorizationId)
+    ).toMatchObject({ status: "revocation_pending" })
+    expect(
+      await harness.connectionStorage.getConnectionById({
+        projectId: "project",
+        connectorId: harness.connector.id,
+        connectionId: connection.id,
+      })
+    ).toMatchObject({ status: "disconnected" })
+
+    harness.setRevokeError(undefined)
+    await harness.process.revokeAuthorization(
+      managementCommand(),
+      harness.connector.id,
+      authorization.authorizationId
+    )
+    expect(
+      await getAuthorization(harness.connectionStorage, authorization.authorizationId)
+    ).toMatchObject({ status: "revoked", credentials: undefined })
+    expect(harness.counts().revokeCount).toBe(2)
   })
 
   test("keeps provider revocation pending when credentials cannot be opened", async () => {
@@ -253,6 +327,10 @@ describe("connector connection lifecycle", () => {
       }
     )
     expect(reauthorized.id).toBe(first.id)
+    expect(
+      await getAuthorization(harness.connectionStorage, firstAuthorization.authorizationId)
+    ).toMatchObject({ status: "revoked", credentials: undefined })
+    expect(harness.counts().revokeCount).toBe(1)
 
     await expect(
       harness.process.selectAccount(managementCommand(), harness.connector.id, {

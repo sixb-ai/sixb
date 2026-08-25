@@ -1,4 +1,3 @@
-import type { ConnectorAuthorizationStatus } from "../../storage/connector-connections/types"
 import type { CreateExecutionInput } from "../../storage/executions/types"
 import type { ConnectorAccountCandidate, ConnectorConnectionSelector } from "../types"
 
@@ -39,7 +38,7 @@ export interface ConnectorConnectionView extends ConnectorConnectionSelector {
   readonly id: string
   readonly connectorId: string
   readonly account: ConnectorAccountCandidate
-  readonly status: ConnectorAuthorizationStatus
+  readonly status: "connected" | "needs_reauthorization" | "disconnected"
 }
 
 export interface RevokeConnectorAuthorizationResult {

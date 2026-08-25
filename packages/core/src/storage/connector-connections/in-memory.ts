@@ -187,7 +187,7 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
       if (!canReplacePrepared) return null
     }
 
-    const attached = this.connectionsForAuthorization(record.id)
+    const attached = this.connectedConnectionsForAuthorization(record.id)
     if (
       input.mutation.kind === "reauthorization" &&
       !sameIds(
@@ -224,8 +224,9 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
     const disconnected: ConnectorConnectionRecord[] = []
     if (input.mutation.kind === "revocation") {
       for (const connection of attached) {
-        disconnected.push(structuredClone(connection))
-        this.connections.delete(connection.id)
+        const updated = disconnectConnectionRecord(connection, now)
+        this.connections.set(connection.id, updated)
+        disconnected.push(structuredClone(updated))
       }
     }
     return { authorization: structuredClone(updated), disconnected }
@@ -419,7 +420,7 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
     const record = this.authorizations.get(input.authorizationId)
     const staged = stagedCredentials(record, input, "reauthorization")
     if (!record || !staged || !record.credentialMutation) return null
-    const attached = this.connectionsForAuthorization(record.id)
+    const attached = this.connectedConnectionsForAuthorization(record.id)
     if (
       !sameIds(
         attached.map((connection) => connection.id),
@@ -469,6 +470,10 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
     const updated: ConnectorAuthorizationRecord = {
       ...record,
       status: "revoked",
+      credentials: undefined,
+      credentialExpiresAt: undefined,
+      scopes: [],
+      accounts: [],
       selectionExpiresAt: undefined,
       revision: record.revision + 1,
       credentialMutation: undefined,
@@ -509,8 +514,7 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
         "[Sixb] Connector connection account is not exposed by its authorization."
       )
     }
-    const existing = this.findConnection(input)
-    if (existing) this.assertConnectionCanMove(existing)
+    const existing = this.findConnectionRecord(input)
     const sameAccount = existing?.account.id === account.id
     if (existing && !sameAccount && !input.replace) {
       throw new ConnectorConnectionStorageError(
@@ -523,6 +527,29 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
         "connection_conflict",
         "[Sixb] Connector connection id already exists."
       )
+    }
+
+    let revocationPendingAuthorizationId: string | undefined
+    if (existing?.status === "connected" && existing.authorizationId !== authorization.id) {
+      const previous = this.authorizations.get(existing.authorizationId)
+      if (!previous) {
+        throw new ConnectorConnectionStorageError(
+          "authorization_conflict",
+          "[Sixb] Existing connector connection references an unavailable authorization."
+        )
+      }
+      const remaining = this.connectedConnectionsForAuthorization(previous.id).filter(
+        (connection) => connection.id !== existing.id
+      )
+      this.assertConnectionCanMove(existing, previous, remaining.length === 0)
+      if (remaining.length === 0) {
+        const pending = markAuthorizationRevocationPending(previous, now)
+        this.authorizations.set(previous.id, pending)
+        revocationPendingAuthorizationId = previous.id
+      }
+    } else if (existing?.status === "connected") {
+      const previous = this.authorizations.get(existing.authorizationId)
+      if (previous) this.assertConnectionCanMove(existing, previous, false)
     }
 
     const updatedAuthorization: ConnectorAuthorizationRecord =
@@ -540,6 +567,8 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
           ...existing,
           authorizationId: input.authorizationId,
           account: structuredClone(account),
+          status: "connected",
+          disconnectedAt: undefined,
           updatedAt: now,
         }
       : {
@@ -550,6 +579,7 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
           slot: input.slot,
           authorizationId: input.authorizationId,
           account: structuredClone(account),
+          status: "connected",
           createdAt: now,
           updatedAt: now,
         }
@@ -561,6 +591,9 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
     return {
       connection: structuredClone(connection),
       authorization: structuredClone(updatedAuthorization),
+      ...(revocationPendingAuthorizationId === undefined
+        ? {}
+        : { revocationPendingAuthorizationId }),
       created: existing === undefined,
       replaced: existing !== undefined && !sameAccount,
     }
@@ -569,7 +602,8 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
   async getConnection(
     input: GetConnectorConnectionInput
   ): Promise<ConnectorConnectionRecord | null> {
-    return cloneOrNull(this.findConnection(input))
+    const connection = this.findConnectionRecord(input)
+    return connection?.status === "connected" ? structuredClone(connection) : null
   }
 
   async getConnectionById(
@@ -579,19 +613,39 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
     return sameConnectionScope(connection, input) ? structuredClone(connection) : null
   }
 
+  async listConnections(input: {
+    readonly projectId: string
+    readonly connectorId: string
+  }): Promise<readonly ConnectorConnectionRecord[]> {
+    return [...this.connections.values()]
+      .filter((connection) => sameConnectionScope(connection, input))
+      .map((connection) => structuredClone(connection))
+  }
+
+  async getAuthorizationByConnectionId(
+    input: ConnectorConnectionKey
+  ): Promise<ConnectorAuthorizationRecord | null> {
+    const connection = this.connections.get(input.connectionId)
+    if (!sameConnectionScope(connection, input)) return null
+    const authorization = this.authorizations.get(connection.authorizationId)
+    return sameAuthorizationScope(authorization, input) ? structuredClone(authorization) : null
+  }
+
   async listConnectionsByAuthorization(
     input: ConnectorAuthorizationKey
   ): Promise<readonly ConnectorConnectionRecord[]> {
     const authorization = this.authorizations.get(input.authorizationId)
     if (!sameAuthorizationScope(authorization, input)) return []
-    return this.connectionsForAuthorization(input.authorizationId)
+    return this.connectedConnectionsForAuthorization(input.authorizationId)
       .filter((connection) => sameConnectionScope(connection, input))
       .map((connection) => structuredClone(connection))
   }
 
-  async disconnectConnection(
-    input: ConnectorConnectionKey
-  ): Promise<ConnectorConnectionRecord | null> {
+  async disconnectConnection(input: ConnectorConnectionKey): Promise<{
+    readonly connection: ConnectorConnectionRecord
+    readonly authorization: ConnectorAuthorizationRecord
+    readonly revocationPendingAuthorizationId?: string
+  } | null> {
     const connection = this.connections.get(input.connectionId)
     if (
       !connection ||
@@ -600,9 +654,45 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
     ) {
       return null
     }
-    this.assertConnectionCanMove(connection)
-    this.connections.delete(connection.id)
-    return structuredClone(connection)
+    const authorization = this.authorizations.get(connection.authorizationId)
+    if (!sameAuthorizationScope(authorization, input)) {
+      throw new ConnectorConnectionStorageError(
+        "authorization_conflict",
+        "[Sixb] Connector connection references an unavailable authorization."
+      )
+    }
+    if (connection.status === "disconnected") {
+      return {
+        connection: structuredClone(connection),
+        authorization: structuredClone(authorization),
+        ...(authorization.status === "revocation_pending"
+          ? { revocationPendingAuthorizationId: authorization.id }
+          : {}),
+      }
+    }
+
+    const now = this.now()
+    const remaining = this.connectedConnectionsForAuthorization(authorization.id).filter(
+      (candidate) => candidate.id !== connection.id
+    )
+    this.assertConnectionCanMove(connection, authorization, remaining.length === 0)
+    const disconnected = disconnectConnectionRecord(connection, now)
+    this.connections.set(connection.id, disconnected)
+
+    const updatedAuthorization =
+      remaining.length === 0
+        ? markAuthorizationRevocationPending(authorization, now)
+        : authorization
+    if (updatedAuthorization !== authorization) {
+      this.authorizations.set(authorization.id, updatedAuthorization)
+    }
+    return {
+      connection: structuredClone(disconnected),
+      authorization: structuredClone(updatedAuthorization),
+      ...(updatedAuthorization.status === "revocation_pending" && remaining.length === 0
+        ? { revocationPendingAuthorizationId: updatedAuthorization.id }
+        : {}),
+    }
   }
 
   snapshot(): InMemoryConnectorConnectionStorageSnapshot {
@@ -623,7 +713,7 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
     return new Date(this.options.now?.() ?? new Date())
   }
 
-  private findConnection(
+  private findConnectionRecord(
     input: GetConnectorConnectionInput
   ): ConnectorConnectionRecord | undefined {
     for (const connection of this.connections.values()) {
@@ -639,20 +729,72 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
     return undefined
   }
 
-  private connectionsForAuthorization(authorizationId: string): ConnectorConnectionRecord[] {
+  private connectionRecordsForAuthorization(authorizationId: string): ConnectorConnectionRecord[] {
     return [...this.connections.values()].filter(
       (connection) => connection.authorizationId === authorizationId
     )
   }
 
-  private assertConnectionCanMove(connection: ConnectorConnectionRecord): void {
-    const authorization = this.authorizations.get(connection.authorizationId)
-    if (authorization?.credentialMutation?.kind === "reauthorization") {
+  private connectedConnectionsForAuthorization(
+    authorizationId: string
+  ): ConnectorConnectionRecord[] {
+    return this.connectionRecordsForAuthorization(authorizationId).filter(
+      (connection) => connection.status === "connected"
+    )
+  }
+
+  private assertConnectionCanMove(
+    _connection: ConnectorConnectionRecord,
+    authorization: ConnectorAuthorizationRecord,
+    removingLastConnection = true
+  ): void {
+    const mutation = authorization.credentialMutation
+    if (mutation?.kind === "reauthorization") {
       throw new ConnectorConnectionStorageError(
         "authorization_conflict",
         "[Sixb] Connections cannot change while their connector authorization is being reauthorized."
       )
     }
+    if (removingLastConnection && mutation) {
+      throw new ConnectorConnectionStorageError(
+        "authorization_conflict",
+        "[Sixb] The last connector connection cannot be removed while credentials are being mutated."
+      )
+    }
+  }
+}
+
+function disconnectConnectionRecord(
+  connection: ConnectorConnectionRecord,
+  now: Date
+): ConnectorConnectionRecord {
+  return {
+    ...connection,
+    status: "disconnected",
+    disconnectedAt: new Date(now),
+    updatedAt: new Date(now),
+  }
+}
+
+function markAuthorizationRevocationPending(
+  authorization: ConnectorAuthorizationRecord,
+  now: Date
+): ConnectorAuthorizationRecord {
+  if (authorization.status === "revocation_pending" || authorization.status === "revoked") {
+    return authorization
+  }
+  if (authorization.credentialMutation) {
+    throw new ConnectorConnectionStorageError(
+      "authorization_conflict",
+      "[Sixb] Connector authorization cannot begin revocation while credentials are being mutated."
+    )
+  }
+  return {
+    ...authorization,
+    status: "revocation_pending",
+    selectionExpiresAt: undefined,
+    revision: authorization.revision + 1,
+    updatedAt: new Date(now),
   }
 }
 
@@ -660,10 +802,6 @@ function safeEqual(left: string, right: string): boolean {
   const leftBytes = Buffer.from(left)
   const rightBytes = Buffer.from(right)
   return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes)
-}
-
-function cloneOrNull<T>(value: T | undefined): T | null {
-  return value === undefined ? null : structuredClone(value)
 }
 
 function replaceMap<TKey, TValue>(target: Map<TKey, TValue>, source: Map<TKey, TValue>): void {

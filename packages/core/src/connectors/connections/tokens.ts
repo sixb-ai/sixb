@@ -13,6 +13,7 @@ import {
   type ConnectorCredentialMutationCoordinator,
   connectorAuthorizationStatusError,
 } from "./credential-mutations"
+import { withConnectorStorageBoundary } from "./storage-boundary"
 import { nonNegativeDuration, shouldRefresh, tokenView, validateCredentials } from "./validation"
 
 type OAuthConnectorDefinition = ConnectorDefinition<string, OAuthConnectorAdapter>
@@ -64,6 +65,12 @@ export class ConnectorTokenAccess {
     connectorId: string,
     authorization: ConnectorAuthorizationRecord
   ): Promise<ConnectorOAuthCredentials> {
+    if (!authorization.credentials) {
+      throw createConnectorCodedError(
+        "connector.credentials_unavailable",
+        "Stored connector credentials are unavailable."
+      )
+    }
     return this.credentials.open(connectorId, authorization.id, authorization.credentials)
   }
 
@@ -234,11 +241,15 @@ export class ConnectorTokenAccess {
     connectorId: string,
     authorizationId: string
   ): Promise<ConnectorAuthorizationRecord> {
-    const authorization = await this.storage.getAuthorization({
-      projectId: this.projectId,
-      connectorId,
-      authorizationId,
-    })
+    const authorization = await withConnectorStorageBoundary(
+      "Connector authorization could not be read.",
+      () =>
+        this.storage.getAuthorization({
+          projectId: this.projectId,
+          connectorId,
+          authorizationId,
+        })
+    )
     if (!authorization) {
       throw createConnectorCodedError(
         "connector.not_found",

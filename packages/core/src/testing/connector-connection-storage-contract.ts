@@ -177,6 +177,10 @@ export function runConnectorConnectionStorageContractSuite<
           replace: true,
         })
         expect(replaced.connection.id).toBe(firstConnection.connection.id)
+        expect(replaced.revocationPendingAuthorizationId).toBe(first.id)
+        expect(await storage.getAuthorization(authorizationKey(first.id))).toMatchObject({
+          status: "revocation_pending",
+        })
         expect(
           await storage.getConnection({
             projectId,
@@ -185,6 +189,47 @@ export function runConnectorConnectionStorageContractSuite<
             slot: "default",
           })
         ).toMatchObject({ authorizationId: second.id, account: { id: "account-b" } })
+      })
+    })
+
+    test("retains disconnected identities and reactivates the same slot id", async () => {
+      await withStorage(async (storage) => {
+        const first = await createAuthorization(storage, "authorization-a", "account-a")
+        const connected = await connect(storage, first, "connection-a", "account-a")
+
+        const disconnected = await storage.disconnectConnection({
+          projectId,
+          connectorId,
+          connectionId: connected.connection.id,
+        })
+        expect(disconnected).toMatchObject({
+          connection: { id: connected.connection.id, status: "disconnected" },
+          authorization: { status: "revocation_pending" },
+          revocationPendingAuthorizationId: first.id,
+        })
+        expect(
+          await storage.getConnection({
+            projectId,
+            connectorId,
+            owner: { type: "project" },
+            slot: "default",
+          })
+        ).toBeNull()
+        expect(
+          await storage.getConnectionById({
+            projectId,
+            connectorId,
+            connectionId: connected.connection.id,
+          })
+        ).toMatchObject({ status: "disconnected" })
+
+        const second = await createAuthorization(storage, "authorization-b", "account-a")
+        const reconnected = await connect(storage, second, "ignored-new-id", "account-a")
+        expect(reconnected.connection).toMatchObject({
+          id: connected.connection.id,
+          authorizationId: second.id,
+          status: "connected",
+        })
       })
     })
 
@@ -488,6 +533,33 @@ export function runConnectorConnectionStorageContractSuite<
         expect(
           await storage.listConnectionsByAuthorization(authorizationKey(authorization.id))
         ).toEqual([])
+        expect(await storage.listConnections({ projectId, connectorId })).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ id: first.connection.id, status: "disconnected" }),
+            expect.objectContaining({ id: "connection-b", status: "disconnected" }),
+          ])
+        )
+      })
+    })
+
+    test("removes sealed credentials only after provider revocation is staged", async () => {
+      await withStorage(async (storage) => {
+        const authorization = await createActiveAuthorization(storage)
+        const claim = await claimMutation(storage, authorization, "mutation-revoke", "revocation")
+        const executing = await markExecuting(storage, claim.authorization)
+        const staged = await storage.stageCredentialMutationRevocation({
+          ...fence(executing),
+          holderId: "worker-a",
+        })
+        if (!staged) throw new Error("Expected staged connector revocation.")
+
+        expect(staged.credentials).toEqual(credentials)
+        await expect(storage.finalizeRevocation(fence(staged))).resolves.toMatchObject({
+          status: "revoked",
+          credentials: undefined,
+          scopes: [],
+          accounts: [],
+        })
       })
     })
 

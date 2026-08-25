@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { isSixbError } from "../../errors/internal"
 import type {
   ConnectorConnectionStorage,
   PutConnectorConnectionResult,
@@ -40,6 +41,7 @@ import type {
 } from "./contracts"
 import { connectorAuthorizationStatusError } from "./credential-mutations"
 import { ConnectorAuthorizationRequestHandler } from "./request"
+import { withConnectorStorageBoundary } from "./storage-boundary"
 import { nonblank } from "./validation"
 import { assertConnectorConnectionSelector, connectorConnectionView } from "./views"
 
@@ -113,11 +115,15 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
   ): Promise<ConnectorClient<TAdapter>> {
     this.assertOAuthRegistered(definition)
     assertConnectorConnectionSelector(selector)
-    const connection = await this.connectionStorage.getConnection({
-      projectId: this.projectId,
-      connectorId: definition.id,
-      ...selector,
-    })
+    const connection = await withConnectorStorageBoundary(
+      "Connector connection could not be read.",
+      () =>
+        this.connectionStorage.getConnection({
+          projectId: this.projectId,
+          connectorId: definition.id,
+          ...selector,
+        })
+    )
     if (!connection) {
       throw createConnectorCodedError(
         "connector.not_found",
@@ -201,6 +207,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
       })
     } catch (error) {
       if (isConnectorStorageError(error, "authorization_conflict")) {
+        await this.continueRevocationIfPending(definition, authorization.id)
         throw createConnectorCodedError(
           "connector.operation_conflict",
           "Connector authorization cannot be selected in its current state.",
@@ -216,6 +223,9 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
       }
       throw storageBoundaryError(error, "Connector account selection could not be persisted.")
     }
+    if (result.revocationPendingAuthorizationId) {
+      await this.continuePendingRevocation(definition, result.revocationPendingAuthorizationId)
+    }
     return connectorConnectionView(result.connection, result.authorization.status)
   }
 
@@ -228,26 +238,19 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
     requireConnectorConnectionCommandActor(command.execution, this.projectId)
     const normalizedConnectionId = nonblank(connectionId, "connection id")
     try {
-      const connection = await this.connectionStorage.getConnectionById({
-        projectId: this.projectId,
-        connectorId: definition.id,
-        connectionId: normalizedConnectionId,
-      })
-      if (!connection) return null
-
-      const authorization = await this.connectionStorage.getAuthorization({
-        projectId: this.projectId,
-        connectorId: definition.id,
-        authorizationId: connection.authorizationId,
-      })
       const disconnected = await this.connectionStorage.disconnectConnection({
         projectId: this.projectId,
         connectorId: definition.id,
         connectionId: normalizedConnectionId,
       })
-      return disconnected
-        ? connectorConnectionView(disconnected, authorization?.status ?? "needs_reauthorization")
-        : null
+      if (!disconnected) return null
+      if (disconnected.revocationPendingAuthorizationId) {
+        await this.continuePendingRevocation(
+          definition,
+          disconnected.revocationPendingAuthorizationId
+        )
+      }
+      return connectorConnectionView(disconnected.connection, disconnected.authorization.status)
     } catch (error) {
       if (isConnectorStorageError(error, "authorization_conflict")) {
         throw createConnectorCodedError(
@@ -314,6 +317,30 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
       )
     }
     return definition
+  }
+
+  private async continueRevocationIfPending(
+    definition: ConnectorDefinition<string, OAuthConnectorAdapter>,
+    authorizationId: string
+  ): Promise<void> {
+    const authorization = await this.authorizations.requireAuthorization(
+      definition.id,
+      authorizationId
+    )
+    if (authorization.status !== "revocation_pending") return
+    await this.continuePendingRevocation(definition, authorization.id)
+  }
+
+  private async continuePendingRevocation(
+    definition: ConnectorDefinition<string, OAuthConnectorAdapter>,
+    authorizationId: string
+  ): Promise<void> {
+    try {
+      await this.authorizations.continuePendingRevocation(definition, authorizationId)
+    } catch (error) {
+      if (isSixbError(error) && error.code === "connector.revocation_pending") return
+      throw error
+    }
   }
 }
 
