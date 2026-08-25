@@ -6,6 +6,7 @@ import type {
   Storage,
 } from "@sixb/core"
 import {
+  agentServiceAccountId,
   buildAgentSystemPrompt,
   createAgentMessageId,
   fromAiSdk,
@@ -276,7 +277,10 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         role: assistant.role,
         parts: assistantParts,
         ...(assistant.metadata === undefined ? {} : { metadata: assistant.metadata }),
-        authorPrincipal: context.agentPrincipal,
+        // The agent authored this, whoever it is acting for. `context.agentPrincipal` is the run's
+        // *authority*, which for a delegated turn is the human — recording them as the author of
+        // the agent's own reply would misattribute the transcript.
+        authorPrincipal: { type: "serviceAccount", id: agentServiceAccountId(run.agentId) },
       },
       finish: {
         projectId,
@@ -386,7 +390,9 @@ async function finalizeCancelledTurn(input: {
       role: assistant.role,
       parts: assistant.parts,
       ...(assistant.metadata === undefined ? {} : { metadata: assistant.metadata }),
-      authorPrincipal: context.agentPrincipal,
+      // Authorship is the agent's, not the authority the run executes under. See the note on the
+      // successful finalize above.
+      authorPrincipal: { type: "serviceAccount", id: agentServiceAccountId(run.agentId) },
     },
     finish: {
       projectId,

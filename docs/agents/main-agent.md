@@ -75,6 +75,11 @@ This is why `mainAgent` takes no `groups`: giving it a fixed identity would flat
 reach into one. Every other agent still acts under its own managed service account, exactly as
 before.
 
+This extends to the [sandbox](../sandboxes/overview.md). The main agent's `bash` tool calls the Sixb
+API through a run-scoped gateway, and those calls now carry the user's authority too — so a command
+the model writes can read and act on exactly what that user could, and nothing more. The gateway's
+route allow-list still bounds *which* endpoints are reachable at all.
+
 The reach is the *effective* one. If a request authenticated with an access token scoped to a subset
 of the user's groups, the main agent inherits that narrower set — a scoped token cannot be widened by
 routing work through an agent. A run whose requester is suspended after admission is refused rather

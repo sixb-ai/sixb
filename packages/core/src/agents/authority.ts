@@ -259,7 +259,10 @@ export async function resolveAgentRunAuthorization(input: {
     throw new Error(`[Sixb] Agent '${input.agentId}' execution requires principal authority.`)
   }
 
-  if (authority.principal.id === agentServiceAccountId(input.agentId)) {
+  if (
+    authority.principal.type === "serviceAccount" &&
+    authority.principal.id === agentServiceAccountId(input.agentId)
+  ) {
     const resolved = await resolveAgentExecutionAuthorization({
       auth,
       projectId: input.projectId,

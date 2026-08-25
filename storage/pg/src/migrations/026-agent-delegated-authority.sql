@@ -8,16 +8,19 @@
 DO $$
 DECLARE
   target_constraint TEXT;
+  match_count INTEGER;
 BEGIN
-  SELECT conname
-    INTO target_constraint
+  SELECT count(*), min(conname)
+    INTO match_count, target_constraint
     FROM pg_constraint
    WHERE conrelid = 'executions'::regclass
      AND contype = 'c'
      AND pg_get_constraintdef(oid) LIKE '%executor_kind = ''agent''%';
 
-  IF target_constraint IS NULL THEN
-    RAISE EXCEPTION 'executions executor-authority constraint not found';
+  -- Refuse to guess. Dropping the wrong CHECK here would silently remove an unrelated invariant.
+  IF match_count <> 1 THEN
+    RAISE EXCEPTION
+      'expected exactly one executions executor-authority constraint, found %', match_count;
   END IF;
 
   EXECUTE format('ALTER TABLE executions DROP CONSTRAINT %I', target_constraint);

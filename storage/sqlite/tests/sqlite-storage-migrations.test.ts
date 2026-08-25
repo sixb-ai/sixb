@@ -236,6 +236,54 @@ describe("SQLite storage migrations", () => {
     expect(readMigrationRows(sqliteStoragePath(tempDir))).toEqual(expectedStorageMigrationRows)
   })
 
+  test("delegated-authority migration preserves existing executions and admits both forms", () => {
+    const db = new Database(":memory:")
+    try {
+      // Everything up to (but not including) 026.
+      for (const step of sqliteStorageMigrations.steps.slice(0, 25)) {
+        step.up(db)
+      }
+      db.query(
+        `INSERT INTO auth_users (project_id, id, email, status, created_at, updated_at)
+         VALUES ('p', 'usr_ada', 'ada@example.com', 'active', '2026-08-25T10:00:00.000Z', '2026-08-25T10:00:00.000Z')`
+      ).run()
+      db.query(
+        `INSERT INTO auth_service_accounts
+           (project_id, id, name, status, created_by_principal_type, created_by_principal_id, created_at, updated_at)
+         VALUES ('p', 'svc_agent_main', 'Main', 'active', 'system', 'system', '2026-08-25T10:00:00.000Z', '2026-08-25T10:00:00.000Z')`
+      ).run()
+      const insertExecution = (id: string, authorityColumn: string, authorityValue: string) =>
+        db
+          .query(
+            `INSERT INTO executions (
+               project_id, id, executor_kind, executor_id, source_kind, source_id,
+               requested_by_user_id, correlation_id, authority_kind, ${authorityColumn}, created_at
+             ) VALUES ('p', ?, 'agent', ?, 'event', ?, 'usr_ada', 'corr', 'principal', ?, '2026-08-25T10:00:00.000Z')`
+          )
+          .run(id, `run-${id}`, `event-${id}`, authorityValue)
+
+      insertExecution("exec_own", "authority_service_account_id", "svc_agent_main")
+      // The delegated form is rejected before the migration...
+      expect(() =>
+        insertExecution("exec_delegated_early", "authority_user_id", "usr_ada")
+      ).toThrow()
+
+      sqliteStorageMigrations.steps[25]?.up(db)
+
+      // ...accepted after it, and the pre-existing row survived the table rebuild.
+      insertExecution("exec_delegated", "authority_user_id", "usr_ada")
+      const ids = db
+        .query("SELECT id FROM executions ORDER BY id")
+        .all() as { readonly id: string }[]
+      expect(ids.map((row) => row.id)).toEqual(["exec_delegated", "exec_own"])
+
+      // A third-party human is still refused.
+      expect(() => insertExecution("exec_stranger", "authority_user_id", "usr_mallory")).toThrow()
+    } finally {
+      db.close()
+    }
+  })
+
   test("repeated migration planning is idempotent", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-idempotent-migrations-"))
     tempDirs.push(tempDir)

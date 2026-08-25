@@ -286,6 +286,18 @@ describe("sub_agent", () => {
     // user's own thread list.
     expect(childThread?.ownerPrincipal).toEqual({ type: "serviceAccount", id: "svc_agent_main" })
 
+    // Authorship is the agent's even though the run's *authority* is the human.
+    const parentMessages = await sixb.storage.agents?.messages.list({
+      projectId: PROJECT_ID,
+      threadId: requested.run.threadId,
+      roles: ["assistant"],
+      order: "asc",
+    })
+    expect(parentMessages?.messages[0]?.authorPrincipal).toEqual({
+      type: "serviceAccount",
+      id: "svc_agent_main",
+    })
+
     const visible = await createTestSixb(sixb, {
       authorization: resolveAuthorizationContext({
         principal: REQUESTER,
