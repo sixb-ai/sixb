@@ -49,8 +49,8 @@ export class AgentFinalizationError extends Error {
 /**
  * A turn exceeded its wall-clock budget. Unlike a shutdown abort, this is a run-level failure: the
  * run is recorded `failed` and the thread released (a slow-but-alive model must not hold a thread
- * forever). The name is intentionally **not** `AbortError`, so it routes through the normal failure
- * path rather than the worker's shutdown-abort path.
+ * forever). It is persisted as the run failure while coherent partial work is retained as the
+ * assistant message.
  */
 export class AgentTurnTimeoutError extends Error {
   readonly name = "AgentTurnTimeoutError"

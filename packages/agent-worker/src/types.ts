@@ -122,7 +122,7 @@ export interface AgentWorkerOptions {
   /**
    * Wall-clock budget for a single turn, in ms. A turn that exceeds it is aborted and recorded
    * `failed`, releasing the thread — a slow-but-alive model cannot hold a thread indefinitely.
-   * Defaults to 5 minutes.
+   * Defaults to 10 minutes.
    */
   readonly turnTimeoutMs?: number
 }

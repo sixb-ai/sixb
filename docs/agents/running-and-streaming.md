@@ -84,10 +84,17 @@ Attachments — and any files the agent produces — appear as `file` parts on t
 | `cancelled` | The run was aborted. |
 
 A finished run also carries `finishReason` (`stop`, `length`, `tool-calls`, `content-filter`,
-`error`, `other`, `unknown`), provider-neutral `usage`, and `modelId`. Usage is read from the durable
-model-call ledger and includes input/output totals plus any reported cache, text, and reasoning
-breakdowns. It summarizes every completed provider call, including calls completed before a later
-failure or cancellation.
+`timeout`, `error`, `other`, `unknown`), provider-neutral `usage`, and `modelId`. Usage is read from
+the durable model-call ledger and includes input/output totals plus any reported cache, text, and
+reasoning breakdowns. It summarizes every completed provider call, including calls completed before
+a later failure or cancellation.
+
+When the wall-clock budget is reached, the run ends as `failed` with `finishReason: "timeout"` and
+the configured duration in `error.details.timeoutMs`. Any coherent text and completed tool work that
+already streamed is finalized as an assistant message in the same transaction as the run. A client
+can therefore offer **Continue** when that message exists; when no coherent progress exists, it can
+offer the failed-run retry instead. Retrying a timeout that has saved progress is discouraged because
+completed tools may already have had side effects.
 
 Cancel a queued or running run with `POST /api/agent-threads/:threadId/cancel` (body `{ runId }`);
 it ends as `cancelled`.

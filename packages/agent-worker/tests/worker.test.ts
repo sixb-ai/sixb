@@ -5318,7 +5318,69 @@ describe("AgentWorker", () => {
     })
   })
 
-  test("fails the run and releases the thread when a turn exceeds its wall-clock budget", async () => {
+  test("persists partial progress when a turn exceeds its wall-clock budget", async () => {
+    const partial = "I found the relevant deployment and started checking its logs"
+    const controlled = partialTextThenBlockingModel(partial)
+    const sixb = buildSixb(controlled.model, new InMemoryBroker(), new RecordingSandboxFactory())
+    const storage = agentStorageOf(sixb)
+    let reportCount = 0
+    const reporter = attachSixbErrorReporter(sixb, () => {
+      reportCount += 1
+    })
+
+    const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs: 100 }))
+    await worker.start()
+    try {
+      const request = await requestAgent(sixb, { agentId: "assistant", text: "investigate" })
+      await controlled.waitForStarted()
+      await waitFor(
+        async () => {
+          const records = await listRunStreamRecords(sixb.broker, request.run.id)
+          return JSON.stringify(records).includes(partial) ? true : null
+        },
+        { label: "partial text streamed before timeout" }
+      )
+
+      const run = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "partial run timed out" }
+      )
+
+      expect(run.status).toBe("failed")
+      expect(run.finishReason).toBe("timeout")
+      expect(run.error).toMatchObject({
+        code: "agent.execution_failed",
+        details: { timeoutMs: "100" },
+      })
+
+      const messages = await listMessages(storage, request.run.threadId)
+      const assistant = messages.find((message) => message.role === "assistant")
+      expect(assistant?.parts).toContainEqual({ type: "text", text: partial })
+
+      const streamNames = (await listRunStreamRecords(sixb.broker, request.run.id)).map(
+        (record) => record.name
+      )
+      expect(streamNames.indexOf("agent.message.finalized")).toBeGreaterThan(-1)
+      expect(streamNames.indexOf("agent.message.finalized")).toBeLessThan(
+        streamNames.indexOf("agent.run.finished")
+      )
+
+      const thread = await storage.threads.getById({
+        projectId: PROJECT_ID,
+        id: request.run.threadId,
+      })
+      expect(thread?.activeRunId).toBeNull()
+      await reporter.flush()
+      expect(reportCount).toBe(0)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("fails without an assistant message when a turn times out before producing content", async () => {
     const sixb = buildSixb(hangingModel())
     const storage = agentStorageOf(sixb)
 
@@ -5338,11 +5400,12 @@ describe("AgentWorker", () => {
       )
 
       expect(run.status).toBe("failed")
+      expect(run.finishReason).toBe("timeout")
       expect(run.error).toMatchObject({
         code: "agent.execution_failed",
         message: "Agent execution failed.",
         retryable: false,
-        details: { agentId: "assistant", runId: run.id, threadId },
+        details: { agentId: "assistant", runId: run.id, threadId, timeoutMs: "50" },
       })
       expect(
         (await listRunStreamRecords(sixb.broker, run.id)).find(
@@ -5351,10 +5414,11 @@ describe("AgentWorker", () => {
       ).toMatchObject({
         type: "agent.run.finished",
         status: "failed",
+        finishReason: "timeout",
         runId: run.id,
         attempt: 1,
       })
-      // Thread released so a later message can run, and no assistant message was persisted.
+      // Thread released so a retry can run; there was no coherent progress to persist.
       const thread = await storage.threads.getById({ projectId: PROJECT_ID, id: threadId })
       expect(thread?.activeRunId).toBeNull()
       const messages = await listMessages(storage, threadId)

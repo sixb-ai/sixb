@@ -68,7 +68,8 @@ The default `StreamSink` writes:
 - `agent.run.finished`
 
 Live AI SDK UI chunks are broker records only. They are not inserted into `agent_messages`.
-`agent_messages` stores the final assistant message after the model turn completes.
+`agent_messages` stores the finalized assistant message after the model turn completes or is
+interrupted with coherent partial progress.
 
 The default sink is created with `createBrokerStreamSink(...)`. Tests can pass `NOOP_STREAM_SINK` or
 a custom `streamSink`.
@@ -78,7 +79,9 @@ a custom `streamSink`.
 The terminal run state is stored on the run record:
 
 - Model or tool failure: `failed`
-- Turn timeout: `failed`
+- Turn timeout: `failed` with `finishReason: "timeout"`; coherent partial work is finalized as the
+  assistant message before the thread is released. This controlled limit is not emitted as an
+  unhandled runtime failure
 - Worker shutdown during a turn: `cancelled`
 - Queue ownership lost mid-turn: the turn is aborted and stale durable writes are fenced
 - Finalization storage failure: job is retried up to a bounded attempt limit; if finalization still
@@ -99,6 +102,6 @@ The terminal run state is stored on the run record:
 - `streamSink`: stream sink override; defaults to a broker-backed sink.
 - `leaseMs`: queue visibility duration; defaults to 60 seconds. The worker renews it while the turn
   runs.
-- `turnTimeoutMs`: wall-clock turn budget; defaults to 5 minutes.
+- `turnTimeoutMs`: wall-clock turn budget; defaults to 10 minutes.
 - `defaultMaxSteps`: model step cap when an agent does not specify one; defaults to `25`.
 - `idlePollMs`: queue polling interval while idle.

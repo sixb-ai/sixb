@@ -41,7 +41,7 @@ import { enqueueWorkflowAgentNodeResume, executeWorkflowAgentNode } from "./work
 
 const DEFAULT_AGENT_QUEUE_LEASE_MS = 60_000
 const DEFAULT_AGENT_CONCURRENCY = 4
-const DEFAULT_TURN_TIMEOUT_MS = 5 * 60_000
+const DEFAULT_TURN_TIMEOUT_MS = 10 * 60_000
 const AGENT_DISPATCH_POLL_MS = 1_000
 /** Reconciliation is a safety net for failed request-time publication; an empty scan idles longer. */
 const AGENT_DISPATCH_IDLE_MS = 10_000

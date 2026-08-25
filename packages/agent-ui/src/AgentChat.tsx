@@ -202,10 +202,29 @@ export function AgentChat({
         waitingLonger={conversation.waitingLonger}
         failedBeforeResponse={presentation.kind === "failed"}
         cancelledBeforeResponse={presentation.kind === "cancelled"}
+        timeout={
+          presentation.kind === "timeout"
+            ? {
+                hasProgress: presentation.hasProgress,
+                ...(presentation.timeoutMs === undefined
+                  ? {}
+                  : { timeoutMs: presentation.timeoutMs }),
+              }
+            : undefined
+        }
         onRetry={
-          presentation.kind === "failed" ? () => conversation.retry(presentation.run) : undefined
+          presentation.kind === "failed" ||
+          (presentation.kind === "timeout" && !presentation.hasProgress)
+            ? () => conversation.retry(presentation.run)
+            : undefined
+        }
+        onContinue={
+          presentation.kind === "timeout" && presentation.hasProgress
+            ? conversation.continueAfterTimeout
+            : undefined
         }
         retrying={conversation.retrying}
+        continuing={conversation.composerPending}
         reconnecting={conversation.reconnecting}
         sendError={conversation.sendError}
         agents={conversation.agents}

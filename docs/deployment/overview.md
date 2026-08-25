@@ -113,6 +113,15 @@ sixb worker-group sync pipeline projection
 sixb worker-group
 ```
 
+Agent turns have a 10-minute wall-clock budget by default. Override it for `sixb dev`,
+`sixb worker agent`, or a worker group containing `agent` with a duration such as `30s`, `10m`,
+or `1h`; the flag wins over the environment:
+
+```bash
+sixb worker agent --agent-turn-timeout 20m
+SIXB_AGENT_TURN_TIMEOUT=20m sixb worker-group
+```
+
 A role process is **idle**, not an error, when it has nothing to do — an
 orchestrator with no routes, a rules process with no rules, or a worker group
 with no registered worker types prints a warning and stays running.

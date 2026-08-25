@@ -21,6 +21,8 @@ export interface LiveRunState {
   readonly finalizedMessageId: string | null
   /** Terminal run status, or null while in-flight. */
   readonly finishStatus: AgentRunStatus | null
+  /** Stable reason the run ended, when the terminal event supplies one. */
+  readonly finishReason: string | null
   /** Exact durable failure from a failed or cancelled run. */
   readonly finishError: AgentRunFailure | null
   /** Error text surfaced by a stream `error` chunk (not necessarily fatal). */
@@ -41,6 +43,7 @@ export function createLiveRunState(runId: string | null = null): LiveRunState {
     stepIndex: 0,
     finalizedMessageId: null,
     finishStatus: null,
+    finishReason: null,
     finishError: null,
     streamError: null,
   }
@@ -83,6 +86,7 @@ function reduceEvent(state: LiveRunState, event: AgentRunStreamEvent): LiveRunSt
         ...state,
         active: false,
         finishStatus: event.status,
+        finishReason: event.finishReason ?? null,
         finishError: event.error ?? null,
       }
     default:

@@ -2,6 +2,7 @@ import { dirname, resolve } from "node:path"
 import { type CustomAppDevServer, createCustomApp } from "@sixb/app"
 import { type AtlasAppServer, createAtlasApp } from "@sixb/atlas"
 import { createSixbServer, type SixbServer } from "@sixb/server"
+import { resolveAgentTurnTimeoutMs } from "../lib/agent-turn-timeout"
 import { apiDocsUrl, apiEventsUrl, apiUrl, resolveBrowserTopology } from "../lib/browser-topology"
 import { type LoadedSixbHost, loadSixbFromEntry } from "../lib/loadSixb"
 import { runUntilSignal, startSixbRuntime, stopQuietly } from "../lib/runtime"
@@ -17,11 +18,13 @@ export interface DevOptions {
   apiPublicOrigin?: string
   atlasPublicOrigin?: string
   appPublicOrigin?: string
+  agentTurnTimeout?: string
 }
 
 export async function runDev(options: DevOptions = {}) {
   process.env.NODE_ENV = "development"
 
+  const agentTurnTimeoutMs = resolveAgentTurnTimeoutMs(options.agentTurnTimeout)
   const entry = resolve(options.entry ?? "sixb.config.ts")
 
   const app = renderPersistent(
@@ -57,6 +60,7 @@ export async function runDev(options: DevOptions = {}) {
     runtime = await startSixbRuntime(host, {
       cohostWorkers: true,
       agentApiBaseUrl: topology.apiPublicOrigin,
+      agentTurnTimeoutMs,
     })
     const authEnabled = host.auth.isEnabled()
 

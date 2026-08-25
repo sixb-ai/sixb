@@ -316,6 +316,10 @@ export function useAgentConversation({
     )
   }
 
+  const continueAfterTimeout = () => {
+    void send("Continue from where you left off.", [], [])
+  }
+
   const currentAgent =
     (threadId !== null ? agentsById.get(thread?.agentId ?? "") : undefined) ??
     (draftAgentId ? agentsById.get(draftAgentId) : undefined)
@@ -367,6 +371,7 @@ export function useAgentConversation({
     send,
     stop,
     retry,
+    continueAfterTimeout,
   }
 }
 
