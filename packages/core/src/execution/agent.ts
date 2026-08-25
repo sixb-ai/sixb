@@ -1,4 +1,5 @@
 import { agentServiceAccountId } from "../agents/authority"
+import { MAIN_AGENT_ID } from "../agents/main-agent"
 import { principalsEqual } from "../auth/types"
 import type { AuthorizationContext } from "../authorization"
 import type { OntologySource } from "../ontology"
@@ -125,6 +126,10 @@ export function assertAgentExecutionRecord(input: {
  * what its user can reach without being given groups of its own. Pinning the delegated form to
  * `requestedBy` makes the record self-describing — no extra column, and a run cannot name an
  * identity nobody granted it.
+ *
+ * The delegated form is restricted to the main agent here rather than only at the call site that
+ * mints it, so no future producer — a workflow node, a retry path, a third-party storage seed —
+ * can put an authored agent under a human's identity and still pass every layer of validation.
  */
 function assertAgentExecutionAuthority(input: {
   readonly agentId: string
@@ -135,7 +140,11 @@ function assertAgentExecutionAuthority(input: {
   if (input.principal.type === "serviceAccount" && input.principal.id === expectedId) {
     return
   }
-  if (input.requestedBy && principalsEqual(input.principal, input.requestedBy)) {
+  if (
+    input.agentId === MAIN_AGENT_ID &&
+    input.requestedBy &&
+    principalsEqual(input.principal, input.requestedBy)
+  ) {
     return
   }
   throw new ExecutionStorageError(

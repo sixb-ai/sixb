@@ -271,6 +271,9 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     let stopOwnershipProjection: (() => void) | undefined
     /** Sub-agent runs currently executing inside this turn, by run id → execution token. */
     const liveChildOwnership = new Map<string, string>()
+    // The delivery's lease moves as it renews. A child admitted late must inherit the *current*
+    // window, not the one this turn started with, or its API gateway fails closed immediately.
+    let currentLeaseExpiresAt = new Date(delivery.leaseExpiresAt)
     // Watch for a user cancel (an out-of-band `/cancel` publishes to the run's control stream). Its
     // signal joins the turn's abort sources, so a cancel stops the model stream just like a shutdown.
     const cancel = await this.watchForCancel(run.id)
@@ -279,6 +282,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       // The queue remains the sole source of ownership timing. Persist its latest confirmed
       // expiration so the API gateway can fail closed without maintaining another heartbeat.
       stopOwnershipProjection = delivery.onLeaseRenewed((renewed) => {
+        currentLeaseExpiresAt = new Date(renewed.leaseExpiresAt)
         // Sub-agent runs execute inside this slot and hold no queue job of their own, so this
         // delivery's lease is their liveness too. Projecting it onto them keeps their API gateway
         // open for as long as the turn that started them.
@@ -330,7 +334,13 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
                 signal: turnSignal,
                 trackChildOwnership: (child) => {
                   liveChildOwnership.set(child.runId, child.executionToken)
-                  return () => liveChildOwnership.delete(child.runId)
+                  return () => {
+                    liveChildOwnership.delete(child.runId)
+                  }
+                },
+                currentLeaseExpiresAt: () => currentLeaseExpiresAt,
+                reportChildFailure: (error, childRun, failure) => {
+                  this.reportFailure(error, childRun, job.attempt, failure)
                 },
               },
             }

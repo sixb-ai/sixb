@@ -250,7 +250,13 @@ async function prepareDurableAgentExecution(
   // The framework-managed main agent acts as the human who asked for the turn, so it reaches
   // exactly what they can reach without being given groups of its own. Every other agent — and a
   // main-agent turn with no human behind it — acts as its own managed identity.
-  const delegated = agent.id === MAIN_AGENT_ID ? parent.requestedBy : undefined
+  //
+  // Gated on `runtime.authorization`, not on `requestedBy` alone: a trusted-primitive caller (an
+  // action requesting a turn, say) carries the originating human all the way down but has no
+  // resolved grants, so `requesterAuthorizationGroupIds` would be empty. Delegating there would
+  // mint a run acting as a user with no reach at all — neither of the two documented shapes.
+  const delegated =
+    agent.id === MAIN_AGENT_ID && runtime.authorization ? parent.requestedBy : undefined
   return createAgentExecutionRecord({
     id: `exec_${randomUUID()}`,
     parent,

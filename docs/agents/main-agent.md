@@ -45,7 +45,7 @@ allow-list to maintain.
 
 ```text
 User request
-  └── main — its own service account, no groups
+  └── main — runs as the requesting user, no groups of its own
         └── sub_agent("invoice-assistant", task)
               └── invoice-assistant — own service account, own groups, own sandbox
 ```
@@ -91,10 +91,12 @@ An agent the user could not open a thread with is never offered to the main agen
 runs under its own service account and groups — delegation does not hand the user's identity onward.
 
 ```ts
-import { can, defineRole, every } from "@sixb/core"
+import { can, defineGroup, defineRole, every } from "@sixb/core"
 
-const assistantUsers = defineRole("assistant.users", {
-  grantedTo: [everyone],
+const staff = defineGroup("staff", { label: "Staff" })
+
+export const assistantUsers = defineRole("assistant.users", {
+  grantedTo: [staff],
   grants: [can.run(every.agent())],
 })
 ```

@@ -1,10 +1,11 @@
 import type { AgentDefinition, AuthorizationContext } from "@sixb/core"
-import { AgentToolPublicError, isAllowed } from "@sixb/core"
+import { AgentRequestError, AgentToolPublicError, isAllowed } from "@sixb/core"
 import { requestSubAgentRun, resolveAgentExecutionAuthorization } from "@sixb/core/internal/agents"
 import type { AgentRunRecord, ExecutionRecord } from "@sixb/core/storage"
 import { jsonSchema, type Tool, tool } from "ai"
 import { AgentExecutionLostError, AgentFinalizationError } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
+import type { AgentRunFailure } from "./failure"
 import { recordAgentRunFate } from "./finalize"
 import { runAgentTurn } from "./run-agent-turn"
 import { createConversationAgentEnvironment } from "./run-environment"
@@ -32,6 +33,8 @@ export interface CreateSubAgentToolInput {
   /** The delegating run's execution context; the child rebinds it to its own service account. */
   readonly context: AgentExecutionContext
   readonly host: AgentWorkerHost
+  /** Agents this turn may delegate to, resolved once by the caller. */
+  readonly targets: readonly AgentDefinition[]
   readonly parentRun: AgentRunRecord
   readonly parentExecution: ExecutionRecord
   /**
@@ -47,6 +50,14 @@ export interface CreateSubAgentToolInput {
     readonly runId: string
     readonly executionToken: string
   }) => () => void
+  /** The delegating delivery's latest confirmed lease expiry, read at admission time. */
+  readonly currentLeaseExpiresAt: () => Date
+  /** Routes a failed child through the project's error handler, as the queued path does. */
+  readonly reportChildFailure: (
+    error: unknown,
+    run: AgentRunRecord,
+    failure: AgentRunFailure
+  ) => void
   readonly onDetachedTeardown?: (teardown: Promise<void>) => void
 }
 
@@ -93,11 +104,7 @@ export interface SubAgentTool {
  * latency ever matters more than sandbox headroom.
  */
 export function createSubAgentTool(input: CreateSubAgentToolInput): SubAgentTool {
-  const targets = resolveSubAgentTargets({
-    host: input.host,
-    agentId: input.parentRun.agentId,
-    requesterAuthorization: input.requesterAuthorization,
-  })
+  const targets = input.targets
   let gate: Promise<unknown> = Promise.resolve()
   let finalizationError: unknown
 
@@ -171,18 +178,29 @@ async function runSubAgent(
     throw new AgentToolPublicError(`Unknown agent '${toolInput.agent}'.`)
   }
 
-  const admitted = await requestSubAgentRun({
-    storage: context.storage,
-    projectId: context.id,
-    security: host.definitions.security,
-    agent,
-    parentExecution: deps.parentExecution,
-    parentRun: deps.parentRun,
-    prompt: toolInput.task,
-    // Mirrors the delegating run's queue lease: the child lives inside the parent's turn, so the
-    // parent's ownership window is the child's too.
-    queueLeaseExpiresAt: requireParentLease(deps.parentRun),
-  })
+  let admitted: Awaited<ReturnType<typeof requestSubAgentRun>>
+  try {
+    admitted = await requestSubAgentRun({
+      storage: context.storage,
+      projectId: context.id,
+      security: host.definitions.security,
+      agent,
+      parentExecution: deps.parentExecution,
+      parentRun: deps.parentRun,
+      prompt: toolInput.task,
+      // The delegating run's *current* ownership window, not the snapshot taken when the turn
+      // started: a turn that delegates late would otherwise admit a child whose lease has already
+      // expired, and its API gateway would fail closed until the next renewal.
+      queueLeaseExpiresAt: deps.currentLeaseExpiresAt(),
+    })
+  } catch (error) {
+    // A refusal is actionable — the model can pick a different agent — so it must not arrive as
+    // the generic "An error occurred." that every non-public tool error renders as.
+    if (error instanceof AgentRequestError && error.code === "agent_not_found") {
+      throw new AgentToolPublicError(`Unknown agent '${toolInput.agent}'.`)
+    }
+    throw error
+  }
 
   const executionToken = admitted.run.execution?.token
   if (!executionToken) {
@@ -234,7 +252,7 @@ async function runSubAgent(
       throw error
     }
     if (!(error instanceof AgentExecutionLostError)) {
-      await recordAgentRunFate({
+      const finalized = await recordAgentRunFate({
         storage: context.storage.agents,
         projectId: context.id,
         run: admitted.run,
@@ -242,6 +260,15 @@ async function runSubAgent(
         status: signal.aborted ? "cancelled" : "failed",
         error,
       })
+      // A delegated run is a real run: it reported `started` on its own stream and its failure
+      // belongs in the project's error handler, exactly as the queued path does. Without this a
+      // child dies with no diagnostic anywhere and its stream never reaches a terminal event.
+      if (finalized) {
+        if (finalized.run.status === "failed") {
+          deps.reportChildFailure(error, finalized.run, finalized.failure)
+        }
+        await context.streamSink.publishRunFinished(finalized.run)
+      }
     }
     throw new AgentToolPublicError(`Agent '${agent.id}' could not complete the task.`)
   } finally {
@@ -272,6 +299,12 @@ async function readSubAgentOutcome(
     .join("\n")
     .trim()
 
+  // An empty answer is not a result. A child can end on tool calls alone or hit its step cap, and
+  // handing the delegating model `result: ""` alongside `status: "succeeded"` reads as "done, with
+  // nothing to say" — which it will relay to the user as an answer.
+  if (finished?.status === "succeeded" && text.length === 0) {
+    throw new AgentToolPublicError(`Agent '${agent.id}' finished without producing an answer.`)
+  }
   const truncated = text.length > MAX_SUB_AGENT_OUTPUT_CHARS
   return {
     agent: agent.id,
@@ -281,12 +314,4 @@ async function readSubAgentOutcome(
     result: truncated ? text.slice(0, MAX_SUB_AGENT_OUTPUT_CHARS) : text,
     resultTruncated: truncated,
   }
-}
-
-function requireParentLease(parentRun: AgentRunRecord): Date {
-  const lease = parentRun.execution?.queueLeaseExpiresAt
-  if (!lease) {
-    throw new AgentToolPublicError("Delegation is unavailable for this run.")
-  }
-  return lease
 }

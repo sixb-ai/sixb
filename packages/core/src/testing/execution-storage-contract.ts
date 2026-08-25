@@ -155,6 +155,16 @@ export function runExecutionStorageContractSuite<TStorage extends ExecutionStora
             },
           },
           {
+            // ...and never as a human when there is no requester at all. A NULL-unsafe SQL CHECK
+            // passes this silently, so the case is asserted rather than assumed.
+            ...agentExecution("unrequested-agent"),
+            requestedBy: undefined,
+            authorizationRef: {
+              type: "principal",
+              principal: { type: "user", id: "user-one" },
+            },
+          },
+          {
             ...kernelExecution("requested-kernel"),
             requestedBy: { type: "user", id: "user-one" },
           },

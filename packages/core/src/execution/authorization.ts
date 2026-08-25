@@ -1,3 +1,4 @@
+import { agentServiceAccountId } from "../agents/authority"
 import type { Principal } from "../auth"
 import { emptyGrantSets, GRANT_KIND_KEYS } from "../authorization/grant-kinds"
 import type { AuthorizationContext, GrantIndex } from "../authorization/types"
@@ -252,10 +253,14 @@ export function resolveExecutionScopeAuthorization(
         resolved.type !== "principal" ||
         resolved.ref.type !== "principal" ||
         resolved.ref.credential !== undefined ||
-        // Its own managed identity, or the human it acts for — the same pair the durable record
-        // admits (`assertAgentExecutionRecord`).
-        (resolved.ref.principal.type !== "serviceAccount" &&
-          !principalsEqual(resolved.ref.principal, execution.requestedBy)) ||
+        // The same pair `assertAgentExecutionRecord` admits, and narrowed the same way: the
+        // *definition's own* service account, or the human the run acts for. Comparing only
+        // `type === "serviceAccount"` here would bind one agent's scope under another's identity.
+        !isAgentScopePrincipal(
+          resolved.ref.principal,
+          execution.executor.agentId,
+          execution.requestedBy
+        ) ||
         resolved.executionBinding?.type !== "agent" ||
         resolved.executionBinding.executionId !== execution.id ||
         resolved.executionBinding.agentId !== execution.executor.agentId ||
@@ -282,6 +287,18 @@ export function resolveExecutionScopeAuthorization(
       }
       return resolved
   }
+}
+
+/** The two identities an Agent scope may bind: its definition's own account, or its requester. */
+function isAgentScopePrincipal(
+  principal: AuthorizablePrincipal,
+  agentId: string,
+  requestedBy: AuthorizablePrincipal | undefined
+): boolean {
+  if (principal.type === "serviceAccount" && principal.id === agentServiceAccountId(agentId)) {
+    return true
+  }
+  return principalsEqual(principal, requestedBy)
 }
 
 function principalsEqual(

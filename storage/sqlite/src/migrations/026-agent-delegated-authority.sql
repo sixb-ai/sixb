@@ -131,7 +131,7 @@ CREATE TABLE executions_v3 (
       AND authority_access_token_id IS NULL
       AND (
         authority_service_account_id IS NOT NULL
-        OR (authority_user_id IS NOT NULL AND authority_user_id = requested_by_user_id)
+        OR (authority_user_id IS NOT NULL AND authority_user_id IS requested_by_user_id)
       )
     )
     OR (executor_kind = 'kernel' AND authority_kind = 'kernel')

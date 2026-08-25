@@ -15,6 +15,7 @@ import {
   prepareAgentAttachments,
 } from "./attachments"
 import { type BashSandboxHandle, createBashTool } from "./bash-tool"
+import type { AgentRunFailure } from "./failure"
 import { prepareAgentSandboxApiContext } from "./sandbox-api-context"
 import { createSubAgentTool, resolveSubAgentTargets } from "./sub-agent-tool"
 import type {
@@ -65,6 +66,14 @@ export interface AgentDelegationInput {
     readonly runId: string
     readonly executionToken: string
   }) => () => void
+  /** The delegating delivery's latest confirmed lease expiry. */
+  readonly currentLeaseExpiresAt: () => Date
+  /** Routes a failed child through the project's error handler. */
+  readonly reportChildFailure: (
+    error: unknown,
+    run: AgentRunRecord,
+    failure: AgentRunFailure
+  ) => void
 }
 
 export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvironmentInput {
@@ -206,23 +215,27 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
   const delegation = input.delegation
   if (delegation && input.run) {
     const parentRun = input.run
-    // Skipped entirely when the requester can reach nothing: an empty enum would only teach the
-    // model to call a tool that can never succeed.
-    const canDelegate =
-      resolveSubAgentTargets({
-        host: delegation.host,
-        agentId: parentRun.agentId,
-        requesterAuthorization: delegation.requesterAuthorization,
-      }).length > 0
-    if (canDelegate) {
+    // Resolved once and handed to the tool: it decides both whether to inject at all and what the
+    // model is offered, and computing it twice invites the two from drifting apart. Skipped
+    // entirely when the requester can reach nothing — an empty enum would only teach the model to
+    // call a tool that can never succeed.
+    const targets = resolveSubAgentTargets({
+      host: delegation.host,
+      agentId: parentRun.agentId,
+      requesterAuthorization: delegation.requesterAuthorization,
+    })
+    if (targets.length > 0) {
       const subAgent = createSubAgentTool({
         context,
         host: delegation.host,
+        targets,
         parentRun,
         parentExecution: delegation.execution,
         parentSignal: delegation.signal,
         requesterAuthorization: delegation.requesterAuthorization,
         trackChildOwnership: delegation.trackChildOwnership,
+        currentLeaseExpiresAt: delegation.currentLeaseExpiresAt,
+        reportChildFailure: delegation.reportChildFailure,
         ...(input.onDetachedTeardown ? { onDetachedTeardown: input.onDetachedTeardown } : {}),
       })
       tools.sub_agent = subAgent.tool
