@@ -76,6 +76,8 @@ describe("Postgres storage migrations", () => {
             "022-projection-executions",
             "023-webhook-executions",
             "024-ontology-commit-executions",
+            "025-agent-run-requester-authorization",
+            "026-agent-delegated-authority",
           ],
         },
       ])
@@ -247,6 +249,20 @@ describe("Postgres storage migrations", () => {
           id: "024-ontology-commit-executions",
           status: "applied",
           version: 24,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "025-agent-run-requester-authorization",
+          status: "applied",
+          version: 25,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "026-agent-delegated-authority",
+          status: "applied",
+          version: 26,
         },
       ])
     })
@@ -1606,6 +1622,20 @@ describe("Postgres storage migrations", () => {
           id: "024-ontology-commit-executions",
           status: "applied",
           version: 24,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "025-agent-run-requester-authorization",
+          status: "applied",
+          version: 25,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "026-agent-delegated-authority",
+          status: "applied",
+          version: 26,
         },
       ])
     } finally {
