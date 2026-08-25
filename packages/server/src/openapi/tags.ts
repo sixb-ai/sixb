@@ -13,7 +13,15 @@ export const OPENAPI_TAGS = {
   },
   connectors: {
     name: "Connectors",
-    description: "Connector metadata and webhook routes",
+    description: "Connector metadata",
+  },
+  connectorConnections: {
+    name: "Connector Connections",
+    description: "Connected external accounts",
+  },
+  connectorConnectionRuns: {
+    name: "Connector Connection Runs",
+    description: "Interactive OAuth connection runs",
   },
   webhooks: {
     name: "Webhooks",

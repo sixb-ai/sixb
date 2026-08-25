@@ -45,6 +45,22 @@ export function assertConnectorAuthorizationAttemptInitiator(
   }
 }
 
+export function assertConnectorConnectionRunInitiator(
+  execution: ExecutionRecord | null,
+  current: ConnectorConnectionCommandActor,
+  connectorId: string
+): asserts execution is ExecutionRecord {
+  const initiating = execution
+    ? connectorConnectionActorFromExecution(execution, execution.projectId)
+    : null
+  if (!initiating || !sameConnectorConnectionCommandActor(initiating, current)) {
+    throw new AuthorizationError(
+      `connection-run:connector:${connectorId}`,
+      "[Sixb] This connector connection run can only be accessed by its initiating actor."
+    )
+  }
+}
+
 function connectorConnectionActorFromExecution(
   execution: CreateExecutionInput | ExecutionRecord,
   projectId: string

@@ -1,6 +1,8 @@
 export type ConnectorConnectionStorageErrorCode =
   | "attempt_conflict"
   | "attempt_invalid"
+  | "run_conflict"
+  | "run_invalid"
   | "authorization_conflict"
   | "connection_conflict"
   | "invalid_input"

@@ -5,6 +5,7 @@ import type {
   ConnectorConnectionStorage,
   ConnectorCredentialMutationKind,
   CreateConnectorAuthorizationAttemptInput,
+  CreateConnectorConnectionRunInput,
 } from "../storage/connector-connections"
 import type { CreateExecutionInput } from "../storage/executions"
 import type { Storage } from "../storage/types"
@@ -111,17 +112,27 @@ export function runConnectorConnectionStorageContractSuite<
       })
     })
 
-    test("commits and rolls back authorization attempts with their execution provenance", async () => {
+    test("commits and rolls back connection runs with their attempt and execution", async () => {
       await withStorage(async (storage, root) => {
         const committedExecution = requestExecution("execution-commit")
         const committedAttempt = authorizationAttempt({
           id: "attempt-commit",
           initiatedByExecutionId: committedExecution.id,
+          connectionRunId: "run-commit",
+          returnTo: "https://app.example.com/connectors",
+          callbackBindingHash: "binding-commit",
+        })
+        const committedRun = connectionRun({
+          id: "run-commit",
+          initiatedByExecutionId: committedExecution.id,
+          authorizationAttemptId: committedAttempt.id,
         })
         await root.transaction(
           async (tx) => {
             await tx.executions.create(committedExecution)
-            await requireTransactionConnections(tx).createAuthorizationAttempt(committedAttempt)
+            const connections = requireTransactionConnections(tx)
+            await connections.createConnectionRun(committedRun)
+            await connections.createAuthorizationAttempt(committedAttempt)
           },
           { isolation: "serializable" }
         )
@@ -130,6 +141,9 @@ export function runConnectorConnectionStorageContractSuite<
           await root.executions.getById({ projectId, id: committedExecution.id })
         ).not.toBeNull()
         await expect(
+          storage.getConnectionRun({ projectId, connectorId, runId: committedRun.id })
+        ).resolves.toMatchObject({ id: committedRun.id })
+        await expect(
           storage.consumeAuthorizationAttempt(authorizationAttemptConsumption(committedAttempt.id))
         ).resolves.toMatchObject({ id: committedAttempt.id })
 
@@ -137,13 +151,23 @@ export function runConnectorConnectionStorageContractSuite<
         const rolledBackAttempt = authorizationAttempt({
           id: "attempt-rollback",
           initiatedByExecutionId: rolledBackExecution.id,
+          connectionRunId: "run-rollback",
+          returnTo: "https://app.example.com/connectors",
+          callbackBindingHash: "binding-rollback",
+        })
+        const rolledBackRun = connectionRun({
+          id: "run-rollback",
+          initiatedByExecutionId: rolledBackExecution.id,
+          authorizationAttemptId: rolledBackAttempt.id,
         })
         const rollback = new Error("rollback connector authorization attempt")
         await expect(
           root.transaction(
             async (tx) => {
               await tx.executions.create(rolledBackExecution)
-              await requireTransactionConnections(tx).createAuthorizationAttempt(rolledBackAttempt)
+              const connections = requireTransactionConnections(tx)
+              await connections.createConnectionRun(rolledBackRun)
+              await connections.createAuthorizationAttempt(rolledBackAttempt)
               throw rollback
             },
             { isolation: "serializable" }
@@ -152,8 +176,119 @@ export function runConnectorConnectionStorageContractSuite<
 
         expect(await root.executions.getById({ projectId, id: rolledBackExecution.id })).toBeNull()
         await expect(
+          storage.getConnectionRun({ projectId, connectorId, runId: rolledBackRun.id })
+        ).resolves.toBeNull()
+        await expect(
           storage.consumeAuthorizationAttempt(authorizationAttemptConsumption(rolledBackAttempt.id))
         ).rejects.toThrow("invalid, expired, or already used")
+      })
+    })
+
+    test("claims a headless callback once with state and browser binding", async () => {
+      await withStorage(async (storage) => {
+        await storage.createConnectionRun(connectionRun())
+        await storage.createAuthorizationAttempt(
+          authorizationAttempt({
+            connectionRunId: "run-a",
+            returnTo: "https://app.example.com/connectors",
+            callbackBindingHash: "binding-hash",
+          })
+        )
+
+        await expect(
+          storage.claimConnectionRunCallback({
+            projectId,
+            attemptId: "attempt-a",
+            stateHash: "state-hash",
+            callbackBindingHash: "wrong-binding",
+            redirectUri: "https://example.com/oauth/callback",
+          })
+        ).resolves.toBeNull()
+
+        const claimed = await storage.claimConnectionRunCallback({
+          projectId,
+          attemptId: "attempt-a",
+          stateHash: "state-hash",
+          callbackBindingHash: "binding-hash",
+          redirectUri: "https://example.com/oauth/callback",
+        })
+        expect(claimed).toMatchObject({
+          type: "claimed",
+          run: { id: "run-a", status: "running" },
+          attempt: { id: "attempt-a", connectionRunId: "run-a" },
+          returnTo: "https://app.example.com/connectors",
+        })
+        expect(claimed && "returnTo" in claimed.run).toBe(false)
+        await expect(
+          storage.claimConnectionRunCallback({
+            projectId,
+            attemptId: "attempt-a",
+            stateHash: "state-hash",
+            callbackBindingHash: "binding-hash",
+            redirectUri: "https://example.com/oauth/callback",
+          })
+        ).resolves.toBeNull()
+      })
+    })
+
+    test("expires a waiting run and removes its protocol attempt lazily", async () => {
+      await withStorage(async (storage, root) => {
+        await storage.createConnectionRun(connectionRun())
+        await storage.createAuthorizationAttempt(
+          authorizationAttempt({
+            connectionRunId: "run-a",
+            returnTo: "https://app.example.com/connectors",
+            callbackBindingHash: "binding-hash",
+          })
+        )
+        await options.advanceTime(root, 60_000)
+
+        await expect(
+          storage.getConnectionRun({ projectId, connectorId, runId: "run-a" })
+        ).resolves.toMatchObject({ status: "expired" })
+        await expect(
+          storage.claimConnectionRunCallback({
+            projectId,
+            attemptId: "attempt-a",
+            stateHash: "state-hash",
+            callbackBindingHash: "binding-hash",
+            redirectUri: "https://example.com/oauth/callback",
+          })
+        ).resolves.toBeNull()
+      })
+    })
+
+    test("keeps account selection atomic with its connection run", async () => {
+      await withStorage(async (storage) => {
+        const active = await createAuthorization(storage, "authorization-a", "account-a")
+        await connect(storage, active, "connection-a", "account-a")
+        const pending = await createAuthorization(storage, "authorization-b", "account-b")
+        await createSelectionRun(storage, pending)
+
+        await expect(
+          storage.putConnectionFromRun({
+            id: "connection-b",
+            projectId,
+            connectorId,
+            runId: "run-a",
+            account: { id: "account-b", label: "Account B" },
+            replace: false,
+          })
+        ).rejects.toThrow("explicit replacement is required")
+        expect(
+          await storage.getConnectionRun({ projectId, connectorId, runId: "run-a" })
+        ).toMatchObject({ status: "waiting", waitingFor: "account_selection" })
+        expect(await storage.getAuthorization(authorizationKey(pending.id))).toEqual(pending)
+
+        const selected = await storage.putConnectionFromRun({
+          id: "connection-b",
+          projectId,
+          connectorId,
+          runId: "run-a",
+          account: { id: "account-b", label: "Account B" },
+          replace: true,
+        })
+        expect(selected.run).toMatchObject({ status: "succeeded" })
       })
     })
 
@@ -533,33 +668,34 @@ export function runConnectorConnectionStorageContractSuite<
         expect(
           await storage.listConnectionsByAuthorization(authorizationKey(authorization.id))
         ).toEqual([])
+        expect(
+          await storage.getAuthorizationByConnectionId({
+            projectId,
+            connectorId,
+            connectionId: first.connection.id,
+          })
+        ).toMatchObject({ id: authorization.id, status: "revocation_pending" })
+
+        if (!claim) throw new Error("Expected revocation mutation claim.")
+        const executing = await markExecuting(storage, claim.authorization)
+        const staged = await storage.stageCredentialMutationRevocation({
+          ...fence(executing),
+          holderId: "worker-a",
+        })
+        if (!staged) throw new Error("Expected staged revocation.")
+        const revoked = await storage.finalizeRevocation(fence(staged))
+        expect(revoked).toMatchObject({
+          status: "revoked",
+          credentials: undefined,
+          scopes: [],
+          accounts: [],
+        })
         expect(await storage.listConnections({ projectId, connectorId })).toEqual(
           expect.arrayContaining([
             expect.objectContaining({ id: first.connection.id, status: "disconnected" }),
             expect.objectContaining({ id: "connection-b", status: "disconnected" }),
           ])
         )
-      })
-    })
-
-    test("removes sealed credentials only after provider revocation is staged", async () => {
-      await withStorage(async (storage) => {
-        const authorization = await createActiveAuthorization(storage)
-        const claim = await claimMutation(storage, authorization, "mutation-revoke", "revocation")
-        const executing = await markExecuting(storage, claim.authorization)
-        const staged = await storage.stageCredentialMutationRevocation({
-          ...fence(executing),
-          holderId: "worker-a",
-        })
-        if (!staged) throw new Error("Expected staged connector revocation.")
-
-        expect(staged.credentials).toEqual(credentials)
-        await expect(storage.finalizeRevocation(fence(staged))).resolves.toMatchObject({
-          status: "revoked",
-          credentials: undefined,
-          scopes: [],
-          accounts: [],
-        })
       })
     })
 
@@ -613,6 +749,53 @@ function authorizationAttempt(
     ttlMs: 60_000,
     ...overrides,
   }
+}
+
+function connectionRun(
+  overrides: Partial<CreateConnectorConnectionRunInput> = {}
+): CreateConnectorConnectionRunInput {
+  return {
+    id: "run-a",
+    projectId,
+    connectorId,
+    kind: "connect",
+    owner: { type: "project" },
+    slot: "default",
+    initiatedByExecutionId: "execution-a",
+    authorizationAttemptId: "attempt-a",
+    ttlMs: 60_000,
+    ...overrides,
+  }
+}
+
+async function createSelectionRun(
+  storage: ConnectorConnectionStorage,
+  authorization: ConnectorAuthorizationRecord
+): Promise<void> {
+  await storage.createConnectionRun(connectionRun())
+  await storage.createAuthorizationAttempt(
+    authorizationAttempt({
+      connectionRunId: "run-a",
+      returnTo: "https://app.example.com/connectors",
+      callbackBindingHash: "binding-hash",
+    })
+  )
+  const claimed = await storage.claimConnectionRunCallback({
+    projectId,
+    attemptId: "attempt-a",
+    stateHash: "state-hash",
+    callbackBindingHash: "binding-hash",
+    redirectUri: "https://example.com/oauth/callback",
+  })
+  if (!claimed || claimed.type !== "claimed") throw new Error("Expected callback claim.")
+  const waiting = await storage.waitForConnectionRunSelection({
+    projectId,
+    connectorId,
+    runId: "run-a",
+    authorizationId: authorization.id,
+    expiresAt: authorization.selectionExpiresAt!,
+  })
+  if (!waiting) throw new Error("Expected account-selection run.")
 }
 
 function authorizationKey(

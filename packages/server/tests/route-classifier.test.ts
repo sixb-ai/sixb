@@ -24,6 +24,7 @@ const PUBLIC: ReadonlyArray<readonly [string, string, string]> = [
   ["POST", "/auth/sign-in", "the page that creates a session"],
   ["GET", "/auth/callback", "the emailed token IS the credential"],
   ["POST", "/auth/callback", "the emailed token IS the credential"],
+  ["GET", "/auth/connectors/callback", "one-use state, browser binding and PKCE authenticate it"],
 ]
 
 describe("classifyRoute", () => {

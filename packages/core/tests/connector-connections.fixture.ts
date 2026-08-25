@@ -306,6 +306,7 @@ export function serializedSnapshot(storage: InMemoryStorage): string {
   const snapshot = getInMemoryStorageTestingAdapter(storage).snapshot().connectorConnections
   return JSON.stringify({
     attempts: [...snapshot.attempts.values()],
+    connectionRuns: [...snapshot.connectionRuns.values()],
     authorizations: [...snapshot.authorizations.values()],
     connections: [...snapshot.connections.values()],
   })
@@ -353,6 +354,36 @@ export function afterReady(
   ready: Promise<void>
 ): ConnectorConnectionProcess {
   return {
+    callbackProcess: {
+      async completeConnectionRun(...args) {
+        await ready
+        return process.callbackProcess.completeConnectionRun(...args)
+      },
+    },
+    async listConnections(...args) {
+      await ready
+      return process.listConnections(...args)
+    },
+    async startConnectionRun(...args) {
+      await ready
+      return process.startConnectionRun(...args)
+    },
+    async getConnectionRun(...args) {
+      await ready
+      return process.getConnectionRun(...args)
+    },
+    async selectConnectionRunAccount(...args) {
+      await ready
+      return process.selectConnectionRunAccount(...args)
+    },
+    async startReauthorization(...args) {
+      await ready
+      return process.startReauthorization(...args)
+    },
+    async revokeConnection(...args) {
+      await ready
+      return process.revokeConnection(...args)
+    },
     async startAuthorization(...args) {
       await ready
       return process.startAuthorization(...args)
