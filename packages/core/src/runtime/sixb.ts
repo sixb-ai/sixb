@@ -2,6 +2,9 @@ import { type ActionsRuntime, createActionsRuntime } from "../actions/execution"
 import { type AgentsRuntime, createAgentsRuntime } from "../agents/execution"
 import { type BlobsRuntime, createBlobsRuntime } from "../blob-storage/execution"
 import type { BlobStorage } from "../blob-storage/types"
+import { registerConnectorConnectionsRuntime } from "../connectors/connections/capability"
+import type { ConnectorConnectionProcess } from "../connectors/connections/contracts"
+import { createConnectorConnectionsRuntime } from "../connectors/connections/execution"
 import { type ConnectorRuntime, createConnectorRuntime } from "../connectors/execution"
 import type { ConnectorService } from "../connectors/service"
 import { createDatasetsRuntime, type DatasetsRuntime } from "../datasets/execution"
@@ -47,6 +50,7 @@ export interface SixbDependencies {
   readonly definitions: SixbDefinitions
   readonly logging: LoggingService
   readonly connectorService: ConnectorService
+  readonly connectorConnections?: ConnectorConnectionProcess
   readonly blobStorage: BlobStorage
 }
 
@@ -60,6 +64,12 @@ export function createBoundSixb<TOntologySources extends readonly OntologySource
     ...createExecutionFacades<TOntologySources>(runtime, execution, dependencies),
   }
   shareOntologyMutationRuntime(runtime, sixb)
+  if (dependencies.connectorConnections) {
+    registerConnectorConnectionsRuntime(
+      sixb,
+      createConnectorConnectionsRuntime(runtime, execution, dependencies.connectorConnections)
+    )
+  }
   boundSixbInstances.add(sixb)
   return sixb
 }

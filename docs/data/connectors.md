@@ -90,6 +90,127 @@ The first call opens the connection. Later calls reuse the same client for that 
 > with the same id throws `Connector '<id>' is not the registered definition instance.` Always
 > import and pass the exported connector, not a local copy.
 
+## Define an OAuth connector
+
+For OAuth, Sixb owns state, PKCE, encrypted credentials, refresh coordination, and account
+selection. The adapter owns the provider protocol and the client exposed to application code.
+
+```ts
+import { defineConnector } from "@sixb/core"
+
+export const socialConnector = defineConnector("social", {
+  type: "social",
+  authentication: {
+    type: "oauth2",
+    authorizationUrl(context, { state, codeChallenge, codeChallengeMethod }) {
+      const url = new URL("https://social.example/oauth/authorize")
+      url.searchParams.set("redirect_uri", context.redirectUri)
+      url.searchParams.set("state", state)
+      url.searchParams.set("code_challenge", codeChallenge)
+      url.searchParams.set("code_challenge_method", codeChallengeMethod)
+      return url
+    },
+    exchangeCode(context, input) {
+      return exchangeSocialCode({
+        ...input,
+        redirectUri: context.redirectUri,
+        signal: context.signal,
+      })
+    },
+    refresh(context, credentials) {
+      return refreshSocialToken(credentials, { signal: context.signal })
+    },
+    revoke(context, credentials) {
+      return revokeSocialGrant(credentials, { signal: context.signal })
+    },
+  },
+  discoverAccounts(context, credentials) {
+    return listSocialAccounts(credentials, { signal: context.signal })
+  },
+  connect({ account, tokenSource, signal }) {
+    return {
+      async request(path: string) {
+        const token = await tokenSource.get()
+        const response = await fetch(`https://social.example/accounts/${account.id}/${path}`, {
+          headers: { authorization: `${token.tokenType ?? "Bearer"} ${token.accessToken}` },
+          signal,
+        })
+        if (response.status === 401) token.invalidate()
+        return response
+      },
+    }
+  },
+})
+```
+
+Trusted primitive executions resolve one stable project connection by its application-defined
+slot:
+
+```ts
+const social = await sixb.connector(socialConnector, {
+  owner: { type: "project" },
+  slot: "organic-marketing",
+})
+```
+
+Each returned token invalidates only its own credential revision, so a late `401` cannot refresh a
+newer token. Provider failures that affect a grant can be classified explicitly:
+
+| `ConnectorOAuthError` kind | Use when |
+| --- | --- |
+| `retryable` | The adapter guarantees that the provider made no external change. |
+| `terminal` | The provider definitively rejected the grant or credential. |
+| `ambiguous` | The provider may have changed state, or the adapter cannot prove otherwise. |
+
+Unclassified errors are treated as `ambiguous` and fail closed. Throw, for example,
+`new ConnectorOAuthError("retryable", "Social provider is unavailable", { cause })` only when
+retrying the unchanged operation is safe. `revoke()` must be idempotent: an already revoked or
+invalid grant resolves successfully.
+
+Managing an OAuth connection requires an authenticated request whose role grants the connector:
+
+```ts
+can.manage(socialConnector)
+// or: can.manage(every.connector())
+```
+
+> **Current scope.** Core provides the OAuth connection foundation; the headless HTTP management
+> API is added separately. OAuth-backed sync fan-out and webhook routing remain rejected until their
+> connection routing contracts are defined.
+
+## Protect OAuth credentials
+
+When at least one OAuth connector uses durable connector storage, Sixb encrypts its tokens at rest.
+Provide the canonical base64url encoding of 32 random bytes through `createSixb()`:
+
+```ts
+const connectorEncryptionKey = process.env.SIXB_CONNECTOR_ENCRYPTION_KEY
+
+if (!connectorEncryptionKey) {
+  throw new Error("[SixbConfig] SIXB_CONNECTOR_ENCRYPTION_KEY is required")
+}
+
+export const sixb = createSixb({
+  // ...providers
+  connectorConnections: {
+    encryptionKey: connectorEncryptionKey,
+  },
+})
+```
+
+Generate the value once, then store it in the deployment's secret manager:
+
+```bash
+bun -e 'import { randomBytes } from "node:crypto"; console.log(randomBytes(32).toString("base64url"))'
+```
+
+Every process sharing the same connector database must receive the same key. Do not commit,
+replace, or lose it: existing OAuth credentials would become unreadable.
+
+Static connectors do not need this setting. It can also be omitted with ephemeral connector
+storage, where both the stored credentials and Sixb's process-local protection disappear on
+restart.
+
 ## ConnectorContext
 
 `connect` receives a `ConnectorContext` so adapters can scope logs, build cache keys, or cancel

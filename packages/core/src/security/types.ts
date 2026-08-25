@@ -104,6 +104,13 @@ export interface ObserveGrant {
   readonly selection: Selection
 }
 
+/** Manage the OAuth connection lifecycle for selected connector definitions. */
+export interface ManageGrant {
+  readonly kind: "grant"
+  readonly capability: "manage"
+  readonly selection: Selection
+}
+
 export type GrantDefinition =
   | AccessGrant
   | ViewGrant
@@ -112,6 +119,7 @@ export type GrantDefinition =
   | ApplyGrant
   | RunGrant
   | ObserveGrant
+  | ManageGrant
 
 export type GrantCapability = GrantDefinition["capability"]
 

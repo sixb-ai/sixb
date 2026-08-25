@@ -2,11 +2,11 @@ import { createHash, randomUUID } from "node:crypto"
 import type {
   ConnectorAdapter,
   ConnectorClient,
-  ConnectorDefinition,
   Logger,
   RegisteredWebhook,
   SixbFailure,
   SixbHostView,
+  StaticConnectorDefinition,
   WebhookDefinition,
   WebhookMetadata,
   WebhookResponse,
@@ -383,7 +383,7 @@ function parseWebhookBody(webhook: WebhookDefinition, rawBody: Uint8Array): unkn
 
 function createClientResolver(
   sixb: ReturnType<typeof bindDurablePrimitiveExecution>["sixb"],
-  connector: ConnectorDefinition
+  connector: StaticConnectorDefinition
 ): () => Promise<ConnectorClient<ConnectorAdapter>> {
   let clientPromise: Promise<ConnectorClient<ConnectorAdapter>> | null = null
   return () => {

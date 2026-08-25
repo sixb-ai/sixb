@@ -35,6 +35,10 @@ evaluation passes.
 It does not run for successes, cancellations, retries that remain recoverable, workflow nodes or
 pipeline steps separately, or routine webhook 4xx rejections.
 
+Connector authorization and credential refresh failures are also not reported separately. They
+carry `connector.*` codes to their synchronous caller; if one makes a durable run fail, that run's
+single `run.failed` notification owns the escalation.
+
 ## Context
 
 The second argument is a discriminated `SixbErrorContext`:

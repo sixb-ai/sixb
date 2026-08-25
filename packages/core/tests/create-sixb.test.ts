@@ -25,6 +25,7 @@ import {
   ref,
 } from "../src"
 import { EVENTS_STREAM } from "../src/events"
+import { InMemoryConnectorConnectionStorage } from "../src/storage/connector-connections"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -51,6 +52,55 @@ afterEach(async () => {
 })
 
 describe("createSixb", () => {
+  test("forwards OAuth connector connection protection to the host", async () => {
+    const projectRoot = await createTempProjectRoot()
+    const Record = defineObjectType({
+      id: "Record",
+      name: "Record",
+      properties: [prop("id", "string", { required: true, primary: true })],
+    })
+    const oauthConnector = defineConnector("social", {
+      type: "test-oauth",
+      authentication: {
+        type: "oauth2",
+        authorizationUrl() {
+          return "https://provider.test/oauth/authorize"
+        },
+        exchangeCode() {
+          return { accessToken: "unused" }
+        },
+        refresh() {
+          return { accessToken: "unused" }
+        },
+      },
+      discoverAccounts() {
+        return []
+      },
+      connect() {
+        return {}
+      },
+    })
+    const dependencies = createTestRuntimeDeps()
+    const durable =
+      new InMemoryConnectorConnectionStorage() as InMemoryConnectorConnectionStorage & {
+        durability: "durable"
+      }
+    Object.defineProperty(durable, "durability", { value: "durable" })
+    Object.defineProperty(dependencies.storage, "connectorConnections", { value: durable })
+
+    await expect(
+      createSixb({
+        projectRoot,
+        ontologies: [Record],
+        connectors: [oauthConnector],
+        connectorConnections: {
+          encryptionKey: Buffer.from(new Uint8Array(32).fill(9)).toString("base64url"),
+        },
+        ...dependencies,
+      })
+    ).resolves.toBeDefined()
+  })
+
   test("discovers ontology, actions, syncs, and connectors from project folders", async () => {
     const projectRoot = await createTempProjectRoot()
 

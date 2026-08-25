@@ -5,6 +5,8 @@
  * the interface cannot be implemented from outside the package.
  */
 export type { Principal } from "../auth"
+export type { ConnectorAccountCandidate } from "../connectors"
+export type { SealedConnectorCredential } from "../connectors/credentials"
 export type { SixbFailure } from "../errors/types"
 export type { StoredRuleResolvedEvent, StoredRuleTriggeredEvent } from "../events"
 export type { ReadonlyJsonObject } from "../json"
@@ -172,6 +174,47 @@ export type {
 } from "./auth"
 export { AuthStorageError, InMemoryAuthStorage } from "./auth"
 export type {
+  ClaimConnectorCredentialMutationInput,
+  ClaimConnectorCredentialMutationResult,
+  ConnectorAuthorizationAttemptRecord,
+  ConnectorAuthorizationKey,
+  ConnectorAuthorizationRecord,
+  ConnectorAuthorizationStatus,
+  ConnectorConnectionKey,
+  ConnectorConnectionOwner,
+  ConnectorConnectionRecord,
+  ConnectorConnectionSelector,
+  ConnectorConnectionStorage,
+  ConnectorConnectionStorageErrorCode,
+  ConnectorCredentialMutation,
+  ConnectorCredentialMutationFence,
+  ConnectorCredentialMutationKind,
+  ConnectorCredentialMutationPhase,
+  ConnectorStagedCredentials,
+  ConsumeConnectorAuthorizationAttemptInput,
+  CreateConnectorAuthorizationAttemptInput,
+  CreateConnectorAuthorizationInput,
+  FinalizeConnectorReauthorizationInput,
+  GetConnectorConnectionInput,
+  InitializeConnectorAuthorizationAccountsInput,
+  InMemoryConnectorConnectionStorageOptions,
+  InMemoryConnectorConnectionStorageSnapshot,
+  MarkConnectorAuthorizationNeedsReauthorizationInput,
+  MarkConnectorCredentialMutationExecutingInput,
+  ProjectConnectorConnectionOwner,
+  PutConnectorConnectionInput,
+  PutConnectorConnectionResult,
+  RecoverExpiredConnectorCredentialMutationInput,
+  ReleaseConnectorCredentialMutationInput,
+  RenewConnectorCredentialMutationInput,
+  StageConnectorCredentialMutationCredentialsInput,
+  StageConnectorCredentialMutationRevocationInput,
+} from "./connector-connections"
+export {
+  ConnectorConnectionStorageError,
+  InMemoryConnectorConnectionStorage,
+} from "./connector-connections"
+export type {
   StorageTransactionErrorCode,
   StorageTransactionErrorOptions,
 } from "./errors"
@@ -211,6 +254,7 @@ export {
   FileUploadSessionError,
   InMemoryFileUploadSessions,
 } from "./file-upload-sessions"
+export type { InMemoryStorageOptions } from "./in-memory"
 export { InMemoryStorage } from "./in-memory"
 export type {
   DefineMigrationsOptions,

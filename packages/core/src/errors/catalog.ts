@@ -18,6 +18,50 @@ export const SIXB_ERROR_DEFINITIONS = {
     publicMessage: "Agent execution failed.",
     retryable: false,
   },
+  "connector.adapter_invalid": {
+    publicMessage: "Connector adapter returned an invalid result.",
+    retryable: false,
+  },
+  "connector.authorization_invalid": {
+    publicMessage: "Connector authorization is invalid.",
+    retryable: false,
+  },
+  "connector.authorization_required": {
+    publicMessage: "Connector authorization is required.",
+    retryable: false,
+  },
+  "connector.configuration_invalid": {
+    publicMessage: "Connector configuration is invalid.",
+    retryable: false,
+  },
+  "connector.credentials_unavailable": {
+    publicMessage: "Connector credentials are unavailable.",
+    retryable: false,
+  },
+  "connector.not_found": {
+    publicMessage: "Connector resource not found.",
+    retryable: false,
+  },
+  "connector.operation_conflict": {
+    publicMessage: "Connector operation conflicts with the current state.",
+    retryable: false,
+  },
+  "connector.operation_in_progress": {
+    publicMessage: "Another connector credential operation is in progress.",
+    retryable: true,
+  },
+  "connector.provider_failed": {
+    publicMessage: "Connector provider operation failed.",
+    retryable: false,
+  },
+  "connector.provider_unavailable": {
+    publicMessage: "Connector provider is temporarily unavailable.",
+    retryable: true,
+  },
+  "connector.revocation_pending": {
+    publicMessage: "Connector revocation is pending.",
+    retryable: true,
+  },
   "dataset.not_found": {
     publicMessage: "Dataset not found.",
     retryable: false,
