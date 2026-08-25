@@ -4,17 +4,17 @@ import type { SyncConnectorSourceResolver } from "@sixb/core/internal/syncs"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type { SyncRunFailureCode, SyncRunRecord, SyncRunStorage } from "@sixb/core/storage"
 
-  export interface SyncWorkerContext {
-    readonly id: string
-    readonly syncRunsStorage: SyncRunStorage
-    readonly lakeStorage: LakeStorage
-    readonly blobs: BlobStorage
-    readonly logging?: LoggingService
+export interface SyncWorkerContext {
+  readonly id: string
+  readonly syncRunsStorage: SyncRunStorage
+  readonly lakeStorage: LakeStorage
+  readonly blobs: BlobStorage
+  readonly logging?: LoggingService
 
-    readonly datasets: Pick<SixbDefinitions["datasets"], "getById">
-    readonly syncs: Pick<SixbDefinitions["syncs"], "getById">
-    readonly connectorSources: SyncConnectorSourceResolver
-  }
+  readonly datasets: Pick<SixbDefinitions["datasets"], "getById">
+  readonly syncs: Pick<SixbDefinitions["syncs"], "getById">
+  readonly connectorSources: SyncConnectorSourceResolver
+}
 
 export interface RunSyncJobInput {
   readonly runtime: SyncWorkerContext
