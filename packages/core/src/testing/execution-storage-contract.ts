@@ -146,10 +146,12 @@ export function runExecutionStorageContractSuite<TStorage extends ExecutionStora
             authorizationRef: { type: "disabled" },
           },
           {
-            ...agentExecution("user-agent"),
+            // An Agent may act as its own service account or as its requester — never as some
+            // other human. `user-other` is not this execution's `requestedBy`.
+            ...agentExecution("third-party-agent"),
             authorizationRef: {
               type: "principal",
-              principal: { type: "user", id: "user-one" },
+              principal: { type: "user", id: "user-other" },
             },
           },
           {
@@ -163,6 +165,18 @@ export function runExecutionStorageContractSuite<TStorage extends ExecutionStora
             code: "invalid_input",
           })
         }
+
+        // The delegated form — authority equal to `requestedBy` — is the one exception, and is how
+        // a framework-managed main agent acts with its user's reach.
+        await expect(
+          storage.executions.create({
+            ...agentExecution("delegated-agent"),
+            authorizationRef: {
+              type: "principal",
+              principal: { type: "user", id: "user-one" },
+            },
+          })
+        ).resolves.toMatchObject({ id: "delegated-agent" })
       })
     })
 

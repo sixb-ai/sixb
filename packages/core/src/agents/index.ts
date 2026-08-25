@@ -30,11 +30,17 @@ export {
   isAllowedAgentApiRequest,
   isValidAgentApiGatewayCapability,
 } from "./api-gateway"
-export type { AgentExecutionIdentity } from "./authority"
+export type {
+  AgentExecutionIdentity,
+  AgentRunAuthorization,
+  ResolveRequesterAuthorizationInput,
+} from "./authority"
 export {
   agentServiceAccountId,
   ensureAgentExecutionIdentity,
   resolveAgentExecutionAuthorization,
+  resolveAgentRunAuthorization,
+  resolveRequesterAuthorization,
 } from "./authority"
 export { defineAgent, defineAgentTool } from "./builders"
 export type {
@@ -134,9 +140,7 @@ export {
 export {
   type RequestSubAgentRunInput,
   type RequestSubAgentRunResult,
-  type ResolveRequesterAuthorizationInput,
   requestSubAgentRun,
-  resolveRequesterAuthorization,
 } from "./sub-agent"
 export type {
   AgentDefinition,

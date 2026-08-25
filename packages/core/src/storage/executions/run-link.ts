@@ -1,3 +1,4 @@
+import { principalsEqual } from "../../auth/types"
 import type { TrustedPrimitiveRef } from "../../execution/types"
 import type { ExecutionRecord, ExecutionStorage } from "./types"
 
@@ -41,7 +42,7 @@ export async function findPrimitiveRunExecution(input: {
   return execution
 }
 
-/** Find the immutable execution and service-account authority owned by one Agent run. */
+/** Find the immutable execution and authority owned by one Agent run. */
 export async function findAgentRunExecution(input: {
   readonly executions: ExecutionStorage
   readonly projectId: string
@@ -60,11 +61,16 @@ export async function findAgentRunExecution(input: {
     execution.executor.type !== "agent" ||
     execution.executor.runId !== input.runId ||
     authority?.type !== "principal" ||
-    authority.principal.type !== "serviceAccount" ||
-    authority.principal.id !== input.serviceAccountId ||
     authority.credential !== undefined
   ) {
     return null
   }
-  return execution
+  // The run's own managed identity, or the human it is acting for.
+  const actsAsAgent =
+    authority.principal.type === "serviceAccount" &&
+    authority.principal.id === input.serviceAccountId
+  const actsAsRequester =
+    execution.requestedBy !== undefined &&
+    principalsEqual(authority.principal, execution.requestedBy)
+  return actsAsAgent || actsAsRequester ? execution : null
 }

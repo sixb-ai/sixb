@@ -261,6 +261,41 @@ describe("sub_agent", () => {
     expect(enqueued).not.toContain(agentRunQueueJobId(child?.id ?? ""))
   })
 
+  test("keeps child threads owned by the agent even though the parent runs as the user", async () => {
+    const sixb = buildHost({
+      mainModel: delegatingModel("researcher"),
+      specialistModel: new MockLanguageModelV4({
+        modelId: "specialist-model",
+        doStream: async () => stream(answer("Invoices are late.")),
+      }),
+      sandboxes: new CountingSandboxFactory(),
+    })
+
+    const requested = await requestMainTurn(sixb, ["agent-users"])
+    await runWorkerUntilIdle(sixb, requested.run.id)
+
+    const runs = await sixb.storage.agents?.runs.list({ projectId: PROJECT_ID })
+    const child = runs?.runs.find((run) => run.agentId === "researcher")
+    const childThread = await sixb.storage.agents?.threads.getById({
+      projectId: PROJECT_ID,
+      id: child?.threadId ?? "",
+    })
+
+    // The delegating turn now runs *as the requester*, so `context.agentPrincipal` is the human.
+    // Owning child threads by that principal would surface every delegated conversation in the
+    // user's own thread list.
+    expect(childThread?.ownerPrincipal).toEqual({ type: "serviceAccount", id: "svc_agent_main" })
+
+    const visible = await createTestSixb(sixb, {
+      authorization: resolveAuthorizationContext({
+        principal: REQUESTER,
+        groupIds: ["agent-users"],
+        roles: sixb.definitions.security.listResolvedRoles(),
+      }),
+    }).agents.threads.list({})
+    expect(visible.threads.map((thread) => thread.agentId)).toEqual(["main"])
+  })
+
   test("links the child execution to the delegating one and bills it separately", async () => {
     const sixb = buildHost({
       mainModel: delegatingModel("researcher"),
@@ -331,4 +366,22 @@ describe("sub_agent", () => {
       resolveSubAgentTargets({ host: sixb, agentId: "main", requesterAuthorization: null })
     ).toEqual([])
   })
+
+  // TODO(you): what should happen to a running child when its parent is cancelled?
+  //
+  // Setup you already have: `buildHost`, `requestMainTurn`, and a specialist model whose
+  // `doStream` you can make hang (`await new Promise(() => {})`) so the child is still running
+  // when you act. Cancel with `publishAgentRunCancel` from `@sixb/core/internal/agents`, or just
+  // call `worker.stop()`.
+  //
+  // The decision this test pins down — `runSubAgent`'s catch block records
+  // `signal.aborted ? "cancelled" : "failed"` (packages/agent-worker/src/sub-agent-tool.ts):
+  //   - Is `cancelled` right for a child the user never knew existed?
+  //   - Must the child reach a terminal status at all before the parent's turn returns, or is
+  //     leaving it `running` acceptable given its thread is single-use?
+  //   - The child's thread holds `activeRunId` until it finalizes. Does that matter here?
+  //
+  // Whatever you assert, prove it: change the recorded status in `runSubAgent` and watch this
+  // fail. A test that passes either way pins nothing.
+  test.todo("releases the child when the delegating turn is cancelled", () => {})
 })

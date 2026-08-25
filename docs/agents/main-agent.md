@@ -35,7 +35,8 @@ project agent may not also claim that id while `mainAgent` is configured.
 | `loop` | `{ stopWhen?: { maxSteps?: number } }` | No | Step cap per turn. Defaults to **25**. |
 
 There is deliberately no `tools` and no `groups`. The main agent gets exactly one tool —
-`sub_agent` — and reaches other agents through the *requester's* permissions rather than its own.
+`sub_agent` — and it does not need groups because it **runs with the authority of whoever is talking
+to it**. See [Permissions](#permissions).
 
 ## `sub_agent`
 
@@ -59,12 +60,30 @@ level deep by construction.
 
 ## Permissions
 
-Before starting a delegated run, `sub_agent` checks the **requester's** `run:agent` grant on the
-target — the same grant that governs running that agent directly from the API. An agent a user could
-not open a thread with is not offered to the main agent and cannot be reached through it.
+**The main agent runs as you.** Its execution carries the requesting user as its authority, so every
+object it queries, every action it requests, and every agent it delegates to is bounded by that
+user's own grants. Two people talking to the same assistant see exactly what each of them is allowed
+to see, from one definition with no groups on it.
 
-The main agent has no groups of its own, so it holds no grants: it routes, and the specialists it
-calls are what actually reach your data. Give each specialist the groups its work needs.
+```text
+Ada asks the assistant                Bob asks the assistant
+  └── runs as Ada                       └── runs as Bob
+        └── reaches Ada's data                └── reaches Bob's data
+```
+
+This is why `mainAgent` takes no `groups`: giving it a fixed identity would flatten every user's
+reach into one. Every other agent still acts under its own managed service account, exactly as
+before.
+
+The reach is the *effective* one. If a request authenticated with an access token scoped to a subset
+of the user's groups, the main agent inherits that narrower set — a scoped token cannot be widened by
+routing work through an agent. A run whose requester is suspended after admission is refused rather
+than replayed.
+
+Delegation follows the same rule: before starting a child run, `sub_agent` checks the requester's
+`run:agent` grant on the target, which is the same grant that governs running that agent directly.
+An agent the user could not open a thread with is never offered to the main agent. The **child** then
+runs under its own service account and groups — delegation does not hand the user's identity onward.
 
 ```ts
 import { can, defineRole, every } from "@sixb/core"
@@ -78,6 +97,10 @@ const assistantUsers = defineRole("assistant.users", {
 > Granting `run:agent` on the main agent alone is not currently expressible — `can.run` takes a
 > definition object, and the main agent's definition is framework-owned. Use `every.agent()` for
 > now.
+
+A main-agent turn started with no human behind it (a schedule, a system trigger) falls back to its
+own service account, which has no groups and therefore no grants. That is deliberate: unattended
+work does not silently inherit anyone's authority.
 
 ## Limits in this release
 

@@ -70,7 +70,8 @@ export interface AgentWorkerContext {
   readonly turnTimeoutMs: number
 }
 
-export type AgentPrincipal = Extract<AuthorizablePrincipal, { readonly type: "serviceAccount" }>
+/** The identity a run executes as: its own service account, or the human it acts for. */
+export type AgentPrincipal = AuthorizablePrincipal
 
 /** Provider ports activated only after an agent service-account scope is bound. */
 export interface AgentExecutionContext extends AgentWorkerContext {

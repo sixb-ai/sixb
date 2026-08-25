@@ -1,4 +1,5 @@
 import { agentServiceAccountId } from "../agents/authority"
+import { principalsEqual } from "../auth/types"
 import type { AuthorizationContext } from "../authorization"
 import type { OntologySource } from "../ontology"
 import { isBoundSixb, type Sixb } from "../runtime/sixb"
@@ -19,9 +20,14 @@ export function createAgentExecutionRecord(input: {
   readonly parent: ExecutionRecord
   readonly agentId: string
   readonly runId: string
-  readonly principal: Extract<AuthorizablePrincipal, { readonly type: "serviceAccount" }>
+  /** The agent's own managed identity, or the human the run acts for. */
+  readonly principal: AuthorizablePrincipal
 }): CreateExecutionInput {
-  assertAgentPrincipal(input.agentId, input.principal)
+  assertAgentExecutionAuthority({
+    agentId: input.agentId,
+    principal: input.principal,
+    requestedBy: input.parent.requestedBy,
+  })
   return {
     id: input.id,
     projectId: input.parent.projectId,
@@ -99,27 +105,43 @@ export function assertAgentExecutionRecord(input: {
     input.execution.executor.runId !== input.runId ||
     input.execution.source.type !== "execution" ||
     authority.type !== "principal" ||
-    authority.principal.type !== "serviceAccount" ||
-    input.authorization.principal.type !== "serviceAccount" ||
-    authority.principal.id !== input.authorization.principal.id ||
+    !principalsEqual(authority.principal, input.authorization.principal) ||
     authority.credential !== undefined
   ) {
     invalidAgentExecution(input.execution.id, input.runId)
   }
-  assertAgentPrincipal(input.agentId, authority.principal)
+  assertAgentExecutionAuthority({
+    agentId: input.agentId,
+    principal: authority.principal,
+    requestedBy: input.execution.requestedBy,
+  })
 }
 
-function assertAgentPrincipal(
-  agentId: string,
-  principal: Extract<AuthorizablePrincipal, { readonly type: "serviceAccount" }>
-): void {
-  const expectedId = agentServiceAccountId(agentId)
-  if (principal.id !== expectedId) {
-    throw new ExecutionStorageError(
-      "invalid_input",
-      `[Sixb] Agent '${agentId}' execution authority must reference service account '${expectedId}'.`
-    )
+/**
+ * An Agent run acts under exactly one of two identities.
+ *
+ * Its own managed service account is the default. The alternative is **delegated authority**: the
+ * run acts as the human who requested it, which is how a framework-managed main agent reaches only
+ * what its user can reach without being given groups of its own. Pinning the delegated form to
+ * `requestedBy` makes the record self-describing — no extra column, and a run cannot name an
+ * identity nobody granted it.
+ */
+function assertAgentExecutionAuthority(input: {
+  readonly agentId: string
+  readonly principal: AuthorizablePrincipal
+  readonly requestedBy: AuthorizablePrincipal | undefined
+}): void {
+  const expectedId = agentServiceAccountId(input.agentId)
+  if (input.principal.type === "serviceAccount" && input.principal.id === expectedId) {
+    return
   }
+  if (input.requestedBy && principalsEqual(input.principal, input.requestedBy)) {
+    return
+  }
+  throw new ExecutionStorageError(
+    "invalid_input",
+    `[Sixb] Agent '${input.agentId}' execution authority must reference service account '${expectedId}' or its requested-by principal.`
+  )
 }
 
 function invalidAgentExecution(executionId: string, runId: string): never {

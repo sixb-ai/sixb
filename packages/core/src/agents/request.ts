@@ -22,6 +22,7 @@ import { resolveAgentContextParts } from "./context-resolution"
 import { dispatchQueuedAgentRuns } from "./dispatch"
 import { AgentRequestError } from "./errors"
 import { createAgentMessageId, createAgentRunId, createAgentThreadId } from "./ids"
+import { MAIN_AGENT_ID } from "./main-agent"
 import type { AgentDefinition } from "./types"
 
 export interface RequestAgentRunInput {
@@ -246,12 +247,16 @@ async function prepareDurableAgentExecution(
       runtimeAuthorization: runtime.runtimeAuthorization,
     })
   )
+  // The framework-managed main agent acts as the human who asked for the turn, so it reaches
+  // exactly what they can reach without being given groups of its own. Every other agent — and a
+  // main-agent turn with no human behind it — acts as its own managed identity.
+  const delegated = agent.id === MAIN_AGENT_ID ? parent.requestedBy : undefined
   return createAgentExecutionRecord({
     id: `exec_${randomUUID()}`,
     parent,
     agentId: agent.id,
     runId,
-    principal: resolved.identity.principal,
+    principal: delegated ?? resolved.identity.principal,
   })
 }
 

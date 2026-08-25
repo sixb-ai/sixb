@@ -1,14 +1,17 @@
 import { SYSTEM_PRINCIPAL } from "../auth"
+import { normalizeRequesterGroupIds } from "../auth/attribution"
 import type { AuthorizationContext } from "../authorization"
 import { resolveAuthorizationContext } from "../authorization"
 import type { AuthorizablePrincipal, AuthorizationRef } from "../execution"
 import type { SecurityDefinitionCatalog } from "../security"
+import type { AgentRunRecord } from "../storage/agents"
 import type {
   AuthStorage,
   ServiceAccountGroupMembershipRecord,
   ServiceAccountRecord,
 } from "../storage/auth"
 import { AuthStorageError } from "../storage/auth"
+import type { ExecutionRecord } from "../storage/executions"
 import type { AgentDefinition } from "./types"
 
 export interface AgentExecutionIdentity {
@@ -186,4 +189,113 @@ async function updateAgentServiceAccountMetadata(
     description: input.description,
     updatedAt: input.updatedAt,
   })
+}
+
+export interface ResolveRequesterAuthorizationInput {
+  /** The run's immutable execution, which carries the originating human in `requestedBy`. */
+  readonly execution: ExecutionRecord
+  /** The run, which carries the effective authorization groups snapshotted at admission. */
+  readonly run: Pick<AgentRunRecord, "requesterAuthorizationGroupIds">
+  readonly security: SecurityDefinitionCatalog
+}
+
+/**
+ * Rebuild the authority of the human an Agent run acts for.
+ *
+ * Groups come from the run's `requesterAuthorizationGroupIds` — the *constrained* snapshot taken at
+ * admission — while roles resolve live, so a role edit takes effect without re-admitting the run.
+ * `requesterGroupIds` must never be substituted: it is deliberately the principal's full membership
+ * (see `snapshotRequesterGroupIds`), so using it would re-inflate a group-scoped access token back
+ * to full authority.
+ *
+ * Returns `null` when the run has no human requester. Callers must treat that as a denial, never as
+ * an absent check — `evaluate(undefined, ...)` reports `allowed: true`.
+ */
+export function resolveRequesterAuthorization(
+  input: ResolveRequesterAuthorizationInput
+): AuthorizationContext | null {
+  const requestedBy = input.execution.requestedBy
+  if (!requestedBy) {
+    return null
+  }
+  return resolveAuthorizationContext({
+    principal: requestedBy,
+    groupIds: normalizeRequesterGroupIds(input.run.requesterAuthorizationGroupIds),
+    roles: input.security.listResolvedRoles(),
+  })
+}
+
+export interface AgentRunAuthorization {
+  readonly context: AuthorizationContext
+  /** The identity the run executes as: its own service account, or the human it acts for. */
+  readonly principal: AuthorizablePrincipal
+}
+
+/**
+ * Resolve the authority one durable Agent run executes under.
+ *
+ * The record decides which of two shapes applies:
+ *
+ * - **Own identity** — the default. Grants resolve live from the service account's current
+ *   memberships, so a group change takes effect on the next turn.
+ * - **Delegated** — the run acts as its requester, which is how the framework-managed main agent
+ *   reaches exactly what its user can reach without holding groups of its own. See
+ *   {@link resolveRequesterAuthorization} for why the snapshot, not live memberships, is the basis.
+ *
+ * A delegated run whose requester has since been suspended is refused: the snapshot fixes the
+ * caller's reach, not their continued existence.
+ */
+export async function resolveAgentRunAuthorization(input: {
+  readonly auth: AuthStorage | undefined
+  readonly projectId: string
+  readonly agentId: string
+  readonly execution: ExecutionRecord
+  readonly run: Pick<AgentRunRecord, "requesterAuthorizationGroupIds">
+  readonly security: SecurityDefinitionCatalog
+}): Promise<AgentRunAuthorization> {
+  const auth = requireAuthStorage(input.auth)
+  const authority = input.execution.authorizationRef
+  if (authority.type !== "principal") {
+    throw new Error(`[Sixb] Agent '${input.agentId}' execution requires principal authority.`)
+  }
+
+  if (authority.principal.id === agentServiceAccountId(input.agentId)) {
+    const resolved = await resolveAgentExecutionAuthorization({
+      auth,
+      projectId: input.projectId,
+      agentId: input.agentId,
+      authorizationRef: authority,
+      security: input.security,
+    })
+    return { context: resolved.context, principal: resolved.identity.principal }
+  }
+
+  const requestedBy = input.execution.requestedBy
+  const context = resolveRequesterAuthorization({
+    execution: input.execution,
+    run: input.run,
+    security: input.security,
+  })
+  if (!context || !requestedBy) {
+    throw new Error(
+      `[Sixb] Agent '${input.agentId}' delegated authority must reference its requested-by principal.`
+    )
+  }
+  await assertRequesterStillActive(auth, input.projectId, requestedBy)
+  return { context, principal: requestedBy }
+}
+
+/** Refuse a delegated run whose requester was suspended or removed after admission. */
+async function assertRequesterStillActive(
+  auth: AuthStorage,
+  projectId: string,
+  principal: AuthorizablePrincipal
+): Promise<void> {
+  const record =
+    principal.type === "user"
+      ? await auth.users.getById({ projectId, id: principal.id })
+      : await auth.serviceAccounts.getById({ projectId, id: principal.id })
+  if (!record || record.status !== "active") {
+    throw new Error(`[Sixb] Requester '${principal.id}' is no longer active for this project.`)
+  }
 }

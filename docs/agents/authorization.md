@@ -45,9 +45,10 @@ When a [main agent](./main-agent.md) calls `sub_agent`, the target is checked ag
 **requester's** `run:agent` grant — the same grant that governs running that agent directly.
 An agent a user cannot open a thread with cannot be reached through delegation either.
 
-The main agent has no groups, so it holds no grants of its own: it routes, and the specialists
-it calls are what reach your data. The delegated run acts under the target agent's identity and
-groups, exactly as it would if the user had started it themselves.
+The main agent itself runs under the **requester's** authority rather than a service account, so it
+reaches exactly what that user reaches — which is why `mainAgent` takes no `groups`. The delegated
+child is different: it acts under the target agent's own identity and groups, exactly as it would if
+the user had started it themselves.
 
 A delegated run gets its own thread, owned by the main agent rather than the user, so it stays
 out of the user's thread list.

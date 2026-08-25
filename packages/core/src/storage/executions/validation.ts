@@ -190,14 +190,20 @@ function assertExecutorAuthority(record: ExecutionRecord): void {
       return
     }
     case "agent": {
-      if (
-        authorizationRef.type !== "principal" ||
-        authorizationRef.principal.type !== "serviceAccount"
-      ) {
-        invalid("Agent executions require service-account authority.")
+      if (authorizationRef.type !== "principal") {
+        invalid("Agent executions require principal authority.")
       }
       if (authorizationRef.credential !== undefined) {
         invalid("Agent execution authority cannot carry an external credential.")
+      }
+      // An Agent acts either as its own managed identity or as the human who asked for the turn.
+      // The delegated form mirrors the `request` executor above; core narrows the service-account
+      // form further to the definition's own account.
+      if (
+        authorizationRef.principal.type !== "serviceAccount" &&
+        !principalsEqual(requestedBy, authorizationRef.principal)
+      ) {
+        invalid("Agent authority must be a service account or its requested-by principal.")
       }
       return
     }

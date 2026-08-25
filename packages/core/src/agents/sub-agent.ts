@@ -1,13 +1,16 @@
 import { randomUUID } from "node:crypto"
 import type { Principal } from "../auth"
-import { normalizeRequesterGroupIds } from "../auth/attribution"
-import { type AuthorizationContext, isAllowed, resolveAuthorizationContext } from "../authorization"
+import { isAllowed } from "../authorization"
 import { createAgentExecutionRecord } from "../execution/agent"
 import type { SecurityDefinitionCatalog } from "../security"
 import type { AgentRunRecord, AgentStorage } from "../storage/agents"
 import type { ExecutionRecord } from "../storage/executions"
 import type { Storage } from "../storage/types"
-import { ensureAgentExecutionIdentity, resolveAgentExecutionAuthorization } from "./authority"
+import {
+  ensureAgentExecutionIdentity,
+  resolveAgentExecutionAuthorization,
+  resolveRequesterAuthorization,
+} from "./authority"
 import { AgentRequestError } from "./errors"
 import {
   createAgentMessageId,
@@ -17,35 +20,6 @@ import {
 } from "./ids"
 import { MAIN_AGENT_ID } from "./main-agent"
 import type { AgentDefinition } from "./types"
-
-export interface ResolveRequesterAuthorizationInput {
-  /** The parent run's immutable execution, which carries the originating human in `requestedBy`. */
-  readonly execution: ExecutionRecord
-  /** The parent run, which carries the effective authorization groups snapshotted at admission. */
-  readonly run: AgentRunRecord
-  readonly security: SecurityDefinitionCatalog
-}
-
-/**
- * Rebuild the requester's authority for work an agent delegates on their behalf.
- *
- * Groups come from the run's `requesterAuthorizationGroupIds` — the *constrained* snapshot — while
- * roles resolve live, so a role edit takes effect without re-admitting the run. Returns `null` when
- * the run has no human requester; callers must treat that as a denial, never as an absent check.
- */
-export function resolveRequesterAuthorization(
-  input: ResolveRequesterAuthorizationInput
-): AuthorizationContext | null {
-  const requestedBy = input.execution.requestedBy
-  if (!requestedBy) {
-    return null
-  }
-  return resolveAuthorizationContext({
-    principal: requestedBy,
-    groupIds: normalizeRequesterGroupIds(input.run.requesterAuthorizationGroupIds),
-    roles: input.security.listResolvedRoles(),
-  })
-}
 
 export interface RequestSubAgentRunInput {
   readonly storage: Storage

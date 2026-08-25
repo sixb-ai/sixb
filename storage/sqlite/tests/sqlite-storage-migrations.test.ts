@@ -203,6 +203,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 25,
   },
+  {
+    adapter_id: "SixbSqliteStorage",
+    checksum_length: 64,
+    id: "026-agent-delegated-authority",
+    status: "applied",
+    version: 26,
+  },
 ]
 
 afterEach(async () => {

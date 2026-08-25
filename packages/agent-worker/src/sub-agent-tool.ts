@@ -1,6 +1,10 @@
 import type { AgentDefinition, AuthorizationContext } from "@sixb/core"
 import { AgentToolPublicError, isAllowed } from "@sixb/core"
-import { requestSubAgentRun, resolveAgentExecutionAuthorization } from "@sixb/core/internal/agents"
+import {
+  agentServiceAccountId,
+  requestSubAgentRun,
+  resolveAgentExecutionAuthorization,
+} from "@sixb/core/internal/agents"
 import type { AgentRunRecord, ExecutionRecord } from "@sixb/core/storage"
 import { jsonSchema, type Tool, tool } from "ai"
 import { AgentExecutionLostError, AgentFinalizationError } from "./errors"
@@ -177,8 +181,10 @@ async function runSubAgent(
     parentExecution: deps.parentExecution,
     parentRun: deps.parentRun,
     prompt: toolInput.task,
-    // The delegating agent's own identity, so the child's thread stays out of the requester's list.
-    ownerPrincipal: context.agentPrincipal,
+    // The delegating *agent's* managed identity — deliberately not `context.agentPrincipal`, which
+    // for a delegated main-agent turn is the human. Owning child threads by the user would surface
+    // every one of them in their thread list, since `threads.list` filters on ownership.
+    ownerPrincipal: { type: "serviceAccount", id: agentServiceAccountId(deps.parentRun.agentId) },
     // Mirrors the delegating run's queue lease: the child lives inside the parent's turn, so the
     // parent's ownership window is the child's too.
     queueLeaseExpiresAt: requireParentLease(deps.parentRun),

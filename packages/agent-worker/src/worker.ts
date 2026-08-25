@@ -4,7 +4,7 @@ import {
   createAgentRunExecutionToken,
   dispatchQueuedAgentRuns,
   MAIN_AGENT_ID,
-  resolveAgentExecutionAuthorization,
+  resolveAgentRunAuthorization,
   resolveRequesterAuthorization,
   subscribeAgentRunCancel,
   workflowAgentNodeQueueJobId,
@@ -232,11 +232,12 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         }
       )
     }
-    const resolved = await resolveAgentExecutionAuthorization({
+    const resolved = await resolveAgentRunAuthorization({
       auth: context.storage.auth,
       projectId: context.id,
       agentId: agent.id,
-      authorizationRef: durableExecution.authorizationRef,
+      execution: durableExecution,
+      run: queuedRun,
       security: this.host.definitions.security,
     })
     const executionContext = createAgentExecutionContext({
@@ -246,7 +247,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       agentId: agent.id,
       runId: queuedRun.id,
       authorization: resolved.context,
-      agentPrincipal: resolved.identity.principal,
+      agentPrincipal: resolved.principal,
     })
 
     const reservation = await this.startOrReclaim(context, {

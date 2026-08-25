@@ -56,7 +56,13 @@ export function createPrincipalRuntimeAuthorization(input: {
   return createRegisteredPrincipalAuthorization(input)
 }
 
-/** Register service-account authority bound to one exact agent run. */
+/**
+ * Register the authority bound to one exact agent run.
+ *
+ * The principal is either the agent's own service account or the human the run acts for; which of
+ * the two is legitimate is decided by `assertAgentExecutionRecord` against the durable record, not
+ * here.
+ */
 export function createAgentRuntimeAuthorization(input: {
   readonly projectId: string
   readonly context: AuthorizationContext
@@ -64,9 +70,6 @@ export function createAgentRuntimeAuthorization(input: {
   readonly agentId: string
   readonly runId: string
 }): RuntimeAuthorization {
-  if (input.context.principal.type !== "serviceAccount") {
-    throw new Error("[Sixb] Agent execution authority must belong to a service account.")
-  }
   assertNonEmpty(input.executionId, "Execution id")
   assertNonEmpty(input.agentId, "Agent id")
   assertNonEmpty(input.runId, "Agent run id")
@@ -248,8 +251,11 @@ export function resolveExecutionScopeAuthorization(
       if (
         resolved.type !== "principal" ||
         resolved.ref.type !== "principal" ||
-        resolved.ref.principal.type !== "serviceAccount" ||
         resolved.ref.credential !== undefined ||
+        // Its own managed identity, or the human it acts for — the same pair the durable record
+        // admits (`assertAgentExecutionRecord`).
+        (resolved.ref.principal.type !== "serviceAccount" &&
+          !principalsEqual(resolved.ref.principal, execution.requestedBy)) ||
         resolved.executionBinding?.type !== "agent" ||
         resolved.executionBinding.executionId !== execution.id ||
         resolved.executionBinding.agentId !== execution.executor.agentId ||

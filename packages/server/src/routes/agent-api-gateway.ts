@@ -5,7 +5,7 @@ import {
   AGENT_API_ROUTES,
   isAllowedAgentApiRequest,
   isValidAgentApiGatewayCapability,
-  resolveAgentExecutionAuthorization,
+  resolveAgentRunAuthorization,
 } from "@sixb/core/internal/agents"
 import { normalizeRoutePath, pathSegmentsFor } from "@sixb/core/internal/http"
 import type { Elysia } from "elysia"
@@ -174,11 +174,16 @@ async function resolveAgentRunAuthState(
 
   let authz: AuthorizationContext
   try {
-    const resolved = await resolveAgentExecutionAuthorization({
+    const resolved = await resolveAgentRunAuthorization({
       auth,
       projectId: host.id,
       agentId: run.agentId,
-      authorizationRef: execution.authorizationRef,
+      execution,
+      // A workflow agent node always acts under the agent's own service account, so it carries no
+      // requester snapshot and never reaches the delegated branch.
+      run: {
+        requesterAuthorizationGroupIds: conversationalRun?.requesterAuthorizationGroupIds ?? [],
+      },
       security: host.definitions.security,
     })
     assertAgentExecutionRecord({

@@ -69,6 +69,9 @@ import ontologyCommitExecutionsSql from "./migrations/024-ontology-commit-execut
 import agentRunRequesterAuthorizationSql from "./migrations/025-agent-run-requester-authorization.sql" with {
   type: "text",
 }
+import agentDelegatedAuthoritySql from "./migrations/026-agent-delegated-authority.sql" with {
+  type: "text",
+}
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -149,6 +152,7 @@ export const sqliteStorageMigrations = defineMigrations({
       { checksum: checksum(ontologyCommitExecutionsSql) }
     ),
     sqliteSql("025-agent-run-requester-authorization", agentRunRequesterAuthorizationSql),
+    sqliteSql("026-agent-delegated-authority", agentDelegatedAuthoritySql),
   ],
 })
 
