@@ -4,6 +4,7 @@ export {
   getConnectorConnectionsRuntime,
 } from "./capability"
 export type {
+  AddConnectorConnectionInput,
   CompleteConnectorConnectionRunInput,
   CompleteConnectorConnectionRunResult,
   ConnectorConnectionRunView,

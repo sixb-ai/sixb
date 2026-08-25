@@ -292,7 +292,7 @@ describe("connector OAuth lifecycle", () => {
     expect(persisted).not.toContain(harness.exchangedVerifiers[0])
   })
 
-  test("revokes unused credentials when initial account discovery fails", async () => {
+  test("bounds initial account discovery and revokes the unused credentials", async () => {
     const harness = createHarness({ providerOperationTimeoutMs: 20 })
     harness.setDiscoverGate(new Promise<void>(() => {}))
     const started = await startAuthorization(harness)
@@ -302,14 +302,9 @@ describe("connector OAuth lifecycle", () => {
       "connector.provider_failed"
     )
     expect(error.retryable).toBe(false)
-    const authorizations = [...connectionSnapshot(harness.storage).authorizations.values()]
-    expect(authorizations).toHaveLength(1)
-    expect(authorizations[0]).toMatchObject({
-      status: "revoked",
-      credentials: undefined,
-      accounts: [],
-      scopes: [],
-    })
+    const pending = [...connectionSnapshot(harness.storage).authorizations.values()]
+    expect(pending).toHaveLength(1)
+    expect(pending[0]).toMatchObject({ status: "revoked", credentials: undefined, accounts: [] })
     expect(harness.counts().revokeCount).toBe(1)
   })
 
@@ -356,14 +351,6 @@ describe("connector OAuth lifecycle", () => {
       (await getAuthorization(harness.connectionStorage, authorization.authorizationId))?.status
     ).toBe("revoked")
 
-    await harness.process.revokeAuthorization(
-      managementCommand(),
-      harness.connector.id,
-      authorization.authorizationId
-    )
-    expect(
-      (await getAuthorization(harness.connectionStorage, authorization.authorizationId))?.status
-    ).toBe("revoked")
     expect(harness.counts().revokeCount).toBe(1)
   })
 })

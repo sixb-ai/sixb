@@ -13,11 +13,14 @@ import {
   SixbHost,
 } from "@sixb/core"
 import { createSessionCredential } from "@sixb/core/internal/auth"
+import { decorateOperationScopedMethodForTesting } from "@sixb/core/internal/storage-operation-scope"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
 let revokeError: Error | undefined
+let discoverError: Error | undefined
 let revokeCount = 0
+let exchangeCount = 0
 
 const connector = defineConnector("crm", {
   type: "test-oauth",
@@ -32,6 +35,7 @@ const connector = defineConnector("crm", {
       return url
     },
     exchangeCode(_context, input) {
+      exchangeCount += 1
       return {
         accessToken: `access-${input.code}`,
         refreshToken: "refresh-secret",
@@ -46,6 +50,7 @@ const connector = defineConnector("crm", {
     },
   },
   discoverAccounts() {
+    if (discoverError) throw discoverError
     return [
       { id: "account-a", label: "Account A" },
       { id: "account-b", label: "Account B" },
@@ -71,7 +76,9 @@ const connectorManager = defineRole("connector.manager", {
 
 async function createHarness() {
   revokeError = undefined
+  discoverError = undefined
   revokeCount = 0
+  exchangeCount = 0
   const storage = new InMemoryStorage()
   const host = new SixbHost<readonly OntologySource[]>({
     id: "test-project",
@@ -101,7 +108,11 @@ async function createHarness() {
     setRevokeError(error: Error | undefined) {
       revokeError = error
     },
+    setDiscoverError(error: Error | undefined) {
+      discoverError = error
+    },
     revokeCount: () => revokeCount,
+    exchangeCount: () => exchangeCount,
   }
 }
 
@@ -253,6 +264,31 @@ describe("connector connection Headless API", () => {
     )
     expect(unknownResponse.status).toBe(404)
     expect(await unknownResponse.json()).toMatchObject({ code: "connector.not_found" })
+  })
+
+  test("maps connector storage failures to a coded internal response", async () => {
+    const harness = await createHarness()
+    const restore = decorateOperationScopedMethodForTesting(
+      harness.storage.connectorConnections,
+      "listConnections",
+      () => async () => {
+        throw new Error("sensitive storage failure")
+      }
+    )
+
+    try {
+      const response = await harness.app.handle(
+        new Request("http://api.localhost/api/connectors/crm/connections", {
+          headers: harness.session.readHeaders,
+        })
+      )
+      const body = await response.text()
+      expect(response.status).toBe(500)
+      expect(JSON.parse(body)).toMatchObject({ code: "internal.unexpected" })
+      expect(body).not.toContain("sensitive storage failure")
+    } finally {
+      restore()
+    }
   })
 
   test("binds the OAuth callback to its browser and resumes account selection through a run", async () => {
@@ -412,6 +448,43 @@ describe("connector connection Headless API", () => {
     expect(body).not.toContain("infrastructure")
   })
 
+  test("keeps failed discovery cleanup addressable without exposing the authorization", async () => {
+    const harness = await createHarness()
+    harness.setDiscoverError(new Error("sensitive discovery failure"))
+    const started = await startRun(harness)
+
+    const callback = await completeRunAtProvider(harness, started.state, started.callbackCookie)
+    expect(callback.status).toBe(302)
+
+    const stored = await harness.storage.connectorConnections.getConnectionRun({
+      projectId: "test-project",
+      connectorId: connector.id,
+      runId: started.runId,
+    })
+    expect(stored).toMatchObject({ status: "failed" })
+    if (!stored || stored.status !== "failed" || !stored.authorizationId) {
+      throw new Error("Expected a failed run linked to its authorization.")
+    }
+    await expect(
+      harness.storage.connectorConnections.getAuthorization({
+        projectId: "test-project",
+        connectorId: connector.id,
+        authorizationId: stored.authorizationId,
+      })
+    ).resolves.toMatchObject({ status: "revoked", credentials: undefined })
+
+    const response = await harness.app.handle(
+      new Request(`http://api.localhost/api/connectors/crm/connection-runs/${started.runId}`, {
+        headers: harness.session.readHeaders,
+      })
+    )
+    const body = await response.text()
+    expect(response.status).toBe(200)
+    expect(JSON.parse(body)).toMatchObject({ status: "failed" })
+    expect(body).not.toContain(stored.authorizationId)
+    expect(body).not.toContain("sensitive discovery failure")
+  })
+
   test("authenticates the callback with one-use state", async () => {
     const harness = await createHarness()
     const started = await startRun(harness)
@@ -491,7 +564,7 @@ describe("connector connection Headless API", () => {
     })
   })
 
-  test("disconnects one connection without revoking its provider authorization", async () => {
+  test("revokes an authorization after its last durable connection is disconnected", async () => {
     const harness = await createHarness()
     const connected = await connectAccount(harness)
 
@@ -509,7 +582,10 @@ describe("connector connection Headless API", () => {
         headers: harness.session.readHeaders,
       })
     )
-    expect(await connections.json()).toEqual([])
+    expect(await connections.json()).toMatchObject([
+      { id: connected.connectionId, status: "disconnected" },
+    ])
+    expect(harness.revokeCount()).toBe(1)
   })
 
   test("revokes the provider authorization and returns every disconnected connection", async () => {
@@ -535,7 +611,9 @@ describe("connector connection Headless API", () => {
         headers: harness.session.readHeaders,
       })
     )
-    expect(await connections.json()).toEqual([])
+    expect(await connections.json()).toMatchObject([
+      { id: connected.connectionId, status: "disconnected" },
+    ])
   })
 
   test("retries provider revocation through the former connection id", async () => {
@@ -556,7 +634,7 @@ describe("connector connection Headless API", () => {
     )
     expect(retried.status, await retried.clone().text()).toBe(200)
     expect(await retried.json()).toMatchObject({
-      affectedConnections: [{ id: connected.connectionId, status: "disconnected" }],
+      affectedConnections: [],
     })
     expect(harness.revokeCount()).toBe(2)
 
@@ -565,7 +643,7 @@ describe("connector connection Headless API", () => {
     )
     expect(repeated.status).toBe(200)
     expect(await repeated.json()).toMatchObject({
-      affectedConnections: [{ id: connected.connectionId, status: "disconnected" }],
+      affectedConnections: [],
     })
     expect(harness.revokeCount()).toBe(2)
 
@@ -577,6 +655,120 @@ describe("connector connection Headless API", () => {
       }
     )
     expect(authorization).toMatchObject({ status: "revoked", credentials: undefined })
+  })
+
+  test("adds another account through an existing connection without repeating OAuth", async () => {
+    const harness = await createHarness()
+    const connected = await connectAccount(harness, "social", "account-a")
+
+    const started = await harness.app.handle(
+      new Request(
+        `http://api.localhost/api/connectors/crm/connections/${connected.connectionId}/connection-runs`,
+        {
+          method: "POST",
+          headers: harness.session.mutationHeaders,
+          body: JSON.stringify({ slot: "ads" }),
+        }
+      )
+    )
+    expect(started.status, await started.clone().text()).toBe(201)
+    const run = (await started.json()) as {
+      readonly id: string
+      readonly status: string
+      readonly waitingFor: string
+    }
+    expect(run).toMatchObject({
+      status: "waiting",
+      waitingFor: "account_selection",
+      slot: "ads",
+    })
+
+    const selected = await harness.app.handle(
+      new Request(`http://api.localhost/api/connectors/crm/connection-runs/${run.id}/selection`, {
+        method: "POST",
+        headers: harness.session.mutationHeaders,
+        body: JSON.stringify({ accountId: "account-b" }),
+      })
+    )
+    expect(selected.status, await selected.clone().text()).toBe(200)
+    expect(await selected.json()).toMatchObject({
+      status: "succeeded",
+      connections: [{ slot: "ads", account: { id: "account-b" } }],
+    })
+    expect(harness.exchangeCount()).toBe(1)
+
+    const connections = await harness.app.handle(
+      new Request("http://api.localhost/api/connectors/crm/connections", {
+        headers: harness.session.readHeaders,
+      })
+    )
+    expect(await connections.json()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ slot: "social", status: "connected" }),
+        expect.objectContaining({ slot: "ads", status: "connected" }),
+      ])
+    )
+  })
+
+  test("retains a durable cleanup handle when replacement revocation must be retried", async () => {
+    const harness = await createHarness()
+    const connected = await connectAccount(harness, "social", "account-a")
+    const previousAuthorization =
+      await harness.storage.connectorConnections.getAuthorizationByConnectionId({
+        projectId: "test-project",
+        connectorId: connector.id,
+        connectionId: connected.connectionId,
+      })
+    if (!previousAuthorization) throw new Error("Expected the original authorization.")
+    harness.setRevokeError(new Error("temporary provider outage"))
+
+    const started = await startRun(harness, "social")
+    const callback = await completeRunAtProvider(harness, started.state, started.callbackCookie)
+    expect(callback.status).toBe(302)
+    const selection = await harness.app.handle(
+      new Request(
+        `http://api.localhost/api/connectors/crm/connection-runs/${started.runId}/selection`,
+        {
+          method: "POST",
+          headers: harness.session.mutationHeaders,
+          body: JSON.stringify({ accountId: "account-b", replace: true }),
+        }
+      )
+    )
+    expect(selection.status, await selection.clone().text()).toBe(200)
+    const stored = await harness.storage.connectorConnections.getConnectionRun({
+      projectId: "test-project",
+      connectorId: connector.id,
+      runId: started.runId,
+    })
+    expect(stored).toMatchObject({
+      status: "succeeded",
+      cleanupAuthorizationId: previousAuthorization.id,
+    })
+    expect(await selection.text()).not.toContain(previousAuthorization.id)
+    await expect(
+      harness.storage.connectorConnections.getAuthorization({
+        projectId: "test-project",
+        connectorId: connector.id,
+        authorizationId: previousAuthorization.id,
+      })
+    ).resolves.toMatchObject({ status: "revocation_pending" })
+
+    harness.setRevokeError(undefined)
+    const retried = await harness.app.handle(
+      new Request(`http://api.localhost/api/connectors/crm/connection-runs/${started.runId}`, {
+        headers: harness.session.readHeaders,
+      })
+    )
+    expect(retried.status).toBe(200)
+    await expect(
+      harness.storage.connectorConnections.getAuthorization({
+        projectId: "test-project",
+        connectorId: connector.id,
+        authorizationId: previousAuthorization.id,
+      })
+    ).resolves.toMatchObject({ status: "revoked", credentials: undefined })
+    expect(harness.revokeCount()).toBe(2)
   })
 
   test("requires CSRF and connector management permission before creating a run", async () => {

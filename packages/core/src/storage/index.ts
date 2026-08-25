@@ -174,6 +174,7 @@ export type {
 } from "./auth"
 export { AuthStorageError, InMemoryAuthStorage } from "./auth"
 export type {
+  AttachConnectorConnectionRunAuthorizationInput,
   ClaimConnectorConnectionRunCallbackInput,
   ClaimConnectorConnectionRunCallbackResult,
   ClaimConnectorCredentialMutationInput,
@@ -208,8 +209,9 @@ export type {
   ConsumeConnectorAuthorizationAttemptInput,
   CreateConnectorAuthorizationAttemptInput,
   CreateConnectorAuthorizationInput,
-  DisconnectConnectorConnectionResult,
   CreateConnectorConnectionRunInput,
+  CreateConnectorConnectionSelectionRunInput,
+  DisconnectConnectorConnectionResult,
   FinalizeConnectorReauthorizationInput,
   FinishConnectorConnectionRunInput,
   GetConnectorConnectionInput,

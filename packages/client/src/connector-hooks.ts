@@ -16,15 +16,86 @@ import {
 } from "./generated/@tanstack/react-query.gen"
 import type { Client } from "./generated/client"
 import {
+  addConnectorConnection,
   getConnectorConnectionRun,
   selectConnectorConnectionRunAccount,
   startConnectorConnectionRun,
 } from "./generated/sdk.gen"
 import type {
+  AddConnectorConnectionResponse,
   GetConnectorConnectionRunResponse,
   SelectConnectorConnectionRunAccountResponse,
   StartConnectorConnectionRunResponse,
 } from "./generated/types.gen"
+
+export interface AddConnectorConnectionOptions<TContext = unknown>
+  extends Omit<
+    UseMutationOptions<AddConnectorConnectionResponse, Error, void, TContext>,
+    "mutationFn"
+  > {
+  readonly connectorId: string
+  readonly fromConnectionId: string
+  readonly slot: string
+  /** hey-api client override. Defaults to the nearest SixbProvider client, then the global client. */
+  readonly client?: Client
+  /** Override used by tests and non-hook option factory consumers. */
+  readonly queryClient?: QueryClient
+}
+
+export function addConnectorConnectionMutationOptions<TContext = unknown>(
+  options: AddConnectorConnectionOptions<TContext>
+): UseMutationOptions<AddConnectorConnectionResponse, Error, void, TContext> {
+  const {
+    connectorId,
+    fromConnectionId,
+    slot,
+    client,
+    queryClient,
+    onSuccess,
+    ...mutationOptions
+  } = options
+  const normalizedConnectorId = nonblank(connectorId, "connectorId")
+  const path = {
+    connectorId: normalizedConnectorId,
+    connectionId: nonblank(fromConnectionId, "fromConnectionId"),
+  }
+
+  return {
+    ...mutationOptions,
+    mutationFn: async () => {
+      const { data } = await addConnectorConnection<true>({
+        client,
+        path,
+        body: { slot: nonblank(slot, "slot") },
+        throwOnError: true,
+      })
+      return data
+    },
+    onSuccess: async (run, variables, context, mutation) => {
+      queryClient?.setQueryData(
+        getConnectorConnectionRunQueryKey({
+          path: { connectorId: normalizedConnectorId, runId: run.id },
+        }),
+        run
+      )
+      await onSuccess?.(run, variables, context, mutation)
+    },
+  }
+}
+
+export function useAddConnectorConnection<TContext = unknown>(
+  options: AddConnectorConnectionOptions<TContext>
+): UseMutationResult<AddConnectorConnectionResponse, Error, void, TContext> {
+  const providerClient = useSixbProviderClient()
+  const queryClient = useQueryClient()
+  return useMutation(
+    addConnectorConnectionMutationOptions({
+      ...options,
+      client: options.client ?? providerClient,
+      queryClient: options.queryClient ?? queryClient,
+    })
+  )
+}
 
 export interface ConnectConnectorOptions<TContext = unknown>
   extends Omit<

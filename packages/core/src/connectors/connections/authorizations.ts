@@ -187,6 +187,20 @@ export class DefaultConnectorAuthorizationLifecycle implements ConnectorAuthoriz
       throw storageBoundaryError(error, "Connector authorization could not be persisted.")
     }
 
+    if (input.onAuthorizationPersisted) {
+      try {
+        await input.onAuthorizationPersisted(pending)
+      } catch (error) {
+        await this.revokeAbandonedAuthorization(
+          input.definition,
+          authorizationId,
+          input.principal,
+          error
+        )
+        throw error
+      }
+    }
+
     let accounts: readonly ConnectorAccountCandidate[]
     try {
       accounts = await this.discoverAccounts(input.definition, credentials)

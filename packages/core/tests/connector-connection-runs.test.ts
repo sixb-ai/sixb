@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { AuthorizationError } from "../src"
 import {
+  authorize,
   callbackUrl,
   createHarness,
   managementCommand,
@@ -124,5 +125,90 @@ describe("connector connection runs", () => {
       harness.process.getConnectionRun(command, harness.connector.id, started.runId)
     ).resolves.toMatchObject({ status: "cancelled" })
     expect(harness.counts().exchangeCount).toBe(0)
+  })
+
+  test("adds another account through the existing connection without repeating OAuth", async () => {
+    const harness = createHarness()
+    const command = managementCommand()
+    const completed = await authorize(harness)
+    const first = await harness.process.selectAccount(command, harness.connector.id, {
+      authorizationId: completed.authorizationId,
+      accountId: "account-a",
+      owner: projectOwner,
+      slot: "social",
+    })
+
+    const waiting = await harness.process.addConnection(command, harness.connector.id, {
+      fromConnectionId: first.id,
+      owner: projectOwner,
+      slot: "ads",
+    })
+    expect(waiting).toMatchObject({
+      status: "waiting",
+      waitingFor: "account_selection",
+      slot: "ads",
+    })
+    const selected = await harness.process.selectConnectionRunAccount(
+      command,
+      harness.connector.id,
+      { runId: waiting.id, accountId: "account-b" }
+    )
+    expect(selected).toMatchObject({
+      status: "succeeded",
+      connections: [{ slot: "ads", account: { id: "account-b" } }],
+    })
+    expect(harness.counts().exchangeCount).toBe(1)
+    await expect(
+      harness.connectionStorage.listConnectionsByAuthorization({
+        projectId: "project",
+        connectorId: harness.connector.id,
+        authorizationId: completed.authorizationId,
+      })
+    ).resolves.toHaveLength(2)
+  })
+
+  test("automatically revokes an abandoned account-selection run", async () => {
+    const harness = createHarness({
+      accountSelectionTtlMs: 10,
+      systemRuntimeClock: true,
+      systemStorageClock: true,
+    })
+    const command = managementCommand()
+    const started = await harness.process.startConnectionRun(command, harness.connector.id, {
+      owner: projectOwner,
+      slot: "social",
+      redirectUri: callbackUrl,
+      returnTo,
+    })
+    const state = new URL(started.authorizationUrl).searchParams.get("state")!
+    await harness.process.callbackProcess.completeConnectionRun({
+      state,
+      code: "authorization-code",
+      redirectUri: callbackUrl,
+      callbackBinding: started.callbackBinding.secret,
+    })
+    const waiting = await harness.connectionStorage.getConnectionRun({
+      projectId: "project",
+      connectorId: harness.connector.id,
+      runId: started.runId,
+    })
+    if (!waiting || waiting.status !== "waiting" || waiting.waitingFor !== "account_selection") {
+      throw new Error("Expected an account-selection run.")
+    }
+
+    await Bun.sleep(40)
+
+    await expect(
+      harness.connectionStorage.getAuthorization({
+        projectId: "project",
+        connectorId: harness.connector.id,
+        authorizationId: waiting.authorizationId,
+      })
+    ).resolves.toMatchObject({ status: "revoked", credentials: undefined })
+    await expect(
+      harness.process.getConnectionRun(command, harness.connector.id, started.runId)
+    ).resolves.toMatchObject({ status: "expired" })
+    expect(harness.counts().revokeCount).toBe(1)
+    await harness.service.close()
   })
 })

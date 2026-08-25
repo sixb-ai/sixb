@@ -46,7 +46,10 @@ export type HarnessOptions = Pick<
   | "credentialMutationLeaseMs"
   | "providerOperationTimeoutMs"
   | "refreshSkewMs"
-> & { readonly systemStorageClock?: boolean }
+> & {
+  readonly systemRuntimeClock?: boolean
+  readonly systemStorageClock?: boolean
+}
 
 export function createHarness(options: HarnessOptions = {}) {
   let now = new Date("2026-08-19T12:00:00.000Z")
@@ -154,7 +157,7 @@ export function createHarness(options: HarnessOptions = {}) {
   const service = new ConnectorService("project", [connector], {
     storage,
     credentialProtector: protector,
-    now: () => new Date(now),
+    now: options.systemRuntimeClock ? () => new Date() : () => new Date(now),
     accountSelectionTtlMs: options.accountSelectionTtlMs,
     credentialMutationLeaseMs: options.credentialMutationLeaseMs,
     providerOperationTimeoutMs: options.providerOperationTimeoutMs,
@@ -367,6 +370,10 @@ export function afterReady(
     async startConnectionRun(...args) {
       await ready
       return process.startConnectionRun(...args)
+    },
+    async addConnection(...args) {
+      await ready
+      return process.addConnection(...args)
     },
     async getConnectionRun(...args) {
       await ready

@@ -108,11 +108,7 @@ export class ConnectorCredentialMutationCoordinator {
             connectorId,
             authorizationId: authorization.id,
             expectedRevision: authorization.revision,
-            mutation: {
-              id: `ccm_${randomUUID()}`,
-              kind,
-              holderId: this.holderId,
-            },
+            mutation: { id: `ccm_${randomUUID()}`, kind, holderId: this.holderId },
             ...(expectedConnectionIds === undefined ? {} : { expectedConnectionIds }),
             leaseDurationMs: this.leaseDurationMs,
             operationTimeoutMs: this.operationTimeoutMs,

@@ -2,6 +2,7 @@
 
 export {
   abortFileUpload,
+  addConnectorConnection,
   appendTelemetry,
   cancelAgentRun,
   cancelWorkflowIntervention,
@@ -128,6 +129,11 @@ export type {
   AbortFileUploadErrors,
   AbortFileUploadResponse,
   AbortFileUploadResponses,
+  AddConnectorConnectionData,
+  AddConnectorConnectionError,
+  AddConnectorConnectionErrors,
+  AddConnectorConnectionResponse,
+  AddConnectorConnectionResponses,
   AppendTelemetryData,
   AppendTelemetryError,
   AppendTelemetryErrors,

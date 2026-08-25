@@ -6,6 +6,7 @@ export type {
 } from "./in-memory"
 export { InMemoryConnectorConnectionStorage } from "./in-memory"
 export type {
+  AttachConnectorConnectionRunAuthorizationInput,
   ClaimConnectorConnectionRunCallbackInput,
   ClaimConnectorConnectionRunCallbackResult,
   ClaimConnectorCredentialMutationInput,
@@ -39,8 +40,9 @@ export type {
   ConsumeConnectorAuthorizationAttemptInput,
   CreateConnectorAuthorizationAttemptInput,
   CreateConnectorAuthorizationInput,
-  DisconnectConnectorConnectionResult,
   CreateConnectorConnectionRunInput,
+  CreateConnectorConnectionSelectionRunInput,
+  DisconnectConnectorConnectionResult,
   FinalizeConnectorReauthorizationInput,
   FinishConnectorConnectionRunInput,
   GetConnectorConnectionInput,

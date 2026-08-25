@@ -66,6 +66,8 @@ export interface CompleteNewConnectorAuthorizationInput {
   readonly code: string
   readonly codeVerifier: string
   readonly redirectUri: string
+  /** Called immediately after the encrypted grant is durable, before account discovery. */
+  readonly onAuthorizationPersisted?: (authorization: ConnectorAuthorizationRecord) => Promise<void>
 }
 
 export interface CompleteConnectorReauthorizationInput
@@ -289,6 +291,9 @@ export class ConnectorAuthorizationRequestHandler {
     readonly principal: AuthorizablePrincipal
     readonly code: string
     readonly redirectUri: string
+    readonly onAuthorizationPersisted?: (
+      authorization: ConnectorAuthorizationRecord
+    ) => Promise<void>
   }): Promise<ConnectorAuthorizationRecord> {
     const verifierBytes = await this.credentialProtector.open(input.attempt.codeVerifier, {
       projectId: this.projectId,
@@ -396,6 +401,9 @@ export class ConnectorAuthorizationRequestHandler {
     readonly code: string
     readonly codeVerifier: string
     readonly redirectUri: string
+    readonly onAuthorizationPersisted?: (
+      authorization: ConnectorAuthorizationRecord
+    ) => Promise<void>
   }): Promise<ConnectorAuthorizationRecord> {
     if (input.attempt.reauthorizationId === undefined) {
       return this.lifecycle.completeNewAuthorization({
@@ -404,6 +412,9 @@ export class ConnectorAuthorizationRequestHandler {
         code: input.code,
         codeVerifier: input.codeVerifier,
         redirectUri: input.redirectUri,
+        ...(input.onAuthorizationPersisted === undefined
+          ? {}
+          : { onAuthorizationPersisted: input.onAuthorizationPersisted }),
       })
     }
 

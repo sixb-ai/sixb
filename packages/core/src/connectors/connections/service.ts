@@ -30,6 +30,7 @@ import {
 } from "./authorizations"
 import { requireConnectorConnectionCommandActor } from "./command-context"
 import type {
+  AddConnectorConnectionInput,
   CompleteConnectorAuthorizationInput,
   CompleteConnectorAuthorizationResult,
   CompleteConnectorConnectionRunInput,
@@ -67,6 +68,7 @@ export interface ConnectorConnectionServiceOptions {
   readonly accountSelectionTtlMs?: number
   readonly credentialMutationLeaseMs?: number
   readonly providerOperationTimeoutMs?: number
+  readonly connectionRunProcessingTtlMs?: number
   readonly refreshSkewMs?: number
   readonly now?: () => Date
 }
@@ -93,6 +95,9 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
     const resolveDefinition = (connectorId: string) => this.requireOAuthDefinition(connectorId)
     const hostSignal = () => this.abortController.signal
     const now = options.now ?? (() => new Date())
+    const accountSelectionTtlMs = options.accountSelectionTtlMs ?? DEFAULT_SELECTION_TTL_MS
+    const providerOperationTimeoutMs =
+      options.providerOperationTimeoutMs ?? DEFAULT_PROVIDER_OPERATION_TIMEOUT_MS
 
     this.authorizations = new DefaultConnectorAuthorizationLifecycle({
       projectId,
@@ -100,11 +105,10 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
       credentialProtector,
       resolveDefinition,
       hostSignal,
-      accountSelectionTtlMs: options.accountSelectionTtlMs ?? DEFAULT_SELECTION_TTL_MS,
+      accountSelectionTtlMs,
       credentialMutationLeaseMs:
         options.credentialMutationLeaseMs ?? DEFAULT_CREDENTIAL_MUTATION_LEASE_MS,
-      providerOperationTimeoutMs:
-        options.providerOperationTimeoutMs ?? DEFAULT_PROVIDER_OPERATION_TIMEOUT_MS,
+      providerOperationTimeoutMs,
       refreshSkewMs: options.refreshSkewMs ?? DEFAULT_REFRESH_SKEW_MS,
       now,
     })
@@ -113,8 +117,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
       storage: storage.root,
       credentialProtector,
       authorizationAttemptTtlMs: options.authorizationAttemptTtlMs ?? DEFAULT_ATTEMPT_TTL_MS,
-      providerOperationTimeoutMs:
-        options.providerOperationTimeoutMs ?? DEFAULT_PROVIDER_OPERATION_TIMEOUT_MS,
+      providerOperationTimeoutMs,
       resolveDefinition,
       lifecycle: this.authorizations,
       hostSignal,
@@ -125,6 +128,9 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
       requestHandler: this.requests,
       authorizations: this.authorizations,
       resolveDefinition,
+      processingTtlMs:
+        options.connectionRunProcessingTtlMs ?? providerOperationTimeoutMs * 2 + 30_000,
+      selectionTtlMs: accountSelectionTtlMs,
       now,
     })
     this.callbackProcess = Object.freeze({
@@ -192,21 +198,23 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
     } catch (error) {
       throw storageBoundaryError(error, "Connector connections could not be listed.")
     }
-    return Promise.all(
-      connections.map(async (connection) => {
-        const authorization = await this.connectionStorage.getAuthorization({
-          projectId: this.projectId,
-          connectorId: definition.id,
-          authorizationId: connection.authorizationId,
+    return withConnectorStorageBoundary("Connector authorizations could not be read.", () =>
+      Promise.all(
+        connections.map(async (connection) => {
+          const authorization = await this.connectionStorage.getAuthorization({
+            projectId: this.projectId,
+            connectorId: definition.id,
+            authorizationId: connection.authorizationId,
+          })
+          if (!authorization) {
+            throw createConnectorCodedError(
+              "internal.unexpected",
+              "Connector connection references an unavailable authorization."
+            )
+          }
+          return connectorConnectionView(connection, authorization.status)
         })
-        if (!authorization) {
-          throw createConnectorCodedError(
-            "internal.unexpected",
-            "Connector connection references an unavailable authorization."
-          )
-        }
-        return connectorConnectionView(connection, authorization.status)
-      })
+      )
     )
   }
 
@@ -216,6 +224,44 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
     input: StartConnectorConnectionRunInput
   ): Promise<StartConnectorConnectionRunResult> {
     return this.runs.start(command, connectorId, input)
+  }
+
+  async addConnection(
+    command: ConnectorConnectionCommandContext,
+    connectorId: string,
+    input: AddConnectorConnectionInput
+  ): Promise<ConnectorConnectionRunView> {
+    const definition = this.requireOAuthDefinition(connectorId)
+    const actor = requireConnectorConnectionCommandActor(command.execution, this.projectId)
+    assertConnectorConnectionSelector(input)
+    const source = await withConnectorStorageBoundary(
+      "Source connector connection could not be read.",
+      () =>
+        this.connectionStorage.getConnectionById({
+          projectId: this.projectId,
+          connectorId: definition.id,
+          connectionId: nonblank(input.fromConnectionId, "source connection id"),
+        })
+    )
+    if (!source) {
+      throw createConnectorCodedError("connector.not_found", "Source connection was not found.")
+    }
+    if (source.status !== "connected") {
+      throw createConnectorCodedError(
+        "connector.authorization_required",
+        "Source connection is disconnected."
+      )
+    }
+    const authorization = await this.authorizations.requireStableActiveAuthorization(
+      definition,
+      source.authorizationId
+    )
+    assertConnectorAuthorizationActor(authorization, actor.principal)
+    return this.runs.startSelection(command, definition.id, {
+      owner: input.owner,
+      slot: input.slot,
+      authorizationId: authorization.id,
+    })
   }
 
   getConnectionRun(
@@ -243,13 +289,23 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
   ): Promise<StartConnectorConnectionRunResult> {
     const definition = this.requireOAuthDefinition(connectorId)
     requireConnectorConnectionCommandActor(command.execution, this.projectId)
-    const connection = await this.connectionStorage.getConnectionById({
-      projectId: this.projectId,
-      connectorId: definition.id,
-      connectionId: nonblank(connectionId, "connection id"),
-    })
+    const connection = await withConnectorStorageBoundary(
+      "Connector connection could not be read.",
+      () =>
+        this.connectionStorage.getConnectionById({
+          projectId: this.projectId,
+          connectorId: definition.id,
+          connectionId: nonblank(connectionId, "connection id"),
+        })
+    )
     if (!connection) {
       throw createConnectorCodedError("connector.not_found", "Connector connection was not found.")
+    }
+    if (connection.status !== "connected") {
+      throw createConnectorCodedError(
+        "connector.authorization_required",
+        "Disconnected connector connections cannot be reauthorized; start a new connection."
+      )
     }
     return this.runs.start(command, definition.id, {
       owner: connection.owner,
@@ -267,11 +323,15 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
   ): Promise<RevokeConnectorAuthorizationResult> {
     const definition = this.requireOAuthDefinition(connectorId)
     requireConnectorConnectionCommandActor(command.execution, this.projectId)
-    const authorization = await this.connectionStorage.getAuthorizationByConnectionId({
-      projectId: this.projectId,
-      connectorId: definition.id,
-      connectionId: nonblank(connectionId, "connection id"),
-    })
+    const authorization = await withConnectorStorageBoundary(
+      "Connector authorization could not be resolved from its connection.",
+      () =>
+        this.connectionStorage.getAuthorizationByConnectionId({
+          projectId: this.projectId,
+          connectorId: definition.id,
+          connectionId: nonblank(connectionId, "connection id"),
+        })
+    )
     if (!authorization) {
       throw createConnectorCodedError("connector.not_found", "Connector connection was not found.")
     }
@@ -418,6 +478,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
   }
 
   async close(): Promise<void> {
+    this.runs.close()
     this.abortController.abort()
     this.abortController = new AbortController()
   }
