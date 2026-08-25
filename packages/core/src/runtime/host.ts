@@ -7,7 +7,7 @@
 
 import { resolve } from "node:path"
 import type { ActionDefinition } from "../actions/types"
-import type { AgentDefinition } from "../agents"
+import type { AgentDefinition, MainAgentConfig } from "../agents"
 import {
   AuthRuntime,
   AuthRuntimeError,
@@ -99,6 +99,8 @@ export interface SixbHostOptions<TOntologySources extends readonly OntologySourc
   rules?: readonly RuleDefinition[]
   workflows?: readonly WorkflowDefinition[]
   agents?: readonly AgentDefinition[]
+  /** Framework-managed main agent. Only it receives the injected `sub_agent` tool. */
+  mainAgent?: MainAgentConfig
   groups?: readonly GroupDefinition[]
   roles?: readonly RoleDefinition[]
   membershipPolicies?: readonly MembershipPolicyDefinition[]

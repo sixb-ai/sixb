@@ -92,6 +92,7 @@ function runInput(overrides: Partial<TestRunInput> = {}): TestRunInput {
     triggerMessageId: "msg_user_1",
     executionId: "test_agent_execution:run_1",
     requesterGroupIds: ["support", "engineering", "support"],
+    requesterAuthorizationGroupIds: ["support"],
     execution: execution("exec_1"),
     createdAt: at("2026-06-23T10:00:10.000Z"),
     ...overrides,

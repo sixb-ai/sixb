@@ -151,6 +151,13 @@ export interface AgentRunRecord {
   readonly triggerMessageId: string
   /** Durable group memberships snapshotted when the run was admitted. */
   readonly requesterGroupIds: readonly string[]
+  /**
+   * The requester's *effective* authorization groups at admission — already narrowed by any
+   * credential constraint (see `constrainTokenGroupIds`). Authorizing work this run delegates
+   * must use this, never `requesterGroupIds`: that snapshot is the principal's full membership
+   * and would re-inflate a group-scoped access token back to full authority.
+   */
+  readonly requesterAuthorizationGroupIds: readonly string[]
   readonly status: AgentRunStatus
   readonly modelId?: string
   /** Why the run ended (our own SDK-independent enum). */
@@ -175,6 +182,7 @@ export interface CreateAgentRunInput {
   readonly agentId: string
   readonly triggerMessageId: string
   readonly requesterGroupIds: readonly string[]
+  readonly requesterAuthorizationGroupIds: readonly string[]
   readonly createdAt?: Date
 }
 

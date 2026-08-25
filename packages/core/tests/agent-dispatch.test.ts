@@ -25,6 +25,7 @@ async function createQueuedRun(storage: InMemoryStorage, id = "run-1") {
     agentId: "assistant",
     triggerMessageId: `message-${id}`,
     requesterGroupIds: [],
+    requesterAuthorizationGroupIds: [],
   })
 }
 

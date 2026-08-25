@@ -183,6 +183,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     // AI SDK swallows lifecycle callback errors, so surface a retained ledger append failure before
     // interpreting the stream as a success or cancellation.
     usageRecorder.assertHealthy()
+    context.assertToolsHealthy?.()
     // A sandbox failure and a timeout take precedence over the abort-shaped error they cause.
     if (provisionError !== undefined) {
       throw provisionError

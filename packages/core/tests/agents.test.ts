@@ -8,11 +8,14 @@ import {
   type AgentDefinition,
   AgentDefinitionError,
   type AgentToolDefinition,
+  can,
   createSixb,
   defineAgent,
   defineAgentTool,
   defineGroup,
   defineObjectType,
+  defineRole,
+  every,
   isAgentDefinition,
   prop,
   RuntimeError,
@@ -157,6 +160,7 @@ describe("defineAgentTool", () => {
       expect(() => validateName(name)).toThrow(AgentDefinitionError)
     }
     expect(() => validateName("bash")).toThrow("reserved by the framework")
+    expect(() => validateName("sub_agent")).toThrow("reserved by the framework")
   })
 
   test("rejects empty descriptions, invalid schemas, and missing handlers", () => {
@@ -631,5 +635,80 @@ describe("agent discovery + registry", () => {
     })
 
     expect(sixb.definitions.agents.getById("ops")?.groupIds).toEqual(["agent-runtime"])
+  })
+})
+
+describe("createSixb({ mainAgent })", () => {
+  test("registers the framework main agent with no groups and no authored tools", async () => {
+    const projectRoot = await createTempProjectRoot()
+
+    const sixb = await createSixb({
+      projectRoot,
+      ontologies: [Room],
+      mainAgent: { name: "Assistant", model, instructions: "Delegate specialist work." },
+      ...createTestRuntimeDeps(),
+    })
+
+    const main = sixb.definitions.agents.getById("main")
+    expect(main?.name).toBe("Assistant")
+    // No groups is the design, not an oversight: the main agent routes and holds no grants of its
+    // own, so `sub_agent` authorizes against the requester instead.
+    expect(main?.groupIds).toEqual([])
+    expect(main?.tools).toEqual([])
+  })
+
+  test("names the reserved id when a project agent collides with it", async () => {
+    const projectRoot = await createTempProjectRoot()
+
+    // Asserting the *message*, not just that it throws: without the explicit guard this still
+    // fails, but as `Duplicate agent id: main`, which sends the author hunting for a second
+    // definition that does not exist.
+    await expect(
+      createSixb({
+        projectRoot,
+        ontologies: [Room],
+        agents: [defineAgent("main", { name: "Mine", model, instructions: "x" })],
+        mainAgent: { name: "Assistant", model, instructions: "y" },
+        ...createTestRuntimeDeps(),
+      })
+    ).rejects.toThrow("is reserved for the framework-managed main agent")
+  })
+
+  test("validates the main agent through defineAgent rather than a second code path", async () => {
+    const projectRoot = await createTempProjectRoot()
+
+    await expect(
+      createSixb({
+        projectRoot,
+        ontologies: [Room],
+        mainAgent: { name: "   ", model, instructions: "x" },
+        ...createTestRuntimeDeps(),
+      })
+    ).rejects.toThrow(AgentDefinitionError)
+  })
+
+  test("reaches the security registry, so breadth grants resolve against it", async () => {
+    const projectRoot = await createTempProjectRoot()
+
+    const sixb = await createSixb({
+      projectRoot,
+      ontologies: [Room],
+      agents: [defineAgent("researcher", { name: "Researcher", model, instructions: "x" })],
+      mainAgent: { name: "Assistant", model, instructions: "Delegate." },
+      groups: [agentRuntime],
+      roles: [
+        defineRole("agent-runtime.runner", {
+          grantedTo: [agentRuntime],
+          grants: [can.run(every.agent())],
+        }),
+      ],
+      ...createTestRuntimeDeps(),
+    })
+
+    // Appending `main` only to the returned catalog would leave it out of `SecurityRegistry`, and
+    // this breadth grant would silently resolve to `["researcher"]` — nobody could run the agent
+    // the project just configured.
+    const resolved = sixb.definitions.security.listResolvedRoles()
+    expect([...(resolved[0]?.grants["run:agent"] ?? [])].sort()).toEqual(["main", "researcher"])
   })
 })

@@ -3,6 +3,17 @@
 Every agent run gets a sandboxed `bash` tool and scoped access to the Sixb API. Agents may also
 receive explicitly selected tools that run in the agent worker.
 
+`bash` and `sub_agent` are reserved names: `defineAgentTool` rejects both, because the framework
+injects them.
+
+## The sub_agent tool
+
+Only the framework-managed [main agent](./main-agent.md) receives `sub_agent`. It hands a
+self-contained task to one of your agents and returns that agent's answer. The child is a full run
+with its own execution, service account and sandbox; it is not a nested call inside the parent's.
+
+Specialists do not receive the tool, so delegation is one level deep.
+
 ## The bash tool
 
 The `bash` tool runs a command (as `bash -lc`) inside a per-run [sandbox](../sandboxes/overview.md)

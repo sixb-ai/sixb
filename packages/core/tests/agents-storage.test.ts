@@ -38,6 +38,7 @@ describe("InMemoryStorage agents", () => {
           agentId: "sales",
           triggerMessageId: "msg_1",
           requesterGroupIds: ["engineering"],
+          requesterAuthorizationGroupIds: ["engineering"],
           createdAt: new Date("2026-06-23T10:00:10.000Z"),
         })
         await tx.agents?.messages.append({
@@ -84,6 +85,7 @@ describe("InMemoryStorage agents", () => {
       agentId: "sales",
       triggerMessageId: "msg_1",
       requesterGroupIds: ["engineering"],
+      requesterAuthorizationGroupIds: ["engineering"],
       createdAt: new Date("2026-06-23T10:00:10.000Z"),
     })
     await storage.agents.runs.start({

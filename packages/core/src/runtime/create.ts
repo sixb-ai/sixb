@@ -1,6 +1,6 @@
 import { resolve } from "node:path"
 import type { ActionDefinition } from "../actions"
-import type { AgentDefinition } from "../agents"
+import type { AgentDefinition, MainAgentConfig } from "../agents"
 import type { SixbAuthConfig } from "../auth"
 import type { BlobStorage } from "../blob-storage"
 import {
@@ -60,6 +60,8 @@ export interface CreateSixbOptions {
   actions?: readonly ActionDefinition[]
   /** Agent definitions to register in addition to auto-discovered `agents/` exports. */
   agents?: readonly AgentDefinition[]
+  /** Framework-managed main agent. Only it receives the injected `sub_agent` tool. */
+  mainAgent?: MainAgentConfig
   datasets?: readonly DatasetDefinition[]
   /** Connector definitions to register in addition to auto-discovered `connectors/` exports. */
   connectors?: readonly ConnectorDefinition[]
@@ -158,6 +160,7 @@ export async function createSixb(
     roles: [...(options.roles ?? []), ...roles],
     membershipPolicies: [...(options.membershipPolicies ?? []), ...membershipPolicies],
     agents: [...(options.agents ?? []), ...agents],
+    mainAgent: options.mainAgent,
     auth: options.auth,
   })
 }

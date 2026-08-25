@@ -39,6 +39,9 @@ export const invoiceAssistant = defineAgent("invoice-assistant", {
 | `tools` | `AgentToolDefinition[]` | No | Worker-side tools this agent is explicitly allowed to call. Defaults to none. |
 | `loop` | `{ stopWhen?: { maxSteps?: number } }` | No | Step cap per turn. Defaults to **25**. |
 
+The framework-managed [main agent](./main-agent.md) takes the same fields minus `tools` and
+`groups`, and is configured on `createSixb` rather than with `defineAgent`.
+
 ## The model
 
 `model` is an [AI SDK](https://sdk.vercel.ai) `LanguageModelV4` instance, not a string. The simplest

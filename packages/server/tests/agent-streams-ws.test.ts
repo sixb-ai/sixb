@@ -128,6 +128,7 @@ describe("/ws/agents", () => {
         agentId,
         triggerMessageId: "msg_queued",
         requesterGroupIds: [],
+        requesterAuthorizationGroupIds: [],
       })
       const ws = new WebSocket(`${baseUrl.replace("http://", "ws://")}/ws/agents`)
 
@@ -269,6 +270,7 @@ describe("canAccessAgentRunStream", () => {
       agentId,
       triggerMessageId: "msg_ws_1",
       requesterGroupIds: ["support-users"],
+      requesterAuthorizationGroupIds: ["support-users"],
     })
 
     await expect(
@@ -442,6 +444,7 @@ async function advanceDurableRun(
       agentId,
       triggerMessageId: `msg_${input.runId}`,
       requesterGroupIds: [],
+      requesterAuthorizationGroupIds: [],
     })
   }
   if (run.status === "queued") {

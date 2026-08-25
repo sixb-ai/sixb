@@ -1,7 +1,11 @@
-import type { AgentDefinition, Sandbox } from "@sixb/core"
+import type { AgentDefinition, AuthorizationContext, Sandbox } from "@sixb/core"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
-import type { AgentRunRecord, WorkflowAgentNodeRunRecord } from "@sixb/core/storage"
+import type {
+  AgentRunRecord,
+  ExecutionRecord,
+  WorkflowAgentNodeRunRecord,
+} from "@sixb/core/storage"
 import { type AgentExecutionMode, renderAgentSkillCatalog } from "./agent-skills"
 import { aiSdkToolsFromAgentDefinitions } from "./ai-sdk-adapters"
 import { createAgentApiGatewayBaseUrl } from "./api-url"
@@ -12,7 +16,13 @@ import {
 } from "./attachments"
 import { type BashSandboxHandle, createBashTool } from "./bash-tool"
 import { prepareAgentSandboxApiContext } from "./sandbox-api-context"
-import type { AgentExecutionContext, AgentTurnContext, AgentWorkerContext } from "./types"
+import { createSubAgentTool, resolveSubAgentTargets } from "./sub-agent-tool"
+import type {
+  AgentExecutionContext,
+  AgentTurnContext,
+  AgentWorkerContext,
+  AgentWorkerHost,
+} from "./types"
 import { prepareWorkflowInputAttachments } from "./workflow-input-attachments"
 
 export interface AgentExecutionEnvironment {
@@ -31,8 +41,35 @@ interface CreateAgentEnvironmentInput {
   readonly onDetachedTeardown?: (teardown: Promise<void>) => void
 }
 
+/**
+ * What a turn needs to hand work to another agent.
+ *
+ * Supplied only by `AgentWorker.execute()`, and only for the framework-managed main agent. A
+ * sub-agent turn is created without it, so it receives no `sub_agent` tool and delegation depth is
+ * bounded at one structurally rather than by a counter.
+ */
+export interface AgentDelegationInput {
+  readonly host: AgentWorkerHost
+  /** The delegating run's immutable execution; becomes each child's `source.executionId`. */
+  readonly execution: ExecutionRecord
+  /** The requester's rebuilt authority; `null` denies delegation outright. */
+  readonly requesterAuthorization: AuthorizationContext | null
+  /** The delegating turn's abort sources, so no child outlives its parent's slot. */
+  readonly signal: AbortSignal
+  /**
+   * Register a live child so the delegating run's queue-lease renewals extend the child's execution
+   * ownership too. Without it a child outlives its own 60s lease and its API gateway fails closed
+   * mid-turn. Returns an unregister callback.
+   */
+  readonly trackChildOwnership: (child: {
+    readonly runId: string
+    readonly executionToken: string
+  }) => () => void
+}
+
 export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvironmentInput {
   readonly run: AgentRunRecord
+  readonly delegation?: AgentDelegationInput
 }
 
 export interface CreateWorkflowAgentNodeEnvironmentInput extends CreateAgentEnvironmentInput {
@@ -80,6 +117,7 @@ export async function createConversationAgentEnvironment(
     attachmentContext,
     skills,
     onDetachedTeardown: input.onDetachedTeardown,
+    ...(input.delegation ? { delegation: input.delegation, run } : {}),
   })
 }
 
@@ -126,6 +164,8 @@ interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
   readonly apiBaseUrl: string
   readonly attachmentContext: PreparedAgentAttachmentContext
   readonly skills: Awaited<AgentWorkerContext["agentSkills"]>
+  readonly delegation?: AgentDelegationInput
+  readonly run?: AgentRunRecord
 }
 
 /**
@@ -162,6 +202,34 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
     return ready
   })
 
+  let assertToolsHealthy: (() => void) | undefined
+  const delegation = input.delegation
+  if (delegation && input.run) {
+    const parentRun = input.run
+    // Skipped entirely when the requester can reach nothing: an empty enum would only teach the
+    // model to call a tool that can never succeed.
+    const canDelegate =
+      resolveSubAgentTargets({
+        host: delegation.host,
+        agentId: parentRun.agentId,
+        requesterAuthorization: delegation.requesterAuthorization,
+      }).length > 0
+    if (canDelegate) {
+      const subAgent = createSubAgentTool({
+        context,
+        host: delegation.host,
+        parentRun,
+        parentExecution: delegation.execution,
+        parentSignal: delegation.signal,
+        requesterAuthorization: delegation.requesterAuthorization,
+        trackChildOwnership: delegation.trackChildOwnership,
+        ...(input.onDetachedTeardown ? { onDetachedTeardown: input.onDetachedTeardown } : {}),
+      })
+      tools.sub_agent = subAgent.tool
+      assertToolsHealthy = subAgent.assertHealthy
+    }
+  }
+
   ready = provisionSandbox({
     context,
     agent,
@@ -193,6 +261,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
       systemAddendum: renderAgentSkillCatalog(skills, mode),
       sandboxReady: ready,
       sandboxWasUsed: () => sandboxWasUsed,
+      ...(assertToolsHealthy ? { assertToolsHealthy } : {}),
       streamSink: context.streamSink,
       recoverAiModelCall: context.recoverAiModelCall,
       defaultMaxSteps: context.defaultMaxSteps,

@@ -964,6 +964,7 @@ export type {
   DefineAgentConfig,
   InferAgentToolInput,
   InferAgentToolInputSchema,
+  MainAgentConfig,
   RequestAgentRunInput,
   RequestAgentRunResult,
 } from "./agents"

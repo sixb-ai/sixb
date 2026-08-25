@@ -29,6 +29,9 @@ export const businessAnalyst = defineAgent("business-analyst", {
 
 See [Defining agents](./defining-agents.md) for every config field.
 
+If you would rather users talked to one assistant that routes to your agents, configure a
+[main agent](./main-agent.md).
+
 ## Core concepts
 
 | Concept | What it is |
@@ -38,6 +41,7 @@ See [Defining agents](./defining-agents.md) for every config field.
 | **Run** | One turn. Posting a user message triggers a run. |
 | **Message** | A `system`, `user`, or `assistant` message made of `text`, `reasoning`, `step-start`, and `tool-call` parts. |
 | **Tools** | Explicitly selected worker tools plus built-in `bash` in a [sandbox](../sandboxes/overview.md). |
+| **Main agent** | An optional framework-managed entrypoint that delegates to your agents. See [The main agent](./main-agent.md). |
 
 ## Run an agent
 

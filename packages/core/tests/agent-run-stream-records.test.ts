@@ -27,6 +27,7 @@ function runRecord(overrides: Partial<AgentRunRecord> = {}): AgentRunRecord {
     agentId: "assistant",
     triggerMessageId: "agt_msg_1",
     requesterGroupIds: [],
+    requesterAuthorizationGroupIds: [],
     status: "cancelled",
     attempt: 0,
     createdAt: new Date("2026-01-02T03:00:00.000Z"),

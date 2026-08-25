@@ -1,7 +1,13 @@
 import { ActionRegistry } from "../actions"
 import type { ActionDefinition } from "../actions/types"
 import type { AgentDefinition } from "../agents"
-import { validateAgentGroupReferences, validateAgentToolsAtStartup } from "../agents"
+import {
+  createMainAgentDefinition,
+  MAIN_AGENT_ID,
+  type MainAgentConfig,
+  validateAgentGroupReferences,
+  validateAgentToolsAtStartup,
+} from "../agents"
 import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets/types"
 import { assertDatasetDefinition } from "../datasets/validation"
@@ -40,6 +46,8 @@ interface DefinitionOptions {
   readonly rules?: readonly RuleDefinition[]
   readonly workflows?: readonly WorkflowDefinition[]
   readonly agents?: readonly AgentDefinition[]
+  /** Framework-managed main agent. Only it receives the injected `sub_agent` tool. */
+  readonly mainAgent?: MainAgentConfig
   readonly groups?: readonly GroupDefinition[]
   readonly roles?: readonly RoleDefinition[]
   readonly membershipPolicies?: readonly MembershipPolicyDefinition[]
@@ -58,7 +66,20 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
   const actionRegistry = new ActionRegistry({ actions: options.actions ?? [], ontology })
   const registeredActionIds = new Set(actionRegistry.list().map((action) => action.id))
 
-  const agents = options.agents ?? []
+  const declaredAgents = options.agents ?? []
+  if (options.mainAgent && declaredAgents.some((agent) => agent.id === MAIN_AGENT_ID)) {
+    // Reported ahead of the generic duplicate-id error below, which would otherwise send the
+    // author looking for a second `main` definition that does not exist.
+    throw new RuntimeError(
+      `Agent id '${MAIN_AGENT_ID}' is reserved for the framework-managed main agent configured with createSixb({ mainAgent }).`
+    )
+  }
+  // Appended before validation and indexing so the injected definition travels exactly the path an
+  // authored one does — including into `SecurityRegistry`, which needs `main` in `agentIds` for
+  // `can.run(every.agent())` to resolve against it.
+  const agents = options.mainAgent
+    ? [...declaredAgents, createMainAgentDefinition(options.mainAgent)]
+    : declaredAgents
   validateAgentToolsAtStartup(agents)
   const agentsById = indexUniqueDefinitions("agent", agents)
   const connectorsById = indexUniqueDefinitions("connector", options.connectors ?? [])

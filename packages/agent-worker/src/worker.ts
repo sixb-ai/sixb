@@ -3,7 +3,9 @@ import type { AgentDefinition } from "@sixb/core"
 import {
   createAgentRunExecutionToken,
   dispatchQueuedAgentRuns,
+  MAIN_AGENT_ID,
   resolveAgentExecutionAuthorization,
+  resolveRequesterAuthorization,
   subscribeAgentRunCancel,
   workflowAgentNodeQueueJobId,
 } from "@sixb/core/internal/agents"
@@ -18,8 +20,8 @@ import { loadAgentSkills } from "./agent-skills"
 import { normalizeApiBaseUrl } from "./api-url"
 import { AgentExecutionLostError, AgentFinalizationError, AgentUsageRecordingError } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
-import { type AgentRunFailure, toAgentExecutionFailure, toAgentRunFailure } from "./failure"
-import { finishRunOrThrow } from "./finalize"
+import { type AgentRunFailure, toAgentRunFailure } from "./failure"
+import { agentRunFailureDetails, recordAgentRunFate } from "./finalize"
 import {
   enqueueAiModelCallRecovery,
   isPermanentAiUsageRecoveryError,
@@ -266,6 +268,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     }
     let environment: AgentExecutionEnvironment | null = null
     let stopOwnershipProjection: (() => void) | undefined
+    /** Sub-agent runs currently executing inside this turn, by run id → execution token. */
+    const liveChildOwnership = new Map<string, string>()
     // Watch for a user cancel (an out-of-band `/cancel` publishes to the run's control stream). Its
     // signal joins the turn's abort sources, so a cancel stops the model stream just like a shutdown.
     const cancel = await this.watchForCancel(run.id)
@@ -274,36 +278,65 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       // The queue remains the sole source of ownership timing. Persist its latest confirmed
       // expiration so the API gateway can fail closed without maintaining another heartbeat.
       stopOwnershipProjection = delivery.onLeaseRenewed((renewed) => {
-        void this.confirmExecutionOwnership(
-          context,
-          run.id,
-          executionToken,
-          renewed.leaseExpiresAt
-        ).catch((error) => {
-          if (!isExecutionGone(error)) {
-            console.error(
-              `[SixbAgentWorker] Could not project queue ownership for agent run '${run.id}'.`,
-              error
-            )
-          }
-        })
+        // Sub-agent runs execute inside this slot and hold no queue job of their own, so this
+        // delivery's lease is their liveness too. Projecting it onto them keeps their API gateway
+        // open for as long as the turn that started them.
+        for (const [ownedRunId, ownedToken] of [
+          [run.id, executionToken] as const,
+          ...liveChildOwnership,
+        ]) {
+          void this.confirmExecutionOwnership(
+            context,
+            ownedRunId,
+            ownedToken,
+            renewed.leaseExpiresAt
+          ).catch((error) => {
+            if (!isExecutionGone(error)) {
+              console.error(
+                `[SixbAgentWorker] Could not project queue ownership for agent run '${ownedRunId}'.`,
+                error
+              )
+            }
+          })
+        }
       })
       // Catch a renewal that completed between starting/reclaiming the run and attaching the
       // observer. Storage keeps this projection monotonic, so racing confirmations are safe.
       await this.confirmExecutionOwnership(context, run.id, executionToken, delivery.leaseExpiresAt)
 
       await context.streamSink.publishStarted(run)
+      const turnSignal = AbortSignal.any([signal, cancel.signal])
       environment = await createConversationAgentEnvironment({
         context: executionContext,
         agent,
         run,
         onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
+        // Only the framework-managed main agent may delegate. Withholding this from every other
+        // turn — including a sub-agent's own — is what bounds delegation depth at one.
+        ...(agent.id === MAIN_AGENT_ID
+          ? {
+              delegation: {
+                host: this.host,
+                execution: durableExecution,
+                requesterAuthorization: resolveRequesterAuthorization({
+                  execution: durableExecution,
+                  run,
+                  security: this.host.definitions.security,
+                }),
+                signal: turnSignal,
+                trackChildOwnership: (child) => {
+                  liveChildOwnership.set(child.runId, child.executionToken)
+                  return () => liveChildOwnership.delete(child.runId)
+                },
+              },
+            }
+          : {}),
       })
       await runAgentTurn({
         context: environment.turnContext,
         agent,
         run,
-        signal: AbortSignal.any([signal, cancel.signal]),
+        signal: turnSignal,
       })
     } catch (error) {
       // Queue ownership or the durable execution token was lost. Touch nothing; the current
@@ -327,13 +360,14 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       const aborted =
         !(error instanceof AgentUsageRecordingError) &&
         (signal.aborted || cancel.signal.aborted || isAbortError(error))
-      const finalized = await this.recordFate(
-        context,
+      const finalized = await recordAgentRunFate({
+        storage: context.storage.agents,
+        projectId: context.id,
         run,
         executionToken,
-        aborted ? "cancelled" : "failed",
-        error
-      )
+        status: aborted ? "cancelled" : "failed",
+        error,
+      })
       if (finalized) {
         if (finalized.run.status === "failed") {
           this.reportFailure(error, finalized.run, job.attempt, finalized.failure)
@@ -623,39 +657,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       failure,
     })
   }
-
-  private async recordFate(
-    context: AgentWorkerContext,
-    run: AgentRunRecord,
-    executionToken: string,
-    status: "failed" | "cancelled",
-    error: unknown
-  ): Promise<{ readonly run: AgentRunRecord; readonly failure: AgentRunFailure } | undefined> {
-    try {
-      const completedAt = new Date()
-      const failure = toAgentExecutionFailure(error, {
-        status,
-        at: completedAt,
-        details: agentRunFailureDetails(run),
-      })
-      const finalized = await finishRunOrThrow(context.storage.agents, {
-        projectId: context.id,
-        id: run.id,
-        executionToken,
-        status,
-        error: failure,
-        completedAt,
-      })
-      return { run: finalized, failure }
-    } catch (finalizeError) {
-      // Execution already lost / run already terminal — nothing more to record.
-      if (finalizeError instanceof AgentExecutionLostError) {
-        return undefined
-      }
-      // Storage stayed unavailable across retries: propagate so the job is redelivered, not acked.
-      throw finalizeError
-    }
-  }
 }
 
 function buildAgentContext(host: AgentWorkerHost, options: AgentWorkerOptions): AgentWorkerContext {
@@ -743,12 +744,6 @@ function aiUsageRecoveryBackoffMs(attempt: number): number {
     AI_USAGE_RECOVERY_INITIAL_BACKOFF_MS * 2 ** exponent,
     AI_USAGE_RECOVERY_MAX_BACKOFF_MS
   )
-}
-
-function agentRunFailureDetails(
-  run: Pick<AgentRunRecord, "id" | "agentId" | "threadId">
-): Readonly<Record<string, string>> {
-  return { agentId: run.agentId, runId: run.id, threadId: run.threadId }
 }
 
 function normalizeRequiredString(value: string | undefined): string {

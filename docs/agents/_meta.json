@@ -1,6 +1,7 @@
 [
   "overview.md",
   "defining-agents.md",
+  "main-agent.md",
   "running-and-streaming.md",
   "tools-and-gateway.md",
   "authorization.md"

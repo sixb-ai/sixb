@@ -36,6 +36,7 @@ export interface AgentRunRow {
   agent_id: string
   trigger_message_id: string
   requester_group_ids: string
+  requester_authorization_group_ids: string
   status: AgentRunRecord["status"]
   model_id: string | null
   finish_reason: string | null
@@ -92,6 +93,7 @@ export function rowToRunRecord(row: AgentRunRow): AgentRunRecord {
     agentId: row.agent_id,
     triggerMessageId: row.trigger_message_id,
     requesterGroupIds: JSON.parse(row.requester_group_ids) as string[],
+    requesterAuthorizationGroupIds: JSON.parse(row.requester_authorization_group_ids) as string[],
     status: row.status,
     modelId: row.model_id ?? undefined,
     finishReason: coerceAgentRunFinishReason(row.finish_reason),

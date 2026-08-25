@@ -219,6 +219,9 @@ class InMemoryAgentRunStore implements AgentRunStore {
       agentId: input.agentId,
       triggerMessageId: input.triggerMessageId,
       requesterGroupIds: normalizeRequesterGroupIds(input.requesterGroupIds),
+      requesterAuthorizationGroupIds: normalizeRequesterGroupIds(
+        input.requesterAuthorizationGroupIds
+      ),
       status: "queued",
       attempt: 0,
       createdAt,

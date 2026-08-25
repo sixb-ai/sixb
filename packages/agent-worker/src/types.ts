@@ -95,6 +95,11 @@ export interface AgentTurnContext {
    */
   readonly sandboxReady?: Promise<BashSandboxHandle>
   readonly sandboxWasUsed?: () => boolean
+  /**
+   * Surface a failure an injected tool retained because the AI SDK turned it into tool-result text.
+   * Called before the turn interprets its stream.
+   */
+  readonly assertToolsHealthy?: () => void
   readonly streamSink: StreamSink
   readonly recoverAiModelCall: RecoverAiModelCall
   readonly defaultMaxSteps: number

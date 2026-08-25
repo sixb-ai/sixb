@@ -574,6 +574,7 @@ describe("agent routes", () => {
       agentId: "assistant",
       triggerMessageId: "trigger-diagnostics",
       requesterGroupIds: [],
+      requesterAuthorizationGroupIds: [],
       execution: testExecution(executionToken),
     })
     await storage.agents.messages.append({
@@ -635,6 +636,7 @@ describe("agent routes", () => {
       agentId: "assistant",
       triggerMessageId: "msg-existing",
       requesterGroupIds: [],
+      requesterAuthorizationGroupIds: [],
       execution: testExecution(),
     })
 
@@ -845,6 +847,7 @@ describe("agent routes", () => {
       agentId: "assistant",
       triggerMessageId: "msg-user",
       requesterGroupIds: [],
+      requesterAuthorizationGroupIds: [],
       modelId: "test-model",
       execution: testExecution(),
       createdAt: new Date("2026-06-27T10:00:00.000Z"),
@@ -916,6 +919,7 @@ describe("agent routes", () => {
       agentId: "assistant",
       triggerMessageId: "msg-list-1",
       requesterGroupIds: [],
+      requesterAuthorizationGroupIds: [],
     })
     await storage.agents.runs.finishQueued({
       id: "run-list-1",
@@ -935,6 +939,7 @@ describe("agent routes", () => {
       agentId: "assistant",
       triggerMessageId: "msg-list-2",
       requesterGroupIds: [],
+      requesterAuthorizationGroupIds: [],
     })
 
     const aiUsage = storage.aiUsage
@@ -983,6 +988,7 @@ describe("agent routes", () => {
       agentId: "assistant",
       triggerMessageId: "msg-user",
       requesterGroupIds: [],
+      requesterAuthorizationGroupIds: [],
       execution: testExecution(),
     })
 
@@ -1024,6 +1030,7 @@ describe("agent routes", () => {
       agentId: "assistant",
       triggerMessageId: "msg-other",
       requesterGroupIds: [],
+      requesterAuthorizationGroupIds: [],
       execution: testExecution(),
     })
     const crossThread = await app.fetch(

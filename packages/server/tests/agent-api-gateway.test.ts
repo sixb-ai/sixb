@@ -541,6 +541,7 @@ async function createGatewayRuntime(
       agentId: "assistant",
       triggerMessageId: "msg-1",
       requesterGroupIds: ["engineering"],
+      requesterAuthorizationGroupIds: ["engineering"],
       createdAt: NOW,
     })
     await storage.agents.runs.start({

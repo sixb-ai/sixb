@@ -5397,6 +5397,7 @@ describe("AgentWorker", () => {
       agentId: "removed-agent",
       triggerMessageId,
       requesterGroupIds: ["engineering"],
+      requesterAuthorizationGroupIds: ["engineering"],
     })
     await sixb.queues.agents.enqueue({
       projectId: PROJECT_ID,

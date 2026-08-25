@@ -32,7 +32,8 @@
     "build": "bun ../../scripts/build-package.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "prepack": "bun run build"
+    "prepack": "bun run build",
+    "test:e2e": "bun ../../scripts/ci-guard.ts --stall 120 --max 600 bun test ./tests/sub-agent-tool.e2e.ts"
   },
   "sixbBuild": {
     "assets": [

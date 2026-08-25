@@ -80,6 +80,11 @@ export {
   createAgentThreadId,
 } from "./ids"
 export {
+  createMainAgentDefinition,
+  MAIN_AGENT_ID,
+  type MainAgentConfig,
+} from "./main-agent"
+export {
   AGENT_MESSAGE_CONTENT_VERSION,
   type AgentFilePart,
   type AgentMessage,
@@ -126,6 +131,13 @@ export {
   publishAgentRunFinished,
   subscribeAgentRunCancel,
 } from "./streams"
+export {
+  type RequestSubAgentRunInput,
+  type RequestSubAgentRunResult,
+  type ResolveRequesterAuthorizationInput,
+  requestSubAgentRun,
+  resolveRequesterAuthorization,
+} from "./sub-agent"
 export type {
   AgentDefinition,
   AgentLoopConfig,

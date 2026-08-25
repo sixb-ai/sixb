@@ -142,6 +142,7 @@ export async function requestAgentRun(
         agentId: agent.id,
         triggerMessageId,
         requesterGroupIds,
+        requesterAuthorizationGroupIds: runtime.authorization?.groupIds ?? [],
       })
     })
   } catch (error) {
@@ -212,6 +213,7 @@ export async function retryAgentRun(
       agentId: agent.id,
       triggerMessageId: failedRun.triggerMessageId,
       requesterGroupIds,
+      requesterAuthorizationGroupIds: runtime.authorization?.groupIds ?? [],
     })
   })
   const jobId = await dispatchAgentRun(runtime, agents, runId)
