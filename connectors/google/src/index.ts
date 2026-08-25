@@ -70,6 +70,8 @@ export type { GmailSmimeInfoResource } from "./surfaces/gmail/settings/smimeInfo
 export type { GmailThreadsResource } from "./surfaces/gmail/threads"
 export type { GmailUsersResource } from "./surfaces/gmail/users"
 export type { SheetsSurface } from "./surfaces/sheets"
+export type { SheetsDeveloperMetadataResource } from "./surfaces/sheets/developerMetadata"
+export type { SheetsSheetsResource } from "./surfaces/sheets/sheets"
 export type { SheetsSpreadsheetsResource } from "./surfaces/sheets/spreadsheets"
 export type { SheetsValuesResource } from "./surfaces/sheets/values"
 export type * from "./types"

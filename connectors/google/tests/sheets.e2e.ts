@@ -72,4 +72,12 @@ const values = await client.sheets.spreadsheets.values.get(spreadsheetId, range,
   dateTimeRenderOption: "FORMATTED_STRING",
 })
 console.log(`  ${values.values?.length ?? 0} row(s).`)
+
+console.log(`\nReading ${range} through a data filter …`)
+const filtered = await client.sheets.spreadsheets.values.batchGetByDataFilter(spreadsheetId, {
+  dataFilters: [{ a1Range: range }],
+  majorDimension: "ROWS",
+  valueRenderOption: "UNFORMATTED_VALUE",
+})
+console.log(`  ${filtered.valueRanges?.length ?? 0} matched range(s).`)
 console.log("\nE2E OK.")
