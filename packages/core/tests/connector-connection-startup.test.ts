@@ -1,12 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import {
-  col,
-  defineConnector,
-  defineDataset,
-  defineSync,
-  SixbHost,
-  type SyncDefinition,
-} from "../src"
+import { col, defineConnector, defineDataset, defineSync, SixbHost } from "../src"
 import { ConnectorService } from "../src/connectors/service"
 import { InMemoryStorage } from "../src/storage/in-memory"
 import { createHarness, encryptionKey } from "./connector-connections.fixture"
@@ -65,20 +58,13 @@ describe("connector connection startup validation", () => {
     ).not.toThrow()
   })
 
-  test("rejects OAuth sync and webhook surfaces explicitly", () => {
+  test("accepts OAuth Syncs while rejecting unrouted webhook surfaces", () => {
     const harness = createHarness()
     const dataset = defineDataset("accounts", { schema: [col("id", "string")] })
-    const staticConnector = defineConnector("static", {
-      type: "static",
-      connect() {
-        return {}
-      },
-    })
     const sync = defineSync("accounts")
-      .from(staticConnector)
+      .from(harness.connector)
       .read(() => [])
       .intoDataset(dataset)
-    const oauthSync = { ...sync, connector: harness.connector } as unknown as SyncDefinition
 
     expect(
       () =>
@@ -86,11 +72,11 @@ describe("connector connection startup validation", () => {
           ontology: [],
           connectors: [harness.connector],
           datasets: [dataset],
-          syncs: [oauthSync],
+          syncs: [sync],
           connectorConnections: { encryptionKey },
           ...createTestRuntimeDeps(),
         })
-    ).toThrow("cannot use OAuth connector")
+    ).not.toThrow()
 
     Object.defineProperty(harness.connector.adapter, "webhooks", { value: [] })
     expect(

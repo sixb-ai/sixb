@@ -658,6 +658,7 @@ export type {
   DatasetSyncTarget,
   RequestSyncRunInput,
   SyncBuilder,
+  SyncConnectorConnection,
   SyncDefinition,
   SyncMode,
   SyncReadBuilder,

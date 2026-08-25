@@ -175,7 +175,7 @@ export class SixbHost<
     })
     validateAuthStrategySecurityReferences(this.auth.getStrategy(), definitions.security)
     const connectors = definitions.connectors.list()
-    assertConnectorConnectionSurfaces(connectors, definitions.syncs.list())
+    assertConnectorConnectionSurfaces(connectors)
     const hasOAuthConnectors = connectors.some(isOAuthConnectorDefinition)
     const credentialProtector =
       hasOAuthConnectors && options.connectorConnections?.encryptionKey !== undefined
@@ -364,25 +364,13 @@ function assertWebhookRunStorage(
   }
 }
 
-function assertConnectorConnectionSurfaces(
-  connectors: readonly ConnectorDefinition[],
-  syncs: readonly SyncDefinition[]
-): void {
+function assertConnectorConnectionSurfaces(connectors: readonly ConnectorDefinition[]): void {
   for (const connector of connectors) {
     if (!isOAuthConnectorDefinition(connector)) continue
     if (connector.adapter.webhooks !== undefined) {
       throw createConnectorCodedError(
         "connector.configuration_invalid",
         `OAuth connector '${connector.id}' cannot register webhooks until connection routing is defined.`
-      )
-    }
-  }
-
-  for (const sync of syncs) {
-    if (isOAuthConnectorDefinition(sync.connector as ConnectorDefinition)) {
-      throw createConnectorCodedError(
-        "connector.configuration_invalid",
-        `Sync '${sync.id}' cannot use OAuth connector '${sync.connector.id}' until connection fan-out is defined.`
       )
     }
   }

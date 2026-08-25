@@ -1,5 +1,4 @@
 import {
-  assertJsonValue,
   type BlobStorage,
   cloneJsonValue,
   type DatasetDefinition,
@@ -8,9 +7,7 @@ import {
   getDatasetRowValidationError,
   isFileRef,
   type JsonValue,
-  type Logger,
   type MergeChange,
-  type SyncDefinition,
 } from "@sixb/core"
 import {
   captureSixbFailure,
@@ -21,13 +18,9 @@ import {
 import { resolveLoggingService } from "@sixb/core/internal/logging"
 import { type DatasetVersion, getDatasetMergeChangeValidationError } from "@sixb/core/lake-storage"
 import { SYNC_RUN_FAILURE_CODES, type SyncRunRecord } from "@sixb/core/storage"
-import { assertDatasetRow, normalizeReadResult, throwIfAborted } from "./normalize"
-import type {
-  RunSyncJobInput,
-  SyncRunFinishedHandler,
-  SyncRunResult,
-  SyncWorkerContext,
-} from "./types"
+import { assertDatasetRow, throwIfAborted } from "./normalize"
+import { readSyncValues } from "./source-read"
+import type { RunSyncJobInput, SyncRunFinishedHandler, SyncRunResult } from "./types"
 
 export class SyncRunAlreadyStartedError extends Error {
   override readonly name = "SyncRunAlreadyStartedError"
@@ -83,7 +76,10 @@ function translateSyncExecutionError(
     readonly datasetId: string
   }
 ): unknown {
-  if (isSixbError(error) && error.code === "internal.unexpected") {
+  if (
+    isSixbError(error) &&
+    (error.code === "internal.unexpected" || error.code === "sync.execution_failed")
+  ) {
     return error
   }
 
@@ -169,31 +165,6 @@ function assertMergeChange(
     )
   }
   return value as MergeChange<DatasetRow, DatasetRow>
-}
-
-async function readSyncValues(options: {
-  runtime: SyncWorkerContext
-  sync: SyncDefinition
-  signal: AbortSignal
-  blobStorage: BlobStorage
-  logger: Logger
-  previousCheckpoint: JsonValue | undefined
-  setCheckpoint(next: unknown): void
-}): Promise<AsyncIterable<unknown>> {
-  const client = await options.runtime.connector(options.sync.connector)
-  const readResult = await options.sync.read(client, {
-    projectId: options.runtime.id,
-    syncId: options.sync.id,
-    signal: options.signal,
-    blobs: options.blobStorage,
-    logger: options.logger,
-    checkpoint:
-      options.previousCheckpoint !== undefined
-        ? cloneJsonValue(options.previousCheckpoint)
-        : undefined,
-    setCheckpoint: options.setCheckpoint,
-  })
-  return normalizeReadResult(readResult, options.sync.id)
 }
 
 async function* validatedDatasetRows(options: {
@@ -355,13 +326,14 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
       readSyncValues({
         runtime,
         sync,
+        runId: job.id,
+        datasetId: dataset.id,
         signal,
         blobStorage,
         logger,
         previousCheckpoint,
         setCheckpoint(next) {
-          assertJsonValue(next, `Sync '${sync.id}' checkpoint`)
-          nextCheckpoint = cloneJsonValue(next)
+          nextCheckpoint = next === undefined ? undefined : cloneJsonValue(next)
         },
       })
     const onRead = () => {

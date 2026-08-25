@@ -46,6 +46,40 @@ The read handler receives the `client` returned by the connector's `connect()` a
 Snapshot and append handlers return rows; merge handlers return `change.upsert(...)` and
 `change.delete(...)` values. Each handler may return one value, an iterable, or an async iterable.
 
+## OAuth connector fan-out
+
+An OAuth connector may have several project connections. A Sync reads all currently connected
+accounts by default; its definition needs no selector:
+
+```ts
+export const syncSocialVideos = defineSync("sync-social-videos")
+  .from(socialConnector)
+  .read(async (social, { connection }) => {
+    const videos = await social.listVideos()
+    return videos.map((video) => ({
+      ...video,
+      sourceConnectionId: connection.id,
+      sourceAccountId: connection.account.id,
+    }))
+  })
+  .intoDataset(socialVideosDataset)
+```
+
+```text
+one Sync run
+  ├─ connection A → read
+  ├─ connection B → read
+  └─ one atomic dataset commit
+```
+
+Connections are read sequentially in stable order. If one source fails, the complete run fails and
+the previous dataset and checkpoints remain unchanged. Incremental checkpoints are isolated per
+connection and account; replacing an account starts that connection without the old cursor.
+
+For merge datasets, include connection or account identity in the primary key whenever provider
+record ids are not globally unique. With no connected account, the handler is not called and the
+run follows the normal empty-result semantics for its mode.
+
 ## Schedules
 
 Every sync declares when it runs with `.when(...)`. Call it more than once to add schedules; they
@@ -212,6 +246,7 @@ The read handler signature is `(client, context)`.
 | `context.syncId` | This sync's id |
 | `context.signal` | `AbortSignal` for cooperative cancellation |
 | `context.blobs` | Blob facade (`put`, `open`, `stat`) for file ingestion |
+| `context.connection` | Connection, slot and account metadata for OAuth-backed Syncs |
 | `context.checkpoint` | Last checkpoint value (only with `.checkpoint<T>()`) |
 | `context.setCheckpoint(next)` | Records the next checkpoint (only with `.checkpoint<T>()`) |
 

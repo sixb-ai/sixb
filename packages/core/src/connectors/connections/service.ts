@@ -161,6 +161,44 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
       )
     }
 
+    return this.connectExecutionConnection(definition, connection)
+  }
+
+  /** Snapshot the connected records that one trusted primitive execution may consume. */
+  async listExecutionConnections<TAdapter extends OAuthConnectorAdapter>(
+    definition: ConnectorDefinition<string, TAdapter>
+  ): Promise<readonly ConnectorConnectionRecord[]> {
+    this.assertOAuthRegistered(definition)
+    const connections = await withConnectorStorageBoundary(
+      "Connector connections could not be listed.",
+      () =>
+        this.connectionStorage.listConnections({
+          projectId: this.projectId,
+          connectorId: definition.id,
+        })
+    )
+    return connections
+      .filter((connection) => connection.status === "connected")
+      .sort((left, right) => left.id.localeCompare(right.id))
+  }
+
+  /** Resolve a client from an immutable connection snapshot captured for one execution. */
+  async connectExecutionConnection<TAdapter extends OAuthConnectorAdapter>(
+    definition: ConnectorDefinition<string, TAdapter>,
+    connection: ConnectorConnectionRecord
+  ): Promise<ConnectorClient<TAdapter>> {
+    this.assertOAuthRegistered(definition)
+    if (
+      connection.projectId !== this.projectId ||
+      connection.connectorId !== definition.id ||
+      connection.status !== "connected"
+    ) {
+      throw createConnectorCodedError(
+        "connector.not_found",
+        `Connector '${definition.id}' connection '${connection.id}' is not active in this project.`
+      )
+    }
+
     const authorization = await this.authorizations.requireStableActiveAuthorization(
       definition,
       connection.authorizationId

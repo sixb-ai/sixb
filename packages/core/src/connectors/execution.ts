@@ -5,8 +5,11 @@ import type { SixbRuntimeContext } from "../runtime/types"
 import { createConnectorCodedError } from "./errors"
 import type { ConnectorService } from "./service"
 import type {
+  AnyConnectorAdapter,
+  ConnectorAccountCandidate,
   ConnectorAdapter,
   ConnectorClient,
+  ConnectorConnectionOwner,
   ConnectorConnectionSelector,
   ConnectorDefinition,
   OAuthConnectorAdapter,
@@ -24,12 +27,33 @@ export interface ConnectorRuntime {
   ): Promise<ConnectorClient<TAdapter>>
 }
 
+export interface ConnectorExecutionSource<
+  TAdapter extends AnyConnectorAdapter = AnyConnectorAdapter,
+> {
+  readonly connection?: {
+    readonly id: string
+    readonly connectorId: string
+    readonly owner: ConnectorConnectionOwner
+    readonly slot: string
+    readonly account: ConnectorAccountCandidate
+  }
+  connect(): Promise<ConnectorClient<TAdapter>>
+}
+
+export interface ConnectorExecutionSourceResolver {
+  list<TAdapter extends AnyConnectorAdapter>(
+    definition: ConnectorDefinition<string, TAdapter>
+  ): Promise<readonly ConnectorExecutionSource<TAdapter>[]>
+}
+
+const sourceResolvers = new WeakMap<ConnectorRuntime, ConnectorExecutionSourceResolver>()
+
 export function createConnectorRuntime(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
   service: ConnectorService
 ): ConnectorRuntime {
-  return ((definition: ConnectorDefinition, selector?: ConnectorConnectionSelector) => {
+  const connector = ((definition: ConnectorDefinition, selector?: ConnectorConnectionSelector) => {
     if (isOAuthConnectorDefinition(definition)) {
       assertConnectorConnectionAccess(runtime, execution)
       if (!selector) {
@@ -49,6 +73,79 @@ export function createConnectorRuntime(
     assertProviderAccess(runtime, execution, "connector.connect")
     return service.connect(definition as ConnectorDefinition<string, ConnectorAdapter>)
   }) as ConnectorRuntime
+
+  registerConnectorExecutionSourceResolver(connector, {
+    async list<TAdapter extends AnyConnectorAdapter>(
+      definition: ConnectorDefinition<string, TAdapter>
+    ): Promise<readonly ConnectorExecutionSource<TAdapter>[]> {
+      if (!isOAuthConnectorDefinition(definition)) {
+        return [
+          {
+            connect: () =>
+              connector(definition as ConnectorDefinition<string, ConnectorAdapter>) as Promise<
+                ConnectorClient<TAdapter>
+              >,
+          },
+        ]
+      }
+
+      assertConnectorConnectionAccess(runtime, execution)
+      const connections = await service.listExecutionConnections(definition)
+      return connections.map((connection) => ({
+        connection: {
+          id: connection.id,
+          connectorId: connection.connectorId,
+          owner: connection.owner,
+          slot: connection.slot,
+          account: connection.account,
+        },
+        connect: () =>
+          service.connectExecutionConnection(definition, connection) as Promise<
+            ConnectorClient<TAdapter>
+          >,
+      }))
+    },
+  })
+  return connector
+}
+
+function registerConnectorExecutionSourceResolver(
+  connector: ConnectorRuntime,
+  resolver: ConnectorExecutionSourceResolver
+): void {
+  const registered = sourceResolvers.get(connector)
+  if (registered && registered !== resolver) {
+    throw new Error("[Sixb] Connector source resolver is already registered for this execution.")
+  }
+  sourceResolvers.set(connector, resolver)
+}
+
+export function getConnectorExecutionSourceResolver(
+  connector: ConnectorRuntime
+): ConnectorExecutionSourceResolver {
+  const resolver = sourceResolvers.get(connector)
+  if (resolver) return resolver
+
+  return {
+    async list<TAdapter extends AnyConnectorAdapter>(
+      definition: ConnectorDefinition<string, TAdapter>
+    ): Promise<readonly ConnectorExecutionSource<TAdapter>[]> {
+      if (isOAuthConnectorDefinition(definition)) {
+        throw createConnectorCodedError(
+          "connector.configuration_invalid",
+          `[Sixb] OAuth connector '${definition.id}' cannot be resolved without the managed connection runtime.`
+        )
+      }
+      return [
+        {
+          connect: () =>
+            connector(definition as ConnectorDefinition<string, ConnectorAdapter>) as Promise<
+              ConnectorClient<TAdapter>
+            >,
+        },
+      ]
+    },
+  }
 }
 
 function assertConnectorConnectionAccess(

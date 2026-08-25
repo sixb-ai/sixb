@@ -174,8 +174,12 @@ can.manage(socialConnector)
 // or: can.manage(every.connector())
 ```
 
-> **Current scope.** OAuth-backed sync fan-out and webhook routing remain rejected until their
-> connection routing contracts are defined.
+Syncs automatically read every connected account for an OAuth connector. The handler receives
+non-secret connection metadata through `context.connection`; no connection selector is required
+in the Sync definition. See [OAuth connector fan-out](./syncs.md#oauth-connector-fan-out).
+
+> **Current scope.** OAuth-backed webhook routing remains rejected until its connection admission
+> contract is defined.
 
 ## Protect OAuth credentials
 
