@@ -1,18 +1,19 @@
 # @sixb/connector-google
 
 A pair of typed Google clients for Sixb, built on `@sixb/connector-rest`: `google()` for Drive,
-Calendar, Gmail, and Analytics, and `googleAds()` for read-only Google Ads manager-account reporting.
+Calendar, Gmail, Sheets, and Analytics, and `googleAds()` for read-only Google Ads manager-account
+reporting.
 Like every Sixb connector they are **typed bridges** to the external system — they do not store,
 sync, parse, or project data. Datasets, syncs, and projections are wired project-side by the
 consumer.
 
-One package shares Google's three explicit authentication modes. Drive, Calendar, Gmail, and
-Analytics use one `google()` client with declarative surfaces; Google Ads has a separate
+One package shares Google's three explicit authentication modes. Drive, Calendar, Gmail, Sheets,
+and Analytics use one `google()` client with declarative surfaces; Google Ads has a separate
 `googleAds()` factory because its developer token, manager context, version lifecycle, and GAQL
 transport are distinct.
 
-Surfaces implemented: **`drive`** (v3), **`calendar`** (v3), **`gmail`** (v1), and
-**`analytics`** with **Admin** (v1beta) plus **Data** (v1beta).
+Surfaces implemented: **`drive`** (v3), **`calendar`** (v3), **`gmail`** (v1), **`sheets`** (v4),
+and **`analytics`** with **Admin** (v1beta) plus **Data** (v1beta).
 
 ## Usage
 
@@ -100,6 +101,38 @@ await client.drive.files.delete(file.id)                                    // p
 
 Writes need a write scope — `drive.file` (files the app created or opened) or full
 `drive` for arbitrary files — where the read paths above only need `drive.readonly`.
+
+### Google Sheets (v4)
+
+Sheets is exposed separately from Drive: use Drive to discover spreadsheet files, then pass the
+Drive file id as the Sheets `spreadsheetId`. `spreadsheets.get` returns workbook and sheet metadata;
+ordinary cell reads should use `spreadsheets.values.get` or `batchGet` rather than requesting full
+grid data.
+
+```ts
+const spreadsheet = await client.sheets.spreadsheets.get(fileId, {
+  fields: "spreadsheetId,properties(title),sheets(properties(sheetId,title,index))",
+})
+
+const rows = await client.sheets.spreadsheets.values.get(fileId, "Sales!A1:Z1000", {
+  majorDimension: "ROWS",
+  valueRenderOption: "UNFORMATTED_VALUE",
+  dateTimeRenderOption: "FORMATTED_STRING",
+})
+
+const ranges = await client.sheets.spreadsheets.values.batchGet(fileId, {
+  ranges: ["Sales!A:Z", "Targets!A:D"],
+  valueRenderOption: "FORMULA",
+})
+```
+
+Google omits empty trailing rows and columns from `ValueRange.values`; callers must not assume that
+the returned matrix is rectangular. The render options are passed through unchanged: formatted
+values are strings by default, while `UNFORMATTED_VALUE` can return strings, numbers, and booleans.
+
+Enable the Google Sheets API in the credential's Cloud project. Reads accept
+`spreadsheets.readonly`, `drive.readonly`, or another compatible Sheets/Drive scope. As with Drive,
+the authenticated principal must have access to the target spreadsheet.
 
 ### Calendar (v3)
 
