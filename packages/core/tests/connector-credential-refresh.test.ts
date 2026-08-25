@@ -387,7 +387,9 @@ describe("connector credential refresh", () => {
       expect(error.message).not.toContain("storage secret")
       expect(error.cause).toBeInstanceOf(AggregateError)
       if (!(error.cause instanceof AggregateError)) throw new Error("Expected aggregated causes.")
-      expect(error.cause.errors).toEqual([providerError, recoveryError])
+      expect(error.cause.errors[0]).toBe(providerError)
+      expectSixbError(error.cause.errors[1], "internal.unexpected")
+      expect((error.cause.errors[1] as Error & { cause?: unknown }).cause).toBe(recoveryError)
     } finally {
       restoreRelease()
     }

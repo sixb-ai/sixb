@@ -13,9 +13,11 @@ import {
   isConnectorStorageError,
   providerBoundaryError,
   recoverConnectorFailure,
+  storageBoundaryError,
 } from "../errors"
 import type { ConnectorAccountCandidate } from "../types"
 import { runBoundedConnectorProviderOperation } from "./provider-operation"
+import { withConnectorStorageBoundary } from "./storage-boundary"
 import { delay, positiveDuration, sameIds } from "./validation"
 
 const MUTATION_POLL_MS = 25
@@ -98,20 +100,24 @@ export class ConnectorCredentialMutationCoordinator {
     let authorization = initial
 
     while (true) {
-      const claimed = await this.storage.claimCredentialMutation({
-        projectId: this.projectId,
-        connectorId,
-        authorizationId: authorization.id,
-        expectedRevision: authorization.revision,
-        mutation: {
-          id: `ccm_${randomUUID()}`,
-          kind,
-          holderId: this.holderId,
-        },
-        ...(expectedConnectionIds === undefined ? {} : { expectedConnectionIds }),
-        leaseDurationMs: this.leaseDurationMs,
-        operationTimeoutMs: this.operationTimeoutMs,
-      })
+      const claimed = await withConnectorStorageBoundary(
+        "Connector credential mutation could not be claimed.",
+        () =>
+          this.storage.claimCredentialMutation({
+            projectId: this.projectId,
+            connectorId,
+            authorizationId: authorization.id,
+            expectedRevision: authorization.revision,
+            mutation: {
+              id: `ccm_${randomUUID()}`,
+              kind,
+              holderId: this.holderId,
+            },
+            ...(expectedConnectionIds === undefined ? {} : { expectedConnectionIds }),
+            leaseDurationMs: this.leaseDurationMs,
+            operationTimeoutMs: this.operationTimeoutMs,
+          })
+      )
       if (claimed) return { type: "claimed", claim: claimed }
 
       await delay(MUTATION_POLL_MS)
@@ -177,11 +183,15 @@ export class ConnectorCredentialMutationCoordinator {
     connectorId: string,
     authorizationId: string
   ): Promise<ConnectorAuthorizationRecord | null> {
-    return this.storage.recoverExpiredCredentialMutation({
-      projectId: this.projectId,
-      connectorId,
-      authorizationId,
-    })
+    return withConnectorStorageBoundary(
+      "Expired connector credential mutation could not be recovered.",
+      () =>
+        this.storage.recoverExpiredCredentialMutation({
+          projectId: this.projectId,
+          connectorId,
+          authorizationId,
+        })
+    )
   }
 
   async executeCredentialMutation<T>(
@@ -194,10 +204,14 @@ export class ConnectorCredentialMutationCoordinator {
         "Connector credential mutation was not claimed."
       )
     }
-    const executing = await this.storage.markCredentialMutationExecuting({
-      ...credentialMutationFence(authorization),
-      holderId: this.holderId,
-    })
+    const executing = await withConnectorStorageBoundary(
+      "Connector credential mutation could not be marked as executing.",
+      () =>
+        this.storage.markCredentialMutationExecuting({
+          ...credentialMutationFence(authorization),
+          holderId: this.holderId,
+        })
+    )
     if (!executing) throw createAmbiguousProviderOperationError()
     return this.withCredentialMutationSignal(executing, (signal) => run(executing, signal))
   }
@@ -208,15 +222,19 @@ export class ConnectorCredentialMutationCoordinator {
     input: StageConnectorCredentialMutationInput
   ): Promise<ConnectorAuthorizationRecord> {
     assertCredentialMutationOperationActive(signal)
-    const staged = await this.storage.stageCredentialMutationCredentials({
-      ...credentialMutationFence(executing),
-      holderId: this.holderId,
-      credentials: input.credentials,
-      ...(input.credentialExpiresAt === undefined
-        ? {}
-        : { credentialExpiresAt: input.credentialExpiresAt }),
-      scopes: input.scopes,
-    })
+    const staged = await withConnectorStorageBoundary(
+      "Connector credential mutation result could not be staged.",
+      () =>
+        this.storage.stageCredentialMutationCredentials({
+          ...credentialMutationFence(executing),
+          holderId: this.holderId,
+          credentials: input.credentials,
+          ...(input.credentialExpiresAt === undefined
+            ? {}
+            : { credentialExpiresAt: input.credentialExpiresAt }),
+          scopes: input.scopes,
+        })
+    )
     if (!staged) throw createAmbiguousProviderOperationError()
     return staged
   }
@@ -226,10 +244,14 @@ export class ConnectorCredentialMutationCoordinator {
     signal: AbortSignal
   ): Promise<ConnectorAuthorizationRecord> {
     assertCredentialMutationOperationActive(signal)
-    const staged = await this.storage.stageCredentialMutationRevocation({
-      ...credentialMutationFence(executing),
-      holderId: this.holderId,
-    })
+    const staged = await withConnectorStorageBoundary(
+      "Connector revocation result could not be staged.",
+      () =>
+        this.storage.stageCredentialMutationRevocation({
+          ...credentialMutationFence(executing),
+          holderId: this.holderId,
+        })
+    )
     if (!staged) throw createAmbiguousProviderOperationError()
     return staged
   }
@@ -254,9 +276,15 @@ export class ConnectorCredentialMutationCoordinator {
     const fence = credentialMutationFence(authorization)
     let finalized: ConnectorAuthorizationRecord | null
     if (mutation.kind === "refresh") {
-      finalized = await this.storage.finalizeRefresh(fence)
+      finalized = await withConnectorStorageBoundary(
+        "Connector credential refresh could not be finalized.",
+        () => this.storage.finalizeRefresh(fence)
+      )
     } else if (mutation.kind === "revocation") {
-      finalized = await this.storage.finalizeRevocation(fence)
+      finalized = await withConnectorStorageBoundary(
+        "Connector credential revocation could not be finalized.",
+        () => this.storage.finalizeRevocation(fence)
+      )
     } else {
       const staged = mutation.stagedCredentials
       if (!staged) {
@@ -293,7 +321,10 @@ export class ConnectorCredentialMutationCoordinator {
             { cause: error }
           )
         }
-        throw error
+        throw storageBoundaryError(
+          error,
+          "Connector credential reauthorization could not be finalized."
+        )
       }
     }
     if (finalized) return finalized
@@ -310,15 +341,22 @@ export class ConnectorCredentialMutationCoordinator {
     authorization: ConnectorAuthorizationRecord
   ): Promise<ConnectorAuthorizationRecord | null> {
     if (!authorization.credentialMutation) return null
-    return this.storage.markNeedsReauthorization(credentialMutationFence(authorization))
+    return withConnectorStorageBoundary(
+      "Connector authorization could not be marked for reauthorization.",
+      () => this.storage.markNeedsReauthorization(credentialMutationFence(authorization))
+    )
   }
 
   async releaseCredentialMutation(authorization: ConnectorAuthorizationRecord): Promise<boolean> {
     if (!authorization.credentialMutation) return false
-    return this.storage.releaseCredentialMutation({
-      ...credentialMutationFence(authorization),
-      holderId: this.holderId,
-    })
+    return withConnectorStorageBoundary(
+      "Connector credential mutation could not be released.",
+      () =>
+        this.storage.releaseCredentialMutation({
+          ...credentialMutationFence(authorization),
+          holderId: this.holderId,
+        })
+    )
   }
 
   async requireStableActiveAuthorization(
@@ -358,11 +396,15 @@ export class ConnectorCredentialMutationCoordinator {
     expectedConnectionIds: readonly string[]
   ): Promise<void> {
     const attachedIds = (
-      await this.storage.listConnectionsByAuthorization({
-        projectId: this.projectId,
-        connectorId,
-        authorizationId,
-      })
+      await withConnectorStorageBoundary(
+        "Connector authorization connections could not be read.",
+        () =>
+          this.storage.listConnectionsByAuthorization({
+            projectId: this.projectId,
+            connectorId,
+            authorizationId,
+          })
+      )
     ).map((connection) => connection.id)
     if (!sameIds(attachedIds, expectedConnectionIds)) {
       throw createConnectorCodedError(
@@ -457,11 +499,15 @@ export class ConnectorCredentialMutationCoordinator {
     connectorId: string,
     authorizationId: string
   ): Promise<ConnectorAuthorizationRecord> {
-    const authorization = await this.storage.getAuthorization({
-      projectId: this.projectId,
-      connectorId,
-      authorizationId,
-    })
+    const authorization = await withConnectorStorageBoundary(
+      "Connector authorization could not be read.",
+      () =>
+        this.storage.getAuthorization({
+          projectId: this.projectId,
+          connectorId,
+          authorizationId,
+        })
+    )
     if (!authorization) {
       throw createConnectorCodedError(
         "connector.not_found",

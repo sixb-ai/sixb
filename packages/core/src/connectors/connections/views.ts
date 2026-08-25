@@ -25,6 +25,13 @@ export function connectorConnectionView(
     owner: connection.owner,
     slot: connection.slot,
     account: connection.account,
-    status,
+    status:
+      connection.status === "disconnected" ||
+      status === "revoked" ||
+      status === "revocation_pending"
+        ? "disconnected"
+        : status === "active"
+          ? "connected"
+          : "needs_reauthorization",
   }
 }

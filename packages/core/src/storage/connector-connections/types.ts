@@ -80,7 +80,8 @@ export interface ConnectorAuthorizationRecord {
   readonly projectId: string
   readonly connectorId: string
   readonly authorizedBy: AuthorizablePrincipal
-  readonly credentials: SealedConnectorCredential
+  /** Removed after provider revocation is confirmed. */
+  readonly credentials?: SealedConnectorCredential
   readonly credentialExpiresAt?: Date
   readonly scopes: readonly string[]
   readonly accounts: readonly ConnectorAccountCandidate[]
@@ -181,12 +182,16 @@ export interface FinalizeConnectorReauthorizationInput extends ConnectorCredenti
   readonly accounts: readonly ConnectorAccountCandidate[]
 }
 
+export type ConnectorConnectionStatus = "connected" | "disconnected"
+
 export interface ConnectorConnectionRecord extends ConnectorConnectionSelector {
   readonly id: string
   readonly projectId: string
   readonly connectorId: string
   readonly authorizationId: string
   readonly account: ConnectorAccountCandidate
+  readonly status: ConnectorConnectionStatus
+  readonly disconnectedAt?: Date
   readonly createdAt: Date
   readonly updatedAt: Date
 }
@@ -203,11 +208,25 @@ export interface PutConnectorConnectionInput extends ConnectorConnectionSelector
 export interface PutConnectorConnectionResult {
   readonly connection: ConnectorConnectionRecord
   readonly authorization: ConnectorAuthorizationRecord
+  /** Previous grant made unreachable by this atomic slot replacement. */
+  readonly revocationPendingAuthorizationId?: string
   readonly created: boolean
   readonly replaced: boolean
 }
 
+export interface DisconnectConnectorConnectionResult {
+  readonly connection: ConnectorConnectionRecord
+  readonly authorization: ConnectorAuthorizationRecord
+  /** Present when disconnecting this record removed the grant's last connected usage. */
+  readonly revocationPendingAuthorizationId?: string
+}
+
 export interface GetConnectorConnectionInput extends ConnectorConnectionSelector {
+  readonly projectId: string
+  readonly connectorId: string
+}
+
+export interface ListConnectorConnectionsInput {
   readonly projectId: string
   readonly connectorId: string
 }
@@ -244,6 +263,9 @@ export interface ConnectorConnectionStorage {
     input: InitializeConnectorAuthorizationAccountsInput
   ): Promise<ConnectorAuthorizationRecord | null>
   getAuthorization(input: ConnectorAuthorizationKey): Promise<ConnectorAuthorizationRecord | null>
+  getAuthorizationByConnectionId(
+    input: ConnectorConnectionKey
+  ): Promise<ConnectorAuthorizationRecord | null>
   claimCredentialMutation(
     input: ClaimConnectorCredentialMutationInput
   ): Promise<ClaimConnectorCredentialMutationResult | null>
@@ -284,8 +306,15 @@ export interface ConnectorConnectionStorage {
   putConnection(input: PutConnectorConnectionInput): Promise<PutConnectorConnectionResult>
   getConnection(input: GetConnectorConnectionInput): Promise<ConnectorConnectionRecord | null>
   getConnectionById(input: ConnectorConnectionKey): Promise<ConnectorConnectionRecord | null>
+  /** Lists durable connection identities, including disconnected records. */
+  listConnections(
+    input: ListConnectorConnectionsInput
+  ): Promise<readonly ConnectorConnectionRecord[]>
+  /** Lists only connections currently attached to the authorization. */
   listConnectionsByAuthorization(
     input: ConnectorAuthorizationKey
   ): Promise<readonly ConnectorConnectionRecord[]>
-  disconnectConnection(input: ConnectorConnectionKey): Promise<ConnectorConnectionRecord | null>
+  disconnectConnection(
+    input: ConnectorConnectionKey
+  ): Promise<DisconnectConnectorConnectionResult | null>
 }

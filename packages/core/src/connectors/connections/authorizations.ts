@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { AuthorizationError } from "../../authorization"
+import { isSixbError } from "../../errors/internal"
 import type { AuthorizablePrincipal } from "../../execution"
 import type {
   ConnectorAuthorizationRecord,
@@ -33,6 +34,7 @@ import type {
   PrepareConnectorReauthorizationInput,
   PreparedConnectorReauthorization,
 } from "./request"
+import { withConnectorStorageBoundary } from "./storage-boundary"
 import { ConnectorTokenAccess } from "./tokens"
 import { positiveDuration, validateAccounts, validateCredentials } from "./validation"
 
@@ -137,11 +139,15 @@ export class DefaultConnectorAuthorizationLifecycle implements ConnectorAuthoriz
       )
     }
     assertConnectorAuthorizationActor(authorization, input.principal)
-    const connections = await this.storage.listConnectionsByAuthorization({
-      projectId: this.projectId,
-      connectorId: input.definition.id,
-      authorizationId: authorization.id,
-    })
+    const connections = await withConnectorStorageBoundary(
+      "Connector authorization connections could not be read.",
+      () =>
+        this.storage.listConnectionsByAuthorization({
+          projectId: this.projectId,
+          connectorId: input.definition.id,
+          authorizationId: authorization.id,
+        })
+    )
     return { authorization, connections }
   }
 
@@ -185,19 +191,30 @@ export class DefaultConnectorAuthorizationLifecycle implements ConnectorAuthoriz
     try {
       accounts = await this.discoverAccounts(input.definition, credentials)
     } catch (error) {
-      throw providerBoundaryError(
+      const discoveryError = providerBoundaryError(
         error,
         "connector.provider_failed",
-        "Connector account discovery failed; the pending authorization will expire without selection."
+        "Connector account discovery failed; the unused authorization is being revoked."
       )
+      await this.revokeAbandonedAuthorization(
+        input.definition,
+        authorizationId,
+        input.principal,
+        discoveryError
+      )
+      throw discoveryError
     }
-    const initialized = await this.storage.initializeAuthorizationAccounts({
-      projectId: this.projectId,
-      connectorId: input.definition.id,
-      authorizationId,
-      expectedRevision: pending.revision,
-      accounts,
-    })
+    const initialized = await withConnectorStorageBoundary(
+      "Connector authorization accounts could not be persisted.",
+      () =>
+        this.storage.initializeAuthorizationAccounts({
+          projectId: this.projectId,
+          connectorId: input.definition.id,
+          authorizationId,
+          expectedRevision: pending.revision,
+          accounts,
+        })
+    )
     if (!initialized) {
       throw createConnectorCodedError(
         "connector.operation_conflict",
@@ -221,92 +238,30 @@ export class DefaultConnectorAuthorizationLifecycle implements ConnectorAuthoriz
   ): Promise<ConnectorAuthorizationRevocation> {
     this.assertRegistered(input.definition)
     return this.mutations.runLocallySerialized(input.authorizationId, async () => {
-      let authorization = await this.requireAuthorization(
+      const authorization = await this.requireAuthorization(
         input.definition.id,
         input.authorizationId
       )
       assertConnectorAuthorizationActor(authorization, input.principal)
-      if (authorization.status === "revoked") return { disconnected: [] }
+      return this.revokeAuthorizationRecord(input.definition, authorization)
+    })
+  }
 
-      authorization = await this.mutations.prepareAuthorizationForMutation(
-        input.definition.id,
-        authorization,
-        "revocation"
-      )
-      if (authorization.status === "revoked") return { disconnected: [] }
-
-      const claimOutcome = await this.mutations.claimCredentialMutation(
-        input.definition.id,
-        authorization,
-        "revocation"
-      )
-      if (claimOutcome.type === "superseded") return { disconnected: [] }
-      const { claim } = claimOutcome
-
-      let credentials: ConnectorOAuthCredentials | undefined
-      if (input.definition.adapter.authentication.revoke) {
-        try {
-          credentials = await this.credentials.open(
-            input.definition.id,
-            claim.authorization.id,
-            claim.authorization.credentials
-          )
-        } catch (error) {
-          await recoverConnectorFailure(
-            error,
-            "Connector credential mutation could not be released after credential decryption failed.",
-            () => this.mutations.releaseCredentialMutation(claim.authorization)
-          )
-          throw createConnectorCodedError(
-            "connector.credentials_unavailable",
-            "Connector revocation is pending, but stored credentials could not be opened.",
-            { cause: error }
-          )
-        }
-      }
-
-      try {
-        await this.mutations.executeCredentialMutation(
-          claim.authorization,
-          async (executing, signal) => {
-            if (input.definition.adapter.authentication.revoke && credentials) {
-              await input.definition.adapter.authentication.revoke(
-                this.adapterContext(input.definition.id, signal),
-                credentials
-              )
-            }
-            return this.mutations.stageCredentialMutationRevocation(executing, signal)
-          }
-        )
-      } catch (error) {
-        const latest = await recoverConnectorFailure(
-          error,
-          "Connector revocation outcome could not be recovered from storage.",
-          () => this.requireAuthorization(input.definition.id, input.authorizationId)
-        )
-        if (this.mutations.isStagedMutation(latest, claim.authorization, "revocation")) {
-          await recoverConnectorFailure(
-            error,
-            "Staged connector revocation could not be finalized during recovery.",
-            () => this.mutations.finalizeStagedMutation(latest)
-          )
-          return { disconnected: claim.disconnected }
-        }
-        await recoverConnectorFailure(
-          error,
-          "Connector revocation mutation could not be released for retry.",
-          () => this.mutations.releaseCredentialMutation(claim.authorization)
-        )
+  /** Continues cleanup only after storage has already fenced the authorization from new usage. */
+  async continuePendingRevocation(
+    definition: OAuthConnectorDefinition,
+    authorizationId: string
+  ): Promise<ConnectorAuthorizationRevocation> {
+    this.assertRegistered(definition)
+    return this.mutations.runLocallySerialized(authorizationId, async () => {
+      const authorization = await this.requireAuthorization(definition.id, authorizationId)
+      if (authorization.status !== "revocation_pending" && authorization.status !== "revoked") {
         throw createConnectorCodedError(
-          "connector.revocation_pending",
-          "Connector revocation is pending; provider revocation can be retried safely.",
-          { cause: error }
+          "internal.unexpected",
+          "Connector cleanup requires an authorization already pending revocation."
         )
       }
-
-      const staged = await this.requireAuthorization(input.definition.id, input.authorizationId)
-      await this.mutations.finalizeStagedMutation(staged)
-      return { disconnected: claim.disconnected }
+      return this.revokeAuthorizationRecord(definition, authorization)
     })
   }
 
@@ -330,11 +285,15 @@ export class DefaultConnectorAuthorizationLifecycle implements ConnectorAuthoriz
     connectorId: string,
     authorizationId: string
   ): Promise<ConnectorAuthorizationRecord> {
-    const authorization = await this.storage.getAuthorization({
-      projectId: this.projectId,
-      connectorId,
-      authorizationId,
-    })
+    const authorization = await withConnectorStorageBoundary(
+      "Connector authorization could not be read.",
+      () =>
+        this.storage.getAuthorization({
+          projectId: this.projectId,
+          connectorId,
+          authorizationId,
+        })
+    )
     if (!authorization) {
       throw createConnectorCodedError(
         "connector.not_found",
@@ -342,6 +301,122 @@ export class DefaultConnectorAuthorizationLifecycle implements ConnectorAuthoriz
       )
     }
     return authorization
+  }
+
+  private async revokeAuthorizationRecord(
+    definition: OAuthConnectorDefinition,
+    initial: ConnectorAuthorizationRecord
+  ): Promise<ConnectorAuthorizationRevocation> {
+    if (initial.status === "revoked") return { disconnected: [] }
+
+    const authorization = await this.mutations.prepareAuthorizationForMutation(
+      definition.id,
+      initial,
+      "revocation"
+    )
+    if (authorization.status === "revoked") return { disconnected: [] }
+
+    const claimOutcome = await this.mutations.claimCredentialMutation(
+      definition.id,
+      authorization,
+      "revocation"
+    )
+    if (claimOutcome.type === "superseded") return { disconnected: [] }
+    const { claim } = claimOutcome
+
+    let credentials: ConnectorOAuthCredentials | undefined
+    if (definition.adapter.authentication.revoke) {
+      try {
+        if (!claim.authorization.credentials) {
+          throw createConnectorCodedError(
+            "connector.credentials_unavailable",
+            "Stored connector credentials are unavailable."
+          )
+        }
+        credentials = await this.credentials.open(
+          definition.id,
+          claim.authorization.id,
+          claim.authorization.credentials
+        )
+      } catch (error) {
+        await recoverConnectorFailure(
+          error,
+          "Connector credential mutation could not be released after credential decryption failed.",
+          () => this.mutations.releaseCredentialMutation(claim.authorization)
+        )
+        throw createConnectorCodedError(
+          "connector.credentials_unavailable",
+          "Connector revocation is pending, but stored credentials could not be opened.",
+          { cause: error }
+        )
+      }
+    }
+
+    try {
+      await this.mutations.executeCredentialMutation(
+        claim.authorization,
+        async (executing, signal) => {
+          if (definition.adapter.authentication.revoke && credentials) {
+            await definition.adapter.authentication.revoke(
+              this.adapterContext(definition.id, signal),
+              credentials
+            )
+          }
+          return this.mutations.stageCredentialMutationRevocation(executing, signal)
+        }
+      )
+    } catch (error) {
+      const latest = await recoverConnectorFailure(
+        error,
+        "Connector revocation outcome could not be recovered from storage.",
+        () => this.requireAuthorization(definition.id, authorization.id)
+      )
+      if (this.mutations.isStagedMutation(latest, claim.authorization, "revocation")) {
+        await recoverConnectorFailure(
+          error,
+          "Staged connector revocation could not be finalized during recovery.",
+          () => this.mutations.finalizeStagedMutation(latest)
+        )
+        return { disconnected: claim.disconnected }
+      }
+      await recoverConnectorFailure(
+        error,
+        "Connector revocation mutation could not be released for retry.",
+        () => this.mutations.releaseCredentialMutation(claim.authorization)
+      )
+      throw createConnectorCodedError(
+        "connector.revocation_pending",
+        "Connector revocation is pending; provider revocation can be retried safely.",
+        { cause: error }
+      )
+    }
+
+    const staged = await this.requireAuthorization(definition.id, authorization.id)
+    await this.mutations.finalizeStagedMutation(staged)
+    return { disconnected: claim.disconnected }
+  }
+
+  private async revokeAbandonedAuthorization(
+    definition: OAuthConnectorDefinition,
+    authorizationId: string,
+    principal: AuthorizablePrincipal,
+    primaryError: unknown
+  ): Promise<void> {
+    try {
+      await this.revokeAuthorization({ definition, authorizationId, principal })
+    } catch (cleanupError) {
+      if (isSixbError(cleanupError) && cleanupError.code === "connector.revocation_pending") return
+      throw createConnectorCodedError(
+        "internal.unexpected",
+        "Unused connector credentials could not be scheduled for revocation.",
+        {
+          cause: new AggregateError(
+            [primaryError, cleanupError],
+            "Connector authorization failed and cleanup could not be secured."
+          ),
+        }
+      )
+    }
   }
 
   private async completeReauthorizationMutation(
