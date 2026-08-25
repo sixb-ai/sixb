@@ -20,7 +20,13 @@ import {
  * name here, a base URL in `google.ts`, its typed resources, and one wiring
  * line in `client.ts` — the auth and HTTP core below never change.
  */
-export type GoogleSurface = "drive" | "calendar" | "gmail" | "analyticsAdmin" | "analyticsData"
+export type GoogleSurface =
+  | "drive"
+  | "calendar"
+  | "gmail"
+  | "sheets"
+  | "analyticsAdmin"
+  | "analyticsData"
 
 export interface GoogleHttpClients {
   /** JSON API clients, keyed by surface. */

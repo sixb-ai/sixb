@@ -1,3 +1,18 @@
+export type { GoogleAdsClient, GoogleAdsCustomerScope } from "./ads/client"
+export {
+  DEFAULT_GOOGLE_ADS_API_VERSION,
+  GOOGLE_ADS_SCOPE,
+  type GoogleAdsConnector,
+  googleAds,
+} from "./ads/connector"
+export {
+  GoogleAdsApiError,
+  GoogleAdsConfigurationError,
+  GoogleAdsProtocolError,
+} from "./ads/errors"
+export type { GoogleAdsCustomersResource } from "./ads/resources/customers"
+export type { GoogleAdsReportsResource } from "./ads/resources/reports"
+export type * from "./ads/types"
 export type { GoogleAuthOptions, ServiceAccountKey, TokenSource } from "./auth"
 export { createTokenSource } from "./auth"
 export type {
@@ -54,4 +69,9 @@ export type { GmailSendAsResource } from "./surfaces/gmail/settings/sendAs"
 export type { GmailSmimeInfoResource } from "./surfaces/gmail/settings/smimeInfo"
 export type { GmailThreadsResource } from "./surfaces/gmail/threads"
 export type { GmailUsersResource } from "./surfaces/gmail/users"
+export type { SheetsSurface } from "./surfaces/sheets"
+export type { SheetsDeveloperMetadataResource } from "./surfaces/sheets/developerMetadata"
+export type { SheetsSheetsResource } from "./surfaces/sheets/sheets"
+export type { SheetsSpreadsheetsResource } from "./surfaces/sheets/spreadsheets"
+export type { SheetsValuesResource } from "./surfaces/sheets/values"
 export type * from "./types"

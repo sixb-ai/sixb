@@ -14,6 +14,7 @@ const BASE_URLS = {
   drive: "https://www.googleapis.com/drive/v3/",
   calendar: "https://www.googleapis.com/calendar/v3/",
   gmail: "https://gmail.googleapis.com/gmail/v1/",
+  sheets: "https://sheets.googleapis.com/v4/",
   analyticsAdmin: "https://analyticsadmin.googleapis.com/v1beta/",
   analyticsData: "https://analyticsdata.googleapis.com/v1beta/",
 } as const satisfies Record<GoogleSurface, string>

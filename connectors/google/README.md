@@ -1,15 +1,19 @@
 # @sixb/connector-google
 
-A typed Google Workspace client for Sixb, built on `@sixb/connector-rest`. Like every Sixb
-connector it is a **typed bridge** to the external system — it does not store, sync, parse, or
-project data. Datasets, syncs, and projections are wired project-side by the consumer.
+A pair of typed Google clients for Sixb, built on `@sixb/connector-rest`: `google()` for Drive,
+Calendar, Gmail, Sheets, and Analytics, and `googleAds()` for read-only Google Ads manager-account
+reporting.
+Like every Sixb connector they are **typed bridges** to the external system — they do not store,
+sync, parse, or project data. Datasets, syncs, and projections are wired project-side by the
+consumer.
 
-One package spans Google's many APIs: auth and HTTP conventions live in a shared core, and each
-API is a **surface** of declarative typed resources. Adding a surface (e.g. `meet`, `calendar`)
-costs a base-URL entry, its resources, and one wiring line — the auth/HTTP core never changes.
+One package shares Google's three explicit authentication modes. Drive, Calendar, Gmail, Sheets,
+and Analytics use one `google()` client with declarative surfaces; Google Ads has a separate
+`googleAds()` factory because its developer token, manager context, version lifecycle, and GAQL
+transport are distinct.
 
-Surfaces implemented: **`drive`** (v3), **`calendar`** (v3), **`gmail`** (v1), and
-**`analytics`** with **Admin** (v1beta) plus **Data** (v1beta).
+Surfaces implemented: **`drive`** (v3), **`calendar`** (v3), **`gmail`** (v1), **`sheets`** (v4),
+and **`analytics`** with **Admin** (v1beta) plus **Data** (v1beta).
 
 ## Usage
 
@@ -97,6 +101,66 @@ await client.drive.files.delete(file.id)                                    // p
 
 Writes need a write scope — `drive.file` (files the app created or opened) or full
 `drive` for arbitrary files — where the read paths above only need `drive.readonly`.
+
+### Google Sheets (v4)
+
+Sheets is exposed separately from Drive: use Drive to discover spreadsheet files, then pass the
+Drive file id as the Sheets `spreadsheetId`. The complete v4 REST surface is available: spreadsheet
+creation and structural batch updates, values reads and writes, data-filter variants, developer
+metadata, and cross-spreadsheet sheet copies.
+
+```ts
+const spreadsheet = await client.sheets.spreadsheets.get(fileId, {
+  fields: "spreadsheetId,properties(title),sheets(properties(sheetId,title,index))",
+})
+
+const rows = await client.sheets.spreadsheets.values.get(fileId, "Sales!A1:Z1000", {
+  majorDimension: "ROWS",
+  valueRenderOption: "UNFORMATTED_VALUE",
+  dateTimeRenderOption: "FORMATTED_STRING",
+})
+
+const ranges = await client.sheets.spreadsheets.values.batchGet(fileId, {
+  ranges: ["Sales!A:Z", "Targets!A:D"],
+  valueRenderOption: "FORMULA",
+})
+
+await client.sheets.spreadsheets.values.update(
+  fileId,
+  "Sales!A2:C2",
+  { values: [["Widget", 12, 1250.5]] },
+  { valueInputOption: "USER_ENTERED" },
+)
+
+await client.sheets.spreadsheets.values.append(
+  fileId,
+  "Sales!A:C",
+  { values: [["Gadget", 8, 640]] },
+  { valueInputOption: "RAW", insertDataOption: "INSERT_ROWS" },
+)
+
+await client.sheets.spreadsheets.batchUpdate(fileId, {
+  requests: [{ addSheet: { properties: { title: "Forecast" } } }],
+})
+
+const tagged = await client.sheets.spreadsheets.values.batchGetByDataFilter(fileId, {
+  dataFilters: [{ developerMetadataLookup: { metadataKey: "region" } }],
+})
+```
+
+Google omits empty trailing rows and columns from `ValueRange.values`; callers must not assume that
+the returned matrix is rectangular. The render options are passed through unchanged: formatted
+values are strings by default, while `UNFORMATTED_VALUE` can return strings, numbers, and booleans.
+
+`spreadsheets.values.batchUpdate` changes cell values; `spreadsheets.batchUpdate` applies structural
+and formatting operations atomically. Mutations are single-attempt so an automatic retry cannot
+duplicate an append, copy, or structural operation. Read-only `POST` methods such as
+`getByDataFilter` remain retryable.
+
+Enable the Google Sheets API in the credential's Cloud project. Reads accept
+`spreadsheets.readonly`, `drive.readonly`, or another compatible Sheets/Drive scope. Writes need
+`spreadsheets`, `drive.file`, or another compatible write scope. As with Drive, the authenticated
+principal must have access to the target spreadsheet.
 
 ### Calendar (v3)
 
@@ -249,6 +313,144 @@ Use `https://www.googleapis.com/auth/analytics.readonly` for account/property di
 reads. Admin mutations require `https://www.googleapis.com/auth/analytics.edit`. A service account
 must also be granted access inside Google Analytics (directly or through a group); assigning Google
 Cloud IAM roles alone does not make Analytics accounts visible to it.
+
+## Google Ads manager reporting
+
+Google Ads supports service accounts directly. Add the service account email as a user of the
+Google Ads manager account (MCC); for reporting, grant it the **Read-only** Google Ads role. Do not
+set `subject`: Google Ads does not require Google Workspace domain-wide delegation for this flow.
+
+Every request needs a developer token from the API Center. The connector also requires the manager
+account ID as `loginCustomerId` and sends it on calls routed through the MCC; `listAccessible()` is
+the exception because Google explicitly ignores that header there. The operating customer ID in
+`client.customer(...)` is deliberately separate: the former establishes the MCC access path, while
+the latter selects the advertiser whose data is queried.
+
+```ts
+import { defineConnector } from "@sixb/core"
+import { GOOGLE_ADS_SCOPE, googleAds } from "@sixb/connector-google"
+
+export const googleAdsConnector = defineConnector(
+  "google-ads",
+  googleAds({
+    auth: {
+      serviceAccountKey: process.env.GOOGLE_SERVICE_ACCOUNT_JSON!,
+      scopes: [GOOGLE_ADS_SCOPE],
+    },
+    developerToken: process.env.GOOGLE_ADS_DEVELOPER_TOKEN!,
+    // UI form with hyphens is accepted and normalized before it reaches Google.
+    loginCustomerId: "123-456-7890",
+  })
+)
+```
+
+The Google Ads OAuth scope is `https://www.googleapis.com/auth/adwords`; Google provides no
+read-only variant, so least privilege comes from the service account's Google Ads role.
+
+### Discover clients, then query each advertiser
+
+`listAccessible()` only reports accounts granted **directly** to the authenticated identity. If the
+service account was invited only to the MCC, that usually means the MCC itself. `listManaged()`
+instead runs the documented `customer_client` GAQL query on the configured manager and yields its
+enabled, non-manager descendants at every depth.
+
+Google Ads does not aggregate child metrics on a manager. Query every advertiser ID separately:
+
+```ts
+const ads = await googleAdsConnector.adapter.connect(ctx)
+
+console.log(await ads.customers.listAccessible()) // e.g. ["customers/1234567890"]
+
+for await (const account of ads.customers.listManaged()) {
+  for await (const row of ads.customer(account.id).reports.customerDaily({
+    startDate: "2026-08-01",
+    endDate: "2026-08-23",
+  })) {
+    // int64 values stay strings: impressions, clicks, interactions, costMicros,
+    // viewThroughConversions, IDs.
+    // conversions and conversion values are fractional-capable numbers.
+    console.log(account.currencyCode, row.segments.date, row.metrics.costMicros)
+  }
+}
+```
+
+The built-in report's row grain is `(customer, date)` and it selects additive measures:
+impressions, clicks, interactions, cost micros, conversions, conversion value, all conversions,
+all conversion value, and view-through conversions. Google omits dates where every selected metric
+is zero. Derive CTR/CPC/CVR/ROAS after aggregation instead of summing rates. Costs are denominated
+in each account's `currencyCode`; never add them across currencies without conversion. Dates follow
+the advertiser's `timeZone`. Google can revise recent conversion data, so downstream syncs should
+upsert by `(customerId, date)` and re-read an overlap window rather than treating daily results as
+append-only.
+
+### Raw GAQL
+
+The customer-scoped reporting resource stays close to Google's wire API:
+
+```ts
+type CampaignRow = {
+  readonly campaign?: { readonly id?: string; readonly name?: string }
+  readonly segments?: { readonly date?: string }
+  readonly metrics?: { readonly impressions?: string; readonly costMicros?: string }
+}
+
+const reports = ads.customer("9876543210").reports
+
+for await (const row of reports.searchAll<CampaignRow>({
+  query: `SELECT
+    campaign.id,
+    campaign.name,
+    segments.date,
+    metrics.impressions,
+    metrics.cost_micros
+  FROM campaign
+  WHERE segments.date DURING LAST_30_DAYS`,
+})) {
+  // One row per campaign/date because selecting a segment changes the result grain.
+}
+
+const firstPage = await reports.search({
+  query: "SELECT campaign.id, campaign.name FROM campaign ORDER BY campaign.id",
+  searchSettings: { returnTotalResultsCount: true },
+})
+
+const batches = await reports.searchStream({
+  query: "SELECT campaign.id, campaign.name FROM campaign ORDER BY campaign.id",
+})
+```
+
+`search()` follows Google's fixed 10,000-row pages; `pageSize` is rejected locally because v25
+returns `PAGE_SIZE_NOT_SUPPORTED`. `searchAll()` follows page tokens, keeps the GAQL identical, and
+detects repeated tokens. Use `search()` when response metadata such as `totalResultsCount`,
+`summaryRow`, or `queryResourceConsumption` matters. REST `searchStream()` mirrors Google's raw
+JSON array of batches; because JSON parsing buffers that array, prefer paginated `searchAll()` for
+memory-bounded processing.
+
+The default endpoint is `/v25` (minor v25.x releases update that endpoint in place). Override
+`apiVersion` deliberately when upgrading major versions; v25 is scheduled to sunset in August
+2027. IDs may be passed with or without UI hyphens, and `customers/1234567890` resource names from
+`listAccessible()` can be passed directly to `customer()`. `GoogleAdsApiError` exposes `status`,
+`requestId`, granular `failures`/`errors`, response headers, and the original response body. Reads
+retry network errors, `429`, and `5xx` twice by default. `GoogleAdsProtocolError` identifies a
+malformed successful response instead of letting it escape under a trusted wire type. Use
+`minDelayMs` and bounded workflow concurrency for the dynamic per-customer and per-developer-token
+QPS limits.
+
+For a credentialed smoke test covering direct grants, MCC discovery, Search, SearchStream, and the
+daily report, follow the environment setup at the top of `tests/ads.e2e.ts` and run it directly with
+Bun. It is intentionally excluded from the unit suite.
+
+Official references:
+
+- [Service-account workflow](https://developers.google.com/google-ads/api/docs/oauth/service-accounts)
+- [REST authentication and required headers](https://developers.google.com/google-ads/api/rest/auth)
+- [Account discovery and MCC hierarchy](https://developers.google.com/google-ads/api/docs/account-management/listing-accounts)
+- [Search and SearchStream](https://developers.google.com/google-ads/api/rest/common/search)
+- [REST JSON mappings](https://developers.google.com/google-ads/api/rest/design/json-mappings)
+- [Google Ads API error details](https://developers.google.com/google-ads/api/docs/best-practices/understand-api-errors)
+- [Zero-metric reporting behavior](https://developers.google.com/google-ads/api/docs/reporting/zero-metrics)
+- [Google Ads API versioning and sunset dates](https://developers.google.com/google-ads/api/docs/concepts/versioning)
+- [Quotas and rate limits](https://developers.google.com/google-ads/api/docs/best-practices/quotas)
 
 ## Auth
 
