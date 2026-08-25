@@ -13,12 +13,18 @@ export {
   type SyncRunDispatcherDependencies,
   type SyncRunDispatchPort,
 } from "./run-dispatch"
+export {
+  resolveSyncConnectorSources,
+  type SyncConnectorSource,
+  type SyncConnectorSourceResolver,
+} from "./sources"
 export type {
   BatchSyncConfig,
   BatchSyncDefinitionConfig,
   DatasetSyncTarget,
   SyncBlobContext,
   SyncBuilder,
+  SyncConnectorConnection,
   SyncDefinition,
   SyncMode,
   SyncReadBuilder,

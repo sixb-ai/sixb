@@ -5,6 +5,7 @@ import {
   bindDurablePrimitiveExecution,
   type PrimitiveExecutionHost,
 } from "@sixb/core/internal/primitive-execution"
+import { resolveSyncConnectorSources } from "@sixb/core/internal/syncs"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
@@ -227,6 +228,8 @@ function buildSyncContext(
     logging: host.logging,
     syncs: host.definitions.syncs,
     datasets: host.definitions.datasets,
-    connector: sixb.connector,
+    connectorSources: {
+      list: (definition) => resolveSyncConnectorSources(sixb.connector, definition),
+    },
   }
 }

@@ -4,9 +4,6 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type {
   BlobStorage,
-  ConnectorAdapter,
-  ConnectorClient,
-  ConnectorDefinition,
   DatasetDefinition,
   DatasetRow,
   FileRef,
@@ -23,6 +20,7 @@ import {
   InMemoryLakeStorage,
   InMemoryStorage,
 } from "@sixb/core"
+import type { SyncConnectorSourceResolver } from "@sixb/core/internal/syncs"
 import type { BeginDatasetWriteInput, LakeWriteSession } from "@sixb/core/lake-storage"
 import type { ExecutionStorage, SyncRunRecord, SyncRunStorage } from "@sixb/core/storage"
 import { LocalLakeStorage } from "@sixb/lake-local"
@@ -99,6 +97,19 @@ function createRuntime(options: {
   const blobStorage = options.blobStorage ?? new InMemoryBlobStorage()
   const client = options.client ?? {}
 
+  const connectorSources: SyncConnectorSourceResolver = {
+    async list() {
+      return [
+        {
+          async connect() {
+            await options.onConnect?.()
+            return client
+          },
+        },
+      ] as never
+    },
+  }
+
   return {
     id: "project-1",
     syncRunsStorage,
@@ -114,12 +125,7 @@ function createRuntime(options: {
         return syncId === options.sync.id ? options.sync : null
       },
     },
-    async connector<TAdapter extends ConnectorAdapter>(
-      _definition: ConnectorDefinition<string, TAdapter>
-    ): Promise<ConnectorClient<TAdapter>> {
-      await options.onConnect?.()
-      return client as ConnectorClient<TAdapter>
-    },
+    connectorSources,
   }
 }
 

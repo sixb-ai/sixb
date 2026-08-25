@@ -1,9 +1,13 @@
 import type { BlobStorage } from "../blob-storage"
 import {
+  type AnyConnectorAdapter,
+  type ConnectorAccountCandidate,
   type ConnectorAdapter,
   type ConnectorClient,
+  type ConnectorConnectionOwner,
   type ConnectorDefinition,
   isConnectorDefinition,
+  type OAuthConnectorAdapter,
 } from "../connectors"
 import type { DatasetDefinition, DatasetPrimaryKey, MergeChange } from "../datasets"
 import { isDatasetDefinition } from "../datasets"
@@ -14,8 +18,25 @@ import { isScheduleReference } from "../schedules"
 /** Blob operations available to sync read handlers. */
 export type SyncBlobContext = Pick<BlobStorage, "put" | "open" | "stat">
 
+/** Non-secret connector connection metadata available to OAuth-backed Sync handlers. */
+export interface SyncConnectorConnection {
+  readonly id: string
+  readonly connectorId: string
+  readonly owner: ConnectorConnectionOwner
+  readonly slot: string
+  readonly account: ConnectorAccountCandidate
+}
+
+type SyncConnectionContext<TAdapter extends AnyConnectorAdapter> =
+  TAdapter extends OAuthConnectorAdapter
+    ? { readonly connection: SyncConnectorConnection }
+    : { readonly connection?: undefined }
+
 /** Context passed to a sync read handler. */
-export type SyncReadContext<TCheckpoint = never> = {
+export type SyncReadContext<
+  TCheckpoint = never,
+  TAdapter extends AnyConnectorAdapter = ConnectorAdapter,
+> = {
   readonly projectId: string
   readonly syncId: string
   readonly signal: AbortSignal
@@ -26,7 +47,8 @@ export type SyncReadContext<TCheckpoint = never> = {
   : {
       readonly checkpoint?: TCheckpoint
       setCheckpoint(next: TCheckpoint): void
-    })
+    }) &
+  SyncConnectionContext<TAdapter>
 
 export type SyncMode = "snapshot" | "append" | "merge"
 
@@ -66,13 +88,13 @@ export interface DatasetSyncTarget {
  * they author a sync.
  */
 export type SyncReadHandler<
-  TAdapter extends ConnectorAdapter,
+  TAdapter extends AnyConnectorAdapter,
   TCheckpoint = never,
   TMode extends SyncMode = SyncMode,
 > = {
   bivarianceHack(
     client: ConnectorClient<TAdapter>,
-    context: SyncReadContext<TCheckpoint>
+    context: SyncReadContext<TCheckpoint, TAdapter>
   ): SyncReadResult<TMode> | Promise<SyncReadResult<TMode>>
 }["bivarianceHack"]
 
@@ -84,9 +106,9 @@ export type SyncReadHandler<
  */
 export interface SyncDefinition<
   TId extends string = string,
-  TConnector extends ConnectorDefinition<string, ConnectorAdapter> = ConnectorDefinition<
+  TConnector extends ConnectorDefinition<string, AnyConnectorAdapter> = ConnectorDefinition<
     string,
-    ConnectorAdapter
+    AnyConnectorAdapter
   >,
   TCheckpoint = unknown,
   TMode extends SyncMode = SyncMode,
@@ -102,9 +124,9 @@ export interface SyncDefinition<
 
 export interface SyncTargetBuilder<
   TId extends string = string,
-  TConnector extends ConnectorDefinition<string, ConnectorAdapter> = ConnectorDefinition<
+  TConnector extends ConnectorDefinition<string, AnyConnectorAdapter> = ConnectorDefinition<
     string,
-    ConnectorAdapter
+    AnyConnectorAdapter
   >,
   TCheckpoint = never,
   TMode extends SyncMode = SyncMode,
@@ -118,9 +140,9 @@ export interface SyncTargetBuilder<
 
 export interface SyncReadBuilder<
   TId extends string = string,
-  TConnector extends ConnectorDefinition<string, ConnectorAdapter> = ConnectorDefinition<
+  TConnector extends ConnectorDefinition<string, AnyConnectorAdapter> = ConnectorDefinition<
     string,
-    ConnectorAdapter
+    AnyConnectorAdapter
   >,
   TCheckpoint = never,
   TMode extends SyncMode = SyncMode,
@@ -137,7 +159,7 @@ export interface SyncBuilder<
 > {
   when(schedule: ScheduleDefinition): SyncBuilder<TId, TCheckpoint, TMode>
   checkpoint<TNextCheckpoint>(): SyncBuilder<TId, TNextCheckpoint, TMode>
-  from<TConnector extends ConnectorDefinition<string, ConnectorAdapter>>(
+  from<TConnector extends ConnectorDefinition<string, AnyConnectorAdapter>>(
     connector: TConnector
   ): SyncReadBuilder<TId, TConnector, TCheckpoint, TMode>
 }

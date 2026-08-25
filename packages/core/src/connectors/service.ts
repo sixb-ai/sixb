@@ -1,3 +1,4 @@
+import type { ConnectorConnectionRecord } from "../storage"
 import type { ConnectorConnectionProcess } from "./connections/contracts"
 import {
   ConnectorConnectionService,
@@ -74,6 +75,19 @@ export class ConnectorService {
     selector: ConnectorConnectionSelector
   ): Promise<ConnectorClient<TAdapter>> {
     return this.requireConnections().connectConnection(definition, selector)
+  }
+
+  listExecutionConnections<TAdapter extends OAuthConnectorAdapter>(
+    definition: ConnectorDefinition<string, TAdapter>
+  ): Promise<readonly ConnectorConnectionRecord[]> {
+    return this.requireConnections().listExecutionConnections(definition)
+  }
+
+  connectExecutionConnection<TAdapter extends OAuthConnectorAdapter>(
+    definition: ConnectorDefinition<string, TAdapter>,
+    connection: ConnectorConnectionRecord
+  ): Promise<ConnectorClient<TAdapter>> {
+    return this.requireConnections().connectExecutionConnection(definition, connection)
   }
 
   get connectionProcess(): ConnectorConnectionProcess | undefined {

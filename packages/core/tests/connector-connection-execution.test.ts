@@ -5,7 +5,8 @@ import { ConnectorService } from "../src/connectors/service"
 import { createTrustedPrimitiveRuntimeAuthorization } from "../src/execution/authorization"
 import { bindDurablePrimitiveExecution } from "../src/execution/primitive"
 import type { SixbRuntimeContext } from "../src/runtime/types"
-import { createTestActionExecution } from "../src/testing"
+import { resolveSyncConnectorSources } from "../src/syncs/sources"
+import { createTestActionExecution, createTestSyncExecution } from "../src/testing"
 import {
   callbackUrl,
   createHarness,
@@ -108,5 +109,76 @@ describe("connector connection execution boundary", () => {
     expect(() =>
       request.connector(harness.connector, { owner: projectOwner, slot: "social" })
     ).toThrow(AuthorizationError)
+  })
+
+  test("resolves every connected account for one trusted Sync execution", async () => {
+    const harness = createHarness()
+    const dependencies = createTestRuntimeDeps()
+    await seedConnectorActors(dependencies.storage, "default", new Date("2026-08-19T12:00:00.000Z"))
+    const management = requireConnectionProcess(
+      new ConnectorService("default", [harness.connector], {
+        storage: dependencies.storage,
+        credentialProtector: harness.protector,
+      })
+    )
+    const command = managementCommand("session-a", { projectId: "default" })
+
+    const started = await management.startAuthorization(command, harness.connector.id, {
+      owner: projectOwner,
+      slot: "brand-a",
+      redirectUri: callbackUrl,
+    })
+    const state = new URL(started.authorizationUrl).searchParams.get("state")!
+    const authorization = await management.completeAuthorization(command, harness.connector.id, {
+      state,
+      code: "authorization-code",
+      redirectUri: callbackUrl,
+    })
+    const first = await management.selectAccount(command, harness.connector.id, {
+      authorizationId: authorization.authorizationId,
+      accountId: "account-a",
+      owner: projectOwner,
+      slot: "brand-a",
+    })
+    const second = await management.selectAccount(command, harness.connector.id, {
+      authorizationId: authorization.authorizationId,
+      accountId: "account-b",
+      owner: projectOwner,
+      slot: "brand-b",
+    })
+    const host = new SixbHost({
+      ontology: [],
+      connectors: [harness.connector],
+      connectorConnections: { encryptionKey },
+      ...dependencies,
+    })
+    const primitive = { kind: "sync" as const, id: "sync-social", runId: "run-social" }
+    const executionId = await createTestSyncExecution(dependencies.storage.executions, {
+      projectId: "default",
+      syncId: primitive.id,
+      runId: primitive.runId,
+    })
+    const execution = await dependencies.storage.executions.getById({
+      projectId: "default",
+      id: executionId,
+    })
+    if (!execution) throw new Error("Expected the Sync execution fixture.")
+    const trusted = bindDurablePrimitiveExecution(host, { execution, primitive }).sixb
+
+    const sources = await resolveSyncConnectorSources(trusted.connector, harness.connector)
+    expect(sources.map((source) => source.connection?.id)).toEqual(
+      [first.id, second.id].sort((left, right) => left.localeCompare(right))
+    )
+    const clients = await Promise.all(sources.map((source) => source.connect()))
+    expect(clients.map((client) => client.accountId).sort()).toEqual(["account-a", "account-b"])
+
+    await management.disconnect(command, harness.connector.id, first.id)
+    const remaining = await resolveSyncConnectorSources(trusted.connector, harness.connector)
+    expect(remaining.map((source) => source.connection?.id)).toEqual([second.id])
+
+    const request = host.withScope(managementScope("session-a", { projectId: "default" }).scope)
+    await expect(resolveSyncConnectorSources(request.connector, harness.connector)).rejects.toThrow(
+      AuthorizationError
+    )
   })
 })

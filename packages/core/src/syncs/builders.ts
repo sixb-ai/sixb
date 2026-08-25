@@ -1,4 +1,4 @@
-import type { ConnectorAdapter, ConnectorDefinition } from "../connectors"
+import type { AnyConnectorAdapter, ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets"
 import type { ScheduleDefinition, ScheduleReference } from "../schedules"
 import { isScheduleDefinition } from "../schedules"
@@ -82,7 +82,7 @@ export function defineSync<TId extends string>(
       checkpoint<TNextCheckpoint>(): SyncBuilder<TId, TNextCheckpoint, SyncMode> {
         return createBuilder<TNextCheckpoint>()
       },
-      from<TConnector extends ConnectorDefinition<string, ConnectorAdapter>>(
+      from<TConnector extends ConnectorDefinition<string, AnyConnectorAdapter>>(
         connector: TConnector
       ): SyncReadBuilder<TId, TConnector, TCheckpoint, SyncMode> {
         return {
