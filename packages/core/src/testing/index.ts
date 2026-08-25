@@ -25,6 +25,11 @@ export {
   runBrokerContractSuite,
 } from "./broker-contract"
 export {
+  type ConnectorConnectionStorageContractStorage,
+  type ConnectorConnectionStorageContractSuiteOptions,
+  runConnectorConnectionStorageContractSuite,
+} from "./connector-connection-storage-contract"
+export {
   type EffectiveStorageContractSuiteOptions,
   runEffectiveStorageContractSuite,
 } from "./effective-storage-contract"

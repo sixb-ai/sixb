@@ -5,7 +5,7 @@ import type { SixbAuthConfig } from "../auth"
 import type { BlobStorage } from "../blob-storage"
 import { discoverOntologySources, discoverProjectDefinitions } from "../bootstrap"
 import type { Broker } from "../broker"
-import type { ConnectorDefinition } from "../connectors/types"
+import type { ConnectorConnectionOptions, ConnectorDefinition } from "../connectors/types"
 import type { DatasetDefinition } from "../datasets"
 import type { SixbErrorHandler } from "../error-reporting/types"
 import type { LakeStorage } from "../lake-storage"
@@ -48,6 +48,8 @@ export interface CreateSixbOptions {
   datasets?: readonly DatasetDefinition[]
   /** Connector definitions to register in addition to auto-discovered `connectors/` exports. */
   connectors?: readonly ConnectorDefinition[]
+  /** Required to protect OAuth credentials when connector connection storage is durable. */
+  connectorConnections?: ConnectorConnectionOptions
   schedules?: readonly ScheduleDefinition[]
   syncs?: readonly SyncDefinition[]
   pipelines?: readonly PipelineDefinition[]
@@ -105,6 +107,7 @@ export async function createSixb(
     actions: [...(options.actions ?? []), ...definitions.actions],
     datasets: [...(options.datasets ?? []), ...definitions.datasets],
     connectors: [...(options.connectors ?? []), ...definitions.connectors],
+    connectorConnections: options.connectorConnections,
     schedules: [...(options.schedules ?? []), ...definitions.schedules],
     syncs: [...(options.syncs ?? []), ...definitions.syncs],
     pipelines: [...(options.pipelines ?? []), ...definitions.pipelines],

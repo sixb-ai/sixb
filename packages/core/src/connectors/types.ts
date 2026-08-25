@@ -20,10 +20,119 @@ export interface ConnectorContext {
  */
 export interface ConnectorAdapter<TType extends string = string, TClient = unknown> {
   readonly type: TType
+  readonly authentication?: never
   readonly webhooks?: readonly WebhookDefinition<unknown, TClient>[]
   connect(context: ConnectorContext): Promise<TClient> | TClient
   disconnect?(client: TClient): Promise<void> | void
 }
+
+/** One OAuth token set normalized by an OAuth connector adapter. */
+export interface ConnectorOAuthCredentials {
+  readonly accessToken: string
+  readonly refreshToken?: string
+  readonly tokenType?: string
+  readonly scopes?: readonly string[]
+  readonly expiresAt?: Date
+}
+
+/** Public, non-secret account information returned for framework-owned selection UI. */
+export interface ConnectorAccountCandidate {
+  readonly id: string
+  readonly label: string
+  readonly description?: string
+  readonly avatarUrl?: string
+}
+
+/** V1 intentionally supports project-owned connector connections only. */
+export interface ProjectConnectorConnectionOwner {
+  readonly type: "project"
+}
+
+export type ConnectorConnectionOwner = ProjectConnectorConnectionOwner
+
+/** Stable application-defined lookup key for one connector connection. */
+export interface ConnectorConnectionSelector {
+  readonly owner: ConnectorConnectionOwner
+  readonly slot: string
+}
+
+/** Credential protection required when an OAuth connector uses durable connection storage. */
+export interface ConnectorConnectionOptions {
+  /** Canonical base64url encoding of exactly 32 random bytes, shared by storage replicas. */
+  readonly encryptionKey: string
+}
+
+export interface OAuthConnectorAuthorizationContext extends ConnectorContext {
+  readonly redirectUri: string
+}
+
+export interface OAuthConnectorAuthorizationUrlInput {
+  readonly state: string
+  readonly codeChallenge: string
+  readonly codeChallengeMethod: "S256"
+}
+
+export interface OAuthConnectorCodeExchangeInput {
+  readonly code: string
+  readonly codeVerifier: string
+}
+
+export interface ConnectorConnectionClientContext extends ConnectorContext {
+  readonly connectionId: string
+  readonly account: ConnectorAccountCandidate
+  readonly tokenSource: ConnectorTokenSource
+}
+
+/** One delivered token, bound to the credential revision that produced it. */
+export interface ConnectorAccessToken {
+  readonly accessToken: string
+  readonly tokenType?: string
+  /** Report this exact token as rejected so Sixb can refresh only its credential revision. */
+  invalidate(): void
+}
+
+/** Live credential source owned by Sixb. Adapters must resolve a token for each request. */
+export interface ConnectorTokenSource {
+  get(): Promise<ConnectorAccessToken>
+}
+
+/**
+ * OAuth-backed connector adapter. Sixb owns persistence, OAuth state, refresh coordination and UI;
+ * the adapter owns provider protocol details and typed client creation.
+ */
+export interface ConnectorOAuth2Authentication {
+  readonly type: "oauth2"
+  authorizationUrl(
+    context: OAuthConnectorAuthorizationContext,
+    input: OAuthConnectorAuthorizationUrlInput
+  ): Promise<string | URL> | string | URL
+  exchangeCode(
+    context: OAuthConnectorAuthorizationContext,
+    input: OAuthConnectorCodeExchangeInput
+  ): Promise<ConnectorOAuthCredentials> | ConnectorOAuthCredentials
+  refresh(
+    context: ConnectorContext,
+    credentials: ConnectorOAuthCredentials
+  ): Promise<ConnectorOAuthCredentials> | ConnectorOAuthCredentials
+  /**
+   * Revokes the grant idempotently. An already revoked or invalid grant must resolve successfully
+   * so Sixb can converge after losing an earlier provider response.
+   */
+  revoke?(context: ConnectorContext, credentials: ConnectorOAuthCredentials): Promise<void> | void
+}
+
+export interface OAuthConnectorAdapter<TType extends string = string, TClient = unknown> {
+  readonly type: TType
+  readonly authentication: ConnectorOAuth2Authentication
+  readonly webhooks?: undefined
+  discoverAccounts(
+    context: ConnectorContext,
+    credentials: ConnectorOAuthCredentials
+  ): Promise<readonly ConnectorAccountCandidate[]> | readonly ConnectorAccountCandidate[]
+  connect(context: ConnectorConnectionClientContext): Promise<TClient> | TClient
+}
+
+export type AnyConnectorAdapter = ConnectorAdapter | OAuthConnectorAdapter
 
 /**
  * Inert connector definition registered with Sixb.
@@ -33,30 +142,63 @@ export interface ConnectorAdapter<TType extends string = string, TClient = unkno
  */
 export interface ConnectorDefinition<
   TId extends string = string,
-  TAdapter extends ConnectorAdapter = ConnectorAdapter,
+  TAdapter extends AnyConnectorAdapter = AnyConnectorAdapter,
 > {
   readonly kind: "connector"
   readonly id: TId
   readonly adapter: TAdapter
 }
 
+export type StaticConnectorDefinition = ConnectorDefinition<string, ConnectorAdapter>
+
 /** Infer the connected client type returned by a connector adapter. */
-export type ConnectorClient<TAdapter extends ConnectorAdapter> = Awaited<
+export type ConnectorClient<TAdapter extends AnyConnectorAdapter> = Awaited<
   ReturnType<TAdapter["connect"]>
 >
+
+export function isOAuthConnectorAdapter(
+  value: AnyConnectorAdapter
+): value is OAuthConnectorAdapter {
+  return "authentication" in value && value.authentication?.type === "oauth2"
+}
+
+export function isOAuthConnectorDefinition(
+  value: ConnectorDefinition
+): value is ConnectorDefinition<string, OAuthConnectorAdapter> {
+  return isOAuthConnectorAdapter(value.adapter)
+}
+
+export function isStaticConnectorDefinition(
+  value: ConnectorDefinition
+): value is StaticConnectorDefinition {
+  return !isOAuthConnectorDefinition(value)
+}
 
 export function isConnectorDefinition(value: unknown): value is ConnectorDefinition {
   if (!isRecord(value)) {
     return false
   }
 
-  return (
+  const adapter = value.adapter
+  if (
     value.kind === "connector" &&
     typeof value.id === "string" &&
-    isRecord(value.adapter) &&
-    typeof value.adapter.type === "string" &&
-    typeof value.adapter.connect === "function"
-  )
+    isRecord(adapter) &&
+    typeof adapter.type === "string" &&
+    typeof adapter.connect === "function"
+  ) {
+    if (adapter.authentication === undefined) return true
+    const authentication = adapter.authentication
+    if (!isRecord(authentication) || authentication.type !== "oauth2") return false
+    return (
+      typeof authentication.authorizationUrl === "function" &&
+      typeof authentication.exchangeCode === "function" &&
+      typeof authentication.refresh === "function" &&
+      typeof adapter.discoverAccounts === "function"
+    )
+  }
+
+  return false
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

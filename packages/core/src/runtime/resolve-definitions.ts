@@ -137,6 +137,7 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
     syncIds: new Set(syncsById.keys()),
     pipelineIds: new Set(pipelinesById.keys()),
     agentIds: new Set(agentsById.keys()),
+    connectorIds: new Set(connectorsById.keys()),
     getSubTypes: (objectTypeId) => ontology.listSubTypes(objectTypeId),
   })
   validateAgentGroupReferences(agents, security)

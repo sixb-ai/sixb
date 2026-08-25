@@ -84,7 +84,10 @@ export type SyncReadHandler<
  */
 export interface SyncDefinition<
   TId extends string = string,
-  TConnector extends ConnectorDefinition = ConnectorDefinition,
+  TConnector extends ConnectorDefinition<string, ConnectorAdapter> = ConnectorDefinition<
+    string,
+    ConnectorAdapter
+  >,
   TCheckpoint = unknown,
   TMode extends SyncMode = SyncMode,
 > {
@@ -99,7 +102,10 @@ export interface SyncDefinition<
 
 export interface SyncTargetBuilder<
   TId extends string = string,
-  TConnector extends ConnectorDefinition = ConnectorDefinition,
+  TConnector extends ConnectorDefinition<string, ConnectorAdapter> = ConnectorDefinition<
+    string,
+    ConnectorAdapter
+  >,
   TCheckpoint = never,
   TMode extends SyncMode = SyncMode,
 > {
@@ -112,7 +118,10 @@ export interface SyncTargetBuilder<
 
 export interface SyncReadBuilder<
   TId extends string = string,
-  TConnector extends ConnectorDefinition = ConnectorDefinition,
+  TConnector extends ConnectorDefinition<string, ConnectorAdapter> = ConnectorDefinition<
+    string,
+    ConnectorAdapter
+  >,
   TCheckpoint = never,
   TMode extends SyncMode = SyncMode,
 > {
@@ -128,7 +137,7 @@ export interface SyncBuilder<
 > {
   when(schedule: ScheduleDefinition): SyncBuilder<TId, TCheckpoint, TMode>
   checkpoint<TNextCheckpoint>(): SyncBuilder<TId, TNextCheckpoint, TMode>
-  from<TConnector extends ConnectorDefinition>(
+  from<TConnector extends ConnectorDefinition<string, ConnectorAdapter>>(
     connector: TConnector
   ): SyncReadBuilder<TId, TConnector, TCheckpoint, TMode>
 }

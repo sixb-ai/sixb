@@ -33,6 +33,7 @@ export type AuthzRequest =
   | { readonly kind: "pipeline.run"; readonly pipelineId: string }
   | { readonly kind: "agent.run"; readonly agentId: string }
   | { readonly kind: "logs.observe" }
+  | { readonly kind: "connector.manage"; readonly connectorId: string }
   | { readonly kind: "object.query"; readonly touchedObjectTypeIds: readonly string[] }
 
 export interface AuthzDecision {
@@ -81,6 +82,8 @@ function atomsFor(request: AuthzRequest): readonly Atom[] {
       return [{ kind: "run:agent", id: request.agentId }]
     case "logs.observe":
       return [{ kind: "observe:logs", id: "logs" }]
+    case "connector.manage":
+      return [{ kind: "manage:connector", id: request.connectorId }]
     case "object.query":
       return request.touchedObjectTypeIds.map((id) => ({ kind: "view:object", id }))
   }
@@ -173,6 +176,11 @@ export function assertCanAppendTelemetry(runtime: AuthorizedRuntime, objectTypeI
   assertAuthorized(runtime, { kind: "telemetry.append", objectTypeId })
 }
 
+/** Assert a principal may manage lifecycle state for this connector definition. */
+export function assertCanManageConnector(runtime: AuthorizedRuntime, connectorId: string): void {
+  assertAuthorized(runtime, { kind: "connector.manage", connectorId })
+}
+
 /**
  * Fail closed for operations that have no grant semantics yet.
  *
@@ -255,6 +263,8 @@ function deniedMessage(
       return `[Sixb] Principal '${principalId}' is not allowed to run agent '${request.agentId}'.`
     case "logs.observe":
       return `[Sixb] Principal '${principalId}' is not allowed to observe project logs.`
+    case "connector.manage":
+      return `[Sixb] Principal '${principalId}' is not allowed to manage connector '${request.connectorId}'.`
     case "object.query": {
       // Name the first touched type the principal cannot view.
       const blocked = request.touchedObjectTypeIds.find(
