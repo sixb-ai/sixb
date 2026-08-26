@@ -1,32 +1,32 @@
 import {
   type QueryClient,
-  queryOptions,
   type UseMutationOptions,
   type UseMutationResult,
-  type UseQueryOptions,
-  type UseQueryResult,
   useMutation,
-  useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
-import { useSixbProviderClient } from "./client-provider"
+import { useSixbProviderClient } from "../client-provider"
 import {
   getConnectorConnectionRunQueryKey,
   listConnectorConnectionsQueryKey,
-} from "./generated/@tanstack/react-query.gen"
-import type { Client } from "./generated/client"
+} from "../generated/@tanstack/react-query.gen"
+import type { Client } from "../generated/client"
 import {
   addConnectorConnection,
-  getConnectorConnectionRun,
+  disconnectConnectorConnection,
+  reauthorizeConnectorConnection,
+  revokeConnectorConnection,
   selectConnectorConnectionRunAccount,
   startConnectorConnectionRun,
-} from "./generated/sdk.gen"
+} from "../generated/sdk.gen"
 import type {
   AddConnectorConnectionResponse,
-  GetConnectorConnectionRunResponse,
+  DisconnectConnectorConnectionResponse,
+  ReauthorizeConnectorConnectionResponse,
+  RevokeConnectorConnectionResponse,
   SelectConnectorConnectionRunAccountResponse,
   StartConnectorConnectionRunResponse,
-} from "./generated/types.gen"
+} from "../generated/types.gen"
 
 export interface AddConnectorConnectionOptions<TContext = unknown>
   extends Omit<
@@ -145,70 +145,6 @@ export function useConnectConnector<TContext = unknown>(
   )
 }
 
-export type ConnectorConnectionRunQueryKey = ReturnType<typeof getConnectorConnectionRunQueryKey>
-
-export interface ConnectorConnectionRunOptions
-  extends Omit<
-    UseQueryOptions<
-      GetConnectorConnectionRunResponse,
-      Error,
-      GetConnectorConnectionRunResponse,
-      ConnectorConnectionRunQueryKey
-    >,
-    "queryKey" | "queryFn"
-  > {
-  readonly connectorId: string
-  /** A missing callback query parameter disables the query. */
-  readonly runId: string | null | undefined
-  /** hey-api client override. Defaults to the nearest SixbProvider client, then the global client. */
-  readonly client?: Client
-}
-
-export function connectorConnectionRunQueryOptions(options: ConnectorConnectionRunOptions) {
-  const { connectorId, runId, client, ...queryOptionsInput } = options
-  const normalizedRunId = optionalNonblank(runId, "runId")
-  const path = {
-    connectorId: nonblank(connectorId, "connectorId"),
-    runId: normalizedRunId ?? "",
-  }
-  const queryKey = getConnectorConnectionRunQueryKey({ path })
-
-  return queryOptions<
-    GetConnectorConnectionRunResponse,
-    Error,
-    GetConnectorConnectionRunResponse,
-    ConnectorConnectionRunQueryKey
-  >({
-    ...queryOptionsInput,
-    enabled: normalizedRunId === undefined ? false : queryOptionsInput.enabled,
-    queryKey,
-    queryFn: async ({ signal }) => {
-      if (normalizedRunId === undefined) {
-        throw new Error("[SixbClient] runId is required to read a connector connection run.")
-      }
-      const { data } = await getConnectorConnectionRun<true>({
-        client,
-        path,
-        signal,
-        throwOnError: true,
-      })
-      return data
-    },
-  })
-}
-
-export function useConnectorConnectionRun(
-  options: ConnectorConnectionRunOptions
-): UseQueryResult<GetConnectorConnectionRunResponse, Error> {
-  const providerClient = useSixbProviderClient()
-  return useQuery(
-    connectorConnectionRunQueryOptions({
-      ...options,
-      client: options.client ?? providerClient,
-    })
-  )
-}
-
 export interface SelectConnectorAccountInput {
   readonly accountId: string
   readonly replace?: boolean
@@ -241,17 +177,19 @@ export function selectConnectorAccountMutationOptions<TContext = unknown>(
   TContext
 > {
   const { connectorId, runId, client, queryClient, onSuccess, ...mutationOptions } = options
-  const path = {
-    connectorId: nonblank(connectorId, "connectorId"),
+  const normalizedConnectorId = nonblank(connectorId, "connectorId")
+  const path = () => ({
+    connectorId: normalizedConnectorId,
     runId: nonblank(runId, "runId"),
-  }
+  })
 
   return {
     ...mutationOptions,
     mutationFn: async ({ accountId, replace }) => {
+      const resolvedPath = path()
       const { data } = await selectConnectorConnectionRunAccount<true>({
         client,
-        path,
+        path: resolvedPath,
         body: {
           accountId: nonblank(accountId, "accountId"),
           ...(replace === undefined ? {} : { replace }),
@@ -261,14 +199,9 @@ export function selectConnectorAccountMutationOptions<TContext = unknown>(
       return data
     },
     onSuccess: async (run, variables, context, mutation) => {
-      if (queryClient) {
-        queryClient.setQueryData(getConnectorConnectionRunQueryKey({ path }), run)
-        await queryClient.invalidateQueries({
-          queryKey: listConnectorConnectionsQueryKey({
-            path: { connectorId: path.connectorId },
-          }),
-        })
-      }
+      const resolvedPath = path()
+      queryClient?.setQueryData(getConnectorConnectionRunQueryKey({ path: resolvedPath }), run)
+      await invalidateConnectorConnections(queryClient, resolvedPath.connectorId)
       await onSuccess?.(run, variables, context, mutation)
     },
   }
@@ -293,17 +226,163 @@ export function useSelectConnectorAccount<TContext = unknown>(
   )
 }
 
+interface ConnectorConnectionMutationOptions<TResponse, TContext>
+  extends Omit<UseMutationOptions<TResponse, Error, void, TContext>, "mutationFn"> {
+  readonly connectorId: string
+  readonly connectionId: string
+  /** hey-api client override. Defaults to the nearest SixbProvider client, then the global client. */
+  readonly client?: Client
+  /** Override used by tests and non-hook option factory consumers. */
+  readonly queryClient?: QueryClient
+}
+
+export type DisconnectConnectorOptions<TContext = unknown> = ConnectorConnectionMutationOptions<
+  DisconnectConnectorConnectionResponse,
+  TContext
+>
+
+export function disconnectConnectorMutationOptions<TContext = unknown>(
+  options: DisconnectConnectorOptions<TContext>
+): UseMutationOptions<DisconnectConnectorConnectionResponse, Error, void, TContext> {
+  const { connectorId, connectionId, client, queryClient, onSuccess, ...mutationOptions } = options
+  const normalizedConnectorId = nonblank(connectorId, "connectorId")
+  const path = () => ({
+    connectorId: normalizedConnectorId,
+    connectionId: nonblank(connectionId, "connectionId"),
+  })
+
+  return {
+    ...mutationOptions,
+    mutationFn: async () => {
+      const resolvedPath = path()
+      const { data } = await disconnectConnectorConnection<true>({
+        client,
+        path: resolvedPath,
+        throwOnError: true,
+      })
+      return data
+    },
+    onSuccess: async (result, variables, context, mutation) => {
+      await invalidateConnectorConnections(queryClient, normalizedConnectorId)
+      await onSuccess?.(result, variables, context, mutation)
+    },
+  }
+}
+
+export function useDisconnectConnector<TContext = unknown>(
+  options: DisconnectConnectorOptions<TContext>
+): UseMutationResult<DisconnectConnectorConnectionResponse, Error, void, TContext> {
+  const providerClient = useSixbProviderClient()
+  const queryClient = useQueryClient()
+  return useMutation(
+    disconnectConnectorMutationOptions({
+      ...options,
+      client: options.client ?? providerClient,
+      queryClient: options.queryClient ?? queryClient,
+    })
+  )
+}
+
+export type RevokeConnectorOptions<TContext = unknown> = ConnectorConnectionMutationOptions<
+  RevokeConnectorConnectionResponse,
+  TContext
+>
+
+export function revokeConnectorMutationOptions<TContext = unknown>(
+  options: RevokeConnectorOptions<TContext>
+): UseMutationOptions<RevokeConnectorConnectionResponse, Error, void, TContext> {
+  const { connectorId, connectionId, client, queryClient, onSuccess, ...mutationOptions } = options
+  const normalizedConnectorId = nonblank(connectorId, "connectorId")
+  const path = () => ({
+    connectorId: normalizedConnectorId,
+    connectionId: nonblank(connectionId, "connectionId"),
+  })
+
+  return {
+    ...mutationOptions,
+    mutationFn: async () => {
+      const resolvedPath = path()
+      const { data } = await revokeConnectorConnection<true>({
+        client,
+        path: resolvedPath,
+        throwOnError: true,
+      })
+      return data
+    },
+    onSuccess: async (result, variables, context, mutation) => {
+      await invalidateConnectorConnections(queryClient, normalizedConnectorId)
+      await onSuccess?.(result, variables, context, mutation)
+    },
+  }
+}
+
+export function useRevokeConnector<TContext = unknown>(
+  options: RevokeConnectorOptions<TContext>
+): UseMutationResult<RevokeConnectorConnectionResponse, Error, void, TContext> {
+  const providerClient = useSixbProviderClient()
+  const queryClient = useQueryClient()
+  return useMutation(
+    revokeConnectorMutationOptions({
+      ...options,
+      client: options.client ?? providerClient,
+      queryClient: options.queryClient ?? queryClient,
+    })
+  )
+}
+
+export interface ReauthorizeConnectorOptions<TContext = unknown>
+  extends Omit<
+    UseMutationOptions<ReauthorizeConnectorConnectionResponse, Error, void, TContext>,
+    "mutationFn"
+  > {
+  readonly connectorId: string
+  readonly connectionId: string
+  readonly returnTo: string
+  /** hey-api client override. Defaults to the nearest SixbProvider client, then the global client. */
+  readonly client?: Client
+}
+
+export function reauthorizeConnectorMutationOptions<TContext = unknown>(
+  options: ReauthorizeConnectorOptions<TContext>
+): UseMutationOptions<ReauthorizeConnectorConnectionResponse, Error, void, TContext> {
+  const { connectorId, connectionId, returnTo, client, ...mutationOptions } = options
+  const normalizedConnectorId = nonblank(connectorId, "connectorId")
+
+  return {
+    ...mutationOptions,
+    mutationFn: async () => {
+      const { data } = await reauthorizeConnectorConnection<true>({
+        client,
+        path: {
+          connectorId: normalizedConnectorId,
+          connectionId: nonblank(connectionId, "connectionId"),
+        },
+        body: { returnTo: resolveReturnTo(returnTo) },
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+}
+
+export function useReauthorizeConnector<TContext = unknown>(
+  options: ReauthorizeConnectorOptions<TContext>
+): UseMutationResult<ReauthorizeConnectorConnectionResponse, Error, void, TContext> {
+  const providerClient = useSixbProviderClient()
+  return useMutation(
+    reauthorizeConnectorMutationOptions({
+      ...options,
+      client: options.client ?? providerClient,
+    })
+  )
+}
+
 function nonblank(value: string, field: string): string {
   const normalized = value.trim()
   if (!normalized) {
     throw new Error(`[SixbClient] ${field} must be a non-empty string.`)
   }
   return normalized
-}
-
-function optionalNonblank(value: string | null | undefined, field: string): string | undefined {
-  if (value === null || value === undefined) return undefined
-  return nonblank(value, field)
 }
 
 function resolveReturnTo(value: string): string {
@@ -325,4 +404,14 @@ function resolveReturnTo(value: string): string {
       throw new Error("[SixbClient] Connector returnTo must be a valid URL.", { cause: error })
     }
   }
+}
+
+async function invalidateConnectorConnections(
+  queryClient: QueryClient | undefined,
+  connectorId: string
+): Promise<void> {
+  if (!queryClient) return
+  await queryClient.invalidateQueries({
+    queryKey: listConnectorConnectionsQueryKey({ path: { connectorId } }),
+  })
 }

@@ -295,6 +295,7 @@ export function registerConnectorConnectionRunRoutes(
           })
           return connectorCallbackRedirect(
             result.returnTo,
+            result.connectorId,
             result.runId,
             clearConnectorCallbackCookie(request, callbackCookie.name)
           )
@@ -313,8 +314,14 @@ export function registerConnectorConnectionRunRoutes(
     )
 }
 
-function connectorCallbackRedirect(returnTo: string, runId: string, clearCookie: string): Response {
+function connectorCallbackRedirect(
+  returnTo: string,
+  connectorId: string,
+  runId: string,
+  clearCookie: string
+): Response {
   const destination = new URL(returnTo)
+  destination.searchParams.set("connectionConnectorId", connectorId)
   destination.searchParams.set("connectionRunId", runId)
   return new Response(null, {
     status: 302,
