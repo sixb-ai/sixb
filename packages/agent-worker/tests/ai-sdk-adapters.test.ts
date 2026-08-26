@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  type AgentToolArtifacts,
   AgentToolPublicError,
   type AgentToolRunContext,
   defineAgentTool,
@@ -11,11 +12,40 @@ import {
 } from "@sixb/core"
 import type { LanguageModelUsage, ToolSet } from "ai"
 import {
+  aiSdkToolsFromAgentDefinitions as adaptAiSdkToolsFromAgentDefinitions,
   agentToolErrorText,
   agentTraceFromAiSdkSteps,
   aiModelCallUsageFromAiSdk,
-  aiSdkToolsFromAgentDefinitions,
 } from "../src/ai-sdk-adapters"
+
+const unusedArtifacts: AgentToolArtifacts = {
+  async put() {
+    throw new Error("Artifacts are unused in this adapter test.")
+  },
+}
+
+function aiSdkToolsFromAgentDefinitions(
+  input: Omit<
+    Parameters<typeof adaptAiSdkToolsFromAgentDefinitions>[0],
+    "artifactsForToolCall" | "toolResultToModelOutput"
+  > &
+    Partial<
+      Pick<Parameters<typeof adaptAiSdkToolsFromAgentDefinitions>[0], "toolResultToModelOutput">
+    >
+): ToolSet {
+  const {
+    toolResultToModelOutput = ({ output }: { readonly output: JsonValue }) =>
+      typeof output === "string"
+        ? ({ type: "text", value: output } as const)
+        : ({ type: "json", value: output } as const),
+    ...rest
+  } = input
+  return adaptAiSdkToolsFromAgentDefinitions({
+    ...rest,
+    artifactsForToolCall: () => unusedArtifacts,
+    toolResultToModelOutput,
+  })
+}
 
 function captureThrown(callback: () => unknown): unknown {
   try {
@@ -49,17 +79,29 @@ describe("AI SDK agent adapters", () => {
         limit: "integer",
         mode: stringEnum(["quick", "deep"]),
       })
-      .run(async ({ input, signal, run, connector: resolve, logger: runLogger }) => {
-        const knowledge = await resolve(connectorDefinition)
-        runLogger.info("searching", { query: input.query })
-        return {
-          results: knowledge.search(input.query),
-          limit: input.limit,
-          mode: input.mode,
-          aborted: signal.aborted,
-          run: { id: run.id, agentId: run.agentId, threadId: run.threadId ?? null },
+      .run(
+        async ({
+          input,
+          toolCallId,
+          signal,
+          run,
+          connector: resolve,
+          logger: runLogger,
+          artifacts,
+        }) => {
+          const knowledge = await resolve(connectorDefinition)
+          runLogger.info("searching", { query: input.query })
+          return {
+            results: knowledge.search(input.query),
+            limit: input.limit,
+            mode: input.mode,
+            aborted: signal.aborted,
+            toolCallId,
+            hasArtifacts: artifacts === unusedArtifacts,
+            run: { id: run.id, agentId: run.agentId, threadId: run.threadId ?? null },
+          }
         }
-      })
+      )
     const run = { id: "run-1", agentId: "research", threadId: "thread-1" }
     const tools = aiSdkToolsFromAgentDefinitions({
       definitions: [definition],
@@ -90,6 +132,8 @@ describe("AI SDK agent adapters", () => {
       limit: 2,
       mode: "quick",
       aborted: false,
+      toolCallId: "test-tool-call",
+      hasArtifacts: true,
       run,
     })
     expect(resolvedDefinition).toBe(connectorDefinition)
@@ -126,6 +170,36 @@ describe("AI SDK agent adapters", () => {
 
     await expect(execution).resolves.toEqual({ cancelled: true })
     expect(receivedSignal).toBe(abort.signal)
+  })
+
+  test("delegates durable results to the model-output projector", async () => {
+    const output = { kind: "agentToolResult", content: [{ type: "text", text: "created" }] }
+    let received: JsonValue | undefined
+    const definition = defineAgentTool("create_file")
+      .description("Create a file.")
+      .input({})
+      .run(() => output)
+    const adapted = executableTool(
+      aiSdkToolsFromAgentDefinitions({
+        definitions: [definition],
+        valueTypesById: new Map(),
+        run: { id: "run-output", agentId: "creator" },
+        connector: (() => Promise.reject(new Error("unused"))) as AgentToolRunContext["connector"],
+        logger: noopLogger,
+        toolResultToModelOutput({ output: value }) {
+          received = value
+          return { type: "text", value: "projected" }
+        },
+      }),
+      definition.name
+    )
+
+    const result = await adapted.execute({}, {})
+    await expect(adapted.toModelOutput(result)).resolves.toEqual({
+      type: "text",
+      value: "projected",
+    })
+    expect(received).toEqual(output)
   })
 
   test("validates, normalizes, and freezes model input before execution", async () => {
@@ -239,7 +313,7 @@ describe("AI SDK agent adapters", () => {
     })
 
     await expect(executableTool(tools, definition.name).execute({}, {})).rejects.toThrow(
-      "[SixbAgentWorker] Agent tool 'invalid_result' returned a non-JSON result; result.value is undefined."
+      "[SixbAgentWorker] Agent tool 'invalid_result' returned an invalid result; result.value is undefined."
     )
   })
 
@@ -472,14 +546,34 @@ function executableTool(
   readonly inputSchema: unknown
   execute(
     input: Record<string, unknown>,
-    options: { readonly abortSignal?: AbortSignal }
+    options?: { readonly abortSignal?: AbortSignal; readonly toolCallId?: string }
   ): Promise<JsonValue>
+  toModelOutput(output: JsonValue): Promise<unknown>
 } {
   const adapted = tools[name]
   if (!adapted || typeof adapted.execute !== "function") {
     throw new Error(`Expected executable tool '${name}'.`)
   }
-  return adapted as never
+  const execute = adapted.execute as unknown as (
+    input: Record<string, unknown>,
+    options: { readonly abortSignal?: AbortSignal; readonly toolCallId: string }
+  ) => Promise<JsonValue>
+  const toModelOutput = adapted.toModelOutput as NonNullable<typeof adapted.toModelOutput>
+  if (!toModelOutput) {
+    throw new Error(`Expected tool '${name}' to project model output.`)
+  }
+  return {
+    inputSchema: adapted.inputSchema,
+    execute(input, options = {}) {
+      return execute(input, {
+        ...options,
+        toolCallId: options.toolCallId ?? "test-tool-call",
+      })
+    },
+    async toModelOutput(output) {
+      return toModelOutput({ toolCallId: "test-tool-call", input: {}, output })
+    },
+  }
 }
 
 async function toolJsonSchema(toolDefinition: { readonly inputSchema: unknown }): Promise<unknown> {

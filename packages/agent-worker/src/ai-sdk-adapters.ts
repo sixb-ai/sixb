@@ -1,6 +1,7 @@
 import type {
   AgentInboundUiMessagePart,
   AgentMessagePart,
+  AgentToolArtifacts,
   AgentToolDefinition,
   AgentToolRunContext,
   AgentToolRunInfo,
@@ -18,9 +19,9 @@ import { createSixbError } from "@sixb/core/internal/errors"
 import { schemaRecordToJsonSchema } from "@sixb/core/internal/ontology"
 import type { AiModelCallUsageInput } from "@sixb/core/storage"
 import { jsonSchema, type LanguageModelUsage, type Tool, type ToolSet, tool } from "ai"
+import { NEVER_ABORTED_SIGNAL } from "./abort"
 import { AgentToolExecutionError, AgentToolOutputError } from "./errors"
-
-const NEVER_ABORTED_SIGNAL = new AbortController().signal
+import type { AgentToolModelOutput } from "./tool-result-output"
 
 type AgentErrorDetails =
   | { readonly agentId: string; readonly runId: string }
@@ -38,6 +39,16 @@ interface AiSdkToolsFromAgentDefinitionsInput {
   readonly run: AgentToolRunInfo
   readonly connector: AgentToolRunContext["connector"]
   readonly logger: Logger
+  readonly artifactsForToolCall: (input: {
+    readonly toolName: string
+    readonly toolCallId: string
+    readonly signal: AbortSignal
+  }) => AgentToolArtifacts
+  readonly toolResultToModelOutput: (input: {
+    readonly output: JsonValue
+    readonly signal: AbortSignal
+    readonly toolCallId: string
+  }) => AgentToolModelOutput | PromiseLike<AgentToolModelOutput>
   readonly errorDetails?: AgentErrorDetails
 }
 
@@ -68,6 +79,7 @@ function aiSdkToolFromAgentDefinition(
   definition: AgentToolDefinition,
   context: Omit<AiSdkToolsFromAgentDefinitionsInput, "definitions">
 ): Tool<Record<string, unknown>, JsonValue> {
+  const signalsByToolCallId = new Map<string, AbortSignal>()
   return tool({
     description: definition.description,
     inputSchema: aiSdkInputSchemaFromAgentDefinition(
@@ -75,17 +87,26 @@ function aiSdkToolFromAgentDefinition(
       context.valueTypesById,
       context.errorDetails ?? { agentId: context.run.agentId, runId: context.run.id }
     ),
-    async execute(input, { abortSignal }) {
+    async execute(input, { abortSignal, toolCallId }) {
       let result: JsonValue
+      const signal = abortSignal ?? NEVER_ABORTED_SIGNAL
+      signalsByToolCallId.set(toolCallId, signal)
       try {
         result = await definition.handler({
           input,
-          signal: abortSignal ?? NEVER_ABORTED_SIGNAL,
+          toolCallId,
+          signal,
           run: context.run,
           connector: context.connector,
           logger: context.logger,
+          artifacts: context.artifactsForToolCall({
+            toolName: definition.name,
+            toolCallId,
+            signal,
+          }),
         })
       } catch (error) {
+        signalsByToolCallId.delete(toolCallId)
         if (error instanceof AgentToolResultValidationError) {
           throw new AgentToolOutputError(definition.name, error.reason, { cause: error })
         }
@@ -93,6 +114,14 @@ function aiSdkToolFromAgentDefinition(
         throw new AgentToolExecutionError(definition.name, { cause: error })
       }
       return result
+    },
+    async toModelOutput({ output, toolCallId }) {
+      const signal = signalsByToolCallId.get(toolCallId) ?? NEVER_ABORTED_SIGNAL
+      try {
+        return await context.toolResultToModelOutput({ output, toolCallId, signal })
+      } finally {
+        signalsByToolCallId.delete(toolCallId)
+      }
     },
   })
 }

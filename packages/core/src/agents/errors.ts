@@ -25,7 +25,7 @@ export class AgentToolPublicError extends Error {
   readonly name: string = "AgentToolPublicError"
 }
 
-/** Raised when an agent tool result cannot cross the durable JSON message boundary. */
+/** Raised when an agent tool result cannot cross the durable message boundary. */
 export class AgentToolResultValidationError extends Error {
   readonly name = "AgentToolResultValidationError"
 
@@ -34,7 +34,7 @@ export class AgentToolResultValidationError extends Error {
     readonly reason: string,
     options?: ErrorOptions
   ) {
-    super(`[Sixb] Agent tool '${toolName}' result must be a JSON value; ${reason}.`, options)
+    super(`[Sixb] Agent tool '${toolName}' returned an invalid result; ${reason}.`, options)
   }
 }
 

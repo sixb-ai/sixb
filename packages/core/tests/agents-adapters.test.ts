@@ -518,6 +518,64 @@ describe("toModelMessages", () => {
     })
   })
 
+  test("reconstructs rich tool-result files with caller-provided replay projections", () => {
+    const imageRef = { ...fileRef, mediaType: "image/png", fileName: "generated.png" }
+    const message: AgentMessage & { readonly id: string } = {
+      id: "assistant-1",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-call",
+          toolCallId: "image-call-1",
+          toolName: "create_image",
+          input: {},
+          state: "output-available",
+          output: {
+            kind: "agentToolResult",
+            content: [
+              { type: "text", text: "Created the image." },
+              { type: "file", fileRef: imageRef },
+            ],
+          },
+        },
+      ],
+    }
+    const result = toModelMessages([message], {
+      toolResultFileText: ({ message, partIndex, contentIndex }) =>
+        message.id === "assistant-1" && partIndex === 0 && contentIndex === 1
+          ? "Current tool file metadata"
+          : undefined,
+    })
+
+    expect(result).toEqual([
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "image-call-1",
+            toolName: "create_image",
+            input: {},
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "image-call-1",
+            toolName: "create_image",
+            output: {
+              type: "text",
+              value: "Created the image.\nCurrent tool file metadata",
+            },
+          },
+        ],
+      },
+    ])
+  })
+
   test("keeps provider-executed tool results inline in the assistant message", () => {
     const result = toModelMessages([
       sixbMessage("assistant", [

@@ -1,6 +1,7 @@
 import type { BlobStorage, FileRef } from "@sixb/core"
 import { isFileRef } from "@sixb/core"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
+import { waitForAbort } from "./abort"
 import type { PreparedAgentAttachmentContext } from "./attachments"
 
 const MAX_WORKFLOW_ATTACHMENT_BYTES = 25 * 1024 * 1024
@@ -10,6 +11,7 @@ const MAX_WORKFLOW_ATTACHMENTS_TOTAL_BYTES = 100 * 1024 * 1024
 export async function prepareWorkflowInputAttachments(input: {
   readonly input: WorkflowIOSnapshot
   readonly blobStorage: BlobStorage
+  readonly signal?: AbortSignal
 }): Promise<PreparedAgentAttachmentContext> {
   const refs: Array<{ readonly path: string; readonly fileRef: FileRef }> = []
   collectFileRefs(input.input, "input", refs)
@@ -20,7 +22,8 @@ export async function prepareWorkflowInputAttachments(input: {
   let totalBytes = 0
 
   for (const [index, item] of refs.entries()) {
-    const stat = await input.blobStorage.stat(item.fileRef.blobId)
+    input.signal?.throwIfAborted()
+    const stat = await waitForAbort(input.blobStorage.stat(item.fileRef.blobId), input.signal)
     if (
       !stat ||
       stat.digest !== item.fileRef.digest ||
@@ -33,12 +36,13 @@ export async function prepareWorkflowInputAttachments(input: {
     }
 
     const bytes = await readAllBytes(
-      await input.blobStorage.open(item.fileRef.blobId),
-      stat.sizeBytes
+      await waitForAbort(input.blobStorage.open(item.fileRef.blobId), input.signal),
+      stat.sizeBytes,
+      input.signal
     )
     const fileName = safeFileName(item.fileRef.fileName ?? `${item.fileRef.blobId}.bin`)
     const sandboxPath = `.sixb/agent/attachments/workflow-input/${index}-${fileName}`
-    sandboxFiles.push({ key: item.path, path: sandboxPath, bytes })
+    sandboxFiles.push({ key: item.path, path: sandboxPath, bytes, fileRef: item.fileRef })
     totalBytes += bytes.byteLength
     manifest.push({
       path: item.path,
@@ -81,14 +85,20 @@ function collectFileRefs(
 
 async function readAllBytes(
   stream: ReadableStream<Uint8Array>,
-  expectedSize: number
+  expectedSize: number,
+  signal?: AbortSignal
 ): Promise<Uint8Array> {
   const bytes = new Uint8Array(expectedSize)
   const reader = stream.getReader()
   let offset = 0
+  const cancelOnAbort = () => {
+    void reader.cancel(signal?.reason)
+  }
+  signal?.addEventListener("abort", cancelOnAbort, { once: true })
   try {
     for (;;) {
       const { done, value } = await reader.read()
+      signal?.throwIfAborted()
       if (done) break
       if (offset + value.byteLength > expectedSize) {
         throw new Error("Blob size changed while reading.")
@@ -97,6 +107,7 @@ async function readAllBytes(
       offset += value.byteLength
     }
   } finally {
+    signal?.removeEventListener("abort", cancelOnAbort)
     reader.releaseLock()
   }
   if (offset !== expectedSize) throw new Error("Blob size changed while reading.")

@@ -76,8 +76,59 @@ export const searchKnowledge = defineAgentTool("search_knowledge")
   })
 ```
 
-The handler receives inferred input, cancellation, run metadata, connector resolution, and a
-run-scoped logger. Results must be JSON-compatible.
+The handler receives inferred input, the provider's `toolCallId`, cancellation, run metadata,
+connector resolution, a run-scoped logger, and an artifact publisher. Ordinary results must be
+JSON-compatible.
+
+### Tool-created files
+
+Use `artifacts.put` when a selected tool creates a file. It stores the bytes in Sixb's blob store,
+materializes the same bytes in the current run sandbox, and returns a durable `FileRef` plus the
+sandbox path:
+
+```ts
+import { type AgentToolResult, defineAgentTool } from "@sixb/core"
+
+export const createImage = defineAgentTool("create_image")
+  .description("Create an image from a prompt.")
+  .input({ prompt: "string" })
+  .run(async ({ input, artifacts }) => {
+    const imageBytes = await generateImage(input.prompt)
+    const image = await artifacts.put({
+      body: imageBytes,
+      fileName: "generated.png",
+      mediaType: "image/png",
+    })
+
+    return {
+      kind: "agentToolResult",
+      content: [
+        { type: "text", text: "Created an image." },
+        { type: "file", fileRef: image.fileRef },
+      ],
+    } satisfies AgentToolResult
+  })
+```
+
+Artifact file names must be single safe names. Each file is limited to 25 MB and all tool calls in
+one run share an atomic 100 MB artifact budget, including parallel calls. Declared media types are
+normalized, and common image and PDF signatures are checked before storage. Cancellation reaches
+stream consumption, blob upload, and model projection. Persisted tool results contain `FileRef`
+metadata rather than base64 data or temporary URLs.
+
+Sixb keeps tool results text/metadata-only and supplies a bounded image through one ephemeral user
+file message before the next model step. This avoids provider-specific media-in-tool-result behavior.
+Provider retries reuse that same message without duplicating it. Models without image input support
+receive metadata and the sandbox path instead of image bytes.
+
+The original bytes remain in blob storage and the run sandbox. On completion, tool-created files are
+promoted to normal assistant file attachments, with duplicate sandbox outputs removed by content
+digest. Follow-up turns reconstruct files from the durable `FileRef` and materialize them into the
+new run sandbox.
+
+`$SIXB_OUTPUT_DIR` remains the compatibility path for files produced directly by sandbox work.
+Complete files moved there are collected as final assistant attachments; it is not used as the live
+tool-result transport.
 
 Tool definitions are not auto-discovered. Grant them through the agent definition:
 

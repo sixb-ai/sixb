@@ -1,6 +1,7 @@
 import { posix } from "node:path"
 import type { BlobStorage, CommandResult, FileRef } from "@sixb/core"
 import type { AgentRunDiagnostic } from "@sixb/core/storage"
+import { waitForAbort } from "./abort"
 import type { BashSandboxHandle } from "./bash-tool"
 
 const OUTPUT_COLLECTION_TIMEOUT_MS = 30_000
@@ -49,7 +50,7 @@ export async function collectAgentOutputAttachments(input: {
 
   let handle: BashSandboxHandle
   try {
-    handle = await waitFor(input.sandboxReady, window.signal)
+    handle = await waitForAbort(input.sandboxReady, window.signal)
   } catch (error) {
     window.signal.throwIfAborted()
     logCollectionError("Sandbox unavailable while collecting generated files", error)
@@ -127,6 +128,7 @@ export async function collectAgentOutputAttachments(input: {
     try {
       const fileRef = await input.blobStorage.put({
         body: bytes.bytes,
+        signal: window.signal,
         fileName: outputFileName(file.relativePath),
         mediaType: inferMediaType(file.relativePath),
         // Provenance lives on the run/message relation. The blob's logical path is only the
@@ -396,24 +398,6 @@ function diagnosticResult(value: AgentRunDiagnostic): AgentOutputAttachmentResul
 
 function logCollectionError(context: string, error: unknown): void {
   console.error(`[SixbAgentWorker] ${context}.`, error)
-}
-
-function waitFor<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  signal.throwIfAborted()
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = (): void => reject(signal.reason)
-    signal.addEventListener("abort", onAbort, { once: true })
-    promise.then(
-      (value) => {
-        signal.removeEventListener("abort", onAbort)
-        resolve(value)
-      },
-      (error) => {
-        signal.removeEventListener("abort", onAbort)
-        reject(error)
-      }
-    )
-  })
 }
 
 const LIST_OUTPUT_FILES_SCRIPT = `# sixb-list-agent-output-files
