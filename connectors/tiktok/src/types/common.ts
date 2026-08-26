@@ -1,4 +1,6 @@
-export type TiktokAccountType = "organic-account" | "ad-account"
+export type TiktokApi = "organic" | "marketing"
+
+export type TiktokAccountType = "tiktok-account" | "ad-account"
 
 export interface TiktokConnectedAccount<TType extends TiktokAccountType> {
   readonly type: TType

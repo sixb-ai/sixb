@@ -11,7 +11,7 @@ import type {
   TiktokOrganicConnectorOptions,
 } from "./types/options"
 
-const ADS_AUTHORIZATION_URL = "https://ads.tiktok.com/marketing_api/auth"
+const MARKETING_AUTHORIZATION_URL = "https://ads.tiktok.com/marketing_api/auth"
 
 interface OAuthEnvelope {
   readonly code: number
@@ -25,9 +25,9 @@ type OAuthOperation = "exchange" | "refresh" | "revoke"
 export function createTiktokAuthentication(
   options: TiktokConnectorOptions
 ): ConnectorOAuth2Authentication {
-  return options.accountType === "organic-account"
+  return options.api === "organic"
     ? createOrganicAuthentication(options)
-    : createAdsAuthentication(options)
+    : createMarketingAuthentication(options)
 }
 
 export function organicRedirectUri(redirectUri: string): string {
@@ -108,13 +108,13 @@ function createOrganicAuthentication(
   }
 }
 
-function createAdsAuthentication(
+function createMarketingAuthentication(
   options: TiktokAdsConnectorOptions
 ): ConnectorOAuth2Authentication {
   return {
     type: "oauth2",
     authorizationUrl(context, input) {
-      const url = new URL(ADS_AUTHORIZATION_URL)
+      const url = new URL(MARKETING_AUTHORIZATION_URL)
       url.searchParams.set("app_id", options.appId)
       url.searchParams.set("state", input.state)
       url.searchParams.set("redirect_uri", context.redirectUri)
@@ -135,12 +135,12 @@ function createAdsAuthentication(
         },
         "exchange"
       )
-      return adsCredentials(data, options.scope)
+      return marketingCredentials(data, options.scope)
     },
     refresh() {
       throw new ConnectorOAuthError(
         "terminal",
-        "[SixbTikTok] TikTok Ads access tokens do not expire or refresh; reauthorization is required."
+        "[SixbTikTok] TikTok Marketing API access tokens do not refresh; reauthorization is required."
       )
     },
     async revoke(context, credentials) {
@@ -183,7 +183,7 @@ function organicCredentials(data: unknown): ConnectorOAuthCredentials {
   }
 }
 
-function adsCredentials(data: unknown, scope: string | undefined): ConnectorOAuthCredentials {
+function marketingCredentials(data: unknown, scope: string | undefined): ConnectorOAuthCredentials {
   if (!isRecord(data)) throw malformedTokenResponse("data")
   const accessToken = requiredString(data.access_token, "access_token")
   return {

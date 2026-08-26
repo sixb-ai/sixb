@@ -9,7 +9,7 @@ interface TiktokConnectorOptionsBase {
 }
 
 export interface TiktokOrganicConnectorOptions extends TiktokConnectorOptionsBase {
-  readonly accountType: "organic-account"
+  readonly api: "organic"
   /** Client ID from the TikTok for Business app. */
   readonly clientId: string
   readonly clientSecret: string
@@ -20,10 +20,10 @@ export interface TiktokOrganicConnectorOptions extends TiktokConnectorOptionsBas
 }
 
 export interface TiktokAdsConnectorOptions extends TiktokConnectorOptionsBase {
-  readonly accountType: "ad-account"
+  readonly api: "marketing"
   readonly appId: string
   readonly secret: string
-  /** Optional Ads authorization scope string. Omit to request the app's current permissions. */
+  /** Optional Marketing API authorization scope. Omit to request the app's current permissions. */
   readonly scope?: string
 }
 

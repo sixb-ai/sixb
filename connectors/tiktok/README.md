@@ -1,7 +1,8 @@
 # @sixb/connector-tiktok
 
 Read-only TikTok API for Business v1.3 connector for organic account data and Ads reporting.
-TikTok uses two separate OAuth grants, so register one connector definition per surface.
+TikTok uses separate Organic API and Marketing API OAuth grants, so register one connector
+definition per API.
 
 ## Register
 
@@ -12,7 +13,7 @@ import { tiktok } from "@sixb/connector-tiktok"
 export const tiktokOrganic = defineConnector(
   "tiktok-organic",
   tiktok({
-    accountType: "organic-account",
+    api: "organic",
     clientId: process.env.TIKTOK_CLIENT_ID!,
     clientSecret: process.env.TIKTOK_CLIENT_SECRET!,
     authorizationUrl: process.env.TIKTOK_ACCOUNT_AUTHORIZATION_URL!,
@@ -22,7 +23,7 @@ export const tiktokOrganic = defineConnector(
 export const tiktokAds = defineConnector(
   "tiktok-ads",
   tiktok({
-    accountType: "ad-account",
+    api: "marketing",
     appId: process.env.TIKTOK_APP_ID!,
     secret: process.env.TIKTOK_APP_SECRET!,
   })
@@ -31,8 +32,7 @@ export const tiktokAds = defineConnector(
 
 For the organic grant, copy the complete account-holder authorization URL from the TikTok app
 portal. Register Sixb's callback URL with a trailing slash; TikTok requires an exact HTTPS redirect
-URI ending in `/`. The Ads grant uses TikTok's Marketing API authorization page and a long-lived,
-non-refreshable access token.
+URI ending in `/`. The Marketing API grant uses a long-lived, non-refreshable access token.
 
 TikTok does not document PKCE for either flow. Sixb still sends its required `code_challenge` on
 the authorization request, but the connector does not send an undocumented `code_verifier` to the
@@ -90,8 +90,8 @@ for await (const row of ads.reports.runAll({
   tokens expire after one year, after which the account must be reauthorized. Sixb's current OAuth
   credential contract does not store a separate refresh-token expiry timestamp, so expiry is
   detected from TikTok's terminal refresh response rather than scheduled in advance.
-- Ads access tokens are long-lived and have no refresh endpoint. A rejected Ads token therefore
-  produces a terminal reauthorization error.
+- Marketing API access tokens are long-lived and have no refresh endpoint. A rejected token
+  therefore produces a terminal reauthorization error.
 - Profile insight windows are limited to 60 days; post statistics stop updating after 365 days.
 - Reporting is passed through without a metric taxonomy. TikTok limits synchronous requests by
   dimensions and date range; split larger syncs at the project layer.

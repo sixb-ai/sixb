@@ -89,7 +89,7 @@ describe("TikTok OAuth", () => {
     })
   })
 
-  test("builds and exchanges the distinct Ads grant", async () => {
+  test("builds and exchanges the distinct Marketing API grant", async () => {
     const requests: CapturedRequest[] = []
     mockFetch(async (input, init) => {
       requests.push({ input, init })
@@ -125,7 +125,7 @@ describe("TikTok OAuth", () => {
     })
   })
 
-  test("marks Ads refresh as terminal because TikTok has no refresh endpoint", () => {
+  test("marks Marketing API refresh as terminal because TikTok has no refresh endpoint", () => {
     const adapter = adsAdapter()
     expect(() => adapter.authentication.refresh(context, { accessToken: "ads-token" })).toThrow(
       ConnectorOAuthError
@@ -532,7 +532,7 @@ describe("TikTok Ads resources", () => {
 
 function organicAdapter() {
   return tiktok({
-    accountType: "organic-account",
+    api: "organic",
     clientId: "client-id",
     clientSecret: "client-secret",
     authorizationUrl:
@@ -545,7 +545,7 @@ function organicAdapter() {
 
 function adsAdapter(onResponse?: Parameters<typeof tiktok>[0]["onResponse"]) {
   return tiktok({
-    accountType: "ad-account",
+    api: "marketing",
     appId: "app-id",
     secret: "app-secret",
     scope: "ads.read",
@@ -566,7 +566,7 @@ async function organicClient() {
 
 async function adsClient(onResponse?: Parameters<typeof tiktok>[0]["onResponse"]) {
   const adapter = tiktok({
-    accountType: "ad-account",
+    api: "marketing",
     appId: "app-id",
     secret: "app-secret",
     baseUrl: "https://business-api.example.com/open_api/v1.3/",

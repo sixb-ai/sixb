@@ -40,7 +40,7 @@ export function tiktok(options: TiktokConnectorOptions): TiktokConnector {
   validateOptions(options)
   const authentication = createTiktokAuthentication(options)
 
-  if (options.accountType === "organic-account") {
+  if (options.api === "organic") {
     return {
       type: "tiktok",
       authentication,
@@ -49,7 +49,7 @@ export function tiktok(options: TiktokConnectorOptions): TiktokConnector {
       async connect(context) {
         const http = await createTiktokHttp(context, options, context.tokenSource)
         return createOrganicClient(http, {
-          type: "organic-account",
+          type: "tiktok-account",
           ...context.account,
         })
       },
@@ -124,7 +124,7 @@ function validateOptions(options: TiktokConnectorOptions): void {
     throw new Error("[SixbTikTok] timeoutMs must be a positive number.")
   }
 
-  if (options.accountType === "organic-account") {
+  if (options.api === "organic") {
     assertNonEmpty(options.clientId, "clientId")
     assertNonEmpty(options.clientSecret, "clientSecret")
     assertNonEmpty(options.authorizationUrl, "authorizationUrl")

@@ -13,7 +13,7 @@ import type {
 } from "./organic"
 
 export interface TiktokOrganicClient {
-  readonly account: TiktokConnectedAccount<"organic-account">
+  readonly account: TiktokConnectedAccount<"tiktok-account">
   readonly profile: TiktokOrganicProfileApi
   readonly posts: TiktokOrganicPostsApi
   readonly comments: TiktokOrganicCommentsApi
