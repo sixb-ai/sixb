@@ -9,7 +9,7 @@
     "rootDir": "./src",
     "tsBuildInfoFile": "./.tsbuild/tsconfig.build.tsbuildinfo"
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "src/ai-pricing/models-dev-pricing.json"],
   "references": [
     {
       "path": "../core/tsconfig.build.json"

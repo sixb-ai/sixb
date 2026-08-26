@@ -161,7 +161,7 @@ export async function runWorkflowAgentNode(
     for (let attempt = 1; attempt <= WORKFLOW_OUTPUT_FINALIZATION_ATTEMPTS; attempt += 1) {
       try {
         const finalization = await generateText({
-          model: input.agent.model,
+          model: input.usageRecorder.wrapModel(input.agent.model),
           ...(input.agent.providerOptions === undefined
             ? {}
             : { providerOptions: input.agent.providerOptions }),
@@ -171,6 +171,7 @@ export async function runWorkflowAgentNode(
           messages: finalizerMessages,
           output: Output.object({ schema, name: input.agentStep.id }),
           prepareStep: input.usageRecorder.prepareStep,
+          onLanguageModelCallStart: input.usageRecorder.onLanguageModelCallStart,
           onLanguageModelCallEnd: input.usageRecorder.onLanguageModelCallEnd,
           abortSignal,
         })

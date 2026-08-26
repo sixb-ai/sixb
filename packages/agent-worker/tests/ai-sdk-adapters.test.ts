@@ -16,6 +16,8 @@ import {
   agentToolErrorText,
   agentTraceFromAiSdkSteps,
   aiModelCallUsageFromAiSdk,
+  aiPricingContextFromAiSdkCallStart,
+  aiPricingContextFromAiSdkUsage,
 } from "../src/ai-sdk-adapters"
 
 const unusedArtifacts: AgentToolArtifacts = {
@@ -507,6 +509,63 @@ describe("AI SDK agent adapters", () => {
         },
       ])
     ).toThrow("tool output must be a JSON value")
+  })
+
+  test("captures only allowlisted request-side pricing context", () => {
+    expect(
+      aiPricingContextFromAiSdkCallStart(
+        { provider: "openai.responses" },
+        {
+          openai: {
+            serviceTier: "priority",
+            batch: false,
+            region: "us-east-1",
+            inferenceGeo: "us",
+            routedProviderId: "openai",
+            deploymentId: "prod",
+            inferenceProfileId: "profile-1",
+            cacheWriteTtlSeconds: 300,
+            apiKey: "must-not-persist",
+            headers: { authorization: "must-not-persist" },
+          },
+          anthropic: { serviceTier: "irrelevant" },
+        }
+      )
+    ).toEqual({
+      serviceTier: "priority",
+      batch: false,
+      region: "us-east-1",
+      inferenceGeo: "us",
+      routedProviderId: "openai",
+      deploymentId: "prod",
+      inferenceProfileId: "profile-1",
+      cacheWriteTtlSeconds: 300,
+    })
+    expect(
+      aiPricingContextFromAiSdkCallStart(
+        { provider: "unknown" },
+        { openai: { serviceTier: "priority" } }
+      )
+    ).toEqual({})
+  })
+
+  test("merges provider-returned billing context over request context", () => {
+    expect(
+      aiPricingContextFromAiSdkUsage(
+        { serviceTier: "auto", inferenceGeo: "us" },
+        {
+          service_tier: "standard",
+          inference_geo: "global",
+          speed: "fast",
+          cache_creation: { ephemeral_1h_input_tokens: 2 },
+        }
+      )
+    ).toEqual({
+      serviceTier: "standard",
+      inferenceGeo: "global",
+      mode: "fast",
+      cacheWriteTtlSeconds: 3_600,
+    })
   })
 
   test("preserves every provider-neutral model-call usage field", () => {

@@ -126,11 +126,12 @@ export async function executeWorkflowAgentNode(
     )
   }
   const usageRecorder = new AiModelCallRecorder({
-    storage: context.storage.aiUsage,
+    storage: context.storage,
     projectId: context.id,
     executionId: executionRecord.executionId,
     attempt: reserved.attempt,
     requesterGroupIds: workflowRun.requesterGroupIds,
+    providerOptions: agent.providerOptions,
     recoverAiModelCall: context.recoverAiModelCall,
     errorRunId: nodeRun.id,
   })

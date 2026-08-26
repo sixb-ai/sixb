@@ -4,6 +4,7 @@ import type { ProjectionRunFailureCode } from "../projections/types"
 import type { ProviderScope } from "../provider-scope"
 import type { ActionRunFailureCode } from "../storage/action-runs/types"
 import type { AgentRunFailureCode } from "../storage/agents/types"
+import type { AiPricingContext } from "../storage/ai-cost/types"
 import type { RecordAiModelCallInput } from "../storage/ai-usage"
 import type { PipelineRunFailureCode } from "../storage/pipeline-runs/types"
 import type { SyncRunFailureCode } from "../storage/sync-runs/types"
@@ -209,11 +210,18 @@ export type AgentAiUsageRecordPayload = Omit<
   readonly occurredAt: string
 }
 
+export interface AgentAiUsageAccountingPayload {
+  readonly pricingContext: AiPricingContext
+  readonly ratedAt: string
+}
+
 export interface AgentAiUsageRecordRequestedQueueJob
   extends QueueJob<
     "agent.ai-usage.record.requested",
     {
       readonly record: AgentAiUsageRecordPayload
+      /** Absent on Phase 1 jobs; recovery then uses an empty pricing context. */
+      readonly accounting?: AgentAiUsageAccountingPayload
     }
   > {}
 
