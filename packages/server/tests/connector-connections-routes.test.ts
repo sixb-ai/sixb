@@ -711,6 +711,30 @@ describe("connector connection Headless API", () => {
     )
   })
 
+  test("returns a dedicated conflict when account selection requires replacement", async () => {
+    const harness = await createHarness()
+    await connectAccount(harness, "social", "account-a")
+    const started = await startRun(harness, "social")
+    const callback = await completeRunAtProvider(harness, started.state, started.callbackCookie)
+    expect(callback.status).toBe(302)
+
+    const selection = await harness.app.handle(
+      new Request(
+        `http://api.localhost/api/connectors/crm/connection-runs/${started.runId}/selection`,
+        {
+          method: "POST",
+          headers: harness.session.mutationHeaders,
+          body: JSON.stringify({ accountId: "account-b" }),
+        }
+      )
+    )
+
+    expect(selection.status).toBe(409)
+    expect(await selection.json()).toMatchObject({
+      code: "connector.replacement_required",
+    })
+  })
+
   test("retains a durable cleanup handle when replacement revocation must be retried", async () => {
     const harness = await createHarness()
     const connected = await connectAccount(harness, "social", "account-a")

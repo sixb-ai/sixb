@@ -17,6 +17,7 @@ export const CONNECTOR_HTTP_ERROR_CODES = [
   "connector.operation_in_progress",
   "connector.provider_failed",
   "connector.provider_unavailable",
+  "connector.replacement_required",
   "connector.revocation_pending",
 ] as const
 export type ConnectorHttpErrorCode = (typeof CONNECTOR_HTTP_ERROR_CODES)[number]
@@ -32,6 +33,7 @@ export const ConnectorConflictResponseSchema = connectorRouteErrorResponseSchema
   "connector.authorization_required",
   "connector.operation_conflict",
   "connector.operation_in_progress",
+  "connector.replacement_required",
   "connector.revocation_pending",
 ])
 export const ConnectorInternalErrorResponseSchema = connectorRouteErrorResponseSchema([

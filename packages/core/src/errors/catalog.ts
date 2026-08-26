@@ -58,6 +58,10 @@ export const SIXB_ERROR_DEFINITIONS = {
     publicMessage: "Connector provider is temporarily unavailable.",
     retryable: true,
   },
+  "connector.replacement_required": {
+    publicMessage: "Connector selection requires explicit replacement.",
+    retryable: false,
+  },
   "connector.revocation_pending": {
     publicMessage: "Connector revocation is pending.",
     retryable: true,

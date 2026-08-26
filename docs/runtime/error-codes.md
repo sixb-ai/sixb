@@ -94,6 +94,7 @@ Additional rules:
 | `connector.operation_in_progress` | Yes | Another process is safely mutating the same authorization credentials. | Retry after the current credential operation finishes. |
 | `connector.provider_failed` | No | A provider operation failed or ended with an ambiguous outcome. | Inspect the native cause; restart authorization when Sixb failed closed. |
 | `connector.provider_unavailable` | Yes | The adapter guaranteed that a failed provider operation produced no external change. | Retry the unchanged operation later. |
+| `connector.replacement_required` | No | Account selection would replace the connection currently assigned to the slot. | Confirm replacement, then retry selection with `replace: true`, or choose another slot. |
 | `connector.revocation_pending` | Yes | Local access is disconnected, but provider revocation has not been durably confirmed. | Retry revocation; the operation is idempotent and local access remains closed. |
 | `dataset.not_found` | No | Dataset is unavailable to the caller. | Check its ID and access policy. |
 | `dataset.version_incompatible` | No | Version does not match the required dataset or schema. | Materialize a compatible version. |

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { isSixbApiError } from "../api"
 import {
   useConnectConnector,
@@ -63,6 +63,8 @@ export interface UseConnectorConnectionResult {
   readonly connection: ConnectorConnection | undefined
   readonly accounts: readonly ConnectorAccount[]
   readonly error: ConnectorConnectionFailure | null
+  /** Whether a new authorization or reauthorization can start from the current state. */
+  readonly canConnect: boolean
   readonly isPending: boolean
   readonly selectedAccountId: string | undefined
   connect(): Promise<void>
@@ -86,6 +88,7 @@ export function useConnectorConnection({
   returnTo,
 }: UseConnectorConnectionOptions): UseConnectorConnectionResult {
   const [callback, setCallback] = useState(readConnectorConnectionCallback)
+  const connectInFlightRef = useRef<Promise<void> | null>(null)
   const callbackRunId = callback?.connectorId === connectorId ? callback.runId : null
   const connectionsQuery = useConnectorConnections({ connectorId })
   const connection = useMemo(
@@ -119,32 +122,54 @@ export function useConnectorConnection({
     connectionId: connection?.id ?? "",
   })
 
+  const refreshConnectionsAndConsumeCallback = useCallback(
+    async (
+      expectedCallback?: ConnectorConnectionCallback,
+      canConsume: () => boolean = () => true
+    ): Promise<void> => {
+      const result = await connectionsQuery.refetch()
+      if (result.error || !expectedCallback || !canConsume()) return
+      if (!result.data?.some((candidate) => candidate.slot === slot)) return
+
+      clearConnectorConnectionCallback(expectedCallback)
+      setCallback((current) =>
+        sameConnectorConnectionCallback(current, expectedCallback) ? null : current
+      )
+    },
+    [connectionsQuery.refetch, slot]
+  )
+
   const completedRunId = resumedRun?.status === "succeeded" ? resumedRun.id : null
   useEffect(() => {
     if (!completedRunId || !callback) return
     let active = true
 
-    void connectionsQuery.refetch().then((result) => {
-      if (!active || result.error) return
-      if (!result.data?.some((candidate) => candidate.slot === slot)) return
-      clearConnectorConnectionCallback(callback)
-      setCallback(null)
-    })
+    void refreshConnectionsAndConsumeCallback(callback, () => active)
 
     return () => {
       active = false
     }
-  }, [callback, completedRunId, connectionsQuery.refetch, slot])
+  }, [callback, completedRunId, refreshConnectionsAndConsumeCallback])
 
-  async function connect(): Promise<void> {
+  function connect(): Promise<void> {
+    if (connectInFlightRef.current) return connectInFlightRef.current
+    if (!canConnect) return Promise.resolve()
+
     resetError()
-    if (connection?.status === "connected" && resumedRun?.kind !== "reauthorize") return
+    const operation = (async () => {
+      const started =
+        resumedRun?.kind === "reauthorize" || connection?.status === "needs_reauthorization"
+          ? await reauthorizeMutation.mutateAsync()
+          : await connectMutation.mutateAsync()
+      redirectToAuthorization(started.authorizationUrl)
+    })()
+    connectInFlightRef.current = operation
+    operation.then(clearConnectInFlight, clearConnectInFlight)
+    return operation
 
-    const started =
-      resumedRun?.kind === "reauthorize" || connection?.status === "needs_reauthorization"
-        ? await reauthorizeMutation.mutateAsync()
-        : await connectMutation.mutateAsync()
-    redirectToAuthorization(started.authorizationUrl)
+    function clearConnectInFlight(): void {
+      if (connectInFlightRef.current === operation) connectInFlightRef.current = null
+    }
   }
 
   async function selectAccount(
@@ -172,10 +197,22 @@ export function useConnectorConnection({
   }
 
   async function refresh(): Promise<void> {
-    await Promise.all([
-      connectionsQuery.refetch(),
-      ...(callbackRunId === null ? [] : [runQuery.refetch()]),
-    ])
+    let completedCallback: ConnectorConnectionCallback | undefined
+    if (callbackRunId !== null) {
+      const runResult = await runQuery.refetch()
+      if (
+        !runResult.error &&
+        runResult.data?.slot === slot &&
+        runResult.data.status === "succeeded" &&
+        sameConnectorConnectionCallback(callback, {
+          connectorId,
+          runId: runResult.data.id,
+        })
+      ) {
+        completedCallback = callback ?? undefined
+      }
+    }
+    await refreshConnectionsAndConsumeCallback(completedCallback)
   }
 
   function dismiss(): void {
@@ -202,6 +239,20 @@ export function useConnectorConnection({
     run: resumedRun,
     connection,
   })
+  const mutationPending =
+    connectMutation.isPending ||
+    reauthorizeMutation.isPending ||
+    selectMutation.isPending ||
+    disconnectMutation.isPending ||
+    revokeMutation.isPending
+  const canConnect = connectorCanConnect({
+    status,
+    connectionsError: connectionsQuery.error,
+    runError: runQuery.error,
+    run: resumedRun,
+    connection,
+    mutationPending,
+  })
 
   return {
     status,
@@ -215,14 +266,8 @@ export function useConnectorConnection({
       mutationFailure("revoke", revokeMutation.error) ??
       runFailure(callbackRunId, resumedRun, runQuery.error) ??
       mutationFailure("load", connectionsQuery.error),
-    isPending:
-      status === "loading" ||
-      status === "authorizing" ||
-      connectMutation.isPending ||
-      reauthorizeMutation.isPending ||
-      selectMutation.isPending ||
-      disconnectMutation.isPending ||
-      revokeMutation.isPending,
+    canConnect,
+    isPending: status === "loading" || status === "authorizing" || mutationPending,
     selectedAccountId: selectMutation.variables?.accountId,
     connect,
     selectAccount,
@@ -234,14 +279,30 @@ export function useConnectorConnection({
   }
 }
 
-export function isConnectorReplacementConflict(error: unknown): boolean {
-  if (isSixbApiError(error)) return error.code === "connector.operation_conflict"
+export function isConnectorReplacementRequired(error: unknown): boolean {
+  if (isSixbApiError(error)) return error.code === "connector.replacement_required"
   return (
     typeof error === "object" &&
     error !== null &&
     "code" in error &&
-    error.code === "connector.operation_conflict"
+    error.code === "connector.replacement_required"
   )
+}
+
+function connectorCanConnect(input: {
+  readonly status: ConnectorConnectionStatus
+  readonly connectionsError: Error | null
+  readonly runError: Error | null
+  readonly run: ConnectorConnectionRun | undefined
+  readonly connection: ConnectorConnection | undefined
+  readonly mutationPending: boolean
+}): boolean {
+  if (input.mutationPending || input.connectionsError || input.runError) return false
+  if (input.status === "disconnected" || input.status === "needs_reauthorization") return true
+  const run = input.run
+  if (input.status !== "error" || !run || !isRunTerminal(run)) return false
+  if (run.kind === "reauthorize") return input.connection !== undefined
+  return input.connection?.status !== "connected"
 }
 
 function connectionStatus(input: {
@@ -322,6 +383,17 @@ function isRunInProgress(run: ConnectorConnectionRun | undefined): boolean {
     run?.status === "running" ||
     (run?.status === "waiting" && run.waitingFor === "provider_authorization")
   )
+}
+
+function isRunTerminal(run: ConnectorConnectionRun | undefined): boolean {
+  return run?.status === "failed" || run?.status === "cancelled" || run?.status === "expired"
+}
+
+function sameConnectorConnectionCallback(
+  left: ConnectorConnectionCallback | null,
+  right: ConnectorConnectionCallback
+): boolean {
+  return left?.connectorId === right.connectorId && left.runId === right.runId
 }
 
 export function readConnectorConnectionCallback(

@@ -1844,6 +1844,7 @@ export type DisconnectConnectorConnectionErrors = {
       | "connector.authorization_required"
       | "connector.operation_conflict"
       | "connector.operation_in_progress"
+      | "connector.replacement_required"
       | "connector.revocation_pending"
   }
   /**
@@ -1922,6 +1923,7 @@ export type RevokeConnectorConnectionErrors = {
       | "connector.authorization_required"
       | "connector.operation_conflict"
       | "connector.operation_in_progress"
+      | "connector.replacement_required"
       | "connector.revocation_pending"
   }
   /**
@@ -2036,6 +2038,7 @@ export type StartConnectorConnectionRunErrors = {
       | "connector.authorization_required"
       | "connector.operation_conflict"
       | "connector.operation_in_progress"
+      | "connector.replacement_required"
       | "connector.revocation_pending"
   }
   /**
@@ -2343,6 +2346,7 @@ export type AddConnectorConnectionErrors = {
       | "connector.authorization_required"
       | "connector.operation_conflict"
       | "connector.operation_in_progress"
+      | "connector.replacement_required"
       | "connector.revocation_pending"
   }
   /**
@@ -2551,6 +2555,7 @@ export type SelectConnectorConnectionRunAccountErrors = {
       | "connector.authorization_required"
       | "connector.operation_conflict"
       | "connector.operation_in_progress"
+      | "connector.replacement_required"
       | "connector.revocation_pending"
   }
   /**
@@ -2758,6 +2763,7 @@ export type ReauthorizeConnectorConnectionErrors = {
       | "connector.authorization_required"
       | "connector.operation_conflict"
       | "connector.operation_in_progress"
+      | "connector.replacement_required"
       | "connector.revocation_pending"
   }
   /**

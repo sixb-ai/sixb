@@ -318,7 +318,7 @@ export class ConnectorConnectionRunService {
       }
       if (isConnectorStorageError(error, "connection_conflict")) {
         throw createConnectorCodedError(
-          "connector.operation_conflict",
+          "connector.replacement_required",
           "Connector slot is already occupied; explicit replacement is required.",
           { cause: error }
         )
