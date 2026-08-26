@@ -2,6 +2,7 @@ import type { ViewMode } from "./Sidebar"
 
 export const KNOWN_VIEWS = new Set([
   "home",
+  "ai-usage",
   "datasets",
   "connectors",
   "syncs",

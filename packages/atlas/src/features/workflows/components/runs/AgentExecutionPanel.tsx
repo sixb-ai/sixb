@@ -64,6 +64,12 @@ export function AgentExecutionPanel({
           {data.usage?.totalTokens === undefined ? null : (
             <span>{formatTokenCount(data.usage.totalTokens)} tokens</span>
           )}
+          {data.cost ? (
+            <>
+              <span>{formatAiCostAmounts(data.cost.amounts)} rated cost</span>
+              <span>{formatAiCostCoverage(data.cost)}</span>
+            </>
+          ) : null}
           {execution ? (
             <>
               <span>{pluralCount(stepCount, "model step")}</span>
@@ -305,6 +311,32 @@ function finalAgentAnswer(
 
 function formatTokenCount(value: number | undefined): string {
   return value === undefined ? "—" : new Intl.NumberFormat().format(value)
+}
+
+function formatAiCostAmounts(
+  amounts: readonly { currency: string; amountNanos: string }[]
+): string {
+  if (amounts.length === 0) return "—"
+  return amounts
+    .map((amount) => {
+      const nanos = BigInt(amount.amountNanos)
+      const whole = nanos / 1_000_000_000n
+      const fraction = (nanos % 1_000_000_000n).toString().padStart(9, "0").replace(/0+$/, "")
+      return `${amount.currency} ${whole.toLocaleString("en-US")}${fraction ? `.${fraction.padEnd(2, "0")}` : ".00"}`
+    })
+    .join(" · ")
+}
+
+function formatAiCostCoverage(cost: {
+  ratedCallCount: number
+  unpriceableCallCount: number
+  unvaluedCallCount: number
+}): string {
+  const valued = cost.ratedCallCount
+  const missing = cost.unpriceableCallCount + cost.unvaluedCallCount
+  if (valued === 0 && missing === 0) return "No model calls"
+  if (missing === 0) return `${valued} valued`
+  return `${valued} valued · ${missing} missing`
 }
 
 function pluralCount(value: number, singular: string): string {
