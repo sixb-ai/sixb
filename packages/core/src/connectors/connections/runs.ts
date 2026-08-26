@@ -142,7 +142,6 @@ export class ConnectorConnectionRunService {
             owner: prepared.attempt.owner,
             slot: prepared.attempt.slot,
             initiatedByExecutionId: command.execution.id,
-            authorizationAttemptId: prepared.attempt.id,
             ttlMs: prepared.attempt.ttlMs,
           })
           const attempt = await connections.createAuthorizationAttempt({

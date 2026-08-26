@@ -196,6 +196,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 24,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "025-connector-connections",
+    status: "applied",
+    version: 25,
+  },
 ]
 
 afterEach(async () => {
@@ -1567,6 +1574,36 @@ describe("SQLite storage migrations", () => {
       expect(readMemoryIndexColumns(db, "idx_ontology_commits_execution")).toEqual([
         "project_id",
         "execution_id",
+      ])
+    } finally {
+      db.close()
+    }
+  })
+
+  test("stores a headless connector attempt as the run's single protocol child", () => {
+    const db = new Database(":memory:")
+    try {
+      for (const migration of sqliteStorageMigrations.steps) migration.up(db)
+
+      expect(readMemoryTableColumns(db, "connector_connection_runs")).not.toContain(
+        "authorization_attempt_id"
+      )
+      expect(readMemoryTableColumns(db, "connector_authorization_attempts")).not.toContain(
+        "owner_type"
+      )
+      expect(readMemoryTableColumns(db, "connector_connections")).not.toContain("owner_type")
+      expect(readMemoryUniqueIndexes(db, "connector_authorization_attempts")).toContainEqual([
+        "project_id",
+        "connector_id",
+        "connection_run_id",
+      ])
+      expect(readMemoryForeignKeyTables(db, "connector_authorization_attempts")).toContain(
+        "connector_connection_runs"
+      )
+      expect(readMemoryUniqueIndexes(db, "connector_connections")).toContainEqual([
+        "project_id",
+        "connector_id",
+        "slot",
       ])
     } finally {
       db.close()

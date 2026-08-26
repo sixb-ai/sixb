@@ -155,6 +155,12 @@
       "import": "./dist/connectors/connections/internal.js",
       "default": "./dist/connectors/connections/internal.js"
     },
+    "./internal/connector-connection-storage-provider": {
+      "types": "./dist/storage/connector-connections/provider.d.ts",
+      "bun": "./src/storage/connector-connections/provider.ts",
+      "import": "./dist/storage/connector-connections/provider.js",
+      "default": "./dist/storage/connector-connections/provider.js"
+    },
     "./internal/edits": {
       "types": "./dist/edits/index.d.ts",
       "bun": "./src/edits/index.ts",

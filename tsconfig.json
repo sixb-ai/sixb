@@ -65,6 +65,9 @@
       "@sixb/core/internal/connector-connections": [
         "./packages/core/src/connectors/connections/internal.ts"
       ],
+      "@sixb/core/internal/connector-connection-storage-provider": [
+        "./packages/core/src/storage/connector-connections/provider.ts"
+      ],
       "@sixb/core/internal/edits": ["./packages/core/src/edits/index.ts"],
       "@sixb/core/internal/error-reporting": ["./packages/core/src/error-reporting/internal.ts"],
       "@sixb/core/internal/errors": ["./packages/core/src/errors/internal.ts"],

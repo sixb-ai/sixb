@@ -66,6 +66,9 @@ import webhookExecutionsSql from "./migrations/023-webhook-executions.sql" with 
 import ontologyCommitExecutionsSql from "./migrations/024-ontology-commit-executions.sql" with {
   type: "text",
 }
+import connectorConnectionsSql from "./migrations/025-connector-connections.sql" with {
+  type: "text",
+}
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -145,6 +148,7 @@ export const sqliteStorageMigrations = defineMigrations({
       },
       { checksum: checksum(ontologyCommitExecutionsSql) }
     ),
+    sqliteSql("025-connector-connections", connectorConnectionsSql),
   ],
 })
 

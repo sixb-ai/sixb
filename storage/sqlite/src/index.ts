@@ -28,6 +28,7 @@ import { SqliteActionRunStorage } from "./action-run-storage"
 import { SqliteAgentStorage } from "./agents"
 import { SqliteAiUsageStorage } from "./ai-usage-storage"
 import { SqliteAuthStorage } from "./auth-storage"
+import { SqliteConnectorConnectionStorage } from "./connector-connection-storage"
 import { SqliteExecutionStorage } from "./execution-storage"
 import {
   createSqliteStorageMigrators,
@@ -40,6 +41,7 @@ import { SqlitePipelineRunStorage } from "./pipeline-run-storage"
 import { SqliteProjectionRunStorage } from "./projection-run-storage"
 import { SqliteRulesStorage } from "./rules-storage"
 import { SqliteSyncRunStorage } from "./sync-run-storage"
+import { registerSqliteStorageTestingAdapter } from "./testing"
 import { SqliteTimeseriesStorage } from "./timeseries-storage"
 import {
   closeSqliteStoreConnection,
@@ -60,7 +62,7 @@ export interface SqliteStorageOptions {
  * SQLite storage provider for Sixb.
  *
  * Bundles object, timeseries, auth, execution, AI usage, sync run, pipeline run, projection run,
- * workflow run, and webhook run storage backed by SQLite.
+ * workflow run, webhook run, and connector connection storage backed by SQLite.
  *
  * Usage:
  * ```ts
@@ -88,6 +90,7 @@ export class SqliteStorage implements MigrationCapableStorage {
   readonly timeseries: Storage["timeseries"]
   readonly webhookRuns: SqliteWebhookRunStorage
   readonly rules: SqliteRulesStorage
+  readonly connectorConnections: SqliteConnectorConnectionStorage
   readonly migrators: readonly StorageMigrator[]
 
   private readonly connection: SqliteStoreConnection
@@ -149,7 +152,11 @@ export class SqliteStorage implements MigrationCapableStorage {
     this.workflowInterventions = createOperationScopedFacade(stores.workflowInterventions, scope)
     this.webhookRuns = createOperationScopedFacade(stores.webhookRuns, scope)
     this.rules = createOperationScopedFacade(stores.rules, scope)
+    this.connectorConnections = createOperationScopedFacade(stores.connectorConnections, scope)
     this.migrators = options.path ? createSqliteStorageMigrators(options.path) : []
+    registerSqliteStorageTestingAdapter(this, (durationMs) =>
+      stores.connectorConnections.advanceTimeForTesting(durationMs)
+    )
   }
 
   async ping(): Promise<void> {
@@ -300,6 +307,7 @@ function createSqliteStores(
     workflowInterventions: new SqliteWorkflowInterventionStorage({ connection }),
     webhookRuns: new SqliteWebhookRunStorage({ connection, executions }),
     rules: new SqliteRulesStorage({ connection }),
+    connectorConnections: new SqliteConnectorConnectionStorage(connection),
   }
 }
 
@@ -319,6 +327,7 @@ interface SqliteStoreSet {
   readonly timeseries: SqliteTimeseriesStorage
   readonly webhookRuns: SqliteWebhookRunStorage
   readonly rules: SqliteRulesStorage
+  readonly connectorConnections: SqliteConnectorConnectionStorage
 }
 
 export { migrateSqliteStorage } from "./migrations"

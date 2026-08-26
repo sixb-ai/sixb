@@ -184,7 +184,8 @@ in the Sync definition. See [OAuth connector fan-out](./syncs.md#oauth-connector
 ## Protect OAuth credentials
 
 When at least one OAuth connector uses durable connector storage, Sixb encrypts its tokens at rest.
-Provide the canonical base64url encoding of 32 random bytes through `createSixb()`:
+`SqliteStorage` and `PostgresStorage` provide that durable storage automatically. Provide the
+canonical base64url encoding of 32 random bytes through `createSixb()`:
 
 ```ts
 const connectorEncryptionKey = process.env.SIXB_CONNECTOR_ENCRYPTION_KEY
@@ -194,12 +195,13 @@ if (!connectorEncryptionKey) {
 }
 
 export const sixb = createSixb({
-  // ...providers
-  connectorConnections: {
-    encryptionKey: connectorEncryptionKey,
-  },
+  storage: new PostgresStorage({ connectionString: process.env.DATABASE_URL }),
+  connectorConnections: { encryptionKey: connectorEncryptionKey },
 })
 ```
+
+The storage provider owns persistence; `connectorConnections` only configures credential
+protection. Static connectors still require neither.
 
 Generate the value once, then store it in the deployment's secret manager:
 
