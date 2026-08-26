@@ -552,12 +552,26 @@ function DocumentContent({ document }: { document: AgentDocumentSource }) {
   if (renderer === "html-static") return <HtmlDocument document={document} />
   if (renderer === "delimited-text") return <DelimitedTextDocument document={document} />
   if (renderer === "pdf-native") return <PdfDocument document={document} />
+  if (renderer === "image-native") return <ImageDocument document={document} />
 
   return (
     <DocumentNotice
       title="Preview unavailable"
       description="This file type is not available in the document viewer yet."
     />
+  )
+}
+
+function ImageDocument({ document }: { document: AgentDocumentSource }) {
+  const name = documentName(document)
+  return (
+    <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-muted/20 p-4 sm:p-8">
+      <img
+        src={document.inlineUrl}
+        alt={name}
+        className="max-h-full max-w-full rounded-md object-contain shadow-sm"
+      />
+    </div>
   )
 }
 
