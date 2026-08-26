@@ -19,6 +19,7 @@ import {
   createWorkflowRunOperationScope,
 } from "@sixb/core/internal/storage-operation-scope"
 import {
+  type AiCostStorage,
   type AiUsageStorage,
   createTransactionStorageProxy,
   StorageTransactionError,
@@ -26,6 +27,7 @@ import {
 } from "@sixb/core/storage"
 import { SqliteActionRunStorage } from "./action-run-storage"
 import { SqliteAgentStorage } from "./agents"
+import { SqliteAiCostStorage } from "./ai-cost-storage"
 import { SqliteAiUsageStorage } from "./ai-usage-storage"
 import { SqliteAuthStorage } from "./auth-storage"
 import { SqliteConnectorConnectionStorage } from "./connector-connection-storage"
@@ -61,8 +63,8 @@ export interface SqliteStorageOptions {
 /**
  * SQLite storage provider for Sixb.
  *
- * Bundles object, timeseries, auth, execution, AI usage, sync run, pipeline run, projection run,
- * workflow run, webhook run, and connector connection storage backed by SQLite.
+ * Bundles object, timeseries, auth, execution, AI accounting, sync run, pipeline run, projection
+ * run, workflow run, webhook run, and connector connection storage backed by SQLite.
  *
  * Usage:
  * ```ts
@@ -81,6 +83,7 @@ export class SqliteStorage implements MigrationCapableStorage {
   readonly executions: SqliteExecutionStorage
   readonly agents: SqliteAgentStorage
   readonly aiUsage: AiUsageStorage
+  readonly aiCosts: AiCostStorage
   readonly actionRuns: SqliteActionRunStorage
   readonly pipelineRuns: SqlitePipelineRunStorage
   readonly syncRuns: SqliteSyncRunStorage
@@ -143,6 +146,7 @@ export class SqliteStorage implements MigrationCapableStorage {
     this.executions = createOperationScopedFacade(stores.executions, scope)
     this.agents = createAgentOperationScope(stores.agents, scope)
     this.aiUsage = createOperationScopedFacade(stores.aiUsage, scope)
+    this.aiCosts = createOperationScopedFacade(stores.aiCosts, scope)
     this.actionRuns = createOperationScopedFacade(stores.actionRuns, scope)
     this.pipelineRuns = createOperationScopedFacade(stores.pipelineRuns, scope)
     this.timeseries = createOperationScopedFacade(readTimeseries, readScope)
@@ -298,6 +302,7 @@ function createSqliteStores(
     executions,
     agents: new SqliteAgentStorage({ connection, executions }),
     aiUsage: new SqliteAiUsageStorage({ connection }),
+    aiCosts: new SqliteAiCostStorage(connection),
     actionRuns: new SqliteActionRunStorage({ connection, executions }),
     pipelineRuns: new SqlitePipelineRunStorage({ connection, executions }),
     timeseries: new SqliteTimeseriesStorage({ connection }),
@@ -318,6 +323,7 @@ interface SqliteStoreSet {
   readonly executions: SqliteExecutionStorage
   readonly agents: SqliteAgentStorage
   readonly aiUsage: SqliteAiUsageStorage
+  readonly aiCosts: SqliteAiCostStorage
   readonly actionRuns: SqliteActionRunStorage
   readonly pipelineRuns: SqlitePipelineRunStorage
   readonly syncRuns: SqliteSyncRunStorage

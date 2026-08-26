@@ -69,6 +69,7 @@ import ontologyCommitExecutionsSql from "./migrations/024-ontology-commit-execut
 import connectorConnectionsSql from "./migrations/025-connector-connections.sql" with {
   type: "text",
 }
+import aiCostAccountingSql from "./migrations/026-ai-cost-accounting.sql" with { type: "text" }
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -149,6 +150,7 @@ export const sqliteStorageMigrations = defineMigrations({
       { checksum: checksum(ontologyCommitExecutionsSql) }
     ),
     sqliteSql("025-connector-connections", connectorConnectionsSql),
+    sqliteSql("026-ai-cost-accounting", aiCostAccountingSql),
   ],
 })
 
