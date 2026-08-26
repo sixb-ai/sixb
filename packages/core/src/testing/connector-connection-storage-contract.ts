@@ -84,6 +84,9 @@ export function runConnectorConnectionStorageContractSuite<
         await expect(
           storage.consumeAuthorizationAttempt(authorizationAttemptConsumption())
         ).rejects.toThrow("invalid, expired, or already used")
+        await expect(
+          storage.createAuthorizationAttempt(authorizationAttempt())
+        ).resolves.toMatchObject({ id: "attempt-a" })
       })
     })
 
@@ -98,6 +101,9 @@ export function runConnectorConnectionStorageContractSuite<
         await expect(
           storage.consumeAuthorizationAttempt(authorizationAttemptConsumption())
         ).rejects.toThrow("invalid, expired, or already used")
+        await expect(
+          storage.createAuthorizationAttempt(authorizationAttempt())
+        ).resolves.toMatchObject({ id: "attempt-a" })
       })
     })
 
@@ -126,7 +132,6 @@ export function runConnectorConnectionStorageContractSuite<
         const committedRun = connectionRun({
           id: "run-commit",
           initiatedByExecutionId: committedExecution.id,
-          authorizationAttemptId: committedAttempt.id,
         })
         await root.transaction(
           async (tx) => {
@@ -159,7 +164,6 @@ export function runConnectorConnectionStorageContractSuite<
         const rolledBackRun = connectionRun({
           id: "run-rollback",
           initiatedByExecutionId: rolledBackExecution.id,
-          authorizationAttemptId: rolledBackAttempt.id,
         })
         const rollback = new Error("rollback connector authorization attempt")
         await expect(
@@ -182,6 +186,30 @@ export function runConnectorConnectionStorageContractSuite<
         await expect(
           storage.consumeAuthorizationAttempt(authorizationAttemptConsumption(rolledBackAttempt.id))
         ).rejects.toThrow("invalid, expired, or already used")
+      })
+    })
+
+    test("links at most one headless attempt to an awaiting provider run", async () => {
+      await withStorage(async (storage) => {
+        const headlessAttempt = {
+          connectionRunId: "run-a",
+          returnTo: "https://app.example.com/connectors",
+          callbackBindingHash: "binding-hash",
+        } as const
+
+        await expect(
+          storage.createAuthorizationAttempt(authorizationAttempt(headlessAttempt))
+        ).rejects.toThrow("does not match its connection run")
+
+        await storage.createConnectionRun(connectionRun())
+        await expect(
+          storage.createAuthorizationAttempt(authorizationAttempt(headlessAttempt))
+        ).resolves.toMatchObject({ id: "attempt-a", connectionRunId: "run-a" })
+        await expect(
+          storage.createAuthorizationAttempt(
+            authorizationAttempt({ ...headlessAttempt, id: "attempt-b" })
+          )
+        ).rejects.toThrow("does not match its connection run")
       })
     })
 
@@ -438,6 +466,45 @@ export function runConnectorConnectionStorageContractSuite<
         expect(await storage.getAuthorization(authorizationKey(duplicateId.id))).toEqual(
           duplicateId
         )
+      })
+    })
+
+    test("commits expiry cleanup before rejecting account selection", async () => {
+      await withStorage(async (storage, root) => {
+        const authorization = await createAuthorization(storage, "authorization-a", "account-a")
+        await options.advanceTime(root, 60_000)
+
+        await expect(connect(storage, authorization, "connection-a", "account-a")).rejects.toThrow(
+          "selectable authorization"
+        )
+        await expect(
+          storage.getAuthorization(authorizationKey(authorization.id))
+        ).resolves.toMatchObject({ status: "revocation_pending" })
+      })
+    })
+
+    test("commits lazy run expiry before rejecting a late selection", async () => {
+      await withStorage(async (storage, root) => {
+        const authorization = await createAuthorization(storage, "authorization-a", "account-a")
+        await createSelectionRun(storage, authorization)
+        await options.advanceTime(root, 60_000)
+
+        await expect(
+          storage.putConnectionFromRun({
+            id: "connection-a",
+            projectId,
+            connectorId,
+            runId: "run-a",
+            account: { id: "account-a", label: "Account A" },
+            replace: false,
+          })
+        ).rejects.toThrow("invalid, expired, or already used")
+        await expect(
+          storage.getConnectionRun({ projectId, connectorId, runId: "run-a" })
+        ).resolves.toMatchObject({ status: "expired" })
+        await expect(
+          storage.getAuthorization(authorizationKey(authorization.id))
+        ).resolves.toMatchObject({ status: "revocation_pending" })
       })
     })
 
@@ -803,7 +870,6 @@ function connectionRun(
     owner: { type: "project" },
     slot: "default",
     initiatedByExecutionId: "execution-a",
-    authorizationAttemptId: "attempt-a",
     ttlMs: 60_000,
     ...overrides,
   }

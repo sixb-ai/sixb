@@ -41,7 +41,6 @@ interface ConnectorConnectionRunBase extends ConnectorConnectionSelector {
 export interface ConnectorConnectionRunAwaitingProviderRecord extends ConnectorConnectionRunBase {
   readonly status: "waiting"
   readonly waitingFor: "provider_authorization"
-  readonly authorizationAttemptId: string
   readonly expiresAt: Date
 }
 
@@ -106,7 +105,6 @@ export interface CreateConnectorConnectionRunInput extends ConnectorConnectionSe
   readonly connectorId: string
   readonly kind: ConnectorConnectionRunKind
   readonly initiatedByExecutionId: string
-  readonly authorizationAttemptId: string
   readonly ttlMs: number
 }
 

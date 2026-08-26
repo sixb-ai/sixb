@@ -119,6 +119,25 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
         "[Sixb] Connector authorization attempt already exists."
       )
     }
+    if (input.connectionRunId !== undefined) {
+      const run = this.connectionRuns.get(input.connectionRunId)
+      const existingAttempt = this.findAuthorizationAttemptByConnectionRunId(input.connectionRunId)
+      if (
+        !run ||
+        existingAttempt ||
+        run.projectId !== input.projectId ||
+        run.connectorId !== input.connectorId ||
+        run.status !== "waiting" ||
+        run.waitingFor !== "provider_authorization" ||
+        run.slot !== input.slot ||
+        run.initiatedByExecutionId !== input.initiatedByExecutionId
+      ) {
+        throw new ConnectorConnectionStorageError(
+          "attempt_conflict",
+          "[Sixb] Connector authorization attempt does not match its connection run."
+        )
+      }
+    }
     const now = this.now()
     const record: ConnectorAuthorizationAttemptRecord = {
       id: input.id,
@@ -194,7 +213,6 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
       initiatedByExecutionId: input.initiatedByExecutionId,
       status: "waiting",
       waitingFor: "provider_authorization",
-      authorizationAttemptId: input.authorizationAttemptId,
       createdAt: now,
       updatedAt: now,
       expiresAt: new Date(now.getTime() + input.ttlMs),
@@ -266,7 +284,7 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
       run.connectorId !== attempt.connectorId ||
       run.status !== "waiting" ||
       run.waitingFor !== "provider_authorization" ||
-      run.authorizationAttemptId !== attempt.id ||
+      run.slot !== attempt.slot ||
       run.initiatedByExecutionId !== attempt.initiatedByExecutionId
     ) {
       return null
@@ -1062,7 +1080,8 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
     if (run.expiresAt.getTime() > now.getTime()) return run
 
     if (run.status === "waiting" && run.waitingFor === "provider_authorization") {
-      this.attempts.delete(run.authorizationAttemptId)
+      const attempt = this.findAuthorizationAttemptByConnectionRunId(run.id)
+      if (attempt) this.attempts.delete(attempt.id)
     }
     if (run.status === "waiting") {
       if (run.kind === "connect" && run.waitingFor === "account_selection") {
@@ -1093,6 +1112,15 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
       ) {
         return connection
       }
+    }
+    return undefined
+  }
+
+  private findAuthorizationAttemptByConnectionRunId(
+    connectionRunId: string
+  ): ConnectorAuthorizationAttemptRecord | undefined {
+    for (const attempt of this.attempts.values()) {
+      if (attempt.connectionRunId === connectionRunId) return attempt
     }
     return undefined
   }
