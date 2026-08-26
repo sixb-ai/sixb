@@ -165,11 +165,13 @@ export const ConnectorOAuthCallbackQuerySchema = z
   .object({
     state: z.string().min(1),
     code: z.string().min(1).optional(),
+    auth_code: z.string().min(1).optional(),
     error: z.string().min(1).optional(),
   })
-  .refine((query) => (query.code === undefined) !== (query.error === undefined), {
-    message: "OAuth callback must contain exactly one of code or error.",
+  .refine((query) => [query.code, query.auth_code, query.error].filter(Boolean).length === 1, {
+    message: "OAuth callback must contain exactly one of code, auth_code, or error.",
   })
+  .transform(({ auth_code, ...query }) => ({ ...query, code: query.code ?? auth_code }))
 
 function connectorRouteErrorResponseSchema<
   const TCodes extends readonly [ConnectorHttpErrorCode, ...ConnectorHttpErrorCode[]],
