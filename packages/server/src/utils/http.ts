@@ -24,6 +24,7 @@ const HTTP_STATUS_BY_ERROR_CODE: Partial<Record<SixbErrorCode, number>> = {
   "connector.operation_in_progress": 409,
   "connector.provider_failed": 502,
   "connector.provider_unavailable": 503,
+  "connector.replacement_required": 409,
   "connector.revocation_pending": 409,
   "dataset.not_found": 404,
   "dataset.version_not_found": 404,

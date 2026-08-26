@@ -5247,6 +5247,7 @@
                         "connector.authorization_required",
                         "connector.operation_conflict",
                         "connector.operation_in_progress",
+                        "connector.replacement_required",
                         "connector.revocation_pending"
                       ],
                       "description": "Stable machine-readable failure code for programmatic handling."
@@ -5462,6 +5463,7 @@
                         "connector.authorization_required",
                         "connector.operation_conflict",
                         "connector.operation_in_progress",
+                        "connector.replacement_required",
                         "connector.revocation_pending"
                       ],
                       "description": "Stable machine-readable failure code for programmatic handling."
@@ -5778,6 +5780,7 @@
                         "connector.authorization_required",
                         "connector.operation_conflict",
                         "connector.operation_in_progress",
+                        "connector.replacement_required",
                         "connector.revocation_pending"
                       ],
                       "description": "Stable machine-readable failure code for programmatic handling."
@@ -7127,6 +7130,7 @@
                         "connector.authorization_required",
                         "connector.operation_conflict",
                         "connector.operation_in_progress",
+                        "connector.replacement_required",
                         "connector.revocation_pending"
                       ],
                       "description": "Stable machine-readable failure code for programmatic handling."
@@ -7825,6 +7829,7 @@
                         "connector.authorization_required",
                         "connector.operation_conflict",
                         "connector.operation_in_progress",
+                        "connector.replacement_required",
                         "connector.revocation_pending"
                       ],
                       "description": "Stable machine-readable failure code for programmatic handling."
@@ -8091,6 +8096,7 @@
                         "connector.authorization_required",
                         "connector.operation_conflict",
                         "connector.operation_in_progress",
+                        "connector.replacement_required",
                         "connector.revocation_pending"
                       ],
                       "description": "Stable machine-readable failure code for programmatic handling."

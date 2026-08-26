@@ -4,6 +4,7 @@ import {
   authorize,
   callbackUrl,
   createHarness,
+  expectSixbError,
   managementCommand,
   projectOwner,
   rejectionOf,
@@ -169,6 +170,53 @@ describe("connector connection runs", () => {
         authorizationId: completed.authorizationId,
       })
     ).resolves.toHaveLength(2)
+  })
+
+  test("distinguishes an occupied slot from other run conflicts", async () => {
+    const harness = createHarness()
+    const command = managementCommand()
+    const existingAuthorization = await authorize(harness)
+    await harness.process.selectAccount(command, harness.connector.id, {
+      authorizationId: existingAuthorization.authorizationId,
+      accountId: "account-a",
+      owner: projectOwner,
+      slot: "social",
+    })
+
+    const started = await harness.process.startConnectionRun(command, harness.connector.id, {
+      owner: projectOwner,
+      slot: "social",
+      redirectUri: callbackUrl,
+      returnTo,
+    })
+    const state = new URL(started.authorizationUrl).searchParams.get("state")!
+    await harness.process.callbackProcess.completeConnectionRun({
+      state,
+      code: "authorization-code",
+      redirectUri: callbackUrl,
+      callbackBinding: started.callbackBinding.secret,
+    })
+
+    const replacementRequired = await rejectionOf(
+      harness.process.selectConnectionRunAccount(command, harness.connector.id, {
+        runId: started.runId,
+        accountId: "account-b",
+      })
+    )
+    expectSixbError(replacementRequired, "connector.replacement_required")
+
+    await harness.process.selectConnectionRunAccount(command, harness.connector.id, {
+      runId: started.runId,
+      accountId: "account-b",
+      replace: true,
+    })
+    const terminalConflict = await rejectionOf(
+      harness.process.selectConnectionRunAccount(command, harness.connector.id, {
+        runId: started.runId,
+        accountId: "account-b",
+      })
+    )
+    expectSixbError(terminalConflict, "connector.operation_conflict")
   })
 
   test("automatically revokes an abandoned account-selection run", async () => {

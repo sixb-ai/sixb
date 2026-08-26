@@ -230,7 +230,7 @@ export function SocialConnection() {
 
   return (
     <>
-      <button onClick={social.connect} disabled={social.isPending}>
+      <button onClick={social.connect} disabled={!social.canConnect}>
         {social.connection?.account.label ?? "Connect social account"}
       </button>
 
@@ -262,7 +262,7 @@ exposes `disconnect()`, `revoke()`, and `needs_reauthorization`; Sixb imposes th
 visual representation.
 
 Selecting an account for an occupied slot returns a replacement conflict. Detect it with
-`isConnectorReplacementConflict(connection.error?.cause)`, ask for confirmation in the
+`isConnectorReplacementRequired(connection.error?.cause)`, ask for confirmation in the
 application, then retry with `selectAccount(accountId, { replace: true })`.
 
 To expose another account from the same OAuth grant, start a selection run from an existing
