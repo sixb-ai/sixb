@@ -16,6 +16,15 @@ export function agentDocumentKind(
 }
 
 function kindFromMediaType(mediaType: string): AgentDocumentKind | null {
+  if (
+    mediaType === "image/png" ||
+    mediaType === "image/jpeg" ||
+    mediaType === "image/webp" ||
+    mediaType === "image/gif"
+  ) {
+    return "image"
+  }
+
   switch (mediaType) {
     case "text/markdown":
       return "markdown"
@@ -41,5 +50,6 @@ function kindFromFileName(fileName: string | undefined): AgentDocumentKind | nul
   if (normalized.endsWith(".csv")) return "csv"
   if (normalized.endsWith(".tsv")) return "tsv"
   if (normalized.endsWith(".pdf")) return "pdf"
+  if (/\.(png|jpe?g|webp|gif)$/i.test(normalized)) return "image"
   return null
 }
