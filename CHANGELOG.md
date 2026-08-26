@@ -2,6 +2,14 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-08-26
+
+### TikTok connector
+
+- `@sixb/connector-tiktok` `0.1.0`: add separate managed OAuth grants for organic TikTok accounts
+  and Ads accounts, with typed read clients for profiles, posts, comments, campaign entities, and
+  integrated Ads reports.
+
 ## 2026-08-14
 
 ### Redis subscription recovery

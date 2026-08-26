@@ -411,6 +411,7 @@ to `defineConnector`, and most ship a matching webhook helper for the [Webhooks]
 | `@sixb/connector-pipedrive` | `pipedrive(...)` | Pipedrive CRM | `pipedriveEventsWebhook` |
 | `@sixb/connector-stripe` | `stripe(...)` | Stripe customers, subscriptions, invoices, refunds, events | `stripeEventsWebhook` |
 | `@sixb/connector-teamleader` | `teamleader(...)` | Teamleader CRM, invoicing, quotations | `defineTeamleaderWebhook` |
+| `@sixb/connector-tiktok` | `tiktok(...)` | TikTok organic accounts and Ads reporting | — |
 | `@sixb/connector-pandadoc` | `pandadoc(...)` | PandaDoc documents and e-signatures | `pandaDocEventsWebhook` |
 | `@sixb/connector-companycam` | `companycam(...)` | CompanyCam jobsite photos | `companyCamEventsWebhook` |
 | `@sixb/connector-pennylane` | `pennylane(...)` | Pennylane quotes, products, customers | — |
