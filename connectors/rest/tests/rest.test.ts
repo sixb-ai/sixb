@@ -446,6 +446,44 @@ describe("rest reliability contract", () => {
     ])
   })
 
+  test("async retry policies can inspect a cloned response body", async () => {
+    let attempts = 0
+    let delayBody: unknown
+    mockFetch(() => {
+      attempts += 1
+      return Promise.resolve(
+        attempts === 1
+          ? Response.json({ retry: true }, { status: 400 })
+          : Response.json({ ok: true })
+      )
+    })
+    const client = await rest({
+      baseUrl: "https://api.example.com",
+      retry: {
+        maxRetries: 1,
+        async shouldRetry({ response }) {
+          if (!response) return false
+          const body = (await response.clone().json()) as { retry?: boolean }
+          return body.retry === true
+        },
+        async delayMs({ response }) {
+          delayBody = await response?.clone().json()
+          return 0
+        },
+      },
+    }).connect({
+      projectId: "demo",
+      connectorId: "contract",
+      signal: new AbortController().signal,
+    })
+
+    const response = await client.get("/async-retry")
+
+    expect(attempts).toBe(2)
+    expect(delayBody).toEqual({ retry: true })
+    expect(await response.json()).toEqual({ ok: true })
+  })
+
   test("a hard retry gate wins over a custom policy", async () => {
     let attempts = 0
     let decisions = 0

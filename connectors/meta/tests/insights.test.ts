@@ -126,7 +126,25 @@ describe("meta connector — insights", () => {
 
   test("throws MetaApiError on a non-2xx response", async () => {
     mockFetch(() =>
-      Promise.resolve(json({ error: { message: "Invalid metric" } }, { status: 400 }))
+      Promise.resolve(
+        json(
+          {
+            error: {
+              message: "Invalid metric",
+              type: "OAuthException",
+              code: 100,
+              error_subcode: 33,
+              fbtrace_id: "trace-1",
+            },
+          },
+          {
+            status: 400,
+            headers: {
+              "X-App-Usage": JSON.stringify({ call_count: 18, total_cputime: 2, total_time: 4 }),
+            },
+          }
+        )
+      )
     )
 
     const client = await meta({ accessToken: "t" }).connect(CONTEXT)
@@ -134,6 +152,72 @@ describe("meta connector — insights", () => {
 
     await expect(promise).rejects.toBeInstanceOf(MetaApiError)
     await expect(promise).rejects.toThrow("400")
+    const error = (await promise.catch((caught: unknown) => caught)) as MetaApiError
+    expect(error.graphError).toEqual({
+      message: "Invalid metric",
+      type: "OAuthException",
+      code: 100,
+      error_subcode: 33,
+      is_transient: undefined,
+      error_user_title: undefined,
+      error_user_msg: undefined,
+      error_data: undefined,
+      fbtrace_id: "trace-1",
+    })
+    expect(error.usage.app?.call_count).toBe(18)
+    expect(error.body).toEqual({
+      error: {
+        message: "Invalid metric",
+        type: "OAuthException",
+        code: 100,
+        error_subcode: 33,
+        fbtrace_id: "trace-1",
+      },
+    })
+    expect(JSON.parse(error.rawBody)).toEqual(error.body)
+  })
+
+  test("retries Meta throttling codes returned with HTTP 400", async () => {
+    let calls = 0
+    mockFetch(() => {
+      calls += 1
+      return Promise.resolve(
+        calls === 1
+          ? json(
+              { error: { message: "Application request limit reached", code: 4 } },
+              { status: 400 }
+            )
+          : json({ data: [{ name: "reach" }] })
+      )
+    })
+
+    const client = await meta({
+      accessToken: "t",
+      retry: { maxRetries: 1, delayMs: () => 0 },
+    }).connect(CONTEXT)
+    const insights = await client.instagram("ig-1").insights.get({ metrics: ["reach"] })
+
+    expect(calls).toBe(2)
+    expect(insights[0]?.name).toBe("reach")
+  })
+
+  test("does not retry non-throttling Graph errors", async () => {
+    let calls = 0
+    mockFetch(() => {
+      calls += 1
+      return Promise.resolve(
+        json({ error: { message: "Invalid token", code: 190 } }, { status: 400 })
+      )
+    })
+
+    const client = await meta({
+      accessToken: "t",
+      retry: { maxRetries: 2, delayMs: () => 0 },
+    }).connect(CONTEXT)
+    const promise = client.instagram("ig-1").insights.get({ metrics: ["reach"] })
+
+    await expect(promise).rejects.toBeInstanceOf(MetaApiError)
+    expect(calls).toBe(1)
   })
 
   test("retries 429 responses honoring Retry-After", async () => {
