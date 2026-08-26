@@ -244,6 +244,24 @@ async function connectAccount(
 }
 
 describe("connector connection Headless API", () => {
+  test("accepts an OAuth callback whose registered URI ends in a slash", async () => {
+    const harness = await createHarness()
+    const started = await startRun(harness)
+    const callbackUrl = new URL("http://localhost/auth/connectors/callback/")
+    callbackUrl.searchParams.set("state", started.state)
+    callbackUrl.searchParams.set("code", "authorization-code")
+
+    const callback = await harness.app.handle(
+      new Request(callbackUrl, {
+        redirect: "manual",
+        headers: { cookie: started.callbackCookie },
+      })
+    )
+
+    expect(callback.status, await callback.clone().text()).toBe(302)
+    expect(harness.exchangeCount()).toBe(1)
+  })
+
   test("returns coded boundaries when a connector cannot have managed connections", async () => {
     const harness = await createStaticHarness()
 
