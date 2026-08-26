@@ -35,6 +35,7 @@ import {
   getAgentMessageFileContent,
   getAgentRun,
   getAgentThread,
+  getAiAccountingOverview,
   getAuthAccessManagementOptions,
   getAuthInvitationOptions,
   getAuthMembershipOptions,
@@ -69,6 +70,7 @@ import {
   listAgentThreadMessages,
   listAgentThreadRuns,
   listAgentThreads,
+  listAiModelCalls,
   listAuthAccessTokens,
   listAuthInvitations,
   listAuthMembers,
@@ -203,6 +205,9 @@ import type {
   GetAgentThreadData,
   GetAgentThreadError,
   GetAgentThreadResponse,
+  GetAiAccountingOverviewData,
+  GetAiAccountingOverviewError,
+  GetAiAccountingOverviewResponse,
   GetAuthAccessManagementOptionsData,
   GetAuthAccessManagementOptionsError,
   GetAuthAccessManagementOptionsResponse,
@@ -300,6 +305,9 @@ import type {
   ListAgentThreadsData,
   ListAgentThreadsError,
   ListAgentThreadsResponse,
+  ListAiModelCallsData,
+  ListAiModelCallsError,
+  ListAiModelCallsResponse,
   ListAuthAccessTokensData,
   ListAuthAccessTokensError,
   ListAuthAccessTokensResponse,
@@ -1245,6 +1253,99 @@ export const reactivateAuthMemberMutation = (
   }
   return mutationOptions
 }
+
+export const getAiAccountingOverviewQueryKey = (options: Options<GetAiAccountingOverviewData>) =>
+  createQueryKey("getAiAccountingOverview", options)
+
+/**
+ * Get project AI usage and cost analytics
+ */
+export const getAiAccountingOverviewOptions = (options: Options<GetAiAccountingOverviewData>) =>
+  queryOptions<
+    GetAiAccountingOverviewResponse,
+    GetAiAccountingOverviewError,
+    GetAiAccountingOverviewResponse,
+    ReturnType<typeof getAiAccountingOverviewQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getAiAccountingOverview({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getAiAccountingOverviewQueryKey(options),
+  })
+
+export const listAiModelCallsQueryKey = (options: Options<ListAiModelCallsData>) =>
+  createQueryKey("listAiModelCalls", options)
+
+/**
+ * List project AI model-call accounting records
+ */
+export const listAiModelCallsOptions = (options: Options<ListAiModelCallsData>) =>
+  queryOptions<
+    ListAiModelCallsResponse,
+    ListAiModelCallsError,
+    ListAiModelCallsResponse,
+    ReturnType<typeof listAiModelCallsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listAiModelCalls({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listAiModelCallsQueryKey(options),
+  })
+
+export const listAiModelCallsInfiniteQueryKey = (
+  options: Options<ListAiModelCallsData>
+): QueryKey<Options<ListAiModelCallsData>> => createQueryKey("listAiModelCalls", options, true)
+
+/**
+ * List project AI model-call accounting records
+ */
+export const listAiModelCallsInfiniteOptions = (options: Options<ListAiModelCallsData>) =>
+  infiniteQueryOptions<
+    ListAiModelCallsResponse,
+    ListAiModelCallsError,
+    InfiniteData<ListAiModelCallsResponse>,
+    QueryKey<Options<ListAiModelCallsData>>,
+    string | Pick<QueryKey<Options<ListAiModelCallsData>>[0], "body" | "headers" | "path" | "query">
+  >(
+    // @ts-ignore
+    {
+      queryFn: async ({ pageParam, queryKey, signal }) => {
+        // @ts-ignore
+        const page: Pick<
+          QueryKey<Options<ListAiModelCallsData>>[0],
+          "body" | "headers" | "path" | "query"
+        > =
+          typeof pageParam === "object"
+            ? pageParam
+            : {
+                query: {
+                  offset: pageParam,
+                },
+              }
+        const params = createInfiniteParams(queryKey, page)
+        const { data } = await listAiModelCalls({
+          ...options,
+          ...params,
+          signal,
+          throwOnError: true,
+        })
+        return data
+      },
+      queryKey: listAiModelCallsInfiniteQueryKey(options),
+    }
+  )
 
 export const getProjectInfoQueryKey = (options?: Options<GetProjectInfoData>) =>
   createQueryKey("getProjectInfo", options)

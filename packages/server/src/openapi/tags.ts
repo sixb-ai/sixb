@@ -7,6 +7,10 @@ export const OPENAPI_TAGS = {
     name: "Status",
     description: "Runtime status",
   },
+  aiAccounting: {
+    name: "AI Accounting",
+    description: "Project AI token usage, cost analytics, and model-call accounting",
+  },
   ontology: {
     name: "Ontology",
     description: "Object type definitions",

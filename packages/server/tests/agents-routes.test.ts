@@ -968,9 +968,27 @@ describe("agent routes", () => {
         reasoningOutputTokens: 2,
         reportingStatus: "complete",
       },
+      cost: {
+        amounts: [],
+        ratedCallCount: 0,
+        unpriceableCallCount: 0,
+        unvaluedCallCount: 1,
+      },
       startedAt: "2026-06-27T10:00:01.000Z",
     })
     expect("execution" in body).toBe(false)
+
+    Object.defineProperty(storage, "aiCosts", { value: undefined })
+    const unavailableResponse = await app.fetch(
+      new Request(`http://localhost/api/agent-runs/${run.id}`)
+    )
+    expect(unavailableResponse.status).toBe(200)
+    const unavailableBody = (await unavailableResponse.json()) as Record<string, unknown>
+    expect(unavailableBody).toMatchObject({
+      id: run.id,
+      usage: { inputTokens: 12, outputTokens: 8, reportingStatus: "complete" },
+    })
+    expect("cost" in unavailableBody).toBe(false)
   })
 
   test("batches ledger summaries when listing a thread's run history", async () => {

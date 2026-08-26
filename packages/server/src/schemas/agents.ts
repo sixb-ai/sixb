@@ -7,6 +7,7 @@ import {
   type SixbFailure,
 } from "@sixb/core/storage"
 import { z } from "zod"
+import { AiCostSummarySchema } from "./ai-accounting"
 import { AiUsageSummarySchema } from "./ai-usage"
 import { JsonValueSchema, sixbFailureSchema } from "./common"
 import { FileRefSchema } from "./files"
@@ -256,6 +257,7 @@ export const AgentRunSchema = z.object({
   modelId: z.string().optional(),
   finishReason: AgentRunFinishReasonSchema.optional(),
   usage: AiUsageSummarySchema.optional(),
+  cost: AiCostSummarySchema.optional(),
   diagnostics: z.array(AgentRunDiagnosticSchema).optional(),
   error: AgentRunFailureSchema.optional(),
   attempt: z.number(),
