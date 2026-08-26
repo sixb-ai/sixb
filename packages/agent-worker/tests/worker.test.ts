@@ -286,12 +286,27 @@ function slowAnswerModel(delayMs: number): MockLanguageModelV4 {
   })
 }
 
-function toolOnlyModel(): MockLanguageModelV4 {
+function toolOnlyModel(captureSynthesis?: (options: LanguageModelV4CallOptions) => void) {
   let call = 0
   return new MockLanguageModelV4({
     modelId: "mock-model",
-    doStream: async () => {
+    doStream: async (options) => {
       call += 1
+      const echoIsAvailable = options.tools?.some((candidate) => candidate.name === "echo") ?? false
+      if (!echoIsAvailable) {
+        captureSynthesis?.(options)
+        return stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: `synthesis-${call}` },
+          {
+            type: "text-delta",
+            id: `synthesis-${call}`,
+            delta: "Best answer from the work completed so far.",
+          },
+          { type: "text-end", id: `synthesis-${call}` },
+          finish("stop"),
+        ])
+      }
       return stream([
         { type: "stream-start", warnings: [] },
         {
@@ -309,6 +324,18 @@ function toolOnlyModel(): MockLanguageModelV4 {
 function structuredAnswerModel(): MockLanguageModelV4 {
   return new MockLanguageModelV4({
     modelId: "mock-model",
+    doStream: async () =>
+      stream([
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "workflow-answer" },
+        {
+          type: "text-delta",
+          id: "workflow-answer",
+          delta: "Project Alpha is the best match with 0.96 confidence.",
+        },
+        { type: "text-end", id: "workflow-answer" },
+        finish("stop"),
+      ]),
     doGenerate: async () => ({
       content: [
         {
@@ -326,6 +353,18 @@ function structuredAnswerModel(): MockLanguageModelV4 {
 function invalidStructuredAnswerModel(): MockLanguageModelV4 {
   return new MockLanguageModelV4({
     modelId: "mock-model",
+    doStream: async () =>
+      stream([
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "workflow-answer" },
+        {
+          type: "text-delta",
+          id: "workflow-answer",
+          delta: "Project Alpha is the best match.",
+        },
+        { type: "text-end", id: "workflow-answer" },
+        finish("stop"),
+      ]),
     doGenerate: async () => ({
       content: [{ type: "text", text: JSON.stringify({ answer: 42, confidence: "high" }) }],
       finishReason: { unified: "stop", raw: "stop" },
@@ -335,56 +374,115 @@ function invalidStructuredAnswerModel(): MockLanguageModelV4 {
   })
 }
 
+function structuredAnswerAfterValidationRetryModel(
+  captureFinalizerPrompt: (prompt: LanguageModelV4CallOptions["prompt"]) => void
+): MockLanguageModelV4 {
+  let finalizerCall = 0
+  return new MockLanguageModelV4({
+    modelId: "mock-model",
+    doStream: async () =>
+      stream([
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "workflow-answer" },
+        {
+          type: "text-delta",
+          id: "workflow-answer",
+          delta: "Project Alpha is the best match with 0.96 confidence.",
+        },
+        { type: "text-end", id: "workflow-answer" },
+        finish("stop"),
+      ]),
+    doGenerate: async (options) => {
+      captureFinalizerPrompt(options.prompt)
+      finalizerCall += 1
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              finalizerCall === 1
+                ? JSON.stringify({ answer: 42, confidence: "high" })
+                : JSON.stringify({ answer: "Project Alpha", confidence: 0.96 }),
+          },
+        ],
+        finishReason: { unified: "stop", raw: "stop" },
+        usage: USAGE,
+        warnings: [],
+      }
+    },
+  })
+}
+
 function structuredToolThenProviderFailureModel(): MockLanguageModelV4 {
   let call = 0
   return new MockLanguageModelV4({
     modelId: "mock-model",
-    doGenerate: async () => {
+    doStream: async () => {
       call += 1
       if (call === 1) {
-        return {
-          content: [
-            {
-              type: "tool-call",
-              toolCallId: "workflow-failure",
-              toolName: "fail_lookup",
-              input: JSON.stringify({ query: "alpha" }),
-            },
-          ],
-          finishReason: { unified: "tool-calls", raw: "tool-calls" },
-          usage: USAGE,
-          warnings: [],
-        }
+        return stream([
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: "workflow-failure",
+            toolName: "fail_lookup",
+            input: JSON.stringify({ query: "alpha" }),
+          },
+          finish("tool-calls"),
+        ])
       }
       throw new Error("provider unavailable after tool failure")
     },
   })
 }
 
+interface CapturedWorkflowModelCall {
+  readonly phase: "research" | "finalize"
+  readonly options: LanguageModelV4CallOptions
+}
+
 function structuredToolThenAnswerModel(
-  captureSystem?: (system: string | undefined) => void
+  captureCall?: (call: CapturedWorkflowModelCall) => void
 ): MockLanguageModelV4 {
-  let call = 0
+  let researchCall = 0
   return new MockLanguageModelV4({
     modelId: "mock-model",
-    doGenerate: async (options) => {
-      captureSystem?.(options.prompt.find((message) => message.role === "system")?.content)
-      call += 1
-      if (call === 1) {
-        return {
-          content: [
-            {
-              type: "tool-call",
-              toolCallId: "workflow-lookup",
-              toolName: "lookup_project",
-              input: JSON.stringify({ query: "alpha" }),
-            },
-          ],
-          finishReason: { unified: "tool-calls", raw: "tool-calls" },
-          usage: USAGE,
-          warnings: [],
-        }
+    doStream: async (options) => {
+      captureCall?.({ phase: "research", options })
+      researchCall += 1
+      if (researchCall === 1) {
+        return stream([
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: "workflow-lookup",
+            toolName: "lookup_project",
+            input: JSON.stringify({ query: "alpha" }),
+          },
+          finish("tool-calls"),
+        ])
       }
+      return stream([
+        { type: "stream-start", warnings: [] },
+        { type: "reasoning-start", id: "workflow-reasoning" },
+        {
+          type: "reasoning-delta",
+          id: "workflow-reasoning",
+          delta: "private workflow reasoning",
+        },
+        { type: "reasoning-end", id: "workflow-reasoning" },
+        { type: "text-start", id: "workflow-answer" },
+        {
+          type: "text-delta",
+          id: "workflow-answer",
+          delta: "Project Alpha is the best match with 0.96 confidence.",
+        },
+        { type: "text-end", id: "workflow-answer" },
+        finish("stop"),
+      ])
+    },
+    doGenerate: async (options) => {
+      captureCall?.({ phase: "finalize", options })
       return {
         content: [
           {
@@ -1482,10 +1580,8 @@ describe("AgentWorker", () => {
   })
 
   test("executes a headless workflow agent node and publishes its resume", async () => {
-    let capturedSystem: string | undefined
-    const model = structuredToolThenAnswerModel((system) => {
-      capturedSystem = system
-    })
+    const capturedCalls: CapturedWorkflowModelCall[] = []
+    const model = structuredToolThenAnswerModel((call) => capturedCalls.push(call))
     let lookupCalls = 0
     const lookupProject = defineAgentTool("lookup_project")
       .description("Look up a project.")
@@ -1500,6 +1596,8 @@ describe("AgentWorker", () => {
       instructions: "Resolve the best project.",
       groups: [AGENT_RUNTIME_GROUP],
       tools: [lookupProject],
+      reasoning: "high",
+      providerOptions: { openai: { reasoningSummary: "detailed" } },
     })
     const agentStep = defineAgentStep("resolve-project", agent)
       .input({ query: "string" })
@@ -1610,13 +1708,15 @@ describe("AgentWorker", () => {
       expect(execution.execution).toBeUndefined()
       expect(execution.trace).toBeArray()
       expect(lookupCalls).toBe(1)
-      expect(recordedUsage).toHaveLength(2)
+      expect(recordedUsage).toHaveLength(3)
       expect(recordedUsage.map((usage) => usage.executionId)).toEqual([
         agentExecutionId,
         agentExecutionId,
+        agentExecutionId,
       ])
-      expect(recordedUsage.map((usage) => usage.attempt)).toEqual([1, 1])
+      expect(recordedUsage.map((usage) => usage.attempt)).toEqual([1, 1, 1])
       expect(recordedUsage.map((usage) => usage.requesterGroupIds)).toEqual([
+        ["operations", "project-alpha"],
         ["operations", "project-alpha"],
         ["operations", "project-alpha"],
       ])
@@ -1645,28 +1745,39 @@ describe("AgentWorker", () => {
           textOutputTokens: 7,
           reasoningOutputTokens: 0,
         },
+        {
+          inputTokens: 10,
+          outputTokens: 7,
+          uncachedInputTokens: 10,
+          cacheReadInputTokens: 0,
+          cacheWriteInputTokens: 0,
+          textOutputTokens: 7,
+          reasoningOutputTokens: 0,
+        },
       ])
       expect(recordedUsage.map((usage) => usage.requestedModelId)).toEqual([
+        "mock-model",
         "mock-model",
         "mock-model",
       ])
       expect(recordedUsage.map((usage) => usage.rawUsage)).toEqual([
         { input_tokens: 10, output_tokens: 7, provider_meter: 1 },
         { input_tokens: 10, output_tokens: 7, provider_meter: 1 },
+        { input_tokens: 10, output_tokens: 7, provider_meter: 1 },
       ])
       expect(recordedUsage.every((usage) => usage.occurredAt instanceof Date)).toBe(true)
-      expect(new Set(recordedUsage.map((usage) => usage.responseId)).size).toBe(2)
+      expect(new Set(recordedUsage.map((usage) => usage.responseId)).size).toBe(3)
       await expect(
         aiUsage.summarizeExecution({
           projectId: PROJECT_ID,
           executionId: agentExecutionId,
         })
       ).resolves.toMatchObject({
-        modelCallCount: 2,
+        modelCallCount: 3,
         usage: {
-          inputTokens: 20,
-          outputTokens: 14,
-          totalTokens: 34,
+          inputTokens: 30,
+          outputTokens: 21,
+          totalTokens: 51,
           reportingStatus: "complete",
         },
       })
@@ -1682,9 +1793,29 @@ describe("AgentWorker", () => {
           },
         })
       )
-      expect(capturedSystem).toContain("Execution mode: workflow-task")
-      expect(capturedSystem).toContain("headless Sixb workflow agent")
-      expect(capturedSystem).toContain("Do not ask a user follow-up question")
+      expect(execution.trace).toContainEqual(
+        expect.objectContaining({ type: "reasoning", text: "private workflow reasoning" })
+      )
+      expect(capturedCalls.map((call) => call.phase)).toEqual(["research", "research", "finalize"])
+      const researchSystem = capturedCalls[0]?.options.prompt.find(
+        (message) => message.role === "system"
+      )?.content
+      expect(researchSystem).toContain("Execution mode: workflow-task")
+      expect(researchSystem).toContain("headless Sixb workflow agent")
+      expect(researchSystem).toContain("Do not ask a user follow-up question")
+      expect(researchSystem).not.toContain("structured output contract")
+      const finalizer = capturedCalls[2]?.options
+      const finalizerSystem = finalizer?.prompt.find(
+        (message) => message.role === "system"
+      )?.content
+      expect(finalizerSystem).toContain("convert a completed workflow agent answer")
+      expect(finalizer?.tools?.length ?? 0).toBe(0)
+      expect(finalizer?.responseFormat).toMatchObject({ type: "json" })
+      expect(finalizer?.reasoning).toBeUndefined()
+      expect(finalizer?.providerOptions).toEqual({ openai: { reasoningSummary: "detailed" } })
+      expect(JSON.stringify(finalizer?.prompt)).not.toContain("workflow-lookup")
+      expect(JSON.stringify(finalizer?.prompt)).not.toContain("private workflow reasoning")
+      expect(JSON.stringify(finalizer?.prompt)).not.toContain(nodeRunId)
       expect(await runs.nodes.getById({ projectId: PROJECT_ID, id: nodeRunId })).toMatchObject({
         status: "succeeded",
         output: { answer: "Project Alpha", confidence: 0.96 },
@@ -1732,13 +1863,56 @@ describe("AgentWorker", () => {
           executionId: agentExecutionId,
         })
       ).resolves.toMatchObject({
-        modelCallCount: 1,
+        modelCallCount: 3,
         usage: {
-          inputTokens: 10,
-          outputTokens: 7,
-          totalTokens: 17,
+          inputTokens: 30,
+          outputTokens: 21,
+          totalTokens: 51,
           reportingStatus: "complete",
         },
+      })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("retries only the structured workflow finalizer after validation fails", async () => {
+    const finalizerPrompts: LanguageModelV4CallOptions["prompt"][] = []
+    const { sixb, runs, nodeRunId, agentExecutionId } = await queueWorkflowAgentNode({
+      model: structuredAnswerAfterValidationRetryModel((prompt) => finalizerPrompts.push(prompt)),
+      runId: "workflow-output-retry",
+    })
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+
+    await worker.start()
+    try {
+      const execution = await waitFor(
+        async () => {
+          const record = await runs.agentNodes.getByNodeRunId({
+            projectId: PROJECT_ID,
+            nodeRunId,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "workflow output validation retry" }
+      )
+
+      expect(execution).toMatchObject({ status: "succeeded", finishReason: "stop" })
+      expect(finalizerPrompts).toHaveLength(2)
+      expect(JSON.stringify(finalizerPrompts[1])).toContain("answer")
+      expect(JSON.stringify(finalizerPrompts[1])).toContain("confidence")
+      expect(JSON.stringify(finalizerPrompts[1])).toContain("high")
+      expect(JSON.stringify(finalizerPrompts[1])).toContain(
+        "previous response did not satisfy the workflow output schema"
+      )
+      await expect(
+        aiUsageStorageOf(sixb).summarizeExecution({
+          projectId: PROJECT_ID,
+          executionId: agentExecutionId,
+        })
+      ).resolves.toMatchObject({
+        modelCallCount: 3,
+        usage: { inputTokens: 30, outputTokens: 21, totalTokens: 51 },
       })
     } finally {
       await worker.stop()
@@ -1887,6 +2061,16 @@ describe("AgentWorker", () => {
     let modelCalls = 0
     const model = new MockLanguageModelV4({
       modelId: "mock-model",
+      doStream: async () => {
+        modelCalls += 1
+        return stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "workflow-answer" },
+          { type: "text-delta", id: "workflow-answer", delta: "Project Alpha." },
+          { type: "text-end", id: "workflow-answer" },
+          finish("stop"),
+        ])
+      },
       doGenerate: async () => {
         modelCalls += 1
         return {
@@ -1999,8 +2183,8 @@ describe("AgentWorker", () => {
           executionId: agentExecutionId,
         })
       ).resolves.toMatchObject({
-        modelCallCount: 1,
-        usage: { inputTokens: 10, outputTokens: 7, totalTokens: 17 },
+        modelCallCount: 2,
+        usage: { inputTokens: 20, outputTokens: 14, totalTokens: 34 },
       })
     } finally {
       await worker.stop()
@@ -2116,7 +2300,7 @@ describe("AgentWorker", () => {
     const originalError = new Error("workflow agent provider failed")
     const model = new MockLanguageModelV4({
       modelId: "mock-model",
-      doGenerate: async () => {
+      doStream: async () => {
         throw originalError
       },
     })
@@ -3823,8 +4007,13 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("adds visible guidance when the step limit is reached before an answer", async () => {
-    const sixb = buildSixbWithEchoTool(toolOnlyModel())
+  test("reserves the final loop step for a tool-free best-effort answer", async () => {
+    let synthesisOptions: LanguageModelV4CallOptions | undefined
+    const sixb = buildSixbWithEchoTool(
+      toolOnlyModel((options) => {
+        synthesisOptions = options
+      })
+    )
     const storage = agentStorageOf(sixb)
 
     const worker = new AgentWorker(sixb, workerOptions())
@@ -3847,20 +4036,23 @@ describe("AgentWorker", () => {
       )
 
       expect(run.status).toBe("succeeded")
-      expect(run.finishReason).toBe("tool-calls")
+      expect(run.finishReason).toBe("stop")
 
       const messages = await listMessages(storage, threadId)
       const assistant = messages.find((message) => message.role === "assistant")
       const parts = assistant?.parts ?? []
-      expect(parts.filter((part) => part.type === "tool-call")).toHaveLength(4)
+      expect(parts.filter((part) => part.type === "tool-call")).toHaveLength(3)
       expect(
         parts.some(
           (part) =>
             part.type === "text" &&
-            part.text.includes("configured 4-step limit") &&
-            part.text.includes("producing a final answer")
+            part.text.includes("Best answer from the work completed so far.")
         )
       ).toBe(true)
+      expect(synthesisOptions?.tools?.length ?? 0).toBe(0)
+      expect(JSON.stringify(synthesisOptions?.prompt)).toContain(
+        "Provide the best possible final answer from the context available"
+      )
     } finally {
       await worker.stop()
     }
