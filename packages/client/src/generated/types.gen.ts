@@ -1584,6 +1584,344 @@ export type ReactivateAuthMemberResponses = {
 export type ReactivateAuthMemberResponse =
   ReactivateAuthMemberResponses[keyof ReactivateAuthMemberResponses]
 
+export type GetAiAccountingOverviewData = {
+  body?: never
+  path?: never
+  query: {
+    from: string
+    to: string
+    providerId?: string
+    modelId?: string
+    bucket: "hour" | "day" | "week"
+  }
+  url: "/api/ai/accounting/overview"
+}
+
+export type GetAiAccountingOverviewErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type GetAiAccountingOverviewError =
+  GetAiAccountingOverviewErrors[keyof GetAiAccountingOverviewErrors]
+
+export type GetAiAccountingOverviewResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    range: {
+      from: string
+      to: string
+    }
+    bucket: "hour" | "day" | "week"
+    totals: {
+      modelCallCount: number
+      usage: {
+        inputTokens?: number
+        outputTokens?: number
+        totalTokens?: number
+        uncachedInputTokens?: number
+        cacheReadInputTokens?: number
+        cacheWriteInputTokens?: number
+        textOutputTokens?: number
+        reasoningOutputTokens?: number
+        reportingStatus: "complete" | "partial" | "unavailable"
+      }
+      costs: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
+      }
+    }
+    series: Array<{
+      modelCallCount: number
+      usage: {
+        inputTokens?: number
+        outputTokens?: number
+        totalTokens?: number
+        uncachedInputTokens?: number
+        cacheReadInputTokens?: number
+        cacheWriteInputTokens?: number
+        textOutputTokens?: number
+        reasoningOutputTokens?: number
+        reportingStatus: "complete" | "partial" | "unavailable"
+      }
+      costs: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
+      }
+      start: string
+      end: string
+    }>
+    models: Array<{
+      modelCallCount: number
+      usage: {
+        inputTokens?: number
+        outputTokens?: number
+        totalTokens?: number
+        uncachedInputTokens?: number
+        cacheReadInputTokens?: number
+        cacheWriteInputTokens?: number
+        textOutputTokens?: number
+        reasoningOutputTokens?: number
+        reportingStatus: "complete" | "partial" | "unavailable"
+      }
+      costs: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
+      }
+      providerId: string
+      modelId: string
+    }>
+    agents: Array<{
+      modelCallCount: number
+      usage: {
+        inputTokens?: number
+        outputTokens?: number
+        totalTokens?: number
+        uncachedInputTokens?: number
+        cacheReadInputTokens?: number
+        cacheWriteInputTokens?: number
+        textOutputTokens?: number
+        reasoningOutputTokens?: number
+        reportingStatus: "complete" | "partial" | "unavailable"
+      }
+      costs: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
+      }
+      agentId: string
+    }>
+    workflows: Array<{
+      modelCallCount: number
+      usage: {
+        inputTokens?: number
+        outputTokens?: number
+        totalTokens?: number
+        uncachedInputTokens?: number
+        cacheReadInputTokens?: number
+        cacheWriteInputTokens?: number
+        textOutputTokens?: number
+        reasoningOutputTokens?: number
+        reportingStatus: "complete" | "partial" | "unavailable"
+      }
+      costs: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
+      }
+      workflowId: string
+    }>
+  }
+}
+
+export type GetAiAccountingOverviewResponse =
+  GetAiAccountingOverviewResponses[keyof GetAiAccountingOverviewResponses]
+
+export type ListAiModelCallsData = {
+  body?: never
+  path?: never
+  query: {
+    from: string
+    to: string
+    providerId?: string
+    modelId?: string
+    executionId?: string
+    valuationStatus?: "rated" | "unpriceable" | "unvalued"
+    limit?: string
+    offset?: string
+  }
+  url: "/api/ai/model-calls"
+}
+
+export type ListAiModelCallsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type ListAiModelCallsError = ListAiModelCallsErrors[keyof ListAiModelCallsErrors]
+
+export type ListAiModelCallsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    items: Array<{
+      usage: {
+        id: string
+        executionId: string
+        attempt: number
+        callId: string
+        providerId: string
+        requestedModelId: string
+        responseModelId?: string
+        responseId: string
+        usage: {
+          inputTokens?: number
+          outputTokens?: number
+          totalTokens?: number
+          uncachedInputTokens?: number
+          cacheReadInputTokens?: number
+          cacheWriteInputTokens?: number
+          textOutputTokens?: number
+          reasoningOutputTokens?: number
+          reportingStatus: "complete" | "partial" | "unavailable"
+        }
+        occurredAt: string
+        recordedAt: string
+      }
+      attribution?:
+        | {
+            kind: "agent"
+            agentId: string
+            agentRunId: string
+            threadId: string
+          }
+        | {
+            kind: "workflowAgent"
+            agentId: string
+            nodeRunId: string
+            workflowId: string
+            workflowRunId: string
+          }
+      cost?:
+        | {
+            status: "rated"
+            billingIdentity: {
+              providerId: string
+              modelId: string
+            }
+            pricingContext: {
+              serviceTier?: string
+              batch?: boolean
+              region?: string
+              inferenceGeo?: string
+              routedProviderId?: string
+              deploymentId?: string
+              inferenceProfileId?: string
+              cacheWriteTtlSeconds?: number
+              mode?: string
+            }
+            priceSource: {
+              sourceId: string
+              sourceEntryId: string
+              sourceVersion: string
+              sourceUrl: string
+              observedAt: string
+            }
+            money: {
+              currency: string
+              amountNanos: string
+            }
+            components: Array<{
+              meter:
+                | "tokens.input.total"
+                | "tokens.input.uncached"
+                | "tokens.input.cacheRead"
+                | "tokens.input.cacheWrite"
+                | "tokens.output.total"
+                | "tokens.output.text"
+                | "tokens.output.reasoning"
+              quantity: string
+              rateAmountNanosPerMillion: string
+              chargeAmountNanos: string
+            }>
+            ratedAt: string
+          }
+        | {
+            status: "unpriceable"
+            billingIdentity?: {
+              providerId: string
+              modelId: string
+            }
+            pricingContext: {
+              serviceTier?: string
+              batch?: boolean
+              region?: string
+              inferenceGeo?: string
+              routedProviderId?: string
+              deploymentId?: string
+              inferenceProfileId?: string
+              cacheWriteTtlSeconds?: number
+              mode?: string
+            }
+            priceSource: {
+              sourceId: string
+              sourceEntryId: string
+              sourceVersion: string
+              sourceUrl: string
+              observedAt: string
+            }
+            reason:
+              | "missingBillingIdentity"
+              | "missingCatalogEntry"
+              | "missingUsageMeter"
+              | "unsupportedPricingDimension"
+              | "invalidUsageForFormula"
+            missingMeters?: Array<
+              | "tokens.input.total"
+              | "tokens.input.uncached"
+              | "tokens.input.cacheRead"
+              | "tokens.input.cacheWrite"
+              | "tokens.output.total"
+              | "tokens.output.text"
+              | "tokens.output.reasoning"
+            >
+            ratedAt: string
+          }
+      valuationStatus: "rated" | "unpriceable" | "unvalued"
+    }>
+    hasMore: boolean
+    total: number
+  }
+}
+
+export type ListAiModelCallsResponse = ListAiModelCallsResponses[keyof ListAiModelCallsResponses]
+
 export type GetProjectInfoData = {
   body?: never
   path?: never
@@ -5058,6 +5396,15 @@ export type GetWorkflowRunResponses = {
           reasoningOutputTokens?: number
           reportingStatus: "complete" | "partial" | "unavailable"
         }
+        cost?: {
+          amounts: Array<{
+            currency: string
+            amountNanos: string
+          }>
+          ratedCallCount: number
+          unpriceableCallCount: number
+          unvaluedCallCount: number
+        }
         startedAt?: string
         completedAt?: string
       }
@@ -5121,6 +5468,15 @@ export type GetWorkflowAgentNodeExecutionResponses = {
       textOutputTokens?: number
       reasoningOutputTokens?: number
       reportingStatus: "complete" | "partial" | "unavailable"
+    }
+    cost?: {
+      amounts: Array<{
+        currency: string
+        amountNanos: string
+      }>
+      ratedCallCount: number
+      unpriceableCallCount: number
+      unvaluedCallCount: number
     }
     startedAt?: string
     completedAt?: string
@@ -5492,6 +5848,15 @@ export type CancelWorkflowRunResponses = {
           textOutputTokens?: number
           reasoningOutputTokens?: number
           reportingStatus: "complete" | "partial" | "unavailable"
+        }
+        cost?: {
+          amounts: Array<{
+            currency: string
+            amountNanos: string
+          }>
+          ratedCallCount: number
+          unpriceableCallCount: number
+          unvaluedCallCount: number
         }
         startedAt?: string
         completedAt?: string
@@ -8127,6 +8492,15 @@ export type PostAgentThreadMessageResponses = {
         reasoningOutputTokens?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
+      cost?: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
+      }
       diagnostics?: Array<{
         code:
           | "output_file_limit_exceeded"
@@ -8343,6 +8717,15 @@ export type CancelAgentRunResponses = {
         reasoningOutputTokens?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
+      cost?: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
+      }
       diagnostics?: Array<{
         code:
           | "output_file_limit_exceeded"
@@ -8462,6 +8845,15 @@ export type RetryAgentRunResponses = {
         reasoningOutputTokens?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
+      cost?: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
+      }
       diagnostics?: Array<{
         code:
           | "output_file_limit_exceeded"
@@ -8579,6 +8971,15 @@ export type ListAgentThreadRunsResponses = {
         reasoningOutputTokens?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
+      cost?: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
+      }
       diagnostics?: Array<{
         code:
           | "output_file_limit_exceeded"
@@ -8692,6 +9093,15 @@ export type GetAgentRunResponses = {
       textOutputTokens?: number
       reasoningOutputTokens?: number
       reportingStatus: "complete" | "partial" | "unavailable"
+    }
+    cost?: {
+      amounts: Array<{
+        currency: string
+        amountNanos: string
+      }>
+      ratedCallCount: number
+      unpriceableCallCount: number
+      unvaluedCallCount: number
     }
     diagnostics?: Array<{
       code:

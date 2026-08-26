@@ -127,6 +127,7 @@ export function serializeAgentRun(run: AgentRunView): ReturnType<typeof AgentRun
     modelId: run.modelId,
     finishReason: run.finishReason,
     usage: run.usage,
+    cost: run.cost,
     diagnostics: run.diagnostics,
     error: run.error,
     attempt: run.attempt,

@@ -145,6 +145,7 @@ function serializeWorkflowAgentExecutionSummary(execution: WorkflowAgentNodeRunV
     modelId: execution.modelId,
     finishReason: execution.finishReason,
     usage: execution.usage,
+    cost: execution.cost,
     startedAt: execution.startedAt ? toIsoString(execution.startedAt) : undefined,
     completedAt: execution.completedAt ? toIsoString(execution.completedAt) : undefined,
   }

@@ -2114,8 +2114,26 @@ describe("SixbServer HTTP contract", () => {
           cacheWriteInputTokens: 2,
           reportingStatus: "complete",
         },
+        cost: {
+          amounts: [],
+          ratedCallCount: 0,
+          unpriceableCallCount: 0,
+          unvaluedCallCount: 1,
+        },
       })
       expect(JSON.stringify(detail)).not.toContain("secret-execution-token")
+
+      Object.defineProperty(sixb.storage, "aiCosts", { value: undefined })
+      const unavailableResponse = await fetch(
+        `${baseUrl}/api/workflow-runs/${runId}/nodes/resolveDevice/agent-execution`
+      )
+      expect(unavailableResponse.status).toBe(200)
+      const unavailableDetail = (await unavailableResponse.json()) as Record<string, unknown>
+      expect(unavailableDetail).toMatchObject({
+        nodeRunId,
+        usage: { inputTokens: 15, outputTokens: 5, reportingStatus: "complete" },
+      })
+      expect("cost" in unavailableDetail).toBe(false)
 
       const cancelResponse = await fetch(`${baseUrl}/api/workflow-runs/${runId}/cancel`, {
         method: "POST",

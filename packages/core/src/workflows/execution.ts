@@ -1,7 +1,9 @@
 import { canViewWorkflowIntervention, canViewWorkflowRun, isAllowed } from "../authorization"
 import type { AuthorizablePrincipal, ExecutionContext } from "../execution"
+import { resolveExecutionCosts } from "../runtime/ai-cost"
 import { resolveExecutionUsage } from "../runtime/ai-usage"
 import type { SixbRuntimeContext } from "../runtime/types"
+import type { AiCostSummary } from "../storage/ai-cost"
 import type { AiModelCallUsage } from "../storage/ai-usage"
 import type {
   ListWorkflowInterventionsInput,
@@ -61,6 +63,8 @@ export type ListWorkflowRunNodesInput = Omit<
 /** Execution-facing Agent node view derived from its run row and model-call ledger. */
 export interface WorkflowAgentNodeRunView extends Omit<WorkflowAgentNodeRunRecord, "execution"> {
   readonly usage?: AiModelCallUsage
+  /** Preferred valuation; omitted when there are no calls or cost storage is unavailable. */
+  readonly cost?: AiCostSummary
 }
 
 /** Execution-facing workflow node view with optional Agent execution details. */
@@ -226,29 +230,45 @@ async function attachWorkflowNodeViews(
   )
   if (agentExecutions.length === 0) return nodes
 
-  const usages = await resolveExecutionUsage({
-    storage: runtime.storage.aiUsage,
-    projectId: runtime.projectId,
-    executionIds: agentExecutions.map((execution) => execution.executionId),
-  })
-  const usageByExecutionId = new Map(
-    agentExecutions.map((execution, index) => [execution.executionId, usages[index]] as const)
+  const executionIds = agentExecutions.map((execution) => execution.executionId)
+  const [usages, costs] = await Promise.all([
+    resolveExecutionUsage({
+      storage: runtime.storage.aiUsage,
+      projectId: runtime.projectId,
+      executionIds,
+    }),
+    resolveExecutionCosts({
+      storage: runtime.storage.aiCosts,
+      projectId: runtime.projectId,
+      executionIds,
+    }),
+  ])
+  const accountingByExecutionId = new Map(
+    agentExecutions.map((execution, index) => [
+      execution.executionId,
+      { usage: usages[index], cost: costs[index] },
+    ])
   )
 
   return nodes.map((node, index) => {
     const execution = executions[index]
     if (!execution) return node
-    const usage = usageByExecutionId.get(execution.executionId)
+    const accounting = accountingByExecutionId.get(execution.executionId)
     return {
       ...node,
-      agentExecution: toWorkflowAgentNodeRunView(execution, usage),
+      agentExecution: toWorkflowAgentNodeRunView(
+        execution,
+        accounting?.usage,
+        accounting?.usage === undefined ? undefined : accounting.cost
+      ),
     }
   })
 }
 
 function toWorkflowAgentNodeRunView(
   execution: WorkflowAgentNodeRunRecord,
-  usage: AiModelCallUsage | undefined
+  usage: AiModelCallUsage | undefined,
+  cost: AiCostSummary | undefined
 ): WorkflowAgentNodeRunView {
   return {
     projectId: execution.projectId,
@@ -267,6 +287,7 @@ function toWorkflowAgentNodeRunView(
     startedAt: execution.startedAt,
     completedAt: execution.completedAt,
     ...(usage === undefined ? {} : { usage }),
+    ...(usage === undefined || cost === undefined ? {} : { cost }),
   }
 }
 

@@ -83,6 +83,9 @@ import type {
   GetAgentThreadData,
   GetAgentThreadErrors,
   GetAgentThreadResponses,
+  GetAiAccountingOverviewData,
+  GetAiAccountingOverviewErrors,
+  GetAiAccountingOverviewResponses,
   GetAuthAccessManagementOptionsData,
   GetAuthAccessManagementOptionsErrors,
   GetAuthAccessManagementOptionsResponses,
@@ -195,6 +198,9 @@ import type {
   ListAgentThreadsData,
   ListAgentThreadsErrors,
   ListAgentThreadsResponses,
+  ListAiModelCallsData,
+  ListAiModelCallsErrors,
+  ListAiModelCallsResponses,
   ListAuthAccessTokensData,
   ListAuthAccessTokensErrors,
   ListAuthAccessTokensResponses,
@@ -759,6 +765,29 @@ export const reactivateAuthMember = <ThrowOnError extends boolean = false>(
   >({
     security: [{ name: "x-sixb-csrf", type: "apiKey" }],
     url: "/api/auth/members/{userId}/reactivate",
+    ...options,
+  })
+
+/**
+ * Get project AI usage and cost analytics
+ */
+export const getAiAccountingOverview = <ThrowOnError extends boolean = false>(
+  options: Options<GetAiAccountingOverviewData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetAiAccountingOverviewResponses,
+    GetAiAccountingOverviewErrors,
+    ThrowOnError
+  >({ url: "/api/ai/accounting/overview", ...options })
+
+/**
+ * List project AI model-call accounting records
+ */
+export const listAiModelCalls = <ThrowOnError extends boolean = false>(
+  options: Options<ListAiModelCallsData, ThrowOnError>
+) =>
+  (options.client ?? client).get<ListAiModelCallsResponses, ListAiModelCallsErrors, ThrowOnError>({
+    url: "/api/ai/model-calls",
     ...options,
   })
 

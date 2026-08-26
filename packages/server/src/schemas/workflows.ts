@@ -5,6 +5,7 @@ import {
 } from "@sixb/core/storage"
 import { z } from "zod"
 import { AgentMessagePartSchema, AgentRunFailureSchema } from "./agents"
+import { AiCostSummarySchema } from "./ai-accounting"
 import { AiUsageSummarySchema } from "./ai-usage"
 import { JsonValueSchema, sixbFailureSchema } from "./common"
 
@@ -148,6 +149,7 @@ export const WorkflowAgentNodeExecutionSummarySchema = z.object({
   modelId: z.string().optional(),
   finishReason: z.string().optional(),
   usage: AiUsageSummarySchema.optional(),
+  cost: AiCostSummarySchema.optional(),
   startedAt: z.string().optional(),
   completedAt: z.string().optional(),
 })
