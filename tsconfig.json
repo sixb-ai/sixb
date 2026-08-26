@@ -61,6 +61,9 @@
       "@sixb/core/internal/agent-run-storage-provider": [
         "./packages/core/src/storage/agents/provider.ts"
       ],
+      "@sixb/core/internal/ai-cost-storage-provider": [
+        "./packages/core/src/storage/ai-cost/provider.ts"
+      ],
       "@sixb/core/internal/auth": ["./packages/core/src/auth/index.ts"],
       "@sixb/core/internal/authorization": ["./packages/core/src/authorization/index.ts"],
       "@sixb/core/internal/bootstrap": ["./packages/core/src/bootstrap/index.ts"],

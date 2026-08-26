@@ -1,5 +1,6 @@
 import type { ActionRunStorage } from "./action-runs"
 import type { AgentStorage } from "./agents"
+import type { AiCostStorage } from "./ai-cost"
 import type { AiUsageStorage } from "./ai-usage"
 import type { AuthStorage } from "./auth"
 import type { ConnectorConnectionStorage } from "./connector-connections"
@@ -293,6 +294,7 @@ export interface Storage {
   auth?: AuthStorage
   agents?: AgentStorage
   aiUsage?: AiUsageStorage
+  aiCosts?: AiCostStorage
   actionRuns?: ActionRunStorage
   syncRuns?: SyncRunStorage
   pipelineRuns?: PipelineRunStorage
