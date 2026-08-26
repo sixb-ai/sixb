@@ -244,12 +244,12 @@ async function connectAccount(
 }
 
 describe("connector connection Headless API", () => {
-  test("accepts an OAuth callback whose registered URI ends in a slash", async () => {
+  test("accepts TikTok's auth_code on a callback URI ending in a slash", async () => {
     const harness = await createHarness()
     const started = await startRun(harness)
     const callbackUrl = new URL("http://localhost/auth/connectors/callback/")
     callbackUrl.searchParams.set("state", started.state)
-    callbackUrl.searchParams.set("code", "authorization-code")
+    callbackUrl.searchParams.set("auth_code", "authorization-code")
 
     const callback = await harness.app.handle(
       new Request(callbackUrl, {
