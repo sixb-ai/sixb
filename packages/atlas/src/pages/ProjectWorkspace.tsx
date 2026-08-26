@@ -49,6 +49,7 @@ import { ObjectsWorkbench, type ObjectTypePreviewSection } from "./ObjectsWorkbe
 import {
   ActionRunDetailPage,
   ActionsPage,
+  AiUsagePage,
   ConnectorDetailPage,
   ConnectorsPage,
   DatasetDetailPage,
@@ -440,6 +441,7 @@ export function ProjectWorkspace() {
               />
               <Route path="home" element={<Navigate to="/" replace />} />
               <Route path="objects" element={<Navigate to="/" replace />} />
+              <Route path="ai-usage" element={<AiUsagePage />} />
               <Route path="datasets" element={<DatasetsPage />} />
               <Route path="connectors" element={<ConnectorsPage />} />
               <Route path="connectors/:connectorId" element={<ConnectorDetailPage />} />

@@ -21,6 +21,7 @@ import {
   Bot,
   Box,
   Cable,
+  ChartNoAxesCombined,
   Database,
   GitBranch,
   Layers,
@@ -34,6 +35,7 @@ import {
 
 export type ViewMode =
   | "home"
+  | "ai-usage"
   | "datasets"
   | "connectors"
   | "syncs"
@@ -64,6 +66,7 @@ const projectNavItems: NavItem[] = [
   { id: "actions", label: "Actions", Icon: Bolt },
   { id: "workflows", label: "Workflows", Icon: GitBranch },
   { id: "agents", label: "Agents", Icon: Bot },
+  { id: "ai-usage", label: "AI usage", Icon: ChartNoAxesCombined },
   { id: "logs", label: "Logs", Icon: ScrollText },
   { id: "rules", label: "Rules", Icon: ListChecks },
   { id: "settings", label: "Settings", Icon: Settings },
