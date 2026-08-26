@@ -6,10 +6,9 @@ import { createConnectorCodedError } from "./errors"
 import type { ConnectorService } from "./service"
 import type {
   AnyConnectorAdapter,
-  ConnectorAccountCandidate,
   ConnectorAdapter,
   ConnectorClient,
-  ConnectorConnectionOwner,
+  ConnectorConnectionMetadata,
   ConnectorConnectionSelector,
   ConnectorDefinition,
   OAuthConnectorAdapter,
@@ -30,14 +29,8 @@ export interface ConnectorRuntime {
 export interface ConnectorExecutionSource<
   TAdapter extends AnyConnectorAdapter = AnyConnectorAdapter,
 > {
-  readonly connection?: {
-    readonly id: string
-    readonly connectorId: string
-    readonly owner: ConnectorConnectionOwner
-    readonly slot: string
-    readonly account: ConnectorAccountCandidate
-  }
-  connect(): Promise<ConnectorClient<TAdapter>>
+  readonly connection?: ConnectorConnectionMetadata
+  connect(signal: AbortSignal): Promise<ConnectorClient<TAdapter>>
 }
 
 export interface ConnectorExecutionSourceResolver {
@@ -81,7 +74,7 @@ export function createConnectorRuntime(
       if (!isOAuthConnectorDefinition(definition)) {
         return [
           {
-            connect: () =>
+            connect: (_signal) =>
               connector(definition as ConnectorDefinition<string, ConnectorAdapter>) as Promise<
                 ConnectorClient<TAdapter>
               >,
@@ -99,8 +92,8 @@ export function createConnectorRuntime(
           slot: connection.slot,
           account: connection.account,
         },
-        connect: () =>
-          service.connectExecutionConnection(definition, connection) as Promise<
+        connect: (signal) =>
+          service.connectExecutionConnection(definition, connection, signal) as Promise<
             ConnectorClient<TAdapter>
           >,
       }))
@@ -138,7 +131,7 @@ export function getConnectorExecutionSourceResolver(
       }
       return [
         {
-          connect: () =>
+          connect: (_signal) =>
             connector(definition as ConnectorDefinition<string, ConnectorAdapter>) as Promise<
               ConnectorClient<TAdapter>
             >,

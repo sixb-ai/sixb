@@ -9,6 +9,7 @@ export type {
   ConnectorAdapter,
   ConnectorClient,
   ConnectorConnectionClientContext,
+  ConnectorConnectionMetadata,
   ConnectorConnectionOptions,
   ConnectorConnectionOwner,
   ConnectorConnectionSelector,

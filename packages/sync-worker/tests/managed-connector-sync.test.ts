@@ -1,134 +1,14 @@
 import { describe, expect, test } from "bun:test"
-import type { DatasetRow } from "@sixb/core"
+import { defineSync } from "@sixb/core"
+import type { SyncConnectorSource } from "@sixb/core/internal/syncs"
 import {
-  col,
-  defineConnector,
-  defineDataset,
-  defineSync,
-  InMemoryBlobStorage,
-  InMemoryLakeStorage,
-  InMemoryStorage,
-  type SyncDefinition,
-} from "@sixb/core"
-import type { SyncConnectorSource, SyncConnectorSourceResolver } from "@sixb/core/internal/syncs"
-import type { ExecutionStorage } from "@sixb/core/storage"
-import { runSyncJob as runSyncJobWithDurableRun } from "../src/run-sync-job"
-import type { SyncWorkerContext } from "../src/types"
-
-const social = defineConnector("social", {
-  type: "social-oauth",
-  authentication: {
-    type: "oauth2",
-    authorizationUrl() {
-      return "https://provider.test/oauth"
-    },
-    exchangeCode() {
-      return { accessToken: "access" }
-    },
-    refresh() {
-      return { accessToken: "refreshed" }
-    },
-  },
-  discoverAccounts() {
-    return []
-  },
-  connect(context) {
-    return { accountId: context.account.id }
-  },
-})
-
-const socialRows = defineDataset("raw.social.rows", {
-  schema: [col("id", "string"), col("accountId", "string", { nullable: true })],
-})
-
-interface ManagedSyncFixture {
-  readonly runtime: SyncWorkerContext
-  readonly executions: ExecutionStorage
-  readonly lakeStorage: InMemoryLakeStorage
-}
-
-function createFixture(
-  sync: SyncDefinition,
-  sources: () => readonly SyncConnectorSource[]
-): ManagedSyncFixture {
-  const storage = new InMemoryStorage()
-  const connectorSources: SyncConnectorSourceResolver = {
-    async list() {
-      return sources() as never
-    },
-  }
-  const lakeStorage = new InMemoryLakeStorage()
-  return {
-    executions: storage.executions,
-    lakeStorage,
-    runtime: {
-      id: "project-1",
-      syncRunsStorage: storage.syncRuns,
-      lakeStorage,
-      blobs: new InMemoryBlobStorage(),
-      datasets: {
-        getById(datasetId) {
-          return datasetId === sync.target.dataset.id ? sync.target.dataset : null
-        },
-      },
-      syncs: {
-        getById(syncId) {
-          return syncId === sync.id ? sync : null
-        },
-      },
-      connectorSources,
-    },
-  }
-}
-
-function source(connectionId: string, accountId: string, slot: string): SyncConnectorSource {
-  return {
-    connection: {
-      id: connectionId,
-      connectorId: social.id,
-      owner: { type: "project" },
-      slot,
-      account: { id: accountId, label: accountId },
-    },
-    async connect() {
-      return { accountId }
-    },
-  }
-}
-
-async function run(fixture: ManagedSyncFixture, syncId: string, runId: string) {
-  const sync = fixture.runtime.syncs.getById(syncId)
-  if (!sync) throw new Error(`[Test] Unknown Sync '${syncId}'.`)
-  const executionId = `exec:${runId}`
-  await fixture.executions.create({
-    id: executionId,
-    projectId: fixture.runtime.id,
-    executor: { type: "primitive", kind: "sync", runId },
-    source: { type: "schedule", eventId: `event:${runId}` },
-    correlationId: `correlation:${runId}`,
-    authorizationRef: {
-      type: "trustedPrimitive",
-      primitive: { kind: "sync", id: sync.id, runId },
-    },
-  })
-  const queued = await fixture.runtime.syncRunsStorage.queue({
-    id: runId,
-    projectId: fixture.runtime.id,
-    executionId,
-    syncId: sync.id,
-    datasetId: sync.target.dataset.id,
-    mode: sync.config.mode,
-  })
-  return runSyncJobWithDurableRun({ runtime: fixture.runtime, run: queued })
-}
-
-async function rows(storage: InMemoryLakeStorage): Promise<DatasetRow[]> {
-  const result: DatasetRow[] = []
-  for await (const row of storage.readRows({ datasetId: socialRows.id })) {
-    result.push(row)
-  }
-  return result
-}
+  createFixture,
+  rows,
+  run,
+  social,
+  socialRows,
+  source,
+} from "./managed-connector-sync.fixture"
 
 describe("managed connector Sync fan-out", () => {
   test("reads every connection into one snapshot and clears it when none remain", async () => {
@@ -194,6 +74,22 @@ describe("managed connector Sync fan-out", () => {
     nextCursor.set("connection-a", "a-1")
     nextCursor.set("connection-b", "b-1")
     await run(fixture, sync.id, "run-checkpoints-1")
+    const firstRun = await fixture.runtime.syncRunsStorage.getById({
+      projectId: fixture.runtime.id,
+      id: "run-checkpoints-1",
+    })
+    expect(firstRun?.checkpoint).toMatchObject({
+      kind: "sync_checkpoint",
+      version: 1,
+      connectorId: social.id,
+      strategy: "connections",
+      value: {
+        entries: [
+          { connectionId: "connection-a", accountId: "account-a", checkpoint: { cursor: "a-1" } },
+          { connectionId: "connection-b", accountId: "account-b", checkpoint: { cursor: "b-1" } },
+        ],
+      },
+    })
 
     sources = [source("connection-a", "account-a", "brand-a")]
     nextCursor.set("connection-a", "a-2")

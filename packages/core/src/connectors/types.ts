@@ -56,6 +56,13 @@ export interface ConnectorConnectionSelector {
   readonly slot: string
 }
 
+/** Stable, non-secret metadata shared by connector connection consumers. */
+export interface ConnectorConnectionMetadata extends ConnectorConnectionSelector {
+  readonly id: string
+  readonly connectorId: string
+  readonly account: ConnectorAccountCandidate
+}
+
 /** Credential protection required when an OAuth connector uses durable connection storage. */
 export interface ConnectorConnectionOptions {
   /** Canonical base64url encoding of exactly 32 random bytes, shared by storage replicas. */

@@ -85,9 +85,10 @@ export class ConnectorService {
 
   connectExecutionConnection<TAdapter extends OAuthConnectorAdapter>(
     definition: ConnectorDefinition<string, TAdapter>,
-    connection: ConnectorConnectionRecord
+    connection: ConnectorConnectionRecord,
+    signal?: AbortSignal
   ): Promise<ConnectorClient<TAdapter>> {
-    return this.requireConnections().connectExecutionConnection(definition, connection)
+    return this.requireConnections().connectExecutionConnection(definition, connection, signal)
   }
 
   get connectionProcess(): ConnectorConnectionProcess | undefined {

@@ -7,6 +7,7 @@ import type {
   DatasetDefinition,
   DatasetRow,
   FileRef,
+  JsonValue,
   LakeStorage,
   SyncDefinition,
 } from "@sixb/core"
@@ -83,6 +84,16 @@ const keyedDocsDataset = defineDataset("raw.keyed-docs", {
   schema: rawDocsDataset.schema.columns,
   primaryKey: "id",
 })
+
+function storedErpCheckpoint(value: JsonValue): JsonValue {
+  return {
+    kind: "sync_checkpoint",
+    version: 1,
+    connectorId: erpDb.id,
+    strategy: "single",
+    value,
+  }
+}
 
 function createRuntime(options: {
   sync: SyncDefinition
@@ -484,7 +495,7 @@ describe("runSyncJob", () => {
       id: "run_1",
     })
     expect(seenCheckpoint).toEqual({ cursor: "cursor-1" })
-    expect(run?.checkpoint).toEqual({ cursor: "cursor-2" })
+    expect(run?.checkpoint).toEqual(storedErpCheckpoint({ cursor: "cursor-2" }))
   })
 
   test("streams ordered merge changes and stores the successful checkpoint", async () => {
@@ -525,7 +536,7 @@ describe("runSyncJob", () => {
       mode: "merge",
       status: "succeeded",
       rowsRead: 2,
-      checkpoint: { cursor: "event-2" },
+      checkpoint: storedErpCheckpoint({ cursor: "event-2" }),
     })
   })
 
@@ -604,7 +615,7 @@ describe("runSyncJob", () => {
     ).toMatchObject({
       status: "succeeded",
       rowsRead: 1,
-      checkpoint: { cursor: "event-1" },
+      checkpoint: storedErpCheckpoint({ cursor: "event-1" }),
       output: undefined,
     })
   })
@@ -770,7 +781,7 @@ describe("runSyncJob", () => {
     ).toMatchObject({
       status: "succeeded",
       rowsRead: 0,
-      checkpoint: { cursor: "cursor-1" },
+      checkpoint: storedErpCheckpoint({ cursor: "cursor-1" }),
     })
   })
 
@@ -904,7 +915,7 @@ describe("runSyncJob", () => {
       id: "run_succeeded",
     })
     expect(seenCheckpoints).toEqual([{ cursor: "cursor-1" }, { cursor: "cursor-1" }])
-    expect(succeededRun?.checkpoint).toEqual({ cursor: "cursor-2" })
+    expect(succeededRun?.checkpoint).toEqual(storedErpCheckpoint({ cursor: "cursor-2" }))
   })
 
   test("rejects non-JSON checkpoint values", async () => {
