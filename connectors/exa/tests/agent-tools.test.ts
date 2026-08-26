@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  type AgentToolArtifacts,
   AgentToolPublicError,
   type AgentToolRunContext,
   defineConnector,
@@ -19,6 +20,12 @@ import {
   exaWebFetch,
   exaWebSearch,
 } from "../src/agent-tools"
+
+const unusedArtifacts: AgentToolArtifacts = {
+  async put() {
+    throw new Error("Artifacts are unused by Exa agent tools.")
+  },
+}
 
 describe("Exa web_search agent tool", () => {
   test("keeps model input narrow and applies bounded defaults", async () => {
@@ -625,10 +632,12 @@ function harness(
     async execute(query: string) {
       return await tool.handler({
         input: { query },
+        toolCallId: "search-call-1",
         signal,
         run: { id: "run-1", agentId: "research", threadId: "thread-1" },
         connector,
         logger: noopLogger,
+        artifacts: unusedArtifacts,
       })
     },
   }
@@ -659,10 +668,12 @@ function fetchHarness(
     execute(url: string) {
       return tool.handler({
         input: { url },
+        toolCallId: "fetch-call-1",
         signal,
         run: { id: "run-1", agentId: "research", threadId: "thread-1" },
         connector,
         logger: noopLogger,
+        artifacts: unusedArtifacts,
       })
     },
   }

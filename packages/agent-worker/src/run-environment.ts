@@ -13,6 +13,9 @@ import {
 import { type BashSandboxHandle, createBashTool } from "./bash-tool"
 import { createReadTool } from "./read-tool"
 import { prepareAgentSandboxApiContext } from "./sandbox-api-context"
+import { AgentSandboxFileRegistry } from "./sandbox-file-registry"
+import { AgentToolArtifactBudget, createAgentToolArtifacts } from "./tool-artifacts"
+import { AgentToolResultMediaBridge } from "./tool-result-media"
 import type { AgentExecutionContext, AgentTurnContext, AgentWorkerContext } from "./types"
 import { prepareWorkflowInputAttachments } from "./workflow-input-attachments"
 
@@ -24,6 +27,7 @@ export interface AgentExecutionEnvironment {
 interface CreateAgentEnvironmentInput {
   readonly context: AgentExecutionContext
   readonly agent: AgentDefinition
+  readonly signal?: AbortSignal
   /**
    * Sink for a sandbox teardown that outlives dispose() (the model answered before the boot
    * finished, so dispose returns without stalling on it). The worker registers these so a graceful
@@ -60,7 +64,7 @@ export async function createConversationAgentEnvironment(
       threadId: run.threadId,
       order: "asc",
     }),
-    modelSupportsInlineImages(agent.model),
+    modelSupportsInlineImages(agent.model, input.signal),
   ])
   const attachmentContext = await prepareAgentAttachments({
     projectId: context.id,
@@ -69,6 +73,7 @@ export async function createConversationAgentEnvironment(
     blobStorage: context.blobStorage,
     apiBaseUrl,
     inlineImages,
+    signal: input.signal,
   })
 
   return startAgentEnvironment({
@@ -100,6 +105,7 @@ export async function createWorkflowAgentNodeEnvironment(
     prepareWorkflowInputAttachments({
       input: input.nodeInput,
       blobStorage: context.blobStorage,
+      signal: input.signal,
     }),
   ])
 
@@ -144,12 +150,33 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
     agentId: agent.id,
     ...(threadId ? { threadId } : {}),
   })
+  let ready: Promise<BashSandboxHandle>
+  const fileRegistry = new AgentSandboxFileRegistry()
+  const artifactBudget = new AgentToolArtifactBudget()
+  const mediaBridge = new AgentToolResultMediaBridge({
+    blobStorage: context.blobStorage,
+    sandboxPathForFileRef: (fileRef) => fileRegistry.pathFor(fileRef),
+  })
+  const artifactsForToolCall = (input: {
+    readonly toolName: string
+    readonly toolCallId: string
+    readonly signal: AbortSignal
+  }) =>
+    createAgentToolArtifacts({
+      ...input,
+      blobStorage: context.blobStorage,
+      budget: artifactBudget,
+      resolveSandbox: () => ready,
+      onPublished: (artifact) => fileRegistry.register(artifact.sandboxPath, artifact.fileRef),
+    })
   const tools = aiSdkToolsFromAgentDefinitions({
     definitions: agent.tools,
     valueTypesById: context.valueTypesById,
     run: { id: runId, agentId: agent.id, ...(threadId ? { threadId } : {}) },
     connector: context.connector,
     logger,
+    artifactsForToolCall,
+    toolResultToModelOutput: (output) => mediaBridge.toModelOutput(output),
     errorDetails:
       mode === "conversation"
         ? { agentId: agent.id, runId }
@@ -157,7 +184,6 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
   })
 
   let sandboxWasUsed = false
-  let ready: Promise<BashSandboxHandle>
   const resolveSandbox = () => {
     sandboxWasUsed = true
     return ready
@@ -193,6 +219,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
       apiBaseUrl,
       attachmentContext,
       tools,
+      prepareStep: mediaBridge.prepareStep,
       systemAddendum: renderAgentSkillCatalog(skills, mode),
       sandboxReady: ready,
       sandboxWasUsed: () => sandboxWasUsed,

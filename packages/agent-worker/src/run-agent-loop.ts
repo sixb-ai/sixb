@@ -2,6 +2,7 @@ import type { AgentDefinition } from "@sixb/core"
 import {
   type ModelMessage,
   type Output,
+  type PrepareStepFunction,
   type StreamTextOnErrorCallback,
   type StreamTextResult,
   stepCountIs,
@@ -24,6 +25,7 @@ export interface RunAgentLoopInput {
   readonly tools: ToolSet
   readonly maxSteps: number
   readonly usageRecorder: AiModelCallRecorder
+  readonly prepareStep?: PrepareStepFunction<ToolSet>
   readonly abortSignal: AbortSignal
   readonly onError?: StreamTextOnErrorCallback
   readonly onStepEnd?: (step: AiSdkTraceStep) => void | Promise<void>
@@ -49,17 +51,19 @@ export function runAgentLoop(
     messages: input.messages,
     tools: input.tools,
     stopWhen: stepCountIs(input.maxSteps),
-    prepareStep: (options) => {
+    prepareStep: async (options) => {
       input.usageRecorder.prepareStep()
+      const prepared = await input.prepareStep?.(options)
 
       // If the step is not the last one, allow tools to be used.
-      if (options.stepNumber !== input.maxSteps - 1) return undefined
+      if (options.stepNumber !== input.maxSteps - 1) return prepared
 
       // If the step is the last one, disable tools.
       return {
+        ...prepared,
         activeTools: [],
         messages: [
-          ...options.messages,
+          ...(prepared?.messages ?? options.messages),
           { role: "user" as const, content: FINAL_AGENT_LOOP_STEP_INSTRUCTION },
         ],
       }

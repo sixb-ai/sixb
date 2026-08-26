@@ -117,6 +117,7 @@ export async function runWorkflowAgentNode(
       tools: input.context.tools,
       maxSteps,
       usageRecorder: input.usageRecorder,
+      prepareStep: input.context.prepareStep,
       abortSignal,
       onError: ({ error }) => {
         researchError ??= error

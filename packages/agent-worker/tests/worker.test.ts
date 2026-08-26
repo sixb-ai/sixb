@@ -3439,7 +3439,7 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("persists and replays selected tool failures with clear non-JSON diagnostics", async () => {
+  test("persists and replays selected tool failures with clear invalid-result diagnostics", async () => {
     let replayedPrompt = ""
     const invalidResult = {
       kind: "agentTool",
@@ -3480,7 +3480,7 @@ describe("AgentWorker", () => {
       ).toMatchObject({
         state: "output-error",
         errorText:
-          "[SixbAgentWorker] Agent tool 'invalid_result' returned a non-JSON result; result.invalid is undefined.",
+          "[SixbAgentWorker] Agent tool 'invalid_result' returned an invalid result; result.invalid is undefined.",
       })
 
       const second = await requestAgent(sixb, {
@@ -3496,7 +3496,7 @@ describe("AgentWorker", () => {
         { label: "tool failure replay run terminal" }
       )
       expect(replayedPrompt).toContain("invalid_result")
-      expect(replayedPrompt).toContain("returned a non-JSON result")
+      expect(replayedPrompt).toContain("returned an invalid result")
     } finally {
       await worker.stop()
     }

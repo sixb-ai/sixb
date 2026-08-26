@@ -18,7 +18,7 @@ import type {
   AuthStorage,
   RecordAiModelCallInput,
 } from "@sixb/core/storage"
-import type { ToolSet } from "ai"
+import type { PrepareStepFunction, ToolSet } from "ai"
 import type { AgentSkill } from "./agent-skills"
 import type { PreparedAgentAttachmentContext } from "./attachments"
 import type { BashSandboxHandle } from "./bash-tool"
@@ -87,6 +87,7 @@ export interface AgentTurnContext {
   /** Run-scoped agent API gateway base URL, when this turn was created through a run environment. */
   readonly apiBaseUrl?: string
   readonly tools: ToolSet
+  readonly prepareStep?: PrepareStepFunction<ToolSet>
   readonly systemAddendum?: string
   readonly attachmentContext?: PreparedAgentAttachmentContext
   /**

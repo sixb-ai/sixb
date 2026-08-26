@@ -74,7 +74,7 @@ export class AgentToolExecutionError extends Error {
   }
 }
 
-/** A selected agent tool returned a value that cannot cross the durable JSON message boundary. */
+/** A selected agent tool returned a value that cannot cross the durable message boundary. */
 export class AgentToolOutputError extends AgentToolPublicError {
   override readonly name = "AgentToolOutputError"
   constructor(
@@ -83,7 +83,7 @@ export class AgentToolOutputError extends AgentToolPublicError {
     options?: ErrorOptions
   ) {
     super(
-      `[SixbAgentWorker] Agent tool '${toolName}' returned a non-JSON result; ${reason}.`,
+      `[SixbAgentWorker] Agent tool '${toolName}' returned an invalid result; ${reason}.`,
       options
     )
   }

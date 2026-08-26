@@ -137,6 +137,7 @@ export async function executeWorkflowAgentNode(
 
   let environment: AgentExecutionEnvironment | null = null
   const cancel = await input.watchForCancel(nodeRun.id)
+  const turnSignal = AbortSignal.any([signal, cancel.signal])
   const stopOwnershipProjection = projectQueueOwnership({
     delivery,
     runs,
@@ -158,6 +159,7 @@ export async function executeWorkflowAgentNode(
       agent,
       run: reserved,
       nodeInput: nodeRun.input,
+      signal: turnSignal,
       onDetachedTeardown: input.onDetachedTeardown,
     })
     const result = await runWorkflowAgentNode({
@@ -170,7 +172,7 @@ export async function executeWorkflowAgentNode(
       prompt: reserved.prompt,
       valueTypesById,
       usageRecorder,
-      signal: AbortSignal.any([signal, cancel.signal]),
+      signal: turnSignal,
     })
     const completedNode = await finishWorkflowAgentNodeSucceeded({
       context,

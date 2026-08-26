@@ -1,10 +1,4 @@
-import type {
-  AgentDefinition,
-  AgentInboundUiMessagePart,
-  AgentMessage,
-  AgentMessagePart,
-  Storage,
-} from "@sixb/core"
+import type { AgentDefinition, AgentInboundUiMessagePart, AgentMessage, Storage } from "@sixb/core"
 import {
   buildAgentSystemPrompt,
   createAgentMessageId,
@@ -16,15 +10,18 @@ import { isAbortError, QueueDeliveryLeaseLostError } from "@sixb/core/internal/w
 import type { AgentRunFinishReason, AgentRunRecord, AgentStorage } from "@sixb/core/storage"
 import { type ModelMessage, toUIMessageStream } from "ai"
 import { agentToolErrorText } from "./ai-sdk-adapters"
-import { attachmentKey, modelSupportsInlineImages, prepareAgentAttachments } from "./attachments"
+import { assistantPartsWithAttachments } from "./assistant-attachments"
+import {
+  attachmentKey,
+  modelSupportsInlineImages,
+  prepareAgentAttachments,
+  toolResultAttachmentKey,
+} from "./attachments"
 import { AgentTurnTimeoutError } from "./errors"
 import { type AgentRunFailure, toAgentExecutionFailure } from "./failure"
 import { appendMessageAndFinishRunOrThrow, finishRunOrThrow } from "./finalize"
 import { AiModelCallRecorder } from "./model-call-recorder"
-import {
-  type AgentOutputAttachmentResult,
-  collectAgentOutputAttachments,
-} from "./output-attachments"
+import { collectAgentOutputAttachments } from "./output-attachments"
 import { runAgentLoop } from "./run-agent-loop"
 import type { AgentTurnContext } from "./types"
 
@@ -88,6 +85,10 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       attachmentContext?.promptTextByPartKey.get(attachmentKey(message.id, partIndex)),
     fileData: ({ message, partIndex }) =>
       attachmentContext?.modelFileDataByPartKey.get(attachmentKey(message.id, partIndex)),
+    toolResultFileText: ({ message, partIndex, contentIndex }) =>
+      attachmentContext?.promptTextByPartKey.get(
+        toolResultAttachmentKey(message.id, partIndex, contentIndex)
+      ),
   }) as ModelMessage[]
 
   const maxSteps = agent.loop?.stopWhen?.maxSteps ?? defaultMaxSteps
@@ -135,6 +136,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     tools,
     maxSteps,
     usageRecorder,
+    prepareStep: context.prepareStep,
     abortSignal,
   })
 
@@ -254,7 +256,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       finishReason,
       maxSteps,
     })
-    let outputAttachments: AgentOutputAttachmentResult
+    let outputAttachments: Awaited<ReturnType<typeof collectAgentOutputAttachments>>
     try {
       outputAttachments = await collectAgentOutputAttachments({
         sandboxReady: context.sandboxReady,
@@ -277,7 +279,10 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     if (interruptedAfterCollection) {
       return interruptedAfterCollection
     }
-    const assistantParts = assistantPartsWithOutputAttachments(assistant.parts, outputAttachments)
+    const assistantParts = assistantPartsWithAttachments(
+      assistant.parts,
+      outputAttachments.attachments
+    )
     const assistantMessageId = createAgentMessageId()
 
     // Keep the final signal check adjacent to the transaction. Collection or queue renewal can yield
@@ -324,19 +329,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   } finally {
     clearTimeout(timeoutTimer)
   }
-}
-
-function assistantPartsWithOutputAttachments(
-  parts: readonly AgentMessagePart[],
-  output: AgentOutputAttachmentResult
-): AgentMessagePart[] {
-  return [
-    ...parts,
-    ...output.attachments.map((attachment) => ({
-      type: "file" as const,
-      fileRef: attachment.fileRef,
-    })),
-  ]
 }
 
 function ensureVisibleAssistantMessage(
@@ -428,7 +420,7 @@ async function finalizeInterruptedTurn(input: {
       threadId: run.threadId,
       runId: run.id,
       role: assistant.role,
-      parts: assistant.parts,
+      parts: assistantPartsWithAttachments(assistant.parts),
       ...(assistant.metadata === undefined ? {} : { metadata: assistant.metadata }),
       authorPrincipal: context.agentPrincipal,
     },
