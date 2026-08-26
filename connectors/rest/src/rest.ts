@@ -110,12 +110,19 @@ function createRestClient(options: RestConnectorOptions, context: ConnectorConte
         bodyReplayable &&
         !isAbortError(error) &&
         retryAttempt < maxRetries &&
-        shouldRetry(retryContext)
+        (await shouldRetry(retryContext))
 
       if (canRetry) {
         retryAttempt += 1
+        let retryDelayMs: number
+        try {
+          retryDelayMs = await delayMs(retryContext)
+        } catch (delayError) {
+          await cancelResponseBody(response)
+          throw delayError
+        }
         await cancelResponseBody(response)
-        await sleep(delayMs(retryContext), requestSignal)
+        await sleep(retryDelayMs, requestSignal)
         continue
       }
 

@@ -24,8 +24,8 @@ export interface RestRetryContext extends RestRequestContext {
 
 export interface RestRetryPolicy {
   readonly maxRetries?: number
-  shouldRetry?(context: RestRetryContext): boolean
-  delayMs?(context: RestRetryContext): number
+  shouldRetry?(context: RestRetryContext): boolean | Promise<boolean>
+  delayMs?(context: RestRetryContext): number | Promise<number>
 }
 
 export interface RestConnectorOptions {

@@ -15,6 +15,79 @@ export interface MetaPaginationOptions {
   readonly after?: string
 }
 
+/** A response header returned by Graph API, preserving Meta's batch representation. */
+export interface MetaHeader {
+  readonly name: string
+  readonly value: string
+}
+
+/** The structured `error` object returned by Graph API. */
+export interface MetaGraphError {
+  readonly message: string
+  readonly type?: string
+  readonly code?: number
+  readonly error_subcode?: number
+  readonly is_transient?: boolean
+  readonly error_user_title?: string
+  readonly error_user_msg?: string
+  readonly error_data?: unknown
+  readonly fbtrace_id?: string
+}
+
+/** Percentage-based application usage from `X-App-Usage`. */
+export interface MetaAppUsage {
+  readonly call_count?: number
+  readonly total_cputime?: number
+  readonly total_time?: number
+}
+
+/** One business-use-case usage entry from `X-Business-Use-Case-Usage`. */
+export interface MetaBusinessUseCaseUsageEntry extends MetaAppUsage {
+  readonly type?: string
+  /** Meta reports this duration in minutes. */
+  readonly estimated_time_to_regain_access?: number
+}
+
+/** Business object id to its reported business-use-case usage entries. */
+export type MetaBusinessUseCaseUsage = Readonly<
+  Record<string, readonly MetaBusinessUseCaseUsageEntry[]>
+>
+
+/** Parsed quota metadata. Missing or malformed headers are omitted. */
+export interface MetaUsage {
+  readonly app?: MetaAppUsage
+  readonly businessUseCase?: MetaBusinessUseCaseUsage
+}
+
+/** Metadata emitted for a Graph API response without changing resource return values. */
+export interface MetaResponseMetadata {
+  readonly path: string
+  readonly method: "GET" | "POST"
+  readonly status: number
+  readonly headers: readonly MetaHeader[]
+  readonly usage: MetaUsage
+  /** Present when the response belongs to a sub-request inside a Graph batch. */
+  readonly batchIndex?: number
+}
+
+/** Context supplied to a connector-level retry policy. */
+export interface MetaRetryContext {
+  readonly attempt: number
+  readonly path: string
+  readonly method: "GET" | "POST"
+  readonly response: Response | null
+  readonly error: unknown
+  readonly graphError?: MetaGraphError
+  readonly usage: MetaUsage
+  readonly batchIndex?: number
+}
+
+export interface MetaRetryPolicy {
+  readonly maxRetries?: number
+  shouldRetry?(context: MetaRetryContext): boolean | Promise<boolean>
+  delayMs?(context: MetaRetryContext): number | Promise<number>
+}
+
 /**
  * A measured Graph API metric, returned by an `/insights` edge.
  *
