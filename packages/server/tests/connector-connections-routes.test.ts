@@ -320,6 +320,7 @@ describe("connector connection Headless API", () => {
     expect(destination.origin).toBe("http://atlas.localhost")
     expect(destination.pathname).toBe("/settings/connectors")
     expect(destination.searchParams.get("tab")).toBe("crm")
+    expect(destination.searchParams.get("connectionConnectorId")).toBe("crm")
     expect(destination.searchParams.get("connectionRunId")).toBe(started.runId)
 
     const claimed = await harness.storage.connectorConnections.getConnectionRun({

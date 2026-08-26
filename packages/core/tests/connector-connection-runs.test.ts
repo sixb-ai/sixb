@@ -50,7 +50,7 @@ describe("connector connection runs", () => {
       redirectUri: callbackUrl,
       callbackBinding: started.callbackBinding.secret,
     })
-    expect(completed).toEqual({ runId: started.runId, returnTo })
+    expect(completed).toEqual({ runId: started.runId, connectorId: harness.connector.id, returnTo })
 
     const waiting = await harness.process.getConnectionRun(
       command,
@@ -120,7 +120,11 @@ describe("connector connection runs", () => {
         redirectUri: callbackUrl,
         callbackBinding: started.callbackBinding.secret,
       })
-    ).resolves.toEqual({ runId: started.runId, returnTo })
+    ).resolves.toEqual({
+      runId: started.runId,
+      connectorId: harness.connector.id,
+      returnTo,
+    })
     await expect(
       harness.process.getConnectionRun(command, harness.connector.id, started.runId)
     ).resolves.toMatchObject({ status: "cancelled" })

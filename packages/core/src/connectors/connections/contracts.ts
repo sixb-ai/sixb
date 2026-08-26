@@ -64,6 +64,7 @@ export type CompleteConnectorConnectionRunInput =
 
 export interface CompleteConnectorConnectionRunResult {
   readonly runId: string
+  readonly connectorId: string
   readonly returnTo: string
 }
 

@@ -183,7 +183,11 @@ export class ConnectorConnectionRunService {
     )
     const claimed = await this.claimCallback(state, callbackBinding, redirectUri)
     if (claimed.type === "expired") {
-      return { runId: claimed.run.id, returnTo: claimed.returnTo }
+      return {
+        runId: claimed.run.id,
+        connectorId: claimed.run.connectorId,
+        returnTo: claimed.returnTo,
+      }
     }
 
     const { run, attempt, principal, returnTo } = claimed
@@ -193,7 +197,7 @@ export class ConnectorConnectionRunService {
         input.error === "access_denied"
           ? await this.cancelRun(run)
           : await this.failRun(run, providerCallbackError(input.error))
-      return { runId: finished.id, returnTo }
+      return { runId: finished.id, connectorId: finished.connectorId, returnTo }
     }
 
     let authorizationId = run.authorizationId
@@ -227,10 +231,10 @@ export class ConnectorConnectionRunService {
         },
       })
       const finished = await this.finalizeCompletedRun(run, authorization)
-      return { runId: finished.id, returnTo }
+      return { runId: finished.id, connectorId: finished.connectorId, returnTo }
     } catch (error) {
       const failed = await this.failRun(run, error, authorizationId)
-      return { runId: failed.id, returnTo }
+      return { runId: failed.id, connectorId: failed.connectorId, returnTo }
     }
   }
 

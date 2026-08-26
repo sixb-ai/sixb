@@ -216,27 +216,38 @@ restart.
 
 ## Connect an OAuth account from an app
 
-Sixb owns the OAuth callback, state and PKCE exchange. The app starts the connection and redirects
-the browser to the provider:
+Sixb owns the OAuth callback, state, PKCE exchange, durable run, and lifecycle transitions. The
+application keeps control of its interface through one headless hook:
 
 ```tsx
-import { useConnectConnector } from "@sixb/client/hooks"
+import { useConnectorConnection } from "@sixb/client/hooks"
 
-export function ConnectSocialButton() {
-  const connect = useConnectConnector({
+export function SocialConnection() {
+  const social = useConnectorConnection({
     connectorId: "social",
     slot: "organic-marketing",
-    returnTo: "/settings/connectors",
-    onSuccess: ({ authorizationUrl }) => window.location.assign(authorizationUrl),
   })
 
-  return <button onClick={() => connect.mutate()}>Connect social account</button>
+  return (
+    <>
+      <button onClick={social.connect} disabled={social.isPending}>
+        {social.connection?.account.label ?? "Connect social account"}
+      </button>
+
+      {social.status === "selecting_account" &&
+        social.accounts.map((account) => (
+          <button key={account.id} onClick={() => social.selectAccount(account.id)}>
+            {account.label}
+          </button>
+        ))}
+    </>
+  )
 }
 ```
 
 `slot` is the stable application role filled by the connection, not the provider account id. For
 example, `organic-marketing`, `customer-support`, or `brand-france` can each resolve a different
-account later through `sixb.connector(...)`.
+account later through `sixb.connector(...)`. Project ownership is implicit in V1.
 
 Register this server-owned callback URL with the OAuth provider:
 
@@ -244,33 +255,15 @@ Register this server-owned callback URL with the OAuth provider:
 https://<sixb-api-origin>/auth/connectors/callback
 ```
 
-After OAuth, Sixb redirects to `returnTo` with `connectionRunId`. Read the run and select the account
-that should fill the slot:
+By default, OAuth returns to the current page while preserving unrelated query parameters and the
+URL hash. Keep the hook mounted there: it resumes the run from the non-secret callback identity and
+exposes `selecting_account` when the application must present provider accounts. The hook also
+exposes `disconnect()`, `revoke()`, and `needs_reauthorization`; Sixb imposes the protocol, not its
+visual representation.
 
-```tsx
-import { useConnectorConnectionRun, useSelectConnectorAccount } from "@sixb/client/hooks"
-
-export function SocialConnectionResult() {
-  const runId = new URLSearchParams(window.location.search).get("connectionRunId")
-  return runId ? <SocialConnectionRun runId={runId} /> : null
-}
-
-function SocialConnectionRun({ runId }: { runId: string }) {
-  const run = useConnectorConnectionRun({ connectorId: "social", runId })
-  const selectAccount = useSelectConnectorAccount({
-    connectorId: "social",
-    runId,
-  })
-
-  if (run.data?.status !== "waiting" || run.data.waitingFor !== "account_selection") return null
-
-  return run.data.accounts.map((account) => (
-    <button key={account.id} onClick={() => selectAccount.mutate({ accountId: account.id })}>
-      {account.label}
-    </button>
-  ))
-}
-```
+Selecting an account for an occupied slot returns a replacement conflict. Detect it with
+`isConnectorReplacementConflict(connection.error?.cause)`, ask for confirmation in the
+application, then retry with `selectAccount(accountId, { replace: true })`.
 
 To expose another account from the same OAuth grant, start a selection run from an existing
 connection. The provider authorization is not repeated:
@@ -287,7 +280,8 @@ const addAccount = useAddConnectorConnection({
 addAccount.mutate()
 ```
 
-The returned run is already waiting for `account_selection` and uses the same selection UI.
+The returned run is already waiting for `account_selection`. Use `useConnectorConnectionRun` and
+`useSelectConnectorAccount` when building this advanced multi-slot flow.
 
 A connection run records the interactive execution: `waiting`, `running`, then a terminal status.
 Its terminal record is secret-free and retained without automatic cleanup in V1.

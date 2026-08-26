@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import { QueryClient } from "@tanstack/react-query"
 import {
+  connectorConnectionReturnTo,
+  readConnectorConnectionCallback,
+} from "../src/connectors/connection"
+import {
   getConnectorConnectionRunQueryKey,
   listConnectorConnectionsQueryKey,
 } from "../src/generated/@tanstack/react-query.gen"
@@ -8,6 +12,9 @@ import { createClient, createConfig } from "../src/generated/client"
 import type {
   AddConnectorConnectionResponse,
   GetConnectorConnectionRunResponse,
+  ListConnectorConnectionsResponse,
+  ReauthorizeConnectorConnectionResponse,
+  RevokeConnectorConnectionResponse,
   SelectConnectorConnectionRunAccountResponse,
   StartConnectorConnectionRunResponse,
 } from "../src/generated/types.gen"
@@ -15,6 +22,10 @@ import {
   addConnectorConnectionMutationOptions,
   connectConnectorMutationOptions,
   connectorConnectionRunQueryOptions,
+  connectorConnectionsQueryOptions,
+  disconnectConnectorMutationOptions,
+  reauthorizeConnectorMutationOptions,
+  revokeConnectorMutationOptions,
   selectConnectorAccountMutationOptions,
 } from "../src/hooks"
 
@@ -66,6 +77,21 @@ const succeededRun: SelectConnectorConnectionRunAccountResponse = {
   finishedAt: "2026-08-24T12:02:00.000Z",
 }
 
+const connections: ListConnectorConnectionsResponse = succeededRun.connections
+
+const reauthorization: ReauthorizeConnectorConnectionResponse = {
+  runId: "ccr_3",
+  authorizationUrl: "https://github.com/login/oauth/authorize?state=reauthorize",
+  affectedConnections: connections,
+}
+
+const revoked: RevokeConnectorConnectionResponse = {
+  affectedConnections: connections.map((connection) => ({
+    ...connection,
+    status: "disconnected",
+  })),
+}
+
 function createConnectorTestClient() {
   const requests: Array<{ method: string; path: string; body?: unknown }> = []
   const client = createClient(
@@ -73,7 +99,8 @@ function createConnectorTestClient() {
       baseUrl: "http://sixb.test",
       fetch: (async (request: Request) => {
         const url = new URL(request.url)
-        const body = request.method === "POST" ? await request.json() : undefined
+        const requestBody = request.method === "POST" ? await request.text() : ""
+        const body = requestBody ? JSON.parse(requestBody) : undefined
         requests.push({ method: request.method, path: url.pathname, body })
 
         if (
@@ -99,6 +126,27 @@ function createConnectorTestClient() {
           url.pathname === "/api/connectors/github/connection-runs/ccr_1/selection"
         ) {
           return Response.json(succeededRun)
+        }
+        if (request.method === "GET" && url.pathname === "/api/connectors/github/connections") {
+          return Response.json(connections)
+        }
+        if (
+          request.method === "DELETE" &&
+          url.pathname === "/api/connectors/github/connections/ccn_1"
+        ) {
+          return Response.json({ success: true })
+        }
+        if (
+          request.method === "POST" &&
+          url.pathname === "/api/connectors/github/connections/ccn_1/revoke"
+        ) {
+          return Response.json(revoked)
+        }
+        if (
+          request.method === "POST" &&
+          url.pathname === "/api/connectors/github/connections/ccn_1/reauthorize"
+        ) {
+          return Response.json(reauthorization, { status: 201 })
         }
         return Response.json({ error: "Unexpected request" }, { status: 500 })
       }) as unknown as typeof fetch,
@@ -190,6 +238,87 @@ describe("connector connection hooks", () => {
     ).toEqual(additionalConnectionRun)
   })
 
+  test("lists connector connections through a connector-scoped query", async () => {
+    const { client, requests } = createConnectorTestClient()
+    const options = connectorConnectionsQueryOptions({ client, connectorId: "github" })
+    const queryFn = options.queryFn as unknown as (context: {
+      signal?: AbortSignal
+    }) => Promise<ListConnectorConnectionsResponse>
+
+    expect(await queryFn({})).toEqual(connections)
+    expect(requests).toEqual([
+      {
+        method: "GET",
+        path: "/api/connectors/github/connections",
+        body: undefined,
+      },
+    ])
+  })
+
+  test("disconnects and revokes through concise intents that invalidate connection state", async () => {
+    const { client, requests } = createConnectorTestClient()
+    const queryClient = new QueryClient()
+    const queryKey = listConnectorConnectionsQueryKey({ path: { connectorId: "github" } })
+    queryClient.setQueryData(queryKey, connections)
+
+    const disconnectOptions = disconnectConnectorMutationOptions({
+      client,
+      queryClient,
+      connectorId: "github",
+      connectionId: "ccn_1",
+    })
+    const disconnect = disconnectOptions.mutationFn as () => Promise<{ success: boolean }>
+    const disconnected = await disconnect()
+    await disconnectOptions.onSuccess?.(disconnected, undefined, undefined, {} as never)
+    expect(queryClient.getQueryState(queryKey)?.isInvalidated).toBe(true)
+
+    queryClient.setQueryData(queryKey, connections)
+    const revokeOptions = revokeConnectorMutationOptions({
+      client,
+      queryClient,
+      connectorId: "github",
+      connectionId: "ccn_1",
+    })
+    const revoke = revokeOptions.mutationFn as () => Promise<RevokeConnectorConnectionResponse>
+    const revokedResult = await revoke()
+    await revokeOptions.onSuccess?.(revokedResult, undefined, undefined, {} as never)
+
+    expect(revokedResult).toEqual(revoked)
+    expect(queryClient.getQueryState(queryKey)?.isInvalidated).toBe(true)
+    expect(requests.slice(-2)).toEqual([
+      {
+        method: "DELETE",
+        path: "/api/connectors/github/connections/ccn_1",
+        body: undefined,
+      },
+      {
+        method: "POST",
+        path: "/api/connectors/github/connections/ccn_1/revoke",
+        body: undefined,
+      },
+    ])
+  })
+
+  test("starts reauthorization without exposing the generated request shape", async () => {
+    const { client, requests } = createConnectorTestClient()
+    const options = reauthorizeConnectorMutationOptions({
+      client,
+      connectorId: "github",
+      connectionId: "ccn_1",
+      returnTo: "https://app.sixb.test/settings/connectors",
+    })
+    const mutationFn = options.mutationFn as () => Promise<ReauthorizeConnectorConnectionResponse>
+
+    expect(await mutationFn()).toEqual(reauthorization)
+    expect(requests).toEqual([
+      {
+        method: "POST",
+        path: "/api/connectors/github/connections/ccn_1/reauthorize",
+        body: { returnTo: "https://app.sixb.test/settings/connectors" },
+      },
+    ])
+  })
+
   test("reads the resumed run through the generated cache key", async () => {
     const { client, requests } = createConnectorTestClient()
     const options = connectorConnectionRunQueryOptions({
@@ -264,5 +393,29 @@ describe("connector connection hooks", () => {
       queryClient.getQueryData<SelectConnectorConnectionRunAccountResponse>(runQueryKey)
     ).toEqual(succeededRun)
     expect(queryClient.getQueryState(connectionsQueryKey)?.isInvalidated).toBe(true)
+  })
+})
+
+describe("connector connection callback", () => {
+  test("reads the namespaced connector and run identity", () => {
+    expect(
+      readConnectorConnectionCallback(
+        "https://app.sixb.test/settings?connectionConnectorId=tiktok&connectionRunId=ccr_123"
+      )
+    ).toEqual({ connectorId: "tiktok", runId: "ccr_123" })
+  })
+
+  test("ignores an incomplete callback identity", () => {
+    expect(
+      readConnectorConnectionCallback("https://app.sixb.test/settings?connectionRunId=ccr_123")
+    ).toBeNull()
+  })
+
+  test("preserves application URL state while removing callback parameters", () => {
+    expect(
+      connectorConnectionReturnTo(
+        "https://app.sixb.test/settings?tab=connectors&connectionConnectorId=tiktok&connectionRunId=ccr_123#oauth"
+      )
+    ).toBe("https://app.sixb.test/settings?tab=connectors#oauth")
   })
 })

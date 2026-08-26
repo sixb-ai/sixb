@@ -19,7 +19,7 @@ import {
 } from "./models"
 
 export * from "./agent-streams"
-export * from "./connector-hooks"
+export * from "./connectors"
 export * from "./events"
 export * from "./events-hooks"
 export * from "./events-provider"
