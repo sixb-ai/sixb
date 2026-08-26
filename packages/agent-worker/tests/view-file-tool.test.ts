@@ -9,8 +9,8 @@ import type {
 import { InMemoryBlobStorage } from "@sixb/core"
 import type { Tool } from "ai"
 import type { PreparedAgentAttachmentContext } from "../src/attachments"
-import { createAgentToolArtifacts } from "../src/tool-artifacts"
 import { AgentSandboxFileRegistry } from "../src/sandbox-file-registry"
+import { createAgentToolArtifacts } from "../src/tool-artifacts"
 import { createViewFileTool } from "../src/view-file-tool"
 
 const PNG_BYTES = Uint8Array.from(
