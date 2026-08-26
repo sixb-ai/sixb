@@ -14,7 +14,7 @@ import {
 import { createSixbError } from "@sixb/core/internal/errors"
 import { isAbortError, QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { AgentRunFinishReason, AgentRunRecord, AgentStorage } from "@sixb/core/storage"
-import { type ModelMessage, stepCountIs, streamText, toUIMessageStream } from "ai"
+import { type ModelMessage, toUIMessageStream } from "ai"
 import { agentToolErrorText } from "./ai-sdk-adapters"
 import { attachmentKey, modelSupportsInlineImages, prepareAgentAttachments } from "./attachments"
 import { AgentTurnTimeoutError } from "./errors"
@@ -25,6 +25,7 @@ import {
   type AgentOutputAttachmentResult,
   collectAgentOutputAttachments,
 } from "./output-attachments"
+import { runAgentLoop } from "./run-agent-loop"
 import type { AgentTurnContext } from "./types"
 
 export const DEFAULT_MAX_STEPS = 25
@@ -124,19 +125,16 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
   const abortSignal = AbortSignal.any([signal, timeoutAbort.signal, provisionAbort.signal])
 
-  const result = streamText({
-    model: agent.model,
-    ...(agent.reasoning === undefined ? {} : { reasoning: agent.reasoning }),
-    ...(agent.providerOptions === undefined ? {} : { providerOptions: agent.providerOptions }),
+  const result = runAgentLoop({
+    agent,
     system: buildAgentSystemPrompt({
       instructions: agent.instructions,
       addendum: context.systemAddendum,
     }),
     messages: modelMessages,
     tools,
-    stopWhen: stepCountIs(maxSteps),
-    prepareStep: usageRecorder.prepareStep,
-    onLanguageModelCallEnd: usageRecorder.onLanguageModelCallEnd,
+    maxSteps,
+    usageRecorder,
     abortSignal,
   })
 

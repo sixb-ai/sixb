@@ -94,9 +94,12 @@ export {
 } from "./message"
 export {
   type BuildAgentSystemPromptInput,
+  type BuildWorkflowOutputFinalizerPromptInput,
   buildAgentSystemPrompt,
+  buildWorkflowOutputFinalizerPrompt,
   DEFAULT_AGENT_SYSTEM_CONTEXT,
-  DEFAULT_AGENT_TASK_SYSTEM_CONTEXT,
+  DEFAULT_AGENT_WORKFLOW_SYSTEM_CONTEXT,
+  DEFAULT_WORKFLOW_OUTPUT_FINALIZER_SYSTEM_CONTEXT,
 } from "./prompt"
 export {
   type RequestAgentRunInput,
