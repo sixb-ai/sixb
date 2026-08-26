@@ -65,9 +65,11 @@ export function createHarness(options: HarnessOptions = {}) {
   let discoverGate: Promise<void> | undefined
   let refreshGate: Promise<void> | undefined
   let revokeGate: Promise<void> | undefined
+  let connectGate: Promise<void> | undefined
   let providerRevoked = false
   const exchangedVerifiers: string[] = []
   const refreshInputs: ConnectorOAuthCredentials[] = []
+  const connectionSignals: AbortSignal[] = []
 
   const connector = defineConnector("social", {
     type: "fake-oauth",
@@ -128,7 +130,9 @@ export function createHarness(options: HarnessOptions = {}) {
         { id: "account-b", label: "Account B" },
       ]
     },
-    connect(context) {
+    async connect(context) {
+      connectionSignals.push(context.signal)
+      await connectGate
       let latestToken: Awaited<ReturnType<typeof context.tokenSource.get>> | undefined
       return {
         accountId: context.account.id,
@@ -203,10 +207,14 @@ export function createHarness(options: HarnessOptions = {}) {
     setRevokeGate(value: Promise<void> | undefined) {
       revokeGate = value
     },
+    setConnectGate(value: Promise<void> | undefined) {
+      connectGate = value
+    },
     now: () => new Date(now),
     counts: () => ({ exchangeCount, refreshCount, revokeCount }),
     exchangedVerifiers,
     refreshInputs,
+    connectionSignals,
   }
 }
 

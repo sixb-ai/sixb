@@ -1,10 +1,9 @@
 import type { BlobStorage } from "../blob-storage"
 import {
   type AnyConnectorAdapter,
-  type ConnectorAccountCandidate,
   type ConnectorAdapter,
   type ConnectorClient,
-  type ConnectorConnectionOwner,
+  type ConnectorConnectionMetadata,
   type ConnectorDefinition,
   isConnectorDefinition,
   type OAuthConnectorAdapter,
@@ -19,13 +18,7 @@ import { isScheduleReference } from "../schedules"
 export type SyncBlobContext = Pick<BlobStorage, "put" | "open" | "stat">
 
 /** Non-secret connector connection metadata available to OAuth-backed Sync handlers. */
-export interface SyncConnectorConnection {
-  readonly id: string
-  readonly connectorId: string
-  readonly owner: ConnectorConnectionOwner
-  readonly slot: string
-  readonly account: ConnectorAccountCandidate
-}
+export type SyncConnectorConnection = ConnectorConnectionMetadata
 
 type SyncConnectionContext<TAdapter extends AnyConnectorAdapter> =
   TAdapter extends OAuthConnectorAdapter

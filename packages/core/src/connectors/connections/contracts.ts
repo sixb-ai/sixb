@@ -3,7 +3,11 @@ import type {
   ConnectorConnectionRunKind,
 } from "../../storage/connector-connections/types"
 import type { CreateExecutionInput } from "../../storage/executions/types"
-import type { ConnectorAccountCandidate, ConnectorConnectionSelector } from "../types"
+import type {
+  ConnectorAccountCandidate,
+  ConnectorConnectionMetadata,
+  ConnectorConnectionSelector,
+} from "../types"
 
 /** Durable, already-authorized request provenance carried into the process-owned OAuth service. */
 export interface ConnectorConnectionCommandContext {
@@ -85,10 +89,7 @@ export interface AddConnectorConnectionInput extends ConnectorConnectionSelector
   readonly fromConnectionId: string
 }
 
-export interface ConnectorConnectionView extends ConnectorConnectionSelector {
-  readonly id: string
-  readonly connectorId: string
-  readonly account: ConnectorAccountCandidate
+export interface ConnectorConnectionView extends ConnectorConnectionMetadata {
   readonly status: "connected" | "needs_reauthorization" | "disconnected"
 }
 

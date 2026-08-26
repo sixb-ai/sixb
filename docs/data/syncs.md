@@ -76,6 +76,11 @@ Connections are read sequentially in stable order. If one source fails, the comp
 the previous dataset and checkpoints remain unchanged. Incremental checkpoints are isolated per
 connection and account; replacing an account starts that connection without the old cursor.
 
+The stored checkpoint is bound to the connector and its framework format. Changing the connector
+while keeping the same Sync id fails safely; use a new Sync id to start ingestion from scratch. The
+framework envelope is internal: `context.checkpoint` still contains only the value declared by the
+Sync.
+
 For merge datasets, include connection or account identity in the primary key whenever provider
 record ids are not globally unique. With no connected account, the handler is not called and the
 run follows the normal empty-result semantics for its mode.

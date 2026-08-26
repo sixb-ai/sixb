@@ -8,12 +8,15 @@ import type { SixbRuntimeContext } from "../src/runtime/types"
 import { resolveSyncConnectorSources } from "../src/syncs/sources"
 import { createTestActionExecution, createTestSyncExecution } from "../src/testing"
 import {
+  authorize,
   callbackUrl,
   createHarness,
   encryptionKey,
+  expectSixbError,
   managementCommand,
   managementScope,
   projectOwner,
+  rejectionOf,
   requireConnectionProcess,
   seedConnectorActors,
 } from "./connector-connections.fixture"
@@ -169,7 +172,9 @@ describe("connector connection execution boundary", () => {
     expect(sources.map((source) => source.connection?.id)).toEqual(
       [first.id, second.id].sort((left, right) => left.localeCompare(right))
     )
-    const clients = await Promise.all(sources.map((source) => source.connect()))
+    const clients = await Promise.all(
+      sources.map((source) => source.connect(new AbortController().signal))
+    )
     expect(clients.map((client) => client.accountId).sort()).toEqual(["account-a", "account-b"])
 
     await management.disconnect(command, harness.connector.id, first.id)
@@ -181,4 +186,61 @@ describe("connector connection execution boundary", () => {
       AuthorizationError
     )
   })
+
+  test("cancels and bounds managed client creation", async () => {
+    const harness = createHarness({ providerOperationTimeoutMs: 20 })
+    const authorization = await authorize(harness)
+    await harness.process.selectAccount(managementCommand(), harness.connector.id, {
+      authorizationId: authorization.authorizationId,
+      accountId: "account-a",
+      owner: projectOwner,
+      slot: "social",
+    })
+    const primitive = { kind: "sync" as const, id: "sync-social", runId: "run-social" }
+    const execution = {
+      id: "execution-social",
+      projectId: "project",
+      executor: { type: "primitive" as const, ...primitive },
+      source: { type: "schedule" as const, eventId: "event-social" },
+      correlationId: "correlation-social",
+    }
+    const runtime = {
+      projectId: "project",
+      runtimeAuthorization: createTrustedPrimitiveRuntimeAuthorization({
+        projectId: "project",
+        primitive,
+      }),
+    } as SixbRuntimeContext
+    const connector = createConnectorRuntime(runtime, execution, harness.service)
+    const [source] = await resolveSyncConnectorSources(connector, harness.connector)
+    if (!source) throw new Error("Expected one managed connector source.")
+
+    harness.setConnectGate(new Promise(() => {}))
+    const runController = new AbortController()
+    const cancelled = source.connect(runController.signal)
+    await waitFor(() => harness.connectionSignals.length === 1)
+    runController.abort(new DOMException("cancelled by test", "AbortError"))
+    await expect(cancelled).rejects.toThrow("cancelled by test")
+    expect(harness.connectionSignals[0]?.aborted).toBe(true)
+
+    const timedOut = await rejectionOf(source.connect(new AbortController().signal))
+    expectSixbError(timedOut, "connector.provider_unavailable")
+    expect(harness.connectionSignals[1]?.aborted).toBe(true)
+
+    harness.setConnectGate(undefined)
+    const lifetimeController = new AbortController()
+    const client = await source.connect(lifetimeController.signal)
+    expect(client.aborted()).toBe(false)
+    lifetimeController.abort()
+    expect(client.aborted()).toBe(true)
+  })
 })
+
+async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < timeoutMs) {
+    if (predicate()) return
+    await Bun.sleep(5)
+  }
+  throw new Error("Timed out waiting for connector client creation.")
+}

@@ -19,7 +19,7 @@ import { resolveLoggingService } from "@sixb/core/internal/logging"
 import { type DatasetVersion, getDatasetMergeChangeValidationError } from "@sixb/core/lake-storage"
 import { SYNC_RUN_FAILURE_CODES, type SyncRunRecord } from "@sixb/core/storage"
 import { assertDatasetRow, throwIfAborted } from "./normalize"
-import { readSyncValues } from "./source-read"
+import { readSyncValues, type SyncSourceValue } from "./source-read"
 import type { RunSyncJobInput, SyncRunFinishedHandler, SyncRunResult } from "./types"
 
 export class SyncRunAlreadyStartedError extends Error {
@@ -168,67 +168,103 @@ function assertMergeChange(
 }
 
 async function* validatedDatasetRows(options: {
-  values: AsyncIterable<unknown>
+  values: AsyncIterable<SyncSourceValue>
   signal: AbortSignal
   blobStorage: BlobStorage
   syncId: string
+  runId: string
   dataset: DatasetDefinition
   onRead(): void
 }): AsyncIterable<DatasetRow> {
   let itemIndex = 0
-  for await (const value of options.values) {
+  for await (const sourceValue of options.values) {
     throwIfAborted(options.signal)
     itemIndex += 1
 
-    const row = assertDatasetRow(value, options.syncId, itemIndex)
-    // Validate before handing rows to lake storage so sync failures include
-    // the source item index; lake storage still re-validates as the final boundary.
-    const validationError = getDatasetRowValidationError(row, options.dataset)
-    if (validationError) {
-      throw new Error(
-        `[SixbSyncWorker] Sync '${options.syncId}' returned an invalid row at item ${itemIndex}. ${validationError}`
-      )
+    let row: DatasetRow
+    try {
+      row = assertDatasetRow(sourceValue.value, options.syncId, itemIndex)
+      // Validate before handing rows to lake storage so sync failures include
+      // the source item index; lake storage still re-validates as the final boundary.
+      const validationError = getDatasetRowValidationError(row, options.dataset)
+      if (validationError) {
+        throw new Error(
+          `[SixbSyncWorker] Sync '${options.syncId}' returned an invalid row at item ${itemIndex}. ${validationError}`
+        )
+      }
+
+      // Lake storage validates fileRef shape; the worker owns existence checks against blob storage.
+      await verifyRowFileRefs({
+        blobStorage: options.blobStorage,
+        syncId: options.syncId,
+        dataset: options.dataset,
+        row,
+        itemIndex,
+      })
+      options.onRead()
+    } catch (error) {
+      throw sourceValidationError(error, sourceValue, options, itemIndex)
     }
-
-    // Lake storage validates fileRef shape; the worker owns existence checks against blob storage.
-    await verifyRowFileRefs({
-      blobStorage: options.blobStorage,
-      syncId: options.syncId,
-      dataset: options.dataset,
-      row,
-      itemIndex,
-    })
-
-    options.onRead()
     yield row
   }
 }
 
 async function* validatedMergeChanges(options: {
-  values: AsyncIterable<unknown>
+  values: AsyncIterable<SyncSourceValue>
   signal: AbortSignal
   blobStorage: BlobStorage
   syncId: string
+  runId: string
   dataset: DatasetDefinition
   onRead(): void
 }): AsyncIterable<MergeChange<DatasetRow, DatasetRow>> {
   let itemIndex = 0
-  for await (const value of options.values) {
+  for await (const sourceValue of options.values) {
     throwIfAborted(options.signal)
     itemIndex += 1
-    const mergeChange = assertMergeChange(value, options.syncId, options.dataset, itemIndex)
-    if (mergeChange.kind === "upsert") {
-      await verifyRowFileRefs({
-        blobStorage: options.blobStorage,
-        syncId: options.syncId,
-        dataset: options.dataset,
-        row: mergeChange.row,
-        itemIndex,
-      })
+    let mergeChange: MergeChange<DatasetRow, DatasetRow>
+    try {
+      mergeChange = assertMergeChange(sourceValue.value, options.syncId, options.dataset, itemIndex)
+      if (mergeChange.kind === "upsert") {
+        await verifyRowFileRefs({
+          blobStorage: options.blobStorage,
+          syncId: options.syncId,
+          dataset: options.dataset,
+          row: mergeChange.row,
+          itemIndex,
+        })
+      }
+      options.onRead()
+    } catch (error) {
+      throw sourceValidationError(error, sourceValue, options, itemIndex)
     }
-    options.onRead()
     yield mergeChange
   }
+}
+
+function sourceValidationError(
+  error: unknown,
+  sourceValue: SyncSourceValue,
+  options: { readonly syncId: string; readonly runId: string; readonly dataset: DatasetDefinition },
+  itemIndex: number
+): unknown {
+  const connection = sourceValue.connection
+  if (!connection) return error
+  const code =
+    isSixbError(error) && error.code === "internal.unexpected"
+      ? "internal.unexpected"
+      : "sync.execution_failed"
+  return createSixbError(code, summarizeErrorMessage(error, "Sync source validation failed."), {
+    cause: error,
+    details: {
+      syncId: options.syncId,
+      runId: options.runId,
+      datasetId: options.dataset.id,
+      itemIndex,
+      connectionId: connection.id,
+      accountId: connection.account.id,
+    },
+  })
 }
 
 interface SyncCommitResult {
@@ -358,6 +394,7 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
           signal,
           blobStorage,
           syncId: sync.id,
+          runId: job.id,
           dataset,
           onRead,
         })
@@ -386,6 +423,7 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
           signal,
           blobStorage,
           syncId: sync.id,
+          runId: job.id,
           dataset,
           onRead,
         })

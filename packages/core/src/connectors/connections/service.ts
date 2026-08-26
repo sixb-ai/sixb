@@ -49,10 +49,11 @@ import type {
   StartConnectorConnectionRunResult,
 } from "./contracts"
 import { connectorAuthorizationStatusError } from "./credential-mutations"
+import { runBoundedConnectorProviderOperation } from "./provider-operation"
 import { ConnectorAuthorizationRequestHandler } from "./request"
 import { ConnectorConnectionRunService } from "./runs"
 import { withConnectorStorageBoundary } from "./storage-boundary"
-import { nonblank } from "./validation"
+import { nonblank, positiveDuration } from "./validation"
 import { assertConnectorConnectionSelector, connectorConnectionView } from "./views"
 
 const DEFAULT_ATTEMPT_TTL_MS = 10 * 60_000
@@ -78,6 +79,7 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
   private readonly definitionsById: ReadonlyMap<string, ConnectorDefinition>
   private abortController = new AbortController()
   private readonly connectionStorage: ConnectorConnectionStorage
+  private readonly providerOperationTimeoutMs: number
   private readonly authorizations: DefaultConnectorAuthorizationLifecycle
   private readonly requests: ConnectorAuthorizationRequestHandler
   private readonly runs: ConnectorConnectionRunService
@@ -96,8 +98,11 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
     const hostSignal = () => this.abortController.signal
     const now = options.now ?? (() => new Date())
     const accountSelectionTtlMs = options.accountSelectionTtlMs ?? DEFAULT_SELECTION_TTL_MS
-    const providerOperationTimeoutMs =
-      options.providerOperationTimeoutMs ?? DEFAULT_PROVIDER_OPERATION_TIMEOUT_MS
+    const providerOperationTimeoutMs = positiveDuration(
+      options.providerOperationTimeoutMs ?? DEFAULT_PROVIDER_OPERATION_TIMEOUT_MS,
+      "provider operation timeout"
+    )
+    this.providerOperationTimeoutMs = providerOperationTimeoutMs
 
     this.authorizations = new DefaultConnectorAuthorizationLifecycle({
       projectId,
@@ -185,7 +190,8 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
   /** Resolve a client from an immutable connection snapshot captured for one execution. */
   async connectExecutionConnection<TAdapter extends OAuthConnectorAdapter>(
     definition: ConnectorDefinition<string, TAdapter>,
-    connection: ConnectorConnectionRecord
+    connection: ConnectorConnectionRecord,
+    signal: AbortSignal = this.abortController.signal
   ): Promise<ConnectorClient<TAdapter>> {
     this.assertOAuthRegistered(definition)
     if (
@@ -203,16 +209,30 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
       definition,
       connection.authorizationId
     )
+    const hostSignal = this.abortController.signal
+    const operationSignal =
+      signal === hostSignal ? hostSignal : AbortSignal.any([hostSignal, signal])
     try {
-      return (await definition.adapter.connect({
-        projectId: this.projectId,
-        connectorId: definition.id,
-        connectionId: connection.id,
-        account: connection.account,
-        tokenSource: this.authorizations.createTokenSource(definition, authorization.id),
-        signal: this.abortController.signal,
-      })) as ConnectorClient<TAdapter>
+      return (await runBoundedConnectorProviderOperation(
+        {
+          hostSignal: operationSignal,
+          timeoutMs: this.providerOperationTimeoutMs,
+        },
+        (providerSignal) => {
+          const clientSignal = AbortSignal.any([operationSignal, providerSignal])
+          return definition.adapter.connect({
+            projectId: this.projectId,
+            connectorId: definition.id,
+            connectionId: connection.id,
+            account: connection.account,
+            tokenSource: this.authorizations.createTokenSource(definition, authorization.id),
+            signal: clientSignal,
+          })
+        },
+        () => connectorClientInterruptionError(operationSignal)
+      )) as ConnectorClient<TAdapter>
     } catch (error) {
+      if (operationSignal.aborted) throw error
       throw providerBoundaryError(
         error,
         providerFailureCode(error),
@@ -572,6 +592,19 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
       throw error
     }
   }
+}
+
+function connectorClientInterruptionError(signal: AbortSignal): Error {
+  if (signal.aborted) {
+    if (signal.reason instanceof Error) return signal.reason
+    const error = new Error("[Sixb] Connector client creation was cancelled.")
+    error.name = "AbortError"
+    return error
+  }
+  return createConnectorCodedError(
+    "connector.provider_unavailable",
+    "Connector client creation timed out."
+  )
 }
 
 function requireConnectionStorage(storage: Storage | undefined): {

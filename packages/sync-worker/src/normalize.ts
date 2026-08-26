@@ -46,6 +46,28 @@ export function throwIfAborted(signal: AbortSignal): void {
   }
 }
 
+/** Stop awaiting user/provider work when the queue delivery is cancelled or loses its lease. */
+export async function runAbortable<T>(
+  signal: AbortSignal,
+  run: () => PromiseLike<T> | T
+): Promise<T> {
+  throwIfAborted(signal)
+  let rejectAborted: ((error: Error) => void) | undefined
+  const aborted = new Promise<never>((_resolve, reject) => {
+    rejectAborted = reject
+  })
+  const onAbort = () => rejectAborted?.(toAbortError(signal))
+  signal.addEventListener("abort", onAbort, { once: true })
+
+  const operation = Promise.resolve().then(run)
+  operation.catch(() => {})
+  try {
+    return await Promise.race([operation, aborted])
+  } finally {
+    signal.removeEventListener("abort", onAbort)
+  }
+}
+
 export function assertDatasetRow(value: unknown, syncId: string, itemIndex: number): DatasetRow {
   if (isPlainObject(value)) {
     return value
@@ -58,21 +80,41 @@ export function assertDatasetRow(value: unknown, syncId: string, itemIndex: numb
 
 export async function* normalizeReadResult(
   readResult: SyncReadResult,
-  syncId: string
+  syncId: string,
+  signal: AbortSignal
 ): AsyncIterable<unknown> {
   if (isAsyncIterable(readResult)) {
-    yield* readResult
+    const iterator = readResult[Symbol.asyncIterator]()
+    let completed = false
+    try {
+      while (true) {
+        const next = await runAbortable(signal, () => iterator.next())
+        if (next.done) {
+          completed = true
+          return
+        }
+        yield next.value
+      }
+    } finally {
+      if (!completed && iterator.return) {
+        const closing = Promise.resolve().then(() => iterator.return?.())
+        if (signal.aborted) closing.catch(() => {})
+        else await closing
+      }
+    }
     return
   }
 
   if (isIterable(readResult)) {
     for (const item of readResult) {
+      throwIfAborted(signal)
       yield item
     }
     return
   }
 
   if (isPlainObject(readResult)) {
+    throwIfAborted(signal)
     yield readResult
     return
   }
