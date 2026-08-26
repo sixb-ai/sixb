@@ -66,6 +66,7 @@ import ontologyCommitExecutionsSql from "./migrations/024-ontology-commit-execut
 import connectorConnectionsSql from "./migrations/025-connector-connections.sql" with {
   type: "text",
 }
+import aiCostAccountingSql from "./migrations/026-ai-cost-accounting.sql" with { type: "text" }
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -344,6 +345,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("023-webhook-executions", webhookExecutionsSql),
     pgSql("024-ontology-commit-executions", ontologyCommitExecutionsSql),
     pgSql("025-connector-connections", connectorConnectionsSql),
+    pgSql("026-ai-cost-accounting", aiCostAccountingSql),
   ],
 })
 

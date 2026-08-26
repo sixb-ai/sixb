@@ -203,6 +203,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 25,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "026-ai-cost-accounting",
+    status: "applied",
+    version: 26,
+  },
 ]
 
 afterEach(async () => {
@@ -1681,6 +1688,8 @@ describe("SQLite storage migrations", () => {
     expect(tables).toContain("agent_messages")
     expect(tables).toContain("ai_model_call_usage")
     expect(tables).toContain("ai_model_call_usage_groups")
+    expect(tables).toContain("ai_model_call_valuations")
+    expect(tables).not.toContain("ai_price_schedules")
     expect(readTableColumns(path, "ai_model_call_usage")).toContain("execution_id")
     expect(readTableColumns(path, "ai_model_call_usage")).not.toContain("execution_kind")
     expect(readTableColumns(path, "ai_model_call_usage")).not.toContain("requester_principal_id")
@@ -1700,6 +1709,55 @@ describe("SQLite storage migrations", () => {
     expect(agentRunColumns).not.toContain("usage_cached_input_tokens")
     expect(workflowAgentNodeColumns).not.toContain("usage")
     expect(readTableColumns(path, "workflow_runs")).toContain("requester_group_ids")
+  })
+
+  test("AI cost accounting migration preserves existing Phase 1 usage rows", () => {
+    const db = new Database(":memory:")
+    try {
+      const costIndex = sqliteStorageMigrations.steps.findIndex(
+        (migration) => migration.id === "026-ai-cost-accounting"
+      )
+      const costMigration = sqliteStorageMigrations.steps[costIndex]
+      if (!costMigration) throw new Error("expected AI cost accounting migration")
+      for (const migration of sqliteStorageMigrations.steps.slice(0, costIndex)) {
+        const applied = migration.up(db)
+        if (applied instanceof Promise) throw new Error("expected synchronous SQLite migration")
+      }
+
+      db.run(`
+        INSERT INTO executions (
+          project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
+          authority_kind, authority_primitive_kind, authority_primitive_id, created_at
+        ) VALUES (
+          'project-a', 'execution-1', 'workflow', 'workflow-1', 'event', 'event-1',
+          'correlation-1', 'trustedPrimitive', 'workflow', 'workflow-1',
+          '2026-08-01T11:59:00.000Z'
+        )
+      `)
+      db.run(`
+        INSERT INTO ai_model_call_usage (
+          project_id, id, execution_id, attempt, call_id, provider_id, requested_model_id,
+          response_id, input_tokens, output_tokens, total_tokens, reporting_status, raw_usage,
+          occurred_at, recorded_at
+        ) VALUES (
+          'project-a', 'usage-1', 'execution-1', 1, 'call-1', 'gateway', 'openai/gpt-5',
+          'response-1', 12, 8, 20, 'complete', '{"inputTokens":12,"outputTokens":8}',
+          '2026-08-01T12:00:00.000Z', '2026-08-01T12:00:01.000Z'
+        )
+      `)
+      const before = db.query("SELECT * FROM ai_model_call_usage").get()
+
+      const applied = costMigration.up(db)
+      if (applied instanceof Promise) throw new Error("expected synchronous SQLite migration")
+
+      expect(db.query("SELECT * FROM ai_model_call_usage").get()).toEqual(before)
+      expect(tableColumns(db, "ai_model_call_valuations")).toEqual(
+        expect.arrayContaining(["usage_record_id", "status", "details", "amount_nanos", "rated_at"])
+      )
+      expect(tableColumns(db, "ai_price_schedules")).toEqual([])
+    } finally {
+      db.close()
+    }
   })
 
   test("drops only obsolete run usage projections from an existing schema", () => {

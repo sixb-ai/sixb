@@ -77,6 +77,7 @@ describe("Postgres storage migrations", () => {
             "023-webhook-executions",
             "024-ontology-commit-executions",
             "025-connector-connections",
+            "026-ai-cost-accounting",
           ],
         },
       ])
@@ -255,6 +256,13 @@ describe("Postgres storage migrations", () => {
           id: "025-connector-connections",
           status: "applied",
           version: 25,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "026-ai-cost-accounting",
+          status: "applied",
+          version: 26,
         },
       ])
     })
@@ -1238,6 +1246,7 @@ describe("Postgres storage migrations", () => {
           "agent_messages",
           "ai_model_call_usage",
           "ai_model_call_usage_groups",
+          "ai_model_call_valuations",
         ])
       )
       expect(await readTableColumns(schemaName, "ai_model_call_usage")).toContain("execution_id")
@@ -1298,6 +1307,65 @@ describe("Postgres storage migrations", () => {
         "connector_id",
         "slot",
       ])
+    })
+  })
+
+  test("AI cost accounting migration preserves existing Phase 1 usage rows", async () => {
+    const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    await withSql(async (sql) => {
+      const schema = quoteIdent(schemaName)
+      const context = { exec: (sqlText: string) => sql.unsafe(sqlText).then(() => undefined) }
+      const costIndex = postgresStorageMigrations.steps.findIndex(
+        (migration) => migration.id === "026-ai-cost-accounting"
+      )
+      const costMigration = postgresStorageMigrations.steps[costIndex]
+      if (!costMigration) throw new Error("PostgreSQL AI cost accounting migration is missing.")
+
+      try {
+        await sql.unsafe(`CREATE SCHEMA ${schema}`)
+        await sql.unsafe(`SET search_path TO ${schema}`)
+        for (const migration of postgresStorageMigrations.steps.slice(0, costIndex)) {
+          await migration.up(context)
+        }
+        await sql.unsafe(`
+          INSERT INTO executions (
+            project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
+            authority_kind, authority_primitive_kind, authority_primitive_id, created_at
+          ) VALUES (
+            'project-a', 'execution-1', 'workflow', 'workflow-1', 'event', 'event-1',
+            'correlation-1', 'trustedPrimitive', 'workflow', 'workflow-1',
+            '2026-08-01T11:59:00.000Z'
+          );
+
+          INSERT INTO ai_model_call_usage (
+            project_id, id, execution_id, attempt, call_id, provider_id, requested_model_id,
+            response_id, input_tokens, output_tokens, total_tokens, reporting_status, raw_usage,
+            occurred_at, recorded_at
+          ) VALUES (
+            'project-a', 'usage-1', 'execution-1', 1, 'call-1', 'gateway', 'openai/gpt-5',
+            'response-1', 12, 8, 20, 'complete', '{"inputTokens":12,"outputTokens":8}',
+            '2026-08-01T12:00:00.000Z', '2026-08-01T12:00:01.000Z'
+          );
+        `)
+        const before = await sql.unsafe("SELECT * FROM ai_model_call_usage")
+
+        await costMigration.up(context)
+
+        expect(await sql.unsafe("SELECT * FROM ai_model_call_usage")).toEqual(before)
+        expect(await readTableColumns(schemaName, "ai_model_call_valuations")).toEqual(
+          expect.arrayContaining([
+            "usage_record_id",
+            "status",
+            "details",
+            "amount_nanos",
+            "rated_at",
+          ])
+        )
+        expect(await readTableColumns(schemaName, "ai_price_schedules")).toEqual([])
+      } finally {
+        await sql.unsafe("RESET search_path")
+        await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
+      }
     })
   })
 
@@ -1653,6 +1721,13 @@ describe("Postgres storage migrations", () => {
           id: "025-connector-connections",
           status: "applied",
           version: 25,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "026-ai-cost-accounting",
+          status: "applied",
+          version: 26,
         },
       ])
     } finally {

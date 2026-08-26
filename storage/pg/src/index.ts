@@ -19,6 +19,7 @@ import {
   createWorkflowRunOperationScope,
 } from "@sixb/core/internal/storage-operation-scope"
 import {
+  type AiCostStorage,
   type AiUsageStorage,
   createTransactionStorageProxy,
   type ObjectStorage,
@@ -31,6 +32,7 @@ import { PgConnectorConnectionStorage } from "./connector-connection-storage"
 import { createPostgresStorageMigrators, dropSchema } from "./migrations"
 import { PgOntologyStorage, type PgOntologyTransactionContext } from "./ontology-storage"
 import { PgActionRunStorage } from "./pg-action-run-storage"
+import { PgAiCostStorage } from "./pg-ai-cost-storage"
 import { PgAiUsageStorage } from "./pg-ai-usage-storage"
 import { createPgClient, type SQL, type SQLClient } from "./pg-client"
 import { PgExecutionStorage } from "./pg-execution-storage"
@@ -110,7 +112,7 @@ export interface PostgresStorageOptions {
 /**
  * PostgreSQL storage provider for Sixb.
  *
- * Bundles Sixb storage adapters, including the AI usage ledger, behind a shared PostgreSQL
+ * Bundles Sixb storage adapters, including the AI accounting ledger, behind a shared PostgreSQL
  * connection pool (porsager `postgres`), which reliably reclaims connections under load.
  *
  * The storage exposes a core `StorageMigrator`. Sixb CLI startup and
@@ -135,6 +137,7 @@ export class PostgresStorage implements MigrationCapableStorage {
   readonly executions: PgExecutionStorage
   readonly agents: PgAgentStorage
   readonly aiUsage: AiUsageStorage
+  readonly aiCosts: AiCostStorage
   readonly actionRuns: PgActionRunStorage
   readonly pipelineRuns: PgPipelineRunStorage
   readonly workflowRuns: PgWorkflowRunStorage
@@ -208,6 +211,7 @@ export class PostgresStorage implements MigrationCapableStorage {
     this.executions = createOperationScopedFacade(stores.executions, scope)
     this.agents = createAgentOperationScope(stores.agents, scope)
     this.aiUsage = createOperationScopedFacade(stores.aiUsage, scope)
+    this.aiCosts = createOperationScopedFacade(stores.aiCosts, scope)
     this.actionRuns = createOperationScopedFacade(stores.actionRuns, scope)
     this.pipelineRuns = createOperationScopedFacade(stores.pipelineRuns, scope)
     this.workflowRuns = createWorkflowRunOperationScope(stores.workflowRuns, scope)
@@ -337,6 +341,7 @@ function createPostgresStores(
     executions,
     agents: new PgAgentStorage({ sql, executions }),
     aiUsage: new PgAiUsageStorage(sql),
+    aiCosts: new PgAiCostStorage(sql),
     actionRuns: new PgActionRunStorage(sql, executions),
     pipelineRuns: new PgPipelineRunStorage(sql, executions),
     workflowRuns: new PgWorkflowRunStorage(sql, executions),
@@ -357,6 +362,7 @@ interface PostgresStoreSet {
   readonly executions: PgExecutionStorage
   readonly agents: PgAgentStorage
   readonly aiUsage: PgAiUsageStorage
+  readonly aiCosts: PgAiCostStorage
   readonly actionRuns: PgActionRunStorage
   readonly pipelineRuns: PgPipelineRunStorage
   readonly workflowRuns: PgWorkflowRunStorage
