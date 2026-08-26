@@ -8,6 +8,7 @@ import {
   InMemoryQueues,
 } from "@sixb/core"
 import { migrateSqliteStorage, SqliteStorage } from "@sixb/sqlite"
+import { renderAcmeMagicLinkEmail } from "./lib/magic-link-email"
 import { securityAdmins } from "./security/groups/security-admins"
 
 // Switch the auth strategy with SIXB_AUTH_MODE:
@@ -51,12 +52,18 @@ async function createAuthExampleSixb() {
             bootstrapUsers,
             bootstrapGroups: [securityAdmins],
             from: fromEmail,
+            subject: "Sign in to Acme Operations",
             sendMagicLink: sendMagicLinkEmail,
           }),
   })
 }
 
 async function sendMagicLinkEmail(message: SendMagicLinkInput): Promise<void> {
+  const email = renderAcmeMagicLinkEmail({
+    subject: message.subject,
+    url: message.url,
+  })
+
   // Print the link so you can sign in even without an email provider configured.
   console.log(`\n[auth] Magic sign-in link for ${message.email}:\n${message.url}\n`)
 
@@ -67,9 +74,9 @@ async function sendMagicLinkEmail(message: SendMagicLinkInput): Promise<void> {
   await sendResendEmail({
     from: message.from,
     to: message.email,
-    subject: message.subject,
-    text: message.text,
-    html: message.html,
+    subject: email.subject,
+    text: email.text,
+    html: email.html,
   })
 }
 

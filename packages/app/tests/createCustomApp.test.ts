@@ -4,7 +4,11 @@ import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { brotliCompressSync, gzipSync } from "node:zlib"
-import { generateAppEntry, generateRouteManifest } from "../src/codegen"
+import {
+  generateAppEntry,
+  generateAuthExperienceEntry,
+  generateRouteManifest,
+} from "../src/codegen"
 import { createCustomApp } from "../src/createCustomApp"
 
 async function linkDependencies(projectRoot: string, packages: readonly string[]): Promise<void> {
@@ -374,6 +378,30 @@ describe("createCustomApp.dev", () => {
     expect(main).toContain("data.queryClient ??= createQueryClient()")
     expect(main).toContain("getRoot().render(<App />)")
     expect(main).not.toContain('createRoot(document.getElementById("root")!).render')
+  })
+
+  test("generates a separate pre-auth entry when app/auth.tsx exists", async () => {
+    await writeFile(
+      join(tempRoot, "app", "auth.tsx"),
+      [
+        'import type { AuthExperienceProps } from "@sixb/app/auth"',
+        "export default function AuthExperience(_props: AuthExperienceProps) { return null }",
+        "",
+      ].join("\n")
+    )
+    const generatedDir = join(tempRoot, ".sixb", "generated")
+    const entry = await generateAuthExperienceEntry(tempRoot, generatedDir)
+    if (!entry) throw new Error("Expected an auth experience entry")
+
+    const main = await readFile(entry.mainPath, "utf-8")
+    const html = await readFile(entry.htmlPath, "utf-8")
+    expect(main).toContain('import AuthExperience from "../../app/auth.tsx"')
+    expect(main).toContain("requestMagicLink(email)")
+    expect(main).toContain("confirmSignIn()")
+    expect(main).toContain("form.submit()")
+    expect(html).toContain('data-sixb-auth="__SIXB_AUTH_BOOTSTRAP__"')
+    expect(html).toContain('src="./auth-main.tsx"')
+    expect(main).not.toContain("RootLayout")
   })
 
   test("renders an access-denied view without starting the application", async () => {

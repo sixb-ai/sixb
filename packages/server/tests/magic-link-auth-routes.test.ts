@@ -1,4 +1,8 @@
 import { describe, expect, test } from "bun:test"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { brotliCompressSync, gzipSync } from "node:zlib"
 import { magicLink, type SendMagicLinkInput } from "@sixb/auth-magic-link"
 import {
   type AuthSessionOptions,
@@ -13,7 +17,7 @@ import {
   prop,
   SixbHost,
 } from "@sixb/core"
-import { createSixbApi, SixbServer } from "../src/server"
+import { createSixbApi, SixbServer, type SixbServerOptions } from "../src/server"
 import { confirmCallback, createTestBrowserPolicy, linkFromLatestMessage } from "./helpers"
 
 const projectId = "test-project"
@@ -44,6 +48,7 @@ function createRuntime(
     readonly bootstrapGroups?: readonly [typeof securityAdmins]
     readonly rateLimit?: false | { readonly perMinute?: number; readonly perHour?: number }
     readonly session?: AuthSessionOptions
+    readonly authExperience?: SixbServerOptions["authExperience"]
   } = {}
 ) {
   const storage = new InMemoryStorage()
@@ -73,11 +78,49 @@ function createRuntime(
         host: sixb,
         quiet: true,
         browser: createTestBrowserPolicy(),
+        ...(options.authExperience ? { authExperience: options.authExperience } : {}),
       })
     ),
     messages,
     sixb,
     storage,
+  }
+}
+
+function customAuthBootstrap(html: string): {
+  readonly state: { readonly kind: string; readonly email?: string }
+  readonly signInUrl: string
+  readonly submission?: {
+    readonly kind: string
+    readonly action: string
+    readonly fields: Readonly<Record<string, string>>
+  }
+} {
+  const encoded = html.match(/data-sixb-auth="([^"]+)"/)?.[1]
+  if (!encoded) throw new Error("Expected a custom auth bootstrap")
+  return JSON.parse(Buffer.from(encoded, "base64url").toString("utf-8"))
+}
+
+async function createCustomAuthFixture(): Promise<{
+  readonly outdir: string
+  cleanup(): Promise<void>
+}> {
+  const outdir = await mkdtemp(join(tmpdir(), "sixb-custom-auth-"))
+  await mkdir(join(outdir, "assets"), { recursive: true })
+  await writeFile(
+    join(outdir, "index.html"),
+    '<!doctype html><html><body><div id="root" data-sixb-auth="__SIXB_AUTH_BOOTSTRAP__">Acme auth</div><script src="/auth/assets/auth-fixture.js"></script></body></html>'
+  )
+  const scriptPath = join(outdir, "assets", "auth-fixture.js")
+  const script = "export {}\n"
+  await writeFile(scriptPath, script)
+  await writeFile(`${scriptPath}.br`, brotliCompressSync(script))
+  await writeFile(`${scriptPath}.gz`, gzipSync(script))
+  return {
+    outdir,
+    async cleanup() {
+      await rm(outdir, { recursive: true, force: true })
+    },
   }
 }
 
@@ -148,6 +191,155 @@ async function founderUserId(storage: InMemoryStorage): Promise<string> {
 }
 
 describe("magic-link auth routes", () => {
+  test("renders a custom app auth experience while retaining the Atlas fallback", async () => {
+    const fixture = await createCustomAuthFixture()
+    try {
+      const { app } = createRuntime({ authExperience: { outdir: fixture.outdir } })
+
+      const custom = await app.fetch(
+        new Request(
+          "http://api.localhost/auth/sign-in?audience=app&returnTo=http%3A%2F%2Fapp.localhost%2Fnotes"
+        )
+      )
+      const customHtml = await custom.text()
+      const bootstrap = customAuthBootstrap(customHtml)
+
+      expect(custom.status).toBe(200)
+      expect(customHtml).toContain("Acme auth")
+      expect(custom.headers.get("referrer-policy")).toBe("same-origin")
+      expect(custom.headers.get("content-security-policy")).toContain(
+        "form-action 'self'; frame-ancestors 'none'"
+      )
+      expect(bootstrap).toMatchObject({
+        state: { kind: "signIn" },
+        submission: {
+          kind: "requestMagicLink",
+          action: "/auth/sign-in",
+          fields: { audience: "app", returnTo: "http://app.localhost/notes" },
+        },
+      })
+
+      const atlas = await app.fetch(
+        new Request(
+          "http://api.localhost/auth/sign-in?audience=atlas&returnTo=http%3A%2F%2Fatlas.localhost%2F"
+        )
+      )
+      expect(await atlas.text()).toContain('name="audience" value="atlas"')
+
+      const asset = await app.fetch(new Request("http://api.localhost/auth/assets/auth-fixture.js"))
+      expect(asset.status).toBe(200)
+      expect(asset.headers.get("cache-control")).toContain("immutable")
+
+      const head = await app.fetch(
+        new Request("http://api.localhost/auth/assets/auth-fixture.js", { method: "HEAD" })
+      )
+      expect(head.status).toBe(200)
+      expect(head.headers.get("content-type")).toBe(asset.headers.get("content-type"))
+      expect(await head.text()).toBe("")
+
+      const gzip = await app.fetch(
+        new Request("http://api.localhost/auth/assets/auth-fixture.js", {
+          headers: { "accept-encoding": "br;q=0, gzip;q=1" },
+        })
+      )
+      expect(gzip.headers.get("content-encoding")).toBe("gzip")
+
+      const identity = await app.fetch(
+        new Request("http://api.localhost/auth/assets/auth-fixture.js", {
+          headers: { "accept-encoding": "br;q=0, gzip;q=0" },
+        })
+      )
+      expect(identity.headers.get("content-encoding")).toBeNull()
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  test("custom app magic-link states preserve neutral delivery and scanner-safe confirmation", async () => {
+    const fixture = await createCustomAuthFixture()
+    try {
+      const { app, messages } = createRuntime({
+        authExperience: { outdir: fixture.outdir },
+        bootstrapUsers: ["founder@acme.com"],
+      })
+
+      const requested = await postSignIn(app, {
+        audience: "app",
+        email: "founder@acme.com",
+        returnTo: "http://app.localhost/notes",
+      })
+      expect(customAuthBootstrap(await requested.text()).state).toEqual({ kind: "checkEmail" })
+
+      const link = linkFromLatestMessage(messages)
+      expect(link.searchParams.get("audience")).toBe("app")
+      expect(link.searchParams.get("returnTo")).toBeNull()
+
+      const invalidLink = new URL(link)
+      invalidLink.searchParams.set("token", "invalid")
+      const invalid = await app.fetch(new Request(invalidLink, { redirect: "manual" }))
+      const invalidBootstrap = customAuthBootstrap(await invalid.text())
+      expect(invalid.status).toBe(400)
+      expect(invalidBootstrap.state).toEqual({ kind: "invalidLink" })
+      expect(invalidBootstrap.signInUrl).toBe(
+        "/auth/sign-in?audience=app&returnTo=http%3A%2F%2Fapp.localhost%2F"
+      )
+
+      for (let i = 0; i < 2; i++) {
+        const confirmation = await app.fetch(new Request(link.toString(), { redirect: "manual" }))
+        const bootstrap = customAuthBootstrap(await confirmation.text())
+        expect(confirmation.headers.get("content-security-policy")).toContain(
+          "form-action 'self' http://app.localhost"
+        )
+        expect(bootstrap.state).toEqual({ kind: "confirm", email: "founder@acme.com" })
+        expect(bootstrap.submission).toMatchObject({
+          kind: "confirmSignIn",
+          fields: {
+            audience: "app",
+            magicLinkId: link.searchParams.get("magicLinkId"),
+            token: link.searchParams.get("token"),
+          },
+        })
+        expect(bootstrap.signInUrl).toBe(
+          "/auth/sign-in?audience=app&returnTo=http%3A%2F%2Fapp.localhost%2F"
+        )
+      }
+
+      const completed = await confirmCallback(app, link)
+      expect(completed.status).toBe(303)
+      expect(completed.headers.get("location")).toBe("http://app.localhost/notes")
+      expect(completed.headers.get("set-cookie")).toContain("sixb_session_app=")
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  test("renders a safe custom error when callback validation is unavailable", async () => {
+    const fixture = await createCustomAuthFixture()
+    try {
+      const { app, messages, storage } = createRuntime({
+        authExperience: { outdir: fixture.outdir },
+        bootstrapUsers: ["founder@acme.com"],
+      })
+      await postSignIn(app, {
+        audience: "app",
+        email: "founder@acme.com",
+        returnTo: "http://app.localhost/notes",
+      })
+
+      storage.auth.magicLinks.getById = async () => {
+        throw new Error("Storage unavailable")
+      }
+      const response = await app.fetch(
+        new Request(linkFromLatestMessage(messages), { redirect: "manual" })
+      )
+
+      expect(response.status).toBe(500)
+      expect(customAuthBootstrap(await response.text()).state).toEqual({ kind: "error" })
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
   test("renders the magic-link sign-in form for the magic-link strategy", async () => {
     const { app } = createRuntime()
 

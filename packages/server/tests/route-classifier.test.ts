@@ -20,6 +20,8 @@ const PUBLIC: ReadonlyArray<readonly [string, string, string]> = [
   ["POST", "/api/webhooks/github/events", "third-party callers sign their payloads"],
   ["GET", "/api/auth/session", "answers whether a session exists"],
   ["POST", "/api/auth/sign-out", "must work with an expired session"],
+  ["GET", "/auth/assets/auth-example.js", "custom auth experience asset"],
+  ["HEAD", "/auth/assets/auth-example.js", "custom auth experience asset metadata"],
   ["GET", "/auth/sign-in", "the page that creates a session"],
   ["POST", "/auth/sign-in", "the page that creates a session"],
   ["GET", "/auth/callback", "the emailed token IS the credential"],

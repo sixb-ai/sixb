@@ -16,6 +16,8 @@ export interface GenerateRouteManifestOptions {
   readonly builtInRoutes?: readonly BuiltInRouteManifestEntry[]
 }
 
+export const AUTH_EXPERIENCE_BOOTSTRAP_PLACEHOLDER = "__SIXB_AUTH_BOOTSTRAP__"
+
 /**
  * Generates `.sixb/generated/routes.ts` with static route imports. Pages are
  * eager on purpose: project-specific apps bundle small, and a single bundle
@@ -67,6 +69,143 @@ ${routeEntries}
   const outPath = join(generatedDir, "routes.ts")
   await writeFileIfChanged(outPath, content)
   return outPath
+}
+
+/** Generates the optional browser entry served by the API for `/auth/*`. */
+export async function generateAuthExperienceEntry(
+  projectRoot: string,
+  generatedDir: string,
+  options: {
+    readonly appDir?: string
+    readonly publicDir?: string
+    readonly stylesheetPath?: string | null
+  } = {}
+): Promise<{ readonly htmlPath: string; readonly mainPath: string } | null> {
+  await mkdir(generatedDir, { recursive: true })
+
+  const appDir = options.appDir ? resolve(projectRoot, options.appDir) : join(projectRoot, "app")
+  const authPath = join(appDir, "auth.tsx")
+  if (!(await fileExists(authPath))) {
+    return null
+  }
+
+  const publicDir = options.publicDir
+    ? resolve(projectRoot, options.publicDir)
+    : join(appDir, "public")
+  const layoutPath = join(appDir, "layout.tsx")
+  const globalsCssPath = join(appDir, "globals.css")
+  const metadata = await resolveAppMetadata({ layoutPath, publicDir })
+  const stylesheetPath =
+    options.stylesheetPath !== undefined
+      ? options.stylesheetPath
+      : (await fileExists(globalsCssPath))
+        ? globalsCssPath
+        : null
+  const stylesheetImport = stylesheetPath
+    ? `import ${JSON.stringify(relativeTo(generatedDir, stylesheetPath))}`
+    : ""
+  const authRel = relativeTo(generatedDir, authPath)
+
+  const mainContent = `import React from "react"
+import { createRoot } from "react-dom/client"
+import type {
+  AuthExperienceActions,
+  AuthExperienceState,
+} from "@sixb/app/auth"
+import AuthExperience from ${JSON.stringify(authRel)}
+${stylesheetImport}
+
+interface AuthExperienceBootstrap {
+  readonly state: AuthExperienceState
+  readonly signInUrl: string
+  readonly submission?: {
+    readonly kind: "requestMagicLink" | "confirmSignIn"
+    readonly action: string
+    readonly fields: Readonly<Record<string, string>>
+  }
+}
+
+const root = document.getElementById("root")
+if (!root) {
+  throw new Error("[SixbApp] Could not find the auth experience root element.")
+}
+
+const encodedBootstrap = root.dataset.sixbAuth
+if (!encodedBootstrap) {
+  throw new Error("[SixbApp] Auth experience bootstrap is missing.")
+}
+
+const bootstrap = decodeBootstrap(encodedBootstrap)
+const actions: AuthExperienceActions = {
+  requestMagicLink(email) {
+    submit("requestMagicLink", { email })
+  },
+  confirmSignIn() {
+    submit("confirmSignIn")
+  },
+  restartSignIn() {
+    window.location.assign(bootstrap.signInUrl)
+  },
+}
+
+function submit(
+  kind: NonNullable<AuthExperienceBootstrap["submission"]>["kind"],
+  additionalFields: Readonly<Record<string, string>> = {}
+): void {
+  const submission = bootstrap.submission
+  if (!submission || submission.kind !== kind) {
+    throw new Error("[SixbApp] Auth action '" + kind + "' is not available in this state.")
+  }
+
+  const form = document.createElement("form")
+  form.method = "post"
+  form.action = submission.action
+  form.hidden = true
+  for (const [name, value] of Object.entries({ ...submission.fields, ...additionalFields })) {
+    const input = document.createElement("input")
+    input.type = "hidden"
+    input.name = name
+    input.value = value
+    form.append(input)
+  }
+  document.body.append(form)
+  form.submit()
+}
+
+function decodeBootstrap(value: string): AuthExperienceBootstrap {
+  const base64 = value.replaceAll("-", "+").replaceAll("_", "/")
+  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=")
+  const bytes = Uint8Array.from(atob(padded), (character) => character.charCodeAt(0))
+  return JSON.parse(new TextDecoder().decode(bytes)) as AuthExperienceBootstrap
+}
+
+createRoot(root).render(<AuthExperience state={bootstrap.state} actions={actions} />)
+`
+
+  const mainPath = join(generatedDir, "auth-main.tsx")
+  await writeFileIfChanged(mainPath, mainContent)
+
+  const htmlContent = `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+${renderAuthMetadataHead(metadata)}
+    <style>
+      * { box-sizing: border-box; }
+      html, body, #root { margin: 0; min-height: 100%; }
+      body, #root { min-height: 100vh; min-height: 100dvh; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-sixb-auth="${AUTH_EXPERIENCE_BOOTSTRAP_PLACEHOLDER}"></div>
+    <script type="module" src="./auth-main.tsx"></script>
+  </body>
+</html>
+`
+  const htmlPath = join(generatedDir, "auth-index.html")
+  await writeFileIfChanged(htmlPath, htmlContent)
+  return { htmlPath, mainPath }
 }
 
 /**
@@ -535,6 +674,20 @@ function renderMetadataHead(metadata: Awaited<ReturnType<typeof resolveAppMetada
       : []),
     ...(metadata.appleTouchIcon
       ? [`    <link rel="apple-touch-icon" href="${metadata.appleTouchIcon}" />`]
+      : []),
+  ]
+  return tags.join("\n")
+}
+
+function renderAuthMetadataHead(metadata: Awaited<ReturnType<typeof resolveAppMetadata>>): string {
+  const tags = [
+    `    <title>${escapeHtmlText(metadata.title)}</title>`,
+    ...(metadata.description
+      ? [`    <meta name="description" content="${escapeHtmlAttribute(metadata.description)}" />`]
+      : []),
+    `    <meta name="theme-color" content="${escapeHtmlAttribute(metadata.themeColor)}" />`,
+    ...(metadata.favicon && /^(?:https?:|data:)/.test(metadata.favicon)
+      ? [`    <link rel="icon" href="${escapeHtmlAttribute(metadata.favicon)}" />`]
       : []),
   ]
   return tags.join("\n")
