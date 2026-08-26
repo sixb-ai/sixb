@@ -13,7 +13,23 @@ import type { OrganizationsResource } from "../resources/organizations"
 import type { PostsResource } from "../resources/posts"
 import type { ReactionsResource } from "../resources/reactions"
 import type { SocialMetadataResource } from "../resources/social-metadata"
-import type { LinkedinId } from "./common"
+import type { LinkedinId, LinkedinOrganizationUrn, LinkedinSponsoredAccountUrn } from "./common"
+
+export type LinkedinConnectedAccount =
+  | {
+      readonly type: "organization"
+      readonly id: LinkedinOrganizationUrn
+      readonly label: string
+      readonly description?: string
+      readonly avatarUrl?: string
+    }
+  | {
+      readonly type: "ad-account"
+      readonly id: LinkedinSponsoredAccountUrn
+      readonly label: string
+      readonly description?: string
+      readonly avatarUrl?: string
+    }
 
 export interface LinkedinAdAccountClient {
   readonly campaignGroups: CampaignGroupsResource
@@ -22,6 +38,8 @@ export interface LinkedinAdAccountClient {
 }
 
 export interface LinkedinClient {
+  /** Account selected for this managed Sixb connection. */
+  readonly account: LinkedinConnectedAccount
   readonly adAccounts: AdAccountsResource
   readonly adAccountUsers: AdAccountUsersResource
   readonly adAnalytics: AdAnalyticsResource

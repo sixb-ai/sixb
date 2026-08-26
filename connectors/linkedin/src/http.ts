@@ -49,7 +49,11 @@ export function createLinkedinHttp(rest: RestClient, options: LinkedinHttpOption
       let error: unknown = null
       try {
         await schedule()
-        response = await rest.request(prepared.path, prepared.init)
+        response = await rest.request(prepared.path, prepared.init, {
+          // Query tunneling changes a logical GET into a transport POST. Preserve the logical
+          // idempotency so the REST layer may safely refresh and replay it after a 401.
+          idempotent: method === "GET",
+        })
       } catch (caughtError) {
         error = caughtError
       }
