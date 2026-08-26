@@ -336,6 +336,21 @@
         "@sixb/core": "workspace:^",
       },
     },
+    "connectors/tiktok": {
+      "name": "@sixb/connector-tiktok",
+      "version": "0.1.0",
+      "dependencies": {
+        "@sixb/connector-rest": "workspace:^",
+      },
+      "devDependencies": {
+        "@sixb/core": "workspace:*",
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
+      },
+    },
     "connectors/unipile": {
       "name": "@sixb/connector-unipile",
       "version": "0.1.0",
@@ -1439,6 +1454,8 @@
     "@sixb/connector-stripe": ["@sixb/connector-stripe@workspace:connectors/stripe"],
 
     "@sixb/connector-teamleader": ["@sixb/connector-teamleader@workspace:connectors/teamleader"],
+
+    "@sixb/connector-tiktok": ["@sixb/connector-tiktok@workspace:connectors/tiktok"],
 
     "@sixb/connector-unipile": ["@sixb/connector-unipile@workspace:connectors/unipile"],
 

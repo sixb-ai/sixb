@@ -41,6 +41,7 @@
       "@sixb/connector-sql": ["./connectors/sql/src/index.ts"],
       "@sixb/connector-stripe": ["./connectors/stripe/src/index.ts"],
       "@sixb/connector-teamleader": ["./connectors/teamleader/src/index.ts"],
+      "@sixb/connector-tiktok": ["./connectors/tiktok/src/index.ts"],
       "@sixb/connector-unipile": ["./connectors/unipile/src/index.ts"],
       "@sixb/core": ["./packages/core/src/index.ts"],
       "@sixb/core/actions/worker": ["./packages/core/src/actions/worker.ts"],
