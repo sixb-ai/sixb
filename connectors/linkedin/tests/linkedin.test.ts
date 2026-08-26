@@ -10,7 +10,7 @@ import {
   sponsoredCreativeUrn,
   ugcPostUrn,
 } from "../src"
-import { CONTEXT, createTestClient, json, recorder } from "./helpers"
+import { createTestClient, DEFAULT_OPTIONS, json, recorder, testTokenSource } from "./helpers"
 
 const originalFetch = globalThis.fetch
 afterEach(() => {
@@ -21,7 +21,10 @@ describe("linkedin connector", () => {
   test("sends the required versioned Rest.li headers and resolves live tokens", async () => {
     let tokenNumber = 0
     const calls = recorder([json({ id: 1, name: "Acme", type: "BUSINESS" })])
-    const client = await createTestClient({ accessToken: () => `token-${++tokenNumber}` })
+    const client = await createTestClient(
+      {},
+      testTokenSource(() => `token-${++tokenNumber}`)
+    )
 
     await client.adAccounts.get(1)
 
@@ -45,13 +48,24 @@ describe("linkedin connector", () => {
   })
 
   test("validates configuration and resource identifiers early", async () => {
-    expect(() => linkedin({ accessToken: " " })).toThrow("accessToken must not be empty")
-    expect(() => linkedin({ accessToken: "token", version: "v2" })).toThrow("YYYYMM")
-    expect(() => linkedin({ accessToken: "token", baseUrl: " " })).toThrow(
+    expect(() => linkedin({ ...DEFAULT_OPTIONS, clientId: " " })).toThrow(
+      "clientId must not be empty"
+    )
+    expect(() => linkedin({ ...DEFAULT_OPTIONS, version: "v2" })).toThrow("YYYYMM")
+    expect(() => linkedin({ ...DEFAULT_OPTIONS, baseUrl: " " })).toThrow(
       "baseUrl must not be empty"
     )
+    expect(() =>
+      linkedin({ ...DEFAULT_OPTIONS, accountType: "organization", scopes: ["r_ads"] })
+    ).toThrow("requires rw_organization_admin")
 
     const client = await createTestClient()
+    expect(client.account).toEqual({
+      type: "ad-account",
+      id: "urn:li:sponsoredAccount:123",
+      label: "Acme Ads",
+      description: "LinkedIn ad account",
+    })
     expect(() => client.adAccount("not-a-number")).toThrow("positive numeric ID")
   })
 
@@ -65,16 +79,16 @@ describe("linkedin connector", () => {
     expect(sponsoredCreativeUrn(321)).toBe("urn:li:sponsoredCreative:321")
   })
 
-  test("rejects an empty token returned by a live resolver", async () => {
+  test("rejects an empty token returned by the managed token source", async () => {
     let resolutions = 0
-    const client = await linkedin({
-      accessToken: () => {
+    const client = await createTestClient(
+      { retry: { maxRetries: 2, delayMs: () => 0 } },
+      testTokenSource(() => {
         resolutions++
         return " "
-      },
-      retry: { maxRetries: 2, delayMs: () => 0 },
-    }).connect(CONTEXT)
-    await expect(client.adAccounts.get(1)).rejects.toThrow("accessToken must not be empty")
+      })
+    )
+    await expect(client.adAccounts.get(1)).rejects.toThrow("empty access token")
     expect(resolutions).toBe(1)
   })
 })

@@ -1,3 +1,4 @@
+import type { ConnectorTokenSource } from "@sixb/core"
 import type { LinkedinConnectorOptions } from "../src"
 import { linkedin } from "../src"
 
@@ -8,6 +9,13 @@ export const CONTEXT = {
 }
 
 export const TOKEN = "linkedin-test-token"
+
+export const DEFAULT_OPTIONS = {
+  clientId: "linkedin-client-id",
+  clientSecret: "linkedin-client-secret",
+  scopes: ["r_ads"],
+  accountType: "ad-account",
+} as const satisfies LinkedinConnectorOptions
 
 export function mockFetch(
   implementation: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
@@ -26,8 +34,31 @@ export function empty(status = 204, headers?: HeadersInit): Response {
   return new Response(null, { status, headers })
 }
 
-export async function createTestClient(options: Partial<LinkedinConnectorOptions> = {}) {
-  return linkedin({ accessToken: TOKEN, ...options }).connect(CONTEXT)
+export async function createTestClient(
+  options: Partial<LinkedinConnectorOptions> = {},
+  tokenSource: ConnectorTokenSource = testTokenSource(() => TOKEN)
+) {
+  return linkedin({ ...DEFAULT_OPTIONS, ...options }).connect({
+    ...CONTEXT,
+    connectionId: "connection-1",
+    account: {
+      id: "urn:li:sponsoredAccount:123",
+      label: "Acme Ads",
+      description: "LinkedIn ad account",
+    },
+    tokenSource,
+  })
+}
+
+export function testTokenSource(
+  resolve: () => string | Promise<string>,
+  invalidate: () => void = () => undefined
+): ConnectorTokenSource {
+  return {
+    async get() {
+      return { accessToken: await resolve(), tokenType: "Bearer", invalidate }
+    },
+  }
 }
 
 export async function collect<T>(items: AsyncIterable<T>): Promise<T[]> {

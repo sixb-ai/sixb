@@ -8,30 +8,65 @@ with the upstream documentation.
 
 ## Register
 
-Until Sixb's managed OAuth flow lands, provide an access token directly or through an async
-resolver:
+LinkedIn requires Community Management to be requested from an application that has no other
+provisioned product. Register one connector definition per LinkedIn developer application while
+the Advertising and Community products remain separate:
 
 ```ts
 import { defineConnector } from "@sixb/core"
 import { linkedin } from "@sixb/connector-linkedin"
 
-export const linkedinConnector = defineConnector(
-  "linkedin",
+export const linkedinAdvertising = defineConnector(
+  "linkedin-advertising",
   linkedin({
-    accessToken: () => process.env.LINKEDIN_ACCESS_TOKEN!,
+    clientId: process.env.LINKEDIN_ADS_CLIENT_ID!,
+    clientSecret: process.env.LINKEDIN_ADS_CLIENT_SECRET!,
+    accountType: "ad-account",
+    scopes: ["r_ads", "r_ads_reporting"],
+  })
+)
+
+export const linkedinCommunity = defineConnector(
+  "linkedin-community",
+  linkedin({
+    clientId: process.env.LINKEDIN_COMMUNITY_CLIENT_ID!,
+    clientSecret: process.env.LINKEDIN_COMMUNITY_CLIENT_SECRET!,
+    accountType: "organization",
+    scopes: [
+      "rw_organization_admin",
+      "r_organization_social",
+      "r_organization_social_feed",
+    ],
   })
 )
 ```
 
-`createSixb()` discovers definitions in the project's `connectors/` directory. Resolve the client
-with:
+`createSixb()` discovers definitions in the project's `connectors/` directory. Sixb owns the OAuth
+state, encrypted credentials, account selection, refresh coordination, and connection lifecycle.
+Register the server-owned callback URL in each LinkedIn application:
 
-```ts
-const li = await sixb.connector(linkedinConnector)
+```text
+https://<sixb-api-origin>/auth/connectors/callback
 ```
 
-The token resolver runs for every attempt, including retries. The future managed OAuth adapter can
-therefore supply a current access token without changing any resource.
+The `accountType` controls the accounts offered by Sixb after authorization:
+
+- `ad-account` calls `adAccountUsers?q=authenticatedUser`, then presents the accessible Campaign
+  Manager accounts.
+- `organization` calls `organizationAcls?q=roleAssignee`, then presents the approved administered
+  Pages.
+
+Advertising and Community grants therefore remain isolated while application code resolves each
+connection by its stable slot:
+
+```ts
+const li = await sixb.connector(linkedinCommunity, {
+  owner: { type: "project" },
+  slot: "organic-marketing",
+})
+
+console.log(li.account) // Selected organization URN and label
+```
 
 ## Access and versioning
 
@@ -48,7 +83,7 @@ Community Management Development Tier request must start on a new LinkedIn devel
 with no other provisioned product. LinkedIn's current Standard Tier process can subsequently add
 Community Management to an existing Advertising API application after the separate application has
 been approved and used for verification. Until that upgrade, configure the Advertising and
-Community connector instances with their respective application tokens.
+Community connector instances with their respective application credentials and OAuth scopes.
 
 | Operation | OAuth scope |
 | --- | --- |
@@ -66,15 +101,33 @@ Community connector instances with their respective application tokens.
 | Read the authenticated member's follower analytics | `r_member_profileAnalytics` |
 | Read the authenticated member's post and video analytics | `r_member_postAnalytics` |
 
-The connector does not perform the OAuth authorization-code exchange or token refresh. Those remain
-the responsibility of the supplied token resolver until the framework's managed OAuth connection is
-available.
+The connector implements LinkedIn's confidential authorization-code flow. LinkedIn only issues
+programmatic refresh tokens to eligible approved partners. If no refresh token is present, Sixb
+keeps the access token until its documented expiry and then moves the connection to
+`needs_reauthorization`; it never invents a refresh path. LinkedIn also returns a separate refresh
+token lifetime, which the current core credential contract cannot store. When that lifetime ends,
+the provider's definitive `invalid_grant` response moves the connection to the same reauthorization
+state.
+
+### LinkedIn PKCE compatibility
+
+Sixb currently requires every managed OAuth adapter to preserve its `state`, `code_challenge`, and
+`code_challenge_method=S256` parameters. LinkedIn documents PKCE only for a separate native flow
+that requires loopback callback URLs, while Sixb uses a server-owned HTTPS callback and LinkedIn's
+confidential web flow. The connector preserves the core-provided PKCE parameters on the standard
+authorization URL so the adapter passes core validation, but it does not send the undocumented
+`code_verifier` to LinkedIn's confidential token endpoint. Consequently, the LinkedIn flow relies
+on Sixb's one-use state and HttpOnly browser binding, the exact HTTPS redirect URI, and the
+application secret until the core can make PKCE capability provider-specific.
 
 ## Options
 
 | Option | Description |
 | --- | --- |
-| `accessToken` | Required bearer token or async token resolver. |
+| `clientId` | Required LinkedIn developer application client ID. |
+| `clientSecret` | Required LinkedIn developer application client secret. |
+| `scopes` | Required least-privilege list of LinkedIn OAuth scopes. |
+| `accountType` | `ad-account` or `organization`; determines managed account discovery. |
 | `version` | LinkedIn Marketing API version without a dash. Defaults to `202608`. |
 | `baseUrl` | Defaults to `https://api.linkedin.com/rest/`; mainly useful for testing. |
 | `timeoutMs` | Optional timeout for each request attempt. |
@@ -84,6 +137,9 @@ available.
 
 Retries cover network errors, `429`, and `5xx` responses and honor `Retry-After`. Writes are not
 retried by default because an interrupted create or update may already have been applied upstream.
+For reads, a `401` invalidates the exact token revision and safely replays the request once with the
+token supplied by Sixb. A write that returns `401` is never replayed or invalidated through the REST
+layer because its upstream effect may be ambiguous.
 
 ## Advertising API
 
@@ -271,6 +327,8 @@ the served region.
 - [Ad reporting](https://learn.microsoft.com/en-us/linkedin/marketing/integrations/ads-reporting/ads-reporting?view=li-lms-2026-08)
 - [Marketing API versioning](https://learn.microsoft.com/en-us/linkedin/marketing/versioning?view=li-lms-2026-08)
 - [Rest.li query tunneling](https://learn.microsoft.com/en-us/linkedin/shared/api-guide/concepts/query-tunneling)
+- [LinkedIn authorization code flow](https://learn.microsoft.com/en-us/linkedin/shared/authentication/authorization-code-flow)
+- [LinkedIn programmatic refresh tokens](https://learn.microsoft.com/en-us/linkedin/shared/authentication/programmatic-refresh-tokens)
+- [LinkedIn native PKCE flow](https://learn.microsoft.com/en-us/linkedin/shared/authentication/authorization-code-flow-native)
 - [Sixb connectors](https://docs.sixb.ai/data/connectors)
-- [Sixb managed OAuth idea](https://github.com/sixb-ai/sixb/issues/384) and
-  [foundation PR](https://github.com/sixb-ai/sixb/pull/411)
+- [Sixb managed OAuth implementation](https://github.com/sixb-ai/sixb/issues/384)

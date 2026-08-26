@@ -19,10 +19,14 @@ import { createPostsResource } from "./resources/posts"
 import { createReactionsResource } from "./resources/reactions"
 import { createSocialMetadataResource } from "./resources/social-metadata"
 import { pathId } from "./restli"
-import type { LinkedinClient } from "./types/client"
+import type { LinkedinClient, LinkedinConnectedAccount } from "./types/client"
 
-export function createLinkedinClient(http: LinkedinHttp): LinkedinClient {
+export function createLinkedinClient(
+  http: LinkedinHttp,
+  account: LinkedinConnectedAccount
+): LinkedinClient {
   return {
+    account,
     adAccounts: createAdAccountsResource(http),
     adAccountUsers: createAdAccountUsersResource(http),
     adAnalytics: createAdAnalyticsResource(http),
