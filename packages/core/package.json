@@ -131,6 +131,12 @@
       "import": "./dist/storage/agents/provider.js",
       "default": "./dist/storage/agents/provider.js"
     },
+    "./internal/ai-cost-storage-provider": {
+      "types": "./dist/storage/ai-cost/provider.d.ts",
+      "bun": "./src/storage/ai-cost/provider.ts",
+      "import": "./dist/storage/ai-cost/provider.js",
+      "default": "./dist/storage/ai-cost/provider.js"
+    },
     "./internal/auth": {
       "types": "./dist/auth/index.d.ts",
       "bun": "./src/auth/index.ts",

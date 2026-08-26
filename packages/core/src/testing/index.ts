@@ -8,6 +8,11 @@ export {
   runAgentStorageContractSuite,
 } from "./agent-storage-contract"
 export {
+  type AiStorageContractSuiteOptions,
+  runAiCostStorageContractSuite,
+  seedAiCostStorageContractUsage,
+} from "./ai-cost-storage-contract"
+export {
   type AiUsageStorageContractSuiteOptions,
   runAiUsageStorageContractSuite,
   seedAiUsageStorageContractExecutions,

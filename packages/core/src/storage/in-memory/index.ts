@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks"
 import { InMemoryActionRunStorage } from "../action-runs"
 import { type AgentStorage, InMemoryAgentStorage } from "../agents"
+import { type AiAccountingAttribution, type AiCostStorage, InMemoryAiCostStorage } from "../ai-cost"
 import { type AiUsageStorage, InMemoryAiUsageStorage } from "../ai-usage"
 import { type AuthStorage, InMemoryAuthStorage } from "../auth"
 import {
@@ -67,6 +68,9 @@ export class InMemoryStorage implements Storage {
   private readonly executionStorage = new InMemoryExecutionStorage(this.authStorage)
   private readonly agentStorage = new InMemoryAgentStorage(this.executionStorage)
   private readonly aiUsageStorage = new InMemoryAiUsageStorage(this.executionStorage)
+  private readonly aiCostStorage = new InMemoryAiCostStorage(this.aiUsageStorage, {
+    resolve: (input) => this.resolveAiAccountingAttribution(input),
+  })
   private readonly actionRunStorage = new InMemoryActionRunStorage(this.executionStorage)
   private readonly syncRunStorage = new InMemorySyncRunStorage(this.executionStorage)
   private readonly pipelineRunStorage = new InMemoryPipelineRunStorage(this.executionStorage)
@@ -83,6 +87,7 @@ export class InMemoryStorage implements Storage {
   readonly executions: ExecutionStorage
   readonly agents: AgentStorage
   readonly aiUsage: AiUsageStorage
+  readonly aiCosts: AiCostStorage
   readonly actionRuns: InMemoryActionRunStorage
   readonly syncRuns: SyncRunStorage
   readonly pipelineRuns: PipelineRunStorage
@@ -108,6 +113,7 @@ export class InMemoryStorage implements Storage {
     this.executions = createOperationScopedFacade(this.executionStorage, scope)
     this.agents = createAgentOperationScope(this.agentStorage, scope)
     this.aiUsage = createOperationScopedFacade(this.aiUsageStorage, scope)
+    this.aiCosts = createOperationScopedFacade(this.aiCostStorage, scope)
     this.actionRuns = createOperationScopedFacade(this.actionRunStorage, scope)
     this.syncRuns = createOperationScopedFacade(this.syncRunStorage, scope)
     this.pipelineRuns = createOperationScopedFacade(this.pipelineRunStorage, scope)
@@ -133,6 +139,46 @@ export class InMemoryStorage implements Storage {
     this.ontology = createOntologyOperationScope(this.ontologyStorage, scope)
     this.ontologyStorage.registerTestingAlias(this.ontology)
     registerInMemoryStorageTestingAdapter(this, { snapshot: () => this.snapshot() })
+  }
+
+  private async resolveAiAccountingAttribution(input: {
+    readonly projectId: string
+    readonly executionId: string
+  }): Promise<AiAccountingAttribution | undefined> {
+    const execution = await this.executionStorage.getById({
+      projectId: input.projectId,
+      id: input.executionId,
+    })
+    if (!execution || execution.executor.type !== "agent") return undefined
+    const directRun = await this.agentStorage.runs.getById({
+      projectId: input.projectId,
+      id: execution.executor.runId,
+    })
+    if (directRun) {
+      return {
+        kind: "agent",
+        agentId: directRun.agentId,
+        agentRunId: directRun.id,
+        threadId: directRun.threadId,
+      }
+    }
+    const agentRun = await this.workflowRunStorage.agentNodes.getByNodeRunId({
+      projectId: input.projectId,
+      nodeRunId: execution.executor.runId,
+    })
+    if (!agentRun) return undefined
+    const node = await this.workflowRunStorage.nodes.getById({
+      projectId: input.projectId,
+      id: agentRun.nodeRunId,
+    })
+    if (!node) return undefined
+    return {
+      kind: "workflowAgent",
+      agentId: agentRun.agentId,
+      nodeRunId: agentRun.nodeRunId,
+      workflowId: node.workflowId,
+      workflowRunId: node.workflowRunId,
+    }
   }
 
   private readonly transactionScope = new AsyncLocalStorage<object>()
@@ -250,6 +296,7 @@ export class InMemoryStorage implements Storage {
       executions: this.executionStorage,
       agents: this.agentStorage,
       aiUsage: this.aiUsageStorage,
+      aiCosts: this.aiCostStorage,
       actionRuns: this.actionRunStorage,
       syncRuns: this.syncRunStorage,
       pipelineRuns: this.pipelineRunStorage,
@@ -276,6 +323,7 @@ export class InMemoryStorage implements Storage {
       executions: this.executionStorage.snapshot(),
       agents: this.agentStorage.snapshot(),
       aiUsage: this.aiUsageStorage.snapshot(),
+      aiCosts: this.aiCostStorage.snapshot(),
       actionRuns: this.actionRunStorage.snapshot(),
       syncRuns: this.syncRunStorage.snapshot(),
       pipelineRuns: this.pipelineRunStorage.snapshot(),
@@ -297,6 +345,7 @@ export class InMemoryStorage implements Storage {
     this.executionStorage.restore(snapshot.executions)
     this.agentStorage.restore(snapshot.agents)
     this.aiUsageStorage.restore(snapshot.aiUsage)
+    this.aiCostStorage.restore(snapshot.aiCosts)
     this.actionRunStorage.restore(snapshot.actionRuns)
     this.syncRunStorage.restore(snapshot.syncRuns)
     this.pipelineRunStorage.restore(snapshot.pipelineRuns)
@@ -318,6 +367,7 @@ export interface InMemoryStorageSnapshot {
   readonly executions: ReturnType<InMemoryExecutionStorage["snapshot"]>
   readonly agents: ReturnType<InMemoryAgentStorage["snapshot"]>
   readonly aiUsage: ReturnType<InMemoryAiUsageStorage["snapshot"]>
+  readonly aiCosts: ReturnType<InMemoryAiCostStorage["snapshot"]>
   readonly actionRuns: ReturnType<InMemoryActionRunStorage["snapshot"]>
   readonly syncRuns: ReturnType<InMemorySyncRunStorage["snapshot"]>
   readonly pipelineRuns: ReturnType<InMemoryPipelineRunStorage["snapshot"]>
