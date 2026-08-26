@@ -93,11 +93,12 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
   const maxSteps = agent.loop?.stopWhen?.maxSteps ?? defaultMaxSteps
   const usageRecorder = new AiModelCallRecorder({
-    storage: storage.aiUsage,
+    storage,
     projectId,
     executionId: run.executionId,
     attempt: run.attempt,
     requesterGroupIds: run.requesterGroupIds,
+    providerOptions: agent.providerOptions,
     recoverAiModelCall: context.recoverAiModelCall,
     errorRunId: runId,
   })

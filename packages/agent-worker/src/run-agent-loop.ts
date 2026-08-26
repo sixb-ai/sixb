@@ -42,7 +42,7 @@ export function runAgentLoop(
   input: RunAgentLoopInput
 ): StreamTextResult<ToolSet, Record<string, unknown>, ReturnType<typeof Output.text>> {
   return streamText({
-    model: input.agent.model,
+    model: input.usageRecorder.wrapModel(input.agent.model),
     ...(input.agent.reasoning === undefined ? {} : { reasoning: input.agent.reasoning }),
     ...(input.agent.providerOptions === undefined
       ? {}
@@ -68,6 +68,7 @@ export function runAgentLoop(
         ],
       }
     },
+    onLanguageModelCallStart: input.usageRecorder.onLanguageModelCallStart,
     onLanguageModelCallEnd: input.usageRecorder.onLanguageModelCallEnd,
     ...(input.onError === undefined ? {} : { onError: input.onError }),
     ...(input.onStepEnd === undefined ? {} : { onStepEnd: input.onStepEnd }),

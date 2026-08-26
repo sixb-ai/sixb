@@ -17,8 +17,15 @@ import {
 } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { schemaRecordToJsonSchema } from "@sixb/core/internal/ontology"
-import type { AiModelCallUsageInput } from "@sixb/core/storage"
-import { jsonSchema, type LanguageModelUsage, type Tool, type ToolSet, tool } from "ai"
+import type { AiModelCallUsageInput, AiPricingContext } from "@sixb/core/storage"
+import {
+  jsonSchema,
+  type LanguageModelCallStartEvent,
+  type LanguageModelUsage,
+  type Tool,
+  type ToolSet,
+  tool,
+} from "ai"
 import { NEVER_ABORTED_SIGNAL } from "./abort"
 import { AgentToolExecutionError, AgentToolOutputError } from "./errors"
 import type { AgentToolModelOutput } from "./tool-result-output"
@@ -323,6 +330,65 @@ export function agentToolErrorText(error: unknown): string {
   return error instanceof AgentToolPublicError ? error.message : "An error occurred."
 }
 
+/** Snapshot only explicitly allowlisted billing dimensions from request-side provider options. */
+export function aiPricingContextFromAiSdkCallStart(
+  event: Pick<LanguageModelCallStartEvent, "provider">,
+  providerOptions: unknown
+): AiPricingContext {
+  if (!isUnknownRecord(providerOptions)) return {}
+  const options = providerOptions[providerOptionsKey(event.provider)]
+  if (!isUnknownRecord(options)) return {}
+  const serviceTier = nonBlankString(options.serviceTier)
+  const region = nonBlankString(options.region)
+  const inferenceGeo = nonBlankString(options.inferenceGeo)
+  const routedProviderId = nonBlankString(options.routedProviderId)
+  const deploymentId = nonBlankString(options.deploymentId)
+  const inferenceProfileId = nonBlankString(options.inferenceProfileId)
+  const mode = nonBlankString(options.mode) ?? nonBlankString(options.speed)
+  return {
+    ...(serviceTier === undefined ? {} : { serviceTier }),
+    ...(typeof options.batch === "boolean" ? { batch: options.batch } : {}),
+    ...(region === undefined ? {} : { region }),
+    ...(inferenceGeo === undefined ? {} : { inferenceGeo }),
+    ...(routedProviderId === undefined ? {} : { routedProviderId }),
+    ...(deploymentId === undefined ? {} : { deploymentId }),
+    ...(inferenceProfileId === undefined ? {} : { inferenceProfileId }),
+    ...(mode === undefined ? {} : { mode }),
+    ...(Number.isSafeInteger(options.cacheWriteTtlSeconds) &&
+    (options.cacheWriteTtlSeconds as number) > 0
+      ? { cacheWriteTtlSeconds: options.cacheWriteTtlSeconds as number }
+      : {}),
+  }
+}
+
+/** Merge allowlisted provider-returned billing dimensions over the request snapshot. */
+export function aiPricingContextFromAiSdkUsage(
+  request: AiPricingContext,
+  rawUsage: unknown
+): AiPricingContext {
+  if (!isUnknownRecord(rawUsage)) return { ...request }
+  const serviceTier = findBillingString(rawUsage, ["service_tier", "serviceTier"])
+  const inferenceGeo = findBillingString(rawUsage, ["inference_geo", "inferenceGeo"])
+  const routedProviderId = findBillingString(rawUsage, ["routed_provider_id", "routedProviderId"])
+  const mode = findBillingString(rawUsage, ["mode", "speed"])
+  const oneHourCacheWriteTokens = findBillingNumber(rawUsage, ["ephemeral_1h_input_tokens"])
+  const fiveMinuteCacheWriteTokens = findBillingNumber(rawUsage, ["ephemeral_5m_input_tokens"])
+  const cacheWriteTtlSeconds =
+    oneHourCacheWriteTokens !== undefined && oneHourCacheWriteTokens > 0
+      ? 3_600
+      : fiveMinuteCacheWriteTokens !== undefined && fiveMinuteCacheWriteTokens > 0
+        ? 300
+        : undefined
+  return {
+    ...request,
+    ...(serviceTier === undefined ? {} : { serviceTier }),
+    ...(inferenceGeo === undefined ? {} : { inferenceGeo }),
+    ...(routedProviderId === undefined ? {} : { routedProviderId }),
+    ...(mode === undefined ? {} : { mode }),
+    ...(cacheWriteTtlSeconds === undefined ? {} : { cacheWriteTtlSeconds }),
+  }
+}
+
 /** Preserve every provider-neutral count from one AI SDK model call without inventing zeroes. */
 export function aiModelCallUsageFromAiSdk(usage: LanguageModelUsage): AiModelCallUsageInput {
   return {
@@ -344,4 +410,60 @@ export function aiModelCallUsageFromAiSdk(usage: LanguageModelUsage): AiModelCal
       ? {}
       : { reasoningOutputTokens: usage.outputTokenDetails.reasoningTokens }),
   }
+}
+
+function providerOptionsKey(provider: string): string {
+  const knownNamespaces: Readonly<Record<string, string>> = {
+    "openai.responses": "openai",
+    "openai.chat": "openai",
+    "anthropic.messages": "anthropic",
+    "google.generative-ai": "google",
+    "amazon-bedrock.converse": "bedrock",
+    "gateway.language-model": "gateway",
+  }
+  return knownNamespaces[provider] ?? provider
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function nonBlankString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined
+}
+
+function findBillingString(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+  depth = 0
+): string | undefined {
+  for (const key of keys) {
+    const match = nonBlankString(value[key])
+    if (match !== undefined) return match
+  }
+  if (depth >= 3) return undefined
+  for (const child of Object.values(value)) {
+    if (!isUnknownRecord(child)) continue
+    const match = findBillingString(child, keys, depth + 1)
+    if (match !== undefined) return match
+  }
+  return undefined
+}
+
+function findBillingNumber(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+  depth = 0
+): number | undefined {
+  for (const key of keys) {
+    const match = value[key]
+    if (typeof match === "number" && Number.isFinite(match) && match >= 0) return match
+  }
+  if (depth >= 3) return undefined
+  for (const child of Object.values(value)) {
+    if (!isUnknownRecord(child)) continue
+    const match = findBillingNumber(child, keys, depth + 1)
+    if (match !== undefined) return match
+  }
+  return undefined
 }

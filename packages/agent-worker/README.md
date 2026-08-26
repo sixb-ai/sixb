@@ -18,8 +18,8 @@ const worker = new AgentWorker(sixb, {
 await worker.start()
 ```
 
-`sixb` must provide `storage.agents`, `storage.aiUsage`, `storage.auth`, `queues.agents`, `agents`,
-`broker`, and `sandboxes`.
+`sixb` must provide `storage.agents`, `storage.aiUsage`, `storage.aiCosts`, `storage.auth`,
+`queues.agents`, `agents`, `broker`, and `sandboxes`.
 
 ## Execution Model
 
@@ -29,9 +29,9 @@ await worker.start()
 - The worker transitions the durable run from `queued` to `running` when it claims the job.
 - The queue lease is the sole authority for liveness and redelivery; the worker renews it during
   turns.
-- Every completed `streamText` and `generateText` provider call is appended to `storage.aiUsage`;
-  API conversation and workflow-agent summaries are derived from that ledger. Run rows do not store
-  a second usage aggregate.
+- Every completed `streamText` and `generateText` provider call is appended to `storage.aiUsage`
+  with an immutable Models.dev valuation in `storage.aiCosts`; API conversation and workflow-agent
+  summaries are derived from that ledger. Run rows do not store a second usage aggregate.
 - Every delivery rotates a durable execution token that fences stale finalization after redelivery.
   Usage remains unfenced because a completed provider call is billable even when execution ownership
   changes afterward. The run also persists the queue-returned lease expiration for gateway
@@ -42,7 +42,8 @@ await worker.start()
 ## Usage accounting
 
 Every completed conversation and workflow-agent provider call observed by the AI SDK lifecycle is
-appended to `storage.aiUsage`, including individual calls in tool loops and calls completed before
+appended to `storage.aiUsage` and rated against the versioned Models.dev snapshot shipped with and
+lazily loaded by the agent worker, including individual calls in tool loops and calls completed before
 later cancellation, tool failure, output validation, or execution ownership loss. Workflow nodes
 use their own durable execution and inherit the parent workflow's admission-time group snapshot.
 Usage writes are intentionally not fenced: a stale worker cannot finalize the execution, but a
@@ -54,7 +55,10 @@ bounded backoff and cannot trigger another provider call. Once an append is defe
 blocks the next model step and the owning Agent run or workflow fails closed while accounting
 recovery continues independently. If the durable handoff also fails, the same stop prevents silent
 usage loss. This local path cannot close a process-crash window before lifecycle delivery;
-provider-side reconciliation is the appropriate later layer for that guarantee.
+provider-side reconciliation is the appropriate later layer for that guarantee. A model middleware
+also retains the provider's response model identity and provider metadata. Sixb rates only exact
+Models.dev matches observed through reviewed AI SDK namespaces; custom providers, aliases, and
+unsupported deployment contexts remain unpriceable rather than being normalized heuristically.
 
 ## Live Stream
 

@@ -4,6 +4,7 @@ export { InMemoryQueues } from "./in-memory"
 export type {
   ActionQueueJobFailureCode,
   ActionRunRequestedQueueJob,
+  AgentAiUsageAccountingPayload,
   AgentAiUsageRecordPayload,
   AgentAiUsageRecordRequestedQueueJob,
   AgentQueueJob,

@@ -14,6 +14,8 @@ import type { AgentExecutionHost } from "@sixb/core/internal/agent-execution"
 import type { LoggingService } from "@sixb/core/internal/logging"
 import type {
   AgentStorage,
+  AiCostStorage,
+  AiPricingContext,
   AiUsageStorage,
   AuthStorage,
   RecordAiModelCallInput,
@@ -28,10 +30,17 @@ import type { StreamSink } from "./stream-sink"
 export type AgentWorkerStorage = Storage & {
   readonly agents: AgentStorage
   readonly aiUsage: AiUsageStorage
+  readonly aiCosts: AiCostStorage
   readonly auth: AuthStorage
 }
 
-export type RecoverAiModelCall = (record: RecordAiModelCallInput) => Promise<void>
+export interface RecoverAiModelCallInput {
+  readonly usage: RecordAiModelCallInput
+  readonly pricingContext: AiPricingContext
+  readonly ratedAt: Date
+}
+
+export type RecoverAiModelCall = (input: RecoverAiModelCallInput) => Promise<void>
 
 /**
  * The host surface the agent worker is constructed with. `SixbHost` satisfies it structurally, so

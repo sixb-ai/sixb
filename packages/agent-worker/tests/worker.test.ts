@@ -1329,6 +1329,38 @@ function withStorage(sixb: TestSixb, storage: Storage): TestSixb {
   })
 }
 
+function interceptAiUsageTransactions(
+  storage: Storage,
+  handler: (
+    input: RecordAiModelCallInput,
+    next: AiUsageStorage["recordModelCall"]
+  ) => ReturnType<AiUsageStorage["recordModelCall"]>
+): void {
+  const transaction = storage.transaction.bind(storage)
+  storage.transaction = <T>(
+    run: (tx: Storage) => Promise<T> | T,
+    options?: Parameters<Storage["transaction"]>[1]
+  ): Promise<T> =>
+    transaction((tx) => {
+      if (!tx.aiUsage) return run(tx)
+      const next = tx.aiUsage.recordModelCall.bind(tx.aiUsage)
+      const aiUsage = new Proxy(tx.aiUsage, {
+        get(target, property, receiver) {
+          return property === "recordModelCall"
+            ? (input: RecordAiModelCallInput) => handler(input, next)
+            : Reflect.get(target, property, receiver)
+        },
+      })
+      return run(
+        new Proxy(tx, {
+          get(target, property, receiver) {
+            return property === "aiUsage" ? aiUsage : Reflect.get(target, property, receiver)
+          },
+        })
+      )
+    }, options)
+}
+
 function aiUsageStorageOf(sixb: TestSixb): AiUsageStorage {
   const storage = sixb.storage.aiUsage
   if (!storage) {
@@ -1826,11 +1858,10 @@ describe("AgentWorker", () => {
     })
     const recordedUsage: RecordAiModelCallInput[] = []
     const aiUsage = aiUsageStorageOf(sixb)
-    const recordModelCall = aiUsage.recordModelCall.bind(aiUsage)
-    aiUsage.recordModelCall = async (usage) => {
+    interceptAiUsageTransactions(sixb.storage, async (usage, next) => {
       recordedUsage.push(structuredClone(usage))
-      return recordModelCall(usage)
-    }
+      return next(usage)
+    })
 
     const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
     await worker.start()
@@ -2144,17 +2175,16 @@ describe("AgentWorker", () => {
       runId: "workflow-accounting-failure",
     })
     const aiUsage = aiUsageStorageOf(sixb)
-    const recordModelCall = aiUsage.recordModelCall.bind(aiUsage)
     const queue = sixb.queues.agents
     const enqueue = queue.enqueue.bind(queue)
     let storageAvailable = false
     let appendAttempts = 0
     let recoveryJobs = 0
-    aiUsage.recordModelCall = async (input) => {
-      if (storageAvailable) return recordModelCall(input)
+    interceptAiUsageTransactions(sixb.storage, async (input, next) => {
+      if (storageAvailable) return next(input)
       appendAttempts += 1
       throw new Error("usage storage unavailable")
-    }
+    })
     queue.enqueue = async (params) => {
       const jobs = await enqueue(params)
       const handedOff = params.jobs.filter(
@@ -2255,15 +2285,14 @@ describe("AgentWorker", () => {
       model,
       runId: "workflow-final-callback-failure",
     })
-    const aiUsage = aiUsageStorageOf(sixb)
     const queue = sixb.queues.agents
     const enqueue = queue.enqueue.bind(queue)
     let appendAttempts = 0
     let recoveryAttempts = 0
-    aiUsage.recordModelCall = async () => {
+    interceptAiUsageTransactions(sixb.storage, async () => {
       appendAttempts += 1
       throw new Error("usage storage unavailable")
-    }
+    })
     queue.enqueue = async (params) => {
       if (params.jobs.some((job) => job.type === "agent.ai-usage.record.requested")) {
         recoveryAttempts += 1
@@ -4178,17 +4207,16 @@ describe("AgentWorker", () => {
     const sixb = buildSixbWithEchoTool(model)
     const storage = agentStorageOf(sixb)
     const aiUsage = aiUsageStorageOf(sixb)
-    const recordModelCall = aiUsage.recordModelCall.bind(aiUsage)
     const queue = sixb.queues.agents
     const enqueue = queue.enqueue.bind(queue)
     let storageAvailable = false
     let appendAttempts = 0
     let recoveryJobs = 0
-    aiUsage.recordModelCall = async (input) => {
-      if (storageAvailable) return recordModelCall(input)
+    interceptAiUsageTransactions(sixb.storage, async (input, next) => {
+      if (storageAvailable) return next(input)
       appendAttempts += 1
       throw new Error("usage storage unavailable")
-    }
+    })
     queue.enqueue = async (params) => {
       const jobs = await enqueue(params)
       const handedOff = params.jobs.filter(
@@ -4254,13 +4282,12 @@ describe("AgentWorker", () => {
       runId: "usage-recovery",
     })
     const aiUsage = aiUsageStorageOf(sixb)
-    const recordModelCall = aiUsage.recordModelCall.bind(aiUsage)
     let appendAttempts = 0
-    aiUsage.recordModelCall = async (input) => {
+    interceptAiUsageTransactions(sixb.storage, async (input, next) => {
       appendAttempts += 1
       if (appendAttempts === 1) throw new Error("temporary usage storage failure")
-      return recordModelCall(input)
-    }
+      return next(input)
+    })
 
     const queue = sixb.queues.agents
     const retry = queue.retry.bind(queue)
@@ -4330,15 +4357,14 @@ describe("AgentWorker", () => {
     })
     const sixb = buildSixbWithEchoTool(model)
     const storage = agentStorageOf(sixb)
-    const aiUsage = aiUsageStorageOf(sixb)
     const queue = sixb.queues.agents
     const enqueue = queue.enqueue.bind(queue)
     let appendAttempts = 0
     let recoveryAttempts = 0
-    aiUsage.recordModelCall = async () => {
+    interceptAiUsageTransactions(sixb.storage, async () => {
       appendAttempts += 1
       throw new Error("usage storage unavailable")
-    }
+    })
     queue.enqueue = async (params) => {
       if (params.jobs.some((job) => job.type === "agent.ai-usage.record.requested")) {
         recoveryAttempts += 1
@@ -5589,12 +5615,10 @@ describe("AgentWorker", () => {
     // Regression guard: hard-code the recorder attempt to 1 instead of using the reclaimed durable
     // run and this captures [1, 1], even though the terminal run correctly reports attempt 2.
     const recordedAttempts: number[] = []
-    const aiUsage = aiUsageStorageOf(sixb)
-    const recordModelCall = aiUsage.recordModelCall.bind(aiUsage)
-    aiUsage.recordModelCall = async (input) => {
+    interceptAiUsageTransactions(sixb.storage, async (input, next) => {
       recordedAttempts.push(input.attempt)
-      return recordModelCall(input)
-    }
+      return next(input)
+    })
 
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()

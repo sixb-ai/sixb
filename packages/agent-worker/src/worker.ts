@@ -150,7 +150,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     const context = this.requireContext()
     const { job } = claimed
     if (job.type === "agent.ai-usage.record.requested") {
-      await recordRecoveredAiModelCall(context.storage.aiUsage, job)
+      await recordRecoveredAiModelCall(context.storage, job)
       return
     }
     if (job.type === "agent.workflow-node.requested") {
@@ -698,7 +698,7 @@ function buildAgentContext(
         host.broker
       )
     ),
-    recoverAiModelCall: (record) => enqueueAiModelCallRecovery(host.queues.agents, record),
+    recoverAiModelCall: (input) => enqueueAiModelCallRecovery(host.queues.agents, input),
     agentSkills,
     defaultMaxSteps: options.defaultMaxSteps ?? DEFAULT_MAX_STEPS,
     turnTimeoutMs,
@@ -724,6 +724,12 @@ function assertAgentWorkerStorage(
     throw createSixbError(
       "internal.unexpected",
       "[SixbAgentWorker] Agent workers require storage.aiUsage support."
+    )
+  }
+  if (!storage.aiCosts) {
+    throw createSixbError(
+      "internal.unexpected",
+      "[SixbAgentWorker] Agent workers require storage.aiCosts support."
     )
   }
 }

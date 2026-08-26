@@ -24,7 +24,12 @@ function modelCall(): RecordAiModelCallInput {
     providerId: "gateway",
     requestedModelId: "openai/gpt-5",
     responseId: "response_1",
-    usage: { inputTokens: 12, outputTokens: 8, cacheReadInputTokens: undefined },
+    usage: {
+      inputTokens: 12,
+      outputTokens: 8,
+      uncachedInputTokens: 12,
+      cacheReadInputTokens: 0,
+    },
     rawUsage: { input_tokens: 12, output_tokens: 8 },
     occurredAt: new Date("2026-07-01T12:00:00.000Z"),
     recordedAt: new Date("2026-07-01T12:00:01.000Z"),
@@ -65,12 +70,12 @@ describe("AI usage recovery", () => {
     })
     expect(claimed.job.payload.record).not.toHaveProperty("projectId")
     expect(claimed.job.payload.record).not.toHaveProperty("recordedAt")
-    expect(claimed.job.payload.record.usage).not.toHaveProperty("cacheReadInputTokens")
+    expect(claimed.job.payload.record.usage).toMatchObject({ cacheReadInputTokens: 0 })
 
-    await expect(recordRecoveredAiModelCall(storage.aiUsage, claimed.job)).resolves.toMatchObject({
+    await expect(recordRecoveredAiModelCall(storage, claimed.job)).resolves.toMatchObject({
       created: true,
     })
-    await expect(recordRecoveredAiModelCall(storage.aiUsage, claimed.job)).resolves.toMatchObject({
+    await expect(recordRecoveredAiModelCall(storage, claimed.job)).resolves.toMatchObject({
       created: false,
     })
     await expect(
@@ -78,6 +83,55 @@ describe("AI usage recovery", () => {
     ).resolves.toMatchObject({
       modelCallCount: 1,
       usage: { inputTokens: 12, outputTokens: 8, totalTokens: 20 },
+    })
+  })
+
+  test("recovers pricing context and local valuation atomically for current jobs", async () => {
+    const queues = new InMemoryQueues()
+    const storage = new InMemoryStorage()
+    await createTestAgentExecution(storage, {
+      projectId,
+      agentId: "assistant",
+      runId: "run_1",
+      executionId,
+    })
+    await enqueueAiModelCallRecovery(queues.agents, {
+      usage: modelCall(),
+      pricingContext: { serviceTier: "standard" },
+      ratedAt: new Date("2026-07-01T12:00:01.000Z"),
+    })
+    const [claimed] = await queues.agents.claim({
+      projectId,
+      workerId: "test-worker",
+      limit: 1,
+    })
+    if (claimed?.job.type !== "agent.ai-usage.record.requested") {
+      throw new Error("Expected an AI usage recovery job.")
+    }
+    expect(claimed.job.payload.accounting).toEqual({
+      pricingContext: { serviceTier: "standard" },
+      ratedAt: "2026-07-01T12:00:01.000Z",
+    })
+
+    await expect(recordRecoveredAiModelCall(storage, claimed.job)).resolves.toMatchObject({
+      created: true,
+    })
+    await expect(
+      storage.aiCosts.listModelCalls({
+        projectId,
+        from: new Date("2026-07-01T00:00:00.000Z"),
+        to: new Date("2026-07-02T00:00:00.000Z"),
+      })
+    ).resolves.toMatchObject({
+      items: [
+        {
+          cost: {
+            status: "rated",
+            billingIdentity: { providerId: "vercel", modelId: "openai/gpt-5" },
+            pricingContext: { serviceTier: "standard" },
+          },
+        },
+      ],
     })
   })
 
@@ -99,7 +153,7 @@ describe("AI usage recovery", () => {
     }
 
     const storage = new InMemoryStorage()
-    const invalidJobError = await recordRecoveredAiModelCall(storage.aiUsage, job).catch(
+    const invalidJobError = await recordRecoveredAiModelCall(storage, job).catch(
       (error: unknown) => error
     )
     expect(invalidJobError).toMatchObject({
