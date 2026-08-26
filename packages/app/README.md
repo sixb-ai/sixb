@@ -34,6 +34,8 @@ The generated entry also intercepts plain same-origin `<a href="/...">` clicks a
 
 If `app/layout.tsx` exists, it is used as a root layout wrapper. It can also export a `metadata` object (`title`, `description`, `favicon`, `themeColor`, and `backgroundColor`). Metadata is loaded during generation and written into the static HTML and manifest, so it is available before auth and client startup. The layout module must therefore be import-safe in Bun: do not access `window` or `document` at module scope. An `app/globals.css` file is imported automatically when present.
 
+Add an optional `app/auth.tsx` default export to customize the app audience's magic-link pages. It receives `AuthExperienceProps` from `@sixb/app/auth` with `signIn`, `checkEmail`, `confirm`, `invalidLink`, and `error` states plus framework-owned actions. Sixb builds it separately, includes `app/globals.css`, and serves it from the API's existing `/auth/*` routes. It is not wrapped by `app/layout.tsx`, and it never owns tokens, cookies, callbacks, audience validation, or return redirects. When the file is absent, the generic server login remains the fallback.
+
 ### Built-in Agent Routes
 
 Custom apps automatically receive the shared Sixb agent chat UI at:
@@ -186,5 +188,6 @@ A file at `app/public/app.webmanifest` is ignored because the generated manifest
 | --- | --- |
 | `createCustomApp(options)` | High-level custom app toolkit for dev/build/start |
 | `AppMetadata` | Metadata shape exported by `app/layout.tsx` |
+| `@sixb/app/auth` | Custom auth experience states, actions, and component props |
 | `createTailwindCssCompiler(options)` | Shared Tailwind v4 build pipeline (also used by Atlas) |
 | `@sixb/app/agents` | Full-page agent route plus `AgentPanel`, context provider/hooks, and helpers |

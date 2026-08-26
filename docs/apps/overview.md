@@ -230,6 +230,36 @@ bun add tailwindcss @tailwindcss/cli
 
 Bringing your own UI? Keep `globals.css` plain CSS and skip the install.
 
+## Custom login experience
+
+Add `app/auth.tsx` to give the app audience an organization-specific magic-link experience. The
+component renders before a session exists and receives safe states and actions from Sixb:
+
+```tsx
+import type { AuthExperienceProps } from "@sixb/app/auth"
+
+export default function AuthExperience({ state, actions }: AuthExperienceProps) {
+  if (state.kind === "checkEmail") {
+    return <p>Check your inbox for a secure sign-in link.</p>
+  }
+
+  if (state.kind !== "signIn") {
+    return <button onClick={actions.restartSignIn}>Request a new link</button>
+  }
+
+  return <SignInForm onSubmit={actions.requestMagicLink} />
+}
+```
+
+The available states are `signIn`, `checkEmail`, `confirm`, `invalidLink`, and `error`. The auth
+entry automatically includes `app/globals.css` and uses the app metadata for its document title and
+theme. It is not wrapped in `app/layout.tsx`, because layouts may assume an authenticated session.
+
+Sixb builds this as a separate bundle and serves it from the API's existing `/auth/*` routes. The
+component controls presentation only: the API retains tokens, cookies, callback completion,
+audience checks, neutral email responses, and safe return redirects. Without `app/auth.tsx`, the
+generic server login remains unchanged. Atlas also continues to use the generic login.
+
 ## Running
 
 During development, `bun sixb dev` starts the app alongside the API whenever `app/`

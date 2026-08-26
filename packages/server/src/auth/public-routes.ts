@@ -72,6 +72,13 @@ export function isPublicRoute(pathname: string, method: string): boolean {
     return true
   }
 
+  if (
+    pathname.startsWith("/auth/assets/") &&
+    (normalizedMethod === "GET" || normalizedMethod === "HEAD")
+  ) {
+    return true
+  }
+
   if (pathname === "/auth/sign-in" && (normalizedMethod === "GET" || normalizedMethod === "POST")) {
     return true
   }

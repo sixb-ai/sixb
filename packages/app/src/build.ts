@@ -30,6 +30,15 @@ export interface BuildAppResult {
   logs?: string[]
 }
 
+export interface BuildAuthExperienceOptions {
+  /** Generated HTML shell containing the auth bootstrap placeholder. */
+  entryPath: string
+  /** Browser TypeScript entry generated alongside `entryPath`. */
+  scriptEntryPath: string
+  /** Directory written for the API server to mount under `/auth`. */
+  outdir: string
+}
+
 /**
  * Builds the generated browser entry and writes a production-ready static shell and bundle.
  */
@@ -105,6 +114,74 @@ export async function buildApp(options: BuildAppOptions): Promise<BuildAppResult
   if (options.manifestPath) {
     await copyFile(options.manifestPath, join(outdir, "app.webmanifest"))
   }
+  await precompressBuildAssets(result.outputs)
+
+  return { success: true, outdir }
+}
+
+/** Builds the optional custom auth entry as API-served static assets. */
+export async function buildAuthExperience(
+  options: BuildAuthExperienceOptions
+): Promise<BuildAppResult> {
+  const outdir = resolve(options.outdir)
+  const assetsDir = join(outdir, "assets")
+  await rm(outdir, { recursive: true, force: true })
+  await mkdir(assetsDir, { recursive: true })
+
+  const result = await Bun.build({
+    entrypoints: [options.scriptEntryPath],
+    outdir: assetsDir,
+    target: "browser",
+    conditions: ["bun"],
+    publicPath: "/auth/assets/",
+    minify: true,
+    splitting: true,
+    naming: {
+      entry: "auth-[hash].[ext]",
+      chunk: "chunk-[name]-[hash].[ext]",
+      asset: "asset-[name]-[hash].[ext]",
+    },
+    plugins: [extensionlessSourceImportPlugin],
+    define: { "process.env.NODE_ENV": '"production"' },
+    sourcemap: "external",
+  })
+
+  if (!result.success) {
+    return {
+      success: false,
+      outdir,
+      logs: result.logs.map(String),
+    }
+  }
+
+  const script = result.outputs.find(
+    (output) => output.kind === "entry-point" && output.type.startsWith("text/javascript")
+  )
+  const stylesheets = result.outputs.filter((output) => output.type.startsWith("text/css"))
+  if (!script || stylesheets.length > 1) {
+    throw new Error(
+      `[SixbCustomApp] Expected one auth entry and at most one stylesheet, found ${script ? 1 : 0} entries and ${stylesheets.length} stylesheets.`
+    )
+  }
+
+  const sourceHtml = await readFile(options.entryPath, "utf-8")
+  const sourceEntryPattern =
+    /\s*<script\s+type=["']module["']\s+src=["']\.\/auth-main\.tsx["']><\/script>/
+  if (!sourceEntryPattern.test(sourceHtml)) {
+    throw new Error("[SixbCustomApp] Generated auth shell is missing its ./auth-main.tsx entry.")
+  }
+
+  const assetTags = [
+    ...stylesheets.map(
+      (stylesheet) =>
+        `<link rel="stylesheet" crossorigin href="/auth/assets/${basename(stylesheet.path)}">`
+    ),
+    `<script type="module" crossorigin src="/auth/assets/${basename(script.path)}"></script>`,
+  ].join("")
+  const html = sourceHtml
+    .replace(sourceEntryPattern, "")
+    .replace("</head>", `  ${assetTags}</head>`)
+  await writeFile(join(outdir, "index.html"), html, "utf-8")
   await precompressBuildAssets(result.outputs)
 
   return { success: true, outdir }

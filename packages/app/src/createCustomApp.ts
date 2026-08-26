@@ -1,15 +1,21 @@
 import { watch } from "node:fs"
-import { access, cp, mkdir, readFile, writeFile } from "node:fs/promises"
+import { access, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import type { AuthSessionAudience } from "@sixb/core"
 import {
   type BuildAppResult,
   buildApp,
+  buildAuthExperience,
   prepareAppHtmlBundleEntry,
   restoreAppStaticUrls,
 } from "./build"
-import { type BuiltInRouteManifestEntry, generateAppEntry, generateRouteManifest } from "./codegen"
+import {
+  type BuiltInRouteManifestEntry,
+  generateAppEntry,
+  generateAuthExperienceEntry,
+  generateRouteManifest,
+} from "./codegen"
 import { renderCustomAppRuntimeScript } from "./runtime"
 import { type PageRoute, scanPages } from "./scanner"
 import { type CustomAppStylesheet, resolveCustomAppStylesheet } from "./styles"
@@ -35,6 +41,14 @@ export interface CustomAppBuildOptions {
   outdir?: string
 }
 
+export interface CustomAuthExperienceBuildOptions {
+  outdir?: string
+}
+
+export interface CustomAuthExperienceBuildResult {
+  readonly outdir: string
+}
+
 export interface CustomAppStartOptions {
   host?: string
   port?: number
@@ -54,6 +68,9 @@ export interface CustomAppDevServer {
 export interface CustomAppInstance {
   scanRoutes(): Promise<PageRoute[]>
   hasRoutes(): Promise<boolean>
+  prepareAuthExperience(
+    options?: CustomAuthExperienceBuildOptions
+  ): Promise<CustomAuthExperienceBuildResult | null>
   dev(options?: CustomAppDevOptions): Promise<CustomAppDevServer>
   build(options?: CustomAppBuildOptions): Promise<BuildAppResult>
   start(options?: CustomAppStartOptions): Promise<CustomAppDevServer>
@@ -90,6 +107,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
 
   let tailwindCompiler: TailwindCssCompiler | null = null
   let tailwindCompilerKey: string | null = null
+  let authTailwindCompiler: TailwindCssCompiler | null = null
   let builtInAgentCssCompiler: TailwindCssCompiler | null = null
 
   // `app/globals.css` is source. When it uses Tailwind, compile it to
@@ -238,6 +256,58 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     return { htmlPath, mainPath, manifestPath, routes }
   }
 
+  async function prepareAuthExperience(
+    authOptions: CustomAuthExperienceBuildOptions = {}
+  ): Promise<CustomAuthExperienceBuildResult | null> {
+    const outdir = authOptions.outdir
+      ? resolve(rootDir, authOptions.outdir)
+      : join(generatedDir, "auth")
+    if (!(await pathExists(join(appDir, "auth.tsx")))) {
+      await rm(outdir, { recursive: true, force: true })
+      return null
+    }
+
+    const stylesheet = await resolveCustomAppStylesheet({ appDir, generatedDir, rootDir })
+    let stylesheetPath: string | null
+    if (stylesheet.kind === "none") {
+      stylesheetPath = null
+    } else if (stylesheet.kind === "static") {
+      stylesheetPath = stylesheet.path
+    } else {
+      const outputPath = join(generatedDir, "auth.css")
+      authTailwindCompiler ??= createTailwindCssCompiler({
+        inputPath: stylesheet.sourcePath,
+        outputPath,
+        cwd: appDir,
+        resolveFrom: rootDir,
+        label: "[SixbCustomApp]",
+      })
+      await authTailwindCompiler.compile()
+      stylesheetPath = outputPath
+    }
+
+    const entry = await generateAuthExperienceEntry(rootDir, generatedDir, {
+      appDir,
+      publicDir,
+      stylesheetPath,
+    })
+    if (!entry) {
+      return null
+    }
+
+    const result = await buildAuthExperience({
+      entryPath: entry.htmlPath,
+      scriptEntryPath: entry.mainPath,
+      outdir,
+    })
+    if (!result.success) {
+      throw new Error(
+        `[SixbCustomApp] Failed to build the auth experience: ${(result.logs ?? []).join("\n")}`
+      )
+    }
+    return { outdir: result.outdir }
+  }
+
   return {
     async scanRoutes() {
       return await scanRoutes()
@@ -248,10 +318,15 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
       return routes.length > 0
     },
 
+    async prepareAuthExperience(options) {
+      return await prepareAuthExperience(options)
+    },
+
     async dev(devOptions: CustomAppDevOptions = {}) {
       const host = devOptions.host ?? "0.0.0.0"
       const port = devOptions.port ?? 3001
       const { htmlPath, manifestPath } = await prepareGeneratedApp()
+      await prepareAuthExperience()
       let htmlImportVersion = 0
       let htmlBundle = await importHtmlBundle(htmlPath, htmlImportVersion)
       const publicRoutes = (await pathExists(publicDir)) ? await createPublicRoutes(publicDir) : {}
@@ -282,6 +357,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
         rebuildChain = rebuildChain
           .then(async () => {
             const { htmlPath: nextHtmlPath } = await prepareGeneratedApp()
+            await prepareAuthExperience()
             htmlImportVersion++
             htmlBundle = await importHtmlBundle(nextHtmlPath, htmlImportVersion)
             server.reload(serveOptions(htmlBundle))
@@ -331,6 +407,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
           watcher.close()
           await rebuildChain
           await tailwindCompiler?.stop()
+          await authTailwindCompiler?.stop()
           await builtInAgentCssCompiler?.stop()
           server.stop(true)
         },
@@ -347,11 +424,21 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
         outdir,
       })
 
+      if (result.success) {
+        await prepareAuthExperience({ outdir: join(outdir, "auth") })
+      }
+
       if (result.success && (await pathExists(publicDir))) {
         await cp(publicDir, outdir, {
           recursive: true,
           force: true,
-          filter: (source) => resolve(source) !== join(publicDir, "app.webmanifest"),
+          filter: (source) => {
+            const resolvedSource = resolve(source)
+            return (
+              resolvedSource !== join(publicDir, "app.webmanifest") &&
+              resolvedSource !== join(publicDir, "auth")
+            )
+          },
         })
       }
 

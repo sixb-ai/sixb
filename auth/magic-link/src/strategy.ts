@@ -120,6 +120,7 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
     })
 
     const link = this.createCallbackUrl({
+      audience: input.audience,
       magicLinkId,
       requestOrigin: input.requestOrigin,
       token: credential.token,
@@ -281,6 +282,7 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
   }
 
   private createCallbackUrl(input: {
+    readonly audience: MagicLinkRequestInput["audience"]
     readonly magicLinkId: string
     readonly requestOrigin: string
     readonly token: string
@@ -288,6 +290,9 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
   }): string {
     const origin = this.publicOrigin ?? normalizePublicOrigin(input.requestOrigin)
     const url = new URL("/auth/callback", origin)
+    // This non-secret hint only selects the pre-auth presentation. Completion
+    // still uses the audience and returnTo stored with the magic link.
+    url.searchParams.set("audience", input.audience)
     url.searchParams.set("magicLinkId", input.magicLinkId)
     url.searchParams.set("token", input.token)
     if (input.requesterHash) {

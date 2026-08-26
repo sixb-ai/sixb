@@ -337,6 +337,11 @@ When you serve the runtime, these endpoints are registered for you:
 | `POST /api/auth/service-accounts/:serviceAccountId/access-tokens/:tokenId/revoke` | Revoke a service-account token |
 | `GET /api/auth/access-management-options` | Groups and capabilities for the tokens/service-accounts UI |
 
+Custom apps can replace the app-audience presentation for the magic-link pages with
+`app/auth.tsx`. The API still owns these routes and all credential handling; the custom component
+only renders the organization-specific states and invokes framework actions. See
+[Building Apps](../apps/overview.md#custom-login-experience).
+
 See [Server](../server/overview.md) for how routes are mounted.
 
 ## Development and production

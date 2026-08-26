@@ -25,6 +25,7 @@ import {
   type SixbApiBrowserPolicy,
 } from "./auth/browser-origin"
 import { CSRF_TOKEN_RESPONSE_HEADER_NAME } from "./auth/csrf"
+import type { SixbAuthExperienceOptions } from "./auth/experience"
 import { ServerAuthGuard } from "./auth/guard"
 import { consumeInternalRequestAuthState } from "./auth/scope"
 import { SESSION_ACTIVITY_HEADER_NAME } from "./auth/session-activity"
@@ -49,6 +50,8 @@ export interface SixbServerOptions {
   hostname?: string
   quiet?: boolean
   browser: SixbApiBrowserPolicy
+  /** Optional custom-app auth bundle mounted under the API's `/auth` routes. */
+  authExperience?: SixbAuthExperienceOptions
 }
 
 export function createSixbServer(options: SixbServerOptions): SixbServer {
@@ -63,6 +66,7 @@ export class SixbServer {
   private readonly apiBrowserPolicy: ResolvedSixbApiBrowserPolicy
   private readonly authContextResolver: ResolveRequestAuthContext
   private readonly authRedirectContextResolver: ResolveAuthRedirectContext
+  private readonly authExperience?: SixbAuthExperienceOptions
   private app: SixbApp | null = null
   private bunServer: ReturnType<typeof Bun.serve> | null = null
   private maintenance: OntologyMaintenanceHandle | null = null
@@ -77,6 +81,7 @@ export class SixbServer {
     this.authRedirectContextResolver = createApiBrowserAuthRedirectContextResolver(
       this.apiBrowserPolicy
     )
+    this.authExperience = options.authExperience
   }
 
   getHost(): SixbHostView {
@@ -115,6 +120,10 @@ export class SixbServer {
 
   getApiBrowserPolicy(): ResolvedSixbApiBrowserPolicy {
     return this.apiBrowserPolicy
+  }
+
+  getAuthExperience(): SixbAuthExperienceOptions | undefined {
+    return this.authExperience
   }
 
   async start(): Promise<void> {
@@ -304,6 +313,7 @@ export function createSixbApi(server: SixbServer) {
       server.resolveAuthRedirectContext(request, input),
     getInvitationDestinationOptions: (request) => server.getInvitationDestinationOptions(request),
     resolveAuthRequestOrigin: (request) => server.resolveAuthRequestOrigin(request),
+    authExperience: server.getAuthExperience(),
     resolveInvitationRedirectContext: (request, input) =>
       server.resolveInvitationRedirectContext(request, input),
   })

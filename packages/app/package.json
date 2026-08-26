@@ -33,6 +33,12 @@
       "bun": "./src/agents.ts",
       "import": "./dist/agents.js",
       "default": "./dist/agents.js"
+    },
+    "./auth": {
+      "types": "./dist/auth.d.ts",
+      "bun": "./src/auth.ts",
+      "import": "./dist/auth.js",
+      "default": "./dist/auth.js"
     }
   },
   "scripts": {

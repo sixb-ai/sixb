@@ -39,6 +39,11 @@ import {
   type ResolveRequestAuthContext,
 } from "../auth/browser-origin"
 import { CSRF_TOKEN_RESPONSE_HEADER_NAME } from "../auth/csrf"
+import {
+  customAuthExperienceAssetResponse,
+  customAuthExperienceResponse,
+  type SixbAuthExperienceOptions,
+} from "../auth/experience"
 import { hasForegroundSessionActivity } from "../auth/session-activity"
 import { createSessionRenewalCookieHeaders } from "../auth/session-cookies"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
@@ -115,10 +120,21 @@ export interface AuthRoutesOptions {
     request: Request,
     input: AuthInvitationRedirectInput
   ) => AuthInvitationRedirectContext
+  readonly authExperience?: SixbAuthExperienceOptions
 }
 
 export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: AuthRoutesOptions) {
   return app
+    .get(
+      "/auth/assets/*",
+      async ({ request }) => customAuthExperienceAssetResponse(options.authExperience, request),
+      { detail: { hide: true } }
+    )
+    .head(
+      "/auth/assets/*",
+      async ({ request }) => customAuthExperienceAssetResponse(options.authExperience, request),
+      { detail: { hide: true } }
+    )
     .get(
       "/api/auth/session",
       async ({ request }) => {
@@ -1241,11 +1257,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
             requesterHash: pending.hash,
           })
 
-          const response = htmlMessageResponse(
-            "If this email can sign in, we sent a link. Check your inbox to continue.",
-            200,
-            "Check your email"
-          )
+          const response = await magicLinkRequestedResponse(options, authRedirect)
           // Same-device fast path: this browser keeps the preimage of the
           // `requester` hash embedded in the emailed callback URL, so opening
           // the link here signs in without the confirmation click. Always
@@ -1304,7 +1316,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
         }
 
         if (isMagicLinkAuthStrategy(strategy)) {
-          return signInFormResponse(authRedirect)
+          return await signInFormResponse(options, authRedirect)
         }
 
         if (isOidcAuthStrategy(strategy)) {
@@ -1331,9 +1343,14 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           const url = new URL(request.url)
           const magicLinkId = url.searchParams.get("magicLinkId")?.trim()
           const token = url.searchParams.get("token")?.trim()
+          const authRedirectHint = resolveAuthExperienceRedirectHint(
+            options,
+            request,
+            url.searchParams.get("audience")
+          )
 
           if (!magicLinkId || !token) {
-            return htmlMessageResponse("This sign-in link is invalid or expired.", 400)
+            return await invalidMagicLinkResponse(options, authRedirectHint)
           }
 
           // Read-only peek so the page can greet the user by email and dead
@@ -1353,11 +1370,12 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
                 token,
               })
               if (!peeked) {
-                return htmlMessageResponse("This sign-in link is invalid or expired.", 400)
+                return await invalidMagicLinkResponse(options, authRedirectHint)
               }
               email = peeked.email
-            } catch {
-              return htmlMessageResponse("This sign-in link is invalid or expired.", 400)
+            } catch (error) {
+              logAuthCallbackError("Magic-link", error)
+              return await authExperienceErrorResponse(options, authRedirectHint)
             }
           }
 
@@ -1380,10 +1398,16 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
               magicLinkId,
               token,
               clearPendingCookie: true,
+              authRedirectHint,
             })
           }
 
-          return magicLinkConfirmResponse({ magicLinkId, token, email })
+          return await magicLinkConfirmResponse(options, {
+            magicLinkId,
+            token,
+            email,
+            authRedirect: authRedirectHint,
+          })
         }
 
         if (isOidcAuthStrategy(strategy)) {
@@ -1438,16 +1462,26 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
 
         const magicLinkId = body.magicLinkId?.trim()
         const token = body.token?.trim()
+        const authRedirectHint = resolveAuthExperienceRedirectHint(options, request, body.audience)
         if (!magicLinkId || !token) {
-          return htmlMessageResponse("This sign-in link is invalid or expired.", 400)
+          return await invalidMagicLinkResponse(options, authRedirectHint)
         }
 
-        return completeMagicLinkCallback({ host, strategy, options, request, magicLinkId, token })
+        return completeMagicLinkCallback({
+          host,
+          strategy,
+          options,
+          request,
+          magicLinkId,
+          token,
+          authRedirectHint,
+        })
       },
       {
         body: t.Object({
           magicLinkId: t.Optional(t.String()),
           token: t.Optional(t.String()),
+          audience: t.Optional(t.String()),
         }),
         parse: "urlencoded",
         detail: { hide: true },
@@ -1520,6 +1554,7 @@ async function completeMagicLinkCallback(input: {
   readonly magicLinkId: string
   readonly token: string
   readonly clearPendingCookie?: boolean
+  readonly authRedirectHint?: AuthRedirectContext
 }): Promise<Response> {
   const authOptions = resolveAuthOptions(input.options, input.request)
   const now = new Date()
@@ -1564,7 +1599,7 @@ async function completeMagicLinkCallback(input: {
     }
     return response
   } catch {
-    return htmlMessageResponse("This sign-in link is invalid or expired.", 400)
+    return await invalidMagicLinkResponse(input.options, input.authRedirectHint)
   }
 }
 
@@ -1925,19 +1960,108 @@ function authPageResponse(body: string, status = 200): Response {
   })
 }
 
-function signInFormResponse(context: AuthRedirectContext): Response {
-  return authPageResponse(
-    [
-      "<h1>Sign in</h1>",
-      "<p>We'll email you a sign-in link.</p>",
-      '<form method="post" action="/auth/sign-in">',
-      `<input type="hidden" name="audience" value="${escapeHtml(context.audience)}">`,
-      `<input type="hidden" name="returnTo" value="${escapeHtml(context.returnTo)}">`,
-      '<input name="email" type="email" autocomplete="email" placeholder="you@example.com" aria-label="Email address" required autofocus>',
-      '<button type="submit">Send sign-in link</button>',
-      "</form>",
-    ].join("")
+async function signInFormResponse(
+  options: AuthRoutesOptions,
+  context: AuthRedirectContext
+): Promise<Response> {
+  return (
+    (await customAuthExperienceResponse(options.authExperience, {
+      audience: context.audience,
+      state: { kind: "signIn" },
+      signInUrl: authExperienceSignInUrl(context),
+      submission: {
+        kind: "requestMagicLink",
+        action: "/auth/sign-in",
+        fields: { audience: context.audience, returnTo: context.returnTo },
+      },
+      // Native POST forms inherit the document's referrer policy when
+      // constructing their Origin header. `no-referrer` produces
+      // `Origin: null`, which the API origin guard correctly rejects.
+      referrerPolicy: "same-origin",
+    })) ??
+    authPageResponse(
+      [
+        "<h1>Sign in</h1>",
+        "<p>We'll email you a sign-in link.</p>",
+        '<form method="post" action="/auth/sign-in">',
+        `<input type="hidden" name="audience" value="${escapeHtml(context.audience)}">`,
+        `<input type="hidden" name="returnTo" value="${escapeHtml(context.returnTo)}">`,
+        '<input name="email" type="email" autocomplete="email" placeholder="you@example.com" aria-label="Email address" required autofocus>',
+        '<button type="submit">Send sign-in link</button>',
+        "</form>",
+      ].join("")
+    )
   )
+}
+
+async function magicLinkRequestedResponse(
+  options: AuthRoutesOptions,
+  context: AuthRedirectContext
+): Promise<Response> {
+  return (
+    (await customAuthExperienceResponse(options.authExperience, {
+      audience: context.audience,
+      state: { kind: "checkEmail" },
+      signInUrl: authExperienceSignInUrl(context),
+    })) ??
+    htmlMessageResponse(
+      "If this email can sign in, we sent a link. Check your inbox to continue.",
+      200,
+      "Check your email"
+    )
+  )
+}
+
+async function invalidMagicLinkResponse(
+  options: AuthRoutesOptions,
+  context: AuthRedirectContext | undefined
+): Promise<Response> {
+  if (context) {
+    const custom = await customAuthExperienceResponse(options.authExperience, {
+      audience: context.audience,
+      state: { kind: "invalidLink" },
+      signInUrl: authExperienceSignInUrl(context),
+      status: 400,
+    })
+    if (custom) return custom
+  }
+
+  return htmlMessageResponse("This sign-in link is invalid or expired.", 400)
+}
+
+async function authExperienceErrorResponse(
+  options: AuthRoutesOptions,
+  context: AuthRedirectContext | undefined
+): Promise<Response> {
+  if (context) {
+    const custom = await customAuthExperienceResponse(options.authExperience, {
+      audience: context.audience,
+      state: { kind: "error" },
+      signInUrl: authExperienceSignInUrl(context),
+      status: 500,
+    })
+    if (custom) return custom
+  }
+
+  return await invalidMagicLinkResponse(options, undefined)
+}
+
+function authExperienceSignInUrl(context: AuthRedirectContext): string {
+  const params = new URLSearchParams({ audience: context.audience, returnTo: context.returnTo })
+  return `/auth/sign-in?${params.toString()}`
+}
+
+function resolveAuthExperienceRedirectHint(
+  options: AuthRoutesOptions,
+  request: Request,
+  audience: string | null | undefined
+): AuthRedirectContext | undefined {
+  if (audience !== "app" && audience !== "atlas") {
+    return undefined
+  }
+
+  const context = resolveInvitationDeliveryContext(options, request, { destinationId: audience })
+  return context instanceof Response ? undefined : context
 }
 
 // Deliberately a plain form with no auto-submit: link scanners that execute
@@ -1948,12 +2072,39 @@ function signInFormResponse(context: AuthRedirectContext): Response {
 // a disabled spinner. The form POST is a normal navigation, so this page stays
 // visible (spinner and all) until the server responds; the pageshow handler
 // resets the button when the page is restored from the back/forward cache.
-function magicLinkConfirmResponse(input: {
-  readonly magicLinkId: string
-  readonly token: string
-  // Absent when the strategy doesn't support the read-only peek.
-  readonly email?: string
-}): Response {
+async function magicLinkConfirmResponse(
+  options: AuthRoutesOptions,
+  input: {
+    readonly magicLinkId: string
+    readonly token: string
+    // Absent when the strategy doesn't support the read-only peek.
+    readonly email?: string
+    readonly authRedirect?: AuthRedirectContext
+  }
+): Promise<Response> {
+  if (input.authRedirect) {
+    const custom = await customAuthExperienceResponse(options.authExperience, {
+      audience: input.authRedirect.audience,
+      state: { kind: "confirm", ...(input.email ? { email: input.email } : {}) },
+      signInUrl: authExperienceSignInUrl(input.authRedirect),
+      submission: {
+        kind: "confirmSignIn",
+        action: "/auth/callback",
+        fields: {
+          magicLinkId: input.magicLinkId,
+          token: input.token,
+          audience: input.authRedirect.audience,
+        },
+      },
+      referrerPolicy: "same-origin",
+      // The callback POST is same-origin, but its successful 303 continues to
+      // the validated custom-app origin. CSP applies form-action across that
+      // redirect chain, so permit that exact origin for this state only.
+      formActionOrigins: [new URL(input.authRedirect.returnTo).origin],
+    })
+    if (custom) return custom
+  }
+
   const response = authPageResponse(
     [
       "<h1>Sign in</h1>",
@@ -1963,6 +2114,11 @@ function magicLinkConfirmResponse(input: {
       '<form method="post" action="/auth/callback" id="confirm">',
       `<input type="hidden" name="magicLinkId" value="${escapeHtml(input.magicLinkId)}">`,
       `<input type="hidden" name="token" value="${escapeHtml(input.token)}">`,
+      ...(input.authRedirect
+        ? [
+            `<input type="hidden" name="audience" value="${escapeHtml(input.authRedirect.audience)}">`,
+          ]
+        : []),
       '<button type="submit" id="confirm-button">Continue</button>',
       "</form>",
       "<script>",

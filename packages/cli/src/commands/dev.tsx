@@ -59,6 +59,17 @@ export async function runDev(options: DevOptions = {}) {
       appPublicOrigin: options.appPublicOrigin,
       hasCustomApp,
     })
+    const customApp = await createCustomApp({
+      rootDir: projectRoot,
+      apiBaseUrl: topology.apiPublicOrigin,
+      audience: "app",
+      authEnabled: host.auth.isEnabled(),
+    })
+    const authExperience = hasCustomApp
+      ? ((await customApp.prepareAuthExperience()) ?? {
+          outdir: resolve(projectRoot, ".sixb", "generated", "auth"),
+        })
+      : null
 
     runtime = await startSixbRuntime(host, {
       cohostWorkers: true,
@@ -79,6 +90,7 @@ export async function runDev(options: DevOptions = {}) {
         publicOrigin: topology.apiPublicOrigin,
         allowedOrigins: topology.allowedBrowserOrigins,
       },
+      ...(authExperience ? { authExperience } : {}),
     })
     await server.start()
 
@@ -91,13 +103,6 @@ export async function runDev(options: DevOptions = {}) {
       host: topology.host,
       port: topology.atlasPort,
       development: true,
-    })
-
-    const customApp = await createCustomApp({
-      rootDir: projectRoot,
-      apiBaseUrl: topology.apiPublicOrigin,
-      audience: "app",
-      authEnabled,
     })
 
     let appUrl: string | null = null
