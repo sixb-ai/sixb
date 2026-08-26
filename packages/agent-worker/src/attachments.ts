@@ -217,6 +217,7 @@ export async function prepareAgentToolFileProjection(input: {
 
 function fileWorkItems(messages: readonly AgentMessageRecord[]): AttachmentWorkItem[] {
   const items: AttachmentWorkItem[] = []
+  const currentUserMessageId = latestUserMessageId(messages)
   for (const message of messages) {
     message.parts.forEach((part, partIndex) => {
       if (part.type === "file") {
@@ -227,7 +228,7 @@ function fileWorkItems(messages: readonly AgentMessageRecord[]): AttachmentWorkI
           key: attachmentKey(message.id, partIndex),
           contentPath: `/parts/${partIndex}/fileRef`,
           sandboxName: String(partIndex),
-          inlineContent: message.role !== "assistant",
+          inlineContent: message.role === "user" && message.id === currentUserMessageId,
           origin: "message-file",
         })
       } else if (
@@ -272,6 +273,14 @@ function fileWorkItems(messages: readonly AgentMessageRecord[]): AttachmentWorkI
   return deduplicated.filter(
     (item) => item.message.role !== "assistant" || retainedAssistantKeys.has(item.key)
   )
+}
+
+function latestUserMessageId(messages: readonly AgentMessageRecord[]): string | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message?.role === "user") return message.id
+  }
+  return undefined
 }
 
 function messageFileIdentity(messageId: string, fileRef: FileRef): string {
@@ -419,8 +428,8 @@ async function prepareOneAttachment(input: {
 
     if (inlineDisposition === "metadata-only" && notes.length === 0) {
       notes.push(
-        item.message.role === "assistant"
-          ? "[Generated file kept as metadata: use the sandbox path or content URL when its contents are needed.]"
+        !item.inlineContent
+          ? "[Historical file kept as metadata: use view_file with the sandbox path when its contents are needed.]"
           : remainingTextBytes === 0 && shouldAttemptTextInline(mediaType, fileName, stat.sizeBytes)
             ? "[File not inlined: the attachment text budget is exhausted; use the sandbox path or content URL.]"
             : "[File not inlined: available through the sandbox path or content URL.]"

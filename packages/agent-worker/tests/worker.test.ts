@@ -14,7 +14,9 @@ import {
   type AgentReasoningLevel,
   AgentRequestError,
   type AgentsRuntime,
+  type AgentToolArtifact,
   type AgentToolDefinition,
+  type AgentToolResult,
   type BlobStorage,
   type Broker,
   type CommandResult,
@@ -53,6 +55,7 @@ import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import { createSixbError } from "@sixb/core/internal/errors"
 import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
 import {
+  type AgentMessageRecord,
   type AgentStorage,
   AgentStorageError,
   type AiUsageStorage,
@@ -70,7 +73,7 @@ import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test"
 import { AgentWorker, type AgentWorkerOptions } from "../src"
 import { loadAgentSkills } from "../src/agent-skills"
 import { normalizeApiBaseUrl } from "../src/api-url"
-import { prepareAgentAttachments } from "../src/attachments"
+import { prepareAgentAttachments, toolResultAttachmentKey } from "../src/attachments"
 import { AgentExecutionLostError, AgentFinalizationError } from "../src/errors"
 import { finishRunOrThrow } from "../src/finalize"
 import { enqueueAiModelCallRecovery } from "../src/model-call-recovery"
@@ -90,6 +93,12 @@ const TEST_AGENT_API_BASE_URL = "http://localhost:3002/api/"
 const REQUESTER = { type: "user", id: "usr_requester" } as const
 const AGENT_PRINCIPAL = { type: "serviceAccount", id: "svc_agent_assistant" } as const
 const AGENT_RUNTIME_GROUP = defineGroup("agent-runtime", { label: "Agent runtime" })
+const TEST_PNG_BYTES = Uint8Array.from(
+  Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+    "base64"
+  )
+)
 
 const USAGE: LanguageModelV4Usage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
@@ -137,6 +146,103 @@ function toolThenAnswerModel(captureReplay?: (prompt: string) => void): MockLang
         { type: "reasoning-end", id: "r" },
         { type: "text-start", id: "t" },
         { type: "text-delta", id: "t", delta: "Echoed hi" },
+        { type: "text-end", id: "t" },
+        finish("stop"),
+      ])
+    },
+  })
+}
+
+function artifactToolThenAnswerModel(
+  capture: {
+    readonly live?: (prompt: unknown) => void
+    readonly replay?: (prompt: unknown) => void
+    readonly viewed?: (prompt: unknown) => void
+  } = {}
+): MockLanguageModelV4 {
+  let call = 0
+  return new MockLanguageModelV4({
+    modelId: "mock-model",
+    supportedUrls: { "image/*": [/^data:/] },
+    doStream: async (options) => {
+      call += 1
+      if (call === 1) {
+        return stream([
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: "image-call-1",
+            toolName: "create_image",
+            input: JSON.stringify({}),
+          },
+          finish("tool-calls"),
+        ])
+      }
+      if (call === 2) capture.live?.(options.prompt)
+      if (call === 3) {
+        capture.replay?.(options.prompt)
+        const promptJson = JSON.stringify(options.prompt)
+        const sandboxPath = promptJson.match(/sandboxPath=\\"([^"]+generated\.png)\\"/)?.[1]
+        if (!sandboxPath) throw new Error("Expected replay attachment sandbox path.")
+        return stream([
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: "view-image-call-1",
+            toolName: "view_file",
+            input: JSON.stringify({ path: sandboxPath }),
+          },
+          finish("tool-calls"),
+        ])
+      }
+      if (call === 4) capture.viewed?.(options.prompt)
+      return stream([
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "t" },
+        { type: "text-delta", id: "t", delta: "Created the image" },
+        { type: "text-end", id: "t" },
+        finish("stop"),
+      ])
+    },
+  })
+}
+
+function bashImageThenViewModel(captureViewed: (prompt: unknown) => void): MockLanguageModelV4 {
+  let call = 0
+  return new MockLanguageModelV4({
+    modelId: "mock-model",
+    supportedUrls: { "image/*": [/^data:/] },
+    doStream: async (options) => {
+      call += 1
+      if (call === 1) {
+        return stream([
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: "bash-image-call-1",
+            toolName: "bash",
+            input: JSON.stringify({ command: "create-view-image" }),
+          },
+          finish("tool-calls"),
+        ])
+      }
+      if (call === 2) {
+        return stream([
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: "view-bash-image-call-1",
+            toolName: "view_file",
+            input: JSON.stringify({ path: "scratch/bash-image.png" }),
+          },
+          finish("tool-calls"),
+        ])
+      }
+      captureViewed(options.prompt)
+      return stream([
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "t" },
+        { type: "text-delta", id: "t", delta: "Viewed the bash image" },
         { type: "text-end", id: "t" },
         finish("stop"),
       ])
@@ -751,6 +857,7 @@ class RecordingSandbox implements Sandbox {
   status: "running" | "stopped" | "failed" = "running"
   readonly commands: RecordedCommand[] = []
   readonly writtenFiles: SandboxFileRecord[] = []
+  readonly files = new Map<string, Uint8Array>()
   readonly outputFiles = new Map<string, Uint8Array>()
   readonly outputListedSizeOverrides = new Map<string, number>()
   destroyed = false
@@ -773,6 +880,15 @@ class RecordingSandbox implements Sandbox {
 
   async writeFiles(files: readonly SandboxFileRecord[]): Promise<void> {
     this.writtenFiles.push(...files)
+    for (const file of files) {
+      const path = file.path.startsWith("/") ? file.path : join(this.workingDirectory, file.path)
+      this.files.set(
+        path,
+        typeof file.contents === "string"
+          ? new TextEncoder().encode(file.contents)
+          : new Uint8Array(file.contents)
+      )
+    }
   }
 
   writeOutputFile(relativePath: string, contents: string | Uint8Array): void {
@@ -790,6 +906,15 @@ class RecordingSandbox implements Sandbox {
       return {
         exitCode: 0,
         stdout: "created report.txt",
+        stderr: "",
+        durationMs: 1,
+      }
+    }
+    if (command === "bash" && script === "create-view-image") {
+      this.files.set(join(this.workingDirectory, "scratch", "bash-image.png"), TEST_PNG_BYTES)
+      return {
+        exitCode: 0,
+        stdout: "created scratch/bash-image.png",
         stderr: "",
         durationMs: 1,
       }
@@ -835,6 +960,28 @@ class RecordingSandbox implements Sandbox {
             exitCode: 2,
             stdout: "",
             stderr: "output file not found",
+            durationMs: 1,
+          }
+    }
+    if (
+      command === "bash" &&
+      typeof script === "string" &&
+      script.includes("sixb-read-view-file")
+    ) {
+      const encoded = options.env?.SIXB_VIEW_FILE_PATH_B64
+      const path = encoded ? Buffer.from(encoded, "base64").toString("utf-8") : ""
+      const bytes = this.files.get(path)
+      return bytes
+        ? {
+            exitCode: 0,
+            stdout: `${bytes.byteLength}\n${Buffer.from(bytes).toString("base64")}`,
+            stderr: "",
+            durationMs: 1,
+          }
+        : {
+            exitCode: 2,
+            stdout: "",
+            stderr: "file not found",
             durationMs: 1,
           }
     }
@@ -2844,12 +2991,117 @@ describe("AgentWorker", () => {
     expect(prepared.entries).toHaveLength(50)
     expect(prepared.promptTextByPartKey.has("assistant-0:0")).toBe(false)
     expect(prepared.promptTextByPartKey.get("assistant-50:0")).toContain(
-      "Generated file kept as metadata"
+      "Historical file kept as metadata"
     )
     expect(JSON.stringify([...prepared.promptTextByPartKey.values()])).not.toContain(
       "sensitive generated contents"
     )
     expect(prepared.modelFileDataByPartKey.size).toBe(0)
+  })
+
+  test("inlines only the current user image and defers historical images to view_file", async () => {
+    const blobStorage = new InMemoryBlobStorage()
+    const fileRef = await blobStorage.put({
+      body: TEST_PNG_BYTES,
+      fileName: "uploaded.png",
+      mediaType: "image/png",
+    })
+    const messages: AgentMessageRecord[] = [
+      {
+        id: "user-old",
+        projectId: PROJECT_ID,
+        threadId: "thread-1",
+        runId: "run-old",
+        role: "user",
+        seq: 1,
+        parts: [{ type: "file", fileRef }],
+        contentVersion: 1,
+        createdAt: new Date(2026, 0, 1),
+      },
+      {
+        id: "user-current",
+        projectId: PROJECT_ID,
+        threadId: "thread-1",
+        runId: "run-current",
+        role: "user",
+        seq: 2,
+        parts: [{ type: "file", fileRef }],
+        contentVersion: 1,
+        createdAt: new Date(2026, 0, 2),
+      },
+    ]
+
+    const prepared = await prepareAgentAttachments({
+      projectId: PROJECT_ID,
+      threadId: "thread-1",
+      messages,
+      blobStorage,
+      apiBaseUrl: TEST_AGENT_API_BASE_URL,
+      inlineImages: true,
+    })
+
+    expect(prepared.promptTextByPartKey.get("user-old:0")).toContain(
+      "Historical file kept as metadata"
+    )
+    expect(prepared.promptTextByPartKey.get("user-old:0")).toContain("view_file")
+    if (typeof Bun.Image === "function") {
+      expect(prepared.modelFileDataByPartKey.has("user-old:0")).toBe(false)
+      expect(prepared.modelFileDataByPartKey.get("user-current:0")?.data.href).toStartWith(
+        "data:image/png;base64,"
+      )
+    }
+  })
+
+  test("prepares nested rich tool-result files for replay and the next sandbox", async () => {
+    const blobStorage = new InMemoryBlobStorage()
+    const fileRef = await blobStorage.put({
+      body: TEST_PNG_BYTES,
+      fileName: "generated.png",
+      mediaType: "image/png",
+    })
+    const message: AgentMessageRecord = {
+      id: "assistant-rich",
+      projectId: PROJECT_ID,
+      threadId: "thread-1",
+      runId: "run-rich",
+      role: "assistant" as const,
+      seq: 1,
+      parts: [
+        {
+          type: "tool-call" as const,
+          toolCallId: "image-call-1",
+          toolName: "create_image",
+          input: {},
+          state: "output-available" as const,
+          output: {
+            kind: "agentToolResult",
+            content: [{ type: "file", fileRef: { ...fileRef } }],
+          },
+        },
+        { type: "file" as const, fileRef },
+      ],
+      contentVersion: 1,
+      createdAt: new Date(2026, 0, 1),
+    }
+
+    const prepared = await prepareAgentAttachments({
+      projectId: PROJECT_ID,
+      threadId: "thread-1",
+      messages: [message],
+      blobStorage,
+      apiBaseUrl: TEST_AGENT_API_BASE_URL,
+      inlineImages: true,
+    })
+    const key = toolResultAttachmentKey(message.id, 0, 0)
+
+    expect(prepared.entries).toHaveLength(1)
+    expect(prepared.entries[0]?.contentPath).toBe("/parts/0/output/content/0/fileRef")
+    expect(prepared.promptTextByPartKey.get(key)).toContain("generated.png")
+    expect(prepared.sandboxFiles).toHaveLength(1)
+    expect(prepared.sandboxFiles[0]?.path).toContain("tool-0-0-generated.png")
+    expect(prepared.sandboxFiles[0]?.bytes).toEqual(TEST_PNG_BYTES)
+    expect(prepared.modelFileDataByPartKey.has(key)).toBe(false)
+    expect(prepared.promptTextByPartKey.get(key)).toContain("Historical file kept as metadata")
   })
 
   test("provisions the sandbox concurrently without blocking turn start", async () => {
@@ -3187,6 +3439,224 @@ describe("AgentWorker", () => {
         },
         context: { run: { kind: "agent", id: selectedRequest.run.id } },
       })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("publishes a selected tool artifact to blob storage and the run sandbox", async () => {
+    let published: AgentToolArtifact | undefined
+    let receivedToolCallId: string | undefined
+    let livePrompt: unknown
+    let replayPrompt: unknown
+    let viewedPrompt: unknown
+    const createImage = defineAgentTool("create_image")
+      .description("Create a test image.")
+      .input({})
+      .run(async ({ artifacts, toolCallId }) => {
+        receivedToolCallId = toolCallId
+        published = await artifacts.put({
+          body: TEST_PNG_BYTES,
+          fileName: "generated.png",
+          mediaType: "image/png",
+        })
+        return {
+          kind: "agentToolResult",
+          content: [
+            { type: "text", text: "Created an image." },
+            { type: "file", fileRef: published.fileRef },
+          ],
+        } satisfies AgentToolResult
+      })
+    const sandboxes = new RecordingSandboxFactory()
+    const sixb = buildSixb(
+      artifactToolThenAnswerModel({
+        live: (prompt) => {
+          livePrompt = prompt
+        },
+        replay: (prompt) => {
+          replayPrompt = prompt
+        },
+        viewed: (prompt) => {
+          viewedPrompt = prompt
+        },
+      }),
+      new InMemoryBroker(),
+      sandboxes,
+      { agentTools: [createImage] }
+    )
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+
+    await worker.start()
+    try {
+      const request = await requestAgent(sixb, {
+        agentId: "assistant",
+        text: "create an image",
+      })
+      const run = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "tool artifact run terminal" }
+      )
+
+      expect(run.status).toBe("succeeded")
+      expect(receivedToolCallId).toBe("image-call-1")
+      expect(published).toBeDefined()
+      if (!published) throw new Error("Expected the selected tool to publish an artifact.")
+
+      expect(
+        new Uint8Array(
+          await new Response(await sixb.blobStorage.open(published.fileRef.blobId)).arrayBuffer()
+        )
+      ).toEqual(TEST_PNG_BYTES)
+      const sandboxFile = sandboxes.sandboxes[0]?.writtenFiles.find((file) =>
+        file.path.includes(".sixb/agent/artifacts/")
+      )
+      expect(sandboxFile?.contents).toEqual(TEST_PNG_BYTES)
+      expect(published.sandboxPath).toEndWith("-generated.png")
+
+      const messages = await listMessages(storage, request.run.threadId)
+      const firstAssistant = messages.find(
+        (message) =>
+          message.role === "assistant" &&
+          message.parts.some(
+            (part) => part.type === "tool-call" && part.toolName === createImage.name
+          )
+      )
+      expect(
+        firstAssistant?.parts.find(
+          (part) => part.type === "tool-call" && part.toolName === createImage.name
+        )
+      ).toMatchObject({
+        state: "output-available",
+        output: {
+          kind: "agentToolResult",
+          content: [{ type: "text" }, { type: "file", fileRef: published.fileRef }],
+        },
+      })
+      expect(firstAssistant?.parts.filter((part) => part.type === "file")).toEqual([
+        { type: "file", fileRef: published.fileRef },
+      ])
+      const richToolPartIndex = firstAssistant?.parts.findIndex(
+        (part) => part.type === "tool-call" && part.toolName === createImage.name
+      )
+      expect(richToolPartIndex).toBeGreaterThanOrEqual(0)
+      const durableJson = JSON.stringify(messages)
+      expect(durableJson).not.toContain("data:image")
+      expect(durableJson).not.toContain("iVBORw0KGgo")
+      expect(durableJson).not.toContain(published.sandboxPath)
+
+      const livePromptJson = JSON.stringify(livePrompt)
+      expect(livePromptJson).toContain("generated.png")
+      expect(livePromptJson).toContain("<tool_file")
+      expect(livePromptJson).toContain("<sixb_tool_files")
+      const livePromptMessages = Array.isArray(livePrompt) ? livePrompt : []
+      const liveToolResults = livePromptMessages.flatMap((message) => {
+        if (
+          typeof message !== "object" ||
+          message === null ||
+          !("role" in message) ||
+          message.role !== "tool" ||
+          !("content" in message) ||
+          !Array.isArray(message.content)
+        ) {
+          return []
+        }
+        return message.content.filter(
+          (part: unknown) =>
+            typeof part === "object" &&
+            part !== null &&
+            "type" in part &&
+            part.type === "tool-result"
+        )
+      })
+      expect(JSON.stringify(liveToolResults)).not.toContain('"type":"file"')
+      if (typeof Bun.Image === "function") {
+        expect(
+          livePromptMessages.some(
+            (message) =>
+              typeof message === "object" &&
+              message !== null &&
+              "role" in message &&
+              message.role === "user" &&
+              "content" in message &&
+              Array.isArray(message.content) &&
+              message.content.some(
+                (part: unknown) =>
+                  typeof part === "object" &&
+                  part !== null &&
+                  "type" in part &&
+                  part.type === "file"
+              )
+          )
+        ).toBe(true)
+        expect(livePromptJson).toContain(Buffer.from(TEST_PNG_BYTES).toString("base64"))
+      }
+
+      const followup = await requestAgent(sixb, {
+        agentId: "assistant",
+        threadId: request.run.threadId,
+        text: "inspect it again",
+      })
+      const replayRun = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({
+            projectId: PROJECT_ID,
+            id: followup.run.id,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "tool artifact replay run terminal" }
+      )
+      expect(replayRun.status).toBe("succeeded")
+
+      const replayPromptJson = JSON.stringify(replayPrompt)
+      expect(replayPromptJson).toContain("generated.png")
+      expect(replayPromptJson).toContain(
+        encodeURIComponent(`/parts/${richToolPartIndex}/output/content/1/fileRef`)
+      )
+      if (typeof Bun.Image === "function") {
+        expect(replayPromptJson).not.toContain(Buffer.from(TEST_PNG_BYTES).toString("base64"))
+      }
+      expect(
+        sandboxes.sandboxes[1]?.writtenFiles.some(
+          (file) =>
+            file.path.includes(".sixb/agent/attachments/") &&
+            file.path.endsWith(`tool-${richToolPartIndex}-1-generated.png`) &&
+            Buffer.from(file.contents).equals(Buffer.from(TEST_PNG_BYTES))
+        )
+      ).toBe(true)
+
+      const viewedPromptJson = JSON.stringify(viewedPrompt)
+      expect(viewedPromptJson).toContain("view_file")
+      if (typeof Bun.Image === "function") {
+        expect(viewedPromptJson).toContain(Buffer.from(TEST_PNG_BYTES).toString("base64"))
+      }
+      const replayMessages = await listMessages(storage, request.run.threadId)
+      const replayAssistant = replayMessages.find(
+        (message) =>
+          message.runId === followup.run.id &&
+          message.parts.some((part) => part.type === "tool-call" && part.toolName === "view_file")
+      )
+      expect(
+        replayAssistant?.parts.find(
+          (part) => part.type === "tool-call" && part.toolName === "view_file"
+        )
+      ).toMatchObject({
+        state: "output-available",
+        output: {
+          kind: "agentToolResult",
+          content: [{ type: "text" }, { type: "file", fileRef: published.fileRef }],
+        },
+      })
+      expect(
+        sandboxes.sandboxes[1]?.writtenFiles.filter((file) =>
+          file.path.includes(".sixb/agent/artifacts/")
+        )
+      ).toHaveLength(0)
     } finally {
       await worker.stop()
     }
@@ -4156,6 +4626,79 @@ describe("AgentWorker", () => {
       expect(parts.some((part) => part.type === "text" && part.text.includes("Bash ran"))).toBe(
         true
       )
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("views and publishes an image created by bash", async () => {
+    let viewedPrompt: unknown
+    const sandboxes = new RecordingSandboxFactory()
+    const sixb = buildSixb(
+      bashImageThenViewModel((prompt) => {
+        viewedPrompt = prompt
+      }),
+      new InMemoryBroker(),
+      sandboxes
+    )
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+
+    await worker.start()
+    try {
+      const request = await requestAgent(sixb, {
+        agentId: "assistant",
+        text: "create and inspect an image",
+      })
+      const run = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "bash view_file run terminal" }
+      )
+
+      expect(run.status).toBe("succeeded")
+      const assistant = (await listMessages(storage, request.run.threadId)).find(
+        (message) => message.role === "assistant"
+      )
+      const viewCall = assistant?.parts.find(
+        (part) => part.type === "tool-call" && part.toolName === "view_file"
+      )
+      expect(viewCall).toMatchObject({
+        state: "output-available",
+        output: {
+          kind: "agentToolResult",
+          content: [
+            { type: "text", text: expect.stringContaining("Prepared image") },
+            {
+              type: "file",
+              fileRef: { fileName: "bash-image.png", mediaType: "image/png" },
+            },
+          ],
+        },
+      })
+      const filePart = assistant?.parts.find((part) => part.type === "file")
+      expect(filePart).toMatchObject({
+        type: "file",
+        fileRef: { fileName: "bash-image.png", mediaType: "image/png" },
+      })
+      if (!filePart || filePart.type !== "file") throw new Error("Expected viewed image file.")
+      expect(
+        new Uint8Array(
+          await new Response(await sixb.blobStorage.open(filePart.fileRef.blobId)).arrayBuffer()
+        )
+      ).toEqual(TEST_PNG_BYTES)
+      expect(
+        sandboxes.sandboxes[0]?.writtenFiles.some((file) =>
+          file.path.includes(".sixb/agent/artifacts/")
+        )
+      ).toBe(true)
+      if (typeof Bun.Image === "function") {
+        expect(JSON.stringify(viewedPrompt)).toContain(
+          Buffer.from(TEST_PNG_BYTES).toString("base64")
+        )
+      }
     } finally {
       await worker.stop()
     }

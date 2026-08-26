@@ -17,6 +17,7 @@ import { AgentSandboxFileRegistry } from "./sandbox-file-registry"
 import { AgentToolArtifactBudget, createAgentToolArtifacts } from "./tool-artifacts"
 import { AgentToolResultMediaBridge } from "./tool-result-media"
 import type { AgentExecutionContext, AgentTurnContext, AgentWorkerContext } from "./types"
+import { createViewFileTool } from "./view-file-tool"
 import { prepareWorkflowInputAttachments } from "./workflow-input-attachments"
 
 export interface AgentExecutionEnvironment {
@@ -184,6 +185,14 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
   })
 
   let sandboxWasUsed = false
+  tools.view_file = createViewFileTool({
+    resolveSandbox: () => ready,
+    attachments: attachmentContext,
+    registry: fileRegistry,
+    artifactsForToolCall: ({ toolCallId, signal }) =>
+      artifactsForToolCall({ toolName: "view_file", toolCallId, signal }),
+    toolResultToModelOutput: (output) => mediaBridge.toModelOutput(output),
+  })
   const resolveSandbox = () => {
     sandboxWasUsed = true
     return ready
