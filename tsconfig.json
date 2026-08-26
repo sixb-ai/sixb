@@ -38,6 +38,7 @@
       "@sixb/connector-rest": ["./connectors/rest/src/index.ts"],
       "@sixb/connector-sftp": ["./connectors/sftp/src/index.ts"],
       "@sixb/connector-sql": ["./connectors/sql/src/index.ts"],
+      "@sixb/connector-stripe": ["./connectors/stripe/src/index.ts"],
       "@sixb/connector-teamleader": ["./connectors/teamleader/src/index.ts"],
       "@sixb/connector-unipile": ["./connectors/unipile/src/index.ts"],
       "@sixb/core": ["./packages/core/src/index.ts"],

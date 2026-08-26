@@ -199,6 +199,7 @@ to `defineConnector`, and most ship a matching webhook helper for the [Webhooks]
 | `@sixb/connector-google` | `googleAds(...)` | Google Ads manager-account reporting | — |
 | `@sixb/connector-meta` | `meta(...)` | Meta Graph API (Facebook/Instagram) | — |
 | `@sixb/connector-pipedrive` | `pipedrive(...)` | Pipedrive CRM | `pipedriveEventsWebhook` |
+| `@sixb/connector-stripe` | `stripe(...)` | Stripe customers, subscriptions, invoices, refunds, events | `stripeEventsWebhook` |
 | `@sixb/connector-teamleader` | `teamleader(...)` | Teamleader CRM, invoicing, quotations | `defineTeamleaderWebhook` |
 | `@sixb/connector-pandadoc` | `pandadoc(...)` | PandaDoc documents and e-signatures | `pandaDocEventsWebhook` |
 | `@sixb/connector-companycam` | `companycam(...)` | CompanyCam jobsite photos | `companyCamEventsWebhook` |
