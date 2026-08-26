@@ -71,7 +71,7 @@ export function renderAgentSkillCatalog(
     executionGuidance,
     "Sixb API access is available from the sandboxed bash tool through a per-run gateway URL.",
     "Agent Skills are installed under $SIXB_SKILLS_DIR.",
-    "Message attachments, when present, are listed in $SIXB_ATTACHMENTS and materialized under $SIXB_ATTACHMENT_DIR when size limits allow.",
+    "Message attachments, when present, are listed in $SIXB_ATTACHMENTS and materialized under $SIXB_ATTACHMENT_DIR when size limits allow. Current attachments are provided directly; use view_file with a listed sandbox path to inspect historical files on demand.",
     "Prepare user-facing files under $SIXB_OUTPUT_STAGING_DIR, then atomically publish each complete file or directory with mv into $SIXB_OUTPUT_DIR. Only files under $SIXB_OUTPUT_DIR are attached to the final chat message when size limits allow.",
     "Never write a file directly in $SIXB_OUTPUT_DIR and never modify it after publication; publish only complete outputs.",
     "Use environment variables with bash. With read, use relative paths from this catalog or sandboxPath values.",

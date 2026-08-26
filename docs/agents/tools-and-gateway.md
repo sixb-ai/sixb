@@ -126,6 +126,18 @@ promoted to normal assistant file attachments, with duplicate sandbox outputs re
 digest. Follow-up turns reconstruct files from the durable `FileRef` and materialize them into the
 new run sandbox.
 
+### Inspecting sandbox files
+
+The built-in `view_file` tool accepts a path inside the current run workspace. Current user images
+use normal user file input; historical attachments stay as metadata and sandbox files until the
+model calls `view_file`. Viewed images use the same provider-safe user-message bridge as selected
+tool results. Known attachment and tool-artifact paths reuse their existing `FileRef`. A previously
+unknown file created by `bash` is read within the same 25 MB limit, MIME-sniffed, published through
+the artifact path, and then returned as rich file content. Arbitrary bash paths are reread on each
+invocation so later edits remain visible; framework-owned attachment and artifact paths reuse their
+durable snapshots. Image decoding uses the same resize, base64, and pixel-count limits as direct
+attachments. Symbolic links and paths outside the workspace are rejected.
+
 `$SIXB_OUTPUT_DIR` remains the compatibility path for files produced directly by sandbox work.
 Complete files moved there are collected as final assistant attachments; it is not used as the live
 tool-result transport.
@@ -136,8 +148,9 @@ Tool definitions are not auto-discovered. Grant them through the agent definitio
 tools: [searchKnowledge]
 ```
 
-Names must be unique within one agent, and `read` and `bash` are reserved. Conversation, workflow,
-and CLI-managed agent runs use the same selected tools.
+Names must be unique within one agent. `bash`, `read`, and `view_file` are reserved for the
+framework's built-in sandbox tools. Conversation, workflow, and CLI-managed agent runs use the same
+selected tools.
 
 ### Exa web tools
 
