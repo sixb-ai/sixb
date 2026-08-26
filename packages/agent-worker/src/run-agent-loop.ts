@@ -8,6 +8,7 @@ import {
   streamText,
   type ToolSet,
 } from "ai"
+import type { AiSdkTraceStep } from "./ai-sdk-adapters"
 import type { AiModelCallRecorder } from "./model-call-recorder"
 
 export const FINAL_AGENT_LOOP_STEP_INSTRUCTION = [
@@ -25,6 +26,7 @@ export interface RunAgentLoopInput {
   readonly usageRecorder: AiModelCallRecorder
   readonly abortSignal: AbortSignal
   readonly onError?: StreamTextOnErrorCallback
+  readonly onStepEnd?: (step: AiSdkTraceStep) => void | Promise<void>
 }
 
 /**
@@ -64,6 +66,7 @@ export function runAgentLoop(
     },
     onLanguageModelCallEnd: input.usageRecorder.onLanguageModelCallEnd,
     ...(input.onError === undefined ? {} : { onError: input.onError }),
+    ...(input.onStepEnd === undefined ? {} : { onStepEnd: input.onStepEnd }),
     abortSignal: input.abortSignal,
   })
 }

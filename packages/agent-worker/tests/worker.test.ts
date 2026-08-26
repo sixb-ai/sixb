@@ -1856,7 +1856,13 @@ describe("AgentWorker", () => {
         { label: "workflow output validation failure" }
       )
 
-      expect(execution.status).toBe("failed")
+      expect(execution).toMatchObject({
+        status: "failed",
+        error: { details: { failurePhase: "structured-finalizer" } },
+      })
+      expect(execution.trace).toContainEqual(
+        expect.objectContaining({ type: "text", text: "Project Alpha is the best match." })
+      )
       await expect(
         aiUsageStorageOf(sixb).summarizeExecution({
           projectId: PROJECT_ID,
@@ -1949,7 +1955,18 @@ describe("AgentWorker", () => {
       )
 
       expect(toolCalls).toBe(1)
-      expect(execution.status).toBe("failed")
+      expect(execution).toMatchObject({
+        status: "failed",
+        error: { details: { failurePhase: "agent-loop" } },
+      })
+      expect(execution.trace).toContainEqual(
+        expect.objectContaining({
+          type: "tool-call",
+          toolName: "fail_lookup",
+          state: "output-error",
+          errorText: "An error occurred.",
+        })
+      )
       await expect(
         aiUsageStorageOf(sixb).summarizeExecution({
           projectId: PROJECT_ID,

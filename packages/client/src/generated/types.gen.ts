@@ -5126,8 +5126,184 @@ export type GetWorkflowAgentNodeExecutionResponses = {
     completedAt?: string
     nodeRunId: string
     prompt: string
-    trace?: Array<unknown>
-    diagnostics?: Array<unknown>
+    trace?: Array<
+      | {
+          type: "text"
+          text: string
+          /**
+           * Any JSON-compatible value.
+           */
+          providerMetadata?:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+        }
+      | {
+          type: "reasoning"
+          text: string
+          /**
+           * Any JSON-compatible value.
+           */
+          providerMetadata?:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+        }
+      | {
+          type: "step-start"
+        }
+      | {
+          type: "file"
+          fileRef: {
+            blobId: string
+            digest: string
+            sizeBytes: number
+            fileName?: string
+            mediaType?: string
+            logicalPath?: string
+          }
+          /**
+           * Any JSON-compatible value.
+           */
+          providerMetadata?:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+        }
+      | {
+          context:
+            | {
+                kind: "object"
+                ref: {
+                  objectTypeId: string
+                  primaryId: string
+                }
+              }
+            | {
+                kind: "app-state"
+                id: string
+                label: string
+                description: string
+                /**
+                 * Any JSON-compatible value.
+                 */
+                value:
+                  | string
+                  | number
+                  | boolean
+                  | Array<unknown>
+                  | {
+                      [key: string]: unknown
+                    }
+                  | null
+              }
+          origin: "ambient" | "explicit"
+          type: "context"
+        }
+      | {
+          type: "tool-call"
+          toolCallId: string
+          toolName: string
+          dynamic?: boolean
+          providerExecuted?: boolean
+          /**
+           * Any JSON-compatible value.
+           */
+          input:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+          /**
+           * Any JSON-compatible value.
+           */
+          providerMetadata?:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+          state: "output-available"
+          /**
+           * Any JSON-compatible value.
+           */
+          output:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+        }
+      | {
+          type: "tool-call"
+          toolCallId: string
+          toolName: string
+          dynamic?: boolean
+          providerExecuted?: boolean
+          /**
+           * Any JSON-compatible value.
+           */
+          input:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+          /**
+           * Any JSON-compatible value.
+           */
+          providerMetadata?:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+          state: "output-error"
+          errorText: string
+        }
+    >
+    diagnostics?: Array<
+      | string
+      | number
+      | boolean
+      | Array<unknown>
+      | {
+          [key: string]: unknown
+        }
+      | null
+    >
+    failurePhase?: "agent-loop" | "structured-finalizer"
     error?: {
       code: "internal.unexpected" | "runtime.cancelled" | "agent.execution_failed"
       message: string
