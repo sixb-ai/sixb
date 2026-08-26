@@ -9,7 +9,7 @@ import {
 
 export function createOrganicClient(
   http: TiktokHttp,
-  account: TiktokConnectedAccount<"organic-account">
+  account: TiktokConnectedAccount<"tiktok-account">
 ): TiktokOrganicClient {
   return {
     account,
