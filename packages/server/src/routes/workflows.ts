@@ -157,9 +157,24 @@ function serializeWorkflowAgentExecution(execution: WorkflowAgentNodeRunView) {
     prompt: execution.prompt,
     trace: execution.trace,
     diagnostics: execution.diagnostics,
+    failurePhase: workflowAgentFailurePhase(execution),
     error: execution.error,
     createdAt: toIsoString(execution.createdAt),
   }
+}
+
+function workflowAgentFailurePhase(
+  execution: WorkflowAgentNodeRunView
+): "agent-loop" | "structured-finalizer" | undefined {
+  const details = execution.error?.details
+  if (!isRecord(details)) return undefined
+
+  const phase = details.failurePhase
+  return phase === "agent-loop" || phase === "structured-finalizer" ? phase : undefined
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
 }
 
 function principalForExecution(sixb: Sixb<readonly OntologySource[]>): Principal {

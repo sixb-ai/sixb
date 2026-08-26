@@ -13,7 +13,7 @@ import {
 } from "@sixb/core/internal/workflows"
 import { coerceAgentRunFinishReason } from "@sixb/core/storage"
 import { generateText, jsonSchema, type ModelMessage, NoObjectGeneratedError, Output } from "ai"
-import { agentTraceFromAiSdkSteps } from "./ai-sdk-adapters"
+import { type AiSdkTraceStep, agentTraceFromAiSdkSteps } from "./ai-sdk-adapters"
 import type { AiModelCallRecorder } from "./model-call-recorder"
 import { runAgentLoop } from "./run-agent-loop"
 import type { AgentTurnContext } from "./types"
@@ -38,6 +38,25 @@ export interface WorkflowAgentNodeResult {
   readonly modelId: string
   readonly finishReason: NonNullable<ReturnType<typeof coerceAgentRunFinishReason>>
   readonly trace: readonly AgentMessagePart[]
+}
+
+export type WorkflowAgentFailurePhase = "agent-loop" | "structured-finalizer"
+
+/** Carries best-effort debug context across the workflow node's terminal error boundary. */
+export class WorkflowAgentNodeExecutionError extends Error {
+  readonly phase: WorkflowAgentFailurePhase
+  readonly trace: readonly AgentMessagePart[]
+
+  constructor(input: {
+    readonly phase: WorkflowAgentFailurePhase
+    readonly trace: readonly AgentMessagePart[]
+    readonly cause: unknown
+  }) {
+    super("Workflow agent node execution failed.", { cause: input.cause })
+    this.name = "WorkflowAgentNodeExecutionError"
+    this.phase = input.phase
+    this.trace = input.trace
+  }
 }
 
 export async function runWorkflowAgentNode(
@@ -73,6 +92,14 @@ export async function runWorkflowAgentNode(
   const timeout = new AbortController()
   const timer = setTimeout(() => timeout.abort(), input.context.turnTimeoutMs)
   const abortSignal = AbortSignal.any([input.signal, timeout.signal])
+  const completedSteps: AiSdkTraceStep[] = []
+  const traceDetails = {
+    agentId: input.agent.id,
+    workflowId: input.workflowId,
+    workflowRunId: input.workflowRunId,
+    nodeRunId: input.nodeRunId,
+  }
+  let phase: WorkflowAgentFailurePhase = "agent-loop"
   try {
     let researchError: unknown
     const research = runAgentLoop({
@@ -90,6 +117,9 @@ export async function runWorkflowAgentNode(
       onError: ({ error }) => {
         researchError ??= error
       },
+      onStepEnd: (step) => {
+        completedSteps.push(step)
+      },
     })
 
     await research.consumeStream({
@@ -100,24 +130,17 @@ export async function runWorkflowAgentNode(
     input.usageRecorder.assertHealthy()
     if (researchError !== undefined) throw researchError
 
-    const researchSteps = await research.steps
     const researchText = await research.text
     const researchFinishReason = await research.finishReason
     if (researchText.trim().length === 0) {
       throw createSixbError(
         "agent.execution_failed",
         `[SixbAgentWorker] Workflow agent '${input.agent.id}' produced no final answer to structure.`,
-        {
-          details: {
-            agentId: input.agent.id,
-            workflowId: input.workflowId,
-            workflowRunId: input.workflowRunId,
-            nodeRunId: input.nodeRunId,
-          },
-        }
+        { details: traceDetails }
       )
     }
 
+    phase = "structured-finalizer"
     let finalizerMessages: ModelMessage[] = [
       {
         role: "user",
@@ -178,14 +201,7 @@ export async function runWorkflowAgentNode(
       throw createSixbError(
         "internal.unexpected",
         `[SixbAgentWorker] Workflow output finalization for agent '${input.agent.id}' ended without a value.`,
-        {
-          details: {
-            agentId: input.agent.id,
-            workflowId: input.workflowId,
-            workflowRunId: input.workflowRunId,
-            nodeRunId: input.nodeRunId,
-          },
-        }
+        { details: traceDetails }
       )
     }
 
@@ -199,13 +215,14 @@ export async function runWorkflowAgentNode(
       output,
       modelId: input.agent.model.modelId,
       finishReason: coerceAgentRunFinishReason(researchFinishReason) ?? "unknown",
-      trace: agentTraceFromAiSdkSteps(researchSteps, {
-        agentId: input.agent.id,
-        workflowId: input.workflowId,
-        workflowRunId: input.workflowRunId,
-        nodeRunId: input.nodeRunId,
-      }),
+      trace: agentTraceFromAiSdkSteps(completedSteps, traceDetails),
     }
+  } catch (cause) {
+    throw new WorkflowAgentNodeExecutionError({
+      phase,
+      trace: agentTraceFromAiSdkSteps(completedSteps, traceDetails),
+      cause,
+    })
   } finally {
     clearTimeout(timer)
   }

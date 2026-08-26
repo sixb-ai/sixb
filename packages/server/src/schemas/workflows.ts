@@ -4,7 +4,7 @@ import {
   type WorkflowRunFailureCode,
 } from "@sixb/core/storage"
 import { z } from "zod"
-import { AgentRunFailureSchema } from "./agents"
+import { AgentMessagePartSchema, AgentRunFailureSchema } from "./agents"
 import { AiUsageSummarySchema } from "./ai-usage"
 import { JsonValueSchema, sixbFailureSchema } from "./common"
 
@@ -152,11 +152,14 @@ export const WorkflowAgentNodeExecutionSummarySchema = z.object({
   completedAt: z.string().optional(),
 })
 
+export const WorkflowAgentFailurePhaseSchema = z.enum(["agent-loop", "structured-finalizer"])
+
 export const WorkflowAgentNodeExecutionSchema = WorkflowAgentNodeExecutionSummarySchema.extend({
   nodeRunId: z.string(),
   prompt: z.string(),
-  trace: z.array(z.unknown()).optional(),
-  diagnostics: z.array(z.unknown()).optional(),
+  trace: z.array(AgentMessagePartSchema).optional(),
+  diagnostics: z.array(JsonValueSchema).optional(),
+  failurePhase: WorkflowAgentFailurePhaseSchema.optional(),
   error: AgentRunFailureSchema.optional(),
   createdAt: z.string(),
 })

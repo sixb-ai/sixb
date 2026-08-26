@@ -2163,6 +2163,111 @@ describe("SixbServer HTTP contract", () => {
     })
   })
 
+  test("returns a typed workflow agent trace and failure phase", async () => {
+    await withHttpContractServer(async ({ baseUrl, sixb }) => {
+      const runs = sixb.storage.workflowRuns!
+      const runId = "workflow-agent-failed-trace"
+      const nodeRunId = `${runId}:node:0`
+      const workflowExecutionId = await createTestWorkflowExecution(sixb.storage.executions, {
+        projectId: sixb.id,
+        workflowId: "review-device-health-workflow",
+        runId,
+      })
+      await runs.queue({
+        id: runId,
+        projectId: sixb.id,
+        executionId: workflowExecutionId,
+        workflowId: "review-device-health-workflow",
+        input: { deviceId: "fan-1" },
+        requesterGroupIds: [],
+      })
+      await runs.start({ id: runId, projectId: sixb.id })
+      await runs.nodes.start({
+        id: nodeRunId,
+        projectId: sixb.id,
+        workflowRunId: runId,
+        workflowId: "review-device-health-workflow",
+        nodeIndex: 0,
+        nodeType: "agent",
+        nodeId: "resolve-device",
+        nodeKey: "resolveDevice",
+        input: { deviceId: "fan-1" },
+      })
+      const agentExecutionId = await createTestAgentExecution(sixb.storage, {
+        projectId: sixb.id,
+        agentId: "device-resolver",
+        runId: nodeRunId,
+        sourceExecutionId: workflowExecutionId,
+      })
+      await runs.agentNodes.create({
+        projectId: sixb.id,
+        nodeRunId,
+        executionId: agentExecutionId,
+        agentId: "device-resolver",
+        prompt: "Resolve fan-1.",
+      })
+      await runs.nodes.wait({ projectId: sixb.id, id: nodeRunId })
+      await runs.wait({ projectId: sixb.id, id: runId })
+      await runs.agentNodes.start({
+        projectId: sixb.id,
+        nodeRunId,
+        modelId: "test-model",
+        execution: {
+          token: "failed-trace-token",
+          queueLeaseExpiresAt: new Date(Date.now() + 60_000),
+        },
+      })
+      await runs.agentNodes.finish({
+        projectId: sixb.id,
+        nodeRunId,
+        executionToken: "failed-trace-token",
+        status: "failed",
+        modelId: "test-model",
+        trace: [
+          { type: "step-start" },
+          {
+            type: "tool-call",
+            toolCallId: "policy-call",
+            toolName: "lookup_policy",
+            state: "output-available",
+            input: { severity: "high" },
+            output: { responseWindowMinutes: 90 },
+          },
+          { type: "text", text: "Dispatch within 90 minutes." },
+        ],
+        error: {
+          code: "agent.execution_failed",
+          message: "Structured output did not match the workflow contract.",
+          retryable: false,
+          at: "2026-07-02T12:01:00.000Z",
+          details: { failurePhase: "structured-finalizer" },
+        },
+        completedAt: new Date("2026-07-02T12:01:00.000Z"),
+      })
+
+      const response = await fetch(
+        `${baseUrl}/api/workflow-runs/${runId}/nodes/resolveDevice/agent-execution`
+      )
+
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({
+        status: "failed",
+        failurePhase: "structured-finalizer",
+        trace: [
+          { type: "step-start" },
+          {
+            type: "tool-call",
+            toolName: "lookup_policy",
+            state: "output-available",
+            input: { severity: "high" },
+            output: { responseWindowMinutes: 90 },
+          },
+          { type: "text", text: "Dispatch within 90 minutes." },
+        ],
+      })
+    })
+  })
+
   test("supports documented write endpoints", async () => {
     await withHttpContractServer(async ({ baseUrl, events, sixb }) => {
       const upsertObjectResponse = await fetch(`${baseUrl}/api/objects/device/fan-2`, {
