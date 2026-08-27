@@ -19,7 +19,26 @@ export const WORKER_TYPES = [
 ] as const
 
 export type WorkerType = (typeof WORKER_TYPES)[number]
-export type WorkerConcurrency = Readonly<Partial<Record<WorkerType, number>>>
+
+export const WORKER_CONCURRENCY_CONFIG = {
+  sync: { configurable: true, environmentVariable: "SIXB_SYNC_WORKER_CONCURRENCY" },
+  action: { configurable: false, environmentVariable: "SIXB_ACTION_WORKER_CONCURRENCY" },
+  agent: { configurable: true, environmentVariable: "SIXB_AGENT_WORKER_CONCURRENCY" },
+  pipeline: { configurable: true, environmentVariable: "SIXB_PIPELINE_WORKER_CONCURRENCY" },
+  projection: { configurable: true, environmentVariable: "SIXB_PROJECTION_WORKER_CONCURRENCY" },
+  workflow: { configurable: true, environmentVariable: "SIXB_WORKFLOW_WORKER_CONCURRENCY" },
+} as const satisfies Record<
+  WorkerType,
+  { readonly configurable: boolean; readonly environmentVariable: string }
+>
+
+export type ConfigurableWorkerType = {
+  [Type in WorkerType]: (typeof WORKER_CONCURRENCY_CONFIG)[Type]["configurable"] extends true
+    ? Type
+    : never
+}[WorkerType]
+
+export type WorkerConcurrency = Readonly<Partial<Record<ConfigurableWorkerType, number>>>
 export type QueueWorkerProcess = Worker & { readonly concurrency: number }
 
 export interface WorkerCreationOptions {

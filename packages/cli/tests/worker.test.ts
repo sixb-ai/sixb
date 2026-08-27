@@ -161,6 +161,16 @@ describe("sixb worker", () => {
     expect(result.stderr).toBe("")
   })
 
+  test("preserves the complete equals-form concurrency value for validation", () => {
+    // Reverting getFlag() to split("=")[1] truncates this to 3 and lets startup continue.
+    const result = runWorkerFixture("valid-project", ["sync", "--concurrency=3=4"])
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toContain("Invalid worker concurrency '3=4'")
+    expect(result.stdout).not.toContain("requires a queues provider")
+    expect(result.stderr).toBe("")
+  })
+
   test("refuses without migrating, so a bad command leaves no schema behind", async () => {
     // `sixb worker agent` cannot start without an API origin, and used to find that out after
     // bringing the schema up to date.

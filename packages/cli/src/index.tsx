@@ -61,7 +61,7 @@ async function readPackageVersion(): Promise<string> {
 
 function getFlag(name: string): string | undefined {
   const direct = args.find((arg) => arg.startsWith(`--${name}=`))
-  if (direct) return direct.split("=")[1]
+  if (direct) return direct.slice(name.length + 3)
 
   const idx = args.indexOf(`--${name}`)
   if (idx >= 0) return args[idx + 1]
