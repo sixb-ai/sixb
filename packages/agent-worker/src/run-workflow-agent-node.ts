@@ -11,7 +11,7 @@ import {
   validateWorkflowAgentStepOutput,
   type WorkflowIOSnapshot,
 } from "@sixb/core/internal/workflows"
-import { coerceAgentRunFinishReason } from "@sixb/core/storage"
+import { type AgentRunFinishReason, coerceAgentRunFinishReason } from "@sixb/core/storage"
 import { generateText, jsonSchema, type ModelMessage, NoObjectGeneratedError, Output } from "ai"
 import { type AiSdkTraceStep, agentTraceFromAiSdkSteps } from "./ai-sdk-adapters"
 import type { AiModelCallRecorder } from "./model-call-recorder"
@@ -45,16 +45,19 @@ export type WorkflowAgentFailurePhase = "agent-loop" | "structured-finalizer"
 /** Carries best-effort debug context across the workflow node's terminal error boundary. */
 export class WorkflowAgentNodeExecutionError extends Error {
   readonly phase: WorkflowAgentFailurePhase
+  readonly finishReason?: AgentRunFinishReason
   readonly trace: readonly AgentMessagePart[]
 
   constructor(input: {
     readonly phase: WorkflowAgentFailurePhase
+    readonly finishReason?: AgentRunFinishReason
     readonly trace: readonly AgentMessagePart[]
     readonly cause: unknown
   }) {
     super("Workflow agent node execution failed.", { cause: input.cause })
     this.name = "WorkflowAgentNodeExecutionError"
     this.phase = input.phase
+    this.finishReason = input.finishReason
     this.trace = input.trace
   }
 }
@@ -100,6 +103,7 @@ export async function runWorkflowAgentNode(
     nodeRunId: input.nodeRunId,
   }
   let phase: WorkflowAgentFailurePhase = "agent-loop"
+  let finishReason: AgentRunFinishReason | undefined
   try {
     let researchError: unknown
     const research = runAgentLoop({
@@ -131,7 +135,7 @@ export async function runWorkflowAgentNode(
     if (researchError !== undefined) throw researchError
 
     const researchText = await research.text
-    const researchFinishReason = await research.finishReason
+    finishReason = coerceAgentRunFinishReason(await research.finishReason) ?? "unknown"
     if (researchText.trim().length === 0) {
       throw createSixbError(
         "agent.execution_failed",
@@ -214,12 +218,13 @@ export async function runWorkflowAgentNode(
     return {
       output,
       modelId: input.agent.model.modelId,
-      finishReason: coerceAgentRunFinishReason(researchFinishReason) ?? "unknown",
+      finishReason,
       trace: agentTraceFromAiSdkSteps(completedSteps, traceDetails),
     }
   } catch (cause) {
     throw new WorkflowAgentNodeExecutionError({
       phase,
+      finishReason,
       trace: agentTraceFromAiSdkSteps(completedSteps, traceDetails),
       cause,
     })

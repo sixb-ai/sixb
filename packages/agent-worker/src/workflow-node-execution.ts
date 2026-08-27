@@ -26,6 +26,7 @@ import type {
   AgentWorkflowNodeRequestedQueueJob,
 } from "@sixb/core/queues"
 import type {
+  AgentRunFinishReason,
   ExecutionRecord,
   WorkflowAgentNodeRunExecution,
   WorkflowAgentNodeRunRecord,
@@ -193,6 +194,7 @@ export async function executeWorkflowAgentNode(
         ? {
             cause: error.cause,
             phase: error.phase,
+            finishReason: error.finishReason,
             trace: error.trace,
           }
         : undefined
@@ -228,6 +230,7 @@ export async function executeWorkflowAgentNode(
       status,
       error: executionError,
       trace: debug?.trace,
+      finishReason: debug?.finishReason,
       failurePhase,
     })
     if (status === "failed") {
@@ -463,6 +466,7 @@ async function finishWorkflowAgentNodeFailed(input: {
   readonly executionToken: string
   readonly status: "failed" | "cancelled"
   readonly error: unknown
+  readonly finishReason?: AgentRunFinishReason
   readonly trace?: readonly AgentMessagePart[]
   readonly failurePhase?: WorkflowAgentFailurePhase
 }): Promise<{
@@ -515,6 +519,7 @@ async function finishWorkflowAgentNodeFailed(input: {
       executionToken: input.executionToken,
       status: input.status,
       modelId: input.agent.model.modelId,
+      finishReason: input.finishReason,
       trace: input.trace,
       error: toAgentExecutionFailure(agentExecutionError, {
         status: input.status,
