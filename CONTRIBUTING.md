@@ -236,6 +236,17 @@ bun run release
 bun run release:publish -- --tag next
 ```
 
+For a passkey or security key, authenticate through the browser and keep the publisher interactive
+so every `bun publish` can expose its WebAuthn challenge:
+
+```bash
+bunx npm login --auth-type=web
+bun run release:publish -- --tag next --auth-type web
+```
+
+The publisher gives the child process direct terminal access in this mode. A failed or interrupted
+challenge is safe to resume: re-run the command and versions already on the registry are skipped.
+
 The tag changes how npm resolves an install, not the package version: consumers opt into previews
 with `bun add @sixb/core@next` or `bunx create-sixb@next my-app`. Publishing another preview moves
 `next` forward without making it the default install.

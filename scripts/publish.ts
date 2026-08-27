@@ -4,6 +4,7 @@
  *   bun scripts/publish.ts --plan
  *   bun scripts/publish.ts --dry-run
  *   bun scripts/publish.ts --tag next
+ *   bun scripts/publish.ts --tag next --auth-type web  # passkey / browser challenge
  *   bun scripts/publish.ts --tag next --otp 123456
  *   bun scripts/publish.ts --tag next --registry http://localhost:4873  # local rehearsal
  *
@@ -19,6 +20,7 @@
  * whole thing with no credentials and no public side effects, point `--registry` at a local registry.
  */
 import { join } from "node:path"
+import { parsePublishOptions } from "./publish-options"
 import {
   discoverPublishablePackages,
   packageName,
@@ -34,7 +36,7 @@ import {
 import { assertReleaseTagAllowed, isPreviewRelease } from "./release-policy"
 
 const root = process.cwd()
-const options = parseOptions(process.argv.slice(2))
+const options = parsePublishOptions(process.argv.slice(2))
 const ordered = topologicalPublishOrder(await discoverPublishablePackages(root))
 const registryByName = new Map(
   await Promise.all(
@@ -108,8 +110,27 @@ if (options.tag !== "latest" && !options.dryRun && !options.planOnly) {
 async function publishPackage(release: PlannedPackageRelease): Promise<void> {
   const args = [process.execPath, "publish", "--tag", options.tag]
   if (options.dryRun) args.push("--dry-run")
+  if (options.authType) args.push("--auth-type", options.authType)
   if (options.otp) args.push("--otp", options.otp)
   if (options.registry) args.push("--registry", options.registry)
+
+  if (options.authType) {
+    const proc = Bun.spawn(args, {
+      cwd: join(root, release.packageInfo.dir),
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
+    })
+    const exitCode = await proc.exited
+
+    if (exitCode === 0) return
+
+    throw new Error(
+      `[SixbPublish] Failed to publish ${packageReleaseId(release)}; see the interactive output above.\n\n` +
+        `Published so far: ${published.length > 0 ? published.join(", ") : "nothing"}\n` +
+        "Fix the cause and re-run; packages already on the registry are skipped."
+    )
+  }
 
   const proc = Bun.spawn(args, {
     cwd: join(root, release.packageInfo.dir),
@@ -200,53 +221,4 @@ function dependencyRecord(value: unknown): Record<string, string> | undefined {
 
 function uniqueReleases(releases: readonly PlannedPackageRelease[]): PlannedPackageRelease[] {
   return [...new Map(releases.map((release) => [packageReleaseId(release), release])).values()]
-}
-
-interface PublishOptions {
-  readonly dryRun: boolean
-  readonly planOnly: boolean
-  readonly tag: string
-  readonly otp?: string
-  readonly registry?: string
-}
-
-function parseOptions(argv: string[]): PublishOptions {
-  const values = new Map<string, string>()
-  let dryRun = false
-  let planOnly = false
-
-  for (let index = 0; index < argv.length; index++) {
-    const arg = argv[index]
-    if (arg === "--dry-run") {
-      dryRun = true
-      continue
-    }
-    if (arg === "--plan") {
-      planOnly = true
-      continue
-    }
-    if (arg === "--tag" || arg === "--otp" || arg === "--registry") {
-      const value = argv[index + 1]
-      if (!value || value.startsWith("--")) {
-        throw new Error(`[SixbPublish] ${arg} needs a value.`)
-      }
-      values.set(arg, value)
-      index++
-      continue
-    }
-    throw new Error(
-      `[SixbPublish] Unknown argument ${arg}. Usage: bun scripts/publish.ts ` +
-        "[--plan] [--dry-run] [--tag <tag>] [--otp <code>] [--registry <url>]"
-    )
-  }
-
-  const otp = values.get("--otp")
-  const registry = values.get("--registry")
-  return {
-    dryRun,
-    planOnly,
-    tag: values.get("--tag") ?? "latest",
-    ...(otp ? { otp } : {}),
-    ...(registry ? { registry } : {}),
-  }
 }
