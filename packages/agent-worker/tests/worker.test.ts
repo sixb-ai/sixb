@@ -1858,6 +1858,7 @@ describe("AgentWorker", () => {
 
       expect(execution).toMatchObject({
         status: "failed",
+        finishReason: "stop",
         error: { details: { failurePhase: "structured-finalizer" } },
       })
       expect(execution.trace).toContainEqual(
