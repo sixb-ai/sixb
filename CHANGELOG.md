@@ -2,13 +2,44 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
-## 2026-08-26
+## 2026-08-26 — Framework 0.1.2
 
-### TikTok connector
+This selective release is anchored by `@sixb/core` `0.1.2`.
 
-- `@sixb/connector-tiktok` `0.1.0`: add separate managed OAuth grants for organic TikTok accounts
-  and Ads accounts, with typed read clients for profiles, posts, comments, campaign entities, and
-  integrated Ads reports.
+### Highlights
+
+- Add durable execution provenance and AI model-call cost accounting across actions, agents, syncs,
+  pipelines, projections, workflows, webhooks, and ontology materialization.
+- Persist portable, typed failure records and expose stable error codes through workers, run events,
+  the server, and the generated client.
+- Add keyed dataset merges, faster ontology materialization, and safer queue, scheduler, Redis, and
+  action-wait recovery paths.
+- Add managed connector connections with headless APIs and sync fan-out; introduce ACE IoT, Stripe,
+  LinkedIn, and TikTok connectors, and expand Google, Meta, REST, and Unipile support.
+- Refresh Atlas with an ontology graph explorer and improve the agent thread workspace.
+
+### Upgrade notes
+
+- Apply the bundled SQLite or PostgreSQL migrations before rolling out all runtime roles. Migrations
+  022–024 deliberately stop when legacy projection runs, webhook runs or deliveries, or ontology
+  commits cannot be assigned honest execution provenance; validate the migration on a backup first.
+- This pre-1.0 release has no database downgrade path.
+
+### Package versions
+
+- `0.1.2`: `@sixb/core`, `@sixb/action-worker`, `@sixb/agent-ui`, `@sixb/agent-worker`,
+  `@sixb/app`, `@sixb/atlas`, `@sixb/broker-nats`, `@sixb/cli`, `@sixb/client`,
+  `@sixb/connector-mercury`, `@sixb/connector-meta`, `@sixb/connector-pennylane`,
+  `@sixb/connector-rest`, `@sixb/ducklake`, `@sixb/lake-local`, `@sixb/orchestrator`,
+  `@sixb/pg`, `@sixb/pipeline-worker`, `@sixb/projection-worker`, `@sixb/queues-bullmq`,
+  `@sixb/rules-worker`, `@sixb/sandboxes-apple-container`, `@sixb/sandboxes-local`,
+  `@sixb/sandboxes-smolvm`, `@sixb/sandboxes-vercel`, `@sixb/server`, `@sixb/sqlite`,
+  `@sixb/sync-worker`, `@sixb/workflow-worker`, and `create-sixb`.
+- `0.1.3`: `@sixb/broker-redis` and `@sixb/connector-google`.
+- `0.1.1`: `@sixb/ui`, `@sixb/connector-unipile`, and the new
+  `@sixb/connector-linkedin`.
+- `0.1.0`: the new `@sixb/connector-ace-iot`, `@sixb/connector-stripe`, and
+  `@sixb/connector-tiktok`.
 
 ## 2026-08-14
 

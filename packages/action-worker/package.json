@@ -1,6 +1,6 @@
 {
   "name": "@sixb/action-worker",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Worker that runs Sixb action requests",
   "keywords": [
     "sixb",
