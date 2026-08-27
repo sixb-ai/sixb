@@ -2,6 +2,7 @@ import { AGENT_REASONING_LEVELS, MAX_AGENT_CONTEXT_ENTRIES } from "@sixb/core"
 import {
   AGENT_RUN_DIAGNOSTIC_CODES,
   AGENT_RUN_FAILURE_CODES,
+  AGENT_RUN_FINISH_REASONS,
   type AgentRunFailureCode,
   type SixbFailure,
 } from "@sixb/core/storage"
@@ -242,16 +243,7 @@ export const AgentRunStatusSchema = z.enum([
   "cancelled",
 ])
 
-export const AgentRunFinishReasonSchema = z.enum([
-  "stop",
-  "length",
-  "content-filter",
-  "tool-calls",
-  "timeout",
-  "error",
-  "other",
-  "unknown",
-])
+export const AgentRunFinishReasonSchema = z.enum(AGENT_RUN_FINISH_REASONS)
 
 export const AgentRunSchema = z.object({
   id: z.string(),

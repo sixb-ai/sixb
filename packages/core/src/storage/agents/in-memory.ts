@@ -19,6 +19,7 @@ import type {
   ConfirmAgentRunExecutionOwnershipInput,
   CreateAgentRunInput,
   CreateAgentThreadInput,
+  DeleteAgentMessagesByRunInput,
   FinishAgentRunInput,
   FinishQueuedAgentRunInput,
   ListAgentMessagesInput,
@@ -464,6 +465,50 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
     )
 
     return clone(message)
+  }
+
+  async deleteByRunId(input: DeleteAgentMessagesByRunInput): Promise<number> {
+    const threadKey = key(input.projectId, input.threadId)
+    const thread = this.state.threads.get(threadKey)
+    if (!thread) {
+      throw new AgentStorageError(
+        "thread_not_found",
+        `[Sixb] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
+      )
+    }
+
+    const messages = [...this.state.messages.entries()].filter(
+      ([, message]) =>
+        message.projectId === input.projectId &&
+        message.threadId === input.threadId &&
+        message.runId === input.runId
+    )
+    if (messages.length === 0) {
+      return 0
+    }
+
+    for (const [messageKey] of messages) {
+      this.state.messages.delete(messageKey)
+    }
+
+    const remainingMessages = [...this.state.messages.values()]
+      .filter(
+        (message) => message.projectId === input.projectId && message.threadId === input.threadId
+      )
+      .sort((left, right) => right.seq - left.seq)
+    const latestMessage = remainingMessages[0]
+    const updatedAt = new Date()
+    this.state.threads.set(
+      threadKey,
+      clone({
+        ...thread,
+        messageCount: remainingMessages.length,
+        lastMessageAt: latestMessage?.createdAt,
+        updatedAt,
+      })
+    )
+
+    return messages.length
   }
 
   async getById(params: { projectId: string; id: string }): Promise<AgentMessageRecord | null> {

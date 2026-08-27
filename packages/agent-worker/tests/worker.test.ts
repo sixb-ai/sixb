@@ -1348,6 +1348,7 @@ function withObservedAgentMessageAppendStorage(
     threads: agents.threads,
     runs: agents.runs,
     messages: {
+      deleteByRunId: (input) => agents.messages.deleteByRunId(input),
       getById: (params) => agents.messages.getById(params),
       list: (input) => agents.messages.list(input),
       append: async (input) => {
@@ -1397,6 +1398,27 @@ describe("AgentWorker", () => {
     expect(() => new AgentWorker(sixb, { apiBaseUrl: "" })).toThrow(
       "Agent workers require options.apiBaseUrl."
     )
+  })
+
+  test("rejects invalid turn timeout values at the worker boundary", () => {
+    const sixb = new SixbHost({
+      id: PROJECT_ID,
+      ontology: [],
+      agents: [],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage: new InMemoryLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+      sandboxes: new RecordingSandboxFactory(),
+    })
+    const invalidTimeouts = [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648]
+
+    for (const turnTimeoutMs of invalidTimeouts) {
+      expect(() => new AgentWorker(sixb, workerOptions({ turnTimeoutMs }))).toThrow(
+        "Agent turn timeout must be a positive integer no greater than 2147483647ms."
+      )
+    }
   })
 
   test("does not provision Agent identities when the worker starts", async () => {

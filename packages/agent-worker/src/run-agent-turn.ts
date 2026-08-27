@@ -465,7 +465,7 @@ function coercePartialAssistantMessage(message: AgentInboundLike): AgentMessage 
   const parts: AgentInboundUiMessagePart[] = []
   for (const part of message.parts) {
     if (part.type === "text") {
-      if (typeof part.text === "string" && part.text.length > 0) {
+      if (typeof part.text === "string" && part.text.trim().length > 0) {
         parts.push({
           type: "text",
           text: part.text,
@@ -477,7 +477,11 @@ function coercePartialAssistantMessage(message: AgentInboundLike): AgentMessage 
     } else if (part.type === "reasoning") {
       // Only keep reasoning that finished streaming — it carries the provider signature needed on the
       // next turn; a half-streamed thinking block is dropped rather than replayed.
-      if (part.state !== "streaming" && typeof part.text === "string" && part.text.length > 0) {
+      if (
+        part.state !== "streaming" &&
+        typeof part.text === "string" &&
+        part.text.trim().length > 0
+      ) {
         parts.push({
           type: "reasoning",
           text: part.text,

@@ -205,6 +205,11 @@ export async function retryAgentRun(
     if (!agents) {
       throw new AgentRequestError("storage_unavailable", "[Sixb] Agent storage is not configured.")
     }
+    await agents.messages.deleteByRunId({
+      projectId: runtime.projectId,
+      threadId: failedRun.threadId,
+      runId: failedRun.id,
+    })
     await tx.executions.create(durableExecution)
     return agents.runs.create({
       id: runId,
