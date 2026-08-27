@@ -287,6 +287,39 @@ describe("materializer canonical contracts", () => {
     ).toThrow("exactly its matching link assertion")
   })
 
+  test("strictly validates projection source update timestamps", () => {
+    // Regression proof: replacing the strict parser with Date.parse makes Bun roll February 30
+    // into March 2, so this assertion stops throwing.
+    expect(() =>
+      normalizeProjectionSourceEntry({
+        root: { kind: "object", ref: leftObject },
+        assertions: [
+          {
+            kind: "object",
+            ref: leftObject,
+            properties: {},
+            sourceUpdatedAt: "2026-02-30T03:04:05Z",
+          },
+        ],
+      })
+    ).toThrow("Projection source update timestamp must be a valid timestamp")
+
+    const normalized = normalizeProjectionSourceEntry({
+      root: { kind: "object", ref: leftObject },
+      assertions: [
+        {
+          kind: "object",
+          ref: leftObject,
+          properties: {},
+          sourceUpdatedAt: "2026-01-02 03:04:05-05:00",
+        },
+      ],
+    })
+    expect(normalized.assertions[0]).toMatchObject({
+      sourceUpdatedAt: "2026-01-02T08:04:05.000Z",
+    })
+  })
+
   test("collapses equal telemetry duplicates and rejects conflicting points", () => {
     const point = {
       series: { object: leftObject, propertyId: "temperature" },

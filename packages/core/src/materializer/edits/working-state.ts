@@ -25,6 +25,7 @@ import {
   resolveEffectiveLink,
   resolveEffectiveLinkSlot,
   resolveEffectiveObject,
+  storedObjectEditedAt,
   usableLinkSlotOverride,
 } from "../effective/resolve"
 import { linkCardinality } from "./read-set"
@@ -33,6 +34,8 @@ export interface WorkingObject {
   source: MaterializationObjectState["source"]
   originalOverride: StoredObjectOverride | null
   override: ObjectOverride | null
+  originalEditedAt: Readonly<Record<string, string>>
+  editedAt: Record<string, string>
   before: MaterializationObjectState["effective"]
   latestTelemetry: StoredTelemetryPoint[]
 }
@@ -112,11 +115,14 @@ function workingLinkSlotFromState(scope: MaterializationLinkScopeState): Working
 }
 
 export function workingObjectFromState(object: MaterializationObjectState): WorkingObject {
+  const editedAt = storedObjectEditedAt(object.override)
   return {
     ref: object.ref,
     source: object.source,
     originalOverride: object.override,
     override: object.override?.value ?? null,
+    originalEditedAt: editedAt,
+    editedAt: { ...editedAt },
     before: object.effective,
     latestTelemetry: [...object.latestTelemetry],
   }
@@ -141,6 +147,7 @@ export function resolveObject(
     primaryPropertyId: ontology.getPrimaryPropertyId(working.ref.objectTypeId),
     source: working.source,
     override: working.override,
+    editedAt: working.editedAt,
     latestTelemetry: working.latestTelemetry,
   })
 }

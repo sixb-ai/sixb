@@ -79,6 +79,7 @@ describe("Postgres storage migrations", () => {
             "025-connector-connections",
             "026-ai-cost-accounting",
             "027-agent-context-checkpoints",
+            "028-object-override-edit-times",
           ],
         },
       ])
@@ -271,6 +272,13 @@ describe("Postgres storage migrations", () => {
           id: "027-agent-context-checkpoints",
           status: "applied",
           version: 27,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "028-object-override-edit-times",
+          status: "applied",
+          version: 28,
         },
       ])
     })
@@ -1743,6 +1751,13 @@ describe("Postgres storage migrations", () => {
           id: "027-agent-context-checkpoints",
           status: "applied",
           version: 27,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "028-object-override-edit-times",
+          status: "applied",
+          version: 28,
         },
       ])
     } finally {

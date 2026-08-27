@@ -36,6 +36,9 @@ function projectionDatasetColumns(projection: ProjectionDefinition): ReadonlySet
       ...Object.values(projection.links).flatMap((link) =>
         link.sourceField === undefined ? [] : [link.sourceField]
       ),
+      ...(projection.conflictResolution?.strategy === "mostRecent"
+        ? [projection.conflictResolution.sourceTimestamp]
+        : []),
     ])
   }
   if (projection._tag === "LinkProjectionDefinition") {
@@ -141,6 +144,26 @@ export function assertProjectionCompatibleWithDataset(input: {
             columnName: column.name,
             columnType: column.type,
           }
+        )
+      }
+    }
+
+    if (projection.conflictResolution?.strategy === "mostRecent") {
+      const column = requireColumn(
+        columnsByName,
+        projection.conflictResolution.sourceTimestamp,
+        context
+      )
+      if (column.type !== "timestamp") {
+        throw invalidProjectionDefinition(
+          `[SixbProjectionWorker] Projection '${projection.id}' source timestamp '${column.name}' must be a timestamp dataset column.`,
+          { ...context, columnName: column.name, columnType: column.type }
+        )
+      }
+      if (column.nullable === true) {
+        throw invalidProjectionDefinition(
+          `[SixbProjectionWorker] Projection '${projection.id}' source timestamp '${column.name}' must be a non-null timestamp dataset column.`,
+          { ...context, columnName: column.name, columnType: column.type, nullable: true }
         )
       }
     }

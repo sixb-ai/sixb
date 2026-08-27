@@ -315,6 +315,30 @@ export function validateProjectionsAtStartup(
     }
 
     const datasetColumnNames = new Set(dataset.schema.columns.map((column) => column.name))
+    const conflictResolution = projection.conflictResolution ?? { strategy: "editsWin" }
+    if (conflictResolution.strategy === "mostRecent") {
+      const sourceTimestamp = dataset.schema.columns.find(
+        (column) => column.name === conflictResolution.sourceTimestamp
+      )
+      if (!sourceTimestamp) {
+        throw new ProjectionValidationError(
+          `${prefix}: source timestamp "${conflictResolution.sourceTimestamp}" references unknown ` +
+            `dataset column on dataset "${projection.datasetId}"`
+        )
+      }
+      if (sourceTimestamp.type !== "timestamp") {
+        throw new ProjectionValidationError(
+          `${prefix}: source timestamp "${conflictResolution.sourceTimestamp}" must reference a ` +
+            `timestamp dataset column`
+        )
+      }
+      if (sourceTimestamp.nullable === true) {
+        throw new ProjectionValidationError(
+          `${prefix}: source timestamp "${conflictResolution.sourceTimestamp}" must reference a ` +
+            `non-null timestamp dataset column`
+        )
+      }
+    }
     const propertyIds = new Set(objectType.properties.map((p) => p.id))
     for (const [propId, columnName] of Object.entries(projection.properties)) {
       if (!propertyIds.has(propId)) {

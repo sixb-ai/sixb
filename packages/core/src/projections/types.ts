@@ -39,6 +39,11 @@ export interface ForeignKeyDescriptor {
   readonly targetObjectTypeId: string
 }
 
+/** Resolves competing source-projection and managed-edit values for projected properties. */
+export type SourceEditConflictResolution =
+  | { readonly strategy: "editsWin" }
+  | { readonly strategy: "mostRecent"; readonly sourceTimestamp: string }
+
 /**
  * Lowered, serializable definition for projecting a dataset into object instances.
  *
@@ -56,6 +61,8 @@ export interface ObjectProjectionDefinition {
   readonly properties: Readonly<Record<string, string>>
   /** Maps link id -> FK descriptor. Empty `{}` when no FK links are projected. */
   readonly links: Readonly<Record<string, ForeignKeyDescriptor>>
+  /** Defaults to `editsWin` when omitted by a legacy lowered definition. */
+  readonly conflictResolution?: SourceEditConflictResolution
 }
 
 /**

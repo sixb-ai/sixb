@@ -70,6 +70,9 @@ import aiCostAccountingSql from "./migrations/026-ai-cost-accounting.sql" with {
 import agentContextCheckpointsSql from "./migrations/027-agent-context-checkpoints.sql" with {
   type: "text",
 }
+import objectOverrideEditTimesSql from "./migrations/028-object-override-edit-times.sql" with {
+  type: "text",
+}
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -350,6 +353,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("025-connector-connections", connectorConnectionsSql),
     pgSql("026-ai-cost-accounting", aiCostAccountingSql),
     pgSql("027-agent-context-checkpoints", agentContextCheckpointsSql),
+    pgSql("028-object-override-edit-times", objectOverrideEditTimesSql),
   ],
 })
 

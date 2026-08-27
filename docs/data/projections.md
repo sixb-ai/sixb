@@ -44,6 +44,35 @@ export const customerProjection = defineProjection("customer-proj", Customer)
 
 The object property `id` reads from column `customer_id`, `name` from `contact_name`, and so on.
 
+### Source and Action conflict resolution
+
+By default, an Action edit to a projected property remains authoritative until application code
+resets that property. This `editsWin` policy is useful when Sixb owns the decision.
+
+When the source system remains authoritative, use `mostRecent` with a non-null timestamp column
+that contains the source system's own update time:
+
+```ts
+export const githubIssueProjection = defineProjection("github-issues", GitHubIssue)
+  .fromDataset(githubIssues)
+  .properties({
+    id: "id",
+    title: "title",
+    body: "body",
+    state: "state",
+  })
+  .resolveConflicts({
+    strategy: "mostRecent",
+    sourceTimestamp: "updated_at",
+  })
+```
+
+Resolution is per property. A source value wins when its timestamp is equal to or newer than that
+property's edit time; otherwise the Action edit wins. Editing one property does not refresh any
+other property's edit time. Unmapped properties remain edit-only. Use the source record's update
+time—not dataset ingestion or commit time—because those times do not establish when the source
+value changed.
+
 ## Links from foreign keys
 
 When a row carries a foreign key, turn it into an ontology link with `.withLinks(...)`. Each entry is

@@ -10578,6 +10578,14 @@ export type ListProjectionsResponses = {
           targetObjectTypeId: string
         }
       }
+      conflictResolution:
+        | {
+            strategy: "editsWin"
+          }
+        | {
+            strategy: "mostRecent"
+            sourceTimestamp: string
+          }
       latestRun:
         | {
             id: string
@@ -11132,6 +11140,14 @@ export type GetProjectionResponses = {
             targetObjectTypeId: string
           }
         }
+        conflictResolution:
+          | {
+              strategy: "editsWin"
+            }
+          | {
+              strategy: "mostRecent"
+              sourceTimestamp: string
+            }
         latestRun:
           | {
               id: string

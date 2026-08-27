@@ -26,6 +26,8 @@ import type { StoredSourceLinkAssertion, StoredSourceObjectAssertion } from "./s
 export interface StoredObjectOverride {
   readonly ref: OntologyObjectRef
   readonly value: ObjectOverride
+  /** Per-property Action/runtime edit time. Legacy rows fall back to `updatedAt`. */
+  readonly editedAt?: Readonly<Record<string, string>>
   readonly lastCommitId: string
   readonly updatedAt: string
 }
@@ -160,6 +162,7 @@ export interface MaterializationPlanHeader {
 export interface ExactObjectOverrideWrite {
   readonly ref: OntologyObjectRef
   readonly value: ObjectOverride
+  readonly editedAt: Readonly<Record<string, string>>
   readonly expectedLastCommitId: string | null
   readonly lastCommitId: string
   readonly updatedAt: string

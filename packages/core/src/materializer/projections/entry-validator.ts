@@ -118,7 +118,23 @@ function validateObjectAssertion(
       `Projection '${resolved.projectionId}' asserted unowned property '${assertion.ref.objectTypeId}.${propertyId}'.`
     )
   }
-  return { ...assertion, properties }
+  const conflictResolution = resolved.definition.conflictResolution ?? { strategy: "editsWin" }
+  if (conflictResolution.strategy === "mostRecent" && assertion.sourceUpdatedAt === undefined) {
+    throw new MaterializationValidationError(
+      `Projection '${resolved.projectionId}' requires source update timestamp ` +
+        `'${conflictResolution.sourceTimestamp}' on every object assertion.`
+    )
+  }
+  return {
+    kind: "object",
+    ref: assertion.ref,
+    properties,
+    conflictResolution: { ...conflictResolution },
+    projectedPropertyIds: [...owned].sort(),
+    ...(conflictResolution.strategy === "mostRecent"
+      ? { sourceUpdatedAt: assertion.sourceUpdatedAt }
+      : {}),
+  }
 }
 
 function validateLinkAssertion(

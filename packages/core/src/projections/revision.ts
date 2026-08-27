@@ -147,6 +147,7 @@ function normalizeProjectionDefinition(projection: ProjectionDefinition): JsonVa
             },
           ])
       ),
+      conflictResolution: projection.conflictResolution ?? { strategy: "editsWin" },
     }
   }
   if (projection._tag === "LinkProjectionDefinition") {
@@ -177,6 +178,9 @@ function projectionColumns(projection: ProjectionDefinition): Set<string> {
       ...Object.values(projection.links).flatMap((link) =>
         link.sourceField === undefined ? [] : [link.sourceField]
       ),
+      ...(projection.conflictResolution?.strategy === "mostRecent"
+        ? [projection.conflictResolution.sourceTimestamp]
+        : []),
     ])
   }
   if (projection._tag === "LinkProjectionDefinition") {

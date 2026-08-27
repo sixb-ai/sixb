@@ -1720,6 +1720,7 @@ describe("in-memory ontology storage", () => {
           value.overrides.objects.upserts.push({
             ref: objectA,
             value: { kind: "create", properties: { name: "a" } },
+            editedAt: { name: committedAt },
             expectedLastCommitId: null,
             lastCommitId: "wrong",
             updatedAt: committedAt,
@@ -1733,6 +1734,7 @@ describe("in-memory ontology storage", () => {
           value.overrides.objects.upserts.push({
             ref: objectA,
             value: { kind: "create", properties: { name: "a" } },
+            editedAt: { name: committedAt },
             expectedLastCommitId: "stale",
             lastCommitId: commitId,
             updatedAt: committedAt,

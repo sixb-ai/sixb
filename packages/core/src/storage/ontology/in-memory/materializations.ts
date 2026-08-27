@@ -588,6 +588,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
             projectId,
             ref: item.ref,
             value: item.value,
+            editedAt: { ...item.editedAt },
             lastCommitId: item.lastCommitId,
             updatedAt: item.updatedAt,
           })

@@ -7,7 +7,9 @@ import type { ProjectionDispatchDescriptor } from "./types"
  *
  * `projectionTargetOf` derives the object types a projection writes, to record them on the run.
  * `validateTelemetryProjectionFieldMapping` re-checks a telemetry mapping against the dataset schema
- * before writing. Both are plumbing, so they live here instead of on the `@sixb/core` root.
+ * before writing. `parseDatasetTimestamp` keeps worker timestamps aligned with the materializer's
+ * authoritative validation. These are plumbing, so they live here instead of on the
+ * `@sixb/core` root.
  */
 export { projectionTargetOf } from "./builders"
 export {
@@ -27,6 +29,7 @@ export {
   ProjectionRunDispatcher,
 } from "./run-dispatch"
 export { createProjectionRunId } from "./run-id"
+export { parseDatasetTimestamp } from "./timestamp"
 export { validateTelemetryProjectionFieldMapping } from "./validation"
 
 export type { ProjectionDispatchDescriptor, ProjectionMaterializationIdentity, ProjectionRegistry }

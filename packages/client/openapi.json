@@ -30820,6 +30820,35 @@
                               "additionalProperties": false
                             }
                           },
+                          "conflictResolution": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "strategy": {
+                                    "type": "string",
+                                    "enum": ["editsWin"]
+                                  }
+                                },
+                                "required": ["strategy"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "strategy": {
+                                    "type": "string",
+                                    "enum": ["mostRecent"]
+                                  },
+                                  "sourceTimestamp": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["strategy", "sourceTimestamp"],
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
                           "latestRun": {
                             "anyOf": [
                               {
@@ -31364,6 +31393,7 @@
                           "datasetId",
                           "properties",
                           "links",
+                          "conflictResolution",
                           "latestRun"
                         ],
                         "additionalProperties": false
@@ -32611,6 +32641,35 @@
                             "additionalProperties": false
                           }
                         },
+                        "conflictResolution": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "strategy": {
+                                  "type": "string",
+                                  "enum": ["editsWin"]
+                                }
+                              },
+                              "required": ["strategy"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "strategy": {
+                                  "type": "string",
+                                  "enum": ["mostRecent"]
+                                },
+                                "sourceTimestamp": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["strategy", "sourceTimestamp"],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
                         "latestRun": {
                           "anyOf": [
                             {
@@ -33137,6 +33196,7 @@
                         "datasetId",
                         "properties",
                         "links",
+                        "conflictResolution",
                         "latestRun"
                       ],
                       "additionalProperties": false

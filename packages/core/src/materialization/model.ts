@@ -2,7 +2,11 @@ import type { SixbFailure } from "../errors/types"
 import type { EventOrigin } from "../events/envelope"
 import type { PropertyChange, PropertyChangeMap } from "../events/property-changes"
 import type { JsonValue } from "../json"
-import type { ProjectionProtocolIdentity, ProjectionRunFailureCode } from "../projections/types"
+import type {
+  ProjectionProtocolIdentity,
+  ProjectionRunFailureCode,
+  SourceEditConflictResolution,
+} from "../projections/types"
 
 export type { ProjectionProtocolIdentity } from "../projections/types"
 
@@ -152,6 +156,12 @@ export type ProjectionSourceAssertion =
       readonly kind: "object"
       readonly ref: OntologyObjectRef
       readonly properties: Readonly<Record<string, JsonValue>>
+      /** Canonical source-system update time supplied for `mostRecent` resolution. */
+      readonly sourceUpdatedAt?: string
+      /** Pinned by the materializer from the versioned projection definition. */
+      readonly conflictResolution?: SourceEditConflictResolution
+      /** Mapped properties, including properties absent from this row's value. */
+      readonly projectedPropertyIds?: readonly string[]
     }
   | {
       readonly kind: "link"

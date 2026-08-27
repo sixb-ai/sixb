@@ -25,6 +25,7 @@ import {
   projectionEntityKey,
   telemetryPointKey,
 } from "../../materialization/refs"
+import { parseDatasetTimestamp } from "../../projections/timestamp"
 
 export function normalizeJsonProperties(
   properties: Readonly<Record<string, unknown>>,
@@ -65,6 +66,16 @@ function normalizeTimestamp(value: string, label: string): string {
     throw new MaterializationValidationError(`${label} must be a valid timestamp.`)
   }
   return new Date(milliseconds).toISOString()
+}
+
+function normalizeProjectionSourceTimestamp(value: string): string {
+  const timestamp = parseDatasetTimestamp(value)
+  if (!timestamp) {
+    throw new MaterializationValidationError(
+      "Projection source update timestamp must be a valid timestamp."
+    )
+  }
+  return timestamp.toISOString()
 }
 
 function normalizePropertyIds(values: readonly string[], label: string): readonly string[] {
@@ -347,6 +358,11 @@ function normalizeProjectionAssertion(
         kind: "object",
         ref: normalizeObjectRef(assertion.ref),
         properties: normalizeJsonProperties(assertion.properties),
+        ...(assertion.sourceUpdatedAt !== undefined
+          ? {
+              sourceUpdatedAt: normalizeProjectionSourceTimestamp(assertion.sourceUpdatedAt),
+            }
+          : {}),
       })
     : Object.freeze({
         kind: "link",
