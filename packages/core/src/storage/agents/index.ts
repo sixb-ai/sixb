@@ -3,6 +3,9 @@ export { AgentStorageError } from "./errors"
 export type { InMemoryAgentStorageSnapshot } from "./in-memory"
 export { InMemoryAgentStorage } from "./in-memory"
 export type {
+  AgentContextCheckpointReason,
+  AgentContextCheckpointRecord,
+  AgentContextCheckpointStore,
   AgentExecutionStatus,
   AgentMessageRecord,
   AgentMessageRole,
@@ -22,6 +25,7 @@ export type {
   AgentThreadStore,
   AppendAgentMessageInput,
   ConfirmAgentRunExecutionOwnershipInput,
+  CreateAgentContextCheckpointInput,
   CreateAgentRunInput,
   CreateAgentThreadInput,
   DeleteAgentMessagesByRunInput,

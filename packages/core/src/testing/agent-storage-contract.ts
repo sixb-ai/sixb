@@ -8,15 +8,17 @@ import {
   type AgentStorage,
   AgentStorageError,
   type AgentStorageErrorCode,
+  type CreateAgentContextCheckpointInput,
   type CreateAgentRunInput,
   type CreateAgentThreadInput,
   type StartAgentRunInput,
 } from "../storage/agents"
 import type { AuthStorage } from "../storage/auth"
 import type { ExecutionStorage } from "../storage/executions"
+import type { Storage } from "../storage/types"
 import { createTestAgentExecution } from "./agent-execution"
 
-export interface AgentStorageContractStorage {
+export interface AgentStorageContractStorage extends Pick<Storage, "transaction"> {
   readonly agents: AgentStorage
   readonly auth: AuthStorage
   readonly executions: ExecutionStorage
@@ -102,6 +104,30 @@ function runInput(overrides: Partial<TestRunInput> = {}): TestRunInput {
   }
 }
 
+function checkpointInput(
+  overrides: Partial<CreateAgentContextCheckpointInput> = {}
+): CreateAgentContextCheckpointInput {
+  return {
+    id: "checkpoint_1",
+    projectId,
+    threadId: "thr_1",
+    createdByRunId: "run_2",
+    expectedPreviousCheckpointId: null,
+    expectedHeadSeq: 3,
+    executionToken: "exec_2",
+    reason: "threshold",
+    summary: "The user asked for one and the agent answered two.",
+    summaryFormatVersion: 1,
+    summarizedThroughSeq: 2,
+    observedHeadSeq: 3,
+    estimatedInputTokensBefore: 1_000,
+    estimatedInputTokensAfter: 300,
+    summaryModelId: "test-model",
+    createdAt: at("2026-06-23T10:03:00.000Z"),
+    ...overrides,
+  }
+}
+
 async function createAndStartRun(
   storage: AgentStorage,
   fixture: AgentStorageContractStorage,
@@ -131,12 +157,55 @@ async function createRun(
   return storage.runs.create(input)
 }
 
+async function prepareCheckpointCandidate(
+  storage: AgentStorage,
+  fixture: AgentStorageContractStorage
+): Promise<void> {
+  await storage.threads.create(threadInput())
+  await storage.messages.append({
+    id: "m1",
+    projectId,
+    threadId: "thr_1",
+    runId: null,
+    role: "user",
+    parts: [{ type: "text", text: "one" }],
+  })
+  await createAndStartRun(storage, fixture, runInput({ id: "run_1" }))
+  await storage.messages.append({
+    id: "m2",
+    projectId,
+    threadId: "thr_1",
+    runId: "run_1",
+    role: "assistant",
+    parts: [{ type: "text", text: "two" }],
+  })
+  await storage.runs.finish({
+    id: "run_1",
+    projectId,
+    executionToken: "exec_1",
+    status: "succeeded",
+  })
+  await storage.messages.append({
+    id: "m3",
+    projectId,
+    threadId: "thr_1",
+    runId: null,
+    role: "user",
+    parts: [{ type: "text", text: "three" }],
+  })
+  await createAndStartRun(
+    storage,
+    fixture,
+    runInput({ id: "run_2", triggerMessageId: "m3", execution: execution("exec_2") })
+  )
+}
+
 /**
  * Runs the shared `AgentStorage` contract against any storage implementation.
  *
  * This is the storage-independent specification for Sixb agent persistence: thread lifecycle and
  * project isolation, single-flight run reservation, execution reclaim, run finalization with
- * execution metadata, and message append with thread-stats bookkeeping.
+ * execution metadata, message append with thread-stats bookkeeping, and fenced context checkpoints.
  */
 export function runAgentStorageContractSuite<TStorage extends AgentStorageContractStorage>(
   label: string,
@@ -913,6 +982,15 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
         })
         expect(users.messages.map((message) => message.id)).toEqual(["m1", "m3"])
 
+        const retainedTail = await storage.messages.list({
+          projectId,
+          threadId: "thr_1",
+          afterSeq: 1,
+          order: "asc",
+        })
+        expect(retainedTail.messages.map((message) => message.id)).toEqual(["m2", "m3"])
+        expect(retainedTail.total).toBe(2)
+
         const firstPage = await storage.messages.list({
           projectId,
           threadId: "thr_1",
@@ -968,6 +1046,211 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
             parts: [{ type: "text", text: "hi" }],
           }),
           "run_not_found"
+        )
+      })
+    })
+
+    // ── context checkpoints ─────────────────────────────────────────────────────────────────
+
+    test("creates an idempotent checkpoint without mutating the transcript", async () => {
+      await withStorage(async (storage, fixture) => {
+        await prepareCheckpointCandidate(storage, fixture)
+        await storage.threads.create(threadInput({ id: "thr_2" }))
+
+        const threadBefore = await storage.threads.getById({ projectId, id: "thr_1" })
+        const [created, replayed] = await Promise.all([
+          storage.checkpoints.create(checkpointInput()),
+          storage.checkpoints.create(checkpointInput()),
+        ])
+
+        expect(replayed).toEqual(created)
+        expect(created).toMatchObject({
+          id: "checkpoint_1",
+          createdByRunId: "run_2",
+          summarizedThroughSeq: 2,
+          observedHeadSeq: 3,
+        })
+        expect(await storage.checkpoints.getLatest({ projectId, threadId: "thr_1" })).toEqual(
+          created
+        )
+        expect(
+          await storage.checkpoints.getLatest({ projectId: otherProjectId, threadId: "thr_1" })
+        ).toBeNull()
+        expect(await storage.checkpoints.getLatest({ projectId, threadId: "thr_2" })).toBeNull()
+
+        const retained = await storage.messages.list({
+          projectId,
+          threadId: "thr_1",
+          afterSeq: created.summarizedThroughSeq,
+          order: "asc",
+        })
+        expect(retained.messages.map((message) => message.id)).toEqual(["m3"])
+
+        const complete = await storage.messages.list({
+          projectId,
+          threadId: "thr_1",
+          order: "asc",
+        })
+        expect(complete.messages.map((message) => message.id)).toEqual(["m1", "m2", "m3"])
+        expect(await storage.threads.getById({ projectId, id: "thr_1" })).toEqual(threadBefore)
+      })
+    })
+
+    test("rejects checkpoints from an inactive run or a different thread", async () => {
+      await withStorage(async (storage, fixture) => {
+        await prepareCheckpointCandidate(storage, fixture)
+        await storage.threads.create(threadInput({ id: "thr_2" }))
+
+        await expectAgentError(
+          storage.checkpoints.create(checkpointInput({ threadId: "thr_2" })),
+          "invalid_input"
+        )
+
+        await storage.runs.finish({
+          id: "run_2",
+          projectId,
+          executionToken: "exec_2",
+          status: "failed",
+        })
+        await expectAgentError(storage.checkpoints.create(checkpointInput()), "invalid_state")
+        expect(await storage.checkpoints.getLatest({ projectId, threadId: "thr_1" })).toBeNull()
+      })
+    })
+
+    test("rolls back a checkpoint with its containing storage transaction", async () => {
+      await withStorage(async (storage, fixture) => {
+        await prepareCheckpointCandidate(storage, fixture)
+        const rollback = new Error("rollback checkpoint")
+
+        await expect(
+          fixture.transaction(async (tx) => {
+            if (!tx.agents) throw new Error("Expected agent storage in transaction.")
+            const created = await tx.agents.checkpoints.create(checkpointInput())
+            expect(await tx.agents.checkpoints.getLatest({ projectId, threadId: "thr_1" })).toEqual(
+              created
+            )
+            throw rollback
+          })
+        ).rejects.toBe(rollback)
+
+        expect(await storage.checkpoints.getLatest({ projectId, threadId: "thr_1" })).toBeNull()
+      })
+    })
+
+    test("fences checkpoint creation by execution, message head, and prior checkpoint", async () => {
+      await withStorage(async (storage, fixture) => {
+        await prepareCheckpointCandidate(storage, fixture)
+
+        await expectAgentError(
+          storage.checkpoints.create(checkpointInput({ executionToken: "stale" })),
+          "execution_lost"
+        )
+        await expectAgentError(
+          storage.checkpoints.create(
+            checkpointInput({ expectedHeadSeq: 2, observedHeadSeq: 2, summarizedThroughSeq: 1 })
+          ),
+          "invalid_state"
+        )
+        await expectAgentError(
+          storage.checkpoints.create(
+            checkpointInput({ expectedPreviousCheckpointId: "checkpoint_missing" })
+          ),
+          "invalid_state"
+        )
+        await expectAgentError(
+          storage.checkpoints.create(checkpointInput({ summarizedThroughSeq: 1 })),
+          "invalid_input"
+        )
+
+        await storage.runs.reclaim({
+          id: "run_2",
+          projectId,
+          execution: execution("exec_2_reclaimed"),
+        })
+        await expectAgentError(storage.checkpoints.create(checkpointInput()), "execution_lost")
+
+        const reclaimedInput = checkpointInput({ executionToken: "exec_2_reclaimed" })
+        await storage.checkpoints.create(reclaimedInput)
+        await expectAgentError(
+          storage.checkpoints.create({ ...reclaimedInput, summary: "different" }),
+          "invalid_state"
+        )
+        await expectAgentError(storage.checkpoints.create(checkpointInput()), "execution_lost")
+        await storage.messages.append({
+          id: "m4",
+          projectId,
+          threadId: "thr_1",
+          runId: "run_2",
+          role: "assistant",
+          parts: [{ type: "text", text: "four" }],
+        })
+        await expectAgentError(storage.checkpoints.create(reclaimedInput), "invalid_state")
+      })
+    })
+
+    test("chains checkpoints only when the retained boundary advances", async () => {
+      await withStorage(async (storage, fixture) => {
+        await prepareCheckpointCandidate(storage, fixture)
+        await storage.checkpoints.create(checkpointInput())
+        await storage.messages.append({
+          id: "m4",
+          projectId,
+          threadId: "thr_1",
+          runId: "run_2",
+          role: "assistant",
+          parts: [{ type: "text", text: "four" }],
+        })
+        await storage.runs.finish({
+          id: "run_2",
+          projectId,
+          executionToken: "exec_2",
+          status: "succeeded",
+        })
+        await storage.messages.append({
+          id: "m5",
+          projectId,
+          threadId: "thr_1",
+          runId: null,
+          role: "user",
+          parts: [{ type: "text", text: "five" }],
+        })
+        await createAndStartRun(
+          storage,
+          fixture,
+          runInput({ id: "run_3", triggerMessageId: "m5", execution: execution("exec_3") })
+        )
+
+        await expectAgentError(
+          storage.checkpoints.create(
+            checkpointInput({
+              id: "checkpoint_2",
+              createdByRunId: "run_3",
+              expectedPreviousCheckpointId: "checkpoint_1",
+              expectedHeadSeq: 5,
+              executionToken: "exec_3",
+              summarizedThroughSeq: 2,
+              observedHeadSeq: 5,
+            })
+          ),
+          "invalid_input"
+        )
+
+        const second = await storage.checkpoints.create(
+          checkpointInput({
+            id: "checkpoint_2",
+            createdByRunId: "run_3",
+            expectedPreviousCheckpointId: "checkpoint_1",
+            expectedHeadSeq: 5,
+            executionToken: "exec_3",
+            summary: "The prior summary was extended through the fourth message.",
+            summarizedThroughSeq: 4,
+            observedHeadSeq: 5,
+            createdAt: at("2026-06-23T10:05:00.000Z"),
+          })
+        )
+        expect(second.previousCheckpointId).toBe("checkpoint_1")
+        expect(await storage.checkpoints.getLatest({ projectId, threadId: "thr_1" })).toEqual(
+          second
         )
       })
     })

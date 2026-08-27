@@ -70,6 +70,9 @@ import connectorConnectionsSql from "./migrations/025-connector-connections.sql"
   type: "text",
 }
 import aiCostAccountingSql from "./migrations/026-ai-cost-accounting.sql" with { type: "text" }
+import agentContextCheckpointsSql from "./migrations/027-agent-context-checkpoints.sql" with {
+  type: "text",
+}
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -151,6 +154,7 @@ export const sqliteStorageMigrations = defineMigrations({
     ),
     sqliteSql("025-connector-connections", connectorConnectionsSql),
     sqliteSql("026-ai-cost-accounting", aiCostAccountingSql),
+    sqliteSql("027-agent-context-checkpoints", agentContextCheckpointsSql),
   ],
 })
 

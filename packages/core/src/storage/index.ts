@@ -52,6 +52,9 @@ export {
   isTerminalActionRun,
 } from "./action-runs"
 export type {
+  AgentContextCheckpointReason,
+  AgentContextCheckpointRecord,
+  AgentContextCheckpointStore,
   AgentExecutionStatus,
   AgentMessageRecord,
   AgentMessageRole,
@@ -72,6 +75,7 @@ export type {
   AgentThreadStore,
   AppendAgentMessageInput,
   ConfirmAgentRunExecutionOwnershipInput,
+  CreateAgentContextCheckpointInput,
   CreateAgentRunInput,
   CreateAgentThreadInput,
   DeleteAgentMessagesByRunInput,

@@ -2,6 +2,7 @@ import type { AgentMessagePart, JsonValue, Principal } from "@sixb/core"
 import { parseSixbFailure } from "@sixb/core/internal/errors"
 import {
   AGENT_RUN_FAILURE_CODES,
+  type AgentContextCheckpointRecord,
   type AgentMessageRecord,
   type AgentRunDiagnostic,
   type AgentRunRecord,
@@ -63,6 +64,23 @@ export interface AgentMessageRow {
   content_version: number | string
   created_at: Date | string
   completed_at: Date | string | null
+}
+
+export interface AgentContextCheckpointRow {
+  project_id: string
+  id: string
+  thread_id: string
+  created_by_run_id: string
+  previous_checkpoint_id: string | null
+  reason: AgentContextCheckpointRecord["reason"]
+  summary: string
+  summary_format_version: number | string
+  summarized_through_seq: number | string
+  observed_head_seq: number | string
+  estimated_input_tokens_before: number | string
+  estimated_input_tokens_after: number | string
+  summary_model_id: string
+  created_at: Date | string
 }
 
 // ── row → record mappers ────────────────────────────────────────────────────────────────────────
@@ -131,6 +149,33 @@ export function rowToMessageRecord(row: AgentMessageRow): AgentMessageRecord {
     contentVersion: Number(row.content_version),
     createdAt: new Date(row.created_at),
     completedAt: row.completed_at ? new Date(row.completed_at) : undefined,
+  }
+}
+
+export function rowToContextCheckpointRecord(
+  row: AgentContextCheckpointRow
+): AgentContextCheckpointRecord {
+  const summaryFormatVersion = Number(row.summary_format_version)
+  if (summaryFormatVersion !== 1) {
+    throw new Error(
+      `[SixbPg] Unsupported agent context checkpoint summary format version '${summaryFormatVersion}'.`
+    )
+  }
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    threadId: row.thread_id,
+    createdByRunId: row.created_by_run_id,
+    previousCheckpointId: row.previous_checkpoint_id ?? undefined,
+    reason: row.reason,
+    summary: row.summary,
+    summaryFormatVersion: 1,
+    summarizedThroughSeq: Number(row.summarized_through_seq),
+    observedHeadSeq: Number(row.observed_head_seq),
+    estimatedInputTokensBefore: Number(row.estimated_input_tokens_before),
+    estimatedInputTokensAfter: Number(row.estimated_input_tokens_after),
+    summaryModelId: row.summary_model_id,
+    createdAt: new Date(row.created_at),
   }
 }
 

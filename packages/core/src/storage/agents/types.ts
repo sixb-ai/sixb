@@ -298,6 +298,8 @@ export interface DeleteAgentMessagesByRunInput {
 export interface ListAgentMessagesInput {
   readonly projectId: string
   readonly threadId: string
+  /** Return only messages whose per-thread sequence is greater than this retained boundary. */
+  readonly afterSeq?: number
   readonly roles?: readonly AgentMessageRole[]
   readonly limit?: number
   readonly offset?: number
@@ -308,6 +310,55 @@ export interface ListAgentMessagesResult {
   readonly messages: readonly AgentMessageRecord[]
   readonly hasMore: boolean
   readonly total: number
+}
+
+// ── agent_context_checkpoints — append-only model-context boundaries ──────────────────────────
+
+export type AgentContextCheckpointReason = "threshold" | "overflow"
+
+/**
+ * A durable summary boundary used only when projecting a thread into model context.
+ *
+ * Checkpoints never replace or mutate transcript messages. Normal thread reads remain authoritative
+ * and complete; the worker reads the latest checkpoint and only the retained message tail.
+ */
+export interface AgentContextCheckpointRecord {
+  readonly id: string
+  readonly projectId: string
+  readonly threadId: string
+  readonly createdByRunId: string
+  readonly previousCheckpointId?: string
+  readonly reason: AgentContextCheckpointReason
+  readonly summary: string
+  readonly summaryFormatVersion: 1
+  readonly summarizedThroughSeq: number
+  readonly observedHeadSeq: number
+  readonly estimatedInputTokensBefore: number
+  readonly estimatedInputTokensAfter: number
+  readonly summaryModelId: string
+  readonly createdAt: Date
+}
+
+export interface CreateAgentContextCheckpointInput {
+  readonly id: string
+  readonly projectId: string
+  readonly threadId: string
+  readonly createdByRunId: string
+  /** Compare-and-swap anchor. `null` means the thread must not have a prior checkpoint. */
+  readonly expectedPreviousCheckpointId: string | null
+  /** Compare-and-swap anchor for the complete transcript observed by the summarizer. */
+  readonly expectedHeadSeq: number
+  /** Current delivery token for `createdByRunId`; stale redeliveries must not write. */
+  readonly executionToken: string
+  readonly reason: AgentContextCheckpointReason
+  readonly summary: string
+  readonly summaryFormatVersion: 1
+  readonly summarizedThroughSeq: number
+  readonly observedHeadSeq: number
+  readonly estimatedInputTokensBefore: number
+  readonly estimatedInputTokensAfter: number
+  readonly summaryModelId: string
+  readonly createdAt?: Date
 }
 
 // ── Store ───────────────────────────────────────────────────────────────────────────────────────
@@ -351,8 +402,21 @@ export interface AgentMessageStore {
   list(input: ListAgentMessagesInput): Promise<ListAgentMessagesResult>
 }
 
+export interface AgentContextCheckpointStore {
+  /**
+   * Append one checkpoint after atomically validating run ownership and both transcript anchors.
+   * Repeating the same payload for the same creating run is idempotent.
+   */
+  create(input: CreateAgentContextCheckpointInput): Promise<AgentContextCheckpointRecord>
+  getLatest(input: {
+    readonly projectId: string
+    readonly threadId: string
+  }): Promise<AgentContextCheckpointRecord | null>
+}
+
 export interface AgentStorage {
   readonly threads: AgentThreadStore
   readonly runs: AgentRunStore
   readonly messages: AgentMessageStore
+  readonly checkpoints: AgentContextCheckpointStore
 }

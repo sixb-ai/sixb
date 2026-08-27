@@ -180,6 +180,11 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
     const whereClauses = ["project_id = ?", "thread_id = ?"]
     const args: SqliteValue[] = [input.projectId, input.threadId]
 
+    if (input.afterSeq !== undefined) {
+      whereClauses.push("seq > ?")
+      args.push(input.afterSeq)
+    }
+
     if (input.roles) {
       whereClauses.push(`role IN (${input.roles.map(() => "?").join(", ")})`)
       args.push(...input.roles)
