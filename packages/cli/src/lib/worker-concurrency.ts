@@ -1,36 +1,25 @@
-import { WORKER_TYPES, type WorkerConcurrency, type WorkerType } from "./worker-registry"
-
-const CONFIGURABLE_WORKER_TYPES = [
-  "sync",
-  "agent",
-  "pipeline",
-  "projection",
-  "workflow",
-] as const satisfies readonly WorkerType[]
-
-type ConfigurableWorkerType = (typeof CONFIGURABLE_WORKER_TYPES)[number]
-
-const concurrencyEnvironmentVariables = {
-  sync: "SIXB_SYNC_WORKER_CONCURRENCY",
-  agent: "SIXB_AGENT_WORKER_CONCURRENCY",
-  pipeline: "SIXB_PIPELINE_WORKER_CONCURRENCY",
-  projection: "SIXB_PROJECTION_WORKER_CONCURRENCY",
-  workflow: "SIXB_WORKFLOW_WORKER_CONCURRENCY",
-} as const satisfies Record<ConfigurableWorkerType, string>
+import {
+  type ConfigurableWorkerType,
+  WORKER_CONCURRENCY_CONFIG,
+  WORKER_TYPES,
+  type WorkerConcurrency,
+  type WorkerType,
+} from "./worker-registry"
 
 /** Resolve the scalar concurrency accepted by `sixb worker <type>`. */
 export function resolveSingleWorkerConcurrency(
   workerType: WorkerType,
   value: string | undefined
 ): WorkerConcurrency {
-  if (workerType === "action") {
-    if (value !== undefined || nonblank(process.env.SIXB_ACTION_WORKER_CONCURRENCY)) {
+  const definition = WORKER_CONCURRENCY_CONFIG[workerType]
+  if (!isConfigurableWorkerType(workerType)) {
+    if (value !== undefined || nonblank(process.env[definition.environmentVariable])) {
       throw fixedActionConcurrency()
     }
     return {}
   }
 
-  const environmentVariable = concurrencyEnvironmentVariables[workerType]
+  const environmentVariable = definition.environmentVariable
   const configured = value?.trim() ?? nonblank(process.env[environmentVariable])
   if (configured === undefined) return {}
 
@@ -42,22 +31,28 @@ export function resolveSingleWorkerConcurrency(
  * their environment variables; repeated CLI values use the last occurrence.
  */
 export function resolveWorkerConcurrency(values: readonly string[] = []): WorkerConcurrency {
-  const resolved: Partial<Record<WorkerType, number>> = {}
+  const overrides = values.map(parseWorkerConcurrencyEntry)
+  const overriddenWorkerTypes = new Set(overrides.map((entry) => entry.workerType))
+  const resolved: Partial<Record<ConfigurableWorkerType, number>> = {}
 
-  for (const workerType of CONFIGURABLE_WORKER_TYPES) {
-    const environmentVariable = concurrencyEnvironmentVariables[workerType]
+  for (const workerType of WORKER_TYPES) {
+    const definition = WORKER_CONCURRENCY_CONFIG[workerType]
+    if (!isConfigurableWorkerType(workerType)) {
+      if (nonblank(process.env[definition.environmentVariable])) {
+        throw fixedActionConcurrency()
+      }
+      continue
+    }
+    if (overriddenWorkerTypes.has(workerType)) continue
+
+    const environmentVariable = definition.environmentVariable
     const configured = nonblank(process.env[environmentVariable])
     if (configured !== undefined) {
       resolved[workerType] = parseConcurrency(configured, environmentVariable)
     }
   }
 
-  if (nonblank(process.env.SIXB_ACTION_WORKER_CONCURRENCY)) {
-    throw fixedActionConcurrency()
-  }
-
-  for (const value of values) {
-    const entry = parseWorkerConcurrencyEntry(value)
+  for (const entry of overrides) {
     resolved[entry.workerType] = entry.concurrency
   }
 
@@ -77,10 +72,10 @@ function parseWorkerConcurrencyEntry(value: string): {
   const configured = value.slice(separator + 1).trim()
   if (!isWorkerType(workerType)) {
     throw new Error(
-      `[SixbCLI] Unknown worker concurrency type '${workerType || value}'. Available: ${CONFIGURABLE_WORKER_TYPES.join(", ")}.`
+      `[SixbCLI] Unknown worker concurrency type '${workerType || value}'. Available: ${WORKER_TYPES.filter(isConfigurableWorkerType).join(", ")}.`
     )
   }
-  if (workerType === "action") {
+  if (!isConfigurableWorkerType(workerType)) {
     throw fixedActionConcurrency()
   }
 
@@ -108,6 +103,10 @@ function nonblank(value: string | undefined): string | undefined {
 
 function isWorkerType(value: string): value is WorkerType {
   return WORKER_TYPES.some((workerType) => workerType === value)
+}
+
+function isConfigurableWorkerType(value: WorkerType): value is ConfigurableWorkerType {
+  return WORKER_CONCURRENCY_CONFIG[value].configurable
 }
 
 function invalidConcurrency(value: string, source: string): Error {

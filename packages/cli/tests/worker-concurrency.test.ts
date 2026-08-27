@@ -44,6 +44,13 @@ describe("worker concurrency configuration", () => {
     expect(resolveSingleWorkerConcurrency("agent", "8")).toEqual({ agent: 8 })
   })
 
+  test("does not validate an environment value replaced by a typed CLI override", () => {
+    process.env.SIXB_AGENT_WORKER_CONCURRENCY = "invalid"
+
+    // Reverting to environment-first parsing makes this throw before the valid override is read.
+    expect(resolveWorkerConcurrency(["agent=8"])).toEqual({ agent: 8 })
+  })
+
   test("combines per-worker environments and repeatable typed overrides", () => {
     process.env.SIXB_AGENT_WORKER_CONCURRENCY = "3"
     process.env.SIXB_SYNC_WORKER_CONCURRENCY = "2"
