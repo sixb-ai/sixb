@@ -42,6 +42,7 @@ import { enqueueWorkflowAgentNodeResume, executeWorkflowAgentNode } from "./work
 const DEFAULT_AGENT_QUEUE_LEASE_MS = 60_000
 const DEFAULT_AGENT_CONCURRENCY = 4
 const DEFAULT_TURN_TIMEOUT_MS = 10 * 60_000
+const MAX_TIMER_DURATION_MS = 2_147_483_647
 const AGENT_DISPATCH_POLL_MS = 1_000
 /** Reconciliation is a safety net for failed request-time publication; an empty scan idles longer. */
 const AGENT_DISPATCH_IDLE_MS = 10_000
@@ -81,6 +82,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
 
   constructor(host: AgentWorkerHost, options: AgentWorkerOptions) {
     const leaseMs = options.leaseMs ?? DEFAULT_AGENT_QUEUE_LEASE_MS
+    const turnTimeoutMs = normalizeTurnTimeoutMs(options.turnTimeoutMs)
     super({
       projectId: host.id,
       queue: host.queues.agents,
@@ -93,7 +95,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
 
     this.host = host
     this.idleWithoutAgents = host.definitions.agents.list().length === 0
-    this.context = this.idleWithoutAgents ? null : buildAgentContext(host, options)
+    this.context = this.idleWithoutAgents ? null : buildAgentContext(host, options, turnTimeoutMs)
   }
 
   override async start(): Promise<void> {
@@ -658,7 +660,11 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
   }
 }
 
-function buildAgentContext(host: AgentWorkerHost, options: AgentWorkerOptions): AgentWorkerContext {
+function buildAgentContext(
+  host: AgentWorkerHost,
+  options: AgentWorkerOptions,
+  turnTimeoutMs: number
+): AgentWorkerContext {
   const storage = host.storage
   assertAgentWorkerStorage(storage)
   if (!host.sandboxes) {
@@ -693,7 +699,7 @@ function buildAgentContext(host: AgentWorkerHost, options: AgentWorkerOptions): 
     recoverAiModelCall: (record) => enqueueAiModelCallRecovery(host.queues.agents, record),
     agentSkills,
     defaultMaxSteps: options.defaultMaxSteps ?? DEFAULT_MAX_STEPS,
-    turnTimeoutMs: options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
+    turnTimeoutMs,
   }
 }
 
@@ -789,4 +795,15 @@ function normalizeConcurrency(value: number | undefined): number {
     )
   }
   return Math.floor(value)
+}
+
+function normalizeTurnTimeoutMs(value: number | undefined): number {
+  const timeoutMs = value ?? DEFAULT_TURN_TIMEOUT_MS
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_TIMER_DURATION_MS) {
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbAgentWorker] Agent turn timeout must be a positive integer no greater than ${MAX_TIMER_DURATION_MS}ms.`
+    )
+  }
+  return timeoutMs
 }

@@ -810,6 +810,62 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
       })
     })
 
+    test("deletes messages produced by a run and repairs thread stats", async () => {
+      await withStorage(async (storage, fixture) => {
+        await storage.threads.create(threadInput())
+        await storage.messages.append({
+          id: "msg_user_1",
+          projectId,
+          threadId: "thr_1",
+          runId: null,
+          role: "user",
+          parts: [{ type: "text", text: "Try this" }],
+          createdAt: at("2026-06-23T10:00:30.000Z"),
+        })
+        await createAndStartRun(storage, fixture, runInput({ id: "run_1" }))
+        await storage.messages.append({
+          id: "msg_asst_1",
+          projectId,
+          threadId: "thr_1",
+          runId: "run_1",
+          role: "assistant",
+          parts: [
+            { type: "text", text: "Partial answer" },
+            {
+              type: "tool-call",
+              toolCallId: "call_1",
+              toolName: "search",
+              input: { query: "sixb" },
+              state: "output-available",
+              output: { matches: 1 },
+            },
+          ],
+          createdAt: at("2026-06-23T10:01:00.000Z"),
+        })
+
+        await expect(
+          storage.messages.deleteByRunId({ projectId, threadId: "thr_1", runId: "run_1" })
+        ).resolves.toBe(1)
+        await expect(storage.messages.getById({ projectId, id: "msg_asst_1" })).resolves.toBeNull()
+
+        const messages = await storage.messages.list({ projectId, threadId: "thr_1" })
+        expect(messages.messages.map((message) => message.id)).toEqual(["msg_user_1"])
+        expect(messages.total).toBe(1)
+        await expect(storage.threads.getById({ projectId, id: "thr_1" })).resolves.toMatchObject({
+          messageCount: 1,
+          lastMessageAt: at("2026-06-23T10:00:30.000Z"),
+        })
+
+        await expect(
+          storage.messages.deleteByRunId({ projectId, threadId: "thr_1", runId: "run_1" })
+        ).resolves.toBe(0)
+        await expect(storage.threads.getById({ projectId, id: "thr_1" })).resolves.toMatchObject({
+          messageCount: 1,
+          lastMessageAt: at("2026-06-23T10:00:30.000Z"),
+        })
+      })
+    })
+
     test("lists messages with role filter, ordering, and pagination", async () => {
       await withStorage(async (storage, fixture) => {
         await storage.threads.create(threadInput())

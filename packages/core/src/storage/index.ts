@@ -74,6 +74,7 @@ export type {
   ConfirmAgentRunExecutionOwnershipInput,
   CreateAgentRunInput,
   CreateAgentThreadInput,
+  DeleteAgentMessagesByRunInput,
   FinishAgentRunInput,
   FinishQueuedAgentRunInput,
   ListAgentMessagesInput,

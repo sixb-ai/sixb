@@ -203,7 +203,7 @@ export function useAgentConversation({
     live,
     runs,
     messages,
-    messagesLoading: messagesQuery.isLoading,
+    messagesLoading: messagesQuery.isFetching,
   })
   const isRunning = presentation.kind === "responding"
   const waitingLonger = useDelayedWaitingCopy(
@@ -303,6 +303,9 @@ export function useAgentConversation({
         onSuccess: (response) => {
           setPendingSend({ run: response.run })
           void Promise.all([
+            queryClient.invalidateQueries({
+              queryKey: listAgentThreadMessagesQueryKey({ path: { threadId } }),
+            }),
             queryClient.invalidateQueries({
               queryKey: listAgentThreadRunsQueryKey({ path: { threadId } }),
             }),

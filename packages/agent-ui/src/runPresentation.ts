@@ -116,7 +116,8 @@ export function presentActiveTurn(sources: ActiveTurnSources): ActiveTurnPresent
   const timeoutRun = timeoutFromRun ?? timeoutFromEvent
   if (timeoutRun) {
     const hasProgress =
-      (live.runId === timeoutRun.id && hasCoherentLiveProgress(live.parts)) ||
+      (live.runId === timeoutRun.id &&
+        (live.finalizedMessageId !== null || hasCoherentLiveProgress(live.parts))) ||
       messages.some((message) => message.role === "assistant" && message.runId === timeoutRun.id)
     const timeoutMs = timeoutMsFromFailure(
       timeoutRun.error ?? (live.runId === timeoutRun.id ? live.finishError : null)
@@ -175,9 +176,9 @@ function hasCoherentLiveProgress(parts: readonly NormalizedPart[]): boolean {
   return parts.some((part) => {
     switch (part.kind) {
       case "text":
-        return part.text.length > 0
+        return part.text.trim().length > 0
       case "reasoning":
-        return !part.streaming && part.text.length > 0
+        return !part.streaming && part.text.trim().length > 0
       case "tool":
         return part.tool.state !== "input-streaming"
       case "file":

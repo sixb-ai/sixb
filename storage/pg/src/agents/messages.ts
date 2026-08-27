@@ -4,6 +4,7 @@ import {
   type AgentMessageStore,
   AgentStorageError,
   type AppendAgentMessageInput,
+  type DeleteAgentMessagesByRunInput,
   type ListAgentMessagesInput,
   type ListAgentMessagesResult,
 } from "@sixb/core/storage"
@@ -102,6 +103,54 @@ export class PgAgentMessageStore implements AgentMessageStore {
 
       throw error
     }
+  }
+
+  async deleteByRunId(input: DeleteAgentMessagesByRunInput): Promise<number> {
+    return runPgTransaction(this.sql, async (tx) => {
+      const [thread] = await tx<{ id: string }[]>`
+        SELECT id FROM agent_threads
+        WHERE project_id = ${input.projectId} AND id = ${input.threadId}
+        FOR UPDATE
+      `
+
+      if (!thread) {
+        throw new AgentStorageError(
+          "thread_not_found",
+          `[SixbPg] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
+        )
+      }
+
+      const deleted = await tx<{ id: string }[]>`
+        DELETE FROM agent_messages
+        WHERE project_id = ${input.projectId}
+          AND thread_id = ${input.threadId}
+          AND run_id = ${input.runId}
+        RETURNING id
+      `
+      if (deleted.length === 0) {
+        return 0
+      }
+
+      const updatedAt = new Date()
+      await tx`
+        UPDATE agent_threads
+        SET
+          message_count = (
+            SELECT COUNT(*) FROM agent_messages
+            WHERE project_id = ${input.projectId} AND thread_id = ${input.threadId}
+          ),
+          last_message_at = (
+            SELECT created_at FROM agent_messages
+            WHERE project_id = ${input.projectId} AND thread_id = ${input.threadId}
+            ORDER BY seq DESC
+            LIMIT 1
+          ),
+          updated_at = ${updatedAt}
+        WHERE project_id = ${input.projectId} AND id = ${input.threadId}
+      `
+
+      return deleted.length
+    })
   }
 
   async getById(params: { projectId: string; id: string }): Promise<AgentMessageRecord | null> {

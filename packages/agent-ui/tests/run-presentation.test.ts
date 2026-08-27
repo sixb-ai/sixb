@@ -226,6 +226,24 @@ describe("presentActiveTurn", () => {
     expect(presentation).toEqual({ kind: "timeout", run: running, hasProgress: true })
   })
 
+  test("a live timeout trusts a finalized message while the transcript refetch is pending", () => {
+    const running = run({ id: "r1", status: "running" })
+    const presentation = presentActiveTurn(
+      sources({
+        activeRunId: running.id,
+        pendingRun: running,
+        live: liveState({
+          runId: running.id,
+          finalizedMessageId: "message-r1",
+          finishStatus: "failed",
+          finishReason: "timeout",
+        }),
+      })
+    )
+
+    expect(presentation).toEqual({ kind: "timeout", run: running, hasProgress: true })
+  })
+
   test("a live timeout does not treat unsafe streaming fragments as resumable progress", () => {
     const running = run({ id: "r1", status: "running" })
     const presentation = presentActiveTurn(
@@ -237,6 +255,8 @@ describe("presentActiveTurn", () => {
           finishStatus: "failed",
           finishReason: "timeout",
           parts: [
+            { kind: "text", text: "   " },
+            { kind: "reasoning", text: "\n", streaming: false },
             { kind: "reasoning", text: "unfinished", streaming: true },
             {
               kind: "tool",
@@ -244,7 +264,7 @@ describe("presentActiveTurn", () => {
             },
             { kind: "step-start" },
           ],
-          partKeys: ["r1", "tool1", "step1"],
+          partKeys: ["t1", "r1", "r2", "tool1", "step1"],
         }),
       })
     )

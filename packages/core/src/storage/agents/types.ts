@@ -289,6 +289,12 @@ export interface AppendAgentMessageInput extends AgentMessage {
   readonly completedAt?: Date
 }
 
+export interface DeleteAgentMessagesByRunInput {
+  readonly projectId: string
+  readonly threadId: string
+  readonly runId: string
+}
+
 export interface ListAgentMessagesInput {
   readonly projectId: string
   readonly threadId: string
@@ -339,6 +345,8 @@ export interface AgentRunStore {
 export interface AgentMessageStore {
   /** Insert a message (its `parts` are the canonical content) and bump thread stats. */
   append(input: AppendAgentMessageInput): Promise<AgentMessageRecord>
+  /** Delete every message produced by one run and repair the thread's message stats. */
+  deleteByRunId(input: DeleteAgentMessagesByRunInput): Promise<number>
   getById(params: { projectId: string; id: string }): Promise<AgentMessageRecord | null>
   list(input: ListAgentMessagesInput): Promise<ListAgentMessagesResult>
 }
