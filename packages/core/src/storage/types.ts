@@ -2,6 +2,7 @@ import type { ActionRunStorage } from "./action-runs"
 import type { AgentStorage } from "./agents"
 import type { AiUsageStorage } from "./ai-usage"
 import type { AuthStorage } from "./auth"
+import type { ConnectorConnectionStorage } from "./connector-connections"
 import type { ExecutionStorage } from "./executions"
 import type { FileUploadSessionStore } from "./file-upload-sessions"
 import type { ObjectStorage } from "./objects/types"
@@ -301,6 +302,7 @@ export interface Storage {
   webhookRuns?: WebhookRunStorage
   rules?: RulesStorage
   fileUploadSessions?: FileUploadSessionStore
+  connectorConnections?: ConnectorConnectionStorage
 
   /** Lightweight reachability probe. It must not open a write transaction or run migrations. */
   ping(): Promise<void>

@@ -752,7 +752,15 @@
     },
     {
       "name": "Connectors",
-      "description": "Connector metadata and webhook routes"
+      "description": "Connector metadata"
+    },
+    {
+      "name": "Connector Connections",
+      "description": "Connected external accounts"
+    },
+    {
+      "name": "Connector Connection Runs",
+      "description": "Interactive OAuth connection runs"
     },
     {
       "name": "Webhooks",
@@ -4766,6 +4774,18 @@
                       "type": {
                         "type": "string"
                       },
+                      "connection": {
+                        "type": "object",
+                        "properties": {
+                          "authentication": {
+                            "type": "string",
+                            "enum": ["oauth2"]
+                          }
+                        },
+                        "required": ["authentication"],
+                        "additionalProperties": false,
+                        "nullable": true
+                      },
                       "syncIds": {
                         "type": "array",
                         "items": {
@@ -4810,7 +4830,7 @@
                         }
                       }
                     },
-                    "required": ["id", "type", "syncIds", "webhooks"],
+                    "required": ["id", "type", "connection", "syncIds", "webhooks"],
                     "additionalProperties": false
                   }
                 }
@@ -4849,6 +4869,18 @@
                     },
                     "type": {
                       "type": "string"
+                    },
+                    "connection": {
+                      "type": "object",
+                      "properties": {
+                        "authentication": {
+                          "type": "string",
+                          "enum": ["oauth2"]
+                        }
+                      },
+                      "required": ["authentication"],
+                      "additionalProperties": false,
+                      "nullable": true
                     },
                     "syncIds": {
                       "type": "array",
@@ -4894,7 +4926,7 @@
                       }
                     }
                   },
-                  "required": ["id", "type", "syncIds", "webhooks"],
+                  "required": ["id", "type", "connection", "syncIds", "webhooks"],
                   "additionalProperties": false
                 }
               }
@@ -4909,6 +4941,3234 @@
                   "properties": {
                     "error": {
                       "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/connectors/{connectorId}/connections": {
+      "get": {
+        "summary": "List connector connections",
+        "tags": ["Connector Connections"],
+        "operationId": "listConnectorConnections",
+        "parameters": [
+          {
+            "name": "connectorId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "connectorId": {
+                        "type": "string"
+                      },
+                      "owner": {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": ["project"]
+                          }
+                        },
+                        "required": ["type"],
+                        "additionalProperties": false
+                      },
+                      "slot": {
+                        "type": "string"
+                      },
+                      "account": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "avatarUrl": {
+                            "type": "string",
+                            "format": "uri"
+                          }
+                        },
+                        "required": ["id", "label"],
+                        "additionalProperties": false
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": ["connected", "needs_reauthorization", "disconnected"]
+                      }
+                    },
+                    "required": ["id", "connectorId", "owner", "slot", "account", "status"],
+                    "additionalProperties": false
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "connector.authorization_invalid",
+                        "connector.configuration_invalid"
+                      ],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["connector.not_found"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["internal.unexpected"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/connectors/{connectorId}/connections/{connectionId}": {
+      "delete": {
+        "summary": "Disconnect a connector account",
+        "tags": ["Connector Connections"],
+        "operationId": "disconnectConnectorConnection",
+        "security": [
+          {
+            "sixbCsrf": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connectorId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "connectionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["success"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "connector.authorization_invalid",
+                        "connector.configuration_invalid"
+                      ],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["connector.not_found"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "connector.authorization_required",
+                        "connector.operation_conflict",
+                        "connector.operation_in_progress",
+                        "connector.replacement_required",
+                        "connector.revocation_pending"
+                      ],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["internal.unexpected"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/connectors/{connectorId}/connections/{connectionId}/revoke": {
+      "post": {
+        "summary": "Revoke a connector authorization",
+        "tags": ["Connector Connections"],
+        "operationId": "revokeConnectorConnection",
+        "security": [
+          {
+            "sixbCsrf": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connectorId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "connectionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "affectedConnections": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "connectorId": {
+                            "type": "string"
+                          },
+                          "owner": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["project"]
+                              }
+                            },
+                            "required": ["type"],
+                            "additionalProperties": false
+                          },
+                          "slot": {
+                            "type": "string"
+                          },
+                          "account": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "avatarUrl": {
+                                "type": "string",
+                                "format": "uri"
+                              }
+                            },
+                            "required": ["id", "label"],
+                            "additionalProperties": false
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["connected", "needs_reauthorization", "disconnected"]
+                          }
+                        },
+                        "required": ["id", "connectorId", "owner", "slot", "account", "status"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["affectedConnections"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "connector.authorization_invalid",
+                        "connector.configuration_invalid"
+                      ],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["connector.not_found"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "connector.authorization_required",
+                        "connector.operation_conflict",
+                        "connector.operation_in_progress",
+                        "connector.replacement_required",
+                        "connector.revocation_pending"
+                      ],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["internal.unexpected"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Response for status 502",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["connector.adapter_invalid", "connector.provider_failed"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "connector.credentials_unavailable",
+                        "connector.provider_unavailable"
+                      ],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/connectors/{connectorId}/connection-runs": {
+      "post": {
+        "summary": "Start a connector connection run",
+        "tags": ["Connector Connection Runs"],
+        "operationId": "startConnectorConnectionRun",
+        "security": [
+          {
+            "sixbCsrf": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connectorId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "slot": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "returnTo": {
+                    "type": "string",
+                    "format": "uri"
+                  }
+                },
+                "required": ["slot", "returnTo"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "slot": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "returnTo": {
+                    "type": "string",
+                    "format": "uri"
+                  }
+                },
+                "required": ["slot", "returnTo"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "slot": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "returnTo": {
+                    "type": "string",
+                    "format": "uri"
+                  }
+                },
+                "required": ["slot", "returnTo"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Response for status 201",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "runId": {
+                      "type": "string"
+                    },
+                    "authorizationUrl": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "affectedConnections": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "connectorId": {
+                            "type": "string"
+                          },
+                          "owner": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["project"]
+                              }
+                            },
+                            "required": ["type"],
+                            "additionalProperties": false
+                          },
+                          "slot": {
+                            "type": "string"
+                          },
+                          "account": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "avatarUrl": {
+                                "type": "string",
+                                "format": "uri"
+                              }
+                            },
+                            "required": ["id", "label"],
+                            "additionalProperties": false
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["connected", "needs_reauthorization", "disconnected"]
+                          }
+                        },
+                        "required": ["id", "connectorId", "owner", "slot", "account", "status"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["runId", "authorizationUrl", "affectedConnections"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "connector.authorization_invalid",
+                        "connector.configuration_invalid"
+                      ],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["connector.not_found"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "connector.authorization_required",
+                        "connector.operation_conflict",
+                        "connector.operation_in_progress",
+                        "connector.replacement_required",
+                        "connector.revocation_pending"
+                      ],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["internal.unexpected"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Response for status 502",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["connector.adapter_invalid", "connector.provider_failed"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "connector.credentials_unavailable",
+                        "connector.provider_unavailable"
+                      ],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/connectors/{connectorId}/connection-runs/{runId}": {
+      "get": {
+        "summary": "Get a connector connection run",
+        "tags": ["Connector Connection Runs"],
+        "operationId": "getConnectorConnectionRun",
+        "parameters": [
+          {
+            "name": "connectorId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "connectorId": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["connect", "reauthorize"]
+                        },
+                        "owner": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["project"]
+                            }
+                          },
+                          "required": ["type"],
+                          "additionalProperties": false
+                        },
+                        "slot": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["waiting"]
+                        },
+                        "waitingFor": {
+                          "type": "string",
+                          "enum": ["provider_authorization"]
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "connectorId",
+                        "kind",
+                        "owner",
+                        "slot",
+                        "createdAt",
+                        "updatedAt",
+                        "status",
+                        "waitingFor",
+                        "expiresAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "connectorId": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["connect", "reauthorize"]
+                        },
+                        "owner": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["project"]
+                            }
+                          },
+                          "required": ["type"],
+                          "additionalProperties": false
+                        },
+                        "slot": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["running"]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "connectorId",
+                        "kind",
+                        "owner",
+                        "slot",
+                        "createdAt",
+                        "updatedAt",
+                        "status"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "connectorId": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["connect", "reauthorize"]
+                        },
+                        "owner": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["project"]
+                            }
+                          },
+                          "required": ["type"],
+                          "additionalProperties": false
+                        },
+                        "slot": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["waiting"]
+                        },
+                        "waitingFor": {
+                          "type": "string",
+                          "enum": ["account_selection"]
+                        },
+                        "accounts": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "avatarUrl": {
+                                "type": "string",
+                                "format": "uri"
+                              }
+                            },
+                            "required": ["id", "label"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "connectorId",
+                        "kind",
+                        "owner",
+                        "slot",
+                        "createdAt",
+                        "updatedAt",
+                        "status",
+                        "waitingFor",
+                        "accounts",
+                        "expiresAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "connectorId": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["connect", "reauthorize"]
+                        },
+                        "owner": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["project"]
+                            }
+                          },
+                          "required": ["type"],
+                          "additionalProperties": false
+                        },
+                        "slot": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["succeeded"]
+                        },
+                        "connections": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "connectorId": {
+                                "type": "string"
+                              },
+                              "owner": {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["project"]
+                                  }
+                                },
+                                "required": ["type"],
+                                "additionalProperties": false
+                              },
+                              "slot": {
+                                "type": "string"
+                              },
+                              "account": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "label": {
+                                    "type": "string"
+                                  },
+                                  "description": {
+                                    "type": "string"
+                                  },
+                                  "avatarUrl": {
+                                    "type": "string",
+                                    "format": "uri"
+                                  }
+                                },
+                                "required": ["id", "label"],
+                                "additionalProperties": false
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["connected", "needs_reauthorization", "disconnected"]
+                              }
+                            },
+                            "required": ["id", "connectorId", "owner", "slot", "account", "status"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "finishedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "connectorId",
+                        "kind",
+                        "owner",
+                        "slot",
+                        "createdAt",
+                        "updatedAt",
+                        "status",
+                        "connections",
+                        "finishedAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "connectorId": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["connect", "reauthorize"]
+                        },
+                        "owner": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["project"]
+                            }
+                          },
+                          "required": ["type"],
+                          "additionalProperties": false
+                        },
+                        "slot": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["failed"]
+                        },
+                        "error": {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "internal.unexpected",
+                                "connector.adapter_invalid",
+                                "connector.authorization_invalid",
+                                "connector.authorization_required",
+                                "connector.credentials_unavailable",
+                                "connector.not_found",
+                                "connector.operation_conflict",
+                                "connector.operation_in_progress",
+                                "connector.provider_failed",
+                                "connector.provider_unavailable"
+                              ]
+                            },
+                            "message": {
+                              "type": "string",
+                              "maxLength": 4096
+                            },
+                            "retryable": {
+                              "type": "boolean"
+                            },
+                            "at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "details": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              ]
+                            },
+                            "truncated": {
+                              "type": "boolean",
+                              "enum": [true]
+                            }
+                          },
+                          "required": ["code", "message", "retryable", "at"],
+                          "additionalProperties": false
+                        },
+                        "finishedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "connectorId",
+                        "kind",
+                        "owner",
+                        "slot",
+                        "createdAt",
+                        "updatedAt",
+                        "status",
+                        "error",
+                        "finishedAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "connectorId": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["connect", "reauthorize"]
+                        },
+                        "owner": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["project"]
+                            }
+                          },
+                          "required": ["type"],
+                          "additionalProperties": false
+                        },
+                        "slot": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["cancelled", "expired"]
+                        },
+                        "finishedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "connectorId",
+                        "kind",
+                        "owner",
+                        "slot",
+                        "createdAt",
+                        "updatedAt",
+                        "status",
+                        "finishedAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "connector.authorization_invalid",
+                        "connector.configuration_invalid"
+                      ],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["connector.not_found"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["internal.unexpected"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/connectors/{connectorId}/connections/{connectionId}/connection-runs": {
+      "post": {
+        "summary": "Add a connector connection from an existing authorization",
+        "tags": ["Connector Connection Runs"],
+        "operationId": "addConnectorConnection",
+        "security": [
+          {
+            "sixbCsrf": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connectorId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "connectionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "slot": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": ["slot"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "slot": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": ["slot"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "slot": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": ["slot"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Response for status 201",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "connectorId": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["connect", "reauthorize"]
+                        },
+                        "owner": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["project"]
+                            }
+                          },
+                          "required": ["type"],
+                          "additionalProperties": false
+                        },
+                        "slot": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["waiting"]
+                        },
+                        "waitingFor": {
+                          "type": "string",
+                          "enum": ["provider_authorization"]
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "connectorId",
+                        "kind",
+                        "owner",
+                        "slot",
+                        "createdAt",
+                        "updatedAt",
+                        "status",
+                        "waitingFor",
+                        "expiresAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "connectorId": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["connect", "reauthorize"]
+                        },
+                        "owner": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["project"]
+                            }
+                          },
+                          "required": ["type"],
+                          "additionalProperties": false
+                        },
+                        "slot": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["running"]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "connectorId",
+                        "kind",
+                        "owner",
+                        "slot",
+                        "createdAt",
+                        "updatedAt",
+                        "status"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "connectorId": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["connect", "reauthorize"]
+                        },
+                        "owner": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["project"]
+                            }
+                          },
+                          "required": ["type"],
+                          "additionalProperties": false
+                        },
+                        "slot": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["waiting"]
+                        },
+                        "waitingFor": {
+                          "type": "string",
+                          "enum": ["account_selection"]
+                        },
+                        "accounts": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "avatarUrl": {
+                                "type": "string",
+                                "format": "uri"
+                              }
+                            },
+                            "required": ["id", "label"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "connectorId",
+                        "kind",
+                        "owner",
+                        "slot",
+                        "createdAt",
+                        "updatedAt",
+                        "status",
+                        "waitingFor",
+                        "accounts",
+                        "expiresAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "connectorId": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["connect", "reauthorize"]
+                        },
+                        "owner": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["project"]
+                            }
+                          },
+                          "required": ["type"],
+                          "additionalProperties": false
+                        },
+                        "slot": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["succeeded"]
+                        },
+                        "connections": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "connectorId": {
+                                "type": "string"
+                              },
+                              "owner": {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["project"]
+                                  }
+                                },
+                                "required": ["type"],
+                                "additionalProperties": false
+                              },
+                              "slot": {
+                                "type": "string"
+                              },
+                              "account": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "label": {
+                                    "type": "string"
+                                  },
+                                  "description": {
+                                    "type": "string"
+                                  },
+                                  "avatarUrl": {
+                                    "type": "string",
+                                    "format": "uri"
+                                  }
+                                },
+                                "required": ["id", "label"],
+                                "additionalProperties": false
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["connected", "needs_reauthorization", "disconnected"]
+                              }
+                            },
+                            "required": ["id", "connectorId", "owner", "slot", "account", "status"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "finishedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "connectorId",
+                        "kind",
+                        "owner",
+                        "slot",
+                        "createdAt",
+                        "updatedAt",
+                        "status",
+                        "connections",
+                        "finishedAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "connectorId": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["connect", "reauthorize"]
+                        },
+                        "owner": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["project"]
+                            }
+                          },
+                          "required": ["type"],
+                          "additionalProperties": false
+                        },
+                        "slot": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["failed"]
+                        },
+                        "error": {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "internal.unexpected",
+                                "connector.adapter_invalid",
+                                "connector.authorization_invalid",
+                                "connector.authorization_required",
+                                "connector.credentials_unavailable",
+                                "connector.not_found",
+                                "connector.operation_conflict",
+                                "connector.operation_in_progress",
+                                "connector.provider_failed",
+                                "connector.provider_unavailable"
+                              ]
+                            },
+                            "message": {
+                              "type": "string",
+                              "maxLength": 4096
+                            },
+                            "retryable": {
+                              "type": "boolean"
+                            },
+                            "at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "details": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              ]
+                            },
+                            "truncated": {
+                              "type": "boolean",
+                              "enum": [true]
+                            }
+                          },
+                          "required": ["code", "message", "retryable", "at"],
+                          "additionalProperties": false
+                        },
+                        "finishedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "connectorId",
+                        "kind",
+                        "owner",
+                        "slot",
+                        "createdAt",
+                        "updatedAt",
+                        "status",
+                        "error",
+                        "finishedAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "connectorId": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["connect", "reauthorize"]
+                        },
+                        "owner": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["project"]
+                            }
+                          },
+                          "required": ["type"],
+                          "additionalProperties": false
+                        },
+                        "slot": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["cancelled", "expired"]
+                        },
+                        "finishedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "connectorId",
+                        "kind",
+                        "owner",
+                        "slot",
+                        "createdAt",
+                        "updatedAt",
+                        "status",
+                        "finishedAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "connector.authorization_invalid",
+                        "connector.configuration_invalid"
+                      ],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["connector.not_found"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "connector.authorization_required",
+                        "connector.operation_conflict",
+                        "connector.operation_in_progress",
+                        "connector.replacement_required",
+                        "connector.revocation_pending"
+                      ],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["internal.unexpected"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/connectors/{connectorId}/connection-runs/{runId}/selection": {
+      "post": {
+        "summary": "Select a connector account",
+        "tags": ["Connector Connection Runs"],
+        "operationId": "selectConnectorConnectionRunAccount",
+        "security": [
+          {
+            "sixbCsrf": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connectorId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "accountId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "replace": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["accountId"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "accountId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "replace": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["accountId"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "accountId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "replace": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["accountId"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "connectorId": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["connect", "reauthorize"]
+                        },
+                        "owner": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["project"]
+                            }
+                          },
+                          "required": ["type"],
+                          "additionalProperties": false
+                        },
+                        "slot": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["waiting"]
+                        },
+                        "waitingFor": {
+                          "type": "string",
+                          "enum": ["provider_authorization"]
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "connectorId",
+                        "kind",
+                        "owner",
+                        "slot",
+                        "createdAt",
+                        "updatedAt",
+                        "status",
+                        "waitingFor",
+                        "expiresAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "connectorId": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["connect", "reauthorize"]
+                        },
+                        "owner": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["project"]
+                            }
+                          },
+                          "required": ["type"],
+                          "additionalProperties": false
+                        },
+                        "slot": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["running"]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "connectorId",
+                        "kind",
+                        "owner",
+                        "slot",
+                        "createdAt",
+                        "updatedAt",
+                        "status"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "connectorId": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["connect", "reauthorize"]
+                        },
+                        "owner": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["project"]
+                            }
+                          },
+                          "required": ["type"],
+                          "additionalProperties": false
+                        },
+                        "slot": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["waiting"]
+                        },
+                        "waitingFor": {
+                          "type": "string",
+                          "enum": ["account_selection"]
+                        },
+                        "accounts": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "avatarUrl": {
+                                "type": "string",
+                                "format": "uri"
+                              }
+                            },
+                            "required": ["id", "label"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "connectorId",
+                        "kind",
+                        "owner",
+                        "slot",
+                        "createdAt",
+                        "updatedAt",
+                        "status",
+                        "waitingFor",
+                        "accounts",
+                        "expiresAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "connectorId": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["connect", "reauthorize"]
+                        },
+                        "owner": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["project"]
+                            }
+                          },
+                          "required": ["type"],
+                          "additionalProperties": false
+                        },
+                        "slot": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["succeeded"]
+                        },
+                        "connections": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "connectorId": {
+                                "type": "string"
+                              },
+                              "owner": {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["project"]
+                                  }
+                                },
+                                "required": ["type"],
+                                "additionalProperties": false
+                              },
+                              "slot": {
+                                "type": "string"
+                              },
+                              "account": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "label": {
+                                    "type": "string"
+                                  },
+                                  "description": {
+                                    "type": "string"
+                                  },
+                                  "avatarUrl": {
+                                    "type": "string",
+                                    "format": "uri"
+                                  }
+                                },
+                                "required": ["id", "label"],
+                                "additionalProperties": false
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["connected", "needs_reauthorization", "disconnected"]
+                              }
+                            },
+                            "required": ["id", "connectorId", "owner", "slot", "account", "status"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "finishedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "connectorId",
+                        "kind",
+                        "owner",
+                        "slot",
+                        "createdAt",
+                        "updatedAt",
+                        "status",
+                        "connections",
+                        "finishedAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "connectorId": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["connect", "reauthorize"]
+                        },
+                        "owner": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["project"]
+                            }
+                          },
+                          "required": ["type"],
+                          "additionalProperties": false
+                        },
+                        "slot": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["failed"]
+                        },
+                        "error": {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "internal.unexpected",
+                                "connector.adapter_invalid",
+                                "connector.authorization_invalid",
+                                "connector.authorization_required",
+                                "connector.credentials_unavailable",
+                                "connector.not_found",
+                                "connector.operation_conflict",
+                                "connector.operation_in_progress",
+                                "connector.provider_failed",
+                                "connector.provider_unavailable"
+                              ]
+                            },
+                            "message": {
+                              "type": "string",
+                              "maxLength": 4096
+                            },
+                            "retryable": {
+                              "type": "boolean"
+                            },
+                            "at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "details": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              ]
+                            },
+                            "truncated": {
+                              "type": "boolean",
+                              "enum": [true]
+                            }
+                          },
+                          "required": ["code", "message", "retryable", "at"],
+                          "additionalProperties": false
+                        },
+                        "finishedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "connectorId",
+                        "kind",
+                        "owner",
+                        "slot",
+                        "createdAt",
+                        "updatedAt",
+                        "status",
+                        "error",
+                        "finishedAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "connectorId": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["connect", "reauthorize"]
+                        },
+                        "owner": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["project"]
+                            }
+                          },
+                          "required": ["type"],
+                          "additionalProperties": false
+                        },
+                        "slot": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["cancelled", "expired"]
+                        },
+                        "finishedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "connectorId",
+                        "kind",
+                        "owner",
+                        "slot",
+                        "createdAt",
+                        "updatedAt",
+                        "status",
+                        "finishedAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "connector.authorization_invalid",
+                        "connector.configuration_invalid"
+                      ],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["connector.not_found"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "connector.authorization_required",
+                        "connector.operation_conflict",
+                        "connector.operation_in_progress",
+                        "connector.replacement_required",
+                        "connector.revocation_pending"
+                      ],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["internal.unexpected"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/connectors/{connectorId}/connections/{connectionId}/reauthorize": {
+      "post": {
+        "summary": "Reauthorize a connector connection",
+        "tags": ["Connector Connection Runs"],
+        "operationId": "reauthorizeConnectorConnection",
+        "security": [
+          {
+            "sixbCsrf": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connectorId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "connectionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "returnTo": {
+                    "type": "string",
+                    "format": "uri"
+                  }
+                },
+                "required": ["returnTo"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "returnTo": {
+                    "type": "string",
+                    "format": "uri"
+                  }
+                },
+                "required": ["returnTo"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "returnTo": {
+                    "type": "string",
+                    "format": "uri"
+                  }
+                },
+                "required": ["returnTo"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Response for status 201",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "runId": {
+                      "type": "string"
+                    },
+                    "authorizationUrl": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "affectedConnections": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "connectorId": {
+                            "type": "string"
+                          },
+                          "owner": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["project"]
+                              }
+                            },
+                            "required": ["type"],
+                            "additionalProperties": false
+                          },
+                          "slot": {
+                            "type": "string"
+                          },
+                          "account": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "avatarUrl": {
+                                "type": "string",
+                                "format": "uri"
+                              }
+                            },
+                            "required": ["id", "label"],
+                            "additionalProperties": false
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["connected", "needs_reauthorization", "disconnected"]
+                          }
+                        },
+                        "required": ["id", "connectorId", "owner", "slot", "account", "status"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["runId", "authorizationUrl", "affectedConnections"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "connector.authorization_invalid",
+                        "connector.configuration_invalid"
+                      ],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["connector.not_found"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "connector.authorization_required",
+                        "connector.operation_conflict",
+                        "connector.operation_in_progress",
+                        "connector.replacement_required",
+                        "connector.revocation_pending"
+                      ],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["internal.unexpected"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Response for status 502",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["connector.adapter_invalid", "connector.provider_failed"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "connector.credentials_unavailable",
+                        "connector.provider_unavailable"
+                      ],
+                      "description": "Stable machine-readable failure code for programmatic handling."
                     }
                   },
                   "required": ["error"],

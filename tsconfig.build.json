@@ -32,6 +32,9 @@
       "path": "connectors/imap/tsconfig.build.json"
     },
     {
+      "path": "connectors/linkedin/tsconfig.build.json"
+    },
+    {
       "path": "connectors/mercury/tsconfig.build.json"
     },
     {
@@ -56,7 +59,13 @@
       "path": "connectors/sql/tsconfig.build.json"
     },
     {
+      "path": "connectors/stripe/tsconfig.build.json"
+    },
+    {
       "path": "connectors/teamleader/tsconfig.build.json"
+    },
+    {
+      "path": "connectors/tiktok/tsconfig.build.json"
     },
     {
       "path": "connectors/unipile/tsconfig.build.json"

@@ -5,6 +5,8 @@
  * the interface cannot be implemented from outside the package.
  */
 export type { Principal } from "../auth"
+export type { ConnectorAccountCandidate } from "../connectors"
+export type { SealedConnectorCredential } from "../connectors/credentials"
 export type { SixbFailure } from "../errors/types"
 export type { StoredRuleResolvedEvent, StoredRuleTriggeredEvent } from "../events"
 export type { ReadonlyJsonObject } from "../json"
@@ -172,6 +174,72 @@ export type {
 } from "./auth"
 export { AuthStorageError, InMemoryAuthStorage } from "./auth"
 export type {
+  AttachConnectorConnectionRunAuthorizationInput,
+  ClaimConnectorConnectionRunCallbackInput,
+  ClaimConnectorConnectionRunCallbackResult,
+  ClaimConnectorCredentialMutationInput,
+  ClaimConnectorCredentialMutationResult,
+  ConnectorAuthorizationAttemptRecord,
+  ConnectorAuthorizationKey,
+  ConnectorAuthorizationRecord,
+  ConnectorAuthorizationStatus,
+  ConnectorConnectionKey,
+  ConnectorConnectionOwner,
+  ConnectorConnectionRecord,
+  ConnectorConnectionRunAwaitingProviderRecord,
+  ConnectorConnectionRunAwaitingSelectionRecord,
+  ConnectorConnectionRunCancelledRecord,
+  ConnectorConnectionRunExpiredRecord,
+  ConnectorConnectionRunFailedRecord,
+  ConnectorConnectionRunFailure,
+  ConnectorConnectionRunFailureCode,
+  ConnectorConnectionRunKind,
+  ConnectorConnectionRunProcessingRecord,
+  ConnectorConnectionRunRecord,
+  ConnectorConnectionRunSucceededRecord,
+  ConnectorConnectionSelector,
+  ConnectorConnectionStatus,
+  ConnectorConnectionStorage,
+  ConnectorConnectionStorageErrorCode,
+  ConnectorCredentialMutation,
+  ConnectorCredentialMutationFence,
+  ConnectorCredentialMutationKind,
+  ConnectorCredentialMutationPhase,
+  ConnectorStagedCredentials,
+  ConsumeConnectorAuthorizationAttemptInput,
+  CreateConnectorAuthorizationAttemptInput,
+  CreateConnectorAuthorizationInput,
+  CreateConnectorConnectionRunInput,
+  CreateConnectorConnectionSelectionRunInput,
+  DisconnectConnectorConnectionResult,
+  FinalizeConnectorReauthorizationInput,
+  FinishConnectorConnectionRunInput,
+  GetConnectorConnectionInput,
+  GetConnectorConnectionRunInput,
+  InitializeConnectorAuthorizationAccountsInput,
+  InMemoryConnectorConnectionStorageOptions,
+  InMemoryConnectorConnectionStorageSnapshot,
+  ListConnectorConnectionsInput,
+  MarkConnectorAuthorizationNeedsReauthorizationInput,
+  MarkConnectorCredentialMutationExecutingInput,
+  ProjectConnectorConnectionOwner,
+  PutConnectorConnectionFromRunInput,
+  PutConnectorConnectionFromRunResult,
+  PutConnectorConnectionInput,
+  PutConnectorConnectionResult,
+  RecoverExpiredConnectorCredentialMutationInput,
+  ReleaseConnectorCredentialMutationInput,
+  RenewConnectorCredentialMutationInput,
+  StageConnectorCredentialMutationCredentialsInput,
+  StageConnectorCredentialMutationRevocationInput,
+  WaitForConnectorConnectionRunSelectionInput,
+} from "./connector-connections"
+export {
+  CONNECTOR_CONNECTION_RUN_FAILURE_CODES,
+  ConnectorConnectionStorageError,
+  InMemoryConnectorConnectionStorage,
+} from "./connector-connections"
+export type {
   StorageTransactionErrorCode,
   StorageTransactionErrorOptions,
 } from "./errors"
@@ -211,6 +279,7 @@ export {
   FileUploadSessionError,
   InMemoryFileUploadSessions,
 } from "./file-upload-sessions"
+export type { InMemoryStorageOptions } from "./in-memory"
 export { InMemoryStorage } from "./in-memory"
 export type {
   DefineMigrationsOptions,

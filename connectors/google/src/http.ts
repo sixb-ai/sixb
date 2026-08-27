@@ -100,20 +100,15 @@ export function createGoogleHttp(clients: GoogleHttpClients): GoogleHttp {
     const retryable =
       options?.retryable ??
       (method === "GET" || (surface !== "analyticsAdmin" && surface !== "analyticsData"))
+    const requestOptions = { idempotent: retryable, retryable }
     // `post` serializes a JSON body and sets content-type under any verb;
     // `request` covers the bodiless verbs (GET/DELETE) without one.
     const response =
       method === "GET"
-        ? await client.get(url, { retry: retryable })
+        ? await client.get(url, undefined, requestOptions)
         : method === "DELETE"
-          ? await client.request(url, {
-              method: "DELETE",
-              retry: retryable,
-            })
-          : await client.post(url, options?.body, {
-              method,
-              retry: retryable,
-            })
+          ? await client.request(url, { method: "DELETE" }, requestOptions)
+          : await client.post(url, options?.body, { method }, requestOptions)
     return readJson<T>(response)
   }
 

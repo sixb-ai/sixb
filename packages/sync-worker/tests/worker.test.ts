@@ -34,6 +34,16 @@ const erpDb = defineConnector("erpDb", {
   },
 })
 
+function storedErpCheckpoint(cursor: string) {
+  return {
+    kind: "sync_checkpoint",
+    version: 1,
+    connectorId: erpDb.id,
+    strategy: "single",
+    value: { cursor },
+  }
+}
+
 function makeDataset(id: string) {
   return defineDataset(id, {
     schema: [col("orderId", "string"), col("customerName", "string", { nullable: true })],
@@ -504,8 +514,8 @@ describe("SyncWorker", () => {
     await Bun.sleep(50)
     await worker.stop()
 
-    expect(createdRun?.checkpoint).toEqual({ cursor: "cursor-1" })
-    expect(noOpRun?.checkpoint).toEqual({ cursor: "cursor-2" })
+    expect(createdRun?.checkpoint).toEqual(storedErpCheckpoint("cursor-1"))
+    expect(noOpRun?.checkpoint).toEqual(storedErpCheckpoint("cursor-2"))
     expect(noOpRun?.output?.versionId).toBe(createdRun?.output?.versionId)
 
     const events = await sixb.events.read({
@@ -581,7 +591,7 @@ describe("SyncWorker", () => {
     await worker.stop()
 
     expect(run?.output).toBeUndefined()
-    expect(run?.checkpoint).toEqual({ cursor: "cursor-1" })
+    expect(run?.checkpoint).toEqual(storedErpCheckpoint("cursor-1"))
     const events = await sixb.events.read({
       types: ["sync.run.started", "dataset.version.committed", "sync.run.finished"],
     })

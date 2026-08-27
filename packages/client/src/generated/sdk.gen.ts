@@ -11,6 +11,9 @@ import type {
   AbortFileUploadData,
   AbortFileUploadErrors,
   AbortFileUploadResponses,
+  AddConnectorConnectionData,
+  AddConnectorConnectionErrors,
+  AddConnectorConnectionResponses,
   AppendTelemetryData,
   AppendTelemetryErrors,
   AppendTelemetryResponses,
@@ -50,6 +53,9 @@ import type {
   DisableAuthServiceAccountData,
   DisableAuthServiceAccountErrors,
   DisableAuthServiceAccountResponses,
+  DisconnectConnectorConnectionData,
+  DisconnectConnectorConnectionErrors,
+  DisconnectConnectorConnectionResponses,
   ExistsObjectsData,
   ExistsObjectsErrors,
   ExistsObjectsResponses,
@@ -91,6 +97,9 @@ import type {
   GetBulkTelemetryHistoryData,
   GetBulkTelemetryHistoryErrors,
   GetBulkTelemetryHistoryResponses,
+  GetConnectorConnectionRunData,
+  GetConnectorConnectionRunErrors,
+  GetConnectorConnectionRunResponses,
   GetConnectorData,
   GetConnectorErrors,
   GetConnectorResponses,
@@ -204,6 +213,9 @@ import type {
   ListAuthSessionsData,
   ListAuthSessionsErrors,
   ListAuthSessionsResponses,
+  ListConnectorConnectionsData,
+  ListConnectorConnectionsErrors,
+  ListConnectorConnectionsResponses,
   ListConnectorsData,
   ListConnectorsResponses,
   ListDatasetRowsData,
@@ -269,6 +281,9 @@ import type {
   ReactivateAuthMemberData,
   ReactivateAuthMemberErrors,
   ReactivateAuthMemberResponses,
+  ReauthorizeConnectorConnectionData,
+  ReauthorizeConnectorConnectionErrors,
+  ReauthorizeConnectorConnectionResponses,
   RemoveObjectLinkData,
   RemoveObjectLinkErrors,
   RemoveObjectLinkResponses,
@@ -299,9 +314,15 @@ import type {
   RevokeAuthSessionData,
   RevokeAuthSessionErrors,
   RevokeAuthSessionResponses,
+  RevokeConnectorConnectionData,
+  RevokeConnectorConnectionErrors,
+  RevokeConnectorConnectionResponses,
   SearchObjectsData,
   SearchObjectsErrors,
   SearchObjectsResponses,
+  SelectConnectorConnectionRunAccountData,
+  SelectConnectorConnectionRunAccountErrors,
+  SelectConnectorConnectionRunAccountResponses,
   SignFileUploadPartData,
   SignFileUploadPartErrors,
   SignFileUploadPartResponses,
@@ -311,6 +332,9 @@ import type {
   SignOutData,
   SignOutErrors,
   SignOutResponses,
+  StartConnectorConnectionRunData,
+  StartConnectorConnectionRunErrors,
+  StartConnectorConnectionRunResponses,
   SubmitWorkflowInterventionData,
   SubmitWorkflowInterventionErrors,
   SubmitWorkflowInterventionResponses,
@@ -781,6 +805,142 @@ export const getConnector = <ThrowOnError extends boolean = false>(
   (options.client ?? client).get<GetConnectorResponses, GetConnectorErrors, ThrowOnError>({
     url: "/api/connectors/{connectorId}",
     ...options,
+  })
+
+/**
+ * List connector connections
+ */
+export const listConnectorConnections = <ThrowOnError extends boolean = false>(
+  options: Options<ListConnectorConnectionsData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    ListConnectorConnectionsResponses,
+    ListConnectorConnectionsErrors,
+    ThrowOnError
+  >({ url: "/api/connectors/{connectorId}/connections", ...options })
+
+/**
+ * Disconnect a connector account
+ */
+export const disconnectConnectorConnection = <ThrowOnError extends boolean = false>(
+  options: Options<DisconnectConnectorConnectionData, ThrowOnError>
+) =>
+  (options.client ?? client).delete<
+    DisconnectConnectorConnectionResponses,
+    DisconnectConnectorConnectionErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/connectors/{connectorId}/connections/{connectionId}",
+    ...options,
+  })
+
+/**
+ * Revoke a connector authorization
+ */
+export const revokeConnectorConnection = <ThrowOnError extends boolean = false>(
+  options: Options<RevokeConnectorConnectionData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    RevokeConnectorConnectionResponses,
+    RevokeConnectorConnectionErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/connectors/{connectorId}/connections/{connectionId}/revoke",
+    ...options,
+  })
+
+/**
+ * Start a connector connection run
+ */
+export const startConnectorConnectionRun = <ThrowOnError extends boolean = false>(
+  options: Options<StartConnectorConnectionRunData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    StartConnectorConnectionRunResponses,
+    StartConnectorConnectionRunErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/connectors/{connectorId}/connection-runs",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Get a connector connection run
+ */
+export const getConnectorConnectionRun = <ThrowOnError extends boolean = false>(
+  options: Options<GetConnectorConnectionRunData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetConnectorConnectionRunResponses,
+    GetConnectorConnectionRunErrors,
+    ThrowOnError
+  >({ url: "/api/connectors/{connectorId}/connection-runs/{runId}", ...options })
+
+/**
+ * Add a connector connection from an existing authorization
+ */
+export const addConnectorConnection = <ThrowOnError extends boolean = false>(
+  options: Options<AddConnectorConnectionData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    AddConnectorConnectionResponses,
+    AddConnectorConnectionErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/connectors/{connectorId}/connections/{connectionId}/connection-runs",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Select a connector account
+ */
+export const selectConnectorConnectionRunAccount = <ThrowOnError extends boolean = false>(
+  options: Options<SelectConnectorConnectionRunAccountData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    SelectConnectorConnectionRunAccountResponses,
+    SelectConnectorConnectionRunAccountErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/connectors/{connectorId}/connection-runs/{runId}/selection",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Reauthorize a connector connection
+ */
+export const reauthorizeConnectorConnection = <ThrowOnError extends boolean = false>(
+  options: Options<ReauthorizeConnectorConnectionData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    ReauthorizeConnectorConnectionResponses,
+    ReauthorizeConnectorConnectionErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/connectors/{connectorId}/connections/{connectionId}/reauthorize",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   })
 
 /**

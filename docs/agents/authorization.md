@@ -4,6 +4,10 @@ Agents touch the same data and actions as everyone else, so the same
 [authorization](../auth/authorization.md) model governs them. Two things decide what an agent can do:
 the **groups** on its definition and the **owner** of each thread.
 
+When authentication is disabled for the runtime, requests through the Agent API gateway follow the
+same unrestricted authorization behavior as normal API requests. The group restrictions below
+apply when authentication is enabled.
+
 ## Groups gate use and reach
 
 An agent's `groups` (set on `defineAgent`) do two things:

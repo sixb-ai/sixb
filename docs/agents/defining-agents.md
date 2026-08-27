@@ -82,8 +82,8 @@ export const researcher = defineAgent("researcher", {
 })
 ```
 
-Omitting it gives the agent no selected worker tools. Sixb still supplies sandboxed `bash`. See
-[Tools and gateway](./tools-and-gateway.md) for custom tools and Exa web access.
+Omitting it gives the agent no selected worker tools. Sixb still supplies sandboxed `read` and
+`bash`. See [Tools and gateway](./tools-and-gateway.md) for custom tools and Exa web access.
 
 ## Loop
 
@@ -113,6 +113,7 @@ export const sixb = createSixb({
 ## Related
 
 - [Authorization](./authorization.md) — `groups` and what they gate.
-- [Tools and gateway](./tools-and-gateway.md) — selected worker tools and sandboxed `bash`.
+- [Tools and gateway](./tools-and-gateway.md) — selected worker tools plus sandboxed `read` and
+  `bash`.
 - [Running and streaming](./running-and-streaming.md) — drive a defined agent.
 - [Runtime](../runtime/overview.md) and [project structure](../fundamentals/project-structure.md).

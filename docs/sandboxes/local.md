@@ -1,8 +1,8 @@
 # Local sandbox
 
 `@sixb/sandboxes-local` runs agent commands as child processes on the host, wrapped in an OS-level
-isolation backend when one is available. It is the default choice for development: it has no external
-dependencies and always boots, falling back to passthrough when no sandboxing tool is present.
+isolation backend when one is available. It is the default choice for development: it needs no
+external service and always boots, falling back to passthrough when no sandboxing tool is present.
 
 ```ts
 import { createSixb } from "@sixb/core"
@@ -13,6 +13,10 @@ createSixb({ sandboxes: new LocalSandboxFactory() })
 
 See the [overview](./overview.md) for the shared `Sandbox` / `SandboxFactory` contract this provider
 implements.
+
+The built-in agent tools use the host's `PATH`. The host must provide `bash`, `curl`, `realpath`,
+`tail`, `head`, and `base64`; macOS and common Linux development environments normally include
+them.
 
 ## Isolation backends
 

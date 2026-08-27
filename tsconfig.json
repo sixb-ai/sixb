@@ -30,6 +30,7 @@
       "@sixb/connector-github": ["./connectors/github/src/index.ts"],
       "@sixb/connector-google": ["./connectors/google/src/index.ts"],
       "@sixb/connector-imap": ["./connectors/imap/src/index.ts"],
+      "@sixb/connector-linkedin": ["./connectors/linkedin/src/index.ts"],
       "@sixb/connector-mercury": ["./connectors/mercury/src/index.ts"],
       "@sixb/connector-meta": ["./connectors/meta/src/index.ts"],
       "@sixb/connector-pandadoc": ["./connectors/pandadoc/src/index.ts"],
@@ -38,7 +39,9 @@
       "@sixb/connector-rest": ["./connectors/rest/src/index.ts"],
       "@sixb/connector-sftp": ["./connectors/sftp/src/index.ts"],
       "@sixb/connector-sql": ["./connectors/sql/src/index.ts"],
+      "@sixb/connector-stripe": ["./connectors/stripe/src/index.ts"],
       "@sixb/connector-teamleader": ["./connectors/teamleader/src/index.ts"],
+      "@sixb/connector-tiktok": ["./connectors/tiktok/src/index.ts"],
       "@sixb/connector-unipile": ["./connectors/unipile/src/index.ts"],
       "@sixb/core": ["./packages/core/src/index.ts"],
       "@sixb/core/actions/worker": ["./packages/core/src/actions/worker.ts"],
@@ -61,6 +64,12 @@
       "@sixb/core/internal/auth": ["./packages/core/src/auth/index.ts"],
       "@sixb/core/internal/authorization": ["./packages/core/src/authorization/index.ts"],
       "@sixb/core/internal/bootstrap": ["./packages/core/src/bootstrap/index.ts"],
+      "@sixb/core/internal/connector-connections": [
+        "./packages/core/src/connectors/connections/internal.ts"
+      ],
+      "@sixb/core/internal/connector-connection-storage-provider": [
+        "./packages/core/src/storage/connector-connections/provider.ts"
+      ],
       "@sixb/core/internal/edits": ["./packages/core/src/edits/index.ts"],
       "@sixb/core/internal/error-reporting": ["./packages/core/src/error-reporting/internal.ts"],
       "@sixb/core/internal/errors": ["./packages/core/src/errors/internal.ts"],

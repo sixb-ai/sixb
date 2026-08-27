@@ -27,6 +27,7 @@ import {
 } from "@sixb/core/storage"
 import { PgAgentStorage } from "./agents"
 import { PgAuthStorage } from "./auth-storage"
+import { PgConnectorConnectionStorage } from "./connector-connection-storage"
 import { createPostgresStorageMigrators, dropSchema } from "./migrations"
 import { PgOntologyStorage, type PgOntologyTransactionContext } from "./ontology-storage"
 import { PgActionRunStorage } from "./pg-action-run-storage"
@@ -43,6 +44,7 @@ import { PgWebhookRunStorage } from "./pg-webhook-run-storage"
 import { PgWorkflowInterventionStorage } from "./pg-workflow-intervention-storage"
 import { PgWorkflowRunStorage } from "./pg-workflow-run-storage"
 import { isRetryableTransactionConflict } from "./storage-errors"
+import { registerPostgresStorageTestingAdapter } from "./testing"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 export interface PostgresStorageOptions {
@@ -142,6 +144,7 @@ export class PostgresStorage implements MigrationCapableStorage {
   readonly timeseries: Storage["timeseries"]
   readonly webhookRuns: PgWebhookRunStorage
   readonly rules: PgRulesStorage
+  readonly connectorConnections: PgConnectorConnectionStorage
   readonly migrators: readonly StorageMigrator[]
 
   private readonly sql: SQL
@@ -214,6 +217,10 @@ export class PostgresStorage implements MigrationCapableStorage {
     this.timeseries = createOperationScopedFacade(stores.timeseries, scope)
     this.webhookRuns = createOperationScopedFacade(stores.webhookRuns, scope)
     this.rules = createOperationScopedFacade(stores.rules, scope)
+    this.connectorConnections = createOperationScopedFacade(stores.connectorConnections, scope)
+    registerPostgresStorageTestingAdapter(this, (durationMs) =>
+      stores.connectorConnections.advanceTimeForTesting(durationMs)
+    )
   }
 
   async ping(): Promise<void> {
@@ -339,6 +346,7 @@ function createPostgresStores(
     timeseries: new PgTimeseriesStorage(sql),
     webhookRuns: new PgWebhookRunStorage(sql, executions),
     rules: new PgRulesStorage(sql),
+    connectorConnections: new PgConnectorConnectionStorage(sql),
   }
 }
 
@@ -358,6 +366,7 @@ interface PostgresStoreSet {
   readonly timeseries: PgTimeseriesStorage
   readonly webhookRuns: PgWebhookRunStorage
   readonly rules: PgRulesStorage
+  readonly connectorConnections: PgConnectorConnectionStorage
 }
 
 function resolveTimeoutMillis(value: number | undefined, label: string): number | undefined {

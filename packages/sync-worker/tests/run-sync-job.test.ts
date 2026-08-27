@@ -4,12 +4,10 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type {
   BlobStorage,
-  ConnectorAdapter,
-  ConnectorClient,
-  ConnectorDefinition,
   DatasetDefinition,
   DatasetRow,
   FileRef,
+  JsonValue,
   LakeStorage,
   SyncDefinition,
 } from "@sixb/core"
@@ -23,6 +21,7 @@ import {
   InMemoryLakeStorage,
   InMemoryStorage,
 } from "@sixb/core"
+import type { SyncConnectorSourceResolver } from "@sixb/core/internal/syncs"
 import type { BeginDatasetWriteInput, LakeWriteSession } from "@sixb/core/lake-storage"
 import type { ExecutionStorage, SyncRunRecord, SyncRunStorage } from "@sixb/core/storage"
 import { LocalLakeStorage } from "@sixb/lake-local"
@@ -86,6 +85,16 @@ const keyedDocsDataset = defineDataset("raw.keyed-docs", {
   primaryKey: "id",
 })
 
+function storedErpCheckpoint(value: JsonValue): JsonValue {
+  return {
+    kind: "sync_checkpoint",
+    version: 1,
+    connectorId: erpDb.id,
+    strategy: "single",
+    value,
+  }
+}
+
 function createRuntime(options: {
   sync: SyncDefinition
   syncRunsStorage?: SyncRunStorage
@@ -98,6 +107,19 @@ function createRuntime(options: {
   const lakeStorage = options.lakeStorage ?? new InMemoryLakeStorage()
   const blobStorage = options.blobStorage ?? new InMemoryBlobStorage()
   const client = options.client ?? {}
+
+  const connectorSources: SyncConnectorSourceResolver = {
+    async list() {
+      return [
+        {
+          async connect() {
+            await options.onConnect?.()
+            return client
+          },
+        },
+      ] as never
+    },
+  }
 
   return {
     id: "project-1",
@@ -114,12 +136,7 @@ function createRuntime(options: {
         return syncId === options.sync.id ? options.sync : null
       },
     },
-    async connector<TAdapter extends ConnectorAdapter>(
-      _definition: ConnectorDefinition<string, TAdapter>
-    ): Promise<ConnectorClient<TAdapter>> {
-      await options.onConnect?.()
-      return client as ConnectorClient<TAdapter>
-    },
+    connectorSources,
   }
 }
 
@@ -478,7 +495,7 @@ describe("runSyncJob", () => {
       id: "run_1",
     })
     expect(seenCheckpoint).toEqual({ cursor: "cursor-1" })
-    expect(run?.checkpoint).toEqual({ cursor: "cursor-2" })
+    expect(run?.checkpoint).toEqual(storedErpCheckpoint({ cursor: "cursor-2" }))
   })
 
   test("streams ordered merge changes and stores the successful checkpoint", async () => {
@@ -519,7 +536,7 @@ describe("runSyncJob", () => {
       mode: "merge",
       status: "succeeded",
       rowsRead: 2,
-      checkpoint: { cursor: "event-2" },
+      checkpoint: storedErpCheckpoint({ cursor: "event-2" }),
     })
   })
 
@@ -598,7 +615,7 @@ describe("runSyncJob", () => {
     ).toMatchObject({
       status: "succeeded",
       rowsRead: 1,
-      checkpoint: { cursor: "event-1" },
+      checkpoint: storedErpCheckpoint({ cursor: "event-1" }),
       output: undefined,
     })
   })
@@ -764,7 +781,7 @@ describe("runSyncJob", () => {
     ).toMatchObject({
       status: "succeeded",
       rowsRead: 0,
-      checkpoint: { cursor: "cursor-1" },
+      checkpoint: storedErpCheckpoint({ cursor: "cursor-1" }),
     })
   })
 
@@ -898,7 +915,7 @@ describe("runSyncJob", () => {
       id: "run_succeeded",
     })
     expect(seenCheckpoints).toEqual([{ cursor: "cursor-1" }, { cursor: "cursor-1" }])
-    expect(succeededRun?.checkpoint).toEqual({ cursor: "cursor-2" })
+    expect(succeededRun?.checkpoint).toEqual(storedErpCheckpoint({ cursor: "cursor-2" }))
   })
 
   test("rejects non-JSON checkpoint values", async () => {

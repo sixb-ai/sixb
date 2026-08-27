@@ -160,6 +160,14 @@ async function resolveAgentRunAuthState(
     return jsonError(403, "Agent API gateway capability is not valid for this run.")
   }
 
+  if (!host.auth.isEnabled()) {
+    return {
+      authorization: { type: "disabled" as const },
+      agentExecution,
+      ...(conversationalRun ? { agentRun: conversationalRun } : {}),
+    }
+  }
+
   const auth = host.storage.auth
   if (!auth) {
     return jsonError(501, "Agent API gateway is not configured for authenticated agent access.")

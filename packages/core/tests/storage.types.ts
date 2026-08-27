@@ -1,4 +1,6 @@
 import type {
+  ConsumeConnectorAuthorizationAttemptInput,
+  InMemoryConnectorConnectionStorageSnapshot,
   ObjectQueryCapabilities,
   ObjectStorage,
   OntologyOutboxFailureCode,
@@ -8,6 +10,12 @@ import type {
   WebhookRunFailureCode,
   WebhookRunRecord,
 } from "../src/storage"
+
+const connectorAttemptInput = {} as ConsumeConnectorAuthorizationAttemptInput
+const connectorStorageSnapshot = {} as InMemoryConnectorConnectionStorageSnapshot
+
+void connectorAttemptInput
+void connectorStorageSnapshot
 
 const outboxFailureCode: OntologyOutboxFailureCode = "event.delivery_failed"
 const storedOutboxFailureCode: NonNullable<OntologyOutboxRecord["lastFailure"]>["code"] =

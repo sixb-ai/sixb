@@ -106,11 +106,7 @@ export function ActionsPage() {
   }
 
   return (
-    <PageFrame
-      eyebrow="Atlas"
-      title="Actions"
-      description="Request ontology actions and inspect their durable execution history."
-    >
+    <PageFrame title="Actions" headerDivider={false}>
       <Tabs value={activeTab} onValueChange={handleTabChange} className="gap-4">
         <TabsList variant="line" className="border-b border-border">
           <TabsTrigger value="actions">Actions</TabsTrigger>

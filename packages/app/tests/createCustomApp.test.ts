@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/
 import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
+import { brotliCompressSync, gzipSync } from "node:zlib"
 import { generateAppEntry, generateRouteManifest } from "../src/codegen"
 import { createCustomApp } from "../src/createCustomApp"
 
@@ -141,8 +142,12 @@ describe("createCustomApp.start", () => {
 
   test("serves hashed build chunks with immutable cache headers", async () => {
     const outdir = join(tempRoot, ".sixb", "dist", "app")
-    await writeFile(join(outdir, "chunk-ab12cd34.js"), "console.log('chunk')\n")
-    await writeFile(join(outdir, "chunk-ab12cd34.css"), "body{}\n")
+    const javascript = "console.log('chunk')\n"
+    const stylesheet = "body{}\n"
+    await writeFile(join(outdir, "chunk-ab12cd34.js"), javascript)
+    await writeFile(join(outdir, "chunk-ab12cd34.js.br"), brotliCompressSync(javascript))
+    await writeFile(join(outdir, "chunk-ab12cd34.css"), stylesheet)
+    await writeFile(join(outdir, "chunk-ab12cd34.css.gz"), gzipSync(stylesheet))
 
     const port = await getFreePort()
     const app = await createCustomApp({ rootDir: tempRoot, audience: "app" })
@@ -154,12 +159,22 @@ describe("createCustomApp.start", () => {
 
     try {
       const immutable = "public, max-age=31536000, immutable"
-      const chunkJs = await fetch(`http://127.0.0.1:${port}/chunk-ab12cd34.js`)
+      const chunkJs = await fetch(`http://127.0.0.1:${port}/chunk-ab12cd34.js`, {
+        headers: { "accept-encoding": "br, gzip" },
+      })
       expect(chunkJs.status).toBe(200)
       expect(chunkJs.headers.get("cache-control")).toBe(immutable)
+      expect(chunkJs.headers.get("content-encoding")).toBe("br")
+      expect(chunkJs.headers.get("vary")).toContain("Accept-Encoding")
+      expect(await chunkJs.text()).toBe(javascript)
 
-      const chunkCss = await fetch(`http://127.0.0.1:${port}/chunk-ab12cd34.css`)
+      const chunkCss = await fetch(`http://127.0.0.1:${port}/chunk-ab12cd34.css`, {
+        headers: { "accept-encoding": "gzip" },
+      })
       expect(chunkCss.headers.get("cache-control")).toBe(immutable)
+      expect(chunkCss.headers.get("content-encoding")).toBe("gzip")
+      expect(chunkCss.headers.get("vary")).toContain("Accept-Encoding")
+      expect(await chunkCss.text()).toBe(stylesheet)
 
       // Non-hashed files (public/ copies) and the SPA shell stay uncached.
       const mainJs = await fetch(`http://127.0.0.1:${port}/main.js`)

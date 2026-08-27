@@ -76,8 +76,9 @@ describe("Postgres storage migrations", () => {
             "022-projection-executions",
             "023-webhook-executions",
             "024-ontology-commit-executions",
-            "025-agent-run-requester-authorization",
-            "026-agent-delegated-authority",
+            "025-connector-connections",
+            "026-agent-run-requester-authorization",
+            "027-agent-delegated-authority",
           ],
         },
       ])
@@ -253,16 +254,23 @@ describe("Postgres storage migrations", () => {
         {
           adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
           checksum_length: 64,
-          id: "025-agent-run-requester-authorization",
+          id: "025-connector-connections",
           status: "applied",
           version: 25,
         },
         {
           adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
           checksum_length: 64,
-          id: "026-agent-delegated-authority",
+          id: "026-agent-run-requester-authorization",
           status: "applied",
           version: 26,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "027-agent-delegated-authority",
+          status: "applied",
+          version: 27,
         },
       ])
     })
@@ -1277,6 +1285,38 @@ describe("Postgres storage migrations", () => {
     })
   })
 
+  test("stores a headless connector attempt as the run's single protocol child", async () => {
+    await withStorage(false, async (storage, schemaName) => {
+      await migrateStorage(storage)
+
+      expect(await readTableColumns(schemaName, "connector_connection_runs")).not.toContain(
+        "authorization_attempt_id"
+      )
+      expect(await readTableColumns(schemaName, "connector_authorization_attempts")).not.toContain(
+        "owner_type"
+      )
+      expect(await readTableColumns(schemaName, "connector_connections")).not.toContain(
+        "owner_type"
+      )
+      expect(
+        await readUniqueConstraints(schemaName, "connector_authorization_attempts")
+      ).toContainEqual(["project_id", "connector_id", "connection_run_id"])
+      expect(
+        await readTableForeignKeys(schemaName, "connector_authorization_attempts")
+      ).toContainEqual({
+        column_name: "connection_run_id",
+        delete_action: "r",
+        foreign_column_name: "id",
+        foreign_table_name: "connector_connection_runs",
+      })
+      expect(await readUniqueConstraints(schemaName, "connector_connections")).toContainEqual([
+        "project_id",
+        "connector_id",
+        "slot",
+      ])
+    })
+  })
+
   test("drops only obsolete run usage projections from an existing schema", async () => {
     // Regression guard: remove migration 020 (or any one DROP COLUMN) and this leaves the old
     // projection column behind; deleting the run rows instead breaks the preservation assertions.
@@ -1626,16 +1666,23 @@ describe("Postgres storage migrations", () => {
         {
           adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
           checksum_length: 64,
-          id: "025-agent-run-requester-authorization",
+          id: "025-connector-connections",
           status: "applied",
           version: 25,
         },
         {
           adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
           checksum_length: 64,
-          id: "026-agent-delegated-authority",
+          id: "026-agent-run-requester-authorization",
           status: "applied",
           version: 26,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "027-agent-delegated-authority",
+          status: "applied",
+          version: 27,
         },
       ])
     } finally {

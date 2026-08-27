@@ -2,30 +2,34 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
+import { runCliToCompletion } from "./shared/cli-process"
 
-function runBuildEntry(
+// A cold production build drives the custom-app and Atlas bundlers plus asset precompression. Keep
+// that production work out of the parallel unit suite, and bound its child so a wedged bundler
+// cannot consume the E2E job wall-clock timeout.
+
+const BUILD_TIMEOUT_MS = 150_000
+
+function buildTest(name: string, run: () => Promise<void>): void {
+  test(name, run, BUILD_TIMEOUT_MS + 10_000)
+}
+
+async function runBuildEntry(
   entry: string,
   outdir: string
-): {
+): Promise<{
   exitCode: number
   stdout: string
   stderr: string
-} {
+}> {
   const repoRoot = resolve(import.meta.dir, "..", "..", "..")
   const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
 
-  const result = Bun.spawnSync({
+  return await runCliToCompletion({
     cmd: ["bun", cliEntry, "build", "--entry", entry, "--outdir", outdir],
     cwd: repoRoot,
-    stdout: "pipe",
-    stderr: "pipe",
+    timeoutMs: BUILD_TIMEOUT_MS,
   })
-
-  return {
-    exitCode: result.exitCode,
-    stdout: Buffer.from(result.stdout).toString("utf-8"),
-    stderr: Buffer.from(result.stderr).toString("utf-8"),
-  }
 }
 
 describe("sixb build", () => {
@@ -49,12 +53,12 @@ describe("sixb build", () => {
     }
   })
 
-  test("builds the custom app from the entry project root", async () => {
+  buildTest("builds the custom app from the entry project root", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "sixb-cli-build-"))
     tempDirs.push(tempDir)
     const outdir = join(tempDir, "dist")
 
-    const result = runBuildEntry(exampleEntry, outdir)
+    const result = await runBuildEntry(exampleEntry, outdir)
 
     expect(result.exitCode).toBe(0)
     expect(result.stderr).toBe("")
@@ -71,10 +75,10 @@ describe("sixb build", () => {
     expect(atlasAssets.some((file) => /^chunk-.+\.js$/.test(file))).toBe(true)
 
     const html = await readFile(join(outdir, "app", "index.html"), "utf-8")
-    expect(html).toContain('<div id="root"></div>')
+    expect(html).toContain('class="sixb-loading-shell"')
   })
 
-  test("does not overwrite custom app files watched by the dev server", async () => {
+  buildTest("does not overwrite custom app files watched by the dev server", async () => {
     const tempDir = await mkdtemp(join(dirname(exampleEntry), ".tmp-sixb-cli-build-isolation-"))
     tempDirs.push(tempDir)
     const appDir = join(tempDir, "app")
@@ -97,7 +101,7 @@ describe("sixb build", () => {
       await writeFile(join(devGeneratedDir, name), content)
     }
 
-    const result = runBuildEntry(entry, outdir)
+    const result = await runBuildEntry(entry, outdir)
 
     expect(result.exitCode).toBe(0)
     expect(result.stderr).toBe("")
@@ -106,9 +110,9 @@ describe("sixb build", () => {
       expect(await readFile(join(devGeneratedDir, name), "utf-8")).toBe(content)
     }
     await stat(join(tempDir, ".sixb", "build", "app", "index.html"))
-  }, 30_000)
+  })
 
-  test("externalizes package dependencies when bundling runtime config", async () => {
+  buildTest("externalizes package dependencies when bundling runtime config", async () => {
     const repoRoot = resolve(import.meta.dir, "..", "..", "..")
     const tempDir = await mkdtemp(join(repoRoot, ".tmp-sixb-cli-build-packages-"))
     tempDirs.push(tempDir)
@@ -126,7 +130,7 @@ describe("sixb build", () => {
       ].join("\n")
     )
 
-    const result = runBuildEntry(entry, outdir)
+    const result = await runBuildEntry(entry, outdir)
 
     expect(result.exitCode).toBe(0)
     expect(result.stderr).toBe("")

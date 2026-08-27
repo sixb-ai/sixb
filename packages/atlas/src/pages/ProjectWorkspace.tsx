@@ -19,7 +19,15 @@ import { Button, Card, EmptyState } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQueries, useQuery } from "@tanstack/react-query"
 import { Box, Loader2 } from "lucide-react"
-import { type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react"
+import {
+  type ReactNode,
+  Suspense,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react"
 import {
   Navigate,
   Route,
@@ -31,31 +39,38 @@ import {
 } from "react-router-dom"
 import { SidebarDataContext } from "../components/layout/sidebarData"
 import { KNOWN_VIEWS } from "../components/layout/viewMode"
-import { SettingsMembersPage } from "../components/SettingsMembersPage"
-import { SettingsServiceAccountsPage } from "../components/SettingsServiceAccountsPage"
-import { SettingsSessionsPage } from "../components/SettingsSessionsPage"
-import { SettingsTokensPage } from "../components/SettingsTokensPage"
+import { SettingsAccessGate } from "../components/SettingsAccessGate"
 import {
   getObjectSortPreference,
   type ObjectSortPreference,
   setObjectSortPreference,
 } from "../lib/userPreferences"
-import { ActionRunDetailPage } from "./ActionRunDetailPage"
-import { ActionsPage } from "./ActionsPage"
-import { AgentsPage } from "./AgentsPage"
-import { ConnectorDetailPage, ConnectorsPage } from "./ConnectorsPage"
-import { DatasetDetailPage, DatasetsPage } from "./DatasetsPage"
-import { LogsPage } from "./LogsPage"
-import { ObjectDetailPage } from "./ObjectDetailPage"
 import { ObjectsWorkbench, type ObjectTypePreviewSection } from "./ObjectsWorkbench"
-import { ObjectTypeDetail } from "./ObjectTypeDetail"
-import { OntologyExplorer } from "./OntologyExplorer"
-import { PipelineDetailPage, PipelinesPage } from "./PipelinesPage"
-import { ProjectionDetailPage, ProjectionsPage } from "./ProjectionsPage"
-import { RuleDetailPage, RulesPage } from "./RulesPage"
-import { SyncDetailPage, SyncsPage } from "./SyncsPage"
-import { WorkflowDetailPage } from "./WorkflowDetailPage"
-import { WorkflowsPage } from "./WorkflowsPage"
+import {
+  ActionRunDetailPage,
+  ActionsPage,
+  ConnectorDetailPage,
+  ConnectorsPage,
+  DatasetDetailPage,
+  DatasetsPage,
+  LogsPage,
+  ObjectDetailPage,
+  OntologyExplorer,
+  PipelineDetailPage,
+  PipelinesPage,
+  ProjectionDetailPage,
+  ProjectionsPage,
+  RuleDetailPage,
+  RulesPage,
+  SettingsMembersPage,
+  SettingsServiceAccountsPage,
+  SettingsSessionsPage,
+  SettingsTokensPage,
+  SyncDetailPage,
+  SyncsPage,
+  WorkflowDetailPage,
+  WorkflowsPage,
+} from "./workspaceRoutes"
 
 const emptyObjectList: ObjectSummary[] = []
 const OBJECT_PAGE_SIZE = 300
@@ -72,6 +87,45 @@ export function ProjectWorkspace() {
   const [objectSortBy, setObjectSortBy] = useState<ObjectSortPreference>(getObjectSortPreference)
   const [searchParams, setSearchParams] = useSearchParams()
   const classFilter = searchParams.get("class") || null
+  const selectedOntologyTypeId = location.pathname === "/ontology" ? searchParams.get("type") : null
+  const ontologyDetailsOpen =
+    location.pathname === "/ontology" &&
+    selectedOntologyTypeId !== null &&
+    searchParams.get("view") === "details"
+
+  const setOntologyState = useCallback(
+    (typeId: string | null, details: boolean, options?: { replace?: boolean }) => {
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev)
+          if (typeId) {
+            params.set("type", typeId)
+          } else {
+            params.delete("type")
+          }
+          if (typeId && details) {
+            params.set("view", "details")
+          } else {
+            params.delete("view")
+          }
+          if (!typeId) params.delete("tab")
+          return params
+        },
+        { replace: options?.replace ?? true }
+      )
+    },
+    [setSearchParams]
+  )
+
+  const setSelectedOntologyTypeId = useCallback(
+    (typeId: string | null) => setOntologyState(typeId, false),
+    [setOntologyState]
+  )
+
+  const openOntologyTypeDetails = useCallback(
+    (typeId: string) => setOntologyState(typeId, true, { replace: false }),
+    [setOntologyState]
+  )
 
   const setClassFilter = useCallback(
     (next: string | null, options?: { replace?: boolean }) => {
@@ -332,87 +386,139 @@ export function ProjectWorkspace() {
     )
   }
 
+  const ontologyWorkspace = location.pathname === "/ontology"
   const constrained = (children: ReactNode) => (
-    <div className={cn("mx-auto w-full max-w-7xl min-w-0 p-3 sm:p-4 lg:p-6")}>{children}</div>
+    <div
+      className={cn(
+        ontologyWorkspace
+          ? "h-full min-h-0 w-full"
+          : "mx-auto w-full max-w-7xl min-w-0 p-3 sm:p-4 lg:p-6"
+      )}
+    >
+      {children}
+    </div>
   )
 
+  // BrowserRouter transitions keep the current route visible while an intent-preloaded chunk
+  // resolves. The destination page then owns the only loading state: its actual data.
   return (
-    <Routes>
-      <Route path="pipelines/:pipelineId" element={<PipelineDetailPage />} />
-      <Route path="datasets/:datasetId" element={<DatasetDetailPage />} />
-      <Route path="actions" element={<ActionsPage />} />
-      <Route path="actions/runs/:runId" element={<ActionRunDetailPage />} />
-      <Route path="agents" element={<AgentsPage />} />
-      <Route path="agents/new/:agentId" element={<AgentsPage />} />
-      <Route path="agents/:threadId" element={<AgentsPage />} />
-      <Route path="workflows" element={<WorkflowsPage />} />
-      <Route path="workflows/:workflowId" element={<WorkflowDetailPage />} />
-      <Route path="logs" element={<LogsPage />} />
-      <Route path="runs" element={<RunsTabRedirect />} />
-      <Route path="runs/:runId" element={<RunRedirect />} />
-      <Route
-        path="*"
-        element={constrained(
-          <Routes>
-            <Route
-              index
-              element={
-                <ObjectsWorkbench
-                  projectName={resolvedProjectName}
-                  objectPageSize={OBJECT_PAGE_SIZE}
-                  allObjectsTotal={allObjectsTotal}
-                  objectTypeCounts={objectTypeCounts}
-                  overviewSections={objectTypePreviewSections}
-                  overviewLoading={overviewLoading}
-                  objectTypesLoading={objectTypesLoading}
-                  sortBy={objectSortBy}
-                  classFilter={classFilter}
-                  selectedObjectType={selectedObjectType}
-                  selectedObjectId={selectedObjectIdForSidebar}
-                  onSortByChange={handleObjectSortByChange}
-                  onClassFilterChange={setClassFilter}
-                  onSelectObject={(objectId) => navigate(toProjectPath(objectId))}
-                />
-              }
-            />
-            <Route path="home" element={<Navigate to="/" replace />} />
-            <Route path="objects" element={<Navigate to="/" replace />} />
-            <Route path="datasets" element={<DatasetsPage />} />
-            <Route path="connectors" element={<ConnectorsPage />} />
-            <Route path="connectors/:connectorId" element={<ConnectorDetailPage />} />
-            <Route path="syncs" element={<SyncsPage />} />
-            <Route path="syncs/:syncId" element={<SyncDetailPage />} />
-            <Route path="projections" element={<ProjectionsPage />} />
-            <Route path="projections/:projectionId" element={<ProjectionDetailPage />} />
-            <Route path="pipelines" element={<PipelinesPage />} />
-            <Route path="rules" element={<RulesPage />} />
-            <Route path="rules/:ruleId" element={<RuleDetailPage />} />
-            <Route path="settings" element={<Navigate to="/settings/members" replace />} />
-            <Route path="settings/tokens" element={<SettingsTokensPage />} />
-            <Route path="settings/members" element={<SettingsMembersPage />} />
-            <Route path="settings/service-accounts" element={<SettingsServiceAccountsPage />} />
-            <Route path="settings/sessions" element={<SettingsSessionsPage />} />
-            <Route
-              path="ontology"
-              element={
-                <OntologyExplorer
-                  onSelectType={(typeId) => navigate(toProjectPath(`ontology/${typeId}`))}
-                />
-              }
-            />
-            <Route path="ontology/:typeId" element={<ObjectTypeDetail />} />
-            <Route
-              path=":objectId"
-              element={
-                <ObjectDetailPage projectName={resolvedProjectName} objectLookup={objectLookup} />
-              }
-            />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        )}
-      />
-    </Routes>
+    <Suspense fallback={null}>
+      <Routes>
+        <Route path="pipelines/:pipelineId" element={<PipelineDetailPage />} />
+        <Route path="datasets/:datasetId" element={<DatasetDetailPage />} />
+        <Route path="actions" element={<ActionsPage />} />
+        <Route path="actions/runs/:runId" element={<ActionRunDetailPage />} />
+        <Route path="workflows" element={<WorkflowsPage />} />
+        <Route path="workflows/:workflowId" element={<WorkflowDetailPage />} />
+        <Route path="logs" element={<LogsPage />} />
+        <Route path="runs" element={<RunsTabRedirect />} />
+        <Route path="runs/:runId" element={<RunRedirect />} />
+        <Route
+          path="*"
+          element={constrained(
+            <Routes>
+              <Route
+                index
+                element={
+                  <ObjectsWorkbench
+                    projectName={resolvedProjectName}
+                    objectPageSize={OBJECT_PAGE_SIZE}
+                    allObjectsTotal={allObjectsTotal}
+                    objectTypeCounts={objectTypeCounts}
+                    overviewSections={objectTypePreviewSections}
+                    overviewLoading={overviewLoading}
+                    objectTypesLoading={objectTypesLoading}
+                    sortBy={objectSortBy}
+                    classFilter={classFilter}
+                    selectedObjectType={selectedObjectType}
+                    selectedObjectId={selectedObjectIdForSidebar}
+                    onSortByChange={handleObjectSortByChange}
+                    onClassFilterChange={setClassFilter}
+                    onSelectObject={(objectId) => navigate(toProjectPath(objectId))}
+                  />
+                }
+              />
+              <Route path="home" element={<Navigate to="/" replace />} />
+              <Route path="objects" element={<Navigate to="/" replace />} />
+              <Route path="datasets" element={<DatasetsPage />} />
+              <Route path="connectors" element={<ConnectorsPage />} />
+              <Route path="connectors/:connectorId" element={<ConnectorDetailPage />} />
+              <Route path="syncs" element={<SyncsPage />} />
+              <Route path="syncs/:syncId" element={<SyncDetailPage />} />
+              <Route path="projections" element={<ProjectionsPage />} />
+              <Route path="projections/:projectionId" element={<ProjectionDetailPage />} />
+              <Route path="pipelines" element={<PipelinesPage />} />
+              <Route path="rules" element={<RulesPage />} />
+              <Route path="rules/:ruleId" element={<RuleDetailPage />} />
+              <Route path="settings" element={<Navigate to="/settings/members" replace />} />
+              <Route
+                path="settings/tokens"
+                element={
+                  <SettingsAccessGate>
+                    <SettingsTokensPage />
+                  </SettingsAccessGate>
+                }
+              />
+              <Route
+                path="settings/members"
+                element={
+                  <SettingsAccessGate>
+                    <SettingsMembersPage />
+                  </SettingsAccessGate>
+                }
+              />
+              <Route
+                path="settings/service-accounts"
+                element={
+                  <SettingsAccessGate>
+                    <SettingsServiceAccountsPage />
+                  </SettingsAccessGate>
+                }
+              />
+              <Route
+                path="settings/sessions"
+                element={
+                  <SettingsAccessGate>
+                    <SettingsSessionsPage />
+                  </SettingsAccessGate>
+                }
+              />
+              <Route
+                path="ontology"
+                element={
+                  <OntologyExplorer
+                    objectTypeCounts={objectTypeCounts}
+                    selectedTypeId={selectedOntologyTypeId}
+                    detailsOpen={ontologyDetailsOpen}
+                    onSelectedTypeChange={setSelectedOntologyTypeId}
+                    onOpenType={openOntologyTypeDetails}
+                    onViewObjects={(typeId) => {
+                      navigate(toProjectPath(`?class=${encodeURIComponent(typeId)}`))
+                    }}
+                  />
+                }
+              />
+              <Route path="ontology/:typeId" element={<OntologyTypeRedirect />} />
+              <Route
+                path=":objectId"
+                element={
+                  <ObjectDetailPage projectName={resolvedProjectName} objectLookup={objectLookup} />
+                }
+              />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          )}
+        />
+      </Routes>
+    </Suspense>
   )
+}
+
+function OntologyTypeRedirect() {
+  const { typeId } = useParams<{ typeId: string }>()
+  if (!typeId) return <Navigate to="/ontology" replace />
+  const params = new URLSearchParams({ type: typeId, view: "details" })
+  return <Navigate to={`/ontology?${params.toString()}`} replace />
 }
 
 function RunsTabRedirect() {

@@ -11,6 +11,7 @@ import {
 import { client } from "../client.gen"
 import {
   abortFileUpload,
+  addConnectorConnection,
   appendTelemetry,
   cancelAgentRun,
   cancelWorkflowIntervention,
@@ -24,6 +25,7 @@ import {
   createAuthServiceAccountAccessToken,
   createFileUpload,
   disableAuthServiceAccount,
+  disconnectConnectorConnection,
   existsObjects,
   facetObjects,
   getAction,
@@ -39,6 +41,7 @@ import {
   getAuthSession,
   getBulkTelemetryHistory,
   getConnector,
+  getConnectorConnectionRun,
   getDataset,
   getDatasetVersion,
   getLatestTelemetry,
@@ -72,6 +75,7 @@ import {
   listAuthServiceAccountAccessTokens,
   listAuthServiceAccounts,
   listAuthSessions,
+  listConnectorConnections,
   listConnectors,
   listDatasetRows,
   listDatasets,
@@ -97,6 +101,7 @@ import {
   postAgentThreadMessage,
   queryObjects,
   reactivateAuthMember,
+  reauthorizeConnectorConnection,
   removeObjectLink,
   requestAction,
   requestPipelineRun,
@@ -107,10 +112,13 @@ import {
   revokeAuthInvitation,
   revokeAuthServiceAccountAccessToken,
   revokeAuthSession,
+  revokeConnectorConnection,
   searchObjects,
+  selectConnectorConnectionRunAccount,
   signFileUploadPart,
   signOut,
   signOutAll,
+  startConnectorConnectionRun,
   submitWorkflowIntervention,
   suspendAuthMember,
   updateAuthMemberGroups,
@@ -123,6 +131,9 @@ import type {
   AbortFileUploadData,
   AbortFileUploadError,
   AbortFileUploadResponse,
+  AddConnectorConnectionData,
+  AddConnectorConnectionError,
+  AddConnectorConnectionResponse,
   AppendTelemetryData,
   AppendTelemetryError,
   AppendTelemetryResponse,
@@ -162,6 +173,9 @@ import type {
   DisableAuthServiceAccountData,
   DisableAuthServiceAccountError,
   DisableAuthServiceAccountResponse,
+  DisconnectConnectorConnectionData,
+  DisconnectConnectorConnectionError,
+  DisconnectConnectorConnectionResponse,
   ExistsObjectsData,
   ExistsObjectsError,
   ExistsObjectsResponse,
@@ -203,6 +217,9 @@ import type {
   GetBulkTelemetryHistoryData,
   GetBulkTelemetryHistoryError,
   GetBulkTelemetryHistoryResponse,
+  GetConnectorConnectionRunData,
+  GetConnectorConnectionRunError,
+  GetConnectorConnectionRunResponse,
   GetConnectorData,
   GetConnectorError,
   GetConnectorResponse,
@@ -301,6 +318,9 @@ import type {
   ListAuthSessionsData,
   ListAuthSessionsError,
   ListAuthSessionsResponse,
+  ListConnectorConnectionsData,
+  ListConnectorConnectionsError,
+  ListConnectorConnectionsResponse,
   ListConnectorsData,
   ListConnectorsResponse,
   ListDatasetRowsData,
@@ -366,6 +386,9 @@ import type {
   ReactivateAuthMemberData,
   ReactivateAuthMemberError,
   ReactivateAuthMemberResponse,
+  ReauthorizeConnectorConnectionData,
+  ReauthorizeConnectorConnectionError,
+  ReauthorizeConnectorConnectionResponse,
   RemoveObjectLinkData,
   RemoveObjectLinkError,
   RemoveObjectLinkResponse,
@@ -396,9 +419,15 @@ import type {
   RevokeAuthSessionData,
   RevokeAuthSessionError,
   RevokeAuthSessionResponse,
+  RevokeConnectorConnectionData,
+  RevokeConnectorConnectionError,
+  RevokeConnectorConnectionResponse,
   SearchObjectsData,
   SearchObjectsError,
   SearchObjectsResponse,
+  SelectConnectorConnectionRunAccountData,
+  SelectConnectorConnectionRunAccountError,
+  SelectConnectorConnectionRunAccountResponse,
   SignFileUploadPartData,
   SignFileUploadPartError,
   SignFileUploadPartResponse,
@@ -408,6 +437,9 @@ import type {
   SignOutData,
   SignOutError,
   SignOutResponse,
+  StartConnectorConnectionRunData,
+  StartConnectorConnectionRunError,
+  StartConnectorConnectionRunResponse,
   SubmitWorkflowInterventionData,
   SubmitWorkflowInterventionError,
   SubmitWorkflowInterventionResponse,
@@ -1313,6 +1345,219 @@ export const getConnectorOptions = (options: Options<GetConnectorData>) =>
     },
     queryKey: getConnectorQueryKey(options),
   })
+
+export const listConnectorConnectionsQueryKey = (options: Options<ListConnectorConnectionsData>) =>
+  createQueryKey("listConnectorConnections", options)
+
+/**
+ * List connector connections
+ */
+export const listConnectorConnectionsOptions = (options: Options<ListConnectorConnectionsData>) =>
+  queryOptions<
+    ListConnectorConnectionsResponse,
+    ListConnectorConnectionsError,
+    ListConnectorConnectionsResponse,
+    ReturnType<typeof listConnectorConnectionsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listConnectorConnections({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listConnectorConnectionsQueryKey(options),
+  })
+
+/**
+ * Disconnect a connector account
+ */
+export const disconnectConnectorConnectionMutation = (
+  options?: Partial<Options<DisconnectConnectorConnectionData>>
+): UseMutationOptions<
+  DisconnectConnectorConnectionResponse,
+  DisconnectConnectorConnectionError,
+  Options<DisconnectConnectorConnectionData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    DisconnectConnectorConnectionResponse,
+    DisconnectConnectorConnectionError,
+    Options<DisconnectConnectorConnectionData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await disconnectConnectorConnection({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Revoke a connector authorization
+ */
+export const revokeConnectorConnectionMutation = (
+  options?: Partial<Options<RevokeConnectorConnectionData>>
+): UseMutationOptions<
+  RevokeConnectorConnectionResponse,
+  RevokeConnectorConnectionError,
+  Options<RevokeConnectorConnectionData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    RevokeConnectorConnectionResponse,
+    RevokeConnectorConnectionError,
+    Options<RevokeConnectorConnectionData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await revokeConnectorConnection({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Start a connector connection run
+ */
+export const startConnectorConnectionRunMutation = (
+  options?: Partial<Options<StartConnectorConnectionRunData>>
+): UseMutationOptions<
+  StartConnectorConnectionRunResponse,
+  StartConnectorConnectionRunError,
+  Options<StartConnectorConnectionRunData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    StartConnectorConnectionRunResponse,
+    StartConnectorConnectionRunError,
+    Options<StartConnectorConnectionRunData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await startConnectorConnectionRun({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const getConnectorConnectionRunQueryKey = (
+  options: Options<GetConnectorConnectionRunData>
+) => createQueryKey("getConnectorConnectionRun", options)
+
+/**
+ * Get a connector connection run
+ */
+export const getConnectorConnectionRunOptions = (options: Options<GetConnectorConnectionRunData>) =>
+  queryOptions<
+    GetConnectorConnectionRunResponse,
+    GetConnectorConnectionRunError,
+    GetConnectorConnectionRunResponse,
+    ReturnType<typeof getConnectorConnectionRunQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getConnectorConnectionRun({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getConnectorConnectionRunQueryKey(options),
+  })
+
+/**
+ * Add a connector connection from an existing authorization
+ */
+export const addConnectorConnectionMutation = (
+  options?: Partial<Options<AddConnectorConnectionData>>
+): UseMutationOptions<
+  AddConnectorConnectionResponse,
+  AddConnectorConnectionError,
+  Options<AddConnectorConnectionData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    AddConnectorConnectionResponse,
+    AddConnectorConnectionError,
+    Options<AddConnectorConnectionData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await addConnectorConnection({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Select a connector account
+ */
+export const selectConnectorConnectionRunAccountMutation = (
+  options?: Partial<Options<SelectConnectorConnectionRunAccountData>>
+): UseMutationOptions<
+  SelectConnectorConnectionRunAccountResponse,
+  SelectConnectorConnectionRunAccountError,
+  Options<SelectConnectorConnectionRunAccountData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    SelectConnectorConnectionRunAccountResponse,
+    SelectConnectorConnectionRunAccountError,
+    Options<SelectConnectorConnectionRunAccountData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await selectConnectorConnectionRunAccount({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Reauthorize a connector connection
+ */
+export const reauthorizeConnectorConnectionMutation = (
+  options?: Partial<Options<ReauthorizeConnectorConnectionData>>
+): UseMutationOptions<
+  ReauthorizeConnectorConnectionResponse,
+  ReauthorizeConnectorConnectionError,
+  Options<ReauthorizeConnectorConnectionData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    ReauthorizeConnectorConnectionResponse,
+    ReauthorizeConnectorConnectionError,
+    Options<ReauthorizeConnectorConnectionData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await reauthorizeConnectorConnection({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
 
 export const listDatasetsQueryKey = (options?: Options<ListDatasetsData>) =>
   createQueryKey("listDatasets", options)

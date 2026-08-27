@@ -1,6 +1,6 @@
 # @sixb/sandboxes-apple-container
 
-Runs each agent's bash inside a local [Apple Container](https://github.com/apple/container)
+Runs each agent's sandbox tools inside a local [Apple Container](https://github.com/apple/container)
 container. Drop-in `Sandbox` provider - wire it once into `createSixb({ sandboxes })`; agent code
 still uses the provider-neutral Sixb sandbox contract.
 
@@ -13,13 +13,13 @@ Install Apple Container on an Apple silicon Mac running macOS 26 or newer, then 
 container system start
 ```
 
-The default image is `node:22-bookworm` because Sixb's built-in bash tool executes commands through
-`bash -lc` and the agent skills use `curl`. Custom images should include:
+The default image is `node:22-bookworm`. Custom agent images should include:
 
 - `bash`
 - `/bin/sh`
 - `curl`
-- `base64`, `dirname`, `mkdir`, `cat`, and `chmod`
+- `realpath`, `tail`, `head`, and `base64` for the built-in `read` tool
+- `dirname`, `mkdir`, `cat`, and optionally `chmod` for file materialization
 
 ## Use
 

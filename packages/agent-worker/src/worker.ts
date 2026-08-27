@@ -32,7 +32,7 @@ import {
   type AgentExecutionEnvironment,
   createConversationAgentEnvironment,
 } from "./run-environment"
-import { createBrokerStreamSink, isolateStreamSink } from "./stream-sink"
+import { createBrokerStreamSink, isolateStreamSink, withAgentActivityStream } from "./stream-sink"
 import type {
   AgentWorkerContext,
   AgentWorkerHost,
@@ -679,7 +679,7 @@ function buildAgentContext(host: AgentWorkerHost, options: AgentWorkerOptions): 
   if (!host.sandboxes) {
     throw createSixbError(
       "internal.unexpected",
-      "[SixbAgentWorker] Agent workers require createSixb({ sandboxes }) for the built-in bash tool."
+      "[SixbAgentWorker] Agent workers require createSixb({ sandboxes }) for the built-in read and bash tools."
     )
   }
   const agentSkills = loadAgentSkills({
@@ -700,7 +700,10 @@ function buildAgentContext(host: AgentWorkerHost, options: AgentWorkerOptions): 
     // URL builder, the sandbox run context) consumes it verbatim.
     apiBaseUrl: normalizeApiBaseUrl(normalizeRequiredString(options.apiBaseUrl)),
     streamSink: isolateStreamSink(
-      options.streamSink ?? createBrokerStreamSink({ broker: host.broker, projectId: host.id })
+      withAgentActivityStream(
+        options.streamSink ?? createBrokerStreamSink({ broker: host.broker, projectId: host.id }),
+        host.broker
+      )
     ),
     recoverAiModelCall: (record) => enqueueAiModelCallRecovery(host.queues.agents, record),
     agentSkills,

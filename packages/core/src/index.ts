@@ -439,6 +439,7 @@ export type {
   GrantDefinition,
   GroupDefinition,
   GroupReference,
+  ManageGrant,
   MembershipOperation,
   MembershipPolicyDefinition,
   ObserveGrant,
@@ -472,6 +473,7 @@ export type {
   DurableExecutionSource,
   ExecutionRecord,
   ExecutionStorage,
+  InMemoryStorageOptions,
   MigrationCapableStorage,
   MigrationReport,
   // `status()` returns these, so reading a migrator from here needs them; without them
@@ -596,12 +598,30 @@ export {
 // ── Connectors ─────────────────────────────────────────────
 
 export type {
+  AnyConnectorAdapter,
+  ConnectorAccessToken,
+  ConnectorAccountCandidate,
   ConnectorAdapter,
   ConnectorClient,
+  ConnectorConnectionClientContext,
+  ConnectorConnectionMetadata,
+  ConnectorConnectionOptions,
+  ConnectorConnectionOwner,
+  ConnectorConnectionSelector,
   ConnectorContext,
   ConnectorDefinition,
+  ConnectorOAuth2Authentication,
+  ConnectorOAuthCredentials,
+  ConnectorOAuthErrorKind,
+  ConnectorTokenSource,
+  OAuthConnectorAdapter,
+  OAuthConnectorAuthorizationContext,
+  OAuthConnectorAuthorizationUrlInput,
+  OAuthConnectorCodeExchangeInput,
+  ProjectConnectorConnectionOwner,
+  StaticConnectorDefinition,
 } from "./connectors"
-export { defineConnector } from "./connectors"
+export { ConnectorOAuthError, defineConnector } from "./connectors"
 
 // ── Webhooks ───────────────────────────────────────────────
 
@@ -639,6 +659,7 @@ export type {
   DatasetSyncTarget,
   RequestSyncRunInput,
   SyncBuilder,
+  SyncConnectorConnection,
   SyncDefinition,
   SyncMode,
   SyncReadBuilder,

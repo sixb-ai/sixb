@@ -2337,8 +2337,8 @@ describe("AgentWorker", () => {
       )
       const systemAddendum = firstEnvironment.turnContext.systemAddendum ?? ""
       expect(systemAddendum).toContain("Execution mode: conversation")
-      expect(systemAddendum).toContain("Use $SIXB_SKILLS_DIR and attachment/output env vars")
-      expect(systemAddendum).toContain("Path: $SIXB_SKILLS_DIR/sixb-query")
+      expect(systemAddendum).toContain("use relative paths from this catalog or sandboxPath values")
+      expect(systemAddendum).toContain("Path: .sixb/agent/skills/sixb-query/SKILL.md")
       expect(systemAddendum).not.toContain("/tmp/sixb-recording-sandbox")
 
       await firstEnvironment.dispose()
@@ -2846,9 +2846,11 @@ describe("AgentWorker", () => {
       tools: [selectedEcho],
     })
     let unselectedToolNames: readonly string[] = []
+    let plainModelCalls = 0
     const plain = defineAgent("plain", {
       name: "Plain",
       model: answerModel((names) => {
+        plainModelCalls += 1
         unselectedToolNames = names
       }),
       instructions: "Answer without the research tool.",
@@ -2904,7 +2906,9 @@ describe("AgentWorker", () => {
         threadId: selectedRequest.run.threadId,
       })
       expect(unselectedToolNames).toContain("bash")
+      expect(unselectedToolNames).toContain("read")
       expect(unselectedToolNames).not.toContain(selectedEcho.name)
+      expect(plainModelCalls).toBe(1)
 
       const messages = await listMessages(storage, selectedRequest.run.threadId)
       expect(
@@ -4113,9 +4117,9 @@ describe("AgentWorker", () => {
           { label: "project skills run terminal" }
         )
         expect(run.status).toBe("succeeded")
-        expect(capturedSystem).toContain("Path: $SIXB_SKILLS_DIR/acme-style")
+        expect(capturedSystem).toContain("Path: .sixb/agent/skills/acme-style/SKILL.md")
         expect(capturedSystem).toContain("Use when drafting Acme customer-facing messages.")
-        expect(capturedSystem).toContain("Path: $SIXB_SKILLS_DIR/sixb-query")
+        expect(capturedSystem).toContain("Path: .sixb/agent/skills/sixb-query/SKILL.md")
 
         const command = sandboxes.sandboxes[0]?.commands[0]
         const skillsDir = command?.options.env?.SIXB_SKILLS_DIR
@@ -4945,7 +4949,7 @@ describe("AgentWorker", () => {
 
     expect(capturedSystem).toContain("<sixb_core_rules>")
     expect(capturedSystem).toContain("You are operating as a Sixb agent")
-    expect(capturedSystem).toContain("sandboxed bash tool")
+    expect(capturedSystem).toContain("sandboxed read and bash tools")
     expect(capturedSystem).toContain("<sixb_runtime_context>")
     expect(capturedSystem).toContain("Extra sandbox context.")
     expect(capturedSystem).toContain("<agent_instructions>")

@@ -19,12 +19,18 @@ import {
 } from "./models"
 
 export * from "./agent-streams"
+export * from "./connectors"
 export * from "./events"
 export * from "./events-hooks"
 export * from "./events-provider"
 export * from "./generated/@tanstack/react-query.gen"
 export * from "./logs-hooks"
 export * from "./query-hooks"
+export {
+  type UseAgentActivityStreamOptions,
+  type UseAgentActivityStreamResult,
+  useAgentActivityStream,
+} from "./useAgentActivityStream"
 export {
   type UseAgentRunStreamOptions,
   type UseAgentRunStreamResult,

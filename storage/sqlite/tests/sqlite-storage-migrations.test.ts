@@ -197,18 +197,25 @@ const expectedStorageMigrationRows = [
     version: 24,
   },
   {
-    adapter_id: "SixbSqliteStorage",
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
     checksum_length: 64,
-    id: "025-agent-run-requester-authorization",
+    id: "025-connector-connections",
     status: "applied",
     version: 25,
   },
   {
-    adapter_id: "SixbSqliteStorage",
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
     checksum_length: 64,
-    id: "026-agent-delegated-authority",
+    id: "026-agent-run-requester-authorization",
     status: "applied",
     version: 26,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "027-agent-delegated-authority",
+    status: "applied",
+    version: 27,
   },
 ]
 
@@ -239,8 +246,8 @@ describe("SQLite storage migrations", () => {
   test("delegated-authority migration preserves existing executions and admits both forms", () => {
     const db = new Database(":memory:")
     try {
-      // Everything up to (but not including) 026.
-      for (const step of sqliteStorageMigrations.steps.slice(0, 25)) {
+      // Everything up to (but not including) 027.
+      for (const step of sqliteStorageMigrations.steps.slice(0, 26)) {
         step.up(db)
       }
       db.query(
@@ -268,7 +275,7 @@ describe("SQLite storage migrations", () => {
         insertExecution("exec_delegated_early", "authority_user_id", "usr_ada")
       ).toThrow()
 
-      sqliteStorageMigrations.steps[25]?.up(db)
+      sqliteStorageMigrations.steps[26]?.up(db)
 
       // ...accepted after it, and the pre-existing row survived the table rebuild.
       insertExecution("exec_delegated", "authority_user_id", "usr_ada")
@@ -1629,6 +1636,36 @@ describe("SQLite storage migrations", () => {
       expect(readMemoryIndexColumns(db, "idx_ontology_commits_execution")).toEqual([
         "project_id",
         "execution_id",
+      ])
+    } finally {
+      db.close()
+    }
+  })
+
+  test("stores a headless connector attempt as the run's single protocol child", () => {
+    const db = new Database(":memory:")
+    try {
+      for (const migration of sqliteStorageMigrations.steps) migration.up(db)
+
+      expect(readMemoryTableColumns(db, "connector_connection_runs")).not.toContain(
+        "authorization_attempt_id"
+      )
+      expect(readMemoryTableColumns(db, "connector_authorization_attempts")).not.toContain(
+        "owner_type"
+      )
+      expect(readMemoryTableColumns(db, "connector_connections")).not.toContain("owner_type")
+      expect(readMemoryUniqueIndexes(db, "connector_authorization_attempts")).toContainEqual([
+        "project_id",
+        "connector_id",
+        "connection_run_id",
+      ])
+      expect(readMemoryForeignKeyTables(db, "connector_authorization_attempts")).toContain(
+        "connector_connection_runs"
+      )
+      expect(readMemoryUniqueIndexes(db, "connector_connections")).toContainEqual([
+        "project_id",
+        "connector_id",
+        "slot",
       ])
     } finally {
       db.close()

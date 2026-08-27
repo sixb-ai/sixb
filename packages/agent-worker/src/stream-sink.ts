@@ -6,6 +6,7 @@ import {
   agentRunStreamDefinition,
   agentRunStreamId,
   agentRunStreamIdempotencyKey,
+  publishAgentRunActivity,
 } from "@sixb/core/agents/streams"
 import { createSixbError } from "@sixb/core/internal/errors"
 import type { AgentRunRecord } from "@sixb/core/storage"
@@ -55,6 +56,24 @@ export function isolateStreamSink(sink: StreamSink): StreamSink {
     publishRunFinished: (run) =>
       isolateStreamSinkCall(run.id, "run finished", () => sink.publishRunFinished(run)),
   }
+}
+
+/** Keep the project lifecycle feed platform-owned even when callers replace transcript streaming. */
+export function withAgentActivityStream(sink: StreamSink, broker: Broker): StreamSink {
+  return {
+    publishStarted: (run) =>
+      publishLifecycle([sink.publishStarted(run), publishAgentRunActivity(broker, run)]),
+    publishUiChunk: (input) => sink.publishUiChunk(input),
+    publishMessageFinalized: (input) => sink.publishMessageFinalized(input),
+    publishRunFinished: (run) =>
+      publishLifecycle([sink.publishRunFinished(run), publishAgentRunActivity(broker, run)]),
+  }
+}
+
+async function publishLifecycle(deliveries: readonly Promise<void>[]): Promise<void> {
+  const results = await Promise.allSettled(deliveries)
+  const failure = results.find((result) => result.status === "rejected")
+  if (failure?.status === "rejected") throw failure.reason
 }
 
 class BrokerStreamSink implements StreamSink {

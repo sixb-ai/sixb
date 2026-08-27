@@ -16,6 +16,7 @@ import {
   ThemeSwitcher,
 } from "@sixb/ui/components"
 import {
+  Bot,
   CalendarClock,
   ClipboardList,
   FileText,
@@ -37,6 +38,7 @@ const groups = [
       { href: "/", label: "Today", icon: LayoutDashboard },
       { href: "/service-cases", label: "Service cases", icon: ClipboardList },
       { href: "/dispatch", label: "Dispatch", icon: CalendarClock },
+      { href: "/agents", label: "Agents", icon: Bot },
     ],
   },
   {
@@ -58,23 +60,25 @@ const groups = [
 
 export function AppShell({ children }: PropsWithChildren) {
   const location = useLocation()
-  useInvalidateOnEvent(events.objects(), () => [objectQueryKeys.all()], { debounceMs: 75 })
-  useInvalidateOnEvent(events.links(), () => [objectQueryKeys.all()], { debounceMs: 75 })
+  const agentsActive = location.pathname.startsWith("/agents")
+  useInvalidateOnEvent(events.objects(), () => [objectQueryKeys.all()], {
+    debounceMs: 75,
+    enabled: !agentsActive,
+  })
+  useInvalidateOnEvent(events.links(), () => [objectQueryKeys.all()], {
+    debounceMs: 75,
+    enabled: !agentsActive,
+  })
+
+  if (agentsActive) return children
+
   return (
     <SidebarProvider
       style={{ "--sidebar-width": "12.5rem" } as CSSProperties}
       className="h-svh min-h-0 overflow-hidden"
     >
       <Sidebar collapsible="offcanvas" className="border-sidebar-border">
-        <SidebarHeader className="h-16 justify-center border-b border-sidebar-border px-4 py-2">
-          <Link to="/" aria-label="Northline Operations">
-            <img
-              src="/brand/northline-wordmark-light.svg"
-              alt="Northline Mechanical"
-              className="h-10 w-auto"
-            />
-          </Link>
-        </SidebarHeader>
+        <NorthlineSidebarHeader />
         <SidebarContent className="py-2">
           {groups.map((group) => (
             <SidebarGroup key={group.label} className="px-2 py-1.5">
@@ -108,17 +112,7 @@ export function AppShell({ children }: PropsWithChildren) {
             </SidebarGroup>
           ))}
         </SidebarContent>
-        <SidebarFooter className="border-t border-sidebar-border p-3">
-          <div className="flex items-center gap-2.5 rounded-md px-1.5 py-1 text-xs">
-            <span className="grid size-7 place-items-center rounded-full bg-sidebar-accent font-semibold">
-              AD
-            </span>
-            <span className="min-w-0">
-              <strong className="block truncate font-medium">Alex Dawson</strong>
-              <span className="block truncate text-[11px] opacity-65">Service operations</span>
-            </span>
-          </div>
-        </SidebarFooter>
+        <NorthlineSidebarFooter />
       </Sidebar>
       <SidebarInset className="h-svh min-h-0 overflow-hidden">
         <header className="flex h-12 shrink-0 items-center gap-3 bg-background px-3 sm:px-4">
@@ -136,5 +130,35 @@ export function AppShell({ children }: PropsWithChildren) {
       </SidebarInset>
       <OperationsAssistant />
     </SidebarProvider>
+  )
+}
+
+export function NorthlineSidebarHeader() {
+  return (
+    <SidebarHeader className="h-16 justify-center border-b border-sidebar-border px-4 py-2">
+      <Link to="/" aria-label="Northline Operations">
+        <img
+          src="/brand/northline-wordmark-light.svg"
+          alt="Northline Mechanical"
+          className="h-10 w-auto"
+        />
+      </Link>
+    </SidebarHeader>
+  )
+}
+
+export function NorthlineSidebarFooter() {
+  return (
+    <SidebarFooter className="border-t border-sidebar-border p-3">
+      <div className="flex items-center gap-2.5 rounded-md px-1.5 py-1 text-xs">
+        <span className="grid size-7 place-items-center rounded-full bg-sidebar-accent font-semibold">
+          AD
+        </span>
+        <span className="min-w-0">
+          <strong className="block truncate font-medium">Alex Dawson</strong>
+          <span className="block truncate text-[11px] opacity-65">Service operations</span>
+        </span>
+      </div>
+    </SidebarFooter>
   )
 }

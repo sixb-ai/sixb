@@ -48,6 +48,24 @@ These routes are generated only when the project has at least one `app/` page, s
 
 The default agent UI is imported through `@sixb/app/agents`, so app projects do not need to import `@sixb/agent-ui` directly. A framework-owned `agent-ui.css` bundle is generated before the app stylesheet and imports normal `@sixb/ui` styles, which means app-level token overrides in `app/globals.css` still apply in the usual way.
 
+Wrap the app layout with `AgentWorkspaceProvider` to make the built-in agent navigation match the
+custom app shell without replacing any routes:
+
+```tsx
+import { AgentWorkspaceProvider } from "@sixb/app/agents"
+
+<AgentWorkspaceProvider
+  sidebarHeader={<AppSidebarHeader />}
+  sidebarFooter={<AppSidebarFooter />}
+  sidebarWidth="12.5rem"
+>
+  <AppShell>{children}</AppShell>
+</AgentWorkspaceProvider>
+```
+
+Explicit props passed to a project-owned `AgentsPage` override provider defaults. The custom width
+applies to the persistent desktop rail; the mobile sheet keeps its responsive width.
+
 ### Embedded Agent Panel
 
 Embed the same conversation runtime without changing the page route:

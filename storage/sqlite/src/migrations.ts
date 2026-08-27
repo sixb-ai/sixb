@@ -66,10 +66,13 @@ import webhookExecutionsSql from "./migrations/023-webhook-executions.sql" with 
 import ontologyCommitExecutionsSql from "./migrations/024-ontology-commit-executions.sql" with {
   type: "text",
 }
-import agentRunRequesterAuthorizationSql from "./migrations/025-agent-run-requester-authorization.sql" with {
+import connectorConnectionsSql from "./migrations/025-connector-connections.sql" with {
   type: "text",
 }
-import agentDelegatedAuthoritySql from "./migrations/026-agent-delegated-authority.sql" with {
+import agentRunRequesterAuthorizationSql from "./migrations/026-agent-run-requester-authorization.sql" with {
+  type: "text",
+}
+import agentDelegatedAuthoritySql from "./migrations/027-agent-delegated-authority.sql" with {
   type: "text",
 }
 
@@ -151,8 +154,9 @@ export const sqliteStorageMigrations = defineMigrations({
       },
       { checksum: checksum(ontologyCommitExecutionsSql) }
     ),
-    sqliteSql("025-agent-run-requester-authorization", agentRunRequesterAuthorizationSql),
-    sqliteSql("026-agent-delegated-authority", agentDelegatedAuthoritySql),
+    sqliteSql("025-connector-connections", connectorConnectionsSql),
+    sqliteSql("026-agent-run-requester-authorization", agentRunRequesterAuthorizationSql),
+    sqliteSql("027-agent-delegated-authority", agentDelegatedAuthoritySql),
   ],
 })
 

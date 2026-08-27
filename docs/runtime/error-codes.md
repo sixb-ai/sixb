@@ -51,6 +51,7 @@ Each boundary exposes only the codes it can persist.
 | Action run or phase | `action.phase_failed`, `internal.unexpected`, `queue.enqueue_failed`, `runtime.cancelled` |
 | Sync run | `internal.unexpected`, `queue.enqueue_failed`, `runtime.cancelled`, `sync.execution_failed` |
 | Agent execution | `agent.execution_failed`, `internal.unexpected`, `runtime.cancelled` |
+| Connector connection run | `connector.adapter_invalid`, `connector.authorization_invalid`, `connector.authorization_required`, `connector.credentials_unavailable`, `connector.not_found`, `connector.operation_conflict`, `connector.operation_in_progress`, `connector.provider_failed`, `connector.provider_unavailable`, `internal.unexpected` |
 | Projection run | `internal.unexpected`, `projection.execution_failed`, `queue.enqueue_failed`, `runtime.cancelled` |
 | Pipeline run or step | `internal.unexpected`, `pipeline.step_failed`, `queue.enqueue_failed`, `runtime.cancelled` |
 | Workflow run or node | `internal.unexpected`, `runtime.cancelled`, `workflow.node_failed` |
@@ -83,6 +84,18 @@ Additional rules:
 | --- | --- | --- | --- |
 | `action.phase_failed` | No | An Action phase could not complete successfully. | Inspect `details.phase` and the native error reported to `onError`. |
 | `agent.execution_failed` | No | An active Agent execution failed. | Inspect the run identity and the native error reported to `onError`. |
+| `connector.adapter_invalid` | No | A connector adapter returned data that violates its Sixb contract. | Fix or upgrade the adapter before retrying. |
+| `connector.authorization_invalid` | No | An OAuth connection run or authorization transition is no longer valid. | Start a new connector connection run. |
+| `connector.authorization_required` | No | The connection cannot provide credentials in its current state. | Reauthorize the connector and select an account when requested. |
+| `connector.configuration_invalid` | No | Connector definitions, storage, or credential protection are misconfigured. | Fix the connector runtime configuration and restart Sixb. |
+| `connector.credentials_unavailable` | No | Stored connector credentials failed validation or authenticated decryption. | Verify the encryption key and reauthorize affected connections. |
+| `connector.not_found` | No | A connector definition, connection, authorization, or account was not found in the current project. | Check the identifier or reconnect the account. |
+| `connector.operation_conflict` | No | Connector state changed incompatibly with the requested operation. | Reload current connection state and start a new operation explicitly. |
+| `connector.operation_in_progress` | Yes | Another process is safely mutating the same authorization credentials. | Retry after the current credential operation finishes. |
+| `connector.provider_failed` | No | A provider operation failed or ended with an ambiguous outcome. | Inspect the native cause; restart authorization when Sixb failed closed. |
+| `connector.provider_unavailable` | Yes | The adapter guaranteed that a failed provider operation produced no external change. | Retry the unchanged operation later. |
+| `connector.replacement_required` | No | Account selection would replace the connection currently assigned to the slot. | Confirm replacement, then retry selection with `replace: true`, or choose another slot. |
+| `connector.revocation_pending` | Yes | Local access is disconnected, but provider revocation has not been durably confirmed. | Retry revocation; the operation is idempotent and local access remains closed. |
 | `dataset.not_found` | No | Dataset is unavailable to the caller. | Check its ID and access policy. |
 | `dataset.version_incompatible` | No | Version does not match the required dataset or schema. | Materialize a compatible version. |
 | `dataset.version_not_found` | No | Version does not exist or nothing has been committed yet. | Check the ID or materialize the dataset. |
