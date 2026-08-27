@@ -130,6 +130,11 @@ export {
   publishAgentRunFinished,
   subscribeAgentRunCancel,
 } from "./streams"
+export type {
+  AgentThreadModelContextMessage,
+  ProjectAgentThreadModelContextInput,
+} from "./thread-context-projection"
+export { projectAgentThreadModelContext } from "./thread-context-projection"
 export { isAgentToolResult } from "./tool-result"
 export type {
   AgentDefinition,

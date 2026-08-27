@@ -78,6 +78,7 @@ describe("Postgres storage migrations", () => {
             "024-ontology-commit-executions",
             "025-connector-connections",
             "026-ai-cost-accounting",
+            "027-agent-context-checkpoints",
           ],
         },
       ])
@@ -263,6 +264,13 @@ describe("Postgres storage migrations", () => {
           id: "026-ai-cost-accounting",
           status: "applied",
           version: 26,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "027-agent-context-checkpoints",
+          status: "applied",
+          version: 27,
         },
       ])
     })
@@ -1728,6 +1736,13 @@ describe("Postgres storage migrations", () => {
           id: "026-ai-cost-accounting",
           status: "applied",
           version: 26,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "027-agent-context-checkpoints",
+          status: "applied",
+          version: 27,
         },
       ])
     } finally {

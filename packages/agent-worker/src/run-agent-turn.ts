@@ -23,6 +23,7 @@ import { appendMessageAndFinishRunOrThrow, finishRunOrThrow } from "./finalize"
 import { AiModelCallRecorder } from "./model-call-recorder"
 import { collectAgentOutputAttachments } from "./output-attachments"
 import { runAgentLoop } from "./run-agent-loop"
+import { loadAgentThreadModelContext } from "./thread-context"
 import type { AgentTurnContext } from "./types"
 
 export const DEFAULT_MAX_STEPS = 25
@@ -63,32 +64,43 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   }
   const agents = storage.agents
 
-  const history = await agents.messages.list({ projectId, threadId: run.threadId, order: "asc" })
+  const threadContext = await loadAgentThreadModelContext({
+    storage: agents,
+    projectId,
+    threadId: run.threadId,
+  })
   const attachmentContext =
     context.attachmentContext ??
     (context.apiBaseUrl
       ? await prepareAgentAttachments({
           projectId,
           threadId: run.threadId,
-          messages: history.messages,
+          messages: threadContext.retainedMessages,
           blobStorage: context.blobStorage,
           apiBaseUrl: context.apiBaseUrl,
-          inlineImages: await modelSupportsInlineImages(agent.model),
+          inlineImages: await modelSupportsInlineImages(agent.model, signal),
+          signal,
         })
       : undefined)
   // `toModelMessages` is core's `ai`-free mirror of `convertToModelMessages`. The only type gap is
   // `providerOptions`, which core types as the wider `JsonValue` (it cannot depend on `ai`); the
   // values originate from the SDK, so the runtime shape is compatible. The worker is where `ai`
   // lives, so this single boundary cast belongs here. Locked by `tests/ai-sdk-compat.types.ts`.
-  const modelMessages = toModelMessages(history.messages, {
+  const modelMessages = toModelMessages(threadContext.modelMessages, {
     fileText: ({ message, partIndex }) =>
-      attachmentContext?.promptTextByPartKey.get(attachmentKey(message.id, partIndex)),
+      message.id
+        ? attachmentContext?.promptTextByPartKey.get(attachmentKey(message.id, partIndex))
+        : undefined,
     fileData: ({ message, partIndex }) =>
-      attachmentContext?.modelFileDataByPartKey.get(attachmentKey(message.id, partIndex)),
+      message.id
+        ? attachmentContext?.modelFileDataByPartKey.get(attachmentKey(message.id, partIndex))
+        : undefined,
     toolResultFileText: ({ message, partIndex, contentIndex }) =>
-      attachmentContext?.promptTextByPartKey.get(
-        toolResultAttachmentKey(message.id, partIndex, contentIndex)
-      ),
+      message.id
+        ? attachmentContext?.promptTextByPartKey.get(
+            toolResultAttachmentKey(message.id, partIndex, contentIndex)
+          )
+        : undefined,
   }) as ModelMessage[]
 
   const maxSteps = agent.loop?.stopWhen?.maxSteps ?? defaultMaxSteps

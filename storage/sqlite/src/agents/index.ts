@@ -1,5 +1,6 @@
 export type { SqliteAgentStorageOptions } from "./agent-storage"
 export { SqliteAgentStorage } from "./agent-storage"
+export { SqliteAgentContextCheckpointStore } from "./checkpoints"
 export { SqliteAgentMessageStore } from "./messages"
 export { SqliteAgentRunStore } from "./runs"
 export { SqliteAgentThreadStore } from "./threads"

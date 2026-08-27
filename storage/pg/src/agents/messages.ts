@@ -21,6 +21,23 @@ export class PgAgentMessageStore implements AgentMessageStore {
 
     try {
       return await runPgTransaction(this.sql, async (tx) => {
+        // Assistant finalization appends and finishes in one outer transaction. Lock its run first
+        // so every operation that needs both rows follows the same run -> thread order.
+        if (input.runId !== null) {
+          const [run] = await tx<{ id: string }[]>`
+            SELECT id FROM agent_runs
+            WHERE project_id = ${input.projectId} AND id = ${input.runId}
+            FOR UPDATE
+          `
+
+          if (!run) {
+            throw new AgentStorageError(
+              "run_not_found",
+              `[SixbPg] Agent run '${input.runId}' not found for project '${input.projectId}'.`
+            )
+          }
+        }
+
         const [thread] = await tx<{ id: string }[]>`
           SELECT id FROM agent_threads
           WHERE project_id = ${input.projectId} AND id = ${input.threadId}
@@ -32,19 +49,6 @@ export class PgAgentMessageStore implements AgentMessageStore {
             "thread_not_found",
             `[SixbPg] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
           )
-        }
-
-        if (input.runId !== null) {
-          const [run] = await tx<{ id: string }[]>`
-            SELECT id FROM agent_runs WHERE project_id = ${input.projectId} AND id = ${input.runId}
-          `
-
-          if (!run) {
-            throw new AgentStorageError(
-              "run_not_found",
-              `[SixbPg] Agent run '${input.runId}' not found for project '${input.projectId}'.`
-            )
-          }
         }
 
         const [seqRow] = await tx<{ next: number | string }[]>`
@@ -169,6 +173,11 @@ export class PgAgentMessageStore implements AgentMessageStore {
     const whereClauses = ["project_id = $1", "thread_id = $2"]
     const params: SqlParameter[] = [input.projectId, input.threadId]
     let index = 3
+
+    if (input.afterSeq !== undefined) {
+      whereClauses.push(`seq > $${index++}`)
+      params.push(input.afterSeq)
+    }
 
     if (input.roles) {
       const placeholders = input.roles.map(() => `$${index++}`)

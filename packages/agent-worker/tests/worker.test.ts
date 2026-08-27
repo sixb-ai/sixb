@@ -1547,6 +1547,7 @@ function withFlakyAgentFinishStorage(storage: Storage, failTimes: number): Stora
   const wrapAgents = (agents: AgentStorage): AgentStorage => ({
     threads: agents.threads,
     messages: agents.messages,
+    checkpoints: agents.checkpoints,
     runs: {
       create: (input) => agents.runs.create(input),
       start: (input) => agents.runs.start(input),
@@ -1587,6 +1588,7 @@ function withAlwaysFailingTransactionalFinish(storage: Storage): Storage {
   const wrapAgents = (agents: AgentStorage): AgentStorage => ({
     threads: agents.threads,
     messages: agents.messages,
+    checkpoints: agents.checkpoints,
     runs: {
       create: (input) => agents.runs.create(input),
       start: (input) => agents.runs.start(input),
@@ -1624,6 +1626,7 @@ function withObservedAgentMessageAppendStorage(
   const wrapAgents = (agents: AgentStorage): AgentStorage => ({
     threads: agents.threads,
     runs: agents.runs,
+    checkpoints: agents.checkpoints,
     messages: {
       deleteByRunId: (input) => agents.messages.deleteByRunId(input),
       getById: (params) => agents.messages.getById(params),

@@ -210,6 +210,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 26,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "027-agent-context-checkpoints",
+    status: "applied",
+    version: 27,
+  },
 ]
 
 afterEach(async () => {
@@ -1686,6 +1693,7 @@ describe("SQLite storage migrations", () => {
     expect(tables).toContain("agent_threads")
     expect(tables).toContain("agent_runs")
     expect(tables).toContain("agent_messages")
+    expect(tables).toContain("agent_context_checkpoints")
     expect(tables).toContain("ai_model_call_usage")
     expect(tables).toContain("ai_model_call_usage_groups")
     expect(tables).toContain("ai_model_call_valuations")
