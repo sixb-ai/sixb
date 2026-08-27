@@ -241,6 +241,13 @@ function cloneObjectProjectionDefinition(
         },
       ])
     ),
+    conflictResolution:
+      projection.conflictResolution?.strategy === "mostRecent"
+        ? {
+            strategy: "mostRecent",
+            sourceTimestamp: projection.conflictResolution.sourceTimestamp,
+          }
+        : { strategy: "editsWin" },
   }
 }
 

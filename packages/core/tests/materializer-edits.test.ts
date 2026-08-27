@@ -11,6 +11,7 @@ import {
   createMaterializerFixture,
   replacement,
   sourceEntry,
+  sourceEntryAt,
   sourceEntryWithParent,
 } from "./materializer-fixture"
 
@@ -584,6 +585,144 @@ describe("ontology materializer edits", () => {
         })
       )?.properties.name
     ).toBe("source")
+  })
+
+  test("resolves most-recent source and edit candidates independently per property", async () => {
+    let now = new Date("2026-01-01T10:00:00.000Z")
+    const { materializer, storage } = createMaterializerFixture({
+      conflictResolution: "mostRecent",
+      dependencies: { clock: () => now },
+    })
+    const object = async () =>
+      storage.objects.getByPrimaryId({
+        projectId: "project",
+        objectTypeId: "Device",
+        primaryId: "one",
+      })
+
+    await materializer.projections.replace(
+      replacement("recent-v1", "2026-01-01T00:00:00Z", [
+        sourceEntryAt("one", "A", "2026-01-01T10:00:00Z", "source-note-1"),
+      ])
+    )
+
+    now = new Date("2026-01-01T11:00:00.000Z")
+    const nameEdit = await materializer.edits.commit(
+      atomic("recent-edit-name", [
+        {
+          id: "name",
+          kind: "object.patch",
+          ref: ref("one"),
+          set: { name: "B" },
+          unset: [],
+          reset: [],
+        },
+      ])
+    )
+    const nameEditOutcome = nameEdit.outcomes[0]
+    expect(nameEditOutcome?.ok).toBe(true)
+    if (!nameEditOutcome?.ok) throw new Error("Expected the name edit to succeed.")
+    expect(nameEditOutcome.object).not.toHaveProperty("propertyConflicts")
+
+    await materializer.projections.replace(
+      replacement("recent-v2", "2026-01-02T00:00:00Z", [
+        sourceEntryAt("one", "source-still-old", "2026-01-01T10:00:00Z", "source-note-2"),
+      ])
+    )
+    expect((await object())?.properties).toMatchObject({ name: "B", note: "source-note-2" })
+
+    now = new Date("2026-01-01T13:00:00.000Z")
+    await materializer.edits.commit(
+      atomic("recent-edit-note", [
+        {
+          id: "note",
+          kind: "object.patch",
+          ref: ref("one"),
+          set: { note: "local-note" },
+          unset: [],
+          reset: [],
+        },
+      ])
+    )
+    const [storedOverride] = [
+      ...getInMemoryOntologyStorageTestingAdapter(storage.ontology)
+        .snapshot()
+        .objectOverrides.values(),
+    ]
+    expect(storedOverride?.editedAt).toEqual({
+      name: "2026-01-01T11:00:00.000Z",
+      note: "2026-01-01T13:00:00.000Z",
+    })
+
+    await materializer.projections.replace(
+      replacement("recent-v3", "2026-01-03T00:00:00Z", [
+        sourceEntryAt("one", "C", "2026-01-01T12:00:00Z", "source-note-3"),
+      ])
+    )
+    expect((await object())?.properties).toMatchObject({ name: "C", note: "local-note" })
+
+    const tied = await materializer.projections.replace(
+      replacement("recent-v4", "2026-01-04T00:00:00Z", [
+        sourceEntryAt("one", "D", "2026-01-01T13:00:00Z", "source-note-4"),
+      ])
+    )
+    expect((await object())?.properties).toMatchObject({ name: "D", note: "source-note-4" })
+    expect(tied.counts.objectsUpdated).toBe(1)
+  })
+
+  test("preserves a dormant edit timestamp when deleting an absent object", async () => {
+    let now = new Date("2026-01-01T10:00:00.000Z")
+    const { materializer, storage } = createMaterializerFixture({
+      conflictResolution: "mostRecent",
+      dependencies: { clock: () => now },
+    })
+
+    await materializer.projections.replace(
+      replacement("dormant-time-v1", "2026-01-01T00:00:00Z", [
+        sourceEntryAt("one", "source", "2026-01-01T10:00:00Z"),
+      ])
+    )
+    now = new Date("2026-01-01T11:00:00.000Z")
+    await materializer.edits.commit(
+      atomic("dormant-time-edit", [
+        {
+          id: "name",
+          kind: "object.patch",
+          ref: ref("one"),
+          set: { name: "edited" },
+          unset: [],
+          reset: [],
+        },
+      ])
+    )
+    await materializer.projections.replace(
+      replacement("dormant-time-v2", "2026-01-02T00:00:00Z", [])
+    )
+
+    now = new Date("2026-01-01T20:00:00.000Z")
+    await materializer.edits.commit(
+      atomic("dormant-time-delete", [{ id: "delete", kind: "object.delete", ref: ref("one") }])
+    )
+
+    const [storedOverride] = [
+      ...getInMemoryOntologyStorageTestingAdapter(storage.ontology)
+        .snapshot()
+        .objectOverrides.values(),
+    ]
+    expect(storedOverride?.editedAt).toEqual({ name: "2026-01-01T11:00:00.000Z" })
+
+    await materializer.projections.replace(
+      replacement("dormant-time-v3", "2026-01-03T00:00:00Z", [
+        sourceEntryAt("one", "newer source", "2026-01-01T12:00:00Z"),
+      ])
+    )
+    await expect(
+      storage.objects.getByPrimaryId({
+        projectId: "project",
+        objectTypeId: "Device",
+        primaryId: "one",
+      })
+    ).resolves.toMatchObject({ properties: { name: "newer source" } })
   })
 
   test("supports create-to-patch, tombstone, dormant patch, and restore semantics", async () => {

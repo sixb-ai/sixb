@@ -6,6 +6,9 @@ import {
   defineValueType,
   fromForeignKey,
   link,
+  type ObjectProjectionBuilder,
+  type ObjectProjectionConflictResolution,
+  type ProjectionForeignKeyInput,
   prop,
   stringEnum,
   valueTypeRef,
@@ -72,6 +75,7 @@ const roomDataset = defineDataset("canonical.rooms", {
     col("col_temperature", "float64"),
     col("col_opened_on", "date"),
     col("col_last_seen_at", "timestamp"),
+    col("col_nullable_updated_at", "timestamp", { nullable: true }),
     col("col_mode", "string"),
     col("col_metadata", "json"),
     col("col_reading", "decimal"),
@@ -98,6 +102,28 @@ const projection = defineProjection("test", _Room).fromDataset(roomDataset).prop
   reading: "col_reading",
 })
 type _projTag = Expect<Equal<typeof projection._tag, "ObjectProjectionDefinition">>
+type _projectionBuilder = Expect<
+  Equal<typeof projection, ObjectProjectionBuilder<typeof _Room, typeof roomDataset>>
+>
+type _projectionResolution = ObjectProjectionConflictResolution<typeof roomDataset>
+type _projectionForeignKey = ProjectionForeignKeyInput<
+  typeof _Room,
+  typeof roomDataset,
+  "inBuilding"
+>
+
+projection.resolveConflicts({ strategy: "editsWin" })
+projection.resolveConflicts({ strategy: "mostRecent", sourceTimestamp: "col_last_seen_at" })
+projection.resolveConflicts({
+  strategy: "mostRecent",
+  // @ts-expect-error — mostRecent requires a timestamp dataset column
+  sourceTimestamp: "col_name",
+})
+projection.resolveConflicts({
+  strategy: "mostRecent",
+  // @ts-expect-error — mostRecent requires a non-null timestamp dataset column
+  sourceTimestamp: "col_nullable_updated_at",
+})
 
 // 2. .fromDataset() accepts dataset definitions, not string ids
 // @ts-expect-error — string dataset ids are no longer accepted

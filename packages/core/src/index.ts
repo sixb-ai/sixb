@@ -1023,12 +1023,16 @@ export type {
   ForeignKeyDescriptor,
   LinkProjectionDefinition,
   LinkProjectionTarget,
+  ObjectProjectionBuilder,
+  ObjectProjectionConflictResolution,
   ObjectProjectionDefinition,
   ObjectProjectionTarget,
   ProjectionDefinition,
   ProjectionDefinitionCatalog,
+  ProjectionForeignKeyInput,
   ProjectionTarget,
   ProjectionTargetByKind,
+  SourceEditConflictResolution,
   TelemetryProjectionDefinition,
 } from "./projections"
 

@@ -83,6 +83,11 @@ export const ForeignKeyDescriptorSchema = z.object({
   targetObjectTypeId: z.string(),
 })
 
+export const SourceEditConflictResolutionSchema = z.union([
+  z.object({ strategy: z.literal("editsWin") }),
+  z.object({ strategy: z.literal("mostRecent"), sourceTimestamp: z.string() }),
+])
+
 export const ObjectProjectionSchema = z.object({
   _tag: z.literal("ObjectProjectionDefinition"),
   id: z.string(),
@@ -90,6 +95,7 @@ export const ObjectProjectionSchema = z.object({
   datasetId: z.string(),
   properties: z.record(z.string()),
   links: z.record(ForeignKeyDescriptorSchema),
+  conflictResolution: SourceEditConflictResolutionSchema,
   latestRun: ProjectionRunSchema.nullable(),
 })
 

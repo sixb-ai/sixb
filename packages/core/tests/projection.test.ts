@@ -45,6 +45,7 @@ const canonicalRoomsDataset = defineDataset("canonical.rooms", {
     col("room_name", "string"),
     col("building_id", "string"),
     col("building_ref", "string"),
+    col("updated_at", "timestamp"),
   ],
 })
 
@@ -93,6 +94,19 @@ describe("defineProjection", () => {
     expect(result.datasetId).toBe("canonical.rooms")
     expect(result.properties).toEqual({ id: "room_id", name: "room_name" })
     expect(result.links).toEqual({})
+    expect(result.conflictResolution).toEqual({ strategy: "editsWin" })
+  })
+
+  test("configures most-recent source/edit conflict resolution", () => {
+    const result = defineProjection("room-proj", Room)
+      .fromDataset(canonicalRoomsDataset)
+      .properties({ id: "room_id", name: "room_name" })
+      .resolveConflicts({ strategy: "mostRecent", sourceTimestamp: "updated_at" })
+
+    expect(result.conflictResolution).toEqual({
+      strategy: "mostRecent",
+      sourceTimestamp: "updated_at",
+    })
   })
 
   test("rejects empty id", () => {

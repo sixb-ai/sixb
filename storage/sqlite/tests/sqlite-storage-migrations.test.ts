@@ -217,6 +217,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 27,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "028-object-override-edit-times",
+    status: "applied",
+    version: 28,
+  },
 ]
 
 afterEach(async () => {
@@ -252,6 +259,35 @@ describe("SQLite storage migrations", () => {
       await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "current" })
     } finally {
       storage.close()
+    }
+  })
+
+  test("adds empty per-property edit times to legacy object overrides", () => {
+    const db = new Database(":memory:")
+    try {
+      for (const migration of sqliteStorageMigrations.steps.slice(0, 27)) migration.up(db)
+      db.query(`
+        INSERT INTO ontology_object_overrides (
+          project_id, object_type_id, primary_id, value, last_commit_id, updated_at
+        ) VALUES (?, ?, ?, json(?), ?, ?)
+      `).run(
+        "project",
+        "Issue",
+        "issue-1",
+        JSON.stringify({ kind: "patch", set: { title: "edited" }, unset: [] }),
+        "legacy-commit",
+        "2026-01-01T11:00:00.000Z"
+      )
+
+      sqliteStorageMigrations.steps[27]?.up(db)
+
+      expect(
+        db
+          .query("SELECT edited_at FROM ontology_object_overrides WHERE primary_id = ?")
+          .get("issue-1")
+      ).toEqual({ edited_at: "{}" })
+    } finally {
+      db.close()
     }
   })
 

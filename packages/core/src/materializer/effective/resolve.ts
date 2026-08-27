@@ -11,6 +11,7 @@ import type {
 import { linkRefKey } from "../../materialization/refs"
 import type {
   StoredLinkSlotOverride,
+  StoredObjectOverride,
   StoredSourceLinkAssertion,
   StoredSourceObjectAssertion,
   StoredTelemetryPoint,
@@ -46,9 +47,10 @@ export function resolveEffectiveObject(input: {
   readonly primaryPropertyId: string
   readonly source: StoredSourceObjectAssertion | null
   readonly override: ObjectOverride | null
+  readonly editedAt: Readonly<Record<string, string>>
   readonly latestTelemetry: readonly StoredTelemetryPoint[]
 }): ResolvedObjectValue | null {
-  const properties = resolveObjectAuthority(input.source, input.override)
+  const properties = resolveObjectAuthority(input.source, input.override, input.editedAt)
   if (!properties) return null
 
   properties[input.primaryPropertyId] = input.ref.primaryId
@@ -58,29 +60,97 @@ export function resolveEffectiveObject(input: {
 
 function resolveObjectAuthority(
   source: StoredSourceObjectAssertion | null,
-  override: ObjectOverride | null
+  override: ObjectOverride | null,
+  editedAt: Readonly<Record<string, string>>
 ): Record<string, JsonValue> | null {
   switch (override?.kind) {
     case "delete":
       return null
     case "create":
-      return { ...override.properties }
+      if (!source) return { ...override.properties }
+      return resolveSourceAndEdits(source, override, editedAt)
     case "patch":
       if (!source) return null
-      return applyObjectPatch(source.assertion.properties, override)
+      return resolveSourceAndEdits(source, override, editedAt)
     default:
       if (!source) return null
       return { ...source.assertion.properties }
   }
 }
 
-function applyObjectPatch(
-  sourceProperties: Readonly<Record<string, JsonValue>>,
-  override: Extract<ObjectOverride, { readonly kind: "patch" }>
+function resolveSourceAndEdits(
+  source: StoredSourceObjectAssertion,
+  override: Exclude<ObjectOverride, { readonly kind: "delete" }>,
+  editedAt: Readonly<Record<string, string>>
 ): Record<string, JsonValue> {
-  const properties = { ...sourceProperties, ...override.set }
-  for (const propertyId of override.unset) delete properties[propertyId]
+  const properties = { ...source.assertion.properties }
+  const policy = source.assertion.conflictResolution ?? { strategy: "editsWin" }
+  const projectedPropertyIds = new Set(
+    source.assertion.projectedPropertyIds ?? Object.keys(source.assertion.properties)
+  )
+
+  for (const propertyId of objectEditCandidateIds(override, editedAt)) {
+    const edit = objectEditCandidate(override, propertyId)
+    const editTimestamp = editedAt[propertyId]
+    const sourceWins =
+      projectedPropertyIds.has(propertyId) &&
+      policy.strategy === "mostRecent" &&
+      source.assertion.sourceUpdatedAt !== undefined &&
+      editTimestamp !== undefined &&
+      source.assertion.sourceUpdatedAt.localeCompare(editTimestamp) >= 0
+
+    if (!sourceWins) applyObjectEditCandidate(properties, propertyId, edit)
+  }
   return properties
+}
+
+interface ObjectPropertyCandidate {
+  readonly present: boolean
+  readonly value?: JsonValue
+}
+
+function objectEditCandidateIds(
+  override: Exclude<ObjectOverride, { readonly kind: "delete" }>,
+  editedAt: Readonly<Record<string, string>>
+): string[] {
+  const ids = new Set(Object.keys(editedAt))
+  if (override.kind === "create") {
+    for (const propertyId of Object.keys(override.properties)) ids.add(propertyId)
+  } else {
+    for (const propertyId of Object.keys(override.set)) ids.add(propertyId)
+    for (const propertyId of override.unset) ids.add(propertyId)
+  }
+  return [...ids]
+}
+
+function objectEditCandidate(
+  override: Exclude<ObjectOverride, { readonly kind: "delete" }>,
+  propertyId: string
+): ObjectPropertyCandidate {
+  const values = override.kind === "create" ? override.properties : override.set
+  return Object.hasOwn(values, propertyId)
+    ? { present: true, value: values[propertyId] }
+    : { present: false }
+}
+
+function applyObjectEditCandidate(
+  properties: Record<string, JsonValue>,
+  propertyId: string,
+  candidate: ObjectPropertyCandidate
+): void {
+  if (candidate.present) properties[propertyId] = candidate.value as JsonValue
+  else delete properties[propertyId]
+}
+
+export function storedObjectEditedAt(stored: StoredObjectOverride | null): Record<string, string> {
+  if (!stored || stored.value.kind === "delete") return {}
+  const editedAt = { ...(stored.editedAt ?? {}) }
+  const candidateIds =
+    stored.value.kind === "create"
+      ? Object.keys(stored.value.properties)
+      : [...Object.keys(stored.value.set), ...stored.value.unset]
+  for (const propertyId of candidateIds) editedAt[propertyId] ??= stored.updatedAt
+  return editedAt
 }
 
 function applyLatestTelemetry(

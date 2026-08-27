@@ -108,7 +108,15 @@ function toSourceEntry(
 
   return {
     root: { kind: "object", ref: objectRef },
-    assertions: [{ kind: "object", ref: objectRef, properties }, ...linkAssertions],
+    assertions: [
+      {
+        kind: "object",
+        ref: objectRef,
+        properties,
+        ...(row.sourceUpdatedAt === undefined ? {} : { sourceUpdatedAt: row.sourceUpdatedAt }),
+      },
+      ...linkAssertions,
+    ],
   }
 }
 
@@ -116,7 +124,15 @@ function objectProjectionReadColumns(projection: ObjectProjectionDefinition): re
   const linkSourceFields = Object.values(projection.links).flatMap((descriptor) =>
     descriptor.sourceField ? [descriptor.sourceField] : []
   )
-  return [...new Set([...Object.values(projection.properties), ...linkSourceFields])]
+  return [
+    ...new Set([
+      ...Object.values(projection.properties),
+      ...linkSourceFields,
+      ...(projection.conflictResolution?.strategy === "mostRecent"
+        ? [projection.conflictResolution.sourceTimestamp]
+        : []),
+    ]),
+  ]
 }
 
 function requireIdentity(value: unknown, projectionId: string, field: string): string {

@@ -98,6 +98,7 @@ interface LinkScopeRow extends EffectiveLinkRow {
 interface ObjectOverrideRow extends PgStoredOverrideRow {
   readonly object_type_id: string
   readonly primary_id: string
+  readonly edited_at: unknown
 }
 
 interface LinkOverrideRow extends PgStoredOverrideRow {
@@ -1060,6 +1061,7 @@ function storedObjectOverride(row: ObjectOverrideRow): StoredObjectOverride {
   return {
     ref,
     value: structuredClone(row.value) as StoredObjectOverride["value"],
+    editedAt: structuredClone(row.edited_at) as Readonly<Record<string, string>>,
     lastCommitId: row.last_commit_id,
     updatedAt: toIsoString(row.updated_at),
   }

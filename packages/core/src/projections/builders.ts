@@ -5,6 +5,7 @@
  */
 
 import type {
+  DatasetColumnDefinitionOf,
   DatasetColumnNameOf,
   DatasetColumnType,
   DatasetColumnTypeOf,
@@ -21,6 +22,7 @@ import type {
   ObjectProjectionTarget,
   ProjectionDefinition,
   ProjectionTarget,
+  SourceEditConflictResolution,
   TelemetryProjectionDefinition,
 } from "./types"
 import {
@@ -153,6 +155,20 @@ type DateLikeDatasetColumnNameOf<TDataset extends DatasetDefinition> =
           : never
       }[DatasetColumnNameOf<TDataset>]
 
+type TimestampDatasetColumnNameOf<TDataset extends DatasetDefinition> =
+  string extends DatasetColumnNameOf<TDataset>
+    ? string
+    : {
+        [TColumnName in DatasetColumnNameOf<TDataset>]: DatasetColumnTypeOf<
+          TDataset,
+          TColumnName
+        > extends "timestamp"
+          ? DatasetColumnDefinitionOf<TDataset, TColumnName> extends { readonly nullable: true }
+            ? never
+            : TColumnName
+          : never
+      }[DatasetColumnNameOf<TDataset>]
+
 type ProjectionMappingFor<TObjectType extends ObjectType, TDataset extends DatasetDefinition> = {
   readonly [TPropertyId in PropertyIdOf<TObjectType>]?: DatasetColumnNameCompatibleWithSchema<
     TDataset,
@@ -239,7 +255,7 @@ type ProjectionForeignKeyTokenInput<
         )
     }
 
-type ProjectionForeignKeyInput<
+export type ProjectionForeignKeyInput<
   TObjectType extends ObjectType,
   TDataset extends DatasetDefinition,
   TLinkId extends LinkIdOf<TObjectType>,
@@ -280,16 +296,27 @@ interface ObjectProjectionMappingBuilder<
 > {
   properties<const TMapping extends ProjectionMappingFor<TObjectType, TDataset>>(
     mapping: ExactProjectionMapping<TObjectType, TMapping>
-  ): ObjectProjectionDefinition & ObjectProjectionLinkBuilder<TObjectType, TDataset>
+  ): ObjectProjectionBuilder<TObjectType, TDataset>
 }
 
-interface ObjectProjectionLinkBuilder<
+export type ObjectProjectionConflictResolution<TDataset extends DatasetDefinition> =
+  | { readonly strategy: "editsWin" }
+  | {
+      readonly strategy: "mostRecent"
+      readonly sourceTimestamp: TimestampDatasetColumnNameOf<TDataset>
+    }
+
+export interface ObjectProjectionBuilder<
   TObjectType extends ObjectType,
   TDataset extends DatasetDefinition,
-> {
+> extends ObjectProjectionDefinition {
+  readonly conflictResolution: SourceEditConflictResolution
   withLinks(
     mapping: { [K in LinkIdOf<TObjectType>]?: ProjectionForeignKeyInput<TObjectType, TDataset, K> }
-  ): ObjectProjectionDefinition
+  ): ObjectProjectionBuilder<TObjectType, TDataset>
+  resolveConflicts(
+    resolution: ObjectProjectionConflictResolution<TDataset>
+  ): ObjectProjectionBuilder<TObjectType, TDataset>
 }
 
 /**
@@ -352,46 +379,76 @@ function buildObjectProjection<const TObjectType extends ObjectType>(
       return {
         properties<const TMapping extends ProjectionMappingFor<TObjectType, TDataset>>(
           mapping: ExactProjectionMapping<TObjectType, TMapping>
-        ): ObjectProjectionDefinition & ObjectProjectionLinkBuilder<TObjectType, TDataset> {
+        ): ObjectProjectionBuilder<TObjectType, TDataset> {
           const propertyMapping = mapping as Record<string, string>
           validatePropertyMapping(objectType, propertyMapping)
 
-          const definition: ObjectProjectionDefinition = {
-            _tag: "ObjectProjectionDefinition",
+          return objectProjectionBuilder({
             id,
-            objectTypeId: objectType.id,
+            objectType,
             datasetId,
-            properties: { ...propertyMapping },
+            propertyMapping,
             links: {},
-          }
-
-          return Object.assign(definition, {
-            withLinks(
-              linkMapping: {
-                [K in LinkIdOf<TObjectType>]?: ProjectionForeignKeyInput<TObjectType, TDataset, K>
-              }
-            ): ObjectProjectionDefinition {
-              const loweredLinkMapping = lowerForeignKeyMapping(linkMapping)
-              const validatedLinks = validateAndLowerLinkMapping(
-                objectType,
-                loweredLinkMapping,
-                propertyMapping
-              )
-
-              return {
-                _tag: "ObjectProjectionDefinition",
-                id,
-                objectTypeId: objectType.id,
-                datasetId,
-                properties: { ...propertyMapping },
-                links: validatedLinks,
-              }
-            },
+            conflictResolution: { strategy: "editsWin" },
           })
         },
       }
     },
   }
+}
+
+function objectProjectionBuilder<
+  TObjectType extends ObjectType,
+  TDataset extends DatasetDefinition,
+>(input: {
+  readonly id: string
+  readonly objectType: TObjectType
+  readonly datasetId: string
+  readonly propertyMapping: Readonly<Record<string, string>>
+  readonly links: Readonly<Record<string, ForeignKeyDescriptor>>
+  readonly conflictResolution: SourceEditConflictResolution
+}): ObjectProjectionBuilder<TObjectType, TDataset> {
+  const definition: ObjectProjectionDefinition & {
+    readonly conflictResolution: SourceEditConflictResolution
+  } = {
+    _tag: "ObjectProjectionDefinition",
+    id: input.id,
+    objectTypeId: input.objectType.id,
+    datasetId: input.datasetId,
+    properties: { ...input.propertyMapping },
+    links: { ...input.links },
+    conflictResolution: { ...input.conflictResolution },
+  }
+
+  return Object.assign(definition, {
+    withLinks(
+      linkMapping: {
+        [K in LinkIdOf<TObjectType>]?: ProjectionForeignKeyInput<TObjectType, TDataset, K>
+      }
+    ): ObjectProjectionBuilder<TObjectType, TDataset> {
+      const loweredLinkMapping = lowerForeignKeyMapping(linkMapping)
+      const validatedLinks = validateAndLowerLinkMapping(
+        input.objectType,
+        loweredLinkMapping,
+        input.propertyMapping as Record<string, string>
+      )
+      return objectProjectionBuilder({ ...input, links: validatedLinks })
+    },
+    resolveConflicts(
+      resolution: ObjectProjectionConflictResolution<TDataset>
+    ): ObjectProjectionBuilder<TObjectType, TDataset> {
+      validateConflictResolution(resolution)
+      return objectProjectionBuilder({
+        ...input,
+        conflictResolution: resolution as SourceEditConflictResolution,
+      })
+    },
+  })
+}
+
+function validateConflictResolution(resolution: SourceEditConflictResolution): void {
+  if (resolution.strategy === "editsWin") return
+  assertNonEmpty(resolution.sourceTimestamp, "source timestamp field")
 }
 
 // ── Telemetry projection ────────────────────────────────────
@@ -672,8 +729,16 @@ export function isObjectProjectionDefinition(value: unknown): value is ObjectPro
     typeof value.objectTypeId === "string" &&
     typeof value.datasetId === "string" &&
     isRecord(value.properties) &&
-    isRecord(value.links)
+    isRecord(value.links) &&
+    isSourceEditConflictResolution(value.conflictResolution)
   )
+}
+
+function isSourceEditConflictResolution(value: unknown): boolean {
+  if (value === undefined) return true
+  if (!isRecord(value) || typeof value.strategy !== "string") return false
+  if (value.strategy === "editsWin") return value.sourceTimestamp === undefined
+  return value.strategy === "mostRecent" && typeof value.sourceTimestamp === "string"
 }
 
 /** Runtime type guard for {@link LinkProjectionDefinition}. */

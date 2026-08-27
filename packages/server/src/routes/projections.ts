@@ -3,6 +3,7 @@ import type {
   ObjectProjectionDefinition,
   ProjectionDefinition,
   SixbHostView,
+  SourceEditConflictResolution,
   TelemetryProjectionDefinition,
 } from "@sixb/core"
 import type { ProjectionRunRecord } from "@sixb/core/storage"
@@ -81,14 +82,27 @@ function projectionCatalogIds(catalog: ViewableProjectionCatalog): string[] {
   ].map((projection) => projection.id)
 }
 
+type SerializedProjection<TProjection extends ProjectionDefinition> =
+  TProjection extends ObjectProjectionDefinition
+    ? Omit<TProjection, "conflictResolution"> & {
+        conflictResolution: SourceEditConflictResolution
+        latestRun: SerializedProjectionRun | null
+      }
+    : TProjection & { latestRun: SerializedProjectionRun | null }
+
 function serializeProjection<TProjection extends ProjectionDefinition>(
   projection: TProjection,
   latestRuns: ReadonlyMap<string, SerializedProjectionRun>
-): TProjection & { latestRun: SerializedProjectionRun | null } {
-  return {
-    ...projection,
-    latestRun: latestRuns.get(projection.id) ?? null,
+): SerializedProjection<TProjection> {
+  const latestRun = latestRuns.get(projection.id) ?? null
+  if (projection._tag === "ObjectProjectionDefinition") {
+    return {
+      ...projection,
+      conflictResolution: projection.conflictResolution ?? { strategy: "editsWin" },
+      latestRun,
+    } as SerializedProjection<TProjection>
   }
+  return { ...projection, latestRun } as SerializedProjection<TProjection>
 }
 
 function serializeProjectionCatalog(

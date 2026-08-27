@@ -33,6 +33,7 @@ import {
   resolveEffectiveLink,
   resolveEffectiveLinkSlotMember,
   resolveEffectiveObject,
+  storedObjectEditedAt,
   usableLinkSlotOverride,
 } from "../effective/resolve"
 import { validateEffectiveObject } from "../effective/validate"
@@ -374,6 +375,7 @@ function resolveReplacementObject(
     primaryPropertyId: context.ontology.getPrimaryPropertyId(state.ref.objectTypeId),
     source: state.candidateSource,
     override: state.override?.value ?? null,
+    editedAt: storedObjectEditedAt(state.override),
     latestTelemetry: state.latestTelemetry,
   })
 }

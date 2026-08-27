@@ -42,6 +42,7 @@ const devices = defineDataset("devices", {
     col("name", "string"),
     col("note", "string", { nullable: true }),
     col("parent_id", "string", { nullable: true }),
+    col("updated_at", "timestamp"),
   ],
 })
 const readings = defineDataset("readings", {
@@ -57,6 +58,17 @@ const deviceProjection = defineProjection("devices", Device)
       target: Device,
     },
   })
+const mostRecentDeviceProjection = defineProjection("devices", Device)
+  .fromDataset(devices)
+  .properties({ id: "id", name: "name", note: "note" })
+  .withLinks({
+    parent: {
+      link: Device.l.parent,
+      sourceField: "parent_id",
+      target: Device,
+    },
+  })
+  .resolveConflicts({ strategy: "mostRecent", sourceTimestamp: "updated_at" })
 const temperatureProjection = defineProjection("temperatures", Device.p.temperature)
   .fromDataset(readings)
   .points({ objectId: "device_id", at: "at", value: "value" })
@@ -66,11 +78,15 @@ export function createMaterializerFixture(
     readonly dependencies?: OntologyMaterializerDependencies
     readonly storage?: InMemoryStorage
     readonly scope?: ExecutionScope
+    readonly conflictResolution?: "editsWin" | "mostRecent"
   } = {}
 ) {
   const ontology = new OntologyRegistry({ sources: [Device] })
   const projections = new ProjectionRegistry({
-    projections: [deviceProjection, temperatureProjection],
+    projections: [
+      input.conflictResolution === "mostRecent" ? mostRecentDeviceProjection : deviceProjection,
+      temperatureProjection,
+    ],
     ontology,
     datasetsById: new Map<string, DatasetDefinition>([
       [devices.id, devices],
@@ -219,6 +235,21 @@ export function sourceEntry(id: string, name: string, note?: string | null): Pro
         properties: { name, ...(note !== undefined ? { note } : {}) },
       },
     ],
+  }
+}
+
+export function sourceEntryAt(
+  id: string,
+  name: string,
+  sourceUpdatedAt: string,
+  note?: string | null
+): ProjectionSourceEntry {
+  const entry = sourceEntry(id, name, note)
+  return {
+    ...entry,
+    assertions: entry.assertions.map((assertion) =>
+      assertion.kind === "object" ? { ...assertion, sourceUpdatedAt } : assertion
+    ),
   }
 }
 
