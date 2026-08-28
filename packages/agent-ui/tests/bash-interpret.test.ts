@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   classifyCommand,
   coerceBashOutput,
+  commandPreview,
   describeBash,
   humanize,
   objectCount,
@@ -19,148 +20,160 @@ function output(stdout: string, exitCode = 0) {
 }
 
 describe("classifyCommand", () => {
-  test("classifies the ontology discovery curl", () => {
-    expect(classifyCommand(`curl -sS "$SIXB_API_BASE_URL/api/object-types"`)).toEqual({
-      kind: "api-object-types",
+  test("classifies every supported CLI operation from its fixed command path", () => {
+    const cases = {
+      "sixb doctor": "doctor",
+      "sixb context": "context",
+      "sixb project show": "project.show",
+      "sixb ontology list": "ontology.list",
+      "sixb ontology get Customer": "ontology.get",
+      "sixb objects inspect Customer cust-1": "objects.inspect",
+      "sixb objects list --type Customer": "objects.list",
+      "sixb objects get Customer cust-1": "objects.get",
+      "sixb objects search acme": "objects.search",
+      "sixb objects query --file query.json": "objects.query",
+      "sixb objects count --file query.json": "objects.count",
+      "sixb objects exists --file query.json": "objects.exists",
+      "sixb objects facets --file query.json": "objects.facets",
+      "sixb objects links Customer cust-1": "objects.links",
+      "sixb telemetry latest Device fan-1 rpm": "telemetry.latest",
+      "sixb telemetry history Device fan-1 rpm": "telemetry.history",
+      "sixb telemetry query --file telemetry.json": "telemetry.query",
+      "sixb actions list": "actions.list",
+      "sixb actions get archiveCustomer": "actions.get",
+      "sixb actions request archiveCustomer": "actions.request",
+      "sixb action-runs list": "action-runs.list",
+      "sixb action-runs get run-1": "action-runs.get",
+      "sixb files upload report.pdf": "files.upload",
+      "sixb files download action-run run-1 --path /result --output result.json": "files.download",
+      "sixb workflows list": "workflows.list",
+      "sixb workflows get renewCustomer": "workflows.get",
+      "sixb workflows start renewCustomer": "workflows.start",
+      "sixb workflow-runs list": "workflow-runs.list",
+      "sixb workflow-runs get run-2": "workflow-runs.get",
+      "sixb api get /api/project": "api.get",
+      "sixb api post /api/custom --file body.json": "api.post",
+    } as const
+
+    for (const [command, expected] of Object.entries(cases)) {
+      const intent = classifyCommand(command)
+      expect(intent.kind).toBe("sixb")
+      if (intent.kind === "sixb") expect(intent.command).toBe(expected)
+    }
+  })
+
+  test("tokenizes quoted opaque object ids without interpreting their path characters", () => {
+    expect(
+      classifyCommand(`sixb objects get RepositoryIssue 'github:issue:sixb-ai/sixb#297'`)
+    ).toEqual({
+      kind: "sixb",
+      command: "objects.get",
+      args: ["RepositoryIssue", "github:issue:sixb-ai/sixb#297"],
     })
   })
 
-  test("classifies a single object type detail", () => {
-    expect(classifyCommand(`curl -sS "$SIXB_API_BASE_URL/api/object-types/customer"`)).toEqual({
-      kind: "api-object-type-detail",
-      objectTypeId: "customer",
+  test("recognizes an installed CLI by basename", () => {
+    expect(classifyCommand("/opt/sixb/bin/sixb ontology list")).toEqual({
+      kind: "sixb",
+      command: "ontology.list",
+      args: [],
     })
   })
 
-  test("reads the objectTypeId from a GET objects list query string", () => {
-    expect(
-      classifyCommand(`curl -sS "$SIXB_API_BASE_URL/api/objects?objectTypeId=customer&limit=20"`)
-    ).toEqual({ kind: "api-objects-list", objectTypeId: "customer" })
-  })
-
-  test("reads the objectTypeId from a nested POST query body", () => {
-    const command = `curl -sS -H "Content-Type: application/json" -X POST "$SIXB_API_BASE_URL/api/objects/query" --data '{"query":{"kind":"filter","input":{"kind":"start","objectTypeId":"workOrder"},"predicate":{"kind":"eq","propertyId":"status","value":"open"}}}'`
-    expect(classifyCommand(command)).toEqual({
-      kind: "api-objects-query",
-      objectTypeId: "workOrder",
+  test("separates help and copyable query examples from query execution", () => {
+    expect(classifyCommand("sixb objects query --help")).toEqual({
+      kind: "sixb",
+      command: "help",
+      args: ["objects", "query"],
+    })
+    expect(classifyCommand("sixb objects query --example incoming")).toEqual({
+      kind: "sixb",
+      command: "objects.query-example",
+      args: ["--example", "incoming"],
     })
   })
 
-  test("distinguishes count, exists, and facets", () => {
-    const base = (suffix: string) =>
-      `curl -sS -X POST "$SIXB_API_BASE_URL/api/objects/query/${suffix}" --data '{"query":{"kind":"start","objectTypeId":"customer"}}'`
-    expect(classifyCommand(base("count")).kind).toBe("api-count")
-    expect(classifyCommand(base("exists")).kind).toBe("api-exists")
-    expect(classifyCommand(base("facets")).kind).toBe("api-facets")
-  })
-
-  test("classifies object detail and telemetry reads", () => {
-    expect(classifyCommand(`curl -sS "$SIXB_API_BASE_URL/api/objects/customer/cust-001"`)).toEqual({
-      kind: "api-object-detail",
-      objectTypeId: "customer",
-      objectId: "cust-001",
-    })
-    expect(
-      classifyCommand(`curl -sS "$SIXB_API_BASE_URL/api/objects/device/fan-1/telemetry/rpm/latest"`)
-    ).toEqual({ kind: "api-telemetry-latest", objectId: "fan-1", propertyId: "rpm" })
-    expect(
-      classifyCommand(
-        `curl -sS "$SIXB_API_BASE_URL/api/objects/device/fan-1/telemetry/rpm/history?limit=100"`
-      )
-    ).toEqual({ kind: "api-telemetry-history", objectId: "fan-1", propertyId: "rpm" })
-  })
-
-  test("classifies bulk telemetry at the top-level route", () => {
-    expect(
-      classifyCommand(
-        `curl -sS -X POST "$SIXB_API_BASE_URL/api/telemetry/history" --data '{"series":[]}'`
-      )
-    ).toEqual({ kind: "api-telemetry-bulk" })
-  })
-
-  test("classifies actions list versus action request", () => {
-    expect(classifyCommand(`curl -sS "$SIXB_API_BASE_URL/api/actions"`).kind).toBe(
-      "api-actions-list"
-    )
-    expect(
-      classifyCommand(
-        `curl -sS -X POST "$SIXB_API_BASE_URL/api/actions/archiveCustomer" --data '{}'`
-      )
-    ).toEqual({ kind: "api-action-request", actionId: "archiveCustomer" })
-  })
-
-  test("treats a curl with a body flag but no -X as an implicit POST", () => {
-    // No `-X POST`: curl still POSTs because `-d` is present. Without the inference this would
-    // default to GET and be mislabelled as an actions list rather than an action request.
-    expect(
-      classifyCommand(`curl -sS "$SIXB_API_BASE_URL/api/actions/archiveCustomer" -d '{}'`)
-    ).toEqual({ kind: "api-action-request", actionId: "archiveCustomer" })
-    expect(
-      classifyCommand(
-        `curl -sS "$SIXB_API_BASE_URL/api/actions/archiveCustomer" --data-raw '{"reason":"x"}'`
-      )
-    ).toEqual({ kind: "api-action-request", actionId: "archiveCustomer" })
-    // --data-urlencode is a real curl body flag, so it implies POST too.
-    expect(
-      classifyCommand(
-        `curl -sS "$SIXB_API_BASE_URL/api/actions/archiveCustomer" --data-urlencode 'reason=x'`
-      ).kind
-    ).toBe("api-action-request")
-  })
-
-  test("does not infer POST from a body flag that only appears inside a quoted argument", () => {
-    // The `--data` here is inside a header value, not a real curl flag: method stays GET, so this
-    // is an actions list — not an action request. Guards the quote-blanking in the method detector.
-    expect(
-      classifyCommand(
-        `curl -sS "$SIXB_API_BASE_URL/api/actions/archiveCustomer" -H "X-Note: --data disabled"`
-      ).kind
-    ).toBe("api-actions-list")
-  })
-
-  test("keeps an explicit method even when a body flag is present", () => {
-    // `-X GET` must win over the implicit-POST inference triggered by `-d`.
-    expect(
-      classifyCommand(`curl -sS -X GET "$SIXB_API_BASE_URL/api/actions/archiveCustomer" -d '{}'`)
-        .kind
-    ).toBe("api-actions-list")
-  })
-
-  test("classifies an action run lookup", () => {
-    expect(classifyCommand(`curl -sS "$SIXB_API_BASE_URL/api/action-runs/run-abc123"`)).toEqual({
-      kind: "api-action-run",
-      runId: "run-abc123",
+  test("keeps unknown Sixb operations recognizable without guessing their meaning", () => {
+    expect(classifyCommand("sixb objects future --value x")).toEqual({
+      kind: "sixb",
+      command: "unknown",
+      args: ["objects", "future", "--value", "x"],
     })
   })
 
   test("classifies a skill read with skill name and reference", () => {
-    expect(classifyCommand(`cat "$SIXB_SKILLS_DIR/sixb-query/SKILL.md"`)).toEqual({
+    expect(classifyCommand(`cat "$SIXB_SKILLS_DIR/sixb/SKILL.md"`)).toEqual({
       kind: "read-skill",
-      skillName: "sixb-query",
+      skillName: "sixb",
       reference: undefined,
     })
     expect(
-      classifyCommand(`cat /tmp/sandbox/.sixb/agent/skills/sixb-query/references/query-api.md`)
-    ).toEqual({ kind: "read-skill", skillName: "sixb-query", reference: "query-api.md" })
+      classifyCommand(`cat /tmp/sandbox/.sixb/agent/skills/sixb/references/query-ir.md`)
+    ).toEqual({ kind: "read-skill", skillName: "sixb", reference: "query-ir.md" })
   })
 
-  test("a skill-path read is not mistaken for an API call", () => {
-    // The string contains "query-api" but never "/api/" — must stay a skill read.
-    expect(classifyCommand(`cat skills/sixb-query/references/query-api.md`).kind).toBe("read-skill")
+  test("a skill-path read is not mistaken for a Sixb command", () => {
+    expect(classifyCommand(`cat skills/sixb/references/query-ir.md`).kind).toBe("read-skill")
   })
 
-  test("falls back to generic for plain shell commands", () => {
+  test("falls back to generic for plain, compound, and legacy curl commands", () => {
     expect(classifyCommand("ls -la /workspace")).toEqual({
       kind: "generic",
       command: "ls -la /workspace",
     })
+    expect(classifyCommand("sixb ontology list | jq .").kind).toBe("generic")
+    expect(classifyCommand(`curl -sS "$SIXB_API_BASE_URL/api/object-types"`).kind).toBe("generic")
   })
 })
 
 describe("describeBash", () => {
+  test("describes help as checking project capabilities without CLI terminology", () => {
+    const root = describeBash({ kind: "sixb", command: "help", args: [] }, null)
+    const objects = describeBash(
+      { kind: "sixb", command: "help", args: ["objects", "query"] },
+      null
+    )
+
+    expect(root.title).toBe("Checked available project operations")
+    expect(root.runningTitle).toBe("Checking available project operations")
+    expect(objects.title).toBe("Checked how to work with project data")
+    expect(objects.runningTitle).toBe("Checking how to work with project data")
+    expect(`${root.title} ${objects.title}`).not.toContain("CLI")
+  })
+
+  test("puts a generic command directly after the activity verb", () => {
+    const description = describeBash(
+      { kind: "generic", command: "ls -la /workspace" },
+      output("files")
+    )
+
+    expect(description.title).toBe("Ran")
+    expect(description.runningTitle).toBe("Running a command")
+    expect(description.detail).toBe("ls -la /workspace")
+  })
+
+  test("describes common generic commands by intent instead of exposing their payload", () => {
+    const html = describeBash(
+      classifyCommand(
+        `cat > "$SIXB_OUTPUT_PATH" <<'HTML'\n<!DOCTYPE html>\n<html>\n<body>Hi</body>\n</html>\nHTML`
+      ),
+      null
+    )
+    expect(html.title).toBe("Created an HTML file")
+    expect(html.runningTitle).toBe("Creating an HTML file")
+    expect(html.detail).toBeUndefined()
+
+    expect(describeBash(classifyCommand("bun test packages/core/tests"), null).runningTitle).toBe(
+      "Running tests"
+    )
+    expect(describeBash(classifyCommand("rg -n Customer packages"), null).runningTitle).toBe(
+      "Searching files"
+    )
+  })
+
   test("summarizes the ontology with a count", () => {
     const parsed = output(`[{"id":"Customer"},{"id":"Project"},{"id":"Invoice"}]`)
-    const description = describeBash({ kind: "api-object-types" }, parsed)
+    const description = describeBash({ kind: "sixb", command: "ontology.list", args: [] }, parsed)
     expect(description.title).toBe("Explored the ontology")
     expect(description.detail).toBe("3 object types")
   })
@@ -168,7 +181,7 @@ describe("describeBash", () => {
   test("summarizes a query result count with a humanized type label", () => {
     const parsed = output(`{"objects":[{"primaryId":"a"},{"primaryId":"b"}],"hasMore":false}`)
     const description = describeBash(
-      { kind: "api-objects-query", objectTypeId: "workOrder" },
+      { kind: "sixb", command: "objects.get", args: ["workOrder", "a", "b"] },
       parsed
     )
     expect(description.title).toBe("Found 2 work orders")
@@ -176,10 +189,10 @@ describe("describeBash", () => {
 
   test("summarizes a count response value", () => {
     const description = describeBash(
-      { kind: "api-count", objectTypeId: "customer" },
+      { kind: "sixb", command: "objects.count", args: ["--file", "query.json"] },
       output(`{"count":142}`)
     )
-    expect(description.title).toBe("Counted customers")
+    expect(description.title).toBe("Counted objects")
     expect(description.detail).toBe("142")
   })
 
@@ -189,9 +202,25 @@ describe("describeBash", () => {
       status: "succeeded",
       subject: { kind: "object", objectTypeId: "customer", primaryId: "cust-001" },
     })
-    const description = describeBash({ kind: "api-action-run", runId: "run-1" }, output(json))
+    const description = describeBash(
+      { kind: "sixb", command: "action-runs.get", args: ["run-1"] },
+      output(json)
+    )
     expect(description.title).toBe("Archive customer succeeded")
     expect(description.detail).toBe("customer cust-001")
+  })
+
+  test("summarizes an object inspection graph", () => {
+    const description = describeBash(
+      {
+        kind: "sixb",
+        command: "objects.inspect",
+        args: ["Customer", "github:customer:acme/1#owner"],
+      },
+      output(`{"graph":{"objectCount":4,"linkCount":3}}`)
+    )
+    expect(description.title).toBe("Inspected github:customer:acme/1#owner")
+    expect(description.detail).toBe("4 objects · 3 links")
   })
 })
 
@@ -223,5 +252,13 @@ describe("helpers", () => {
     expect(objectCount([1, 2, 3])).toBe(3)
     expect(objectCount({ objects: [1, 2] })).toBe(2)
     expect(objectCount({ count: 9 })).toBeNull()
+  })
+
+  test("folds multiline command payloads into a stable first-line preview", () => {
+    const preview = commandPreview(
+      "cat > output.html <<'HTML'\n<html>\n<body>large</body>\n</html>"
+    )
+    expect(preview).toBe("cat > output.html <<'HTML'\n… 3 more lines")
+    expect(preview).not.toContain("large")
   })
 })

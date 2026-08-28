@@ -229,6 +229,23 @@ export function Composer({
     return () => cancelAnimationFrame(frame)
   }, [disabled, running])
 
+  useEffect(() => {
+    const focusWhenAvailable = () => {
+      if (disabled || pending || running) return
+      textareaRef.current?.focus()
+    }
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") focusWhenAvailable()
+    }
+
+    window.addEventListener("focus", focusWhenAvailable)
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    return () => {
+      window.removeEventListener("focus", focusWhenAvailable)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+    }
+  }, [disabled, pending, running])
+
   // Grow the textarea to fit its content, up to a max height where it starts scrolling.
   // Keep overflow hidden until the content actually exceeds the cap so an empty input does not
   // render a scrollbar in browsers configured to always show scroll bars.
@@ -563,6 +580,7 @@ export function Composer({
             </button>
             <Textarea
               ref={textareaRef}
+              autoFocus={!disabled && !pending && !running}
               value={value}
               onChange={(event) => {
                 setValue(event.target.value)

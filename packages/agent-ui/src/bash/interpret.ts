@@ -1,8 +1,6 @@
-// Interpret the single `bash` tool into a human-friendly view. The agent only ever does a small,
-// predictable set of things — read a Sixb Agent Skill, curl the per-run Sixb API proxy, or run a
-// plain shell command — because we author the skills and the proxy that shape those commands. This
-// module turns the raw `{ command }` input and `{ exitCode, stdout, ... }` output into a typed
-// intent plus a friendly title, so the UI can render native views instead of escaped JSON.
+// Interpret the single `bash` tool into a human-friendly view. Sixb interactions go through a
+// stable CLI command tree, so the UI only needs to tokenize one command and identify its group and
+// operation. Plain shell commands and the initial skill read keep neutral fallbacks.
 
 /** The bash tool input as authored by the agent. */
 export interface BashInput {
@@ -21,31 +19,41 @@ export interface BashOutput {
   readonly stderrTruncated: boolean
 }
 
+const CLI_COMMANDS = {
+  project: ["show"],
+  ontology: ["list", "get"],
+  objects: ["inspect", "list", "get", "search", "query", "count", "exists", "facets", "links"],
+  telemetry: ["latest", "history", "query"],
+  actions: ["list", "get", "request"],
+  "action-runs": ["list", "get"],
+  files: ["upload", "download"],
+  workflows: ["list", "get", "start"],
+  "workflow-runs": ["list", "get"],
+  api: ["get", "post"],
+} as const
+
+type CliGroup = keyof typeof CLI_COMMANDS
+type CliCommandName = {
+  [Group in CliGroup]: `${Group}.${(typeof CLI_COMMANDS)[Group][number]}`
+}[CliGroup]
+
+export type SixbCommandName =
+  | "help"
+  | "version"
+  | "doctor"
+  | "context"
+  | "objects.query-example"
+  | CliCommandName
+  | "unknown"
+
 /** What the agent was trying to do, derived from the command string. */
 export type BashIntent =
-  | { readonly kind: "api-object-types" }
-  | { readonly kind: "api-object-type-detail"; readonly objectTypeId: string }
-  | { readonly kind: "api-objects-list"; readonly objectTypeId?: string }
-  | { readonly kind: "api-objects-query"; readonly objectTypeId?: string }
-  | { readonly kind: "api-count"; readonly objectTypeId?: string }
-  | { readonly kind: "api-exists"; readonly objectTypeId?: string }
-  | { readonly kind: "api-facets"; readonly objectTypeId?: string }
-  | { readonly kind: "api-object-detail"; readonly objectTypeId: string; readonly objectId: string }
   | {
-      readonly kind: "api-telemetry-latest"
-      readonly objectId: string
-      readonly propertyId: string
+      readonly kind: "sixb"
+      readonly command: SixbCommandName
+      /** Arguments after the recognized command path. Quotes have been removed. */
+      readonly args: readonly string[]
     }
-  | {
-      readonly kind: "api-telemetry-history"
-      readonly objectId: string
-      readonly propertyId: string
-    }
-  | { readonly kind: "api-telemetry-bulk" }
-  | { readonly kind: "api-actions-list" }
-  | { readonly kind: "api-action-request"; readonly actionId: string }
-  | { readonly kind: "api-action-run"; readonly runId: string }
-  | { readonly kind: "api-project" }
   | { readonly kind: "read-skill"; readonly skillName?: string; readonly reference?: string }
   | { readonly kind: "generic"; readonly command: string }
 
@@ -91,118 +99,105 @@ export function coerceBashOutput(output: unknown): ParsedBashOutput | null {
 // --- Command classification ------------------------------------------------
 
 export function classifyCommand(command: string): BashIntent {
-  const api = extractApiRequest(command)
-  if (api) {
-    return classifyApiRequest(api)
-  }
+  const sixb = classifySixbCommand(command)
+  if (sixb) return sixb
   const skill = classifySkillRead(command)
   if (skill) return skill
   return { kind: "generic", command: command.trim() }
 }
 
-interface ApiRequest {
-  readonly method: string
-  readonly segments: readonly string[]
-  readonly query: URLSearchParams
-  readonly body: unknown
+function classifySixbCommand(command: string): Extract<BashIntent, { kind: "sixb" }> | null {
+  const tokens = tokenizeShellCommand(command)
+  if (!tokens || executableName(tokens[0]) !== "sixb") return null
+
+  const cliArgs = tokens.slice(1)
+  const helpIndex = cliArgs.findIndex(
+    (token) => token === "--help" || token === "-h" || token === "help"
+  )
+  if (helpIndex !== -1 || cliArgs.length === 0) {
+    return { kind: "sixb", command: "help", args: cliArgs.filter((_, i) => i !== helpIndex) }
+  }
+  if (cliArgs[0] === "version" || cliArgs[0] === "--version") {
+    return { kind: "sixb", command: "version", args: cliArgs.slice(1) }
+  }
+  if (cliArgs[0] === "doctor" || cliArgs[0] === "context") {
+    return { kind: "sixb", command: cliArgs[0], args: cliArgs.slice(1) }
+  }
+
+  const [group, operation, ...args] = cliArgs
+  if (!group || !operation) {
+    return { kind: "sixb", command: "help", args: group ? [group] : [] }
+  }
+  if (!isCliGroup(group) || !isCliOperation(group, operation)) {
+    return { kind: "sixb", command: "unknown", args: cliArgs }
+  }
+  if (group === "objects" && operation === "query" && optionValue(args, "--example")) {
+    return { kind: "sixb", command: "objects.query-example", args }
+  }
+  return { kind: "sixb", command: `${group}.${operation}` as CliCommandName, args }
 }
 
-/** Pull the `/api/...` request out of a curl command, independent of the base-URL placeholder. */
-function extractApiRequest(command: string): ApiRequest | null {
-  const match = command.match(/\/api\/[^\s"'`]*/)
-  if (!match) return null
-
-  const raw = match[0]
-  const queryIndex = raw.indexOf("?")
-  const path = queryIndex === -1 ? raw : raw.slice(0, queryIndex)
-  const query = new URLSearchParams(queryIndex === -1 ? "" : raw.slice(queryIndex + 1))
-  const segments = path.split("/").filter(Boolean).slice(1) // drop leading "api"
-
-  // Detect the method on the command with quoted spans blanked out, so a `-X`/`-d` token that only
-  // appears inside the URL, a header value, or a JSON body is never mistaken for a real curl flag.
-  const flags = command.replace(/'[^']*'|"[^"]*"/g, " ")
-  const explicitMethod = flags.match(/(?:-X|--request)\s*([A-Za-z]+)/)?.[1]
-  // curl treats a body flag with no explicit method as an implicit POST, so infer it here rather
-  // than mislabelling e.g. `curl .../api/actions/:id -d '{}'` as a GET (an actions list).
-  const method = explicitMethod
-    ? explicitMethod.toUpperCase()
-    : CURL_DATA_FLAG_RE.test(flags)
-      ? "POST"
-      : "GET"
-
-  return { method, segments, query, body: extractCurlBody(command) }
+function isCliGroup(value: string): value is CliGroup {
+  return Object.hasOwn(CLI_COMMANDS, value)
 }
 
-// A curl body flag (`-d`, `--data`, `--data-raw|binary|ascii|urlencode`) as a standalone token,
-// including glued forms (`-d@file`, `--data=…`). Detects presence for method inference only — apply
-// it to the quote-blanked command so payload text can't trigger a false match.
-const CURL_DATA_FLAG_RE = /(?:^|\s)(?:--data(?:-raw|-binary|-ascii|-urlencode)?|-d)(?=[\s=@])/
-
-/** Extract and JSON-parse a curl `--data '...'` / `-d '...'` payload, if present. */
-function extractCurlBody(command: string): unknown {
-  const match = command.match(/(?:--data(?:-raw|-binary|-ascii)?|-d)\s+(['"])([\s\S]*?)\1/)
-  if (!match) return undefined
-  return tryParseJson(match[2])
+function isCliOperation<Group extends CliGroup>(
+  group: Group,
+  value: string
+): value is (typeof CLI_COMMANDS)[Group][number] {
+  return (CLI_COMMANDS[group] as readonly string[]).includes(value)
 }
 
-function classifyApiRequest(api: ApiRequest): BashIntent {
-  const [head, ...rest] = api.segments
+/**
+ * Tokenize the small shell subset needed for a direct CLI invocation. Compound shell expressions
+ * intentionally fall back to the generic command view; guessing which command owns a pipeline or
+ * redirection would make the transcript misleading.
+ */
+function tokenizeShellCommand(command: string): string[] | null {
+  const tokens: string[] = []
+  let token = ""
+  let quote: "'" | '"' | null = null
+  let escaped = false
 
-  if (head === "project") return { kind: "api-project" }
-
-  // Bulk telemetry lives at the top level: POST /api/telemetry/history
-  if (head === "telemetry") return { kind: "api-telemetry-bulk" }
-
-  if (head === "object-types") {
-    return rest.length === 0
-      ? { kind: "api-object-types" }
-      : { kind: "api-object-type-detail", objectTypeId: rest[0] }
+  const push = () => {
+    if (token) tokens.push(token)
+    token = ""
   }
 
-  if (head === "actions") {
-    if (rest.length === 0) return { kind: "api-actions-list" }
-    if (api.method === "POST") return { kind: "api-action-request", actionId: rest[0] }
-    return { kind: "api-actions-list" }
+  for (const character of command.trim()) {
+    if (escaped) {
+      token += character
+      escaped = false
+      continue
+    }
+    if (character === "\\" && quote !== "'") {
+      escaped = true
+      continue
+    }
+    if (quote) {
+      if (character === quote) quote = null
+      else token += character
+      continue
+    }
+    if (character === "'" || character === '"') {
+      quote = character
+      continue
+    }
+    if (/\s/.test(character)) {
+      push()
+      continue
+    }
+    if ("|;&<>()`".includes(character)) return null
+    token += character
   }
 
-  // Action run lifecycle: GET /api/action-runs/:runId
-  if (head === "action-runs" && rest.length >= 1) {
-    return { kind: "api-action-run", runId: rest[0] }
-  }
-
-  if (head === "objects") {
-    return classifyObjectsRequest(api, rest)
-  }
-
-  return { kind: "generic", command: api.segments.join("/") }
+  if (quote || escaped) return null
+  push()
+  return tokens
 }
 
-function classifyObjectsRequest(api: ApiRequest, rest: readonly string[]): BashIntent {
-  if (rest.length === 0) {
-    return { kind: "api-objects-list", objectTypeId: api.query.get("objectTypeId") ?? undefined }
-  }
-
-  if (rest[0] === "query") {
-    const objectTypeId = findObjectTypeId(api.body)
-    if (rest[1] === "count") return { kind: "api-count", objectTypeId }
-    if (rest[1] === "exists") return { kind: "api-exists", objectTypeId }
-    if (rest[1] === "facets") return { kind: "api-facets", objectTypeId }
-    return { kind: "api-objects-query", objectTypeId }
-  }
-
-  // /api/objects/:type/:id/telemetry/:prop/(latest|history)
-  if (rest.length >= 4 && rest[2] === "telemetry" && rest[3]) {
-    const objectId = rest[1]
-    const propertyId = rest[3]
-    return rest[4] === "history"
-      ? { kind: "api-telemetry-history", objectId, propertyId }
-      : { kind: "api-telemetry-latest", objectId, propertyId }
-  }
-  if (rest.length >= 2) {
-    return { kind: "api-object-detail", objectTypeId: rest[0], objectId: rest[1] }
-  }
-
-  return { kind: "api-objects-list", objectTypeId: rest[0] }
+function executableName(value: string | undefined): string | undefined {
+  return value?.split("/").at(-1)
 }
 
 const SKILL_READ_RE = /\b(?:cat|less|bat|head|tail|sed|nl)\b/
@@ -246,8 +241,82 @@ export interface BashDescription {
 }
 
 export function describeBash(intent: BashIntent, parsed: ParsedBashOutput | null): BashDescription {
-  switch (intent.kind) {
-    case "api-object-types": {
+  if (intent.kind === "sixb") return describeSixb(intent, parsed)
+  if (intent.kind === "read-skill") {
+    const label = skillLabel(intent)
+    return icon("skill", `Read the ${label}`, `Reading the ${label}`)
+  }
+  return describeGenericCommand(intent.command)
+}
+
+function describeGenericCommand(command: string): BashDescription {
+  const firstLine = command.trim().split(/\r?\n/, 1)[0]?.trim() ?? ""
+  const fileKind = writtenFileKind(command, firstLine)
+  if (fileKind) {
+    return icon("terminal", `Created ${fileKind}`, `Creating ${fileKind}`)
+  }
+  if (/\bapply_patch\b/.test(firstLine)) {
+    return icon("terminal", "Edited files", "Editing files")
+  }
+  if (/(?:^|[;&|]\s*|\s)(?:rg|grep)(?:\s|$)/.test(firstLine)) {
+    return icon("terminal", "Searched files", "Searching files")
+  }
+  if (/(?:^|[;&|]\s*|\s)bun\s+test(?:\s|$)/.test(firstLine)) {
+    return icon("terminal", "Ran tests", "Running tests")
+  }
+  if (/(?:^|[;&|]\s*|\s)mkdir(?:\s|$)/.test(firstLine)) {
+    return icon("terminal", "Created a folder", "Creating a folder")
+  }
+  if (/(?:^|[;&|]\s*|\s)cp(?:\s|$)/.test(firstLine)) {
+    return icon("terminal", "Copied files", "Copying files")
+  }
+  if (/(?:^|[;&|]\s*|\s)mv(?:\s|$)/.test(firstLine)) {
+    return icon("terminal", "Moved files", "Moving files")
+  }
+  return icon("terminal", "Ran", "Running a command", commandPreview(command, 64))
+}
+
+function writtenFileKind(command: string, firstLine: string): string | null {
+  if (!/(?:^|\s)(?:cat|tee|printf|echo)(?:\s|$)/.test(firstLine)) return null
+  const redirect = firstLine.match(/(?:^|\s)>{1,2}\s*(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/)
+  if (!redirect) return null
+
+  const target = (redirect[1] ?? redirect[2] ?? redirect[3] ?? "").toLowerCase()
+  if (/<!doctype\s+html|<html(?:\s|>)/i.test(command) || /\.html?$/.test(target)) {
+    return "an HTML file"
+  }
+  if (/\.json$/.test(target)) return "a JSON file"
+  if (/\.(?:md|mdx)$/.test(target)) return "a Markdown file"
+  if (/\.(?:csv|tsv)$/.test(target)) return "a data file"
+  return "a file"
+}
+
+/** A stable one-line command preview. Multiline payloads stay folded behind the raw disclosure. */
+export function commandPreview(command: string, max = 96): string {
+  const lines = command.trim().split(/\r?\n/)
+  const firstLine = truncateEnd(lines[0]?.trim() ?? "", max)
+  if (lines.length <= 1) return firstLine
+  const remaining = lines.length - 1
+  return `${firstLine}\n… ${remaining.toLocaleString()} more ${remaining === 1 ? "line" : "lines"}`
+}
+
+function describeSixb(
+  intent: Extract<BashIntent, { kind: "sixb" }>,
+  parsed: ParsedBashOutput | null
+): BashDescription {
+  const type = commandObjectType(intent, parsed)
+  switch (intent.command) {
+    case "help": {
+      const subject = helpSubject(intent.args)
+      return icon("skill", `Checked ${subject}`, `Checking ${subject}`)
+    }
+    case "version":
+      return icon("terminal", "Checked the Sixb version", "Checking the Sixb version")
+    case "doctor":
+      return icon("terminal", "Checked the agent runtime", "Checking the agent runtime")
+    case "context":
+      return icon("project", "Read the run context", "Reading the run context")
+    case "ontology.list": {
       const n = arrayLength(parsed?.json)
       return icon(
         "ontology",
@@ -256,23 +325,36 @@ export function describeBash(intent: BashIntent, parsed: ParsedBashOutput | null
         count(n, "object type")
       )
     }
-    case "api-object-type-detail":
+    case "ontology.get":
       return icon(
         "ontology",
-        `Inspected the ${humanize(intent.objectTypeId)} type`,
-        `Inspecting the ${humanize(intent.objectTypeId)} type`
+        `Inspected the ${humanize(intent.args[0]) || "object"} type`,
+        `Inspecting the ${humanize(intent.args[0]) || "object"} type`
       )
-    case "api-objects-list":
-    case "api-objects-query": {
+    case "objects.inspect": {
+      const objectId = intent.args[1] ?? "object"
+      return icon(
+        "object",
+        `Inspected ${objectId}`,
+        `Inspecting ${objectId}`,
+        graphDetail(parsed?.json)
+      )
+    }
+    case "objects.list":
+    case "objects.get":
+    case "objects.search":
+    case "objects.query": {
       const n = objectCount(parsed?.json)
-      const label = humanize(intent.objectTypeId) || "object"
+      const label = humanize(type) || "object"
       const title = n === null ? "Queried objects" : `Found ${count(n, label)}`
       return icon("objects", title, `Looking up ${plural(label)}`)
     }
-    case "api-count": {
+    case "objects.query-example":
+      return icon("skill", "Read a query example", "Reading a query example")
+    case "objects.count": {
       const value = numberField(parsed?.json, "count")
       // Singular base — `plural()` adds the suffix, so "objects" here would become "objectses".
-      const label = humanize(intent.objectTypeId) || "object"
+      const label = humanize(type) || "object"
       return icon(
         "count",
         `Counted ${plural(label)}`,
@@ -280,7 +362,7 @@ export function describeBash(intent: BashIntent, parsed: ParsedBashOutput | null
         value === null ? undefined : value.toLocaleString()
       )
     }
-    case "api-exists": {
+    case "objects.exists": {
       const value = boolField(parsed?.json, "exists")
       return icon(
         "count",
@@ -289,27 +371,34 @@ export function describeBash(intent: BashIntent, parsed: ParsedBashOutput | null
         value === null ? undefined : value ? "Yes" : "No"
       )
     }
-    case "api-facets":
+    case "objects.facets":
       return icon("facets", "Broke down the data", "Breaking down the data")
-    case "api-object-detail":
-      return icon("object", `Opened ${intent.objectId}`, `Opening ${intent.objectId}`)
-    case "api-telemetry-latest":
+    case "objects.links": {
+      const n = nestedArrayLength(parsed?.json, "links")
+      return icon(
+        "objects",
+        `Read links for ${intent.args[1] ?? "an object"}`,
+        `Reading links for ${intent.args[1] ?? "an object"}`,
+        count(n, "link")
+      )
+    }
+    case "telemetry.latest":
       return icon(
         "telemetry",
-        `Read latest ${humanize(intent.propertyId)}`,
-        `Reading latest ${humanize(intent.propertyId)}`,
+        `Read latest ${humanize(intent.args[2]) || "telemetry"}`,
+        `Reading latest ${humanize(intent.args[2]) || "telemetry"}`,
         latestReading(parsed?.json)
       )
-    case "api-telemetry-history": {
+    case "telemetry.history": {
       const n = arrayLength(parsed?.json)
       return icon(
         "telemetry",
-        `Read ${humanize(intent.propertyId)} history`,
-        `Reading ${humanize(intent.propertyId)} history`,
+        `Read ${humanize(intent.args[2]) || "telemetry"} history`,
+        `Reading ${humanize(intent.args[2]) || "telemetry"} history`,
         count(n, "point")
       )
     }
-    case "api-telemetry-bulk": {
+    case "telemetry.query": {
       const n = seriesCount(parsed?.json)
       return icon(
         "telemetry",
@@ -318,32 +407,102 @@ export function describeBash(intent: BashIntent, parsed: ParsedBashOutput | null
         n === null ? undefined : `${n} series`
       )
     }
-    case "api-action-run": {
+    case "actions.list": {
+      const n = arrayLength(parsed?.json)
+      return icon(
+        "actions",
+        "Listed available actions",
+        "Listing available actions",
+        count(n, "action")
+      )
+    }
+    case "actions.get":
+      return icon(
+        "actions",
+        `Inspected the ${humanize(intent.args[0]) || "action"} action`,
+        `Inspecting the ${humanize(intent.args[0]) || "action"} action`
+      )
+    case "actions.request":
+      return icon(
+        "actions",
+        `Ran the ${humanize(intent.args[0]) || "requested"} action`,
+        `Running the ${humanize(intent.args[0]) || "requested"} action`,
+        actionOutcome(parsed?.json)
+      )
+    case "action-runs.get": {
       const run = actionRunInfo(parsed?.json)
       return icon("actions", actionRunTitle(run), "Checking the action run", run.subjectLabel)
     }
-    case "api-actions-list":
-      return icon("actions", "Listed available actions", "Listing available actions")
-    case "api-action-request":
+    case "action-runs.list": {
+      const n = arrayLength(parsed?.json)
+      return icon("actions", "Listed action runs", "Listing action runs", count(n, "run"))
+    }
+    case "workflows.list": {
+      const n = arrayLength(parsed?.json)
+      return icon("actions", "Listed workflows", "Listing workflows", count(n, "workflow"))
+    }
+    case "workflows.get":
       return icon(
         "actions",
-        `Ran the ${humanize(intent.actionId)} action`,
-        `Running the ${humanize(intent.actionId)} action`,
-        actionOutcome(parsed?.json)
+        `Inspected the ${humanize(intent.args[0]) || "workflow"} workflow`,
+        `Inspecting the ${humanize(intent.args[0]) || "workflow"} workflow`
       )
-    case "api-project":
-      return icon("project", "Read project info", "Reading project info")
-    case "read-skill": {
-      const label = skillLabel(intent)
-      return icon("skill", `Read the ${label}`, `Reading the ${label}`)
+    case "workflows.start":
+      return icon(
+        "actions",
+        `Started the ${humanize(intent.args[0]) || "requested"} workflow`,
+        `Starting the ${humanize(intent.args[0]) || "requested"} workflow`,
+        runOutcome(parsed?.json)
+      )
+    case "workflow-runs.list": {
+      const n = arrayLength(parsed?.json)
+      return icon("actions", "Listed workflow runs", "Listing workflow runs", count(n, "run"))
     }
+    case "workflow-runs.get":
+      return icon(
+        "actions",
+        "Checked a workflow run",
+        "Checking a workflow run",
+        runStatus(parsed?.json)
+      )
+    case "files.upload":
+      return icon("object", "Uploaded a file", "Uploading a file", filePath(parsed?.json))
+    case "files.download":
+      return icon("object", "Downloaded a file", "Downloading a file", filePath(parsed?.json))
+    case "project.show":
+      return icon("project", "Read project info", "Reading project info")
+    case "api.get":
+    case "api.post":
+      return icon("terminal", "Called the Sixb API", "Calling the Sixb API", intent.args[0])
     default:
       return icon(
         "terminal",
-        "Ran a command",
-        "Running a command",
-        truncateMiddle(intent.command, 64)
+        "Ran a Sixb command",
+        "Running a Sixb command",
+        truncateMiddle(intent.args.join(" "), 64)
       )
+  }
+}
+
+function helpSubject(args: readonly string[]): string {
+  const group = args.find((value) => !value.startsWith("-"))
+  switch (group) {
+    case "objects":
+      return "how to work with project data"
+    case "ontology":
+      return "the project data model"
+    case "telemetry":
+      return "how to work with telemetry"
+    case "actions":
+      return "available actions"
+    case "workflows":
+      return "available workflows"
+    case "files":
+      return "how to work with files"
+    case "project":
+      return "project information"
+    default:
+      return "available project operations"
   }
 }
 
@@ -394,6 +553,34 @@ function arrayLength(value: unknown): number | null {
   return Array.isArray(value) ? value.length : null
 }
 
+function nestedArrayLength(value: unknown, field: string): number | null {
+  return isRecord(value) && Array.isArray(value[field]) ? value[field].length : null
+}
+
+function commandObjectType(
+  intent: Extract<BashIntent, { kind: "sixb" }>,
+  parsed: ParsedBashOutput | null
+): string | undefined {
+  if (intent.command === "objects.list") return optionValue(intent.args, "--type")
+  if (intent.command === "objects.get" || intent.command === "objects.inspect") {
+    return intent.args[0]
+  }
+  return findObjectTypeId(parsed?.json)
+}
+
+function optionValue(args: readonly string[], option: string): string | undefined {
+  const index = args.indexOf(option)
+  return index === -1 ? undefined : args[index + 1]
+}
+
+function graphDetail(value: unknown): string | undefined {
+  if (!isRecord(value) || !isRecord(value.graph)) return undefined
+  const objectCount = numberField(value.graph, "objectCount")
+  const linkCount = numberField(value.graph, "linkCount")
+  const parts = [count(objectCount, "object"), count(linkCount, "link")].filter(Boolean)
+  return parts.join(" · ") || undefined
+}
+
 /** A single latest telemetry point's value, e.g. "1,240 rpm". */
 function latestReading(value: unknown): string | undefined {
   if (!isRecord(value)) return undefined
@@ -416,6 +603,24 @@ function seriesCount(value: unknown): number | null {
 function actionOutcome(value: unknown): string | undefined {
   if (!isRecord(value)) return undefined
   if (typeof value.runId === "string") return value.created === false ? "already queued" : "queued"
+  return undefined
+}
+
+function runOutcome(value: unknown): string | undefined {
+  if (!isRecord(value)) return undefined
+  if (typeof value.runId === "string" || typeof value.id === "string") return "queued"
+  return runStatus(value)
+}
+
+function runStatus(value: unknown): string | undefined {
+  return isRecord(value) && typeof value.status === "string" ? humanize(value.status) : undefined
+}
+
+function filePath(value: unknown): string | undefined {
+  if (!isRecord(value)) return undefined
+  for (const field of ["output", "logicalPath", "path"]) {
+    if (typeof value[field] === "string") return value[field]
+  }
   return undefined
 }
 
@@ -524,6 +729,11 @@ function truncateMiddle(text: string, max: number): string {
   const head = Math.ceil((max - 1) / 2)
   const tail = Math.floor((max - 1) / 2)
   return `${text.slice(0, head)}…${text.slice(text.length - tail)}`
+}
+
+function truncateEnd(text: string, max: number): string {
+  if (text.length <= max) return text
+  return `${text.slice(0, Math.max(0, max - 1)).trimEnd()}…`
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
