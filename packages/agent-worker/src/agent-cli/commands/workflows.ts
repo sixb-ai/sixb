@@ -2,7 +2,7 @@ import { ApiClient } from "../api-client"
 import { isHelp, requireExact, requireValue } from "../arguments"
 import { fail, writeJson, writeText } from "../output"
 import { GROUP_HELP } from "./metadata"
-import { readJson, singleNamedFileOption } from "./shared"
+import { readJson, singleFileOption } from "./shared"
 
 export async function workflows(args: string[]): Promise<void> {
   const [sub, ...rest] = args
@@ -21,9 +21,7 @@ export async function workflows(args: string[]): Promise<void> {
     requireValue("workflows start", workflowId)
     let input: unknown = {}
     if (rest.length > 1) {
-      input = await readJson(
-        singleNamedFileOption(rest.slice(1), "--input-file", "workflows start")
-      )
+      input = await readJson(singleFileOption(rest.slice(1), "workflows start"))
     }
     if (Array.isArray(input) || typeof input !== "object" || input === null) {
       fail("Workflow input must be a JSON object.")

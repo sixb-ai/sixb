@@ -417,6 +417,13 @@ describe("agent API gateway", () => {
         objects: [expect.objectContaining({ objectTypeId: "device", primaryId: "fan-1" })],
       })
 
+      const objectList = await runAgentCli(baseUrl.href, ["objects", "list", "--type", "device"])
+      expect(objectList.exitCode).toBe(0)
+      expect(JSON.parse(objectList.stdout)).toMatchObject({
+        objects: [expect.objectContaining({ objectTypeId: "device", primaryId: "fan-1" })],
+        hasMore: false,
+      })
+
       const graph = await runAgentCli(baseUrl.href, [
         "objects",
         "inspect",
@@ -465,6 +472,8 @@ describe("agent API gateway", () => {
         },
       })
 
+      const actionParamsPath = join(directory, "action-params.json")
+      await writeFile(actionParamsPath, "{}")
       const action = await runAgentCli(baseUrl.href, [
         "actions",
         "request",
@@ -473,20 +482,51 @@ describe("agent API gateway", () => {
         "device",
         "--subject-id",
         "fan-1",
+        "--file",
+        actionParamsPath,
       ])
       expect(action.exitCode).toBe(0)
-      expect(JSON.parse(action.stdout)).toMatchObject({
+      const actionResult = JSON.parse(action.stdout) as { runId: string }
+      expect(actionResult).toMatchObject({
         created: true,
         runId: expect.any(String),
+      })
+
+      const actionRuns = await runAgentCli(baseUrl.href, [
+        "action-runs",
+        "list",
+        "--action",
+        "label-device",
+      ])
+      expect(actionRuns.exitCode).toBe(0)
+      expect(JSON.parse(actionRuns.stdout)).toMatchObject({
+        runs: [expect.objectContaining({ id: actionResult.runId, actionId: "label-device" })],
+        hasMore: false,
       })
 
       const uploadPath = join(directory, "upload.txt")
       await writeFile(uploadPath, "uploaded through the agent CLI")
       const upload = await runAgentCli(baseUrl.href, ["files", "upload", uploadPath])
       expect(upload.exitCode).toBe(0)
-      expect(JSON.parse(upload.stdout)).toMatchObject({
+      const uploadedFile = JSON.parse(upload.stdout)
+      expect(uploadedFile).toMatchObject({
         fileName: "upload.txt",
         sizeBytes: 30,
+      })
+
+      const workflowInputPath = join(directory, "workflow-input.json")
+      await writeFile(workflowInputPath, JSON.stringify({ document: uploadedFile }))
+      const workflow = await runAgentCli(baseUrl.href, [
+        "workflows",
+        "start",
+        "inspect-devices",
+        "--file",
+        workflowInputPath,
+      ])
+      expect(workflow.exitCode).toBe(0)
+      expect(JSON.parse(workflow.stdout)).toMatchObject({
+        runId: expect.any(String),
+        workflowId: "inspect-devices",
       })
 
       const downloadPath = join(directory, "download.txt")

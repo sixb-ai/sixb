@@ -1,8 +1,19 @@
 import { ApiClient } from "../api-client"
-import { isHelp, requireExact } from "../arguments"
+import { enumValue, isHelp, requireExact, requireOrderedRange, rfc3339Value } from "../arguments"
 import { fail, writeJson, writeText } from "../output"
+import { CLI_LIMITS, DEFAULT_LIST_ORDER } from "../policies"
 import { GROUP_HELP } from "./metadata"
-import { parseQueryOptions } from "./shared"
+import { normalizeWindowOptions, parseQueryOptions } from "./shared"
+
+const ACTION_RUN_STATUSES = ["queued", "running", "succeeded", "failed", "cancelled"] as const
+const WORKFLOW_RUN_STATUSES = [
+  "queued",
+  "running",
+  "waiting",
+  "succeeded",
+  "failed",
+  "cancelled",
+] as const
 
 export async function runs(kind: "action" | "workflow", args: string[]): Promise<void> {
   const [sub, ...rest] = args
@@ -29,12 +40,35 @@ export async function runs(kind: "action" | "workflow", args: string[]): Promise
       "--id": "primaryId",
     }
     const workflow = { ...common, "--workflow": "workflowId" }
-    return writeJson(
-      await api.get(
-        `/api/${group}`,
-        parseQueryOptions(rest, kind === "action" ? action : workflow, `${group} list`)
-      )
+    const options = normalizeWindowOptions(
+      parseQueryOptions(rest, kind === "action" ? action : workflow, `${group} list`),
+      {
+        defaultLimit: CLI_LIMITS.list.default,
+        maximumLimit: CLI_LIMITS.list.maximum,
+        defaultOrder: DEFAULT_LIST_ORDER,
+        offset: true,
+      }
     )
+    if (options.status !== undefined) {
+      options.status = enumValue(
+        "--status",
+        options.status,
+        kind === "action" ? ACTION_RUN_STATUSES : WORKFLOW_RUN_STATUSES
+      )
+    }
+    for (const [name, flag] of [
+      ["startedAfter", "--started-after"],
+      ["startedBefore", "--started-before"],
+    ] as const) {
+      if (options[name] !== undefined) options[name] = rfc3339Value(flag, options[name])
+    }
+    requireOrderedRange(
+      "--started-after",
+      options.startedAfter,
+      "--started-before",
+      options.startedBefore
+    )
+    return writeJson(await api.get(`/api/${group}`, options))
   }
   fail(`Unknown ${group} command '${sub}'.`)
 }

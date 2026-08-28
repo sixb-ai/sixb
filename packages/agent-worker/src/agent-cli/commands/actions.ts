@@ -31,7 +31,7 @@ export async function actions(args: string[]): Promise<void> {
       const flag = rest[index]
       if (flag === "--subject-type") subjectType = requireValue(flag, rest[++index])
       else if (flag === "--subject-id") subjectId = requireValue(flag, rest[++index])
-      else if (flag === "--params-file") paramsSource = requireValue(flag, rest[++index])
+      else if (flag === "--file") paramsSource = requireValue(flag, rest[++index])
       else if (flag === "--run-id") runId = requireValue(flag, rest[++index])
       else fail(`Unknown actions request option '${flag}'.`)
     }
