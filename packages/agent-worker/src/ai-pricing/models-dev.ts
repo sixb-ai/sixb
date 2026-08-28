@@ -165,6 +165,24 @@ export function rateAiModelCall(input: RateAiModelCallInput): AiModelCallCostRec
     rates = selectTier(tiers, usage.inputTokens) ?? rates
   }
 
+  // The compact catalog's cache-write rate is the five-minute price. A nonzero write without an
+  // observed TTL is ambiguous because providers may also charge a different one-hour rate.
+  if (
+    rates.cacheWrite !== undefined &&
+    usage.cacheWriteInputTokens !== undefined &&
+    usage.cacheWriteInputTokens > 0 &&
+    pricingContext.cacheWriteTtlSeconds === undefined
+  ) {
+    return unpriceable(
+      input,
+      ratedAt,
+      pricingContext,
+      resolvedSource,
+      "unsupportedPricingDimension",
+      billingIdentity
+    )
+  }
+
   if (
     (rates.inputAudio !== undefined || rates.outputAudio !== undefined) &&
     rawUsageContainsAudioTokens(usageRecord)

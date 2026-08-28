@@ -331,6 +331,32 @@ describe("Models.dev AI cost rating", () => {
     })
   })
 
+  test("requires an observed five-minute TTL before pricing cache writes", () => {
+    const cacheWriteUsage = usage({
+      usage: {
+        inputTokens: 10,
+        outputTokens: 1,
+        uncachedInputTokens: 0,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 10,
+        reportingStatus: "complete",
+        totalTokens: 11,
+      },
+    })
+
+    expect(rate(cacheWriteUsage)).toMatchObject({
+      status: "unpriceable",
+      reason: "unsupportedPricingDimension",
+    })
+    expect(
+      rateAiModelCall({
+        usage: cacheWriteUsage,
+        pricingContext: { cacheWriteTtlSeconds: 300 },
+        ratedAt: new Date("2026-08-25T00:00:01.000Z"),
+      })
+    ).toMatchObject({ status: "rated" })
+  })
+
   test("rejects unsupported pricing dimensions instead of applying base rates", () => {
     for (const pricingContext of [
       { batch: true },
