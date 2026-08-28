@@ -16,10 +16,10 @@ import {
   assertValidAgentToolDescription,
   assertValidAgentToolInput,
   assertValidAgentToolName,
-  assertValidLoopConfig,
   assertValidProviderOptions,
   assertValidReasoningLevel,
   groupIdsFromDefinitions,
+  resolveAgentLoopConfig,
 } from "./validation"
 
 /**
@@ -76,7 +76,7 @@ export function defineAgent<const TId extends string>(
   }
   assertValidReasoningLevel(config.reasoning)
   assertValidProviderOptions(config.providerOptions)
-  assertValidLoopConfig(config.loop)
+  const loop = resolveAgentLoopConfig(config.loop)
   const groupIds = groupIdsFromDefinitions(id, config.groups)
   const tools = toolsFromDefinitions(id, config.tools)
 
@@ -91,6 +91,6 @@ export function defineAgent<const TId extends string>(
     groupIds,
     tools,
     ...(config.description !== undefined ? { description: config.description } : {}),
-    ...(config.loop !== undefined ? { loop: config.loop } : {}),
+    ...(loop !== undefined ? { loop } : {}),
   })
 }

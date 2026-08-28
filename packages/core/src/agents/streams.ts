@@ -4,6 +4,7 @@ import type { SixbFailure } from "../errors/types"
 import { isJsonValue, isPlainRecord, type JsonValue } from "../json"
 import {
   AGENT_RUN_FAILURE_CODES,
+  type AgentContextCheckpointReason,
   type AgentRunFailureCode,
   type AgentRunRecord,
 } from "../storage/agents/types"
@@ -189,10 +190,34 @@ export async function subscribeAgentRunCancel(
 /** Exact portable failure exposed by a terminal Agent run stream event. */
 export type AgentRunFailure = SixbFailure<AgentRunFailureCode>
 
+export const AGENT_COMPACTION_FAILURE_CODES = [
+  "context_limit_exceeded",
+  "summary_failed",
+  "checkpoint_failed",
+] as const
+export type AgentCompactionFailureCode = (typeof AGENT_COMPACTION_FAILURE_CODES)[number]
+
 export type AgentRunStreamEvent =
   | (AgentRunStreamEventBase & {
       readonly type: "agent.run.started"
       readonly modelId?: string
+    })
+  | (AgentRunStreamEventBase & {
+      readonly type: "agent.compaction.started"
+      readonly reason: AgentContextCheckpointReason
+      readonly estimatedInputTokensBefore: number
+    })
+  | (AgentRunStreamEventBase & {
+      readonly type: "agent.compaction.completed"
+      readonly reason: AgentContextCheckpointReason
+      readonly checkpointId: string
+      readonly estimatedInputTokensBefore: number
+      readonly estimatedInputTokensAfter: number
+    })
+  | (AgentRunStreamEventBase & {
+      readonly type: "agent.compaction.failed"
+      readonly reason: AgentContextCheckpointReason
+      readonly errorCode: AgentCompactionFailureCode
     })
   | (AgentRunStreamEventBase & {
       readonly type: "agent.ui.chunk"
@@ -263,6 +288,23 @@ export function isAgentRunStreamEvent(value: unknown): value is AgentRunStreamEv
   switch (value.type) {
     case "agent.run.started":
       return value.modelId === undefined || typeof value.modelId === "string"
+    case "agent.compaction.started":
+      return (
+        isAgentContextCheckpointReason(value.reason) &&
+        isTokenEstimate(value.estimatedInputTokensBefore)
+      )
+    case "agent.compaction.completed":
+      return (
+        isAgentContextCheckpointReason(value.reason) &&
+        typeof value.checkpointId === "string" &&
+        isTokenEstimate(value.estimatedInputTokensBefore) &&
+        isTokenEstimate(value.estimatedInputTokensAfter)
+      )
+    case "agent.compaction.failed":
+      return (
+        isAgentContextCheckpointReason(value.reason) &&
+        AGENT_COMPACTION_FAILURE_CODES.includes(value.errorCode as AgentCompactionFailureCode)
+      )
     case "agent.ui.chunk":
       return (
         Number.isInteger(value.chunkIndex) &&
@@ -280,6 +322,14 @@ export function isAgentRunStreamEvent(value: unknown): value is AgentRunStreamEv
     default:
       return false
   }
+}
+
+function isAgentContextCheckpointReason(value: unknown): value is AgentContextCheckpointReason {
+  return value === "threshold" || value === "overflow"
+}
+
+function isTokenEstimate(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0
 }
 
 function isTerminalAgentRunStatus(value: unknown): value is "succeeded" | "failed" | "cancelled" {
@@ -305,6 +355,12 @@ export function agentRunStreamIdempotencyKey(event: AgentRunStreamEvent): string
   switch (event.type) {
     case "agent.run.started":
       return `${event.runId}:${event.attempt}:started`
+    case "agent.compaction.started":
+      return `${event.runId}:${event.attempt}:compaction:${event.reason}:started`
+    case "agent.compaction.completed":
+      return `${event.runId}:${event.attempt}:compaction:${event.checkpointId}:completed`
+    case "agent.compaction.failed":
+      return `${event.runId}:${event.attempt}:compaction:${event.reason}:failed:${event.errorCode}`
     case "agent.ui.chunk":
       return `${event.runId}:${event.attempt}:chunk:${event.chunkIndex}`
     case "agent.message.finalized":

@@ -53,6 +53,20 @@ export {
   MAX_AGENT_CONTEXT_ENTRIES,
   normalizeAgentContextEntries,
 } from "./context"
+export type {
+  AgentContextCompactionBoundary,
+  AgentContextEstimateTool,
+  AgentContextTokenEstimate,
+  EstimateAgentContextRequestTokensInput,
+} from "./context-compaction"
+export {
+  AGENT_CONTEXT_ESTIMATOR_VERSION,
+  estimateAgentContextMessagesTokens,
+  estimateAgentContextRequestTokens,
+  selectAgentContextCompactionBoundary,
+  serializeAgentMessagesForSummary,
+  shouldCompactAgentContext,
+} from "./context-compaction"
 export { serializeAgentContextForModel } from "./context-model"
 export { resolveAgentContextParts } from "./context-resolution"
 export type {
@@ -75,6 +89,7 @@ export {
   AgentToolResultValidationError,
 } from "./errors"
 export {
+  agentContextCheckpointId,
   createAgentMessageId,
   createAgentRunExecutionToken,
   createAgentRunId,
@@ -100,6 +115,7 @@ export {
   retryAgentRun,
 } from "./request"
 export type {
+  AgentCompactionFailureCode,
   AgentRunControlStreamId,
   AgentRunFailure,
   AgentRunFinishedEvent,
@@ -107,6 +123,7 @@ export type {
   AgentRunStreamId,
 } from "./streams"
 export {
+  AGENT_COMPACTION_FAILURE_CODES,
   AGENT_RUN_CANCEL_RECORD,
   AGENT_RUN_STREAM_SCHEMA_VERSION,
   agentRunControlStreamDefinition,
@@ -128,6 +145,7 @@ export type {
 export { projectAgentThreadModelContext } from "./thread-context-projection"
 export { isAgentToolResult } from "./tool-result"
 export type {
+  AgentContextConfig,
   AgentDefinition,
   AgentLoopConfig,
   AgentReasoningLevel,
@@ -150,6 +168,8 @@ export type {
   DefineAgentConfig,
   InferAgentToolInput,
   InferAgentToolInputSchema,
+  ResolvedAgentContextConfig,
+  ResolvedAgentLoopConfig,
 } from "./types"
 export { AGENT_REASONING_LEVELS } from "./types"
 export {

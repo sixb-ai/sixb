@@ -15,11 +15,12 @@ import {
 import { AgentTurnTimeoutError } from "./errors"
 import { type AgentRunFailure, toAgentExecutionFailure } from "./failure"
 import { appendMessageAndFinishRunOrThrow, finishRunOrThrow } from "./finalize"
-import { AiModelCallRecorder } from "./model-call-recorder"
 import { collectAgentOutputAttachments } from "./output-attachments"
 import { runAgentLoop } from "./run-agent-loop"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
+import type { LoadedAgentThreadModelContext } from "./thread-context"
 import { loadAgentThreadModelContext } from "./thread-context"
+import { type AgentTurnRuntime, createAgentTurnRuntime } from "./turn-runtime"
 import type { AgentTurnContext } from "./types"
 
 export const DEFAULT_MAX_STEPS = 25
@@ -32,6 +33,10 @@ export interface RunAgentTurnInput {
   readonly run: AgentRunRecord
   /** The worker's shutdown signal. */
   readonly signal: AbortSignal
+  /** Shared with preflight when this turn performed configured compaction. */
+  readonly runtime?: AgentTurnRuntime
+  /** Preflight's retained projection, avoiding a second storage read in the worker path. */
+  readonly threadContext?: LoadedAgentThreadModelContext
 }
 
 /**
@@ -60,11 +65,13 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   }
   const agents = storage.agents
 
-  const threadContext = await loadAgentThreadModelContext({
-    storage: agents,
-    projectId,
-    threadId: run.threadId,
-  })
+  const threadContext =
+    input.threadContext ??
+    (await loadAgentThreadModelContext({
+      storage: agents,
+      projectId,
+      threadId: run.threadId,
+    }))
   const attachmentContext =
     context.attachmentContext ??
     (context.apiBaseUrl
@@ -100,25 +107,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   }) as ModelMessage[]
 
   const maxSteps = agent.loop?.stopWhen?.maxSteps ?? defaultMaxSteps
-  const usageRecorder = new AiModelCallRecorder({
-    storage,
-    projectId,
-    executionId: run.executionId,
-    attempt: run.attempt,
-    requesterGroupIds: run.requesterGroupIds,
-    providerOptions: agent.providerOptions,
-    recoverAiModelCall: context.recoverAiModelCall,
-    errorRunId: runId,
-  })
-
-  // The model call is aborted by worker shutdown, queue delivery loss, or the turn exceeding its
-  // wall-clock budget (a slow-but-alive model must not hold the thread forever).
-  const timeoutAbort = new AbortController()
-  let timedOut = false
-  const timeoutTimer = setTimeout(() => {
-    timedOut = true
-    timeoutAbort.abort()
-  }, turnTimeoutMs)
 
   // The sandbox provisions concurrently with this turn (see `createConversationAgentEnvironment`). If it
   // fails, the run must be recorded `failed` rather than finalizing as a success with a dead
@@ -128,33 +116,52 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   // (best-effort strict).
   const sandboxReadiness = monitorSandboxReadiness(context.sandboxReady)
 
-  const abortSignal = AbortSignal.any([signal, timeoutAbort.signal, sandboxReadiness.signal])
-
-  const result = runAgentLoop({
-    agent,
-    system: context.systemPrompt,
-    messages: modelMessages,
-    tools,
-    maxSteps,
-    usageRecorder,
-    prepareStep: context.prepareStep,
-    abortSignal,
-  })
+  // Production passes the run-owned runtime created before preflight. Direct callers that skip
+  // preflight start it here, after fallible history and attachment preparation, so setup failures
+  // do not leave a detached deadline timer behind.
+  const ownsRuntime = input.runtime === undefined
+  const runtime =
+    input.runtime ??
+    createAgentTurnRuntime({
+      context,
+      run,
+      signal,
+      providerOptions: agent.providerOptions,
+    })
+  const usageRecorder = runtime.usageRecorder
+  const abortSignal = AbortSignal.any([runtime.signal, sandboxReadiness.signal])
 
   // `onFinish` fires even when the stream is aborted — the SDK ends the UI stream gracefully with an
   // `abort` chunk rather than erroring it. `isAborted` distinguishes a stop from a clean finish, and
   // `responseMessage` holds whatever streamed so far, so a cancelled turn can still be persisted.
   let responseMessage: AgentInboundLike | undefined
   let streamAborted = false
-  const uiStream = toUIMessageStream({
-    stream: result.stream,
-    tools,
-    onError: agentToolErrorText,
-    onEnd: (event) => {
-      responseMessage = event.responseMessage
-      streamAborted = streamAborted || event.isAborted
-    },
-  })
+  let result: ReturnType<typeof runAgentLoop>
+  let uiStream: ReturnType<typeof toUIMessageStream>
+  try {
+    result = runAgentLoop({
+      agent,
+      system: context.systemPrompt,
+      messages: modelMessages,
+      tools,
+      maxSteps,
+      usageRecorder,
+      prepareStep: context.prepareStep,
+      abortSignal,
+    })
+    uiStream = toUIMessageStream({
+      stream: result.stream,
+      tools,
+      onError: agentToolErrorText,
+      onEnd: (event) => {
+        responseMessage = event.responseMessage
+        streamAborted = streamAborted || event.isAborted
+      },
+    })
+  } catch (error) {
+    if (ownsRuntime) runtime.dispose()
+    throw error
+  }
 
   let drainError: unknown
   let chunkIndex = 0
@@ -180,15 +187,15 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   }
 
   const finalizeIfInterrupted = async (error?: unknown): Promise<AgentRunRecord | null> => {
-    if (signal.reason instanceof QueueDeliveryLeaseLostError) {
-      throw signal.reason
+    if (runtime.sourceSignal.reason instanceof QueueDeliveryLeaseLostError) {
+      throw runtime.sourceSignal.reason
     }
     // AI SDK swallows lifecycle callback errors, so surface a retained ledger append failure before
     // interpreting the stream as a success or cancellation.
     usageRecorder.assertHealthy()
     // A sandbox failure and a timeout take precedence over the abort-shaped error they cause.
     sandboxReadiness.throwIfFailed()
-    if (timedOut) {
+    if (runtime.timedOut()) {
       const completedAt = new Date()
       return finalizeInterruptedTurn({
         storage,
@@ -326,7 +333,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
     return finalizedRun
   } finally {
-    clearTimeout(timeoutTimer)
+    if (ownsRuntime) runtime.dispose()
   }
 }
 

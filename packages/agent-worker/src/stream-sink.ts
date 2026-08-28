@@ -1,5 +1,5 @@
 import type { Broker, JsonValue } from "@sixb/core"
-import type { AgentRunStreamEvent } from "@sixb/core/agents/streams"
+import type { AgentCompactionFailureCode, AgentRunStreamEvent } from "@sixb/core/agents/streams"
 import {
   AGENT_RUN_STREAM_SCHEMA_VERSION,
   agentRunFinishedEvent,
@@ -9,11 +9,31 @@ import {
   publishAgentRunActivity,
 } from "@sixb/core/agents/streams"
 import { createSixbError } from "@sixb/core/internal/errors"
-import type { AgentRunRecord } from "@sixb/core/storage"
+import type { AgentContextCheckpointReason, AgentRunRecord } from "@sixb/core/storage"
+
+export interface CompactionStartedInput {
+  readonly run: AgentRunRecord
+  readonly reason: AgentContextCheckpointReason
+  readonly estimatedInputTokensBefore: number
+}
+
+export interface CompactionCompletedInput extends CompactionStartedInput {
+  readonly checkpointId: string
+  readonly estimatedInputTokensAfter: number
+}
+
+export interface CompactionFailedInput {
+  readonly run: AgentRunRecord
+  readonly reason: AgentContextCheckpointReason
+  readonly errorCode: AgentCompactionFailureCode
+}
 
 /** Receives live and lifecycle records for one agent run stream. */
 export interface StreamSink {
   publishStarted(run: AgentRunRecord): Promise<void>
+  publishCompactionStarted(input: CompactionStartedInput): Promise<void>
+  publishCompactionCompleted(input: CompactionCompletedInput): Promise<void>
+  publishCompactionFailed(input: CompactionFailedInput): Promise<void>
   publishUiChunk(input: {
     readonly run: AgentRunRecord
     readonly chunkIndex: number
@@ -29,6 +49,9 @@ export interface StreamSink {
 /** Test sink that keeps the worker running without publishing live stream records. */
 export const NOOP_STREAM_SINK: StreamSink = {
   async publishStarted() {},
+  async publishCompactionStarted() {},
+  async publishCompactionCompleted() {},
+  async publishCompactionFailed() {},
   async publishUiChunk() {},
   async publishMessageFinalized() {},
   async publishRunFinished() {},
@@ -47,6 +70,18 @@ export function isolateStreamSink(sink: StreamSink): StreamSink {
   return {
     publishStarted: (run) =>
       isolateStreamSinkCall(run.id, "started", () => sink.publishStarted(run)),
+    publishCompactionStarted: (input) =>
+      isolateStreamSinkCall(input.run.id, "compaction started", () =>
+        sink.publishCompactionStarted(input)
+      ),
+    publishCompactionCompleted: (input) =>
+      isolateStreamSinkCall(input.run.id, "compaction completed", () =>
+        sink.publishCompactionCompleted(input)
+      ),
+    publishCompactionFailed: (input) =>
+      isolateStreamSinkCall(input.run.id, "compaction failed", () =>
+        sink.publishCompactionFailed(input)
+      ),
     publishUiChunk: (input) =>
       isolateStreamSinkCall(input.run.id, "ui chunk", () => sink.publishUiChunk(input)),
     publishMessageFinalized: (input) =>
@@ -63,6 +98,9 @@ export function withAgentActivityStream(sink: StreamSink, broker: Broker): Strea
   return {
     publishStarted: (run) =>
       publishLifecycle([sink.publishStarted(run), publishAgentRunActivity(broker, run)]),
+    publishCompactionStarted: (input) => sink.publishCompactionStarted(input),
+    publishCompactionCompleted: (input) => sink.publishCompactionCompleted(input),
+    publishCompactionFailed: (input) => sink.publishCompactionFailed(input),
     publishUiChunk: (input) => sink.publishUiChunk(input),
     publishMessageFinalized: (input) => sink.publishMessageFinalized(input),
     publishRunFinished: (run) =>
@@ -95,6 +133,35 @@ class BrokerStreamSink implements StreamSink {
       attempt: run.attempt,
       ...(run.modelId === undefined ? {} : { modelId: run.modelId }),
       occurredAt: new Date().toISOString(),
+    })
+  }
+
+  async publishCompactionStarted(input: CompactionStartedInput): Promise<void> {
+    await this.publish({
+      ...streamEventBase(this.projectId, input.run),
+      type: "agent.compaction.started",
+      reason: input.reason,
+      estimatedInputTokensBefore: input.estimatedInputTokensBefore,
+    })
+  }
+
+  async publishCompactionCompleted(input: CompactionCompletedInput): Promise<void> {
+    await this.publish({
+      ...streamEventBase(this.projectId, input.run),
+      type: "agent.compaction.completed",
+      reason: input.reason,
+      checkpointId: input.checkpointId,
+      estimatedInputTokensBefore: input.estimatedInputTokensBefore,
+      estimatedInputTokensAfter: input.estimatedInputTokensAfter,
+    })
+  }
+
+  async publishCompactionFailed(input: CompactionFailedInput): Promise<void> {
+    await this.publish({
+      ...streamEventBase(this.projectId, input.run),
+      type: "agent.compaction.failed",
+      reason: input.reason,
+      errorCode: input.errorCode,
     })
   }
 
@@ -201,6 +268,18 @@ class BrokerStreamSink implements StreamSink {
     })
     this.ensured.add(streamId)
   }
+}
+
+function streamEventBase(projectId: string, run: AgentRunRecord) {
+  return {
+    schemaVersion: AGENT_RUN_STREAM_SCHEMA_VERSION,
+    projectId,
+    runId: run.id,
+    threadId: run.threadId,
+    agentId: run.agentId,
+    attempt: run.attempt,
+    occurredAt: new Date().toISOString(),
+  } as const
 }
 
 async function isolateStreamSinkCall(

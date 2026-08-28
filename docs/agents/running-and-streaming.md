@@ -129,6 +129,9 @@ Each `record` frame carries an `AgentRunStreamEvent`:
 | Event | When | Fields |
 | --- | --- | --- |
 | `agent.run.started` | The turn began. | `modelId` |
+| `agent.compaction.started` | Earlier turns are being condensed. | `reason`, `estimatedInputTokensBefore` |
+| `agent.compaction.completed` | A context checkpoint became active. | `reason`, `checkpointId`, token estimates before/after |
+| `agent.compaction.failed` | Required compaction could not complete. | `reason`, `errorCode` |
 | `agent.ui.chunk` | Live output as the model streams. | `chunkIndex`, `chunk` |
 | `agent.message.finalized` | The assistant message was persisted. | `messageId` |
 | `agent.run.finished` | The run ended. | `status`, `finishReason`, `error` |
@@ -140,6 +143,9 @@ for its resume point to be trimmed is resubscribed from the oldest retained reco
 `subscribed` frame carrying `afterCursor: null`. `agent.ui.chunk` events are
 live; the durable copy of the turn is the persisted assistant message, read back with
 `GET /api/agent-threads/:threadId/messages`.
+
+Compaction events never include summary text. Normal message reads continue to return the complete
+original transcript.
 
 ## A ready-made chat UI
 

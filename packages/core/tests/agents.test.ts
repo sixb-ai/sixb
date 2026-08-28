@@ -322,7 +322,10 @@ describe("defineAgent", () => {
       instructions: "Assist.",
       groups: [agentRuntime],
       tools: [searchKnowledge],
-      loop: { stopWhen: { maxSteps: 16 } },
+      loop: {
+        stopWhen: { maxSteps: 16 },
+        context: { windowTokens: 200_000 },
+      },
     })
 
     expect(agent.description).toBe("Quotes and contacts.")
@@ -331,7 +334,16 @@ describe("defineAgent", () => {
     expect(agent.groupIds).toEqual(["agent-runtime"])
     expect(agent.tools).toEqual([searchKnowledge])
     expect(agent.tools[0]).toBe(searchKnowledge)
-    expect(agent.loop).toEqual({ stopWhen: { maxSteps: 16 } })
+    expect(agent.loop).toEqual({
+      stopWhen: { maxSteps: 16 },
+      context: {
+        windowTokens: 200_000,
+        reserveTokens: 16_384,
+        keepRecentTokens: 20_000,
+      },
+    })
+    expect(Object.isFrozen(agent.loop)).toBe(true)
+    expect(Object.isFrozen(agent.loop?.context)).toBe(true)
     expect(() => {
       ;(searchKnowledge as unknown as { name: string }).name = "bash"
     }).toThrow(TypeError)
@@ -397,6 +409,43 @@ describe("defineAgent", () => {
           model,
           instructions: "x",
           loop: { stopWhen: { maxSteps } },
+        })
+      ).toThrow(AgentDefinitionError)
+    }
+  })
+
+  test("resolves and validates context loop settings", () => {
+    const configured = defineAgent("configured", {
+      name: "Configured",
+      model,
+      instructions: "x",
+      loop: {
+        context: {
+          windowTokens: 10_000,
+          reserveTokens: 2_000,
+          keepRecentTokens: 3_000,
+        },
+      },
+    })
+    expect(configured.loop?.context).toEqual({
+      windowTokens: 10_000,
+      reserveTokens: 2_000,
+      keepRecentTokens: 3_000,
+    })
+
+    for (const context of [
+      { windowTokens: 0 },
+      { windowTokens: Number.MAX_SAFE_INTEGER + 1 },
+      { windowTokens: 100, reserveTokens: 0 },
+      { windowTokens: 100, keepRecentTokens: 1.5 },
+      { windowTokens: 100, reserveTokens: 60, keepRecentTokens: 40 },
+    ]) {
+      expect(() =>
+        defineAgent("bad-context", {
+          name: "Bad context",
+          model,
+          instructions: "x",
+          loop: { context },
         })
       ).toThrow(AgentDefinitionError)
     }

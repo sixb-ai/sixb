@@ -944,6 +944,7 @@ export type {
 // ── Agents ──────────────────────────────────────────────────
 
 export type {
+  AgentContextConfig,
   AgentContextEntryInput,
   AgentContextInput,
   AgentContextOrigin,
@@ -999,6 +1000,8 @@ export type {
   InferAgentToolInputSchema,
   RequestAgentRunInput,
   RequestAgentRunResult,
+  ResolvedAgentContextConfig,
+  ResolvedAgentLoopConfig,
 } from "./agents"
 export {
   AGENT_REASONING_LEVELS,

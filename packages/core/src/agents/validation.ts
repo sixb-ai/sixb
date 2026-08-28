@@ -10,12 +10,15 @@ import type { GroupDefinition, SecurityDefinitionCatalog } from "../security"
 import { AgentDefinitionError } from "./errors"
 import {
   AGENT_REASONING_LEVELS,
+  type AgentContextConfig,
   type AgentDefinition,
   type AgentLoopConfig,
   type AgentReasoningLevel,
   type AgentToolDefinition,
   type AgentToolInputSchema,
   type DefineAgentConfig,
+  type ResolvedAgentContextConfig,
+  type ResolvedAgentLoopConfig,
 } from "./types"
 
 const AGENT_TOOL_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/
@@ -159,14 +162,54 @@ export function validateAgentToolsAtStartup(agents: readonly AgentDefinition[]):
   }
 }
 
-export function assertValidLoopConfig(loop: AgentLoopConfig | undefined): void {
+export function resolveAgentLoopConfig(
+  loop: AgentLoopConfig | undefined
+): ResolvedAgentLoopConfig | undefined {
+  if (loop === undefined) return undefined
+
   const maxSteps = loop?.stopWhen?.maxSteps
-  if (maxSteps === undefined) {
-    return
-  }
-  if (!Number.isInteger(maxSteps) || maxSteps <= 0) {
+  if (maxSteps !== undefined && (!Number.isSafeInteger(maxSteps) || maxSteps <= 0)) {
     throw new AgentDefinitionError(
-      "[Sixb] Agent loop.stopWhen.maxSteps must be a positive finite integer."
+      "[Sixb] Agent loop.stopWhen.maxSteps must be a positive safe integer."
+    )
+  }
+
+  const context = loop.context ? resolveAgentContextConfig(loop.context) : undefined
+  return Object.freeze({
+    ...(loop.stopWhen === undefined
+      ? {}
+      : { stopWhen: Object.freeze({ ...(maxSteps === undefined ? {} : { maxSteps }) }) }),
+    ...(context === undefined ? {} : { context }),
+  })
+}
+
+function resolveAgentContextConfig(context: AgentContextConfig): ResolvedAgentContextConfig {
+  assertPositiveSafeInteger(context.windowTokens, "windowTokens")
+  const reserveTokens =
+    context.reserveTokens ?? Math.min(16_384, Math.floor(context.windowTokens * 0.25))
+  assertPositiveSafeInteger(reserveTokens, "reserveTokens")
+  const keepRecentTokens =
+    context.keepRecentTokens ??
+    Math.min(20_000, Math.floor((context.windowTokens - reserveTokens) * 0.5))
+  assertPositiveSafeInteger(keepRecentTokens, "keepRecentTokens")
+
+  if (reserveTokens + keepRecentTokens >= context.windowTokens) {
+    throw new AgentDefinitionError(
+      "[Sixb] Agent loop.context reserveTokens + keepRecentTokens must be less than windowTokens."
+    )
+  }
+
+  return Object.freeze({
+    windowTokens: context.windowTokens,
+    reserveTokens,
+    keepRecentTokens,
+  })
+}
+
+function assertPositiveSafeInteger(value: number, field: string): void {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new AgentDefinitionError(
+      `[Sixb] Agent loop.context.${field} must be a positive safe integer.`
     )
   }
 }

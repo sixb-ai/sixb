@@ -23,6 +23,8 @@ import {
   rowToThreadRecord,
 } from "./rows"
 
+const SQLITE_CHECKPOINT_RUN_ID_BATCH_SIZE = 500
+
 export class SqliteAgentContextCheckpointStore implements AgentContextCheckpointStore {
   constructor(private readonly db: Database) {}
 
@@ -144,6 +146,34 @@ export class SqliteAgentContextCheckpointStore implements AgentContextCheckpoint
     readonly threadId: string
   }): Promise<AgentContextCheckpointRecord | null> {
     return this.findLatest(input.projectId, input.threadId)
+  }
+
+  async getByRunIds(input: {
+    readonly projectId: string
+    readonly runIds: readonly string[]
+  }): Promise<readonly AgentContextCheckpointRecord[]> {
+    const runIds = [...new Set(input.runIds)]
+    if (runIds.length === 0) return []
+
+    const rows: AgentContextCheckpointRow[] = []
+    for (let offset = 0; offset < runIds.length; offset += SQLITE_CHECKPOINT_RUN_ID_BATCH_SIZE) {
+      const batch = runIds.slice(offset, offset + SQLITE_CHECKPOINT_RUN_ID_BATCH_SIZE)
+      const placeholders = batch.map(() => "?").join(", ")
+      rows.push(
+        ...(this.db
+          .query(
+            `SELECT * FROM agent_context_checkpoints WHERE project_id = ? AND created_by_run_id IN (${placeholders})`
+          )
+          .all(input.projectId, ...batch) as AgentContextCheckpointRow[])
+      )
+    }
+    const byRunId = new Map(
+      rows.map((row) => [row.created_by_run_id, rowToContextCheckpointRecord(row)] as const)
+    )
+    return runIds.flatMap((runId) => {
+      const checkpoint = byRunId.get(runId)
+      return checkpoint ? [checkpoint] : []
+    })
   }
 
   private findLatest(projectId: string, threadId: string): AgentContextCheckpointRecord | null {

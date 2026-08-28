@@ -103,6 +103,41 @@ describe("liveRunReducer", () => {
     expect(state.active).toBe(true)
   })
 
+  test("tracks compaction until it completes or fails", () => {
+    const compacting = liveRunReducer(createLiveRunState("run"), {
+      type: "event",
+      event: event({
+        type: "agent.compaction.started",
+        reason: "threshold",
+        estimatedInputTokensBefore: 95_000,
+      }),
+    })
+    expect(compacting.active).toBe(true)
+    expect(compacting.compacting).toBe(true)
+
+    const completed = liveRunReducer(compacting, {
+      type: "event",
+      event: event({
+        type: "agent.compaction.completed",
+        reason: "threshold",
+        checkpointId: "agt_ctx_run",
+        estimatedInputTokensBefore: 95_000,
+        estimatedInputTokensAfter: 30_000,
+      }),
+    })
+    expect(completed.compacting).toBe(false)
+
+    const failed = liveRunReducer(compacting, {
+      type: "event",
+      event: event({
+        type: "agent.compaction.failed",
+        reason: "threshold",
+        errorCode: "summary_failed",
+      }),
+    })
+    expect(failed.compacting).toBe(false)
+  })
+
   test("reasoning streams until it ends", () => {
     const streaming = reduceChunks([
       { type: "reasoning-start", id: "r" },

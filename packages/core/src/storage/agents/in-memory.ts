@@ -642,6 +642,21 @@ class InMemoryAgentContextCheckpointStore implements AgentContextCheckpointStore
     return record ? clone(record) : null
   }
 
+  async getByRunIds(input: {
+    readonly projectId: string
+    readonly runIds: readonly string[]
+  }): Promise<readonly AgentContextCheckpointRecord[]> {
+    const byRunId = new Map(
+      [...this.state.checkpoints.values()]
+        .filter((checkpoint) => checkpoint.projectId === input.projectId)
+        .map((checkpoint) => [checkpoint.createdByRunId, checkpoint] as const)
+    )
+    return [...new Set(input.runIds)].flatMap((runId) => {
+      const checkpoint = byRunId.get(runId)
+      return checkpoint ? [clone(checkpoint)] : []
+    })
+  }
+
   private findLatest(projectId: string, threadId: string): AgentContextCheckpointRecord | null {
     return (
       [...this.state.checkpoints.values()]

@@ -1,9 +1,14 @@
 import type { AgentDefinition, Sandbox } from "@sixb/core"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
-import type { AgentRunRecord, WorkflowAgentNodeRunRecord } from "@sixb/core/storage"
+import type {
+  AgentMessageRecord,
+  AgentRunRecord,
+  WorkflowAgentNodeRunRecord,
+} from "@sixb/core/storage"
 import { type AgentExecutionMode, renderAgentSystemPrompt } from "./agent-prompt"
 import { assertAgentRuntimeProfile } from "./agent-runtime/preflight"
+import type { AgentSkill } from "./agent-skills"
 import { aiSdkToolsFromAgentDefinitions } from "./ai-sdk-adapters"
 import { createAgentApiGatewayBaseUrl } from "./api-url"
 import {
@@ -40,6 +45,10 @@ interface CreateAgentEnvironmentInput {
 
 export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvironmentInput {
   readonly run: AgentRunRecord
+  /** Retained model tail selected by preflight. Falls back to storage for direct callers. */
+  readonly messages?: readonly AgentMessageRecord[]
+  /** Skills already loaded while estimating the request. */
+  readonly skills?: readonly AgentSkill[]
 }
 
 export interface CreateWorkflowAgentNodeEnvironmentInput extends CreateAgentEnvironmentInput {
@@ -59,19 +68,22 @@ export async function createConversationAgentEnvironment(
     runId: run.id,
     executionToken: run.execution?.token,
   })
-  const [skills, history, inlineImages] = await Promise.all([
-    context.agentSkills,
-    context.storage.agents.messages.list({
-      projectId: context.id,
-      threadId: run.threadId,
-      order: "asc",
-    }),
+  const [skills, messages, inlineImages] = await Promise.all([
+    input.skills ?? context.agentSkills,
+    input.messages ??
+      context.storage.agents.messages
+        .list({
+          projectId: context.id,
+          threadId: run.threadId,
+          order: "asc",
+        })
+        .then((history) => history.messages),
     modelSupportsInlineImages(agent.model, input.signal),
   ])
   const attachmentContext = await prepareAgentAttachments({
     projectId: context.id,
     threadId: run.threadId,
-    messages: history.messages,
+    messages,
     blobStorage: context.blobStorage,
     apiBaseUrl,
     inlineImages,

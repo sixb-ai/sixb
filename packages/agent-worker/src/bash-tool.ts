@@ -1,5 +1,6 @@
 import type { CommandResult, Sandbox } from "@sixb/core"
 import { jsonSchema, type Tool, tool } from "ai"
+import { BASH_TOOL_DESCRIPTION, BASH_TOOL_INPUT_SCHEMA } from "./context-estimation-tools"
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000
 const MAX_COMMAND_TIMEOUT_MS = 120_000
@@ -32,17 +33,8 @@ export function createBashTool(
   resolveSandbox: () => Promise<BashSandboxHandle>
 ): Tool<BashToolInput, BashToolOutput> {
   return tool({
-    description: "Run a Bash command in the agent run sandbox.",
-    inputSchema: jsonSchema<BashToolInput>({
-      type: "object",
-      properties: {
-        command: { type: "string" },
-        cwd: { type: "string" },
-        timeoutMs: { type: "number" },
-      },
-      required: ["command"],
-      additionalProperties: false,
-    }),
+    description: BASH_TOOL_DESCRIPTION,
+    inputSchema: jsonSchema<BashToolInput>(BASH_TOOL_INPUT_SCHEMA),
     async execute(input, { abortSignal }): Promise<BashToolOutput> {
       const { sandbox, env } = await resolveSandbox()
       const result = await sandbox.runCommand("bash", ["-lc", input.command], {

@@ -7969,6 +7969,11 @@ export type ListAgentsResponses = {
       stopWhen?: {
         maxSteps?: number
       }
+      context?: {
+        windowTokens: number
+        reserveTokens: number
+        keepRecentTokens: number
+      }
     }
   }>
 }
@@ -8009,6 +8014,11 @@ export type GetAgentResponses = {
     loop?: {
       stopWhen?: {
         maxSteps?: number
+      }
+      context?: {
+        windowTokens: number
+        reserveTokens: number
+        keepRecentTokens: number
       }
     }
   }
@@ -8430,6 +8440,11 @@ export type ListAgentThreadMessagesResponses = {
         path?: string
         message: string
       }>
+      compaction?: {
+        checkpointId: string
+        summary: string
+        createdAt: string
+      }
       /**
        * Any JSON-compatible value.
        */

@@ -16,6 +16,7 @@ import type { AgentRunExecution, AgentRunRecord } from "@sixb/core/storage"
 import { AGENT_RUN_FAILURE_CODES, AgentStorageError } from "@sixb/core/storage"
 import { loadAgentSkills } from "./agent-skills"
 import { normalizeApiBaseUrl } from "./api-url"
+import { prepareAgentConversationContext } from "./context-compaction"
 import { AgentExecutionLostError, AgentFinalizationError, AgentUsageRecordingError } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
 import { type AgentRunFailure, toAgentExecutionFailure, toAgentRunFailure } from "./failure"
@@ -31,6 +32,7 @@ import {
   createConversationAgentEnvironment,
 } from "./run-environment"
 import { createBrokerStreamSink, isolateStreamSink, withAgentActivityStream } from "./stream-sink"
+import { type AgentTurnRuntime, createAgentTurnRuntime } from "./turn-runtime"
 import type {
   AgentWorkerContext,
   AgentWorkerHost,
@@ -267,6 +269,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       )
     }
     let environment: AgentExecutionEnvironment | null = null
+    let runtime: AgentTurnRuntime | null = null
     let stopOwnershipProjection: (() => void) | undefined
     // Watch for a user cancel (an out-of-band `/cancel` publishes to the run's control stream). Its
     // signal joins the turn's abort sources, so a cancel stops the model stream just like a shutdown.
@@ -296,18 +299,35 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       await this.confirmExecutionOwnership(context, run.id, executionToken, delivery.leaseExpiresAt)
 
       await context.streamSink.publishStarted(run)
+      runtime = createAgentTurnRuntime({
+        context: executionContext,
+        run,
+        signal: turnSignal,
+        providerOptions: agent.providerOptions,
+      })
+      const prepared = await prepareAgentConversationContext({
+        context: executionContext,
+        agent,
+        run,
+        runtime,
+      })
       environment = await createConversationAgentEnvironment({
         context: executionContext,
         agent,
         run,
         signal: turnSignal,
+        messages: prepared.threadContext.retainedMessages,
+        skills: prepared.skills,
         onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
       })
+      runtime.assertCanContinue()
       await runAgentTurn({
         context: environment.turnContext,
         agent,
         run,
         signal: turnSignal,
+        runtime,
+        threadContext: prepared.threadContext,
       })
     } catch (error) {
       // Queue ownership or the durable execution token was lost. Touch nothing; the current
@@ -352,6 +372,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     } finally {
       stopOwnershipProjection?.()
       cancel.stop()
+      runtime?.dispose()
       await environment?.dispose()
     }
   }
