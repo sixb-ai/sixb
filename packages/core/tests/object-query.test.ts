@@ -213,6 +213,23 @@ function disableQueryObjects(storage: ObjectStorage): ObjectStorage {
   })
 }
 
+function disableRefsPushdown(storage: ObjectStorage): ObjectStorage {
+  return new Proxy(storage, {
+    get(target, property) {
+      if (property === "queryCapabilities") {
+        return () => {
+          const capabilities = storage.queryCapabilities()
+          return {
+            ...capabilities,
+            nodes: { ...capabilities.nodes, refs: false },
+          }
+        }
+      }
+      return Reflect.get(target, property, target)
+    },
+  })
+}
+
 async function seedCustomers(fixture: MaterializerTestFixture): Promise<void> {
   await fixture.seed({
     objects: [
@@ -321,20 +338,22 @@ const boundedCustomerQuery: ObjectQuery = {
 }
 
 describe("object query IR normalization", () => {
-  test("deduplicates explicit refs while preserving authored order", () => {
+  test("deduplicates explicit refs into canonical identity order", () => {
     expect(
       normalizeObjectQuery({
         kind: "refs",
         refs: [
-          { objectTypeId: "Customer", primaryId: "cust-1" },
           { objectTypeId: "Order", primaryId: "order-1" },
+          { objectTypeId: "Customer", primaryId: "cust-2" },
           { objectTypeId: "Customer", primaryId: "cust-1" },
+          { objectTypeId: "Customer", primaryId: "cust-2" },
         ],
       })
     ).toEqual({
       kind: "refs",
       refs: [
         { objectTypeId: "Customer", primaryId: "cust-1" },
+        { objectTypeId: "Customer", primaryId: "cust-2" },
         { objectTypeId: "Order", primaryId: "order-1" },
       ],
     })
@@ -865,12 +884,30 @@ describe("object query explain", () => {
     expect(formatted).toContain("Issues:")
     expect(formatted).toContain("[unknown_property]")
   })
+
+  test("uses the configured refs bound", () => {
+    const explanation = explainObjectQuery(
+      {
+        kind: "refs",
+        refs: [
+          { objectTypeId: "Customer", primaryId: "cust-1" },
+          { objectTypeId: "Order", primaryId: "order-1" },
+        ],
+      },
+      { ontology, maxRefs: 1 }
+    )
+
+    expect(explanation.valid).toBe(false)
+    expect(explanation.issues).toContainEqual(
+      expect.objectContaining({ path: "$.refs", code: "too_many_refs" })
+    )
+  })
 })
 
 describe("object query planner and executor", () => {
   test("resolves explicit refs through the bounded core source", async () => {
     const testStorage = createTestStorage()
-    const { storage, calls } = countQueryCalls(testStorage.objects)
+    const { storage, calls } = countQueryCalls(disableRefsPushdown(testStorage.objects))
     await seedCustomerOrders(testStorage.fixture)
 
     const result = await executeObjectQuery(
@@ -891,8 +928,8 @@ describe("object query planner and executor", () => {
     expect(result.plan.mode).toBe("fallback")
     expect(calls.queryObjects).toBe(0)
     expect(result.objects.map((row) => `${row.objectTypeId}:${row.primaryId}`)).toEqual([
-      "Order:order-2",
       "Customer:cust-1",
+      "Order:order-2",
     ])
     expect(result.total).toBe(2)
   })

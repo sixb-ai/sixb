@@ -311,6 +311,21 @@
           }
         }
       },
+      "ObjectRef": {
+        "type": "object",
+        "required": ["objectTypeId", "primaryId"],
+        "additionalProperties": false,
+        "properties": {
+          "objectTypeId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "primaryId": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
       "ObjectQuery": {
         "oneOf": [
           {
@@ -328,6 +343,25 @@
               },
               "includeSubtypes": {
                 "type": "boolean"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["kind", "refs"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["refs"]
+              },
+              "refs": {
+                "type": "array",
+                "minItems": 1,
+                "description": "One to 1,000 unique identities after normalization; duplicate entries are accepted and removed.",
+                "items": {
+                  "$ref": "#/components/schemas/ObjectRef"
+                }
               }
             }
           },

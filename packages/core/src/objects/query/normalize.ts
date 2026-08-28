@@ -252,12 +252,27 @@ function uniqueRefs(
   refs: readonly { objectTypeId: string; primaryId: string }[]
 ): { objectTypeId: string; primaryId: string }[] {
   const seen = new Set<string>()
-  return refs.flatMap((ref) => {
+  const unique = refs.flatMap((ref) => {
     const key = JSON.stringify([ref.objectTypeId, ref.primaryId])
     if (seen.has(key)) return []
     seen.add(key)
     return [{ ...ref }]
   })
+
+  // `refs` is an object-set source, not a positional batch response. Canonical
+  // identity order makes equivalent sets normalize identically and matches the
+  // default ordering used by provider query sources.
+  return unique.sort(
+    (left, right) =>
+      compareStrings(left.objectTypeId, right.objectTypeId) ||
+      compareStrings(left.primaryId, right.primaryId)
+  )
+}
+
+function compareStrings(left: string, right: string): number {
+  if (left < right) return -1
+  if (left > right) return 1
+  return 0
 }
 
 function uniqueStringRecord(

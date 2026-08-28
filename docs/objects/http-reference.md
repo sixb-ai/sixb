@@ -80,6 +80,31 @@ Each object in the response carries its primary id, type, properties, and timest
 ```
 
 
+## Exact Object References
+
+Use a `refs` source when object identities are already known. References can be heterogeneous,
+primary ids remain in JSON rather than URL paths, missing objects are omitted, and duplicates are
+removed. Results use canonical identity order by `objectTypeId` and `primaryId`:
+
+```json
+{
+  "query": {
+    "kind": "refs",
+    "refs": [
+      { "objectTypeId": "Customer", "primaryId": "github:customer:acme/co#42" },
+      { "objectTypeId": "Invoice", "primaryId": "inv-1042" }
+    ]
+  },
+  "includeTotal": false
+}
+```
+
+`refs` accepts between 1 and 1,000 unique references and is intrinsically bounded. SQLite,
+PostgreSQL, and the in-memory provider execute it natively, so it composes with traversal, sets,
+filtering, projection, expansion, and pagination. Providers without native support use the storage
+batch identity primitive for the bounded core fallback.
+
+
 ## Count, Exists, And Facets
 
 `POST /api/objects/query/count` takes the same `query` body and returns `{ "count": number }`
@@ -222,6 +247,7 @@ relationship's edge fields:
 | Node | Fields | Purpose |
 | --- | --- | --- |
 | `start` | `objectTypeId`, `includeSubtypes?` | Begin with all objects of one type. |
+| `refs` | `refs` | Begin with 1–1,000 exact, heterogeneous `{ objectTypeId, primaryId }` identities. |
 | `filter` | `input`, `predicate` | Apply a property predicate tree. |
 | `text` | `input`, `query`, `fields?` | Keyword search over `search.defaultText` or explicit `fields`. |
 | `vector` | `input`, `vector`, `propertyId`, `k` | Nearest-neighbor search on a numeric-array property. |
@@ -284,8 +310,12 @@ Authentication and CSRF handling follow your server configuration; see
 
 ## Provider Support
 
-SQLite and PostgreSQL object storage cover the common graph workflow: property filters, text
-search, sorting, limits, cursor pages, link traversal, set operations, and projection.
+SQLite and PostgreSQL object storage cover the common graph workflow: exact reference sets,
+property filters, text search, sorting, limits, cursor pages, link traversal, set operations, and
+projection.
+
+Exact `refs` sources are pushed down by the bundled providers and fall back to core's bounded batch
+primitive on providers without native support.
 
 Vector search and relevance sorting require explicit storage-provider support. When a provider
 can't execute a requested feature, Sixb returns a structured planning error rather than a partial

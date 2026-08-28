@@ -18,6 +18,7 @@ export interface ObjectQueryExplainOptions {
   normalize?: boolean
   maxLimit?: number
   maxPageSize?: number
+  maxRefs?: number
 }
 
 export interface ObjectQueryExplanation {
@@ -47,6 +48,7 @@ export function explainObjectQuery(
         ontology: options.ontology,
         maxLimit: options.maxLimit,
         maxPageSize: options.maxPageSize,
+        maxRefs: options.maxRefs,
         normalize: false,
       })
     : []
@@ -57,6 +59,7 @@ export function explainObjectQuery(
           ontology: options.ontology,
           maxLimit: options.maxLimit,
           maxPageSize: options.maxPageSize,
+          maxRefs: options.maxRefs,
           normalize: false,
         }).result
       : undefined

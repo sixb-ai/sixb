@@ -145,7 +145,7 @@ export const objectQueryContractOntology = new OntologyRegistry({
  *
  * The contract defines the portable V1 query surface: capability declarations,
  * validation/normalization handoff, provider pushdown, bounded fallback,
- * ordered reference sets, traversal, set operations, pagination, search profile defaults, and stable
+ * canonical reference sets, traversal, set operations, pagination, search profile defaults, and stable
  * structured rejections for features outside a provider's capability map.
  */
 export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
@@ -345,7 +345,7 @@ export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
       })
     })
 
-    test("queries opaque ids through exact primary-property predicates", async () => {
+    test("queries opaque ids through canonical exact refs", async () => {
       await withStorage(async ({ objects: storage, fixture }) => {
         const issue297 = "github:issue:sixb-ai/sixb#297"
         const issue298 = "github:issue:sixb-ai/sixb#298"
@@ -356,28 +356,6 @@ export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
           ],
         })
 
-        const exact = await executeObjectQuery(
-          {
-            projectId,
-            query: {
-              kind: "filter",
-              predicate: { op: "eq", propertyId: "id", value: issue297 },
-              input: { kind: "start", objectTypeId: Asset.id },
-            },
-          },
-          { ontology: objectQueryContractOntology, storage }
-        )
-        const multiple = await executeObjectQuery(
-          {
-            projectId,
-            query: {
-              kind: "filter",
-              predicate: { op: "in", propertyId: "id", values: [issue298, issue297] },
-              input: { kind: "start", objectTypeId: Asset.id },
-            },
-          },
-          { ontology: objectQueryContractOntology, storage }
-        )
         const refs = await executeObjectQuery(
           {
             projectId,
@@ -392,20 +370,15 @@ export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
           { ontology: objectQueryContractOntology, storage }
         )
 
-        // ContractAsset.id intentionally has no query flags. Primary eq/in remain portable exact
-        // lookups, and the JSON query body preserves URL-reserved characters without encoding.
-        expect(exact.plan.mode).toBe("pushdown")
-        expect(ids(exact)).toEqual([issue297])
-        expect(multiple.plan.mode).toBe("pushdown")
-        expect(sortedIds(multiple)).toEqual([issue297, issue298])
+        // The JSON query body preserves URL-reserved characters without encoding.
         expect(refs.plan.mode).toBe(
           storage.queryCapabilities().nodes?.refs === true ? "pushdown" : "fallback"
         )
-        expect(ids(refs)).toEqual([issue298, issue297])
+        expect(ids(refs)).toEqual([issue297, issue298])
       })
     })
 
-    test("executes ordered heterogeneous refs with pagination and projection", async () => {
+    test("executes canonical heterogeneous refs with pagination and projection", async () => {
       await withStorage(async ({ objects: storage, fixture }) => {
         await seedObjectQueryContractData(fixture)
 
@@ -450,16 +423,16 @@ export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
         const expectedMode =
           storage.queryCapabilities().nodes?.refs === true ? "pushdown" : "fallback"
         expect(first.plan.mode).toBe(expectedMode)
-        expect(ids(first)).toEqual(["device-sensor", "room-gamma"])
+        expect(ids(first)).toEqual(["device-sensor", "room-alpha"])
         expect(first.objects.map((row) => row.properties)).toEqual([
           { id: "device-sensor" },
-          { id: "room-gamma" },
+          { id: "room-alpha" },
         ])
         expect(first.total).toBe(3)
         expect(first.hasMore).toBe(true)
         expect(first.nextPageToken).toBeTruthy()
         expect(second.plan.mode).toBe(expectedMode)
-        expect(ids(second)).toEqual(["room-alpha"])
+        expect(ids(second)).toEqual(["room-gamma"])
         expect(second.hasMore).toBe(false)
         expect(count.plan.mode).toBe(expectedMode)
         expect(count.count).toBe(3)

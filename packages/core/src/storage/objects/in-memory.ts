@@ -26,6 +26,7 @@ const IN_MEMORY_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
   facetObjects: true,
   nodes: {
     start: true,
+    refs: true,
     filter: true,
     text: true,
     vector: true,
@@ -83,7 +84,7 @@ function objectRowKey(projectId: string, objectTypeId: string): string {
   return `${projectId}:${objectTypeId}`
 }
 
-function comparePrimaryIds(left: string, right: string): number {
+function compareStrings(left: string, right: string): number {
   if (left < right) return -1
   if (left > right) return 1
   return 0
@@ -344,9 +345,7 @@ export class InMemoryObjectStorage implements ObjectStorage {
       case "start":
         return this.evaluateStart(projectId, query.objectTypeId)
       case "refs":
-        // `refs` is a core-native bounded source resolved through
-        // getByPrimaryIdBatch before a provider query compiler is invoked.
-        throw new Error("[Sixb] In-memory object storage does not compile the core 'refs' source")
+        return this.evaluateRefs(projectId, query.refs)
       case "filter": {
         const input = this.evaluateObjectQuery(projectId, query.input)
         const entries = input.entries.filter((entry) =>
@@ -447,6 +446,29 @@ export class InMemoryObjectStorage implements ObjectStorage {
       score: 0,
       order: index,
     }))
+    return completeEvaluation(entries)
+  }
+
+  private evaluateRefs(
+    projectId: string,
+    refs: readonly { objectTypeId: string; primaryId: string }[]
+  ): QueryEvaluation {
+    const seen = new Set<string>()
+    const entries = refs
+      .flatMap((ref) => {
+        const key = JSON.stringify([ref.objectTypeId, ref.primaryId])
+        if (seen.has(key)) return []
+        seen.add(key)
+        const row = this.rows.get(objectRowKey(projectId, ref.objectTypeId))?.get(ref.primaryId)
+        return row ? [row] : []
+      })
+      .sort(
+        (left, right) =>
+          compareStrings(left.objectTypeId, right.objectTypeId) ||
+          compareStrings(left.primaryId, right.primaryId)
+      )
+      .map((row, order) => ({ row, score: 0, order }))
+
     return completeEvaluation(entries)
   }
 
@@ -669,10 +691,9 @@ export class InMemoryObjectStorage implements ObjectStorage {
     const bucket = this.rows.get(objectRowKey(params.projectId, params.objectTypeId))
     const rows = [...(bucket?.values() ?? [])]
       .filter(
-        (row) =>
-          !params.afterPrimaryId || comparePrimaryIds(row.primaryId, params.afterPrimaryId) > 0
+        (row) => !params.afterPrimaryId || compareStrings(row.primaryId, params.afterPrimaryId) > 0
       )
-      .sort((left, right) => comparePrimaryIds(left.primaryId, right.primaryId))
+      .sort((left, right) => compareStrings(left.primaryId, right.primaryId))
       .slice(0, params.limit + 1)
     const hasMore = rows.length > params.limit
     const objects = rows.slice(0, params.limit).map((row) => structuredClone(row))

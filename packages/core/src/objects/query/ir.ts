@@ -46,7 +46,8 @@ export interface ObjectQueryStart {
  *
  * Unlike `start`, this source is intrinsically bounded. Providers can compile
  * it natively for composition with the rest of the IR; core resolves it through
- * `getByPrimaryIdBatch` when pushdown is unavailable.
+ * `getByPrimaryIdBatch` when pushdown is unavailable. Normalization removes
+ * duplicate identities and orders the set canonically by type and primary id.
  */
 export interface ObjectQueryRefs {
   kind: "refs"
