@@ -33,7 +33,7 @@ export interface RunAgentTurnInput {
   readonly run: AgentRunRecord
   /** The worker's shutdown signal. */
   readonly signal: AbortSignal
-  /** Shared with preflight when this turn performed configured compaction. */
+  /** Shared with preflight when this turn performed compaction. */
   readonly runtime?: AgentTurnRuntime
   /** Preflight's retained projection, avoiding a second storage read in the worker path. */
   readonly threadContext?: LoadedAgentThreadModelContext

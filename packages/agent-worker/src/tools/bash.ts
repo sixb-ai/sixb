@@ -1,10 +1,25 @@
-import type { CommandResult, Sandbox } from "@sixb/core"
-import { jsonSchema, type Tool, tool } from "ai"
-import { BASH_TOOL_DESCRIPTION, BASH_TOOL_INPUT_SCHEMA } from "./context-estimation-tools"
+import type { CommandResult } from "@sixb/core"
+import { type JSONSchema7, jsonSchema, type Tool, tool } from "ai"
+import type { AgentSandboxHandle } from "../sandbox-handle"
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000
 const MAX_COMMAND_TIMEOUT_MS = 120_000
 const DEFAULT_MAX_OUTPUT_CHARS = 20_000
+
+export const BASH_TOOL_SPEC = {
+  name: "bash",
+  description: "Run a Bash command in the agent run sandbox.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      command: { type: "string" },
+      cwd: { type: "string" },
+      timeoutMs: { type: "number" },
+    },
+    required: ["command"],
+    additionalProperties: false,
+  } satisfies JSONSchema7,
+} as const
 
 interface BashToolInput {
   readonly command: string
@@ -17,12 +32,6 @@ export interface BashToolOutput extends CommandResult {
   readonly stderrTruncated: boolean
 }
 
-/** The sandbox plus its run-scoped env, resolved lazily on first sandbox tool use. */
-export interface BashSandboxHandle {
-  readonly sandbox: Sandbox
-  readonly env?: Readonly<Record<string, string>>
-}
-
 /**
  * Build the bash tool from a resolver that yields the sandbox on demand. The
  * resolver is awaited on the first command, not at tool-construction time, so
@@ -30,11 +39,11 @@ export interface BashSandboxHandle {
  * of blocking the turn. A resolver rejection surfaces as a failed command.
  */
 export function createBashTool(
-  resolveSandbox: () => Promise<BashSandboxHandle>
+  resolveSandbox: () => Promise<AgentSandboxHandle>
 ): Tool<BashToolInput, BashToolOutput> {
   return tool({
-    description: BASH_TOOL_DESCRIPTION,
-    inputSchema: jsonSchema<BashToolInput>(BASH_TOOL_INPUT_SCHEMA),
+    description: BASH_TOOL_SPEC.description,
+    inputSchema: jsonSchema<BashToolInput>(BASH_TOOL_SPEC.inputSchema),
     async execute(input, { abortSignal }): Promise<BashToolOutput> {
       const { sandbox, env } = await resolveSandbox()
       const result = await sandbox.runCommand("bash", ["-lc", input.command], {

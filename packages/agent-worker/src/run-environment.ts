@@ -16,14 +16,15 @@ import {
   type PreparedAgentAttachmentContext,
   prepareAgentAttachments,
 } from "./attachments"
-import { type BashSandboxHandle, createBashTool } from "./bash-tool"
-import { createReadTool } from "./read-tool"
 import { prepareAgentSandboxApiContext } from "./sandbox-api-context"
 import { AgentSandboxFileRegistry } from "./sandbox-file-registry"
-import { AgentToolArtifactBudget, createAgentToolArtifacts } from "./tool-artifacts"
-import { AgentToolResultMediaBridge } from "./tool-result-media"
+import type { AgentSandboxHandle } from "./sandbox-handle"
+import { AgentToolArtifactBudget, createAgentToolArtifacts } from "./tools/artifacts"
+import { BASH_TOOL_SPEC, createBashTool } from "./tools/bash"
+import { createReadTool, READ_TOOL_SPEC } from "./tools/read"
+import { AgentToolResultMediaBridge } from "./tools/result-media"
+import { createViewFileTool, VIEW_FILE_TOOL_SPEC } from "./tools/view-file"
 import type { AgentExecutionContext, AgentTurnContext, AgentWorkerContext } from "./types"
-import { createViewFileTool } from "./view-file-tool"
 import { prepareWorkflowInputAttachments } from "./workflow-input-attachments"
 
 export interface AgentExecutionEnvironment {
@@ -164,7 +165,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
     agentId: agent.id,
     ...(threadId ? { threadId } : {}),
   })
-  let ready: Promise<BashSandboxHandle>
+  let ready: Promise<AgentSandboxHandle>
   const fileRegistry = new AgentSandboxFileRegistry()
   const artifactBudget = new AgentToolArtifactBudget()
   const mediaBridge = new AgentToolResultMediaBridge({
@@ -198,20 +199,20 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
   })
 
   let sandboxWasUsed = false
-  tools.view_file = createViewFileTool({
+  tools[VIEW_FILE_TOOL_SPEC.name] = createViewFileTool({
     resolveSandbox: () => ready,
     attachments: attachmentContext,
     registry: fileRegistry,
     artifactsForToolCall: ({ toolCallId, signal }) =>
-      artifactsForToolCall({ toolName: "view_file", toolCallId, signal }),
+      artifactsForToolCall({ toolName: VIEW_FILE_TOOL_SPEC.name, toolCallId, signal }),
     toolResultToModelOutput: (output) => mediaBridge.toModelOutput(output),
   })
   const resolveSandbox = () => {
     sandboxWasUsed = true
     return ready
   }
-  tools.read = createReadTool(resolveSandbox)
-  tools.bash = createBashTool(resolveSandbox)
+  tools[READ_TOOL_SPEC.name] = createReadTool(resolveSandbox)
+  tools[BASH_TOOL_SPEC.name] = createBashTool(resolveSandbox)
 
   ready = provisionSandbox({
     context,
@@ -269,7 +270,7 @@ interface ProvisionSandboxInput {
   readonly skills: Awaited<AgentWorkerContext["agentSkills"]>
 }
 
-async function provisionSandbox(input: ProvisionSandboxInput): Promise<BashSandboxHandle> {
+async function provisionSandbox(input: ProvisionSandboxInput): Promise<AgentSandboxHandle> {
   const { context, agent, run, apiBaseUrl, apiOrigin, skills } = input
   let sandbox: Sandbox | null = null
   try {
@@ -300,7 +301,7 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<BashSandb
 }
 
 function disposeEnvironment(
-  ready: Promise<BashSandboxHandle>,
+  ready: Promise<AgentSandboxHandle>,
   isSettled: () => boolean,
   onDetachedTeardown?: (teardown: Promise<void>) => void
 ): Promise<void> {

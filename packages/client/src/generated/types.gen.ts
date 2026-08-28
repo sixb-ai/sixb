@@ -7970,9 +7970,9 @@ export type ListAgentsResponses = {
         maxSteps?: number
       }
       context?: {
-        windowTokens: number
-        reserveTokens: number
-        keepRecentTokens: number
+        windowTokens?: number
+        reserveTokens?: number
+        keepRecentTokens?: number
       }
     }
   }>
@@ -8016,9 +8016,9 @@ export type GetAgentResponses = {
         maxSteps?: number
       }
       context?: {
-        windowTokens: number
-        reserveTokens: number
-        keepRecentTokens: number
+        windowTokens?: number
+        reserveTokens?: number
+        keepRecentTokens?: number
       }
     }
   }

@@ -14,7 +14,16 @@ import type {
   AiUnpriceableReason,
 } from "@sixb/core/storage"
 import { normalizeAiModelCallUsage } from "@sixb/core/storage"
-import catalogJson from "./models-dev-pricing.json"
+import {
+  getModelsDevCatalogModel,
+  getModelsDevProviderModels,
+  MODELS_DEV_CATALOG_SOURCE,
+  type ModelsDevCatalogRateSet,
+  type ModelsDevCatalogTier,
+  resolveModelsDevProviderId,
+} from "./catalog"
+
+export { MODELS_DEV_CATALOG_SOURCE } from "./catalog"
 
 const SIGNED_INT64_MAX = 9_223_372_036_854_775_807n
 const TOKENS_PER_MILLION = 1_000_000n
@@ -26,62 +35,6 @@ interface RateAiModelCallInput {
   readonly pricingContext?: AiPricingContext
   readonly ratedAt: Date
 }
-
-interface CatalogRateSet {
-  readonly input: string
-  readonly output: string
-  readonly cacheRead?: string
-  readonly cacheWrite?: string
-  readonly reasoning?: string
-  readonly inputAudio?: string
-  readonly outputAudio?: string
-}
-
-interface CatalogTier extends CatalogRateSet {
-  readonly aboveInputTokens: string
-}
-
-interface CatalogPrice extends CatalogRateSet {
-  readonly tiers?: readonly CatalogTier[]
-  readonly modes?: Readonly<Record<string, Omit<CatalogPrice, "modes">>>
-}
-
-interface ModelsDevCatalog {
-  readonly source: {
-    readonly id: string
-    readonly version: string
-    readonly url: string
-    readonly observedAt: string
-  }
-  readonly providers: Readonly<Record<string, Readonly<Record<string, CatalogPrice>>>>
-}
-
-const catalog = catalogJson as ModelsDevCatalog
-
-/** Reviewed AI SDK namespaces whose provider key differs from Models.dev. */
-const SDK_PROVIDER_BINDINGS: Readonly<Record<string, string>> = {
-  "anthropic.messages": "anthropic",
-  "openai.responses": "openai",
-  "openai.chat": "openai",
-  "google.generative-ai": "google",
-  "amazon-bedrock.converse": "amazon-bedrock",
-  gateway: "vercel",
-  "gateway.language-model": "vercel",
-  bedrock: "amazon-bedrock",
-  "google.vertex": "google-vertex",
-  "google.vertex.anthropic": "google-vertex",
-  vertex: "google-vertex",
-  "groq.chat": "groq",
-  "wafer.ai.chat": "wafer.ai",
-}
-
-/** Metadata for the immutable Models.dev snapshot shipped with this agent worker. */
-export const MODELS_DEV_CATALOG_SOURCE = Object.freeze({
-  sourceId: catalog.source.id,
-  sourceVersion: catalog.source.version,
-  sourceUrl: catalog.source.url,
-  observedAt: new Date(catalog.source.observedAt),
-})
 
 /** Rate one immutable usage record against this worker's pinned Models.dev snapshot. */
 export function rateAiModelCall(input: RateAiModelCallInput): AiModelCallCostRecord {
@@ -97,7 +50,10 @@ export function rateAiModelCall(input: RateAiModelCallInput): AiModelCallCostRec
     return unpriceable(input, ratedAt, pricingContext, source, "missingBillingIdentity")
   }
 
-  const entry = catalog.providers[billingIdentity.providerId]?.[billingIdentity.modelId]
+  const entry = getModelsDevCatalogModel(
+    billingIdentity.providerId,
+    billingIdentity.modelId
+  )?.pricing
   let resolvedSource = priceSource(`${billingIdentity.providerId}/${billingIdentity.modelId}`)
   if (!entry) {
     return unpriceable(
@@ -128,7 +84,7 @@ export function rateAiModelCall(input: RateAiModelCallInput): AiModelCallCostRec
   }
 
   const mode = pricingContext.mode
-  let rates: CatalogRateSet = entry
+  let rates: ModelsDevCatalogRateSet = entry
   let tiers = entry.tiers
   if (mode !== undefined) {
     const modeRates = entry.modes?.[mode]
@@ -230,9 +186,7 @@ export function resolveModelsDevBillingIdentity(
     "providerId" | "requestedModelId" | "responseModelId" | "rawUsage"
   >
 ): AiBillingIdentity | undefined {
-  const providerId =
-    SDK_PROVIDER_BINDINGS[usage.providerId] ??
-    (Object.hasOwn(catalog.providers, usage.providerId) ? usage.providerId : undefined)
+  const providerId = resolveModelsDevProviderId(usage.providerId)
   if (providerId === undefined) return undefined
 
   // Models.dev's `vercel` catalog can key a Gateway route by either its requested name or its
@@ -240,10 +194,10 @@ export function resolveModelsDevBillingIdentity(
   // entry. The response model identifies the underlying serving model and is not a Gateway SKU.
   if (providerId === "vercel" && isGatewayProvider(usage.providerId)) {
     const canonicalSlug = gatewayCanonicalSlug(usage.rawUsage)
-    const models = catalog.providers[providerId]!
+    const models = getModelsDevProviderModels(providerId)!
     const modelId = [usage.requestedModelId, canonicalSlug].find(
       (candidate): candidate is string =>
-        candidate !== undefined && Object.hasOwn(models, candidate)
+        candidate !== undefined && models[candidate]?.pricing !== undefined
     )
     return { providerId, modelId: modelId ?? usage.requestedModelId }
   }
@@ -263,7 +217,10 @@ type ComponentResult =
       readonly missingMeters?: readonly AiBillableMeter[]
     }
 
-function componentsForUsage(usage: AiModelCallUsage, rates: CatalogRateSet): ComponentResult {
+function componentsForUsage(
+  usage: AiModelCallUsage,
+  rates: ModelsDevCatalogRateSet
+): ComponentResult {
   const components: AiCostComponent[] = []
   const missing: AiBillableMeter[] = []
 
@@ -328,7 +285,10 @@ function componentsForUsage(usage: AiModelCallUsage, rates: CatalogRateSet): Com
   return { status: "rated", components }
 }
 
-function selectTier(tiers: readonly CatalogTier[], inputTokens: number): CatalogTier | undefined {
+function selectTier(
+  tiers: readonly ModelsDevCatalogTier[],
+  inputTokens: number
+): ModelsDevCatalogTier | undefined {
   return [...tiers]
     .sort((left, right) =>
       BigInt(right.aboveInputTokens) > BigInt(left.aboveInputTokens) ? 1 : -1
@@ -377,11 +337,11 @@ function unpriceable(
 
 function priceSource(sourceEntryId: string): AiPriceSource {
   return {
-    sourceId: catalog.source.id,
+    sourceId: MODELS_DEV_CATALOG_SOURCE.sourceId,
     sourceEntryId,
-    sourceVersion: catalog.source.version,
-    sourceUrl: catalog.source.url,
-    observedAt: new Date(catalog.source.observedAt),
+    sourceVersion: MODELS_DEV_CATALOG_SOURCE.sourceVersion,
+    sourceUrl: MODELS_DEV_CATALOG_SOURCE.sourceUrl,
+    observedAt: new Date(MODELS_DEV_CATALOG_SOURCE.observedAt),
   }
 }
 

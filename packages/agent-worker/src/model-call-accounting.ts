@@ -6,7 +6,7 @@ import type {
   RecordAiModelCallResult,
   Storage,
 } from "@sixb/core/storage"
-import type { AgentWorkerStorage } from "../types"
+import type { AgentWorkerStorage } from "./types"
 
 interface RecordAiModelCallAccountingInput {
   readonly storage: AgentWorkerStorage
@@ -20,7 +20,7 @@ interface AiAccountingCapabilities {
   readonly aiCosts: AiCostStorage
 }
 
-let modelsDevRater: Promise<typeof import("./models-dev")> | undefined
+let modelsDevRater: Promise<typeof import("./models-dev/pricing")> | undefined
 
 /** Atomically append usage and a valuation from this worker's lazily loaded pricing snapshot. */
 export async function recordAiModelCallAccounting(
@@ -40,8 +40,8 @@ export async function recordAiModelCallAccounting(
   })
 }
 
-function loadModelsDevRater(): Promise<typeof import("./models-dev")> {
-  modelsDevRater ??= import("./models-dev")
+function loadModelsDevRater(): Promise<typeof import("./models-dev/pricing")> {
+  modelsDevRater ??= import("./models-dev/pricing")
   return modelsDevRater
 }
 

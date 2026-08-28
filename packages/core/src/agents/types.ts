@@ -27,18 +27,12 @@ export const AGENT_REASONING_LEVELS = [
 ] as const satisfies readonly AgentReasoningLevel[]
 
 export interface AgentContextConfig {
-  /** Provider context-window size for this model. Enables automatic preflight compaction. */
-  readonly windowTokens: number
+  /** Override the provider context-window size inferred by the agent worker. */
+  readonly windowTokens?: number
   /** Tokens reserved for the next response and compaction work. */
   readonly reserveTokens?: number
   /** Approximate recent-message budget retained verbatim after compaction. */
   readonly keepRecentTokens?: number
-}
-
-export interface ResolvedAgentContextConfig {
-  readonly windowTokens: number
-  readonly reserveTokens: number
-  readonly keepRecentTokens: number
 }
 
 /**
@@ -51,14 +45,6 @@ export interface AgentLoopConfig {
     readonly maxSteps?: number
   }
   readonly context?: AgentContextConfig
-}
-
-/** Validated runtime form produced once when an agent definition is created. */
-export interface ResolvedAgentLoopConfig {
-  readonly stopWhen?: {
-    readonly maxSteps?: number
-  }
-  readonly context?: ResolvedAgentContextConfig
 }
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {}
@@ -235,5 +221,5 @@ export interface AgentDefinition<TId extends string = string> {
   readonly groupIds: readonly string[]
   /** Selected tool definitions, normalized to an empty array when omitted. */
   readonly tools: readonly AgentToolDefinition[]
-  readonly loop?: ResolvedAgentLoopConfig
+  readonly loop?: AgentLoopConfig
 }

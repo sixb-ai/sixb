@@ -1,6 +1,6 @@
 import type { BlobStorage, FileRef, JsonValue } from "@sixb/core"
 import { isAgentToolResult } from "@sixb/core/internal/agents"
-import { prepareAgentToolFileProjection } from "./attachments"
+import { prepareAgentToolFileProjection } from "../attachments"
 
 export type AgentToolModelOutput =
   | { readonly type: "text"; readonly value: string }

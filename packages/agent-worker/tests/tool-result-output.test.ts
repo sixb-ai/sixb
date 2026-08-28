@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryBlobStorage, type JsonValue } from "@sixb/core"
-import { agentToolResultToModelOutput } from "../src/tool-result-output"
+import { agentToolResultToModelOutput } from "../src/tools/result-output"
 
 const PNG_BYTES = Uint8Array.from(
   Buffer.from(

@@ -9,7 +9,7 @@ import type {
   FileRef,
 } from "@sixb/core"
 import { AgentToolPublicError } from "@sixb/core"
-import type { BashSandboxHandle } from "./bash-tool"
+import type { AgentSandboxHandle } from "../sandbox-handle"
 
 const DEFAULT_ARTIFACT_FILE_MAX_BYTES = 25 * 1024 * 1024
 const DEFAULT_ARTIFACT_TOTAL_MAX_BYTES = 100 * 1024 * 1024
@@ -23,7 +23,7 @@ interface CreateAgentToolArtifactsInput {
   readonly toolCallId: string
   readonly signal: AbortSignal
   readonly blobStorage: BlobStorage
-  readonly resolveSandbox: () => Promise<BashSandboxHandle>
+  readonly resolveSandbox: () => Promise<AgentSandboxHandle>
   readonly onPublished?: (artifact: AgentToolArtifact) => void
   /** Shared across every tool call in one run so parallel publishers cannot oversubscribe it. */
   readonly budget?: AgentToolArtifactBudget

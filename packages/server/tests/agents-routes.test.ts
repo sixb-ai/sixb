@@ -341,11 +341,7 @@ describe("agent routes", () => {
         groupIds: [],
         loop: {
           stopWhen: { maxSteps: 4 },
-          context: {
-            windowTokens: 10_000,
-            reserveTokens: 2_500,
-            keepRecentTokens: 3_750,
-          },
+          context: { windowTokens: 10_000 },
         },
       },
       {

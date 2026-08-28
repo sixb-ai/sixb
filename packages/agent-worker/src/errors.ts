@@ -1,7 +1,7 @@
 import { AgentToolPublicError } from "@sixb/core"
 import type { AgentCompactionFailureCode } from "@sixb/core/agents/streams"
 
-/** A configured thread could not complete its required preflight compaction. */
+/** A thread could not complete its required preflight compaction. */
 export class AgentContextCompactionError extends Error {
   readonly name = "AgentContextCompactionError"
 
