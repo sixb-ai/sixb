@@ -1,7 +1,8 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger, Markdown } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { ChevronRight, Wrench } from "lucide-react"
-import { memo, useEffect, useRef, useState } from "react"
+import { memo, useState } from "react"
+import { latestWorkLabel } from "../activity-label"
 import { BashToolView } from "../bash/BashToolView"
 import type { NormalizedPart, NormalizedTool } from "../parts"
 import { ReadToolView } from "../read/ReadToolView"
@@ -18,7 +19,7 @@ export function AssistantBody({
   live = false,
 }: {
   parts: readonly NormalizedPart[]
-  /** True while this body is driven by an in-flight run, so the trailing work group stays open. */
+  /** True while this body is driven by an in-flight run, so its headline shows live progress. */
   live?: boolean
 }) {
   const blocks: React.ReactNode[] = []
@@ -63,7 +64,7 @@ export function AssistantBody({
     workBuffer.push(part)
   })
   flushText()
-  // The final work run is the only one that can still be receiving steps: keep it open while live.
+  // The final work run is the only one that can still be receiving steps.
   flushWork(live)
 
   return <div className="flex flex-col gap-3">{blocks}</div>
@@ -82,12 +83,10 @@ const FileBlock = memo(function FileBlock({
 })
 
 /**
- * A consecutive run of reasoning + tool parts, folded into a single disclosure. It stays open while
- * `inProgress` — i.e. this is the trailing run of a live turn still receiving steps — and collapses
- * once it settles (the run finishes, or narration text moves past it). Open/close is keyed off that
- * single signal, never per-part streaming, so it doesn't flicker as each step settles before the
- * next begins. Inside, items flow in a single indented column — reasoning as plain text, tools as
- * their own quiet markers that expand inline — never as dropdowns stacked inside this dropdown.
+ * A consecutive run of reasoning + tool parts, folded into a single disclosure. It stays closed
+ * unless the user explicitly opens it, including while work is live. The collapsed shimmer follows
+ * the newest step, keeping the main transcript informative without exposing debug detail. Inside,
+ * items flow in one indented column and can expand inline when deeper inspection is useful.
  */
 function WorkGroup({
   parts,
@@ -96,27 +95,11 @@ function WorkGroup({
   parts: readonly NormalizedPart[]
   inProgress: boolean
 }) {
-  const [open, setOpen] = useState(inProgress)
-  const wasInProgressRef = useRef(inProgress)
-
-  useEffect(() => {
-    if (inProgress && !wasInProgressRef.current) {
-      setOpen(true)
-    } else if (!inProgress && wasInProgressRef.current) {
-      setOpen(false)
-    }
-    wasInProgressRef.current = inProgress
-  }, [inProgress])
+  const [open, setOpen] = useState(false)
 
   const toolCount = parts.reduce((count, part) => count + (part.kind === "tool" ? 1 : 0), 0)
   const hasTools = toolCount > 0
-  const label = inProgress
-    ? hasTools
-      ? "Working…"
-      : "Reasoning…"
-    : hasTools
-      ? "Worked"
-      : "Reasoning"
+  const label = inProgress ? `${latestWorkLabel(parts)}…` : hasTools ? "Worked" : "Reasoning"
   const detail =
     !inProgress && hasTools ? `${toolCount} ${toolCount === 1 ? "step" : "steps"}` : undefined
 
@@ -125,7 +108,7 @@ function WorkGroup({
       <CollapsibleTrigger className="group flex w-fit max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-[13px] leading-normal text-muted-foreground outline-none transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
         <span className={cn(inProgress && "shimmer")}>{label}</span>
         {detail ? <span className="text-muted-foreground/60">· {detail}</span> : null}
-        <ChevronRight className="size-4 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
+        <ChevronRight className="size-4 shrink-0 opacity-0 transition-all group-hover:opacity-100 group-focus-visible:opacity-100 group-data-[state=open]:rotate-90 group-data-[state=open]:opacity-100" />
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="scrollbar-thin mt-2 ml-1.5 flex max-h-[min(24rem,50vh)] flex-col gap-3 overflow-y-auto overscroll-contain border-l-2 border-border py-0.5 pr-2 pl-3">
@@ -196,7 +179,7 @@ function ToolCallRow({ tool }: { tool: NormalizedTool }) {
           <span className="min-w-0 truncate font-medium">{tool.toolName}</span>
           <ToolStatus state={tool.state} />
           {expandable ? (
-            <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
+            <ChevronRight className="size-3.5 shrink-0 opacity-0 transition-all group-hover:opacity-100 group-focus-visible:opacity-100 group-data-[state=open]:rotate-90 group-data-[state=open]:opacity-100" />
           ) : null}
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-2 space-y-2">

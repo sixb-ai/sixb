@@ -29,7 +29,7 @@ export function ReadToolView({ tool }: { tool: NormalizedTool }) {
             {description.detail}
           </span>
         ) : null}
-        <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
+        <ChevronRight className="size-3.5 shrink-0 opacity-0 transition-all group-hover:opacity-100 group-focus-visible:opacity-100 group-data-[state=open]:rotate-90 group-data-[state=open]:opacity-100" />
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="mt-3 min-w-0 space-y-2 text-xs">

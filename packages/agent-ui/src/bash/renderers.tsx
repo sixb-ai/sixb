@@ -17,7 +17,14 @@ import {
   stringField,
   toSeriesData,
 } from "./data"
-import { capitalize, humanize, isRecord, type ParsedBashOutput, subjectLabel } from "./interpret"
+import {
+  capitalize,
+  commandPreview,
+  humanize,
+  isRecord,
+  type ParsedBashOutput,
+  subjectLabel,
+} from "./interpret"
 
 // Each renderer takes the already-parsed bash output and renders the decoded `json` natively, with
 // the lightest possible chrome — no nested boxes, no badge pills. Anything a renderer doesn't
@@ -26,14 +33,14 @@ import { capitalize, humanize, isRecord, type ParsedBashOutput, subjectLabel } f
 
 const MAX_ROWS = 50
 
-interface ApiViewProps {
+interface CommandViewProps {
   readonly parsed: ParsedBashOutput
 }
 
-/** `GET /api/object-types` — a calm two-column list of the live ontology. */
-export function ObjectTypesView({ parsed }: ApiViewProps) {
+/** `sixb ontology list` — a calm two-column list of the live ontology. */
+export function ObjectTypesView({ parsed }: CommandViewProps) {
   const types = Array.isArray(parsed.json) ? parsed.json.filter(isRecord) : null
-  if (!types) return <ApiDataView parsed={parsed} />
+  if (!types) return <StructuredDataView parsed={parsed} />
 
   return (
     <div className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
@@ -58,10 +65,10 @@ export function ObjectTypesView({ parsed }: ApiViewProps) {
   )
 }
 
-/** `GET /api/objects` and `POST /api/objects/query` — a clean, separator-only table. */
-export function ObjectListView({ parsed }: ApiViewProps) {
+/** Sixb object list, lookup, search, and query results — a clean, separator-only table. */
+export function ObjectListView({ parsed }: CommandViewProps) {
   const objects = extractObjects(parsed.json)
-  if (!objects) return <ApiDataView parsed={parsed} />
+  if (!objects) return <StructuredDataView parsed={parsed} />
   if (objects.length === 0) return <Empty message="No matching objects." />
 
   const columns = pickColumns(objects)
@@ -108,10 +115,10 @@ export function ObjectListView({ parsed }: ApiViewProps) {
   )
 }
 
-/** `GET /api/objects/:type/:id` — a property sheet for one object. */
-export function ObjectDetailView({ parsed }: ApiViewProps) {
+/** `sixb objects inspect` — a property sheet for the root object. */
+export function ObjectDetailView({ parsed }: CommandViewProps) {
   const object = singleObject(parsed.json)
-  if (!object) return <ApiDataView parsed={parsed} />
+  if (!object) return <StructuredDataView parsed={parsed} />
 
   const properties = isRecord(object.properties) ? object.properties : object
   const entries = Object.entries(properties).filter(([key]) => key !== "properties")
@@ -124,11 +131,11 @@ export function ObjectDetailView({ parsed }: ApiViewProps) {
   )
 }
 
-/** `POST /api/objects/query/facets` — a compact proportional breakdown. */
-export function FacetsView({ parsed }: ApiViewProps) {
+/** `sixb objects facets` — a compact proportional breakdown. */
+export function FacetsView({ parsed }: CommandViewProps) {
   const facets =
     isRecord(parsed.json) && Array.isArray(parsed.json.facets) ? parsed.json.facets : null
-  if (!facets) return <ApiDataView parsed={parsed} />
+  if (!facets) return <StructuredDataView parsed={parsed} />
 
   const populated = facets.filter(
     (facet): facet is Record<string, unknown> =>
@@ -174,15 +181,15 @@ export function FacetsView({ parsed }: ApiViewProps) {
   )
 }
 
-/** `GET …/telemetry/:prop/history` — latest value plus a clean sparkline. */
-export function TelemetryHistoryView({ parsed }: ApiViewProps) {
+/** `sixb telemetry history` — latest value plus a clean sparkline. */
+export function TelemetryHistoryView({ parsed }: CommandViewProps) {
   const data = toSeriesData(parsed.json)
   if (data.length === 0) return <Empty message="No readings." />
   return <SeriesChart data={data} unit={seriesUnit(parsed.json)} />
 }
 
-/** `POST /api/telemetry/history` — one labeled sparkline per series. */
-export function TelemetryBulkView({ parsed }: ApiViewProps) {
+/** `sixb telemetry query` — one labeled sparkline per series. */
+export function TelemetryBulkView({ parsed }: CommandViewProps) {
   const series =
     isRecord(parsed.json) && Array.isArray(parsed.json.series)
       ? parsed.json.series.filter(isRecord)
@@ -213,10 +220,10 @@ export function TelemetryBulkView({ parsed }: ApiViewProps) {
   )
 }
 
-/** `GET /api/object-types/:id` — a single type's schema, in plain labeled sections. */
-export function ObjectTypeSchemaView({ parsed }: ApiViewProps) {
+/** `sixb ontology get` — a single type's schema, in plain labeled sections. */
+export function ObjectTypeSchemaView({ parsed }: CommandViewProps) {
   const type = isRecord(parsed.json) ? parsed.json : null
-  if (!type) return <ApiDataView parsed={parsed} />
+  if (!type) return <StructuredDataView parsed={parsed} />
 
   return (
     <div className="space-y-3">
@@ -230,11 +237,11 @@ export function ObjectTypeSchemaView({ parsed }: ApiViewProps) {
   )
 }
 
-/** `POST /api/actions/:id` — a calm confirmation that a run was requested. */
-export function ActionResultView({ parsed }: ApiViewProps) {
+/** `sixb actions request` — a calm confirmation that a run was requested. */
+export function ActionResultView({ parsed }: CommandViewProps) {
   const result = isRecord(parsed.json) ? parsed.json : null
   const runId = result && typeof result.runId === "string" ? result.runId : null
-  if (!runId) return <ApiDataView parsed={parsed} />
+  if (!runId) return <StructuredDataView parsed={parsed} />
 
   const created = result?.created !== false
   const queuedAt = typeof result?.queuedAt === "string" ? result.queuedAt : undefined
@@ -260,10 +267,10 @@ const STATUS_DOT: Record<string, string> = {
   cancelled: "bg-muted-foreground/40",
 }
 
-/** `GET /api/action-runs/:runId` — the run's status, timing, and any error. */
-export function ActionRunView({ parsed }: ApiViewProps) {
+/** `sixb action-runs get` — the run's status, timing, and any error. */
+export function ActionRunView({ parsed }: CommandViewProps) {
   const run = isRecord(parsed.json) ? parsed.json : null
-  if (!run) return <ApiDataView parsed={parsed} />
+  if (!run) return <StructuredDataView parsed={parsed} />
 
   const status = stringField(run, "status") ?? "queued"
   const subject = subjectLabel(run.subject)
@@ -303,13 +310,13 @@ export function ActionRunView({ parsed }: ApiViewProps) {
 export function GenericCommandView({
   parsed,
   command,
-}: ApiViewProps & { readonly command?: string }) {
+}: CommandViewProps & { readonly command?: string }) {
   return (
     <div className="space-y-2">
       {command ? (
-        <pre className="overflow-x-auto rounded bg-muted/50 px-2 py-1.5 font-mono text-[11px] text-muted-foreground">
+        <pre className="overflow-x-auto rounded bg-muted/50 px-2 py-1.5 font-mono text-[11px] whitespace-pre-wrap text-muted-foreground">
           <span className="select-none text-muted-foreground/50">$ </span>
-          {command}
+          {commandPreview(command)}
         </pre>
       ) : null}
       {parsed.stdout.trim() ? (
@@ -332,11 +339,10 @@ export function GenericCommandView({
 }
 
 /**
- * Neutral fallback for parsed API responses without a dedicated renderer (project, actions,
- * telemetry) or shapes a renderer didn't recognize. Arrays become a simple list, objects a
- * property sheet of their scalar fields. Never prints raw JSON in the reading path.
+ * Neutral fallback for parsed CLI results without a dedicated renderer. Arrays become a simple
+ * list, objects a property sheet of their scalar fields. Never prints raw JSON in the reading path.
  */
-export function ApiDataView({ parsed }: ApiViewProps) {
+export function StructuredDataView({ parsed }: CommandViewProps) {
   const json = parsed.json
 
   if (Array.isArray(json)) {
