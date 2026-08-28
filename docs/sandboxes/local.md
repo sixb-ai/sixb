@@ -16,7 +16,9 @@ implements.
 
 The built-in agent tools use the host's `PATH`. For agent use, the host needs Bash, the standard
 file utilities used by reads and output collection, CA certificates, and either Bun 1.3+ or Node
-22+. The local provider does not install or modify host tools. `curl` and `jq` are not required.
+22+. The agent worker validates the environment immediately after provisioning and reports the
+failed behavior when a dependency is missing. The local provider does not install or modify host
+tools. `curl` and `jq` are not required.
 
 ## Isolation backends
 

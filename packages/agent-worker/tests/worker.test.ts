@@ -71,6 +71,7 @@ import {
 import { jsonSchema, type ToolSet, tool } from "ai"
 import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test"
 import { AgentWorker, type AgentWorkerOptions } from "../src"
+import { AGENT_RUNTIME_PROFILE } from "../src/agent-runtime/profile"
 import { loadAgentSkills } from "../src/agent-skills"
 import { normalizeApiBaseUrl } from "../src/api-url"
 import { prepareAgentAttachments, toolResultAttachmentKey } from "../src/attachments"
@@ -852,7 +853,7 @@ interface RecordedCommand {
 
 class RecordingSandbox implements Sandbox {
   readonly id: string
-  readonly provider = "recording"
+  readonly provider: string
   readonly workingDirectory: string
   status: "running" | "stopped" | "failed" = "running"
   readonly commands: RecordedCommand[] = []
@@ -862,8 +863,9 @@ class RecordingSandbox implements Sandbox {
   readonly outputListedSizeOverrides = new Map<string, number>()
   destroyed = false
 
-  constructor(id: string) {
+  constructor(id: string, provider = "recording") {
     this.id = id
+    this.provider = provider
     this.workingDirectory = `/tmp/sixb-recording-sandbox/${id}`
   }
 
@@ -901,6 +903,26 @@ class RecordingSandbox implements Sandbox {
   async runCommand(command: string, args: readonly string[] = [], options: RunCommandOptions = {}) {
     this.commands.push({ command, args, options })
     const script = args.at(-1)
+    if (
+      command === "bash" &&
+      typeof script === "string" &&
+      script.includes("SIXB_BASH_ENV_READY")
+    ) {
+      return {
+        exitCode: 0,
+        stdout: "node\t22.0.0\tsixb agent CLI 1\n",
+        stderr: "",
+        durationMs: 1,
+      }
+    }
+    if (command === "bash" && script === "sixb project show") {
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({ id: PROJECT_ID }),
+        stderr: "",
+        durationMs: 1,
+      }
+    }
     if (command === "bash" && script === "create-agent-output") {
       this.writeOutputFile("report.txt", "generated report")
       return {
@@ -1095,6 +1117,37 @@ class OversizedOutputSandboxFactory extends RecordingSandboxFactory {
 class FailingSandboxFactory implements SandboxFactory {
   async create(): Promise<Sandbox> {
     throw new Error("sandbox provisioning unavailable")
+  }
+}
+
+class IncompatibleRuntimeSandbox extends RecordingSandbox {
+  constructor() {
+    super("incompatible-runtime", "smolvm")
+  }
+
+  override async runCommand(
+    command: string,
+    args: readonly string[] = [],
+    options: RunCommandOptions = {}
+  ): Promise<CommandResult> {
+    const script = args.at(-1)
+    if (
+      command === "bash" &&
+      typeof script === "string" &&
+      script.includes("SIXB_BASH_ENV_READY")
+    ) {
+      this.commands.push({ command, args, options })
+      return { exitCode: 29, stdout: "", stderr: "node: not found", durationMs: 1 }
+    }
+    return super.runCommand(command, args, options)
+  }
+}
+
+class IncompatibleRuntimeSandboxFactory implements SandboxFactory {
+  readonly sandbox = new IncompatibleRuntimeSandbox()
+
+  async create(): Promise<Sandbox> {
+    return this.sandbox
   }
 }
 
@@ -4994,7 +5047,9 @@ describe("AgentWorker", () => {
       }
       expect(createOptions.network.allow[0]?.origin).toBe("http://localhost:3002")
 
-      const command = sandboxes.sandboxes[0]?.commands[0]
+      const command = sandboxes.sandboxes[0]?.commands.find(
+        (candidate) => candidate.args.at(-1) === "print-sixb-env"
+      )
       expect(command?.command).toBe("bash")
       expect(command?.args).toEqual(["-lc", "print-sixb-env"])
       const env = command?.options.env
@@ -5007,15 +5062,20 @@ describe("AgentWorker", () => {
       expect(env?.SIXB_RUN_ID).toBe(runId)
       expect(env?.SIXB_CONTEXT_DIR).toContain("/.sixb/agent")
       expect(env?.SIXB_SKILLS_DIR).toContain("/.sixb/agent/skills")
+      expect(env?.SIXB_BIN_DIR).toContain("/.sixb/agent/bin")
+      expect(env?.SIXB_AGENT_RUNTIME_PROFILE).toBe(AGENT_RUNTIME_PROFILE)
+      expect(env?.SIXB_RUNTIME_PROBE_FILE).toContain("/.sixb/agent/runtime/read-probe.txt")
+      expect(env?.BASH_ENV).toContain("/.sixb/agent/context/bash-env")
       expect(env?.SIXB_RUN_CONTEXT).toContain("/.sixb/agent/context/run.json")
       expect(env?.SIXB_ATTACHMENTS).toContain("/.sixb/agent/context/attachments.json")
       expect(env?.SIXB_ATTACHMENT_DIR).toContain("/.sixb/agent/attachments")
       expect(env?.SIXB_OUTPUT_STAGING_DIR).toContain("/.sixb/agent/outputs/staging")
       expect(env?.SIXB_OUTPUT_DIR).toContain("/.sixb/agent/outputs/published")
       expect(env?.SIXB_API_GUIDE).toBeUndefined()
+      expect(env?.SIXB_CLI).toBeUndefined()
       expect(env?.SIXB_ACCESS_TOKEN).toBeUndefined()
 
-      if (!env?.SIXB_SKILLS_DIR || !env.SIXB_RUN_CONTEXT) {
+      if (!env?.SIXB_SKILLS_DIR || !env.SIXB_BIN_DIR || !env.BASH_ENV || !env.SIXB_RUN_CONTEXT) {
         throw new Error("Expected sandbox API env.")
       }
 
@@ -5025,6 +5085,16 @@ describe("AgentWorker", () => {
       if (!sandbox) {
         throw new Error("Expected a provisioned sandbox.")
       }
+
+      const bashEnv = sandbox.readFileContents(env.BASH_ENV)
+      expect(bashEnv).toContain('export PATH="$SIXB_BIN_DIR:$PATH"')
+      expect(bashEnv).toContain("export SIXB_BASH_ENV_READY=1")
+      if (!env.SIXB_RUNTIME_PROBE_FILE) {
+        throw new Error("Expected sandbox runtime probe path.")
+      }
+      expect(sandbox.readFileContents(env.SIXB_RUNTIME_PROBE_FILE)).toBe(
+        "first\nsixb-runtime-probe\nthird\n"
+      )
 
       const querySkill = sandbox.readFileContents(
         join(env.SIXB_SKILLS_DIR, "sixb-query", "SKILL.md")
@@ -5110,6 +5180,7 @@ describe("AgentWorker", () => {
         agentId: "assistant",
         threadId,
         runId,
+        runtimeProfile: AGENT_RUNTIME_PROFILE,
         apiBaseUrl: env.SIXB_API_BASE_URL,
         outputDir: env.SIXB_OUTPUT_DIR,
         outputStagingDir: env.SIXB_OUTPUT_STAGING_DIR,
@@ -5934,6 +6005,49 @@ describe("AgentWorker", () => {
       // Thread released so a later message can run.
       const thread = await storage.threads.getById({ projectId: PROJECT_ID, id: threadId })
       expect(thread?.activeRunId).toBeNull()
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("blocks sandbox tool use with actionable runtime-profile details", async () => {
+    const sandboxes = new IncompatibleRuntimeSandboxFactory()
+    const sixb = buildSixb(apiBashThenAnswerModel(), new InMemoryBroker(), sandboxes)
+    const storage = agentStorageOf(sixb)
+
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const {
+        run: { threadId },
+      } = await requestAgent(sixb, { agentId: "assistant", text: "hi" })
+      const run = await waitFor(
+        async () => {
+          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
+          const found = list.runs[0]
+          return found && found.status !== "queued" && found.status !== "running" ? found : null
+        },
+        { label: "runtime profile run failed" }
+      )
+
+      expect(run.status).toBe("failed")
+      expect(run.error).toMatchObject({
+        code: "agent.execution_failed",
+        details: {
+          agentId: "assistant",
+          runId: run.id,
+          threadId,
+          provider: "smolvm",
+          runtimeProfile: AGENT_RUNTIME_PROFILE,
+          runtimeCheck: "javascript-runtime",
+          remediation: expect.stringContaining("bun run agent:image"),
+        },
+      })
+      expect(JSON.stringify(run.error)).not.toContain("node: not found")
+      expect(sandboxes.sandbox.destroyed).toBe(true)
+      expect(
+        (await listMessages(storage, threadId)).every((message) => message.role !== "assistant")
+      ).toBe(true)
     } finally {
       await worker.stop()
     }

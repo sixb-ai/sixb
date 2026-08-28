@@ -6,6 +6,7 @@ import {
   summarizeErrorMessage,
 } from "@sixb/core/internal/errors"
 import { AGENT_RUN_FAILURE_CODES, type AgentRunFailureCode } from "@sixb/core/storage"
+import { AgentRuntimeProfileError } from "./agent-runtime/errors"
 
 export type AgentRunFailure = SixbFailure<AgentRunFailureCode>
 
@@ -37,6 +38,19 @@ function translateAgentExecutionError(
   error: unknown,
   details: Readonly<Record<string, string>>
 ): unknown {
+  if (error instanceof AgentRuntimeProfileError) {
+    return createSixbError("agent.execution_failed", error.message, {
+      cause: error,
+      details: {
+        ...details,
+        provider: error.provider,
+        runtimeProfile: error.profile,
+        runtimeCheck: error.check,
+        remediation: error.remediation,
+      },
+    })
+  }
+
   if (
     isSixbError(error) &&
     (error.code === "internal.unexpected" || error.code === "agent.execution_failed")

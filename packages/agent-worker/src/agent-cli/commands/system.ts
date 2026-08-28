@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises"
+import { AGENT_RUNTIME_PROFILE } from "../../agent-runtime/profile"
 import { ApiClient } from "../api-client"
 import { isHelp, requireExact } from "../arguments"
 import { AGENT_CLI_VERSION, fail, writeJson, writeText } from "../output"
@@ -12,7 +13,9 @@ export async function doctor(args: string[]): Promise<void> {
   writeJson({
     ok: true,
     cliVersion: AGENT_CLI_VERSION,
+    runtimeProfile: AGENT_RUNTIME_PROFILE,
     runtime: runtimeInfo(),
+    dependencies: { fetch: true, json: true },
     project: await api.get("/api/project"),
   })
 }

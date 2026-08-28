@@ -74,21 +74,26 @@ command is data, not an exception:
 `CreateSandboxOptions` sets the per-run defaults at `create()` time: `workingDirectory`, `env`,
 `timeout`, and `network`.
 
-### Agent runtime expectations
+### Agent runtime profile
 
-The generic `Sandbox` contract remains command-agnostic. Images and hosts used by the agent worker
-must still provide the behavior its installed CLI and file tools use:
+The generic `Sandbox` contract remains command-agnostic. The agent worker separately validates the
+concrete provisioned environment against `sixb-agent-runtime/v1` before any model-issued sandbox
+command can run. The profile requires behavior, not an `agentReady` provider flag:
 
 - Bash must load the worker's `BASH_ENV` bootstrap.
 - Standard file utilities must support bounded reads and output collection, including `realpath`,
   `tail`, `head`, `base64`, `find`, `wc`, and `tr`.
 - Bun 1.3+ or Node 22+ must execute the portable `sixb` CLI.
 - CA certificates must allow the CLI to reach an HTTPS API gateway.
+- The installed CLI, file modes, `PATH`, and run environment must be correct.
+- The CLI must reach and identify the run-scoped API gateway.
 
-These are agent-environment expectations, not additional `Sandbox` interface fields. `curl` and
-`jq` are not required because the production CLI uses the JavaScript runtime's native fetch and
-JSON support. Bake shared dependencies into versioned images or snapshots; never install packages
-during an individual run.
+`curl` and `jq` are not runtime-profile dependencies because the production CLI uses the JavaScript
+runtime's native fetch and JSON support. The worker performs one network-free behavioral probe
+after materializing its files, then verifies the project identity through the gateway. An
+incompatible environment cannot execute a sandbox command. Its failure records the provider,
+profile, and failed check without recording the gateway capability URL. Bake shared dependencies
+into versioned images or snapshots; never install packages during an individual run.
 
 ## Wiring
 
