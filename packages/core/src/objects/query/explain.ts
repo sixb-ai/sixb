@@ -84,6 +84,14 @@ function buildExplainNode(query: ObjectQuery, path: string): ObjectQueryExplainN
         },
         children: [],
       }
+    case "refs":
+      return {
+        path,
+        kind: query.kind,
+        summary: `refs ${query.refs.length}`,
+        details: { refs: query.refs },
+        children: [],
+      }
     case "filter":
       return {
         path,

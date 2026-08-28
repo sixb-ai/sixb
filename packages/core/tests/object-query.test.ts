@@ -321,6 +321,25 @@ const boundedCustomerQuery: ObjectQuery = {
 }
 
 describe("object query IR normalization", () => {
+  test("deduplicates explicit refs while preserving authored order", () => {
+    expect(
+      normalizeObjectQuery({
+        kind: "refs",
+        refs: [
+          { objectTypeId: "Customer", primaryId: "cust-1" },
+          { objectTypeId: "Order", primaryId: "order-1" },
+          { objectTypeId: "Customer", primaryId: "cust-1" },
+        ],
+      })
+    ).toEqual({
+      kind: "refs",
+      refs: [
+        { objectTypeId: "Customer", primaryId: "cust-1" },
+        { objectTypeId: "Order", primaryId: "order-1" },
+      ],
+    })
+  })
+
   test("merges adjacent filters and limits and deduplicates fields", () => {
     const query: ObjectQuery = {
       kind: "limit",
@@ -430,6 +449,52 @@ describe("object query IR normalization", () => {
 })
 
 describe("object query validation", () => {
+  test("validates heterogeneous refs as an intrinsically bounded source", () => {
+    const validated = validateObjectQuery(
+      {
+        kind: "refs",
+        refs: [
+          { objectTypeId: "Customer", primaryId: "cust-1" },
+          { objectTypeId: "Order", primaryId: "order-1" },
+        ],
+      },
+      { ontology }
+    )
+
+    expect(validated.result.objectTypeIds).toEqual(["Customer", "Order"])
+    expect(validated.touchedObjectTypeIds).toEqual(["Customer", "Order"])
+
+    const issues = collectObjectQueryValidationIssues(
+      {
+        kind: "refs",
+        refs: [{ objectTypeId: "Missing", primaryId: "" }],
+      },
+      { ontology }
+    )
+    expect(issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.refs[0].objectTypeId",
+          code: "unknown_object_type",
+        }),
+        expect.objectContaining({ path: "$.refs[0].primaryId", code: "missing_primary_id" }),
+      ])
+    )
+
+    expect(
+      collectObjectQueryValidationIssues(
+        {
+          kind: "refs",
+          refs: [
+            { objectTypeId: "Customer", primaryId: "cust-1" },
+            { objectTypeId: "Order", primaryId: "order-1" },
+          ],
+        },
+        { ontology, maxRefs: 1 }
+      )
+    ).toContainEqual(expect.objectContaining({ path: "$.refs", code: "too_many_refs" }))
+  })
+
   test("resolves and canonicalizes exact decimal predicate and sort semantics", () => {
     const validated = validateObjectQuery(
       {
@@ -803,6 +868,35 @@ describe("object query explain", () => {
 })
 
 describe("object query planner and executor", () => {
+  test("resolves explicit refs through the bounded core source", async () => {
+    const testStorage = createTestStorage()
+    const { storage, calls } = countQueryCalls(testStorage.objects)
+    await seedCustomerOrders(testStorage.fixture)
+
+    const result = await executeObjectQuery(
+      {
+        projectId: "p1",
+        query: {
+          kind: "refs",
+          refs: [
+            { objectTypeId: "Order", primaryId: "order-2" },
+            { objectTypeId: "Customer", primaryId: "missing" },
+            { objectTypeId: "Customer", primaryId: "cust-1" },
+          ],
+        },
+      },
+      { ontology, storage }
+    )
+
+    expect(result.plan.mode).toBe("fallback")
+    expect(calls.queryObjects).toBe(0)
+    expect(result.objects.map((row) => `${row.objectTypeId}:${row.primaryId}`)).toEqual([
+      "Order:order-2",
+      "Customer:cust-1",
+    ])
+    expect(result.total).toBe(2)
+  })
+
   test("filters and sorts decimals exactly beyond JS number precision", async () => {
     const { objects, fixture } = createTestStorage()
     await fixture.seed({

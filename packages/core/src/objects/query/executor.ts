@@ -52,6 +52,7 @@ export interface QueryExecutorOptions
   storage: ObjectStorage
   maxLimit?: number
   maxPageSize?: number
+  maxRefs?: number
   maxFacetLimit?: number
   /**
    * Per-parent cap on how many links a single `expand` hydrates, applied as a
@@ -132,6 +133,7 @@ export async function executeObjectQuery(
     ontology: options.ontology,
     maxLimit: options.maxLimit,
     maxPageSize: options.maxPageSize,
+    maxRefs: options.maxRefs,
     normalize: false,
   })
   assertQueryViewable(validated, options)
@@ -199,6 +201,7 @@ export async function countObjects(
     ontology: options.ontology,
     maxLimit: options.maxLimit,
     maxPageSize: options.maxPageSize,
+    maxRefs: options.maxRefs,
     normalize: false,
   })
   assertQueryViewable(validated, options)
@@ -259,6 +262,7 @@ export async function existsObjects(
     ontology: options.ontology,
     maxLimit: options.maxLimit,
     maxPageSize: options.maxPageSize,
+    maxRefs: options.maxRefs,
     normalize: false,
   })
   assertQueryViewable(validated, options)
@@ -319,6 +323,7 @@ export async function facetObjects(
     ontology: options.ontology,
     maxLimit: options.maxLimit,
     maxPageSize: options.maxPageSize,
+    maxRefs: options.maxRefs,
     normalize: false,
   })
   assertQueryViewable(validated, options)
@@ -435,6 +440,7 @@ function resolveExpansions(query: ObjectQuery, ctx: ExpansionResolutionContext):
       }
     }
     case "start":
+    case "refs":
       return query
     case "set":
       return {
@@ -555,6 +561,8 @@ function expandIncludeSubtypes(query: ObjectQuery, ontology: OntologyRegistry): 
         inputs: objectTypeIds.map((objectTypeId) => ({ kind: "start", objectTypeId })),
       }
     }
+    case "refs":
+      return query
     case "filter":
     case "text":
     case "vector":
@@ -598,6 +606,8 @@ async function evaluateFallbackQuery(
   switch (query.kind) {
     case "start":
       return evaluateFallbackStart(projectId, query, options, maxRows)
+    case "refs":
+      return evaluateFallbackRefs(projectId, query, options)
     case "filter": {
       const input = await evaluateFallbackQuery(projectId, query.input, options, maxRows)
       return completeFallbackEvaluation(
@@ -670,6 +680,23 @@ async function evaluateFallbackQuery(
         `Fallback execution does not support query node '${query.kind}'`
       )
   }
+}
+
+async function evaluateFallbackRefs(
+  projectId: string,
+  query: Extract<ObjectQuery, { kind: "refs" }>,
+  options: QueryExecutorOptions
+): Promise<FallbackEvaluation> {
+  const rows = await options.storage.getByPrimaryIdBatch({
+    projectId,
+    items: query.refs,
+  })
+  return completeFallbackEvaluation(
+    query.refs.flatMap((ref, order) => {
+      const row = rows.get(`${ref.objectTypeId}:${ref.primaryId}`)
+      return row ? [{ row, order }] : []
+    })
+  )
 }
 
 /**

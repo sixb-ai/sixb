@@ -5,6 +5,8 @@
  * storage backend. Providers can push down the subset they support, while the
  * core planner decides whether a bounded fallback is acceptable.
  */
+import type { ObjectRef } from "../../ontology/refs"
+
 export type ObjectQueryDirection = "outgoing" | "incoming"
 export type ObjectQuerySetOperation = "union" | "intersect" | "subtract"
 export type ObjectQuerySortDirection = "asc" | "desc"
@@ -21,6 +23,7 @@ export type QueryScalarKind =
 
 export type ObjectQuery =
   | ObjectQueryStart
+  | ObjectQueryRefs
   | ObjectQueryFilter
   | ObjectQueryText
   | ObjectQueryVector
@@ -36,6 +39,18 @@ export interface ObjectQueryStart {
   kind: "start"
   objectTypeId: string
   includeSubtypes?: boolean
+}
+
+/**
+ * Starts a query from an explicit, heterogeneous set of object identities.
+ *
+ * Unlike `start`, this source is intrinsically bounded. Providers can compile
+ * it natively for composition with the rest of the IR; core resolves it through
+ * `getByPrimaryIdBatch` when pushdown is unavailable.
+ */
+export interface ObjectQueryRefs {
+  kind: "refs"
+  refs: readonly ObjectRef[]
 }
 
 export interface ObjectQueryFilter {

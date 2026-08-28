@@ -22,6 +22,11 @@ function normalizeNode(query: ObjectQuery): ObjectQuery {
   switch (query.kind) {
     case "start":
       return { ...query }
+    case "refs":
+      return {
+        kind: "refs",
+        refs: uniqueRefs(query.refs),
+      }
     case "filter":
       return normalizeFilter(query.input, query.predicate)
     case "text":
@@ -63,7 +68,14 @@ function normalizeNode(query: ObjectQuery): ObjectQuery {
  * lands above another `expand` is merged into one.
  */
 function hoistExpand(query: ObjectQuery): ObjectQuery {
-  if (query.kind === "start" || query.kind === "set" || query.kind === "expand") return query
+  if (
+    query.kind === "start" ||
+    query.kind === "refs" ||
+    query.kind === "set" ||
+    query.kind === "expand"
+  ) {
+    return query
+  }
   if (query.input.kind !== "expand") return query
 
   const inner = query.input
@@ -234,6 +246,18 @@ function normalizeLimit(input: ObjectQuery, limit: number): ObjectQuery {
 
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values)]
+}
+
+function uniqueRefs(
+  refs: readonly { objectTypeId: string; primaryId: string }[]
+): { objectTypeId: string; primaryId: string }[] {
+  const seen = new Set<string>()
+  return refs.flatMap((ref) => {
+    const key = JSON.stringify([ref.objectTypeId, ref.primaryId])
+    if (seen.has(key)) return []
+    seen.add(key)
+    return [{ ...ref }]
+  })
 }
 
 function uniqueStringRecord(

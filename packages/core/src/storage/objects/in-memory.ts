@@ -343,6 +343,10 @@ export class InMemoryObjectStorage implements ObjectStorage {
     switch (query.kind) {
       case "start":
         return this.evaluateStart(projectId, query.objectTypeId)
+      case "refs":
+        // `refs` is a core-native bounded source resolved through
+        // getByPrimaryIdBatch before a provider query compiler is invoked.
+        throw new Error("[Sixb] In-memory object storage does not compile the core 'refs' source")
       case "filter": {
         const input = this.evaluateObjectQuery(projectId, query.input)
         const entries = input.entries.filter((entry) =>
