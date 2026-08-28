@@ -668,6 +668,31 @@ describe("ontology materializer edits", () => {
     )
     expect((await object())?.properties).toMatchObject({ name: "D", note: "source-note-4" })
     expect(tied.counts.objectsUpdated).toBe(1)
+
+    await materializer.projections.replace(
+      replacement("recent-v5", "2026-01-05T00:00:00Z", [
+        sourceEntryAt("one", "E", "2026-01-01T14:00:00Z"),
+      ])
+    )
+    const withoutSourceNote = await object()
+    expect(withoutSourceNote?.properties.name).toBe("E")
+    expect(withoutSourceNote?.properties).not.toHaveProperty("note")
+
+    const activeSource = [
+      ...getInMemoryOntologyStorageTestingAdapter(storage.ontology)
+        .snapshot()
+        .sourceMaterializations.values(),
+    ].find((source) => source.status === "active")
+    const activeObjectAssertion = [...(activeSource?.rowsByEntity.values() ?? [])].find(
+      (row) => row.assertion.kind === "object"
+    )?.assertion
+    expect(activeObjectAssertion).toEqual({
+      kind: "object",
+      ref: ref("one"),
+      properties: { name: "E" },
+      sourceUpdatedAt: "2026-01-01T14:00:00.000Z",
+      absentSourcePropertyIds: ["note"],
+    })
   })
 
   test("preserves a dormant edit timestamp when deleting an absent object", async () => {

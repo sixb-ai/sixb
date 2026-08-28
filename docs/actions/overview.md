@@ -261,9 +261,10 @@ for a new one. Both return a handle with the rest of the edits:
 })
 ```
 
-When a [projection](../data/projections.md) also writes an object, values your actions set win
-over the projected ones. `reset(...)` drops the action's value for those properties so the projected
-value becomes visible again — use it to hand a field back to the projection.
+By default, when a [projection](../data/projections.md) also writes an object, values your actions set
+win over the projected ones. A projection configured with `mostRecent` can instead make a newer
+source value effective. `reset(...)` drops the action's value in either case so the projected value
+becomes visible again — use it to hand a field back to the projection.
 
 Repeated edits on one object stay in order, and a later `update(...)` sees what an earlier one wrote.
 An edit that ends up changing nothing emits no mutation event.
