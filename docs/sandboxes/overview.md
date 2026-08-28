@@ -1,9 +1,9 @@
 # Sandboxes
 
-A sandbox is an isolated environment where an agent reads files and runs bash commands. Reach for
-one whenever an [agent](../agents/overview.md) needs file work, scripts, or `curl` against the sixb
-API gateway. The sandbox keeps that work off your host — its filesystem, network, and processes
-are walled off from the machine the runtime runs on.
+A sandbox is an isolated environment where an agent reads files and runs Bash commands. Reach for
+one whenever an [agent](../agents/overview.md) needs file work, scripts, or the `sixb` CLI. The
+sandbox keeps that work off your host — its filesystem, network, and processes are walled off from
+the machine the runtime runs on.
 
 You pick a provider once and wire it into `createSixb`. Everything above the sandbox — the agent,
 its sandbox tools, its run lifecycle — is written against one provider-agnostic contract, so
@@ -39,8 +39,8 @@ interface Sandbox {
 }
 ```
 
-The worker calls `factory.create()` once per agent run, `writeFiles(...)` to install the run's
-skills and context, and `runCommand(...)` per command, then `destroy()` on teardown.
+The worker calls `factory.create()` once per agent run, `writeFiles(...)` to install the CLI, skill,
+and run context, and `runCommand(...)` per command. It calls `destroy()` on teardown.
 
 ### File materialization
 
@@ -74,19 +74,19 @@ command is data, not an exception:
 `CreateSandboxOptions` sets the per-run defaults at `create()` time: `workingDirectory`, `env`,
 `timeout`, and `network`.
 
-### Agent image requirements
+### Agent runtime profile
 
-The `Sandbox` contract is command-agnostic, but an image used by the Sixb agent worker must provide
-the commands used by its built-in tools:
+The generic `Sandbox` contract remains command-agnostic. Images and hosts used by the agent worker
+must satisfy the separate `sixb-agent-runtime/v1` behavioral profile:
 
-- `bash` runs both built-in sandbox tools.
-- `curl` lets the agent call the scoped Sixb API gateway.
-- `realpath`, `tail`, `head`, and `base64` power the bounded, binary-safe `read` implementation.
+- Bash must load the worker's `BASH_ENV` bootstrap.
+- `realpath`, `tail`, `head`, and `base64` must support the bounded `read` pipeline.
+- Bun 1.3+ or Node 22+ must execute the portable `sixb` CLI.
+- The installed CLI, file modes, `PATH`, and run environment must be correct.
 
-Stock or canonical provider images include these commands; the local provider uses the copies on
-the host's `PATH`. Bake them into custom images and snapshots rather than installing them on each
-run. The `read` tool probes its four supporting commands and returns a clear error naming a missing
-command.
+`curl` and `jq` are not runtime-profile dependencies. The production CLI uses the JavaScript
+runtime's native fetch and JSON support. Bake shared dependencies into versioned images or
+snapshots; never install packages during an individual run.
 
 ## Wiring
 

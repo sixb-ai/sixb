@@ -3,15 +3,14 @@
 # Spin-up scales with image size, so this stays lean — only what the agent
 # actually uses through the API gateway:
 #   bash            the agent bash tool runs `bash -lc`
-#   curl, jq        the gateway is HTTP + JSON
+#   node            the portable Sixb CLI runtime
 #   busybox tools   read uses realpath, tail, head, and base64
 #   git, ripgrep    common agent file/repo work
-#   python3         scripting beyond jq (stdlib only — no pip; PyPI is
+#   python3         scripting (stdlib only — no pip; PyPI is
 #                   unreachable under the sandbox's gateway-only egress)
 #
-# ~73 MB packed; boots in well under the model's first-response latency, so the
-# sandbox is ready before the agent asks for it. Edit this and rebuild with
-# `bun run agent:image`; add heavy runtimes only when genuinely needed.
-FROM alpine:3.20
+# The multi-platform base digest is pinned so rebuilding runtime-v1 is reproducible. Bump both this
+# digest and the cache namespace in src/agent-image.ts when the runtime profile changes.
+FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
 
-RUN apk add --no-cache bash curl jq git ca-certificates ripgrep python3
+RUN apk add --no-cache bash git ca-certificates ripgrep python3

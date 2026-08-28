@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import {
   agentDockerfilePath,
   agentImageName,
@@ -15,7 +15,9 @@ describe("agent image paths", () => {
     const prev = process.env.XDG_CACHE_HOME
     process.env.XDG_CACHE_HOME = "/tmp/xdg-cache-test"
     try {
-      expect(defaultAgentImagePath()).toBe("/tmp/xdg-cache-test/sixb/smolvm/sixb-agent.tar")
+      expect(defaultAgentImagePath()).toBe(
+        "/tmp/xdg-cache-test/sixb/smolvm/sixb-agent-runtime-v1.tar"
+      )
     } finally {
       if (prev === undefined) {
         delete process.env.XDG_CACHE_HOME
@@ -29,7 +31,7 @@ describe("agent image paths", () => {
     const prev = process.env.XDG_CACHE_HOME
     delete process.env.XDG_CACHE_HOME
     try {
-      expect(defaultAgentImagePath().endsWith("/sixb/smolvm/sixb-agent.tar")).toBe(true)
+      expect(defaultAgentImagePath().endsWith("/sixb/smolvm/sixb-agent-runtime-v1.tar")).toBe(true)
     } finally {
       if (prev !== undefined) process.env.XDG_CACHE_HOME = prev
     }
@@ -37,11 +39,15 @@ describe("agent image paths", () => {
 
   test("the canonical Dockerfile ships with the package", () => {
     expect(existsSync(agentDockerfilePath())).toBe(true)
+    const dockerfile = readFileSync(agentDockerfilePath(), "utf8")
+    expect(dockerfile).toMatch(/^FROM node:22-alpine@sha256:[a-f0-9]{64}$/m)
+    expect(dockerfile).toContain("apk add --no-cache bash git ca-certificates ripgrep python3")
+    expect(dockerfile).not.toMatch(/apk add[^\n]*(?:curl|jq)/)
   })
 
   test("targeted build filenames encode the arch", () => {
-    expect(agentImageName("linux/amd64")).toBe("sixb-agent-amd64.tar")
-    expect(agentImageName("arm64")).toBe("sixb-agent-arm64.tar")
+    expect(agentImageName("linux/amd64")).toBe("sixb-agent-runtime-v1-amd64.tar")
+    expect(agentImageName("arm64")).toBe("sixb-agent-runtime-v1-arm64.tar")
   })
 
   test("default lookup prefers the canonical archive, then a cross-built arch archive", () => {
@@ -50,8 +56,10 @@ describe("agent image paths", () => {
     try {
       const candidates = defaultAgentImageCandidates()
       // The canonical host build is preferred over the arch-suffixed cross-build archive.
-      expect(candidates[0]).toBe("/tmp/xdg-cache-test/sixb/smolvm/sixb-agent.tar")
-      expect(candidates[1]).toMatch(/\/sixb\/smolvm\/sixb-agent-(amd64|arm64|[^/]+)\.tar$/)
+      expect(candidates[0]).toBe("/tmp/xdg-cache-test/sixb/smolvm/sixb-agent-runtime-v1.tar")
+      expect(candidates[1]).toMatch(
+        /\/sixb\/smolvm\/sixb-agent-runtime-v1-(amd64|arm64|[^/]+)\.tar$/
+      )
       expect(candidates[1]).not.toBe(candidates[0])
     } finally {
       if (prev === undefined) {

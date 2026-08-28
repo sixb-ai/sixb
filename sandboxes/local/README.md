@@ -6,7 +6,8 @@ Runs each agent's sandbox tools on the host machine, confined by the OS sandbox 
 available: `sandbox-exec` (seatbelt) on macOS, `bwrap` (bubblewrap) on Linux. Drop-in `Sandbox`
 provider — wire it once into `createSixb({ sandboxes })` and nothing else changes.
 
-The host must provide `bash`, `curl`, `realpath`, `tail`, `head`, and `base64` on `PATH`.
+The host must satisfy `sixb-agent-runtime/v1`: Bash with `BASH_ENV` support; `realpath`, `tail`,
+`head`, and `base64`; CA certificates; and Bun 1.3+ or Node 22+. `curl` and `jq` are not required.
 
 ## Install
 

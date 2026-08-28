@@ -7,7 +7,11 @@ import type {
   VercelSandboxClient,
 } from "../src/vercel-sandbox"
 import { VercelSandbox } from "../src/vercel-sandbox"
-import { type VercelCreateSandbox, VercelSandboxFactory } from "../src/vercel-sandbox-factory"
+import {
+  DEFAULT_VERCEL_SANDBOX_RUNTIME,
+  type VercelCreateSandbox,
+  VercelSandboxFactory,
+} from "../src/vercel-sandbox-factory"
 
 class FakeFinished implements VercelCommandFinishedClient {
   constructor(
@@ -201,6 +205,7 @@ describe("VercelSandboxFactory", () => {
       persistent: false,
       timeout: 60_000,
       resources: { vcpus: 1 },
+      runtime: DEFAULT_VERCEL_SANDBOX_RUNTIME,
       token: "tok",
       teamId: "team",
       projectId: "project",
@@ -226,6 +231,18 @@ describe("VercelSandboxFactory", () => {
       detached: true,
       timeoutMs: 30_000,
     })
+  })
+
+  test("selects the supported node24 runtime explicitly by default", async () => {
+    let captured: unknown
+    const factory = new VercelSandboxFactory({}, async (params) => {
+      captured = params
+      return new FakeVercelClient()
+    })
+
+    await factory.create()
+
+    expect(captured).toMatchObject({ runtime: DEFAULT_VERCEL_SANDBOX_RUNTIME })
   })
 
   test("rejects snapshot configuration conflicts", async () => {
