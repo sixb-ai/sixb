@@ -23,7 +23,12 @@ import {
   resolveAgentContextBudget,
 } from "./context-budget"
 import { prepareAgentConversationContext } from "./context-compaction"
-import { AgentExecutionLostError, AgentFinalizationError, AgentUsageRecordingError } from "./errors"
+import {
+  AgentExecutionLostError,
+  AgentFinalizationError,
+  AgentTurnTimeoutError,
+  AgentUsageRecordingError,
+} from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
 import { type AgentRunFailure, toAgentExecutionFailure, toAgentRunFailure } from "./failure"
 import { finishRunOrThrow } from "./finalize"
@@ -376,7 +381,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         error
       )
       if (finalized) {
-        if (finalized.run.status === "failed") {
+        if (finalized.run.status === "failed" && !(error instanceof AgentTurnTimeoutError)) {
           this.reportFailure(error, finalized.run, job.attempt, finalized.failure)
         }
         await context.streamSink.publishRunFinished(finalized.run)
@@ -678,7 +683,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       const failure = toAgentExecutionFailure(error, {
         status,
         at: completedAt,
-        details: agentRunFailureDetails(run),
+        details: {
+          ...agentRunFailureDetails(run),
+          ...(error instanceof AgentTurnTimeoutError ? { timeoutMs: String(error.timeoutMs) } : {}),
+        },
       })
       const finalized = await finishRunOrThrow(context.storage.agents, {
         projectId: context.id,
@@ -687,6 +695,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         status,
         error: failure,
         completedAt,
+        ...(error instanceof AgentTurnTimeoutError ? { finishReason: "timeout" as const } : {}),
       })
       return { run: finalized, failure }
     } catch (finalizeError) {

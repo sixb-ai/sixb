@@ -115,6 +115,25 @@ describe("agent conversation context estimation", () => {
 
     expect(estimate).toBe(1_200 + estimateAgentContextMessagesTokens([trailing]).tokens)
 
+    // Regression proof: provider usage belongs to the historical request shape. New instructions
+    // or skill/tool catalog content must still contribute to the next request's preflight size.
+    const expandedSystemPrompt = `New deployment instructions:\n${"new requirement ".repeat(1_000)}`
+    const expandedFullEstimate = estimateAgentContextRequestTokens({
+      systemPrompt: expandedSystemPrompt,
+      tools: [],
+      messages,
+    }).tokens
+    expect(expandedFullEstimate).toBeGreaterThan(estimate)
+    await expect(
+      estimateAgentConversationInputTokens({
+        context: { id: projectId, storage: requireWorkerStorage(storage) },
+        agent,
+        threadContext: { checkpoint: null, retainedMessages: messages, modelMessages: messages },
+        systemPrompt: expandedSystemPrompt,
+        tools: [],
+      })
+    ).resolves.toBe(expandedFullEstimate)
+
     const retainedAfterCheckpoint: readonly AgentMessageRecord[] = [
       { ...user, id: "retained_user", seq: 3 },
       { ...assistant, id: "stale_assistant", seq: 4 },
