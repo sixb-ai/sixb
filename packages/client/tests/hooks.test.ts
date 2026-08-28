@@ -115,10 +115,10 @@ describe("listRelationshipsOptions", () => {
         objectId: encodeObjectId("RepositoryIssue", "github:issue:sixb-ai/sixb#297"),
       },
     })
-    const queryFn = options.queryFn as unknown as () => Promise<
-      Array<{ source: string; target: string; type: string }>
-    >
-    const relationships = await queryFn()
+    const queryFn = options.queryFn as unknown as (context: {
+      signal: AbortSignal
+    }) => Promise<Array<{ source: string; target: string; type: string }>>
+    const relationships = await queryFn({ signal: new AbortController().signal })
 
     expect(requests.map((request) => new URL(request.url).pathname)).toEqual([
       "/api/objects/query/links",
@@ -139,6 +139,49 @@ describe("listRelationshipsOptions", () => {
     })
     expect(bodies[1]).toMatchObject({ pageToken: "page-2" })
     expect(relationships).toHaveLength(2)
+  })
+
+  test("stops when a provider repeats a link page token", async () => {
+    defaultClient.setConfig({
+      baseUrl: "http://sixb.test",
+      fetch: (async () =>
+        Response.json({
+          objects: [],
+          links: [],
+          hasMore: true,
+          nextPageToken: "repeated",
+        })) as unknown as typeof fetch,
+    })
+
+    const options = listRelationshipsOptions({
+      query: { objectId: encodeObjectId("RepositoryIssue", "issue-1") },
+    })
+    const queryFn = options.queryFn as unknown as (context: {
+      signal: AbortSignal
+    }) => Promise<unknown>
+
+    await expect(queryFn({ signal: new AbortController().signal })).rejects.toThrow(
+      "[SixbClient] Link pagination returned a repeated nextPageToken."
+    )
+  })
+
+  test("rejects inconsistent link pagination metadata", async () => {
+    defaultClient.setConfig({
+      baseUrl: "http://sixb.test",
+      fetch: (async () =>
+        Response.json({ objects: [], links: [], hasMore: true })) as unknown as typeof fetch,
+    })
+
+    const options = listRelationshipsOptions({
+      query: { objectId: encodeObjectId("RepositoryIssue", "issue-1") },
+    })
+    const queryFn = options.queryFn as unknown as (context: {
+      signal: AbortSignal
+    }) => Promise<unknown>
+
+    await expect(queryFn({ signal: new AbortController().signal })).rejects.toThrow(
+      "[SixbClient] Link page has inconsistent hasMore and nextPageToken values."
+    )
   })
 })
 

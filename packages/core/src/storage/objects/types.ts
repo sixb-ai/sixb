@@ -6,6 +6,7 @@ import type {
   ObjectQuerySortField,
   QueryScalarKind,
 } from "../../objects/query"
+import type { LinkBatchKey, ObjectBatchKey } from "./keys"
 
 /**
  * Latest-state projection storage for objects and links.
@@ -63,6 +64,26 @@ export interface ObjectLinkRow {
 }
 
 export type LinkDirection = "outgoing" | "incoming" | "both"
+
+/** Stable physical-link order: source type/id, link id, then target type/id. */
+export type ObjectLinkCursor = readonly [string, string, string, string, string]
+
+export interface QueryObjectLinksInput {
+  projectId: string
+  /** Object identities are treated as a set; duplicate refs do not duplicate links. */
+  objectRefs: readonly { objectTypeId: string; primaryId: string }[]
+  direction: LinkDirection
+  linkId?: string
+  /** When present, both endpoints must belong to this set. An empty set matches no links. */
+  endpointObjectTypeIds?: readonly string[]
+  after?: ObjectLinkCursor
+  limit: number
+}
+
+export interface QueryObjectLinksResult {
+  links: readonly ObjectLinkRow[]
+  hasMore: boolean
+}
 
 export type ObjectQueryCapabilityMap<T extends string> = Readonly<Partial<Record<T, boolean>>>
 
@@ -192,27 +213,34 @@ export interface ObjectStorage {
 
   /**
    * Batch fetch objects by (objectTypeId, primaryId) pairs.
-   * Returns a Map keyed by "objectTypeId:primaryId". Missing items are absent.
+   * Returns a Map keyed by {@link objectBatchKey}. Missing items are absent.
    */
   getByPrimaryIdBatch(params: {
     projectId: string
     items: readonly { objectTypeId: string; primaryId: string }[]
-  }): Promise<Map<string, ObjectRow>>
+  }): Promise<ReadonlyMap<ObjectBatchKey, ObjectRow>>
 
   /**
    * Batch fetch outgoing links by (objectTypeId, objectId, linkId) tuples.
-   * Returns a Map keyed by "objectTypeId:objectId:linkId". Missing entries are absent.
+   * Returns a Map keyed by {@link linkBatchKey}. Missing entries are absent.
    */
   listLinksBatch(params: {
     projectId: string
     items: readonly { objectTypeId: string; objectId: string; linkId: string }[]
-  }): Promise<Map<string, ObjectLinkRow[]>>
+  }): Promise<ReadonlyMap<LinkBatchKey, ObjectLinkRow[]>>
+
+  /**
+   * Read one canonical page of physical links incident to an object set.
+   * Filtering, endpoint-type scope, cursoring, ordering, and the limit are provider-owned so a
+   * bounded response never requires loading every incident link into the runtime.
+   */
+  queryLinks(params: QueryObjectLinksInput): Promise<QueryObjectLinksResult>
 
   /**
    * Batch fetch every link incident to any of the given objects, in BOTH directions (the object as
    * link source or target). Returns a flat, de-duplicated list: a physical link incident to two
-   * listed objects appears once. Used to load cascade-delete state for `object.delete` operations,
-   * which {@link listLinksBatch} cannot express because it keys on a specific linkId.
+   * listed objects appears once. This unpaged primitive exists for internal materialization and
+   * per-parent expansion work; interactive reads use {@link queryLinks}.
    */
   listIncidentLinksBatch(params: {
     projectId: string

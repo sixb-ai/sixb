@@ -8,15 +8,20 @@ import type {
   ExpandedObjectRow,
   FacetObjectsInput,
   FacetObjectsResult,
+  LinkBatchKey,
   LinkDirection,
+  ObjectBatchKey,
   ObjectLinkRow,
   ObjectQueryCapabilities,
   ObjectRow,
   ObjectRowLinks,
   ObjectStorage,
+  QueryObjectLinksInput,
+  QueryObjectLinksResult,
   QueryObjectsInput,
   QueryObjectsResult,
 } from "@sixb/core/storage"
+import { linkBatchKey, objectBatchKey } from "@sixb/core/storage"
 import type { SQLClient, SqlParameter } from "./pg-client"
 import {
   type CompiledPgObjectQuery,
@@ -264,8 +269,8 @@ export class PgObjectStorage implements ObjectStorage {
   async getByPrimaryIdBatch(params: {
     projectId: string
     items: readonly { objectTypeId: string; primaryId: string }[]
-  }): Promise<Map<string, ObjectRow>> {
-    const result = new Map<string, ObjectRow>()
+  }): Promise<Map<ObjectBatchKey, ObjectRow>> {
+    const result = new Map<ObjectBatchKey, ObjectRow>()
     if (params.items.length === 0) return result
     const rows = await valuesJoin<ObjectDatabaseRow>(
       this.sql,
@@ -277,7 +282,7 @@ export class PgObjectStorage implements ObjectStorage {
     )
 
     for (const row of rows) {
-      result.set(`${row.object_type_id}:${row.primary_id}`, rowToObject(row))
+      result.set(objectBatchKey(row.object_type_id, row.primary_id), rowToObject(row))
     }
     return result
   }
@@ -285,8 +290,8 @@ export class PgObjectStorage implements ObjectStorage {
   async listLinksBatch(params: {
     projectId: string
     items: readonly { objectTypeId: string; objectId: string; linkId: string }[]
-  }): Promise<Map<string, ObjectLinkRow[]>> {
-    const result = new Map<string, ObjectLinkRow[]>()
+  }): Promise<Map<LinkBatchKey, ObjectLinkRow[]>> {
+    const result = new Map<LinkBatchKey, ObjectLinkRow[]>()
     if (params.items.length === 0) return result
     const rows = await valuesJoin<LinkDatabaseRow>(
       this.sql,
@@ -298,12 +303,89 @@ export class PgObjectStorage implements ObjectStorage {
     )
 
     for (const row of rows) {
-      const key = `${row.source_type_id}:${row.source_id}:${row.link_id}`
+      const key = linkBatchKey(row.source_type_id, row.source_id, row.link_id)
       const existing = result.get(key) ?? []
       existing.push(rowToLink(row))
       result.set(key, existing)
     }
     return result
+  }
+
+  async queryLinks(params: QueryObjectLinksInput): Promise<QueryObjectLinksResult> {
+    assertLinkQueryLimit(params.limit)
+    if (params.objectRefs.length === 0 || params.endpointObjectTypeIds?.length === 0) {
+      return { links: [], hasMore: false }
+    }
+
+    const args: SqlParameter[] = [JSON.stringify(params.objectRefs), params.projectId]
+    const addArg = (value: SqlParameter): string => {
+      args.push(value)
+      return `$${args.length}`
+    }
+    const sourceJoin = `
+      SELECT link.*
+      FROM links AS link
+      JOIN requested
+        ON requested.object_type_id = link.source_type_id
+       AND requested.object_id = link.source_id
+      WHERE link.project_id = $2
+    `
+    const targetJoin = `
+      SELECT link.*
+      FROM links AS link
+      JOIN requested
+        ON requested.object_type_id = link.target_type_id
+       AND requested.object_id = link.target_id
+      WHERE link.project_id = $2
+    `
+    const incidentSql =
+      params.direction === "outgoing"
+        ? sourceJoin
+        : params.direction === "incoming"
+          ? targetJoin
+          : `${sourceJoin} UNION ${targetJoin}`
+
+    const predicates: string[] = []
+    if (params.linkId !== undefined) {
+      predicates.push(`link_id = ${addArg(params.linkId)}::text`)
+    }
+    if (params.endpointObjectTypeIds !== undefined) {
+      const allowedTypes = addArg(JSON.stringify([...new Set(params.endpointObjectTypeIds)]))
+      predicates.push(
+        `source_type_id IN (SELECT jsonb_array_elements_text(${allowedTypes}::text::jsonb))`,
+        `target_type_id IN (SELECT jsonb_array_elements_text(${allowedTypes}::text::jsonb))`
+      )
+    }
+    if (params.after) {
+      const cursor = params.after.map((value) => `${addArg(value)}::text`)
+      predicates.push(
+        `(source_type_id, source_id, link_id, target_type_id, target_id) > (${cursor.join(", ")})`
+      )
+    }
+    const limit = addArg(params.limit + 1)
+    const whereSql = predicates.length > 0 ? `WHERE ${predicates.join(" AND ")}` : ""
+    const rows = await this.sql.unsafe<LinkDatabaseRow[]>(
+      `
+        WITH requested AS (
+          SELECT DISTINCT
+            requested."objectTypeId" AS object_type_id,
+            requested."primaryId" AS object_id
+          FROM jsonb_to_recordset($1::text::jsonb)
+            AS requested("objectTypeId" text, "primaryId" text)
+        ), incident AS (${incidentSql})
+        SELECT *
+        FROM incident
+        ${whereSql}
+        ORDER BY source_type_id, source_id, link_id, target_type_id, target_id
+        LIMIT ${limit}
+      `,
+      args
+    )
+
+    return {
+      links: rows.slice(0, params.limit).map((row) => rowToLink(row)),
+      hasMore: rows.length > params.limit,
+    }
   }
 
   async listIncidentLinksBatch(params: {
@@ -315,8 +397,8 @@ export class PgObjectStorage implements ObjectStorage {
 
     // Cover both link directions with two index-friendly equality joins (source-side, then
     // target-side) rather than a single OR-join, which would defeat index usage. This is a constant
-    // number of round trips regardless of how many objects are deleted — issued sequentially because
-    // these reads run on the serializable commit transaction's single connection. A link incident to
+    // number of round trips regardless of the requested object count. They are issued sequentially
+    // because callers may run on a serializable transaction's single connection. A link incident to
     // two listed objects matches both halves and is de-duplicated below.
     const sourceRows = await valuesJoin<LinkDatabaseRow>(
       this.sql,
@@ -607,6 +689,12 @@ function linkIdentity(link: ObjectLinkRow): string {
     link.targetTypeId,
     link.targetId,
   ])
+}
+
+function assertLinkQueryLimit(limit: number): void {
+  if (!Number.isSafeInteger(limit) || limit <= 0) {
+    throw new Error("Object link query limit must be a positive safe integer.")
+  }
 }
 
 interface ObjectDatabaseRow {

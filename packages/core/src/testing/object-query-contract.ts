@@ -525,6 +525,33 @@ export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
       })
     })
 
+    test("does not admit a provider page probe into the link selector", async () => {
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await seedObjectQueryContractData(fixture)
+
+        const result = await executeObjectQueryLinks(
+          {
+            projectId,
+            query: {
+              kind: "page",
+              pageSize: 1,
+              input: {
+                kind: "sort",
+                fields: [{ kind: "property", propertyId: "id", direction: "asc" }],
+                input: { kind: "start", objectTypeId: Room.id },
+              },
+            },
+            direction: "outgoing",
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+
+        expect(result.links).toEqual([
+          expect.objectContaining({ sourceId: "room-alpha", targetId: "device-projector" }),
+        ])
+      })
+    })
+
     test("matches null, missing, neq, in, and not predicate semantics", async () => {
       await withStorage(async ({ objects: storage, fixture }) => {
         await seedObjectQueryContractData(fixture)

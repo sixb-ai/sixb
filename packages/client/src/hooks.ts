@@ -142,12 +142,13 @@ export const listRelationshipsQueryKey = (options?: ListRelationshipsOptions): Q
 export const listRelationshipsOptions = (options?: ListRelationshipsOptions) => {
   return queryOptions({
     queryKey: listRelationshipsQueryKey(options),
-    queryFn: async (): Promise<RelationshipEdge[]> => {
+    queryFn: async ({ signal }): Promise<RelationshipEdge[]> => {
       const objectId = options?.query?.objectId
       const requestedObject = objectId ? decodeObjectId(objectId) : null
       if (!requestedObject) return []
 
       const links = []
+      const seenPageTokens = new Set<string>()
       let pageToken: string | undefined
       do {
         const { data } = await queryObjectLinks({
@@ -160,10 +161,22 @@ export const listRelationshipsOptions = (options?: ListRelationshipsOptions) => 
             pageSize: 1_000,
             ...(pageToken ? { pageToken } : {}),
           },
+          signal,
           throwOnError: true,
         })
         links.push(...data.links)
         pageToken = data.nextPageToken
+        if (data.hasMore !== Boolean(pageToken)) {
+          throw new Error(
+            "[SixbClient] Link page has inconsistent hasMore and nextPageToken values."
+          )
+        }
+        if (pageToken) {
+          if (seenPageTokens.has(pageToken)) {
+            throw new Error("[SixbClient] Link pagination returned a repeated nextPageToken.")
+          }
+          seenPageTokens.add(pageToken)
+        }
       } while (pageToken)
 
       return links.map((link) => ({

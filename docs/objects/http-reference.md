@@ -115,8 +115,10 @@ batch identity primitive for the bounded core fallback.
 physical links incident to that selected set. `direction` is relative to the selected objects and
 defaults to `both`; use `linkId` to restrict the returned edges. Set `includeObjects: true` to also
 return the selected objects and the visible endpoints of the current edge page, de-duplicated.
-Because this terminal returns its own canonical object and edge shapes, `project` and `expand`
-nodes are validated but do not shape its response.
+Because this terminal returns its own canonical object and edge shapes, selectors reject `project`
+and `expand` rather than silently discarding them. When a selector contains an object `page`, it
+must be the outermost node; edge pagination remains controlled by the request's top-level
+`pageSize` and `pageToken`.
 
 ```json
 {
@@ -158,7 +160,9 @@ nodes are validated but do not shape its response.
 The selector is capped at 1,000 objects. Edge pages default to 100 and accept at most 1,000;
 return `nextPageToken` as `pageToken` with the same selector, direction, and link filter. A caller
 must be able to view every type touched by the selector. Links to an endpoint type the caller cannot
-view are omitted, matching the singular link-read authorization behavior.
+view are omitted, matching the singular link-read authorization behavior. SQLite and PostgreSQL
+apply the direction, link filter, authorization-visible endpoint types, cursor, ordering, and edge
+limit before returning rows to the runtime.
 
 Link page tokens are scoped to the project, normalized selector, direction, and link filter. A token
 cannot be reused with a different link query; `includeObjects` and `pageSize` may change between
@@ -374,8 +378,8 @@ property filters, text search, sorting, limits, cursor pages, link traversal, se
 projection.
 
 Exact `refs` sources are pushed down by the bundled providers and fall back to core's bounded batch
-primitive on providers without native support. Object-set link reads continue to use the portable
-bounded link batch primitives.
+primitive on providers without native support. Object-set link reads use a provider-owned stable
+edge page, so response pagination does not require loading every incident link into core.
 
 Vector search and relevance sorting require explicit storage-provider support. When a provider
 can't execute a requested feature, Sixb returns a structured planning error rather than a partial

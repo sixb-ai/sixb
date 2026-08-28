@@ -559,8 +559,6 @@ export {
 // `@sixb/core/internal/query`; the browser-safe builder at `@sixb/core/query`.
 
 export type {
-  ExecuteObjectQueryLinksInput,
-  ExecuteObjectQueryLinksResult,
   ObjectExpansion,
   ObjectQuery,
   ObjectQueryDirection,
