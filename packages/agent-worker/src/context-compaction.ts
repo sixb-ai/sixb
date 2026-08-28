@@ -2,7 +2,6 @@ import type { AgentDefinition } from "@sixb/core"
 import {
   type AgentContextEstimateTool,
   agentContextCheckpointId,
-  buildAgentSystemPrompt,
   estimateAgentContextMessagesTokens,
   estimateAgentContextRequestTokens,
   projectAgentThreadModelContext,
@@ -18,7 +17,8 @@ import type {
 } from "@sixb/core/storage"
 import { AgentStorageError, stableJsonStringify } from "@sixb/core/storage"
 import { generateText } from "ai"
-import { type AgentSkill, renderAgentSkillCatalog } from "./agent-skills"
+import { renderAgentSystemPrompt } from "./agent-prompt"
+import type { AgentSkill } from "./agent-skills"
 import type { AgentContextBudget } from "./context-budget"
 import { AgentContextCompactionError, AgentExecutionLostError } from "./errors"
 import { type LoadedAgentThreadModelContext, loadAgentThreadModelContext } from "./thread-context"
@@ -70,9 +70,10 @@ export async function prepareAgentConversationContext(input: {
   runtime.assertCanContinue()
 
   const estimateShape = {
-    systemPrompt: buildAgentSystemPrompt({
+    systemPrompt: renderAgentSystemPrompt({
+      mode: "conversation",
       instructions: agent.instructions,
-      addendum: renderAgentSkillCatalog(skills, "conversation"),
+      skills,
     }),
     tools: contextEstimateTools(
       agentModelToolSpecs({
@@ -213,7 +214,7 @@ export async function prepareAgentConversationContext(input: {
   }
 }
 
-/** Provider usage when trustworthy; otherwise the deterministic full request estimate. */
+/** Conservatively combine matching provider usage with the current deterministic request shape. */
 export async function estimateAgentConversationInputTokens(input: {
   readonly context: Pick<AgentExecutionContext, "id" | "storage">
   readonly agent: AgentDefinition
@@ -222,6 +223,11 @@ export async function estimateAgentConversationInputTokens(input: {
   readonly tools: readonly AgentContextEstimateTool[]
 }): Promise<number> {
   const { context, agent, threadContext } = input
+  const fullEstimate = estimateAgentContextRequestTokens({
+    systemPrompt: input.systemPrompt,
+    tools: input.tools,
+    messages: threadContext.modelMessages,
+  }).tokens
   const checkpointHead = threadContext.checkpoint?.observedHeadSeq ?? 0
   const anchorIndex = findLatestUsageAnchor(threadContext.retainedMessages, checkpointHead)
   const anchor = threadContext.retainedMessages[anchorIndex]
@@ -245,21 +251,17 @@ export async function estimateAgentConversationInputTokens(input: {
         outputTokens !== undefined &&
         outputTokens > 0
       ) {
-        return (
+        const anchoredEstimate =
           inputTokens +
           outputTokens +
           estimateAgentContextMessagesTokens(threadContext.retainedMessages.slice(anchorIndex + 1))
             .tokens
-        )
+        return Math.max(anchoredEstimate, fullEstimate)
       }
     }
   }
 
-  return estimateAgentContextRequestTokens({
-    systemPrompt: input.systemPrompt,
-    tools: input.tools,
-    messages: threadContext.modelMessages,
-  }).tokens
+  return fullEstimate
 }
 
 function contextEstimateTools(
@@ -291,7 +293,7 @@ async function generateCheckpointSummary(input: {
   let result: Awaited<ReturnType<typeof generateText>>
   try {
     result = await generateText({
-      model: input.agent.model,
+      model: input.runtime.usageRecorder.wrapModel(input.agent.model),
       // Hidden reasoning consumes the same bounded output budget needed for summary text.
       reasoning: "none",
       ...(input.agent.providerOptions === undefined
@@ -304,6 +306,7 @@ async function generateCheckpointSummary(input: {
         Math.max(1, Math.floor(input.budget.reserveTokens / 2))
       ),
       prepareStep: input.runtime.usageRecorder.prepareStep,
+      onLanguageModelCallStart: input.runtime.usageRecorder.onLanguageModelCallStart,
       onLanguageModelCallEnd: input.runtime.usageRecorder.onLanguageModelCallEnd,
       abortSignal: input.runtime.signal,
     })

@@ -389,6 +389,11 @@ function compactingAnswerModel(input: {
         ],
         finishReason: { unified: "stop", raw: "stop" },
         usage: COMPACTION_USAGE,
+        response: {
+          id: "compaction-summary-response",
+          modelId: "served-summary-model",
+        },
+        providerMetadata: { test: { serviceTier: "summary-tier" } },
         warnings: [],
       }
     },
@@ -1923,6 +1928,25 @@ function hangingModel(): MockLanguageModelV4 {
   })
 }
 
+/** A summary request that hangs until the shared turn deadline aborts it. */
+function hangingCompactionModel(): MockLanguageModelV4 {
+  return new MockLanguageModelV4({
+    modelId: "mock-model",
+    doGenerate: async (options) =>
+      new Promise((_, reject) => {
+        const abort = () => reject(new DOMException("Aborted", "AbortError"))
+        if (options.abortSignal?.aborted) {
+          abort()
+        } else {
+          options.abortSignal?.addEventListener("abort", abort, { once: true })
+        }
+      }),
+    doStream: async () => {
+      throw new Error("The answer model call must not start before compaction completes.")
+    },
+  })
+}
+
 describe("AgentWorker", () => {
   test("uses four concurrent jobs by default and accepts an explicit limit", () => {
     const sixb = buildSixb(toolThenAnswerModel())
@@ -2049,6 +2073,7 @@ describe("AgentWorker", () => {
     const answerReasoning: LanguageModelV4CallOptions["reasoning"][] = []
     const sixb = buildSixb(
       compactingAnswerModel({
+        provider: "test-provider",
         captureSummaryPrompt: (prompt) => {
           summaryPrompts.push(prompt)
         },
@@ -2066,6 +2091,7 @@ describe("AgentWorker", () => {
       new RecordingSandboxFactory(),
       {
         reasoning: "high",
+        providerOptions: { "test-provider": { region: "test-region" } },
         context: { windowTokens: 5_000, reserveTokens: 1_000, keepRecentTokens: 700 },
       }
     )
@@ -2168,6 +2194,27 @@ describe("AgentWorker", () => {
           executionId: run.executionId,
         })
       ).resolves.toMatchObject({ modelCallCount: 2 })
+      // Regression proof: removing the summary model wrapper or start callback drops the served
+      // model/provider metadata or the request-side region from this accounting row.
+      const accounting = await sixb.storage.aiCosts?.listModelCalls({
+        projectId: PROJECT_ID,
+        executionId: run.executionId,
+        from: new Date("2000-01-01T00:00:00.000Z"),
+        to: new Date("2100-01-01T00:00:00.000Z"),
+      })
+      const summaryCall = accounting?.items.find(
+        (item) => item.usage.responseModelId === "served-summary-model"
+      )
+      expect(summaryCall).toMatchObject({
+        usage: {
+          responseId: "compaction-summary-response",
+          responseModelId: "served-summary-model",
+          rawUsage: {
+            providerMetadata: { test: { serviceTier: "summary-tier" } },
+          },
+        },
+        cost: { pricingContext: { region: "test-region", serviceTier: "summary-tier" } },
+      })
 
       const streamRecords = await listRunStreamRecords(sixb.broker, run.id)
       const streamNames = streamRecords.map((record) => record.name)
@@ -6926,6 +6973,8 @@ describe("AgentWorker", () => {
       )
 
       expect(run.status).toBe("failed")
+      // Regression proof: routing this preflight timeout through generic finalization omits both
+      // the stable finish reason and duration that distinguish it from an ordinary failure.
       expect(run.finishReason).toBe("timeout")
       expect(run.error).toMatchObject({
         code: "agent.execution_failed",
@@ -6999,6 +7048,73 @@ describe("AgentWorker", () => {
       expect(thread?.activeRunId).toBeNull()
       const messages = await listMessages(storage, threadId)
       expect(messages.every((m) => m.role !== "assistant")).toBe(true)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("records a timeout finish reason when preflight compaction exceeds the turn budget", async () => {
+    const sixb = buildSixb(
+      hangingCompactionModel(),
+      new InMemoryBroker(),
+      new RecordingSandboxFactory(),
+      {
+        context: { windowTokens: 5_000, reserveTokens: 1_000, keepRecentTokens: 700 },
+      }
+    )
+    const storage = agentStorageOf(sixb)
+    let reportCount = 0
+    const reporter = attachSixbErrorReporter(sixb, () => {
+      reportCount += 1
+    })
+    const threadId = "preflight_compaction_timeout_thread"
+    await storage.threads.create({
+      id: threadId,
+      projectId: PROJECT_ID,
+      agentId: "assistant",
+      ownerPrincipal: REQUESTER,
+    })
+    await seedCompletedConversationTurn({
+      sixb,
+      threadId,
+      index: 0,
+      text: "Summarize the historical investigation.",
+      assistantText: `historical-result ${"x".repeat(20_000)}`,
+    })
+
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false, turnTimeoutMs: 50 }))
+    await worker.start()
+    try {
+      const request = await requestAgentAs(sixb, REQUESTER, {
+        agentId: "assistant",
+        threadId,
+        text: "Continue after compacting the thread.",
+      })
+      const run = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({
+            projectId: PROJECT_ID,
+            id: request.run.id,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "preflight compaction timeout" }
+      )
+
+      expect(run.status).toBe("failed")
+      expect(run.finishReason).toBe("timeout")
+      expect(run.error).toMatchObject({
+        code: "agent.execution_failed",
+        details: { timeoutMs: "50" },
+      })
+      await expect(
+        storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
+      ).resolves.toBeNull()
+      expect(
+        (await listRunStreamRecords(sixb.broker, run.id)).map((record) => record.name)
+      ).toContain("agent.compaction.started")
+      await reporter.flush()
+      expect(reportCount).toBe(0)
     } finally {
       await worker.stop()
     }
