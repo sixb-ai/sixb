@@ -12,19 +12,21 @@ const sitePointQuery: ObjectQuery = {
   input: { kind: "start", objectTypeId: "BacnetPoint" },
 }
 
-test("refs compile to one JSONB table parameter and preserve authored order", () => {
+test("refs compile to one de-duplicated JSONB table source in canonical order", () => {
   const refs = [
     { objectTypeId: "Issue", primaryId: "github:issue:sixb-ai/sixb#297" },
+    { objectTypeId: "Customer", primaryId: "cust-1" },
     { objectTypeId: "Customer", primaryId: "cust-1" },
   ]
   const compiled = compilePgObjectQuery("project-a", { kind: "refs", refs })
   const counted = compilePgObjectCountQuery("project-a", { kind: "refs", refs })
 
-  expect(compiled.sql).toContain("FROM jsonb_array_elements($1::text::jsonb) WITH ORDINALITY")
-  expect(compiled.sql).toContain("requested._query_order")
-  expect(compiled.sql).toContain("ORDER BY requested._query_order ASC")
+  expect(compiled.sql).toContain("SELECT DISTINCT")
+  expect(compiled.sql).toContain("FROM jsonb_array_elements($1::text::jsonb) AS ref(value)")
+  expect(compiled.sql).toContain("ORDER BY selected.object_type_id ASC, selected.primary_id ASC")
   expect(compiled.args).toEqual([JSON.stringify(refs), "project-a"])
   expect(compiled.totalArgs).toEqual([JSON.stringify(refs), "project-a"])
+  expect(counted.sql).toContain("SELECT DISTINCT")
   expect(counted.sql).toContain("FROM jsonb_array_elements($1::text::jsonb)")
   expect(counted.args).toEqual([JSON.stringify(refs), "project-a"])
 })

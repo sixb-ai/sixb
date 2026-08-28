@@ -104,11 +104,23 @@ export type ObjectQueryFacetsRequest = {
   facets: Array<ObjectQueryFacetRequest>
 }
 
+export type ObjectRef = {
+  objectTypeId: string
+  primaryId: string
+}
+
 export type ObjectQuery =
   | {
       kind: "start"
       objectTypeId: string
       includeSubtypes?: boolean
+    }
+  | {
+      kind: "refs"
+      /**
+       * One to 1,000 unique identities after normalization; duplicate entries are accepted and removed.
+       */
+      refs: Array<ObjectRef>
     }
   | {
       kind: "filter"

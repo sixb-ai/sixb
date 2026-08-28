@@ -196,6 +196,19 @@ export const ObjectQuerySchema: z.ZodType<unknown> = z.lazy(() =>
       .strict(),
     z
       .object({
+        kind: z.literal("refs"),
+        refs: z.array(
+          z
+            .object({
+              objectTypeId: z.string().min(1),
+              primaryId: z.string().min(1),
+            })
+            .strict()
+        ),
+      })
+      .strict(),
+    z
+      .object({
         kind: z.literal("filter"),
         input: ObjectQuerySchema,
         predicate: ObjectQueryPredicateSchema,
@@ -326,6 +339,7 @@ const objectQueryRef = { $ref: "#/components/schemas/ObjectQuery" }
 const objectQueryPredicateRef = { $ref: "#/components/schemas/ObjectQueryPredicate" }
 const objectQuerySortFieldRef = { $ref: "#/components/schemas/ObjectQuerySortField" }
 const objectExpansionRef = { $ref: "#/components/schemas/ObjectExpansion" }
+const objectRefSchemaRef = { $ref: "#/components/schemas/ObjectRef" }
 
 /**
  * zod-to-json-schema currently drops recursive z.lazy schemas when the server's
@@ -535,6 +549,15 @@ export const ObjectQueryOpenApiSchemas = {
       },
     },
   },
+  ObjectRef: {
+    type: "object",
+    required: ["objectTypeId", "primaryId"],
+    additionalProperties: false,
+    properties: {
+      objectTypeId: { type: "string", minLength: 1 },
+      primaryId: { type: "string", minLength: 1 },
+    },
+  },
   ObjectQuery: {
     oneOf: [
       {
@@ -545,6 +568,21 @@ export const ObjectQueryOpenApiSchemas = {
           kind: { type: "string", enum: ["start"] },
           objectTypeId: { type: "string", minLength: 1 },
           includeSubtypes: { type: "boolean" },
+        },
+      },
+      {
+        type: "object",
+        required: ["kind", "refs"],
+        additionalProperties: false,
+        properties: {
+          kind: { type: "string", enum: ["refs"] },
+          refs: {
+            type: "array",
+            minItems: 1,
+            description:
+              "One to 1,000 unique identities after normalization; duplicate entries are accepted and removed.",
+            items: objectRefSchemaRef,
+          },
         },
       },
       {

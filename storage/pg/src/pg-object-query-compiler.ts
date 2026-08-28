@@ -13,7 +13,6 @@ export interface PgObjectQueryPageRow {
   primary_id: string
   properties: unknown
   _cursor_properties?: unknown
-  _query_order?: number
 }
 
 export interface CompiledPgObjectQuery {
@@ -74,7 +73,7 @@ type CompiledOrderField =
     }
   | {
       kind: "column"
-      column: "object_type_id" | "primary_id" | "_query_order"
+      column: "object_type_id" | "primary_id"
       direction: "asc" | "desc"
     }
 
@@ -254,29 +253,29 @@ function compileRefs(
     throw new Error("[SixbPg] PostgreSQL object storage requires at least one ref")
   }
 
-  const order = compileOrder(refsOrderFields())
+  const order = compileOrder(identityOrderFields())
+  const selectedOrder = compileOrder(identityOrderFields(), "selected")
   const refsJson = JSON.stringify(query.refs)
   const requested = `
-    SELECT
-      (ref.ordinality - 1)::integer AS _query_order,
+    SELECT DISTINCT
       ref.value ->> 'objectTypeId' AS object_type_id,
       ref.value ->> 'primaryId' AS primary_id
-    FROM jsonb_array_elements(?::text::jsonb) WITH ORDINALITY AS ref(value, ordinality)
+    FROM jsonb_array_elements(?::text::jsonb) AS ref(value)
   `
   const sql = `
     WITH requested AS (${requested})
-    SELECT selected.*, requested._query_order, selected.properties AS _cursor_properties
+    SELECT selected.*, selected.properties AS _cursor_properties
     FROM requested
     JOIN objects AS selected
       ON selected.project_id = ?
      AND selected.object_type_id = requested.object_type_id
      AND selected.primary_id = requested.primary_id
-    ORDER BY requested._query_order ASC
+    ORDER BY ${selectedOrder.sql}
   `
 
   return {
     sql,
-    args: [refsJson, projectId],
+    args: [refsJson, projectId, ...selectedOrder.args],
     totalSql: `
       WITH requested AS (${requested})
       SELECT COUNT(*)::bigint AS total
@@ -773,7 +772,6 @@ function compileProject(
   const projection = compileProjectionExpression(properties)
   const inputOrder = compileOrder(input.order.fields, "input", "input._cursor_properties")
   const outputOrder = compileOrder(input.order.fields, undefined, "_cursor_properties")
-  const orderColumns = compileOrderPassthroughColumns(input.order.fields, "input")
 
   return {
     sql: `
@@ -786,7 +784,7 @@ function compileProject(
         input.created_at,
         input.updated_at,
         input.version,
-        input.last_commit_id${orderColumns}
+        input.last_commit_id
       FROM (${input.sql}) AS input
       ORDER BY ${inputOrder.sql}
     `,
@@ -870,11 +868,16 @@ function compileAggregateRefs(
   return {
     sql: `
       SELECT selected.project_id, selected.object_type_id, selected.primary_id, selected.properties
-      FROM jsonb_array_elements(?::text::jsonb) AS ref(value)
+      FROM (
+        SELECT DISTINCT
+          ref.value ->> 'objectTypeId' AS object_type_id,
+          ref.value ->> 'primaryId' AS primary_id
+        FROM jsonb_array_elements(?::text::jsonb) AS ref(value)
+      ) AS requested
       JOIN objects AS selected
         ON selected.project_id = ?
-       AND selected.object_type_id = (ref.value ->> 'objectTypeId')
-       AND selected.primary_id = (ref.value ->> 'primaryId')
+       AND selected.object_type_id = requested.object_type_id
+       AND selected.primary_id = requested.primary_id
     `,
     args: [JSON.stringify(query.refs), projectId],
   }
@@ -1368,19 +1371,6 @@ function identityOrderFields(): readonly CompiledOrderField[] {
   ]
 }
 
-function refsOrderFields(): readonly CompiledOrderField[] {
-  return [{ kind: "column", column: "_query_order", direction: "asc" }]
-}
-
-function compileOrderPassthroughColumns(
-  fields: readonly CompiledOrderField[],
-  qualifier: string
-): string {
-  return fields.some((field) => field.kind === "column" && field.column === "_query_order")
-    ? `,\n        ${qualifier}._query_order`
-    : ""
-}
-
 function compileKeysetPredicate(
   fields: readonly CompiledOrderField[],
   cursor: readonly EncodedCursorValue[],
@@ -1541,9 +1531,7 @@ function cursorValueForField(
     field.kind === "column"
       ? field.column === "object_type_id"
         ? row.object_type_id
-        : field.column === "primary_id"
-          ? row.primary_id
-          : row._query_order
+        : row.primary_id
       : properties[field.propertyId]
 
   return value === null || value === undefined ? { nullish: true } : { nullish: false, value }
@@ -1564,10 +1552,7 @@ function compiledPropertyValueExpression(
     : jsonValueExpression(propertyColumn)
 }
 
-function columnExpression(
-  column: "object_type_id" | "primary_id" | "_query_order",
-  qualifier?: string
-): string {
+function columnExpression(column: "object_type_id" | "primary_id", qualifier?: string): string {
   return qualifier ? `${qualifier}.${column}` : column
 }
 

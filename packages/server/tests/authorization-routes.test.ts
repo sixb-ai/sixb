@@ -519,6 +519,23 @@ describe("authorized object routes", () => {
     expect(allowed.status).toBe(200)
     const body = (await allowed.json()) as { objects: { primaryId: string }[] }
     expect(body.objects.map((row) => row.primaryId)).toEqual(["c1"])
+
+    const deniedRefs = await app.fetch(
+      new Request("http://localhost/api/objects/query", {
+        method: "POST",
+        headers: session.csrfHeaders,
+        body: JSON.stringify({
+          query: {
+            kind: "refs",
+            refs: [
+              { objectTypeId: "contract", primaryId: "c1" },
+              { objectTypeId: "invoice", primaryId: "i1" },
+            ],
+          },
+        }),
+      })
+    )
+    expect(deniedRefs.status).toBe(403)
   })
 
   test("disabled auth keeps object routes privileged", async () => {

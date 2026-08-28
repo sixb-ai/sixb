@@ -596,7 +596,7 @@ describe("SixbServer HTTP contract", () => {
   }
 
   test("serves documented read endpoints", async () => {
-    await withHttpContractServer(async ({ baseUrl }) => {
+    await withHttpContractServer(async ({ baseUrl, sixb }) => {
       const projectResponse = await fetch(`${baseUrl}/api/project`)
       expect(projectResponse.status).toBe(200)
       expect(await projectResponse.json()).toEqual({ id: "contract-project" })
@@ -1454,6 +1454,41 @@ describe("SixbServer HTTP contract", () => {
         }),
       ])
 
+      const queryRefsResponse = await fetch(`${baseUrl}/api/objects/query`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          query: {
+            kind: "refs",
+            refs: [
+              { objectTypeId: "space", primaryId: "system" },
+              { objectTypeId: "device", primaryId: "fan-1" },
+              { objectTypeId: "space", primaryId: "system" },
+              { objectTypeId: "device", primaryId: "missing" },
+            ],
+          },
+        }),
+      })
+      expect(queryRefsResponse.status).toBe(200)
+      expect(await queryRefsResponse.json()).toMatchObject({
+        objects: [
+          { objectTypeId: "device", primaryId: "fan-1" },
+          { objectTypeId: "space", primaryId: "system" },
+        ],
+        total: 2,
+        plan: { mode: "pushdown" },
+      })
+
+      const emptyRefsResponse = await fetch(`${baseUrl}/api/objects/query`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ query: { kind: "refs", refs: [] } }),
+      })
+      expect(emptyRefsResponse.status).toBe(400)
+      expect(await emptyRefsResponse.json()).toMatchObject({
+        issues: [{ path: "$.refs", code: "empty_refs" }],
+      })
+
       const queryObjectsWithoutTotalResponse = await fetch(`${baseUrl}/api/objects/query`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -1527,6 +1562,28 @@ describe("SixbServer HTTP contract", () => {
           },
         ],
         plan: { mode: "pushdown", providerIssues: [] },
+      })
+
+      const opaquePrimaryId = "github:issue:sixb-ai/sixb#297"
+      await createTestSixb(sixb).objects.upsert("device", {
+        id: opaquePrimaryId,
+        label: "Opaque ID",
+      })
+      const opaqueRefResponse = await fetch(`${baseUrl}/api/objects/query`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          query: {
+            kind: "refs",
+            refs: [{ objectTypeId: "device", primaryId: opaquePrimaryId }],
+          },
+          includeTotal: false,
+        }),
+      })
+      expect(opaqueRefResponse.status).toBe(200)
+      expect(await opaqueRefResponse.json()).toMatchObject({
+        objects: [{ objectTypeId: "device", primaryId: opaquePrimaryId }],
+        hasMore: false,
       })
 
       const invalidQueryObjectsResponse = await fetch(`${baseUrl}/api/objects/query`, {
