@@ -15,8 +15,9 @@ test("durable compacted responses expose their continuation summary", () => {
     })
   )
 
-  expect(html).toContain("Earlier conversation condensed")
-  expect(html).toContain("View summary")
+  expect(html).toContain("Condensed conversation")
+  expect(html).not.toContain("View summary")
+  expect(html).toContain("group-hover:opacity-100")
   expect(html).toContain('aria-expanded="false"')
   expect(html).toContain("Here is the completed research.")
 })
@@ -24,7 +25,7 @@ test("durable compacted responses expose their continuation summary", () => {
 test("ordinary responses do not render a compaction disclosure", () => {
   const html = renderToStaticMarkup(createElement(MessageView, { message: assistantMessage() }))
 
-  expect(html).not.toContain("Earlier conversation condensed")
+  expect(html).not.toContain("Condensed conversation")
 })
 
 function assistantMessage(compaction?: AgentMessage["compaction"]): AgentMessage {

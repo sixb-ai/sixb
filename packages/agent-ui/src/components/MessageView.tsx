@@ -5,12 +5,11 @@ import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-  Markdown,
   Marker,
   MarkerContent,
   MarkerIcon,
 } from "@sixb/ui/components"
-import { AlertTriangle, ArrowRight, ChevronRight, Clock3, FileText, RotateCcw } from "lucide-react"
+import { AlertTriangle, ArrowRight, ChevronRight, Clock3, RotateCcw } from "lucide-react"
 import { memo } from "react"
 import { createAgentDocumentSource } from "../document-preview/source"
 import type { AgentDocumentSource } from "../document-preview/types"
@@ -104,14 +103,14 @@ function CompactionResult({ summary }: { summary: string }) {
   return (
     <Collapsible className="max-w-full">
       <CollapsibleTrigger className="group flex w-fit max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-[13px] leading-normal text-muted-foreground outline-none transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-        <FileText className="size-3.5 shrink-0" aria-hidden="true" />
-        <span>Earlier conversation condensed</span>
-        <span className="text-muted-foreground/60">· View summary</span>
-        <ChevronRight className="size-4 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
+        <span>Condensed conversation</span>
+        <ChevronRight className="size-4 shrink-0 opacity-0 transition-[transform,opacity] group-hover:opacity-100 group-focus-visible:opacity-100 group-data-[state=open]:rotate-90 group-data-[state=open]:opacity-100" />
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="scrollbar-thin mt-2 ml-1.5 max-h-[min(24rem,50vh)] overflow-y-auto overscroll-contain border-l-2 border-border py-0.5 pr-2 pl-3">
-          <Markdown className="prose-chat text-sm text-muted-foreground">{summary}</Markdown>
+          <p className="text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground/80">
+            {summary}
+          </p>
         </div>
       </CollapsibleContent>
     </Collapsible>
