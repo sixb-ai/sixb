@@ -1,6 +1,6 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@sixb/ui/components"
-import { cn } from "@sixb/ui/lib/utils"
 import { BookOpen, ChevronRight, FileText, type LucideIcon } from "lucide-react"
+import { ActivityStatusText } from "../components/ActivityStatus"
 import type { NormalizedTool } from "../parts"
 import { coerceReadInput, coerceReadOutput, describeRead } from "./interpret"
 
@@ -67,7 +67,11 @@ function ReadLine({
   return (
     <div className="flex w-fit max-w-full items-center gap-1.5 text-[13px] leading-normal text-muted-foreground">
       <Icon className="size-3.5 shrink-0" />
-      <span className={cn("min-w-0 truncate font-medium", running && "shimmer")}>{label}</span>
+      {running ? (
+        <ActivityStatusText label={label} className="font-medium shimmer" />
+      ) : (
+        <span className="min-w-0 truncate font-medium">{label}</span>
+      )}
       {detail ? (
         <span className="min-w-0 shrink truncate text-muted-foreground/60">{detail}</span>
       ) : null}

@@ -18,6 +18,7 @@ import type {
   AgentFileRef,
   AgentMessage,
 } from "../types"
+import { ACTIVITY_STATUS_ROW_CLASS_NAME, ActivityStatusText } from "./ActivityStatus"
 import { ContextChips } from "./ContextChips"
 import { FileAttachmentCard } from "./FileAttachmentCard"
 import { AssistantBody } from "./MessageParts"
@@ -163,11 +164,11 @@ export function LiveAssistant({
 export function ThinkingMarker({ takingLonger = false }: { takingLonger?: boolean }) {
   return (
     <div className="flex flex-col gap-1">
-      <Marker role="status" aria-label="Agent is thinking">
-        <MarkerContent className="shimmer">Thinking…</MarkerContent>
-      </Marker>
+      <div className={ACTIVITY_STATUS_ROW_CLASS_NAME} role="status" aria-label="Agent is working">
+        <ActivityStatusText label="Thinking" className="shimmer" />
+      </div>
       {takingLonger ? (
-        <p className="pl-6 text-xs text-muted-foreground" role="status">
+        <p className="px-1 text-xs text-muted-foreground" role="status">
           Taking a little longer than usual…
         </p>
       ) : null}

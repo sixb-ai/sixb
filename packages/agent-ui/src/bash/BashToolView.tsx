@@ -1,5 +1,4 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@sixb/ui/components"
-import { cn } from "@sixb/ui/lib/utils"
 import {
   Activity,
   BarChart3,
@@ -15,6 +14,7 @@ import {
   Zap,
 } from "lucide-react"
 import { useState } from "react"
+import { ActivityStatusText } from "../components/ActivityStatus"
 import {
   type BashIcon,
   type BashIntent,
@@ -122,7 +122,11 @@ export function BashToolView({ tool }: { tool: BashTool }) {
     <Collapsible>
       <CollapsibleTrigger className="group flex w-fit max-w-full items-center gap-1.5 text-[13px] leading-normal text-muted-foreground transition-colors hover:text-foreground">
         <Icon className="size-3.5 shrink-0" />
-        <span className={cn("min-w-0 truncate font-medium", running && "shimmer")}>{label}</span>
+        {running ? (
+          <ActivityStatusText label={label} className="font-medium shimmer" />
+        ) : (
+          <span className="min-w-0 truncate font-medium">{label}</span>
+        )}
         {!running && description.detail ? (
           <span className="min-w-0 shrink truncate text-muted-foreground/60">
             {description.detail}
@@ -155,7 +159,11 @@ function ToolLine({
   return (
     <div className="flex w-fit max-w-full items-center gap-1.5 text-[13px] leading-normal text-muted-foreground">
       <Icon className="size-3.5 shrink-0" />
-      <span className={cn("min-w-0 truncate font-medium", running && "shimmer")}>{label}</span>
+      {running ? (
+        <ActivityStatusText label={label} className="font-medium shimmer" />
+      ) : (
+        <span className="min-w-0 truncate font-medium">{label}</span>
+      )}
       {detail ? (
         <span className="min-w-0 shrink truncate text-muted-foreground/60">{detail}</span>
       ) : null}
