@@ -1,0 +1,1434 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+readonly SIXB_AGENT_CLI_VERSION="poc-1"
+readonly SIXB_EXIT_USAGE=2
+readonly SIXB_EXIT_API=3
+
+json_string() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
+  printf '"%s"' "$value"
+}
+
+emit_error() {
+  local code="$1"
+  local message="$2"
+  local status="${3:-}"
+  local hint="${4:-}"
+
+  printf '{"error":{"code":%s' "$(json_string "$code")"
+  [[ -z "$status" ]] || printf ',"status":%s' "$status"
+  printf ',"message":%s' "$(json_string "$message")"
+  [[ -z "$hint" ]] || printf ',"hint":%s' "$(json_string "$hint")"
+  printf '}}\n'
+}
+
+fail() {
+  emit_error "${2:-invalid_arguments}" "$1" "" "${3:-}" >&2
+  exit "$SIXB_EXIT_USAGE"
+}
+
+is_help() {
+  [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]
+}
+
+require_value() {
+  local flag="$1"
+  local value="${2:-}"
+  [[ -n "$value" ]] || fail "$flag requires a value."
+}
+
+require_runtime() {
+  [[ -n "${SIXB_API_BASE_URL:-}" ]] ||
+    fail "SIXB_API_BASE_URL is not set." "runtime_unavailable"
+  [[ -n "$(command -v curl)" ]] ||
+    fail "curl is required in the agent sandbox." "runtime_unavailable"
+  [[ -n "$(command -v jq)" ]] ||
+    fail "jq is required in the agent sandbox." "runtime_unavailable"
+}
+
+api_url() {
+  local path="$1"
+  printf '%s%s' "${SIXB_API_BASE_URL%/}" "$path"
+}
+
+encode_segment() {
+  jq -rn --arg value "$1" '$value | @uri'
+}
+
+validate_api_path() {
+  local path="$1"
+  [[ "$path" == "/api" || "$path" == /api/* ]] ||
+    fail "API paths must be relative and start with /api/."
+  [[ "$path" != *"://"* ]] || fail "API paths must not contain an origin."
+  [[ "$path" != *\\* && "$path" != *#* && "$path" != *"/../"* && "$path" != *"%2e"* && "$path" != *"%2E"* ]] ||
+    fail "API paths must be relative and start with /api/."
+}
+
+read_json() {
+  local source="$1"
+  local parsed
+  if [[ "$source" == "-" ]]; then
+    if ! parsed="$(jq -ce . 2>&1)"; then
+      fail "Standard input is not valid JSON." "invalid_json"
+    fi
+    printf '%s\n' "$parsed"
+    return
+  fi
+  [[ -f "$source" ]] || fail "JSON file '$source' does not exist."
+  if ! parsed="$(jq -ce . "$source" 2>&1)"; then
+    fail "JSON file '$source' is not valid JSON." "invalid_json"
+  fi
+  printf '%s\n' "$parsed"
+}
+
+http_json() {
+  local response
+  if ! response="$(curl -sS --write-out $'\n%{http_code}' "$@" 2>&1)"; then
+    emit_error \
+      "api_unreachable" \
+      "The Sixb API gateway could not be reached." \
+      "" \
+      "Run 'sixb doctor' to verify the sandbox runtime and gateway." >&2
+    exit "$SIXB_EXIT_API"
+  fi
+
+  local status="${response##*$'\n'}"
+  local body="${response%$'\n'*}"
+  if [[ ! "$status" =~ ^[0-9]{3}$ ]]; then
+    emit_error "invalid_api_response" "The Sixb API returned an invalid HTTP status." >&2
+    exit "$SIXB_EXIT_API"
+  fi
+  if ((10#$status < 200 || 10#$status >= 300)); then
+    local code="http_error"
+    local message="The Sixb API request failed with HTTP $status."
+    local hint=""
+    local parsed
+    if parsed="$(jq -er '
+      if (.error | type) == "object" then .error.code // empty else empty end
+    ' <<<"$body" 2>&1)"; then
+      code="$parsed"
+    fi
+    if parsed="$(jq -er '
+      if (.error | type) == "object" then .error.message // empty
+      elif (.error | type) == "string" then .error
+      else empty end
+    ' <<<"$body" 2>&1)"; then
+      message="$parsed"
+    fi
+    if parsed="$(jq -er '
+      if (.error | type) == "object" then .error.hint // empty else empty end
+    ' <<<"$body" 2>&1)"; then
+      hint="$parsed"
+    fi
+    emit_error "$code" "$message" "$((10#$status))" "$hint" >&2
+    exit "$SIXB_EXIT_API"
+  fi
+
+  printf '%s\n' "$body"
+}
+
+http_get() {
+  local path="$1"
+  http_json "$(api_url "$path")"
+}
+
+http_post_json() {
+  local path="$1"
+  local body="$2"
+  http_json \
+    -H "Content-Type: application/json" \
+    -X POST "$(api_url "$path")" \
+    --data-binary "$body"
+}
+
+http_download() {
+  local output="$1"
+  shift
+  local status
+  if ! status="$(curl -sS --write-out '%{http_code}' "$@" --output "$output" 2>&1)"; then
+    emit_error \
+      "api_unreachable" \
+      "The Sixb API gateway could not be reached." \
+      "" \
+      "Run 'sixb doctor' to verify the sandbox runtime and gateway." >&2
+    exit "$SIXB_EXIT_API"
+  fi
+  if [[ ! "$status" =~ ^[0-9]{3}$ ]]; then
+    emit_error "invalid_api_response" "The Sixb API returned an invalid HTTP status." >&2
+    exit "$SIXB_EXIT_API"
+  fi
+  if ((10#$status < 200 || 10#$status >= 300)); then
+    emit_error \
+      "http_error" \
+      "The Sixb API request failed with HTTP $status." \
+      "$((10#$status))" >&2
+    exit "$SIXB_EXIT_API"
+  fi
+}
+
+print_main_help() {
+  cat <<'EOF'
+Sixb agent CLI
+
+Usage:
+  sixb <command> [options]
+
+The CLI uses the run-scoped SIXB_API_BASE_URL. Do not configure authentication or another origin.
+Every command emits JSON except file downloads and help.
+
+Discovery:
+  sixb doctor                         Check the sandbox and API gateway
+  sixb context                        Print the current run context
+  sixb project show                   Show project metadata
+  sixb ontology list                  Compact visible type and relationship catalog
+  sixb ontology get <type>            Inspect one object type, properties, links, and actions
+
+Objects:
+  sixb objects inspect <type> <id>    Inspect an object and its related graph in one command
+  sixb objects list [options]         Browse materialized objects
+  sixb objects get <type> <id>...     Exact lookup through opaque object references
+  sixb objects search <text>          Search visible objects
+  sixb objects query --file <file|->  Execute query IR from JSON
+  sixb objects count --file <file|->  Count a query without returning rows
+  sixb objects exists --file <file|-> Test whether a query has a match
+  sixb objects facets --file <file|-> Run a {query, facets} request
+  sixb objects links <type> <id>      Read exact persisted links
+
+Telemetry:
+  sixb telemetry latest <type> <id> <property>
+  sixb telemetry history <type> <id> <property> [options]
+  sixb telemetry query --file <file|->
+
+Actions and workflows:
+  sixb actions list|get|request ...
+  sixb action-runs list|get ...
+  sixb workflows list|get|start ...
+  sixb workflow-runs list|get ...
+
+Files and escape hatch:
+  sixb files upload|download ...
+  sixb api get|post ...
+
+Run `sixb <group> --help` or `sixb <group> <command> --help` for exact arguments.
+For query IR, run `sixb objects query --help` and `sixb objects query --example list`.
+EOF
+}
+
+print_objects_help() {
+  cat <<'EOF'
+Usage:
+  sixb objects inspect <object-type> <primary-id> [--depth <0-3>] [--max-objects <1-100>] [--full]
+  sixb objects list [options]
+  sixb objects get <object-type> <primary-id>...
+  sixb objects search <text> [--limit <n>]
+  sixb objects query --file <path|-> [--include-total|--no-total]
+  sixb objects query --example <name>
+  sixb objects count --file <path|->
+  sixb objects exists --file <path|->
+  sixb objects facets --file <path|->
+  sixb objects links <object-type> <primary-id> [options]
+
+List options:
+  --type <id>                         Exact ontology object type id
+  --limit <n>                         0 through 1000
+  --offset <n>
+  --order-by createdAt|updatedAt|primaryId
+  --order asc|desc
+  --id-prefix <value>                 Primary-id prefix
+  --id-suffix <value>                 Primary-id suffix
+  --created-after|--created-before <RFC3339>
+  --updated-after|--updated-before <RFC3339>
+
+Links options:
+  --link <link-id>
+  --direction outgoing|incoming|both  Defaults to both
+  --page-size <1-1000>                Defaults to 1000
+  --page-token <token>                Continue an edge page
+  --include-objects                   Include selected and current-page endpoint objects
+
+Use `objects inspect` first when the user or app context identifies an object. It follows both
+relationship directions to depth 2 by default, hydrates up to 40 objects, and returns a bounded
+graph with the actual persisted relationships. Use `--depth 0` for only the object.
+
+Inspect omits materialization timestamps and ontology definitions by default. Use `--full` when
+storage timestamps, declared links, or available actions are needed.
+
+`objects get` uses a refs query without ontology discovery or identity URL paths. It is safe for
+opaque ids containing :, /, #, ?, or %. `objects query` accepts either a query node or a full
+{query, includeTotal} envelope. All identifiers are case-sensitive and come from `ontology get`.
+EOF
+}
+
+print_query_help() {
+  cat <<'EOF'
+Usage:
+  sixb objects query --file <path|-> [--include-total|--no-total]
+  sixb objects query --example <exact|filter|incoming|expand|sort|page|facets>
+  sixb objects query --example list
+
+Input is a query node. A full {"query": ...} request is also accepted. The CLI supplies
+includeTotal unless the full request already contains it.
+
+Query nodes compose through `input`:
+  start     {"kind":"start","objectTypeId":"Type","includeSubtypes":false}
+  refs      {"kind":"refs","refs":[{"objectTypeId":"Type","primaryId":"opaque:id"}]}
+  filter    {"kind":"filter","input":<query>,"predicate":<predicate>}
+  text      {"kind":"text","input":<query>,"query":"words","fields":["name"]}
+  traverse  {"kind":"traverse","input":<query>,"linkId":"link","direction":"outgoing"}
+  vector    {"kind":"vector","input":<query>,"propertyId":"embedding","vector":[0.1],"k":10}
+  set       {"kind":"set","op":"union|intersect|subtract","inputs":[<query>,<query>]}
+  sort      {"kind":"sort","input":<query>,"fields":[<sort-field>]}
+  limit     {"kind":"limit","input":<query>,"limit":20}
+  page      {"kind":"page","input":<query>,"pageSize":20,"pageToken":"optional"}
+  project   {"kind":"project","input":<query>,"properties":["id","name"]}
+  expand    {"kind":"expand","input":<query>,"expansions":[<expansion>]}
+
+Predicates use `op`, not `kind`:
+  and/or    {"op":"and","items":[<predicate>,<predicate>]}
+  not       {"op":"not","item":<predicate>}
+  eq/neq    {"op":"eq","propertyId":"status","value":"open"}
+  lt/lte/gt/gte
+  in        {"op":"in","propertyId":"status","values":["open","closed"]}
+  exists    {"op":"exists","propertyId":"owner","value":true}
+  contains  {"op":"contains","propertyId":"name","value":"sixb"}
+
+Sort fields:
+  {"kind":"property","propertyId":"name","direction":"asc|desc"}
+  {"kind":"relevance","direction":"asc|desc"}
+
+Traversal and expansion directions are outgoing or incoming. For incoming relationships, the link
+is declared on the child/source type; add `sourceObjectTypeId` when needed to disambiguate it.
+Expansion items accept linkId, direction, sourceObjectTypeId, limit, orderBy, and nested expand.
+
+Rules:
+  - Run `sixb ontology get <type>` first; never guess property or link ids.
+  - Use refs for exact identities; it does not require ontology metadata.
+  - Other filters require query.searchable:true and query.filterable:true.
+  - Property sorting requires query.sortable:true. Top-level object timestamps are list options,
+    not ontology-property sorts unless the ontology separately declares those properties.
+  - Put limits and pages inside the query tree, not at the HTTP request top level.
+  - Use `sixb objects facets --file ...` for {query, facets} documents.
+EOF
+}
+
+print_actions_help() {
+  cat <<'EOF'
+Usage:
+  sixb actions list [--type <object-type>]
+  sixb actions get <action-id>
+  sixb actions request <action-id> [options]
+
+Request options:
+  --subject-type <object-type>         Must be paired with --subject-id
+  --subject-id <primary-id>
+  --params-file <path|->               JSON params object; defaults to {}
+  --run-id <id>                        Optional idempotent run id
+
+Before `actions request`, inspect `actions get`, show the user the action id, subject, params, and
+expected effect, and receive approval. Parameter descriptions are authoritative, especially for
+expected source versions or concurrency guards. Top-level updatedAt describes the Sixb materialized
+object; properties.updatedAt is ontology/source data. Use the exact field named by the action
+parameter description rather than guessing from its name.
+EOF
+}
+
+print_action_runs_help() {
+  cat <<'EOF'
+Usage:
+  sixb action-runs list [options]
+  sixb action-runs get <run-id>
+
+List options:
+  --action <action-id>
+  --status queued|running|succeeded|failed|cancelled
+  --type <object-type>
+  --id <primary-id>
+  --started-after|--started-before <timestamp>
+  --limit <n>
+  --offset <n>
+  --order asc|desc
+
+Use `sixb files download action-run ...` for FileRefs in params or writeback results.
+EOF
+}
+
+print_telemetry_help() {
+  cat <<'EOF'
+Usage:
+  sixb telemetry latest <object-type> <primary-id> <property-id>
+  sixb telemetry history <object-type> <primary-id> <property-id> [options]
+  sixb telemetry query --file <path|->
+
+History options:
+  --from <timestamp>
+  --to <timestamp>
+  --limit <n>
+  --order asc|desc
+
+Bulk query input:
+  {"series":[{"objectTypeId":"device","objectId":"fan-1","propertyId":"rpm"}],
+   "from":"optional","to":"optional","limitPerSeries":100,"order":"desc"}
+
+Telemetry append is intentionally unavailable to agents.
+EOF
+}
+
+print_files_help() {
+  cat <<'EOF'
+Usage:
+  sixb files upload <local-path> [--logical-path <path>]
+  sixb files download object <type> <id> --path <json-pointer> --output <local-path>
+  sixb files download action-run <run-id> --path <json-pointer> --output <local-path>
+  sixb files download workflow-run <run-id> --path <json-pointer> --output <local-path>
+
+Upload returns a FileRef JSON object. Publish generated files from SIXB_OUTPUT_STAGING_DIR. The
+simple-upload size ceiling is enforced by the gateway. Download paths are contextual JSON Pointers:
+object paths begin /properties/, action-run paths /params/ or /writeback/result/, and workflow-run
+paths /input/ or /output/. Binary downloads require --output and are never printed to stdout.
+EOF
+}
+
+print_workflows_help() {
+  cat <<'EOF'
+Usage:
+  sixb workflows list
+  sixb workflows get <workflow-id>
+  sixb workflows start <workflow-id> [--input-file <path|->]
+
+Before `workflows start` in conversation mode, inspect the workflow, show the user its id and input,
+and receive approval. A workflow-task agent must never start another workflow; the gateway rejects
+that request. Input defaults to {}.
+EOF
+}
+
+print_workflow_runs_help() {
+  cat <<'EOF'
+Usage:
+  sixb workflow-runs list [options]
+  sixb workflow-runs get <run-id>
+
+List options:
+  --workflow <workflow-id>
+  --status queued|running|waiting|succeeded|failed|cancelled
+  --started-after|--started-before <timestamp>
+  --limit <n>
+  --offset <n>
+  --order asc|desc
+
+Use `sixb files download workflow-run ...` for FileRefs in workflow input or output. Cancellation is
+intentionally unavailable to agents.
+EOF
+}
+
+print_api_help() {
+  cat <<'EOF'
+Usage:
+  sixb api get </api/path[?query]> [--output <local-path>]
+  sixb api post </api/path> --file <path|->
+
+This is the raw escape hatch for an agent-gateway route not covered by a high-level command. Paths
+must be relative and begin /api/. Arbitrary origins and authentication headers are not accepted.
+POST input must be JSON. Prefer high-level commands because they encode path segments and construct
+request envelopes safely.
+EOF
+}
+
+print_query_example() {
+  case "$1" in
+    list)
+      printf '%s\n' "exact filter incoming expand sort page facets"
+      ;;
+    exact)
+      cat <<'EOF'
+{"kind":"refs","refs":[{"objectTypeId":"RepositoryIssue","primaryId":"github:issue:owner/repo#297"}]}
+EOF
+      ;;
+    filter)
+      cat <<'EOF'
+{"kind":"limit","input":{"kind":"filter","input":{"kind":"start","objectTypeId":"Customer"},"predicate":{"op":"eq","propertyId":"status","value":"active"}},"limit":20}
+EOF
+      ;;
+    incoming)
+      cat <<'EOF'
+{"kind":"traverse","input":{"kind":"refs","refs":[{"objectTypeId":"RepositoryIssue","primaryId":"github:issue:owner/repo#297"}]},"linkId":"issue","direction":"incoming","sourceObjectTypeId":"RepositoryComment"}
+EOF
+      ;;
+    expand)
+      cat <<'EOF'
+{"kind":"expand","input":{"kind":"refs","refs":[{"objectTypeId":"RepositoryIssue","primaryId":"github:issue:owner/repo#297"}]},"expansions":[{"linkId":"issue","direction":"incoming","sourceObjectTypeId":"RepositoryComment","limit":20}]}
+EOF
+      ;;
+    sort)
+      cat <<'EOF'
+{"kind":"limit","input":{"kind":"sort","input":{"kind":"start","objectTypeId":"Customer"},"fields":[{"kind":"property","propertyId":"name","direction":"asc"}]},"limit":20}
+EOF
+      ;;
+    page)
+      cat <<'EOF'
+{"kind":"page","input":{"kind":"start","objectTypeId":"Customer"},"pageSize":20,"pageToken":"optional-token-from-previous-response"}
+EOF
+      ;;
+    facets)
+      cat <<'EOF'
+{"query":{"kind":"start","objectTypeId":"WorkOrder"},"facets":[{"propertyId":"status","limit":10}]}
+EOF
+      ;;
+    *)
+      fail "Unknown query example '$1'. Run 'sixb objects query --example list'."
+      ;;
+  esac
+}
+
+cmd_doctor() {
+  is_help "${1:-}" && {
+    printf '%s\n' "Usage: sixb doctor"
+    return
+  }
+
+  local missing=""
+  [[ -n "${SIXB_API_BASE_URL:-}" ]] || missing="SIXB_API_BASE_URL"
+  [[ -n "$(command -v curl)" ]] || missing="${missing:+$missing,}curl"
+  [[ -n "$(command -v jq)" ]] || missing="${missing:+$missing,}jq"
+  [[ -z "$missing" ]] || fail "Missing required runtime: $missing" "runtime_unavailable"
+
+  local project
+  project="$(http_get "/api/project")"
+  jq -cn \
+    --arg cliVersion "$SIXB_AGENT_CLI_VERSION" \
+    --arg apiBaseUrl "$SIXB_API_BASE_URL" \
+    --argjson project "$project" \
+    '{ok:true,cliVersion:$cliVersion,apiBaseUrl:$apiBaseUrl,dependencies:{bash:true,curl:true,jq:true},project:$project}'
+}
+
+cmd_context() {
+  is_help "${1:-}" && {
+    printf '%s\n' "Usage: sixb context"
+    return
+  }
+  [[ -n "${SIXB_RUN_CONTEXT:-}" ]] || fail "SIXB_RUN_CONTEXT is not set."
+  [[ -f "$SIXB_RUN_CONTEXT" ]] || fail "Run context '$SIXB_RUN_CONTEXT' does not exist."
+  cat "$SIXB_RUN_CONTEXT"
+  printf '\n'
+}
+
+cmd_project() {
+  local sub="${1:-}"
+  if [[ -z "$sub" ]] || is_help "$sub"; then
+    printf '%s\n' "Usage: sixb project show"
+    return
+  fi
+  [[ "$sub" == "show" ]] || fail "Unknown project command '$sub'."
+  [[ $# -eq 1 ]] || fail "project show accepts no arguments."
+  require_runtime
+  http_get "/api/project"
+}
+
+cmd_ontology() {
+  local sub="${1:-}"
+  shift || true
+  if [[ -z "$sub" ]] || is_help "$sub"; then
+    cat <<'EOF'
+Usage:
+  sixb ontology list [--full]
+  sixb ontology get <object-type>
+
+`ontology list` is compact by default. Use --full only when complete definitions for every visible
+type are truly needed. Use ids exactly as returned; they are case-sensitive.
+EOF
+    return
+  fi
+  case "$sub" in
+    list)
+      is_help "${1:-}" && {
+        printf '%s\n' "Usage: sixb ontology list [--full]"
+        return
+      }
+      require_runtime
+      local full="false"
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --full) full="true"; shift ;;
+          *) fail "Unknown ontology list option '$1'." ;;
+        esac
+      done
+      local ontology
+      ontology="$(http_get "/api/object-types")"
+      if [[ "$full" == "true" ]]; then
+        printf '%s\n' "$ontology"
+      else
+        jq -c 'map({
+          id,
+          name,
+          description,
+          primaryPropertyId: ([.properties[]? | select(.primary == true) | .id][0]),
+          links: [.links[]? | {id, name, description, targetObjectTypeId, cardinality}],
+          actions: [.actions[]? | {id, name, description}]
+        })' <<<"$ontology"
+      fi
+      ;;
+    get)
+      is_help "${1:-}" && {
+        printf '%s\n' "Usage: sixb ontology get <object-type>"
+        return
+      }
+      require_runtime
+      require_value "ontology get" "${1:-}"
+      [[ $# -eq 1 ]] || fail "ontology get requires exactly one object type."
+      http_get "/api/object-types/$(encode_segment "$1")"
+      ;;
+    *)
+      fail "Unknown ontology command '$sub'."
+      ;;
+  esac
+}
+
+cmd_objects_list() {
+  if is_help "${1:-}"; then
+    print_objects_help
+    return
+  fi
+  require_runtime
+  local -a args=(--get "$(api_url "/api/objects")")
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --type) require_value "$1" "${2:-}"; args+=(--data-urlencode "objectTypeId=$2"); shift 2 ;;
+      --limit) require_value "$1" "${2:-}"; args+=(--data-urlencode "limit=$2"); shift 2 ;;
+      --offset) require_value "$1" "${2:-}"; args+=(--data-urlencode "offset=$2"); shift 2 ;;
+      --order-by) require_value "$1" "${2:-}"; args+=(--data-urlencode "orderBy=$2"); shift 2 ;;
+      --order) require_value "$1" "${2:-}"; args+=(--data-urlencode "order=$2"); shift 2 ;;
+      --id-prefix) require_value "$1" "${2:-}"; args+=(--data-urlencode "idPrefix=$2"); shift 2 ;;
+      --id-suffix) require_value "$1" "${2:-}"; args+=(--data-urlencode "idSuffix=$2"); shift 2 ;;
+      --created-after) require_value "$1" "${2:-}"; args+=(--data-urlencode "createdAfter=$2"); shift 2 ;;
+      --created-before) require_value "$1" "${2:-}"; args+=(--data-urlencode "createdBefore=$2"); shift 2 ;;
+      --updated-after) require_value "$1" "${2:-}"; args+=(--data-urlencode "updatedAfter=$2"); shift 2 ;;
+      --updated-before) require_value "$1" "${2:-}"; args+=(--data-urlencode "updatedBefore=$2"); shift 2 ;;
+      *) fail "Unknown objects list option '$1'." ;;
+    esac
+  done
+  http_json "${args[@]}"
+}
+
+cmd_objects_inspect() {
+  if is_help "${1:-}"; then
+    cat <<'EOF'
+Usage: sixb objects inspect <object-type> <primary-id> [--depth <0-3>] [--max-objects <1-100>] [--full]
+
+Returns the exact object plus a hydrated, de-duplicated graph of relationships in both directions.
+Depth defaults to 2 and max objects defaults to 40 (including the requested object). Use --full to
+include materialization timestamps and ontology definitions with declared links and actions.
+EOF
+    return
+  fi
+
+  local object_type="${1:-}"
+  local primary_id="${2:-}"
+  require_value "objects inspect object type" "$object_type"
+  require_value "objects inspect primary id" "$primary_id"
+  shift 2 || true
+
+  local depth="2"
+  local max_objects="40"
+  local full="false"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --depth) require_value "$1" "${2:-}"; depth="$2"; shift 2 ;;
+      --max-objects) require_value "$1" "${2:-}"; max_objects="$2"; shift 2 ;;
+      --full) full="true"; shift ;;
+      *) fail "Unknown objects inspect option '$1'." ;;
+    esac
+  done
+  [[ "$depth" =~ ^[0-3]$ ]] || fail "--depth must be an integer from 0 through 3."
+  [[ "$max_objects" =~ ^[1-9][0-9]*$ ]] || fail "--max-objects must be an integer from 1 through 100."
+  max_objects="$((10#$max_objects))"
+  (( max_objects <= 100 )) || fail "--max-objects must be an integer from 1 through 100."
+  require_runtime
+
+  local refs frontier objects links truncated
+  refs="$(jq -cn --arg type "$object_type" --arg id "$primary_id" \
+    '[{objectTypeId:$type,primaryId:$id,distance:0}]')"
+  frontier="$refs"
+  objects='[]'
+  links='[]'
+  truncated='false'
+
+  # Depth zero still uses the link terminal once because includeObjects hydrates
+  # the exact root without an ontology lookup or a second object request.
+  local iterations="$depth"
+  (( iterations > 0 )) || iterations=1
+
+  local level
+  for ((level = 0; level < iterations; level += 1)); do
+    local frontier_count
+    frontier_count="$(jq -r 'length' <<<"$frontier")"
+    [[ "$frontier_count" -gt 0 ]] || break
+
+    local selector page_token level_objects level_links
+    selector="$(jq -c 'map({objectTypeId,primaryId})' <<<"$frontier")"
+    page_token=''
+    level_objects='[]'
+    level_links='[]'
+
+    while true; do
+      local body response valid page_links has_more
+      body="$(jq -cn \
+        --argjson refs "$selector" \
+        --arg pageToken "$page_token" '
+          {
+            query:{kind:"refs",refs:$refs},
+            direction:"both",
+            includeObjects:true,
+            pageSize:1000
+          }
+          + (if $pageToken == "" then {} else {pageToken:$pageToken} end)
+        ')"
+      response="$(http_post_json "/api/objects/query/links" "$body")"
+      valid="$(jq -r '
+        (.objects | type == "array")
+        and (.links | type == "array")
+        and (.hasMore | type == "boolean")
+      ' <<<"$response")"
+      [[ "$valid" == "true" ]] || fail "The object-links API returned an invalid response."
+
+      level_objects="$(jq -cn \
+        --argjson existing "$level_objects" \
+        --argjson incoming "$(jq -c '.objects' <<<"$response")" '
+          $existing + $incoming
+          | sort_by(.objectTypeId, .primaryId)
+          | unique_by(.objectTypeId, .primaryId)
+        ')"
+      page_links="$(jq -c '[.links[] | {
+        sourceTypeId:.source.objectTypeId,
+        sourceId:.source.primaryId,
+        linkId,
+        targetTypeId:.target.objectTypeId,
+        targetId:.target.primaryId
+      } + (if has("properties") then {properties} else {} end)]' <<<"$response")"
+      level_links="$(jq -cn \
+        --argjson existing "$level_links" \
+        --argjson incoming "$page_links" '
+          $existing + $incoming
+          | sort_by(.sourceTypeId, .sourceId, .linkId, .targetTypeId, .targetId)
+          | unique_by(.sourceTypeId, .sourceId, .linkId, .targetTypeId, .targetId)
+        ')"
+
+      has_more="$(jq -r '.hasMore' <<<"$response")"
+      [[ "$has_more" == "true" && "$level" -lt "$depth" ]] || break
+      page_token="$(jq -er '.nextPageToken // empty' <<<"$response")" ||
+        fail "The object-links API reported another page without a nextPageToken."
+    done
+
+    objects="$(jq -cn \
+      --argjson existing "$objects" \
+      --argjson incoming "$level_objects" '
+        $existing + $incoming
+        | sort_by(.objectTypeId, .primaryId)
+        | unique_by(.objectTypeId, .primaryId)
+      ')"
+
+    (( level < depth )) || continue
+    links="$(jq -cn --argjson existing "$links" --argjson incoming "$level_links" '
+      $existing + $incoming
+      | sort_by(.sourceTypeId, .sourceId, .linkId, .targetTypeId, .targetId)
+      | unique_by(.sourceTypeId, .sourceId, .linkId, .targetTypeId, .targetId)
+    ')"
+
+    local candidates
+    candidates="$(jq -cn \
+      --argjson frontier "$frontier" \
+      --argjson incoming "$level_links" \
+      --argjson distance "$((level + 1))" '
+        def selected($type; $id):
+          any($frontier[]; .objectTypeId == $type and .primaryId == $id);
+        [$incoming[]
+          | if selected(.sourceTypeId; .sourceId) then
+              {objectTypeId:.targetTypeId,primaryId:.targetId,distance:$distance}
+            elif selected(.targetTypeId; .targetId) then
+              {objectTypeId:.sourceTypeId,primaryId:.sourceId,distance:$distance}
+            else empty
+            end]
+      ')"
+
+    local merge
+    merge="$(jq -cn \
+      --argjson seen "$refs" \
+      --argjson candidates "$candidates" \
+      --argjson max "$max_objects" '
+        def was_seen($candidate):
+          any($seen[]; .objectTypeId == $candidate.objectTypeId and .primaryId == $candidate.primaryId);
+        ($seen + $candidates
+          | group_by(.objectTypeId, .primaryId)
+          | map(min_by(.distance))
+          | sort_by(.distance, .objectTypeId, .primaryId)) as $all
+        | ($all[0:$max]) as $kept
+        | {
+            refs:$kept,
+            frontier:[$kept[] | . as $candidate | select(was_seen($candidate) | not)],
+            truncated:($all | length > $max)
+          }
+      ')"
+    refs="$(jq -c '.refs' <<<"$merge")"
+    frontier="$(jq -c '.frontier' <<<"$merge")"
+    if [[ "$(jq -r '.truncated' <<<"$merge")" == "true" ]]; then
+      truncated='true'
+    fi
+  done
+
+  links="$(jq -c --argjson refs "$refs" '
+    def included($type; $id):
+      any($refs[]; .objectTypeId == $type and .primaryId == $id);
+    [.[]
+      | select(included(.sourceTypeId; .sourceId) and included(.targetTypeId; .targetId))
+      | {
+          sourceTypeId,
+          sourceId,
+          linkId,
+          targetTypeId,
+          targetId
+        } + (if .properties == null then {} else {properties} end)]
+    | sort_by(.sourceTypeId, .sourceId, .linkId, .targetTypeId, .targetId)
+  ' <<<"$links")"
+
+  local root_object related_objects relevant_types
+  root_object="$(jq -ce --arg type "$object_type" --arg id "$primary_id" '
+    [.[] | select(.objectTypeId == $type and .primaryId == $id)]
+    | if length == 1 then .[0] else empty end
+  ' <<<"$objects")" || fail "Object '$object_type/$primary_id' was not found."
+  related_objects="$(jq -cn --argjson refs "$refs" --argjson objects "$objects" '
+    [$refs[] as $ref
+      | select($ref.distance > 0)
+      | $objects[]
+      | select(.objectTypeId == $ref.objectTypeId and .primaryId == $ref.primaryId)
+      | . + {distance:$ref.distance}]
+    | sort_by(.distance, .objectTypeId, .primaryId)
+  ')"
+  relevant_types='[]'
+  if [[ "$full" == "true" ]]; then
+    local relevant_type_id
+    while IFS= read -r relevant_type_id; do
+      [[ -n "$relevant_type_id" ]] || continue
+      local definition
+      definition="$(http_get "/api/object-types/$(encode_segment "$relevant_type_id")")"
+      relevant_types="$(jq -cn \
+        --argjson existing "$relevant_types" \
+        --argjson definition "$definition" '
+          $existing + [$definition] | sort_by(.id)
+        ')"
+    done <<<"$(jq -r 'map(.objectTypeId) | unique | .[]' <<<"$refs")"
+  else
+    root_object="$(jq -c 'del(.createdAt, .updatedAt)' <<<"$root_object")"
+    related_objects="$(jq -c 'map(del(.createdAt, .updatedAt))' <<<"$related_objects")"
+  fi
+
+  jq -cn \
+    --argjson object "$root_object" \
+    --argjson relatedObjects "$related_objects" \
+    --argjson links "$links" \
+    --argjson objectTypes "$relevant_types" \
+    --argjson depth "$depth" \
+    --argjson maxObjects "$max_objects" \
+    --argjson full "$full" \
+    --argjson truncated "$truncated" '
+      {
+        object:$object,
+        relatedObjects:$relatedObjects,
+        links:$links,
+        graph:{
+          depth:$depth,
+          maxObjects:$maxObjects,
+          objectCount:(1 + ($relatedObjects | length)),
+          linkCount:($links | length),
+          truncated:$truncated
+        }
+      }
+      + (if $full then {objectTypes:$objectTypes} else {} end)
+    '
+}
+
+cmd_objects_get() {
+  if is_help "${1:-}"; then
+    printf '%s\n' "Usage: sixb objects get <object-type> <primary-id>..."
+    return
+  fi
+  local object_type="${1:-}"
+  require_value "objects get" "$object_type"
+  shift || true
+  [[ $# -gt 0 ]] || fail "objects get requires at least one primary id."
+  require_runtime
+
+  local ids_json body
+  ids_json="$(jq -cn --args '$ARGS.positional' -- "$@")"
+  body="$(jq -cn --arg type "$object_type" --argjson ids "$ids_json" '
+    {
+      query:{
+        kind:"refs",
+        refs:[$ids[] | {objectTypeId:$type,primaryId:.}]
+      },
+      includeTotal:false
+    }
+  ')"
+  http_post_json "/api/objects/query" "$body"
+}
+
+cmd_objects_search() {
+  if is_help "${1:-}"; then
+    printf '%s\n' "Usage: sixb objects search <text> [--limit <1-50>]"
+    return
+  fi
+  local query="${1:-}"
+  require_value "objects search" "$query"
+  shift || true
+  require_runtime
+  local -a args=(--get "$(api_url "/api/objects/search")" --data-urlencode "q=$query")
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --limit) require_value "$1" "${2:-}"; args+=(--data-urlencode "limit=$2"); shift 2 ;;
+      *) fail "Unknown objects search option '$1'." ;;
+    esac
+  done
+  http_json "${args[@]}"
+}
+
+cmd_objects_query() {
+  if is_help "${1:-}"; then
+    print_query_help
+    return
+  fi
+  local source=""
+  local include_total="false"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --file) require_value "$1" "${2:-}"; source="$2"; shift 2 ;;
+      --include-total) include_total="true"; shift ;;
+      --no-total) include_total="false"; shift ;;
+      --example) require_value "$1" "${2:-}"; print_query_example "$2"; return ;;
+      *) fail "Unknown objects query option '$1'." ;;
+    esac
+  done
+  [[ -n "$source" ]] || fail "objects query requires --file <path|->."
+  require_runtime
+  local input body
+  input="$(read_json "$source")"
+  body="$(jq -cn --argjson input "$input" --argjson include "$include_total" '
+    if ($input | type) == "object" and ($input | has("query")) then
+      if ($input | has("includeTotal")) then $input else $input + {includeTotal:$include} end
+    else {query:$input,includeTotal:$include}
+    end')"
+  http_post_json "/api/objects/query" "$body"
+}
+
+cmd_objects_scalar_query() {
+  local operation="$1"
+  shift
+  if is_help "${1:-}"; then
+    printf 'Usage: sixb objects %s --file <path|->\n' "$operation"
+    return
+  fi
+  local source=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --file) require_value "$1" "${2:-}"; source="$2"; shift 2 ;;
+      *) fail "Unknown objects $operation option '$1'." ;;
+    esac
+  done
+  [[ -n "$source" ]] || fail "objects $operation requires --file <path|->."
+  require_runtime
+  local input body
+  input="$(read_json "$source")"
+  body="$(jq -cn --argjson input "$input" \
+    'if ($input | type) == "object" and ($input | has("query")) then {query:$input.query} else {query:$input} end')"
+  http_post_json "/api/objects/query/$operation" "$body"
+}
+
+cmd_objects_facets() {
+  if is_help "${1:-}"; then
+    cat <<'EOF'
+Usage: sixb objects facets --file <path|->
+
+Input is the complete request: {"query":<query-node>,"facets":[{"propertyId":"status","limit":10}]}
+Use `sixb objects query --example facets` for a copyable example.
+EOF
+    return
+  fi
+  local source=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --file) require_value "$1" "${2:-}"; source="$2"; shift 2 ;;
+      *) fail "Unknown objects facets option '$1'." ;;
+    esac
+  done
+  [[ -n "$source" ]] || fail "objects facets requires --file <path|->."
+  require_runtime
+  local body valid
+  body="$(read_json "$source")"
+  valid="$(jq -r 'type == "object" and has("query") and has("facets")' <<<"$body")"
+  [[ "$valid" == "true" ]] || fail "objects facets input must contain query and facets."
+  http_post_json "/api/objects/query/facets" "$body"
+}
+
+cmd_objects_links() {
+  if is_help "${1:-}"; then
+    print_objects_help
+    return
+  fi
+  local object_type="${1:-}"
+  local primary_id="${2:-}"
+  require_value "objects links object type" "$object_type"
+  require_value "objects links primary id" "$primary_id"
+  shift 2 || true
+  require_runtime
+  local link_id=""
+  local direction="both"
+  local page_size="1000"
+  local page_token=""
+  local include_objects="false"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --link) require_value "$1" "${2:-}"; link_id="$2"; shift 2 ;;
+      --direction) require_value "$1" "${2:-}"; direction="$2"; shift 2 ;;
+      --page-size) require_value "$1" "${2:-}"; page_size="$2"; shift 2 ;;
+      --page-token) require_value "$1" "${2:-}"; page_token="$2"; shift 2 ;;
+      --include-objects) include_objects="true"; shift ;;
+      *) fail "Unknown objects links option '$1'." ;;
+    esac
+  done
+  [[ "$direction" == "outgoing" || "$direction" == "incoming" || "$direction" == "both" ]] ||
+    fail "--direction must be outgoing, incoming, or both."
+  [[ "$page_size" =~ ^[1-9][0-9]*$ ]] || fail "--page-size must be an integer from 1 through 1000."
+  page_size="$((10#$page_size))"
+  (( page_size <= 1000 )) || fail "--page-size must be an integer from 1 through 1000."
+  local body
+  body="$(jq -cn \
+    --arg type "$object_type" \
+    --arg id "$primary_id" \
+    --arg direction "$direction" \
+    --arg linkId "$link_id" \
+    --arg pageToken "$page_token" \
+    --argjson pageSize "$page_size" \
+    --argjson includeObjects "$include_objects" '
+      {
+        query:{kind:"refs",refs:[{objectTypeId:$type,primaryId:$id}]},
+        direction:$direction,
+        includeObjects:$includeObjects,
+        pageSize:$pageSize
+      }
+      + (if $linkId == "" then {} else {linkId:$linkId} end)
+      + (if $pageToken == "" then {} else {pageToken:$pageToken} end)
+    ')"
+  http_post_json "/api/objects/query/links" "$body"
+}
+
+cmd_objects() {
+  local sub="${1:-}"
+  shift || true
+  if [[ -z "$sub" ]] || is_help "$sub"; then
+    print_objects_help
+    return
+  fi
+  case "$sub" in
+    inspect) cmd_objects_inspect "$@" ;;
+    list) cmd_objects_list "$@" ;;
+    get) cmd_objects_get "$@" ;;
+    search) cmd_objects_search "$@" ;;
+    query) cmd_objects_query "$@" ;;
+    count|exists) cmd_objects_scalar_query "$sub" "$@" ;;
+    facets) cmd_objects_facets "$@" ;;
+    links) cmd_objects_links "$@" ;;
+    *) fail "Unknown objects command '$sub'." ;;
+  esac
+}
+
+cmd_telemetry() {
+  local sub="${1:-}"
+  shift || true
+  if [[ -z "$sub" ]] || is_help "$sub"; then
+    print_telemetry_help
+    return
+  fi
+  case "$sub" in
+    latest)
+      is_help "${1:-}" && { print_telemetry_help; return; }
+      [[ $# -eq 3 ]] || fail "telemetry latest requires object type, primary id, and property id."
+      require_runtime
+      http_get "/api/objects/$(encode_segment "$1")/$(encode_segment "$2")/telemetry/$(encode_segment "$3")/latest"
+      ;;
+    history)
+      is_help "${1:-}" && { print_telemetry_help; return; }
+      [[ $# -ge 3 ]] || fail "telemetry history requires object type, primary id, and property id."
+      local object_type="$1" primary_id="$2" property_id="$3"
+      shift 3
+      require_runtime
+      local path="/api/objects/$(encode_segment "$object_type")/$(encode_segment "$primary_id")/telemetry/$(encode_segment "$property_id")/history"
+      local -a args=(--get "$(api_url "$path")")
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --from) require_value "$1" "${2:-}"; args+=(--data-urlencode "from=$2"); shift 2 ;;
+          --to) require_value "$1" "${2:-}"; args+=(--data-urlencode "to=$2"); shift 2 ;;
+          --limit) require_value "$1" "${2:-}"; args+=(--data-urlencode "limit=$2"); shift 2 ;;
+          --order) require_value "$1" "${2:-}"; args+=(--data-urlencode "order=$2"); shift 2 ;;
+          *) fail "Unknown telemetry history option '$1'." ;;
+        esac
+      done
+      http_json "${args[@]}"
+      ;;
+    query)
+      is_help "${1:-}" && { print_telemetry_help; return; }
+      [[ "${1:-}" == "--file" ]] || fail "telemetry query requires --file <path|->."
+      require_value "--file" "${2:-}"
+      [[ $# -eq 2 ]] || fail "telemetry query accepts only --file <path|->."
+      require_runtime
+      http_post_json "/api/telemetry/history" "$(read_json "$2")"
+      ;;
+    *) fail "Unknown telemetry command '$sub'." ;;
+  esac
+}
+
+cmd_actions_list() {
+  if is_help "${1:-}"; then
+    print_actions_help
+    return
+  fi
+  local object_type=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --type) require_value "$1" "${2:-}"; object_type="$2"; shift 2 ;;
+      *) fail "Unknown actions list option '$1'." ;;
+    esac
+  done
+  require_runtime
+  if [[ -z "$object_type" ]]; then
+    http_get "/api/actions"
+    return
+  fi
+  local actions
+  actions="$(http_get "/api/actions")"
+  jq -c --arg type "$object_type" '[.[] | select(.objectTypeId == $type)]' <<<"$actions"
+}
+
+cmd_actions_request() {
+  if is_help "${1:-}"; then
+    print_actions_help
+    return
+  fi
+  local action_id="${1:-}"
+  require_value "actions request" "$action_id"
+  shift || true
+  local subject_type="" subject_id="" params_source="" run_id=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --subject-type) require_value "$1" "${2:-}"; subject_type="$2"; shift 2 ;;
+      --subject-id) require_value "$1" "${2:-}"; subject_id="$2"; shift 2 ;;
+      --params-file) require_value "$1" "${2:-}"; params_source="$2"; shift 2 ;;
+      --run-id) require_value "$1" "${2:-}"; run_id="$2"; shift 2 ;;
+      *) fail "Unknown actions request option '$1'." ;;
+    esac
+  done
+  [[ -z "$subject_type" && -z "$subject_id" || -n "$subject_type" && -n "$subject_id" ]] ||
+    fail "--subject-type and --subject-id must be provided together."
+  require_runtime
+  local params='{}'
+  [[ -z "$params_source" ]] || params="$(read_json "$params_source")"
+  [[ "$(jq -r 'type' <<<"$params")" == "object" ]] || fail "Action params must be a JSON object."
+  local body
+  body="$(jq -cn \
+    --arg subjectType "$subject_type" \
+    --arg subjectId "$subject_id" \
+    --arg runId "$run_id" \
+    --argjson params "$params" '
+      {params:$params}
+      + (if $subjectType == "" then {} else {subject:{kind:"object",objectTypeId:$subjectType,primaryId:$subjectId}} end)
+      + (if $runId == "" then {} else {runId:$runId} end)')"
+  http_post_json "/api/actions/$(encode_segment "$action_id")" "$body"
+}
+
+cmd_actions() {
+  local sub="${1:-}"
+  shift || true
+  if [[ -z "$sub" ]] || is_help "$sub"; then
+    print_actions_help
+    return
+  fi
+  case "$sub" in
+    list) cmd_actions_list "$@" ;;
+    get)
+      is_help "${1:-}" && { print_actions_help; return; }
+      [[ $# -eq 1 ]] || fail "actions get requires exactly one action id."
+      require_runtime
+      http_get "/api/actions/$(encode_segment "$1")"
+      ;;
+    request) cmd_actions_request "$@" ;;
+    *) fail "Unknown actions command '$sub'." ;;
+  esac
+}
+
+cmd_action_runs() {
+  local sub="${1:-}"
+  shift || true
+  if [[ -z "$sub" ]] || is_help "$sub"; then
+    print_action_runs_help
+    return
+  fi
+  case "$sub" in
+    get)
+      is_help "${1:-}" && { print_action_runs_help; return; }
+      [[ $# -eq 1 ]] || fail "action-runs get requires exactly one run id."
+      require_runtime
+      http_get "/api/action-runs/$(encode_segment "$1")"
+      ;;
+    list)
+      is_help "${1:-}" && { print_action_runs_help; return; }
+      require_runtime
+      local -a args=(--get "$(api_url "/api/action-runs")")
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --action) require_value "$1" "${2:-}"; args+=(--data-urlencode "actionId=$2"); shift 2 ;;
+          --status) require_value "$1" "${2:-}"; args+=(--data-urlencode "status=$2"); shift 2 ;;
+          --type) require_value "$1" "${2:-}"; args+=(--data-urlencode "objectTypeId=$2"); shift 2 ;;
+          --id) require_value "$1" "${2:-}"; args+=(--data-urlencode "primaryId=$2"); shift 2 ;;
+          --started-after) require_value "$1" "${2:-}"; args+=(--data-urlencode "startedAfter=$2"); shift 2 ;;
+          --started-before) require_value "$1" "${2:-}"; args+=(--data-urlencode "startedBefore=$2"); shift 2 ;;
+          --limit) require_value "$1" "${2:-}"; args+=(--data-urlencode "limit=$2"); shift 2 ;;
+          --offset) require_value "$1" "${2:-}"; args+=(--data-urlencode "offset=$2"); shift 2 ;;
+          --order) require_value "$1" "${2:-}"; args+=(--data-urlencode "order=$2"); shift 2 ;;
+          *) fail "Unknown action-runs list option '$1'." ;;
+        esac
+      done
+      http_json "${args[@]}"
+      ;;
+    *) fail "Unknown action-runs command '$sub'." ;;
+  esac
+}
+
+cmd_files_upload() {
+  if is_help "${1:-}"; then
+    print_files_help
+    return
+  fi
+  local source="${1:-}"
+  require_value "files upload" "$source"
+  shift || true
+  [[ -f "$source" ]] || fail "Upload file '$source' does not exist."
+  local logical_path=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --logical-path) require_value "$1" "${2:-}"; logical_path="$2"; shift 2 ;;
+      *) fail "Unknown files upload option '$1'." ;;
+    esac
+  done
+  require_runtime
+  local -a args=(-X POST "$(api_url "/api/files")" --form "file=@${source}")
+  [[ -z "$logical_path" ]] || args+=(--form-string "logicalPath=$logical_path")
+  http_json "${args[@]}"
+}
+
+cmd_files_download() {
+  if is_help "${1:-}"; then
+    print_files_help
+    return
+  fi
+  local context="${1:-}"
+  shift || true
+  require_runtime
+  local route
+  case "$context" in
+    object)
+      [[ $# -ge 2 ]] || fail "files download object requires object type and primary id."
+      route="/api/objects/$(encode_segment "$1")/$(encode_segment "$2")/files/content"
+      shift 2
+      ;;
+    action-run)
+      require_value "files download action-run" "${1:-}"
+      route="/api/action-runs/$(encode_segment "$1")/files/content"
+      shift
+      ;;
+    workflow-run)
+      require_value "files download workflow-run" "${1:-}"
+      route="/api/workflow-runs/$(encode_segment "$1")/files/content"
+      shift
+      ;;
+    *) fail "Unknown file download context '$context'." ;;
+  esac
+  local pointer="" output=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --path) require_value "$1" "${2:-}"; pointer="$2"; shift 2 ;;
+      --output) require_value "$1" "${2:-}"; output="$2"; shift 2 ;;
+      *) fail "Unknown files download option '$1'." ;;
+    esac
+  done
+  [[ -n "$pointer" ]] || fail "files download requires --path <json-pointer>."
+  [[ -n "$output" ]] || fail "files download requires --output <local-path>."
+  http_download "$output" --get "$(api_url "$route")" \
+    --data-urlencode "path=$pointer"
+  jq -cn --arg output "$output" '{downloaded:true,output:$output}'
+}
+
+cmd_files() {
+  local sub="${1:-}"
+  shift || true
+  if [[ -z "$sub" ]] || is_help "$sub"; then
+    print_files_help
+    return
+  fi
+  case "$sub" in
+    upload) cmd_files_upload "$@" ;;
+    download) cmd_files_download "$@" ;;
+    *) fail "Unknown files command '$sub'." ;;
+  esac
+}
+
+cmd_workflows() {
+  local sub="${1:-}"
+  shift || true
+  if [[ -z "$sub" ]] || is_help "$sub"; then
+    print_workflows_help
+    return
+  fi
+  case "$sub" in
+    list)
+      [[ $# -eq 0 ]] || fail "workflows list accepts no arguments."
+      require_runtime
+      http_get "/api/workflows"
+      ;;
+    get)
+      is_help "${1:-}" && { print_workflows_help; return; }
+      [[ $# -eq 1 ]] || fail "workflows get requires exactly one workflow id."
+      require_runtime
+      http_get "/api/workflows/$(encode_segment "$1")"
+      ;;
+    start)
+      is_help "${1:-}" && { print_workflows_help; return; }
+      local workflow_id="${1:-}"
+      require_value "workflows start" "$workflow_id"
+      shift || true
+      local input_source=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --input-file) require_value "$1" "${2:-}"; input_source="$2"; shift 2 ;;
+          *) fail "Unknown workflows start option '$1'." ;;
+        esac
+      done
+      require_runtime
+      local input='{}'
+      [[ -z "$input_source" ]] || input="$(read_json "$input_source")"
+      [[ "$(jq -r 'type' <<<"$input")" == "object" ]] || fail "Workflow input must be a JSON object."
+      http_post_json "/api/workflows/$(encode_segment "$workflow_id")/runs" \
+        "$(jq -cn --argjson input "$input" '{input:$input}')"
+      ;;
+    *) fail "Unknown workflows command '$sub'." ;;
+  esac
+}
+
+cmd_workflow_runs() {
+  local sub="${1:-}"
+  shift || true
+  if [[ -z "$sub" ]] || is_help "$sub"; then
+    print_workflow_runs_help
+    return
+  fi
+  case "$sub" in
+    get)
+      is_help "${1:-}" && { print_workflow_runs_help; return; }
+      [[ $# -eq 1 ]] || fail "workflow-runs get requires exactly one run id."
+      require_runtime
+      http_get "/api/workflow-runs/$(encode_segment "$1")"
+      ;;
+    list)
+      is_help "${1:-}" && { print_workflow_runs_help; return; }
+      require_runtime
+      local -a args=(--get "$(api_url "/api/workflow-runs")")
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --workflow) require_value "$1" "${2:-}"; args+=(--data-urlencode "workflowId=$2"); shift 2 ;;
+          --status) require_value "$1" "${2:-}"; args+=(--data-urlencode "status=$2"); shift 2 ;;
+          --started-after) require_value "$1" "${2:-}"; args+=(--data-urlencode "startedAfter=$2"); shift 2 ;;
+          --started-before) require_value "$1" "${2:-}"; args+=(--data-urlencode "startedBefore=$2"); shift 2 ;;
+          --limit) require_value "$1" "${2:-}"; args+=(--data-urlencode "limit=$2"); shift 2 ;;
+          --offset) require_value "$1" "${2:-}"; args+=(--data-urlencode "offset=$2"); shift 2 ;;
+          --order) require_value "$1" "${2:-}"; args+=(--data-urlencode "order=$2"); shift 2 ;;
+          *) fail "Unknown workflow-runs list option '$1'." ;;
+        esac
+      done
+      http_json "${args[@]}"
+      ;;
+    *) fail "Unknown workflow-runs command '$sub'." ;;
+  esac
+}
+
+cmd_api() {
+  local method="${1:-}"
+  shift || true
+  if [[ -z "$method" ]] || is_help "$method"; then
+    print_api_help
+    return
+  fi
+  case "$method" in
+    get)
+      is_help "${1:-}" && { print_api_help; return; }
+      local path="${1:-}"
+      require_value "api get" "$path"
+      shift || true
+      local output=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --output) require_value "$1" "${2:-}"; output="$2"; shift 2 ;;
+          *) fail "Unknown api get option '$1'." ;;
+        esac
+      done
+      require_runtime
+      validate_api_path "$path"
+      if [[ -z "$output" ]]; then
+        http_get "$path"
+      else
+        http_download "$output" "$(api_url "$path")"
+        jq -cn --arg output "$output" '{downloaded:true,output:$output}'
+      fi
+      ;;
+    post)
+      is_help "${1:-}" && { print_api_help; return; }
+      local path="${1:-}"
+      require_value "api post" "$path"
+      shift || true
+      [[ "${1:-}" == "--file" ]] || fail "api post requires --file <path|->."
+      require_value "--file" "${2:-}"
+      [[ $# -eq 2 ]] || fail "api post accepts only a path and --file <path|->."
+      require_runtime
+      validate_api_path "$path"
+      http_post_json "$path" "$(read_json "$2")"
+      ;;
+    *) fail "Unknown api method '$method'. Only get and post are supported." ;;
+  esac
+}
+
+main() {
+  local command="${1:-}"
+  if [[ -z "$command" ]] || is_help "$command"; then
+    print_main_help
+    return
+  fi
+  shift || true
+  case "$command" in
+    --version|version) printf 'sixb agent CLI %s\n' "$SIXB_AGENT_CLI_VERSION" ;;
+    doctor) cmd_doctor "$@" ;;
+    context) cmd_context "$@" ;;
+    project) cmd_project "$@" ;;
+    ontology) cmd_ontology "$@" ;;
+    objects) cmd_objects "$@" ;;
+    telemetry) cmd_telemetry "$@" ;;
+    actions) cmd_actions "$@" ;;
+    action-runs) cmd_action_runs "$@" ;;
+    files) cmd_files "$@" ;;
+    workflows) cmd_workflows "$@" ;;
+    workflow-runs) cmd_workflow_runs "$@" ;;
+    api) cmd_api "$@" ;;
+    *) fail "Unknown command '$command'. Run 'sixb --help'." ;;
+  esac
+}
+
+main "$@"

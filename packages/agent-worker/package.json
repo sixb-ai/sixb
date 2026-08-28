@@ -30,6 +30,8 @@
   },
   "scripts": {
     "build": "bun ../../scripts/build-package.ts",
+    "generate:agent-cli": "bun ./scripts/generate-agent-cli.ts",
+    "check:agent-cli": "bun ./scripts/generate-agent-cli.ts --check",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "prepack": "bun run build"
@@ -39,6 +41,14 @@
       {
         "from": "./src/skills",
         "to": "./dist/skills"
+      },
+      {
+        "from": "./src/agent-cli/bin",
+        "to": "./dist/agent-cli/bin"
+      },
+      {
+        "from": "./src/agent-cli/generated",
+        "to": "./dist/agent-cli/generated"
       }
     ]
   },
