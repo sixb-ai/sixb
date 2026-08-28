@@ -13,7 +13,9 @@ export function latestWorkLabel(parts: readonly NormalizedPart[]): string {
   for (let index = parts.length - 1; index >= 0; index -= 1) {
     const part = parts[index]
     if (part?.kind === "tool") return toolProgressLabel(part.tool)
-    if (part?.kind === "reasoning" && part.text.trim()) return "Thinking"
+    // `reasoning-start` has no text. Keep the pre-token "Thinking" label through that lifecycle
+    // chunk so the first reasoning delta does not look like a new row mounting.
+    if (part?.kind === "reasoning") return "Thinking"
   }
   return "Working"
 }

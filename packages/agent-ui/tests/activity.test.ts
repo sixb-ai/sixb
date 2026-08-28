@@ -3,7 +3,9 @@ import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { AgentExecutionTrace } from "../src/AgentExecutionTrace"
 import { BashToolView } from "../src/bash/BashToolView"
+import { ACTIVITY_STATUS_ROW_CLASS_NAME, activityStatusAt } from "../src/components/ActivityStatus"
 import { AssistantBody } from "../src/components/MessageParts"
+import { ThinkingMarker } from "../src/components/MessageView"
 import { type NormalizedPart, normalizeDurableParts } from "../src/parts"
 import type { AgentMessagePart } from "../src/types"
 
@@ -111,6 +113,26 @@ describe("assistant work dropdowns", () => {
     expect(html).toContain("group-focus-visible:opacity-100")
     expect(html).toContain("group-data-[state=open]:opacity-100")
     expect(html).not.toContain("Checking the available records.")
+  })
+
+  test("keeps the pre-token and reasoning activity rows on one layout contract", () => {
+    const waiting = renderToStaticMarkup(createElement(ThinkingMarker))
+    const reasoningStarted = renderAssistant([reasoning("")], true)
+
+    expect(waiting).toContain(ACTIVITY_STATUS_ROW_CLASS_NAME)
+    expect(reasoningStarted).toContain(ACTIVITY_STATUS_ROW_CLASS_NAME)
+    expect(reasoningStarted).toContain("Thinking…")
+    expect(reasoningStarted).not.toContain(">Working…<")
+  })
+
+  test("updates long indeterminate waits without inventing completion progress", () => {
+    expect(activityStatusAt("Thinking", 0)).toBe("Thinking")
+    expect(activityStatusAt("Thinking", 7_999)).toBe("Thinking")
+    expect(activityStatusAt("Thinking", 8_000)).toBe("Working through it")
+    expect(activityStatusAt("Thinking", 20_000)).toBe("Taking a closer look")
+    expect(activityStatusAt("Thinking", 55_000)).toBe("Still working")
+    expect(activityStatusAt("Preparing a command", 11_999)).toBe("Preparing a command")
+    expect(activityStatusAt("Preparing a command", 12_000)).toBe("Still preparing a command")
   })
 
   test("describes Sixb help as project work instead of CLI output", () => {

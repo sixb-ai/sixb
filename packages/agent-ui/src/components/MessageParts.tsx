@@ -6,6 +6,7 @@ import { latestWorkLabel } from "../activity-label"
 import { BashToolView } from "../bash/BashToolView"
 import type { NormalizedPart, NormalizedTool } from "../parts"
 import { ReadToolView } from "../read/ReadToolView"
+import { ACTIVITY_STATUS_ROW_CLASS_NAME, ActivityStatusText } from "./ActivityStatus"
 import { FileAttachmentCard } from "./FileAttachmentCard"
 
 /**
@@ -99,14 +100,24 @@ function WorkGroup({
 
   const toolCount = parts.reduce((count, part) => count + (part.kind === "tool" ? 1 : 0), 0)
   const hasTools = toolCount > 0
-  const label = inProgress ? `${latestWorkLabel(parts)}…` : hasTools ? "Worked" : "Reasoning"
+  const liveLabel = latestWorkLabel(parts)
+  const label = hasTools ? "Worked" : "Reasoning"
   const detail =
     !inProgress && hasTools ? `${toolCount} ${toolCount === 1 ? "step" : "steps"}` : undefined
 
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="max-w-full">
-      <CollapsibleTrigger className="group flex w-fit max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-[13px] leading-normal text-muted-foreground outline-none transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-        <span className={cn(inProgress && "shimmer")}>{label}</span>
+      <CollapsibleTrigger
+        className={cn(
+          ACTIVITY_STATUS_ROW_CLASS_NAME,
+          "outline-none transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        )}
+      >
+        {inProgress ? (
+          <ActivityStatusText label={liveLabel} className="shimmer" />
+        ) : (
+          <span>{label}</span>
+        )}
         {detail ? <span className="text-muted-foreground/60">· {detail}</span> : null}
         <ChevronRight className="size-4 shrink-0 opacity-0 transition-all group-hover:opacity-100 group-focus-visible:opacity-100 group-data-[state=open]:rotate-90 group-data-[state=open]:opacity-100" />
       </CollapsibleTrigger>
