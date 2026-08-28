@@ -7,6 +7,7 @@ export interface CliErrorBody {
   readonly status?: number
   readonly message: string
   readonly hint?: string
+  readonly issues?: readonly unknown[]
 }
 
 export class CliError extends Error {

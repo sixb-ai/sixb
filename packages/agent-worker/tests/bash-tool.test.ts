@@ -44,15 +44,17 @@ describe("compressStdout", () => {
     expect(parsed[0]).toEqual(value[0])
   })
 
-  test("middle-truncates a single oversized object, preserving head and tail", () => {
+  test("returns a valid diagnostic preview for a single oversized object", () => {
     const value = { id: "Customer", blob: "x".repeat(500), tail: "END" }
     const result = compressStdout(JSON.stringify(value), CAP)
 
     expect(result.truncated).toBe(true)
     expect(result.text.length).toBeLessThanOrEqual(CAP)
-    expect(result.text.startsWith(`{"id":"Customer"`)).toBe(true)
-    expect(result.text.endsWith(`"tail":"END"}`)).toBe(true)
-    expect(result.text).toContain("truncated to")
+    expect(JSON.parse(result.text)).toMatchObject({
+      _sixbOutputTruncated: true,
+      topLevelKeys: ["id", "blob", "tail"],
+    })
+    expect(JSON.parse(result.text).preview).toStartWith(`{"id":"Customer"`)
   })
 
   test("middle-truncates non-JSON output, keeping head and tail", () => {
