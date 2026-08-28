@@ -1180,6 +1180,7 @@ describe("bound Sixb surface", () => {
         "listLinks",
         "listSubTypes",
         "listTypes",
+        "queryLinks",
         "removeLink",
         "resolveType",
         "upsert",
