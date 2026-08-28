@@ -41,6 +41,7 @@ const SQLITE_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
   facetObjects: true,
   nodes: {
     start: true,
+    refs: true,
     filter: true,
     text: true,
     sort: true,
@@ -92,7 +93,7 @@ const SQLITE_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
     stablePageTokens: true,
   },
   notes: [
-    "SQLite object query pushdown supports start/filter/text/sort/limit/page/traverse/set/project/expand over JSON properties and object links.",
+    "SQLite object query pushdown supports start/refs/filter/text/sort/limit/page/traverse/set/project/expand over JSON properties and object links.",
     "expand hydrates linked objects in-database (top-N per parent via row_number() + json_group_array); core resolves each expansion's cardinality before pushdown, and a mixed/unresolved one stays on the fallback.",
     "Ordered decimal predicates and sorting use the bounded core fallback because SQLite has no native exact decimal type; canonical decimal equality remains pushdown-safe.",
     "Relevance sorting, vector search, and unresolved start.includeSubtypes remain planner fallback or rejection cases.",
@@ -223,18 +224,20 @@ export class SqliteObjectStorage implements ObjectStorage {
     const result = new Map<string, ObjectRow>()
     if (params.items.length === 0) return result
 
-    const stmt = this.db.query(
-      "SELECT * FROM objects WHERE project_id = ? AND object_type_id = ? AND primary_id = ?"
-    )
-    for (const item of params.items) {
-      const row = stmt.get(
-        params.projectId,
-        item.objectTypeId,
-        item.primaryId
-      ) as DatabaseRow | null
-      if (row) {
-        result.set(`${item.objectTypeId}:${item.primaryId}`, this.rowToObject(row))
-      }
+    const rows = this.db
+      .query(
+        `
+          SELECT object.*
+          FROM json_each(?) AS requested
+          JOIN objects AS object
+            ON object.project_id = ?
+           AND object.object_type_id = json_extract(requested.value, '$.objectTypeId')
+           AND object.primary_id = json_extract(requested.value, '$.primaryId')
+        `
+      )
+      .all(JSON.stringify(params.items), params.projectId) as DatabaseRow[]
+    for (const row of rows) {
+      result.set(`${row.object_type_id}:${row.primary_id}`, this.rowToObject(row))
     }
     return result
   }

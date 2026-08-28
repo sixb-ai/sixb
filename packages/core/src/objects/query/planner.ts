@@ -40,6 +40,7 @@ const DEFAULT_MAX_FALLBACK_ROWS = 1_000
 // accidental full scans.
 const fallbackNodeKinds = new Set<ObjectQuery["kind"]>([
   "start",
+  "refs",
   "filter",
   "sort",
   "limit",
@@ -194,6 +195,8 @@ function collectNodeProviderIssues(
           "Provider does not support start.includeSubtypes expansion"
         )
       }
+      return
+    case "refs":
       return
     case "filter":
       collectPredicateProviderIssues(query.predicate, `${path}.predicate`, capabilities, issues)
@@ -474,6 +477,7 @@ function collectFallbackNodeIssues(
 
   switch (query.kind) {
     case "start":
+    case "refs":
       return
     case "filter":
     case "limit":
@@ -512,6 +516,7 @@ function hasExplicitResultBound(query: ObjectQuery): boolean {
   switch (query.kind) {
     case "limit":
     case "page":
+    case "refs":
       return true
     case "start":
       return false

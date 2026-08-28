@@ -13,6 +13,7 @@ export interface PgObjectQueryPageRow {
   primary_id: string
   properties: unknown
   _cursor_properties?: unknown
+  _query_order?: number
 }
 
 export interface CompiledPgObjectQuery {
@@ -73,7 +74,7 @@ type CompiledOrderField =
     }
   | {
       kind: "column"
-      column: "object_type_id" | "primary_id"
+      column: "object_type_id" | "primary_id" | "_query_order"
       direction: "asc" | "desc"
     }
 
@@ -177,6 +178,8 @@ function compileObjectQueryInternal(
   switch (query.kind) {
     case "start":
       return compileStart(projectId, query)
+    case "refs":
+      return compileRefs(projectId, query)
     case "filter":
       return compileFilter(projectId, query.input, query.predicate)
     case "sort":
@@ -236,6 +239,54 @@ function compileStart(
     totalSql:
       "SELECT COUNT(*)::bigint AS total FROM objects WHERE project_id = ? AND object_type_id = ?",
     totalArgs: [projectId, query.objectTypeId],
+    order,
+    hasMore: () => false,
+    trimRows: identityRows,
+    nextPageToken: () => undefined,
+  }
+}
+
+function compileRefs(
+  projectId: string,
+  query: Extract<ObjectQuery, { kind: "refs" }>
+): CompiledPgObjectQuery {
+  if (query.refs.length === 0) {
+    throw new Error("[SixbPg] PostgreSQL object storage requires at least one ref")
+  }
+
+  const order = compileOrder(refsOrderFields())
+  const refsJson = JSON.stringify(query.refs)
+  const requested = `
+    SELECT
+      (ref.ordinality - 1)::integer AS _query_order,
+      ref.value ->> 'objectTypeId' AS object_type_id,
+      ref.value ->> 'primaryId' AS primary_id
+    FROM jsonb_array_elements(?::text::jsonb) WITH ORDINALITY AS ref(value, ordinality)
+  `
+  const sql = `
+    WITH requested AS (${requested})
+    SELECT selected.*, requested._query_order, selected.properties AS _cursor_properties
+    FROM requested
+    JOIN objects AS selected
+      ON selected.project_id = ?
+     AND selected.object_type_id = requested.object_type_id
+     AND selected.primary_id = requested.primary_id
+    ORDER BY requested._query_order ASC
+  `
+
+  return {
+    sql,
+    args: [refsJson, projectId],
+    totalSql: `
+      WITH requested AS (${requested})
+      SELECT COUNT(*)::bigint AS total
+      FROM requested
+      JOIN objects AS selected
+        ON selected.project_id = ?
+       AND selected.object_type_id = requested.object_type_id
+       AND selected.primary_id = requested.primary_id
+    `,
+    totalArgs: [refsJson, projectId],
     order,
     hasMore: () => false,
     trimRows: identityRows,
@@ -722,6 +773,7 @@ function compileProject(
   const projection = compileProjectionExpression(properties)
   const inputOrder = compileOrder(input.order.fields, "input", "input._cursor_properties")
   const outputOrder = compileOrder(input.order.fields, undefined, "_cursor_properties")
+  const orderColumns = compileOrderPassthroughColumns(input.order.fields, "input")
 
   return {
     sql: `
@@ -734,7 +786,7 @@ function compileProject(
         input.created_at,
         input.updated_at,
         input.version,
-        input.last_commit_id
+        input.last_commit_id${orderColumns}
       FROM (${input.sql}) AS input
       ORDER BY ${inputOrder.sql}
     `,
@@ -753,6 +805,8 @@ function compileAggregateSource(projectId: string, query: ObjectQuery): Compiled
   switch (query.kind) {
     case "start":
       return compileAggregateStart(projectId, query)
+    case "refs":
+      return compileAggregateRefs(projectId, query)
     case "filter":
       return compileAggregateWhere(projectId, query.input, compilePredicate(query.predicate))
     case "text": {
@@ -781,7 +835,9 @@ function compileAggregateSource(projectId: string, query: ObjectQuery): Compiled
     case "page":
       return compileRowQueryAggregateSource(projectId, query)
     case "vector":
-      throw new Error(`[SixbPg] PostgreSQL object storage does not support query node 'vector'`)
+      throw new Error(
+        `[SixbPg] PostgreSQL object storage does not support query node '${query.kind}'`
+      )
   }
 }
 
@@ -800,6 +856,27 @@ function compileAggregateStart(
       WHERE project_id = ? AND object_type_id = ?
     `,
     args: [projectId, query.objectTypeId],
+  }
+}
+
+function compileAggregateRefs(
+  projectId: string,
+  query: Extract<ObjectQuery, { kind: "refs" }>
+): CompiledAggregateSource {
+  if (query.refs.length === 0) {
+    throw new Error("[SixbPg] PostgreSQL object storage requires at least one ref")
+  }
+
+  return {
+    sql: `
+      SELECT selected.project_id, selected.object_type_id, selected.primary_id, selected.properties
+      FROM jsonb_array_elements(?::text::jsonb) AS ref(value)
+      JOIN objects AS selected
+        ON selected.project_id = ?
+       AND selected.object_type_id = (ref.value ->> 'objectTypeId')
+       AND selected.primary_id = (ref.value ->> 'primaryId')
+    `,
+    args: [JSON.stringify(query.refs), projectId],
   }
 }
 
@@ -1291,6 +1368,19 @@ function identityOrderFields(): readonly CompiledOrderField[] {
   ]
 }
 
+function refsOrderFields(): readonly CompiledOrderField[] {
+  return [{ kind: "column", column: "_query_order", direction: "asc" }]
+}
+
+function compileOrderPassthroughColumns(
+  fields: readonly CompiledOrderField[],
+  qualifier: string
+): string {
+  return fields.some((field) => field.kind === "column" && field.column === "_query_order")
+    ? `,\n        ${qualifier}._query_order`
+    : ""
+}
+
 function compileKeysetPredicate(
   fields: readonly CompiledOrderField[],
   cursor: readonly EncodedCursorValue[],
@@ -1451,7 +1541,9 @@ function cursorValueForField(
     field.kind === "column"
       ? field.column === "object_type_id"
         ? row.object_type_id
-        : row.primary_id
+        : field.column === "primary_id"
+          ? row.primary_id
+          : row._query_order
       : properties[field.propertyId]
 
   return value === null || value === undefined ? { nullish: true } : { nullish: false, value }
@@ -1472,7 +1564,10 @@ function compiledPropertyValueExpression(
     : jsonValueExpression(propertyColumn)
 }
 
-function columnExpression(column: "object_type_id" | "primary_id", qualifier?: string): string {
+function columnExpression(
+  column: "object_type_id" | "primary_id" | "_query_order",
+  qualifier?: string
+): string {
   return qualifier ? `${qualifier}.${column}` : column
 }
 

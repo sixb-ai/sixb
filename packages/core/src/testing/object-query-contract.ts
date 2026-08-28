@@ -145,7 +145,7 @@ export const objectQueryContractOntology = new OntologyRegistry({
  *
  * The contract defines the portable V1 query surface: capability declarations,
  * validation/normalization handoff, provider pushdown, bounded fallback,
- * traversal, set operations, pagination, search profile defaults, and stable
+ * ordered reference sets, traversal, set operations, pagination, search profile defaults, and stable
  * structured rejections for features outside a provider's capability map.
  */
 export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
@@ -342,6 +342,153 @@ export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
         })
         expect(result.total).toBe(2)
         expect(result.hasMore).toBe(false)
+      })
+    })
+
+    test("queries opaque ids through exact primary-property predicates", async () => {
+      await withStorage(async ({ objects: storage, fixture }) => {
+        const issue297 = "github:issue:sixb-ai/sixb#297"
+        const issue298 = "github:issue:sixb-ai/sixb#298"
+        await fixture.seed({
+          objects: [
+            objectSeed(Asset.id, issue297, { id: issue297 }),
+            objectSeed(Asset.id, issue298, { id: issue298 }),
+          ],
+        })
+
+        const exact = await executeObjectQuery(
+          {
+            projectId,
+            query: {
+              kind: "filter",
+              predicate: { op: "eq", propertyId: "id", value: issue297 },
+              input: { kind: "start", objectTypeId: Asset.id },
+            },
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+        const multiple = await executeObjectQuery(
+          {
+            projectId,
+            query: {
+              kind: "filter",
+              predicate: { op: "in", propertyId: "id", values: [issue298, issue297] },
+              input: { kind: "start", objectTypeId: Asset.id },
+            },
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+        const refs = await executeObjectQuery(
+          {
+            projectId,
+            query: {
+              kind: "refs",
+              refs: [
+                { objectTypeId: Asset.id, primaryId: issue298 },
+                { objectTypeId: Asset.id, primaryId: issue297 },
+              ],
+            },
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+
+        // ContractAsset.id intentionally has no query flags. Primary eq/in remain portable exact
+        // lookups, and the JSON query body preserves URL-reserved characters without encoding.
+        expect(exact.plan.mode).toBe("pushdown")
+        expect(ids(exact)).toEqual([issue297])
+        expect(multiple.plan.mode).toBe("pushdown")
+        expect(sortedIds(multiple)).toEqual([issue297, issue298])
+        expect(refs.plan.mode).toBe(
+          storage.queryCapabilities().nodes?.refs === true ? "pushdown" : "fallback"
+        )
+        expect(ids(refs)).toEqual([issue298, issue297])
+      })
+    })
+
+    test("executes ordered heterogeneous refs with pagination and projection", async () => {
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await seedObjectQueryContractData(fixture)
+
+        const refs: Extract<ObjectQuery, { kind: "refs" }>["refs"] = [
+          { objectTypeId: Device.id, primaryId: "device-sensor" },
+          { objectTypeId: Room.id, primaryId: "room-gamma" },
+          { objectTypeId: Room.id, primaryId: "missing" },
+          { objectTypeId: Room.id, primaryId: "room-alpha" },
+        ]
+        const first = await executeObjectQuery(
+          {
+            projectId,
+            query: {
+              kind: "project",
+              properties: ["id"],
+              input: { kind: "page", pageSize: 2, input: { kind: "refs", refs } },
+            },
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+        const second = await executeObjectQuery(
+          {
+            projectId,
+            query: {
+              kind: "project",
+              properties: ["id"],
+              input: {
+                kind: "page",
+                pageSize: 2,
+                pageToken: first.nextPageToken,
+                input: { kind: "refs", refs },
+              },
+            },
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+        const count = await countObjects(
+          { projectId, query: { kind: "refs", refs } },
+          { ontology: objectQueryContractOntology, storage }
+        )
+
+        const expectedMode =
+          storage.queryCapabilities().nodes?.refs === true ? "pushdown" : "fallback"
+        expect(first.plan.mode).toBe(expectedMode)
+        expect(ids(first)).toEqual(["device-sensor", "room-gamma"])
+        expect(first.objects.map((row) => row.properties)).toEqual([
+          { id: "device-sensor" },
+          { id: "room-gamma" },
+        ])
+        expect(first.total).toBe(3)
+        expect(first.hasMore).toBe(true)
+        expect(first.nextPageToken).toBeTruthy()
+        expect(second.plan.mode).toBe(expectedMode)
+        expect(ids(second)).toEqual(["room-alpha"])
+        expect(second.hasMore).toBe(false)
+        expect(count.plan.mode).toBe(expectedMode)
+        expect(count.count).toBe(3)
+      })
+    })
+
+    test("composes refs with traversal in provider pushdown", async () => {
+      await withStorage(async ({ objects: storage, fixture }) => {
+        if (storage.queryCapabilities().nodes?.refs !== true) return
+        await seedObjectQueryContractData(fixture)
+
+        const result = await executeObjectQuery(
+          {
+            projectId,
+            query: {
+              kind: "traverse",
+              direction: "outgoing",
+              linkId: "hasDevice",
+              input: {
+                kind: "refs",
+                refs: [{ objectTypeId: Room.id, primaryId: "room-alpha" }],
+              },
+            },
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+
+        expect(result.plan.mode).toBe("pushdown")
+        expect(ids(result)).toEqual(["device-projector"])
       })
     })
 

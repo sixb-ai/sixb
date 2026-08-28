@@ -28,6 +28,7 @@ export type {
   ObjectQueryPredicateIn,
   ObjectQueryPredicateNot,
   ObjectQueryProject,
+  ObjectQueryRefs,
   ObjectQueryResultShape,
   ObjectQuerySet,
   ObjectQuerySetOperation,
@@ -50,6 +51,7 @@ export type {
   ObjectQueryExecutorListResult,
   ObjectQueryExecutorRow,
 } from "./objects/sdk/query-executor"
+export type { ObjectRef } from "./ontology/refs"
 export type {
   LinkToken,
   ObjectTypeWithPropertyTokens,

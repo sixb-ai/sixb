@@ -34,6 +34,7 @@ const PG_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
   facetObjects: true,
   nodes: {
     start: true,
+    refs: true,
     filter: true,
     text: true,
     sort: true,
@@ -85,7 +86,7 @@ const PG_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
     stablePageTokens: true,
   },
   notes: [
-    "PostgreSQL object query pushdown supports start/filter/text/sort/limit/page/traverse/set/project/expand over JSONB properties and object links.",
+    "PostgreSQL object query pushdown supports start/refs/filter/text/sort/limit/page/traverse/set/project/expand over JSONB properties and object links.",
     "expand hydrates linked objects in-database (top-N per parent via LATERAL + jsonb_agg); core resolves each expansion's cardinality before pushdown, and a mixed/unresolved one stays on the fallback.",
     "Exact decimal predicates, ordering, and keyset pagination use PostgreSQL numeric casts.",
     "Relevance sorting, vector search, and unresolved start.includeSubtypes remain planner fallback or rejection cases.",

@@ -2,6 +2,20 @@ import { expect, test } from "bun:test"
 import type { ObjectQuery } from "@sixb/core"
 import { compileObjectQuery } from "../src/object-query-compiler"
 
+test("refs compile to one JSON table parameter and preserve authored order", () => {
+  const refs = [
+    { objectTypeId: "Issue", primaryId: "github:issue:sixb-ai/sixb#297" },
+    { objectTypeId: "Customer", primaryId: "cust-1" },
+  ]
+  const compiled = compileObjectQuery("project-a", { kind: "refs", refs })
+
+  expect(compiled.sql).toContain("FROM json_each(?) AS ref")
+  expect(compiled.sql).toContain("requested._query_order")
+  expect(compiled.sql).toContain("ORDER BY requested._query_order ASC")
+  expect(compiled.args).toEqual([JSON.stringify(refs), "project-a"])
+  expect(compiled.totalArgs).toEqual([JSON.stringify(refs), "project-a"])
+})
+
 test("expand SQL hydrates an outgoing many link as an ordered json array", () => {
   const compiled = compileObjectQuery("project-a", {
     kind: "expand",

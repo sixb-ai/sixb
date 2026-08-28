@@ -574,6 +574,7 @@ export type {
   ObjectQueryPredicateIn,
   ObjectQueryPredicateNot,
   ObjectQueryProject,
+  ObjectQueryRefs,
   ObjectQueryResultShape,
   ObjectQuerySet,
   ObjectQuerySetOperation,
