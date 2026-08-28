@@ -3,10 +3,8 @@ import { mkdir } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 
 const SOURCE_URL = "https://models.dev/api.json"
-const OUTPUT_PATH = resolve(
-  import.meta.dir,
-  "../packages/agent-worker/src/ai-pricing/models-dev-pricing.json"
-)
+const OUTPUT_PATH = resolve(import.meta.dir, "../packages/agent-worker/src/models-dev/catalog.json")
+
 interface ModelsDevCost {
   readonly input: number
   readonly output: number
@@ -26,6 +24,10 @@ interface ModelsDevMode {
 
 interface ModelsDevModel {
   readonly cost?: ModelsDevCost
+  readonly limit?: {
+    readonly context?: number
+    readonly input?: number
+  }
   readonly experimental?: {
     readonly modes?: Readonly<Record<string, ModelsDevMode>>
   }
@@ -33,6 +35,11 @@ interface ModelsDevModel {
 
 interface ModelsDevProvider {
   readonly models: Readonly<Record<string, ModelsDevModel>>
+}
+
+interface GeneratedModelLimits {
+  readonly context: number
+  readonly input?: number
 }
 
 interface GeneratedRateSet {
@@ -50,27 +57,32 @@ interface GeneratedPrice extends GeneratedRateSet {
   readonly modes?: Readonly<Record<string, Omit<GeneratedPrice, "modes">>>
 }
 
+interface GeneratedCatalogModel {
+  readonly limits?: GeneratedModelLimits
+  readonly pricing?: GeneratedPrice
+}
+
 const response = await fetch(SOURCE_URL)
 if (!response.ok) {
-  throw new Error(`[SixbPricing] Models.dev returned HTTP ${response.status}.`)
+  throw new Error(`[SixbModelsDev] Models.dev returned HTTP ${response.status}.`)
 }
 const sourceText = await response.text()
 const source = JSON.parse(sourceText) as Readonly<Record<string, ModelsDevProvider>>
-const providers: Record<string, Record<string, GeneratedPrice>> = {}
+const providers: Record<string, Record<string, GeneratedCatalogModel>> = {}
+let modelCount = 0
 
 for (const [providerId, provider] of Object.entries(source).sort(compareEntries)) {
-  const models: Record<string, GeneratedPrice> = {}
+  const models: Record<string, GeneratedCatalogModel> = {}
   for (const [modelId, model] of Object.entries(provider.models).sort(compareEntries)) {
-    if (!model.cost) continue
-    const modes = Object.fromEntries(
-      Object.entries(model.experimental?.modes ?? {})
-        .sort(compareEntries)
-        .flatMap(([mode, value]) => (value.cost ? [[mode, generatedPrice(value.cost)]] : []))
-    )
+    const limits = generatedLimits(model.limit)
+    const pricing = model.cost ? generatedPrice(model.cost, model.experimental?.modes) : undefined
+    if (!limits && !pricing) continue
+
     models[modelId] = {
-      ...generatedPrice(model.cost),
-      ...(Object.keys(modes).length ? { modes } : {}),
+      ...(limits ? { limits } : {}),
+      ...(pricing ? { pricing } : {}),
     }
+    modelCount += 1
   }
   if (Object.keys(models).length > 0) providers[providerId] = models
 }
@@ -88,20 +100,42 @@ const output = {
 await mkdir(dirname(OUTPUT_PATH), { recursive: true })
 await Bun.write(OUTPUT_PATH, `${JSON.stringify(output)}\n`)
 console.log(
-  `[SixbPricing] Wrote ${Object.keys(providers).length} providers to ${OUTPUT_PATH} (${output.source.version}).`
+  `[SixbModelsDev] Wrote ${modelCount} models from ${Object.keys(providers).length} providers to ${OUTPUT_PATH} (${output.source.version}).`
 )
 
-function generatedPrice(cost: ModelsDevCost): Omit<GeneratedPrice, "modes"> {
+function generatedLimits(limit: ModelsDevModel["limit"]): GeneratedModelLimits | undefined {
+  if (!isPositiveSafeInteger(limit?.context)) return undefined
+  return {
+    context: limit.context,
+    ...(isPositiveSafeInteger(limit.input) ? { input: limit.input } : {}),
+  }
+}
+
+function generatedPrice(
+  cost: ModelsDevCost,
+  sourceModes?: Readonly<Record<string, ModelsDevMode>>
+): GeneratedPrice {
+  const modes = Object.fromEntries(
+    Object.entries(sourceModes ?? {})
+      .sort(compareEntries)
+      .flatMap(([mode, value]) =>
+        value.cost ? [[mode, generatedPrice(value.cost, undefined)]] : []
+      )
+  )
   const tiers = cost.tiers?.map((tier) => {
     if (tier.tier.type !== "context") {
-      throw new Error(`[SixbPricing] Unsupported Models.dev tier '${tier.tier.type}'.`)
+      throw new Error(`[SixbModelsDev] Unsupported Models.dev tier '${tier.tier.type}'.`)
     }
     return {
       ...rateSet(tier),
       aboveInputTokens: integerString(tier.tier.size, "tier size"),
     }
   })
-  return { ...rateSet(cost), ...(tiers?.length ? { tiers } : {}) }
+  return {
+    ...rateSet(cost),
+    ...(tiers?.length ? { tiers } : {}),
+    ...(Object.keys(modes).length ? { modes } : {}),
+  }
 }
 
 function rateSet(cost: ModelsDevCost): GeneratedRateSet {
@@ -133,11 +167,11 @@ function rateSet(cost: ModelsDevCost): GeneratedRateSet {
  */
 function dollarsPerMillionToNanos(value: number): string {
   if (!Number.isFinite(value) || value < 0) {
-    throw new Error(`[SixbPricing] Invalid Models.dev price '${String(value)}'.`)
+    throw new Error(`[SixbModelsDev] Invalid Models.dev price '${String(value)}'.`)
   }
   const decimal = value.toString()
   const match = /^(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/.exec(decimal)
-  if (!match) throw new Error(`[SixbPricing] Invalid Models.dev decimal '${decimal}'.`)
+  if (!match) throw new Error(`[SixbModelsDev] Invalid Models.dev decimal '${decimal}'.`)
 
   const whole = match[1]!
   const fraction = match[2] ?? ""
@@ -153,16 +187,22 @@ function dollarsPerMillionToNanos(value: number): string {
     scaled = (coefficient + divisor / 2n) / divisor
   }
   if (scaled < 0n || scaled > 9_223_372_036_854_775_807n) {
-    throw new Error(`[SixbPricing] Models.dev price '${decimal}' exceeds signed 64-bit nanounits.`)
+    throw new Error(
+      `[SixbModelsDev] Models.dev price '${decimal}' exceeds signed 64-bit nanounits.`
+    )
   }
   return scaled.toString()
 }
 
 function integerString(value: number, field: string): string {
   if (!Number.isSafeInteger(value) || value < 0) {
-    throw new Error(`[SixbPricing] Models.dev ${field} must be a non-negative safe integer.`)
+    throw new Error(`[SixbModelsDev] Models.dev ${field} must be a non-negative safe integer.`)
   }
   return value.toString()
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
 }
 
 function compareEntries(

@@ -2,7 +2,7 @@ import { posix } from "node:path"
 import type { BlobStorage, CommandResult, FileRef } from "@sixb/core"
 import type { AgentRunDiagnostic } from "@sixb/core/storage"
 import { waitForAbort } from "./abort"
-import type { BashSandboxHandle } from "./bash-tool"
+import type { AgentSandboxHandle } from "./sandbox-handle"
 
 const OUTPUT_COLLECTION_TIMEOUT_MS = 30_000
 const OUTPUT_SCAN_MAX_FILES = 100
@@ -33,7 +33,7 @@ interface CollectionWindow {
 }
 
 export async function collectAgentOutputAttachments(input: {
-  readonly sandboxReady?: Promise<BashSandboxHandle>
+  readonly sandboxReady?: Promise<AgentSandboxHandle>
   readonly sandboxWasUsed?: () => boolean
   readonly blobStorage: BlobStorage
   readonly signal: AbortSignal
@@ -48,7 +48,7 @@ export async function collectAgentOutputAttachments(input: {
   }
   window.signal.throwIfAborted()
 
-  let handle: BashSandboxHandle
+  let handle: AgentSandboxHandle
   try {
     handle = await waitForAbort(input.sandboxReady, window.signal)
   } catch (error) {
@@ -160,7 +160,7 @@ export async function collectAgentOutputAttachments(input: {
 }
 
 async function listOutputFiles(
-  handle: BashSandboxHandle,
+  handle: AgentSandboxHandle,
   window: CollectionWindow
 ): Promise<{
   readonly files: readonly ListedOutputFile[]
@@ -239,7 +239,7 @@ async function listOutputFiles(
 }
 
 async function readOutputFile(
-  handle: BashSandboxHandle,
+  handle: AgentSandboxHandle,
   file: ListedOutputFile,
   window: CollectionWindow
 ): Promise<

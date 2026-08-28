@@ -352,13 +352,16 @@ function answerModel(captureTools?: (names: readonly string[]) => void): MockLan
 }
 
 function compactingAnswerModel(input: {
+  readonly provider?: string
+  readonly modelId?: string
   readonly captureSummaryPrompt: (prompt: LanguageModelV4CallOptions["prompt"]) => void
   readonly captureAnswerPrompt: (prompt: LanguageModelV4CallOptions["prompt"]) => void
   readonly captureSummaryReasoning?: (reasoning: LanguageModelV4CallOptions["reasoning"]) => void
   readonly captureAnswerReasoning?: (reasoning: LanguageModelV4CallOptions["reasoning"]) => void
 }): MockLanguageModelV4 {
   return new MockLanguageModelV4({
-    modelId: "mock-model",
+    ...(input.provider === undefined ? {} : { provider: input.provider }),
+    modelId: input.modelId ?? "mock-model",
     doGenerate: async (options) => {
       input.captureSummaryPrompt(options.prompt)
       input.captureSummaryReasoning?.(options.reasoning)
@@ -1972,6 +1975,68 @@ describe("AgentWorker", () => {
           id: "svc_agent_assistant",
         })
       ).resolves.toBeNull()
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("automatically checkpoints with the selected model's catalog budget", async () => {
+    const summaryPrompts: LanguageModelV4CallOptions["prompt"][] = []
+    const modelId = "gemini-2.5-flash-image"
+    const sixb = buildSixb(
+      compactingAnswerModel({
+        provider: "google.generative-ai",
+        modelId,
+        captureSummaryPrompt: (prompt) => {
+          summaryPrompts.push(prompt)
+        },
+        captureAnswerPrompt: () => {},
+      })
+    )
+    const storage = agentStorageOf(sixb)
+    const threadId = "automatic_compaction_thread"
+    await storage.threads.create({
+      id: threadId,
+      projectId: PROJECT_ID,
+      agentId: "assistant",
+      ownerPrincipal: REQUESTER,
+    })
+    for (let index = 0; index < 5; index += 1) {
+      await seedCompletedConversationTurn({
+        sixb,
+        threadId,
+        index,
+        text: `${`automatic-turn-${index}-`}${"x".repeat(12_000)}`,
+      })
+    }
+
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      const request = await requestAgentAs(sixb, REQUESTER, {
+        agentId: "assistant",
+        threadId,
+        text: "Continue with the catalog-derived context budget.",
+      })
+      const run = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({
+            projectId: PROJECT_ID,
+            id: request.run.id,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "automatic catalog compaction" }
+      )
+
+      expect(run.status).toBe("succeeded")
+      await expect(
+        storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
+      ).resolves.toMatchObject({
+        createdByRunId: run.id,
+        summaryModelId: modelId,
+      })
+      expect(summaryPrompts).toHaveLength(1)
     } finally {
       await worker.stop()
     }

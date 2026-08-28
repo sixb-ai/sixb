@@ -1,6 +1,6 @@
 import type { AgentDefinition } from "@sixb/core"
-import type { ResolvedAgentContextConfig } from "@sixb/core/internal/agents"
 import {
+  type AgentContextEstimateTool,
   agentContextCheckpointId,
   buildAgentSystemPrompt,
   estimateAgentContextMessagesTokens,
@@ -16,12 +16,13 @@ import type {
   AgentMessageRecord,
   AgentRunRecord,
 } from "@sixb/core/storage"
-import { AgentStorageError } from "@sixb/core/storage"
+import { AgentStorageError, stableJsonStringify } from "@sixb/core/storage"
 import { generateText } from "ai"
 import { type AgentSkill, renderAgentSkillCatalog } from "./agent-skills"
-import { agentContextEstimateTools } from "./context-estimation-tools"
+import type { AgentContextBudget } from "./context-budget"
 import { AgentContextCompactionError, AgentExecutionLostError } from "./errors"
 import { type LoadedAgentThreadModelContext, loadAgentThreadModelContext } from "./thread-context"
+import { type AgentModelToolSpec, agentModelToolSpecs } from "./tools/model-spec"
 import type { AgentTurnRuntime } from "./turn-runtime"
 import type { AgentExecutionContext } from "./types"
 
@@ -53,10 +54,11 @@ export interface PreparedAgentConversationContext {
 export async function prepareAgentConversationContext(input: {
   readonly context: AgentExecutionContext
   readonly agent: AgentDefinition
+  readonly budget: AgentContextBudget
   readonly run: AgentRunRecord
   readonly runtime: AgentTurnRuntime
 }): Promise<PreparedAgentConversationContext> {
-  const { context, agent, run, runtime } = input
+  const { context, agent, budget, run, runtime } = input
   const [skills, initialContext] = await Promise.all([
     context.agentSkills,
     loadAgentThreadModelContext({
@@ -67,18 +69,17 @@ export async function prepareAgentConversationContext(input: {
   ])
   runtime.assertCanContinue()
 
-  const config = agent.loop?.context
-  if (!config) return { threadContext: initialContext, skills }
-
   const estimateShape = {
     systemPrompt: buildAgentSystemPrompt({
       instructions: agent.instructions,
       addendum: renderAgentSkillCatalog(skills, "conversation"),
     }),
-    tools: agentContextEstimateTools({
-      definitions: agent.tools,
-      valueTypesById: context.valueTypesById,
-    }),
+    tools: contextEstimateTools(
+      agentModelToolSpecs({
+        definitions: agent.tools,
+        valueTypesById: context.valueTypesById,
+      })
+    ),
   }
   const estimatedInputTokensBefore = await estimateAgentConversationInputTokens({
     context,
@@ -88,12 +89,10 @@ export async function prepareAgentConversationContext(input: {
   })
   runtime.assertCanContinue()
 
-  const inputBudget = config.windowTokens - config.reserveTokens
   if (
     !shouldCompactAgentContext({
       estimatedInputTokens: estimatedInputTokensBefore,
-      windowTokens: config.windowTokens,
-      reserveTokens: config.reserveTokens,
+      inputBudgetTokens: budget.inputBudgetTokens,
     })
   ) {
     return { threadContext: initialContext, skills }
@@ -111,24 +110,24 @@ export async function prepareAgentConversationContext(input: {
       throw new AgentContextCompactionError(
         "context_limit_exceeded",
         run.id,
-        "The current run already compacted this thread, but its retained context still exceeds the configured input budget."
+        "The current run already compacted this thread, but its retained context still exceeds the model input budget."
       )
     }
     const boundary = selectAgentContextCompactionBoundary({
       messages: initialContext.retainedMessages,
-      keepRecentTokens: config.keepRecentTokens,
+      keepRecentTokens: budget.keepRecentTokens,
     })
     if (!boundary) {
       throw new AgentContextCompactionError(
         "context_limit_exceeded",
         run.id,
-        "The current request exceeds the configured input budget and no older complete turn can be removed."
+        "The current request exceeds the model input budget and no older complete turn can be removed."
       )
     }
 
     const summary = await generateCheckpointSummary({
       agent,
-      config,
+      budget,
       run,
       runtime,
       previousCheckpoint: initialContext.checkpoint,
@@ -161,11 +160,11 @@ export async function prepareAgentConversationContext(input: {
         messages: boundary.retainedMessages,
       }),
     }).tokens
-    if (estimatedInputTokensAfter > inputBudget) {
+    if (estimatedInputTokensAfter > budget.inputBudgetTokens) {
       throw new AgentContextCompactionError(
         "context_limit_exceeded",
         run.id,
-        "The summary and selected recent tail still exceed the configured input budget. Increase windowTokens or reduce keepRecentTokens."
+        "The summary and selected recent tail still exceed the model input budget. Reduce loop.context.keepRecentTokens or override loop.context.windowTokens."
       )
     }
 
@@ -220,7 +219,7 @@ export async function estimateAgentConversationInputTokens(input: {
   readonly agent: AgentDefinition
   readonly threadContext: LoadedAgentThreadModelContext
   readonly systemPrompt: string
-  readonly tools: ReturnType<typeof agentContextEstimateTools>
+  readonly tools: readonly AgentContextEstimateTool[]
 }): Promise<number> {
   const { context, agent, threadContext } = input
   const checkpointHead = threadContext.checkpoint?.observedHeadSeq ?? 0
@@ -263,6 +262,16 @@ export async function estimateAgentConversationInputTokens(input: {
   }).tokens
 }
 
+function contextEstimateTools(
+  specs: readonly AgentModelToolSpec[]
+): readonly AgentContextEstimateTool[] {
+  return specs.map((spec) => ({
+    name: spec.name,
+    description: spec.description,
+    inputSchema: stableJsonStringify(spec.inputSchema),
+  }))
+}
+
 function findLatestUsageAnchor(messages: readonly AgentMessageRecord[], afterSeq: number): number {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
@@ -273,7 +282,7 @@ function findLatestUsageAnchor(messages: readonly AgentMessageRecord[], afterSeq
 
 async function generateCheckpointSummary(input: {
   readonly agent: AgentDefinition
-  readonly config: ResolvedAgentContextConfig
+  readonly budget: AgentContextBudget
   readonly run: AgentRunRecord
   readonly runtime: AgentTurnRuntime
   readonly previousCheckpoint: AgentContextCheckpointRecord | null
@@ -292,7 +301,7 @@ async function generateCheckpointSummary(input: {
       prompt: summaryPrompt(input.previousCheckpoint, input.messages),
       maxOutputTokens: Math.min(
         SUMMARY_MAX_OUTPUT_TOKENS,
-        Math.max(1, Math.floor(input.config.reserveTokens / 2))
+        Math.max(1, Math.floor(input.budget.reserveTokens / 2))
       ),
       prepareStep: input.runtime.usageRecorder.prepareStep,
       onLanguageModelCallEnd: input.runtime.usageRecorder.onLanguageModelCallEnd,

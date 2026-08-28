@@ -37,7 +37,7 @@ export const invoiceAssistant = defineAgent("invoice-assistant", {
 | `providerOptions` | provider-keyed object | No | Per-provider passthrough, e.g. `{ openai: { ... } }`. |
 | `groups` | `GroupDefinition[]` | No | Gate who can use the agent and what it can reach. See [Authorization](./authorization.md). |
 | `tools` | `AgentToolDefinition[]` | No | Worker-side tools this agent is explicitly allowed to call. Defaults to none. |
-| `loop` | `AgentLoopConfig` | No | Step cap and optional model-context budget. |
+| `loop` | `AgentLoopConfig` | No | Step cap and optional context-budget overrides. |
 
 ## The model
 
@@ -114,9 +114,15 @@ continues until it stops or hits `loop.stopWhen.maxSteps` (default 25).
 loop: { stopWhen: { maxSteps: 12 } }
 ```
 
-Add `loop.context` to checkpoint long conversations before their next model request exceeds the
-model's context window. Sixb keeps the full transcript; only the model-facing view becomes a
-continuation summary plus recent complete turns.
+Sixb automatically checkpoints long conversations before their next model request exceeds the
+selected model's context window. The worker resolves exact model limits from its pinned Models.dev
+snapshot. If no exact entry exists, it uses a conservative 128,000-token window and logs one startup
+warning for that provider/model pair.
+
+The full transcript remains unchanged. Only the model-facing view becomes a continuation summary
+plus recent complete turns.
+
+Use `loop.context` only when a model deployment or workload needs an explicit override:
 
 ```ts
 loop: {
@@ -127,11 +133,10 @@ loop: {
 }
 ```
 
-`windowTokens` is required because model objects do not expose one reliable provider-neutral
-limit. `reserveTokens` defaults to the smaller of 16,384 or 25% of the window.
-`keepRecentTokens` defaults to the smaller of 20,000 or half the remaining window. Set either
-explicitly when the model or workload needs a different margin. Omitting `context` disables new
-automatic checkpoints.
+`windowTokens` overrides the catalog and is authoritative when set. `reserveTokens` defaults to the
+smaller of 16,384 or 25% of the resolved window. `keepRecentTokens` defaults to the smaller of
+20,000 or half the resolved input budget. All three fields are optional; omitting `context` keeps
+automatic compaction enabled with model-derived defaults.
 
 ## Discovery
 

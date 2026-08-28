@@ -24,10 +24,14 @@ function message(seq: number, role: AgentMessageRecord["role"], text: string): A
 
 describe("agent context token estimation", () => {
   test("compacts only above the reserved input budget", () => {
-    const config = { windowTokens: 10_000, reserveTokens: 2_000 }
-    expect(shouldCompactAgentContext({ ...config, estimatedInputTokens: 7_999 })).toBe(false)
-    expect(shouldCompactAgentContext({ ...config, estimatedInputTokens: 8_000 })).toBe(false)
-    expect(shouldCompactAgentContext({ ...config, estimatedInputTokens: 8_001 })).toBe(true)
+    const inputBudgetTokens = 8_000
+    expect(shouldCompactAgentContext({ inputBudgetTokens, estimatedInputTokens: 7_999 })).toBe(
+      false
+    )
+    expect(shouldCompactAgentContext({ inputBudgetTokens, estimatedInputTokens: 8_000 })).toBe(
+      false
+    )
+    expect(shouldCompactAgentContext({ inputBudgetTokens, estimatedInputTokens: 8_001 })).toBe(true)
   })
 
   test("estimates the complete request shape deterministically", () => {

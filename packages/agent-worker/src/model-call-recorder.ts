@@ -11,13 +11,13 @@ import {
   type LanguageModelCallStartEvent,
   wrapLanguageModel,
 } from "ai"
-import { recordAiModelCallAccounting } from "./ai-pricing/accounting"
 import {
   aiModelCallUsageFromAiSdk,
   aiPricingContextFromAiSdkCallStart,
   aiPricingContextFromAiSdkUsage,
 } from "./ai-sdk-adapters"
 import { AgentUsageRecordingError } from "./errors"
+import { recordAiModelCallAccounting } from "./model-call-accounting"
 import { isPermanentAiUsageRecoveryError } from "./model-call-recovery"
 import type { AgentWorkerStorage, RecoverAiModelCall, RecoverAiModelCallInput } from "./types"
 

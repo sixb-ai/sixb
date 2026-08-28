@@ -5,7 +5,7 @@ import {
   MODELS_DEV_CATALOG_SOURCE,
   rateAiModelCall,
   resolveModelsDevBillingIdentity,
-} from "../src/ai-pricing/models-dev"
+} from "../src/models-dev/pricing"
 
 function usage(overrides: Partial<AiModelCallUsageRecord> = {}): AiModelCallUsageRecord {
   return {

@@ -1,14 +1,33 @@
 import { posix } from "node:path"
 import { AgentToolPublicError, type CommandResult } from "@sixb/core"
-import { jsonSchema, type Tool, tool } from "ai"
-import type { BashSandboxHandle } from "./bash-tool"
-import { READ_TOOL_DESCRIPTION, READ_TOOL_INPUT_SCHEMA } from "./context-estimation-tools"
-import { AgentToolExecutionError } from "./errors"
+import { type JSONSchema7, jsonSchema, type Tool, tool } from "ai"
+import { AgentToolExecutionError } from "../errors"
+import type { AgentSandboxHandle } from "../sandbox-handle"
 
 const DEFAULT_LIMIT = 2_000
 const MAX_BYTES = 50 * 1024
 const PROBE_BYTES = MAX_BYTES + 5
 const READ_TIMEOUT_MS = 30_000
+
+export const READ_TOOL_SPEC = {
+  name: "read",
+  description:
+    "Read a UTF-8 text file relative to the sandbox working directory. Returns at most 2,000 lines or 50 KiB and includes nextOffset when more content remains. Prefer this over bash for reading files.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      path: { type: "string", description: "Path relative to the sandbox working directory." },
+      offset: { type: "integer", minimum: 1, description: "One-based start line. Default: 1." },
+      limit: {
+        type: "integer",
+        minimum: 1,
+        description: "Requested line count. Default and maximum: 2,000.",
+      },
+    },
+    required: ["path"],
+    additionalProperties: false,
+  } satisfies JSONSchema7,
+} as const
 
 export interface ReadToolInput {
   readonly path: string
@@ -27,11 +46,11 @@ export interface ReadToolOutput {
 
 /** Build the bounded UTF-8 file reader from the run's lazy sandbox resolver. */
 export function createReadTool(
-  resolveSandbox: () => Promise<BashSandboxHandle>
+  resolveSandbox: () => Promise<AgentSandboxHandle>
 ): Tool<ReadToolInput, ReadToolOutput> {
   return tool({
-    description: READ_TOOL_DESCRIPTION,
-    inputSchema: jsonSchema<ReadToolInput>(READ_TOOL_INPUT_SCHEMA),
+    description: READ_TOOL_SPEC.description,
+    inputSchema: jsonSchema<ReadToolInput>(READ_TOOL_SPEC.inputSchema),
     async execute(input, { abortSignal }): Promise<ReadToolOutput> {
       const path = normalizePath(input.path)
       const offset = positiveInteger(input.offset, 1, "offset")

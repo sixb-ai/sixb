@@ -1,10 +1,10 @@
 import type { BlobStorage, FileRef, JsonValue } from "@sixb/core"
 import { isAgentToolResult } from "@sixb/core/internal/agents"
 import type { PrepareStepFunction, ToolSet } from "ai"
-import { NEVER_ABORTED_SIGNAL } from "./abort"
-import { modelSupportsInlineImages, prepareAgentToolFileProjection } from "./attachments"
-import { fileContentKey } from "./file-ref"
-import { type AgentToolModelOutput, agentToolResultToModelOutput } from "./tool-result-output"
+import { NEVER_ABORTED_SIGNAL } from "../abort"
+import { modelSupportsInlineImages, prepareAgentToolFileProjection } from "../attachments"
+import { fileContentKey } from "../file-ref"
+import { type AgentToolModelOutput, agentToolResultToModelOutput } from "./result-output"
 
 const TOOL_RESULT_IMAGE_OMISSION_NOTE =
   "[Image is not embedded in the tool-result message; Sixb supplies it as a separate model input when the selected model supports images.]"

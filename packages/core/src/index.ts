@@ -1000,8 +1000,6 @@ export type {
   InferAgentToolInputSchema,
   RequestAgentRunInput,
   RequestAgentRunResult,
-  ResolvedAgentContextConfig,
-  ResolvedAgentLoopConfig,
 } from "./agents"
 export {
   AGENT_REASONING_LEVELS,

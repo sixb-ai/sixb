@@ -22936,7 +22936,6 @@
                                 "minimum": 0
                               }
                             },
-                            "required": ["windowTokens", "reserveTokens", "keepRecentTokens"],
                             "additionalProperties": false
                           }
                         },
@@ -23040,7 +23039,6 @@
                               "minimum": 0
                             }
                           },
-                          "required": ["windowTokens", "reserveTokens", "keepRecentTokens"],
                           "additionalProperties": false
                         }
                       },

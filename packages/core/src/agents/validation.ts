@@ -17,8 +17,6 @@ import {
   type AgentToolDefinition,
   type AgentToolInputSchema,
   type DefineAgentConfig,
-  type ResolvedAgentContextConfig,
-  type ResolvedAgentLoopConfig,
 } from "./types"
 
 const AGENT_TOOL_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/
@@ -164,7 +162,7 @@ export function validateAgentToolsAtStartup(agents: readonly AgentDefinition[]):
 
 export function resolveAgentLoopConfig(
   loop: AgentLoopConfig | undefined
-): ResolvedAgentLoopConfig | undefined {
+): AgentLoopConfig | undefined {
   if (loop === undefined) return undefined
 
   const maxSteps = loop?.stopWhen?.maxSteps
@@ -174,7 +172,7 @@ export function resolveAgentLoopConfig(
     )
   }
 
-  const context = loop.context ? resolveAgentContextConfig(loop.context) : undefined
+  const context = loop.context ? snapshotAgentContextConfig(loop.context) : undefined
   return Object.freeze({
     ...(loop.stopWhen === undefined
       ? {}
@@ -183,31 +181,20 @@ export function resolveAgentLoopConfig(
   })
 }
 
-function resolveAgentContextConfig(context: AgentContextConfig): ResolvedAgentContextConfig {
-  assertPositiveSafeInteger(context.windowTokens, "windowTokens")
-  const reserveTokens =
-    context.reserveTokens ?? Math.min(16_384, Math.floor(context.windowTokens * 0.25))
-  assertPositiveSafeInteger(reserveTokens, "reserveTokens")
-  const keepRecentTokens =
-    context.keepRecentTokens ??
-    Math.min(20_000, Math.floor((context.windowTokens - reserveTokens) * 0.5))
-  assertPositiveSafeInteger(keepRecentTokens, "keepRecentTokens")
-
-  if (reserveTokens + keepRecentTokens >= context.windowTokens) {
-    throw new AgentDefinitionError(
-      "[Sixb] Agent loop.context reserveTokens + keepRecentTokens must be less than windowTokens."
-    )
+function snapshotAgentContextConfig(context: AgentContextConfig): AgentContextConfig {
+  const snapshot: Record<string, number> = {}
+  for (const field of ["windowTokens", "reserveTokens", "keepRecentTokens"] as const) {
+    const value = context[field]
+    if (value === undefined) continue
+    assertPositiveSafeInteger(value, field)
+    snapshot[field] = value
   }
 
-  return Object.freeze({
-    windowTokens: context.windowTokens,
-    reserveTokens,
-    keepRecentTokens,
-  })
+  return Object.freeze(snapshot)
 }
 
-function assertPositiveSafeInteger(value: number, field: string): void {
-  if (!Number.isSafeInteger(value) || value <= 0) {
+function assertPositiveSafeInteger(value: unknown, field: string): asserts value is number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
     throw new AgentDefinitionError(
       `[Sixb] Agent loop.context.${field} must be a positive safe integer.`
     )

@@ -41,10 +41,9 @@ export interface AgentContextCompactionBoundary {
 /** Compaction begins only once the estimated request crosses the reserved input budget. */
 export function shouldCompactAgentContext(input: {
   readonly estimatedInputTokens: number
-  readonly windowTokens: number
-  readonly reserveTokens: number
+  readonly inputBudgetTokens: number
 }): boolean {
-  return input.estimatedInputTokens > input.windowTokens - input.reserveTokens
+  return input.estimatedInputTokens > input.inputBudgetTokens
 }
 
 /** Estimate the provider request shape with one stable, conservative character heuristic. */

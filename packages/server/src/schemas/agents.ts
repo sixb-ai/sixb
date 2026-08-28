@@ -81,9 +81,9 @@ export const AgentLoopConfigSchema = z.object({
     .optional(),
   context: z
     .object({
-      windowTokens: z.number().int().positive(),
-      reserveTokens: z.number().int().positive(),
-      keepRecentTokens: z.number().int().positive(),
+      windowTokens: z.number().int().positive().optional(),
+      reserveTokens: z.number().int().positive().optional(),
+      keepRecentTokens: z.number().int().positive().optional(),
     })
     .optional(),
 })

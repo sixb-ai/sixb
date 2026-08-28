@@ -71,9 +71,9 @@ Then, in one thread:
 3. After **Condensing earlier conversation…** appears, ask the assistant to recall both facts.
 
 The next response should continue normally, and every original message should remain visible in
-the thread. Outside this opt-in demonstration mode, Northline does not impose the artificial test
-budget. Production agents should set `windowTokens` to the selected model's actual context window
-and choose reserve and recent-history budgets for their workload.
+the thread. Outside this opt-in demonstration mode, Northline uses Sixb's automatic model-derived
+context budget. The worker resolves the selected model from its pinned Models.dev snapshot and
+falls back to a 128,000-token window when no exact catalog entry exists.
 
 ### Hosted sandbox
 

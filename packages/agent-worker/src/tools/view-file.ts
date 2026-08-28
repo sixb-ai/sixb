@@ -1,23 +1,35 @@
 import { posix } from "node:path"
 import type { AgentToolArtifacts, FileRef, JsonValue } from "@sixb/core"
 import { AgentToolPublicError } from "@sixb/core"
-import { jsonSchema, type Tool, tool } from "ai"
-import { NEVER_ABORTED_SIGNAL } from "./abort"
-import type { PreparedAgentAttachmentContext } from "./attachments"
-import type { BashSandboxHandle } from "./bash-tool"
-import type { AgentSandboxFileRegistry } from "./sandbox-file-registry"
-import { inferAgentFileMediaType } from "./tool-artifacts"
-import type { AgentToolModelOutput } from "./tool-result-output"
+import { type JSONSchema7, jsonSchema, type Tool, tool } from "ai"
+import { NEVER_ABORTED_SIGNAL } from "../abort"
+import type { PreparedAgentAttachmentContext } from "../attachments"
+import type { AgentSandboxFileRegistry } from "../sandbox-file-registry"
+import type { AgentSandboxHandle } from "../sandbox-handle"
+import { inferAgentFileMediaType } from "./artifacts"
+import type { AgentToolModelOutput } from "./result-output"
 
 const VIEW_FILE_MAX_BYTES = 25 * 1024 * 1024
 const VIEW_FILE_TIMEOUT_MS = 30_000
+
+export const VIEW_FILE_TOOL_SPEC = {
+  name: "view_file",
+  description:
+    "Inspect a file in the current run sandbox. Use this for historical attachments and files created by bash. Paths must stay inside the sandbox working directory. Images are prepared for visual input when supported; other formats return bounded text or metadata.",
+  inputSchema: {
+    type: "object",
+    properties: { path: { type: "string", minLength: 1 } },
+    required: ["path"],
+    additionalProperties: false,
+  } satisfies JSONSchema7,
+} as const
 
 interface ViewFileInput {
   readonly path: string
 }
 
 export function createViewFileTool(input: {
-  readonly resolveSandbox: () => Promise<BashSandboxHandle>
+  readonly resolveSandbox: () => Promise<AgentSandboxHandle>
   readonly attachments: PreparedAgentAttachmentContext
   readonly registry: AgentSandboxFileRegistry
   readonly artifactsForToolCall: (options: {
@@ -32,14 +44,8 @@ export function createViewFileTool(input: {
 }): Tool<ViewFileInput, JsonValue> {
   const signalsByToolCallId = new Map<string, AbortSignal>()
   return tool({
-    description:
-      "Inspect a file in the current run sandbox. Use this for historical attachments and files created by bash. Paths must stay inside the sandbox working directory. Images are prepared for visual input when supported; other formats return bounded text or metadata.",
-    inputSchema: jsonSchema<ViewFileInput>({
-      type: "object",
-      properties: { path: { type: "string", minLength: 1 } },
-      required: ["path"],
-      additionalProperties: false,
-    }),
+    description: VIEW_FILE_TOOL_SPEC.description,
+    inputSchema: jsonSchema<ViewFileInput>(VIEW_FILE_TOOL_SPEC.inputSchema),
     async execute({ path }, { abortSignal, toolCallId }): Promise<JsonValue> {
       const signal = abortSignal ?? NEVER_ABORTED_SIGNAL
       signalsByToolCallId.set(toolCallId, signal)
@@ -116,7 +122,7 @@ function resolveSafeSandboxPath(workingDirectory: string, requestedPath: string)
 }
 
 async function readSandboxFile(input: {
-  readonly handle: BashSandboxHandle
+  readonly handle: AgentSandboxHandle
   readonly absolutePath: string
   readonly signal: AbortSignal
 }): Promise<Uint8Array> {

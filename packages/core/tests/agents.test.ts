@@ -336,11 +336,7 @@ describe("defineAgent", () => {
     expect(agent.tools[0]).toBe(searchKnowledge)
     expect(agent.loop).toEqual({
       stopWhen: { maxSteps: 16 },
-      context: {
-        windowTokens: 200_000,
-        reserveTokens: 16_384,
-        keepRecentTokens: 20_000,
-      },
+      context: { windowTokens: 200_000 },
     })
     expect(Object.isFrozen(agent.loop)).toBe(true)
     expect(Object.isFrozen(agent.loop?.context)).toBe(true)
@@ -414,7 +410,7 @@ describe("defineAgent", () => {
     }
   })
 
-  test("resolves and validates context loop settings", () => {
+  test("snapshots and validates context loop overrides", () => {
     const configured = defineAgent("configured", {
       name: "Configured",
       model,
@@ -433,12 +429,19 @@ describe("defineAgent", () => {
       keepRecentTokens: 3_000,
     })
 
+    const automatic = defineAgent("automatic", {
+      name: "Automatic",
+      model,
+      instructions: "x",
+      loop: { context: {} },
+    })
+    expect(automatic.loop?.context).toEqual({})
+
     for (const context of [
       { windowTokens: 0 },
       { windowTokens: Number.MAX_SAFE_INTEGER + 1 },
       { windowTokens: 100, reserveTokens: 0 },
       { windowTokens: 100, keepRecentTokens: 1.5 },
-      { windowTokens: 100, reserveTokens: 60, keepRecentTokens: 40 },
     ]) {
       expect(() =>
         defineAgent("bad-context", {

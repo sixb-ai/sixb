@@ -16,7 +16,6 @@ import {
   validateAndNormalizeAgentToolInput,
 } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
-import { schemaRecordToJsonSchema } from "@sixb/core/internal/ontology"
 import type { AiModelCallUsageInput, AiPricingContext } from "@sixb/core/storage"
 import {
   jsonSchema,
@@ -28,7 +27,8 @@ import {
 } from "ai"
 import { NEVER_ABORTED_SIGNAL } from "./abort"
 import { AgentToolExecutionError, AgentToolOutputError } from "./errors"
-import type { AgentToolModelOutput } from "./tool-result-output"
+import { type AgentModelToolSpec, agentModelToolSpecFromDefinition } from "./tools/model-spec"
+import type { AgentToolModelOutput } from "./tools/result-output"
 
 type AgentErrorDetails =
   | { readonly agentId: string; readonly runId: string }
@@ -87,10 +87,12 @@ function aiSdkToolFromAgentDefinition(
   context: Omit<AiSdkToolsFromAgentDefinitionsInput, "definitions">
 ): Tool<Record<string, unknown>, JsonValue> {
   const signalsByToolCallId = new Map<string, AbortSignal>()
+  const spec = agentModelToolSpecFromDefinition(definition, context.valueTypesById)
   return tool({
-    description: definition.description,
+    description: spec.description,
     inputSchema: aiSdkInputSchemaFromAgentDefinition(
       definition,
+      spec.inputSchema,
       context.valueTypesById,
       context.errorDetails ?? { agentId: context.run.agentId, runId: context.run.id }
     ),
@@ -135,10 +137,10 @@ function aiSdkToolFromAgentDefinition(
 
 function aiSdkInputSchemaFromAgentDefinition(
   definition: AgentToolDefinition,
+  inputSchema: AgentModelToolSpec["inputSchema"],
   valueTypesById: ReadonlyMap<string, ValueType>,
   errorDetails: AgentErrorDetails
 ) {
-  const inputSchema = schemaRecordToJsonSchema({ shape: definition.input, valueTypesById })
   return jsonSchema<Record<string, unknown>>(inputSchema as Parameters<typeof jsonSchema>[0], {
     validate(value) {
       try {

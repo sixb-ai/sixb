@@ -15,7 +15,7 @@ import {
   tool,
 } from "ai"
 import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test"
-import { AgentToolResultMediaBridge } from "../src/tool-result-media"
+import { AgentToolResultMediaBridge } from "../src/tools/result-media"
 
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 

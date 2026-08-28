@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { compressStdout } from "../src/bash-tool"
+import { compressStdout } from "../src/tools/bash"
 
 const CAP = 200
 

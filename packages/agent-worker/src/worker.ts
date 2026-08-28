@@ -16,6 +16,12 @@ import type { AgentRunExecution, AgentRunRecord } from "@sixb/core/storage"
 import { AGENT_RUN_FAILURE_CODES, AgentStorageError } from "@sixb/core/storage"
 import { loadAgentSkills } from "./agent-skills"
 import { normalizeApiBaseUrl } from "./api-url"
+import {
+  type AgentContextBudget,
+  type AgentModelContextLimits,
+  DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS,
+  resolveAgentContextBudget,
+} from "./context-budget"
 import { prepareAgentConversationContext } from "./context-compaction"
 import { AgentExecutionLostError, AgentFinalizationError, AgentUsageRecordingError } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
@@ -74,8 +80,10 @@ type Reservation =
  */
 export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAILURE_CODES> {
   private readonly host: AgentWorkerHost
+  private readonly agents: readonly AgentDefinition[]
   private readonly context: AgentWorkerContext | null
   private readonly idleWithoutAgents: boolean
+  private contextBudgets: ReadonlyMap<string, AgentContextBudget> = new Map()
   /**
    * Sandbox teardowns that outlived their run's dispose() (boot still in flight when the turn
    * ended). stop() drains these so a graceful shutdown does not leave machines mid-teardown.
@@ -96,13 +104,21 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     })
 
     this.host = host
-    this.idleWithoutAgents = host.definitions.agents.list().length === 0
+    this.agents = host.definitions.agents.list()
+    this.idleWithoutAgents = this.agents.length === 0
     this.context = this.idleWithoutAgents ? null : buildAgentContext(host, options, turnTimeoutMs)
   }
 
   override async start(): Promise<void> {
     if (this.context) {
-      await this.context.agentSkills
+      const [modelsDev] = await Promise.all([
+        import("./models-dev/catalog"),
+        this.context.agentSkills,
+      ])
+      this.contextBudgets = resolveContextBudgets(
+        this.agents,
+        modelsDev.resolveModelsDevContextLimits
+      )
     }
     await super.start()
   }
@@ -308,6 +324,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       const prepared = await prepareAgentConversationContext({
         context: executionContext,
         agent,
+        budget: requiredContextBudget(this.contextBudgets, agent.id),
         run,
         runtime,
       })
@@ -681,6 +698,49 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       throw finalizeError
     }
   }
+}
+
+function resolveContextBudgets(
+  agents: readonly AgentDefinition[],
+  resolveModelContextLimits: (
+    model: AgentDefinition["model"]
+  ) => AgentModelContextLimits | undefined
+): ReadonlyMap<string, AgentContextBudget> {
+  const budgets = new Map<string, AgentContextBudget>()
+  const warnedModels = new Set<string>()
+  for (const agent of agents) {
+    const modelLimits =
+      agent.loop?.context?.windowTokens === undefined
+        ? resolveModelContextLimits(agent.model)
+        : undefined
+    const budget = resolveAgentContextBudget(agent, modelLimits)
+    budgets.set(agent.id, budget)
+    if (budget.source !== "fallback") continue
+
+    const model = `${agent.model.provider}/${agent.model.modelId}`
+    if (warnedModels.has(model)) continue
+    warnedModels.add(model)
+    console.warn(
+      `[SixbAgentWorker] Models.dev has no context limit for '${model}'; using the ${DEFAULT_CONTEXT_WINDOW_LABEL} fallback. Configure loop.context.windowTokens to override it.`
+    )
+  }
+  return budgets
+}
+
+const DEFAULT_CONTEXT_WINDOW_LABEL = `${DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS.toLocaleString("en-US")}-token`
+
+function requiredContextBudget(
+  budgets: ReadonlyMap<string, AgentContextBudget>,
+  agentId: string
+): AgentContextBudget {
+  const budget = budgets.get(agentId)
+  if (!budget) {
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbAgentWorker] Agent '${agentId}' has no resolved context budget.`
+    )
+  }
+  return budget
 }
 
 function buildAgentContext(

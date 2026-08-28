@@ -168,8 +168,6 @@ export type {
   DefineAgentConfig,
   InferAgentToolInput,
   InferAgentToolInputSchema,
-  ResolvedAgentContextConfig,
-  ResolvedAgentLoopConfig,
 } from "./types"
 export { AGENT_REASONING_LEVELS } from "./types"
 export {
