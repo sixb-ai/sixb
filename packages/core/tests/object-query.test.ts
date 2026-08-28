@@ -141,8 +141,37 @@ const Balance = defineObjectType({
   ],
 })
 
+const CollisionLeft = defineObjectType({
+  id: "A",
+  name: "Collision Left",
+  properties: [prop("id", "string", { required: true, primary: true }), prop("name", "string")],
+})
+
+const CollisionRight = defineObjectType({
+  id: "A:B",
+  name: "Collision Right",
+  properties: [prop("id", "string", { required: true, primary: true }), prop("name", "string")],
+})
+
+const CollisionSource = defineObjectType({
+  id: "CollisionSource",
+  name: "Collision Source",
+  properties: [prop("id", "string", { required: true, primary: true })],
+  links: [link.ref("related", [CollisionLeft.id, CollisionRight.id], { cardinality: "many" })],
+})
+
 const ontology = new OntologyRegistry({
-  sources: [Customer, Order, WildcardSource, SearchProfileCustomer, TextNoDefault, Balance],
+  sources: [
+    Customer,
+    Order,
+    WildcardSource,
+    SearchProfileCustomer,
+    TextNoDefault,
+    Balance,
+    CollisionLeft,
+    CollisionRight,
+    CollisionSource,
+  ],
 })
 
 interface QueryCallCounts {
@@ -1015,15 +1044,135 @@ describe("object query planner and executor", () => {
     )
     expect(outgoing.links.map((link) => link.targetId)).toEqual(["order-1"])
 
+    const overflowingStorage = new Proxy(storage, {
+      get(target, property) {
+        if (property === "queryObjects") {
+          return async () => ({
+            objects: Array.from({ length: 1_001 }, (_, index) => ({
+              projectId: "p1",
+              objectTypeId: "Customer",
+              primaryId: `overflow-${index}`,
+              properties: { id: `overflow-${index}` },
+              createdAt: new Date(0),
+              updatedAt: new Date(0),
+              version: 1,
+              lastCommitId: "overflow",
+            })),
+            hasMore: false,
+          })
+        }
+        return Reflect.get(target, property, target)
+      },
+    })
     await expect(
       executeObjectQueryLinks(
         {
           projectId: "p1",
           query: { kind: "start", objectTypeId: "Customer" },
         },
-        { ontology, storage, maxLinkQueryObjects: 2 }
+        { ontology, storage: overflowingStorage }
       )
     ).rejects.toMatchObject({ code: "link_query_object_limit_exceeded", path: "$.query" })
+  })
+
+  test("rejects output shaping and non-root object pages in link selectors", async () => {
+    const { objects: storage } = createTestStorage()
+
+    await expect(
+      executeObjectQueryLinks(
+        {
+          projectId: "p1",
+          query: {
+            kind: "filter",
+            predicate: { op: "eq", propertyId: "status", value: "active" },
+            input: {
+              kind: "project",
+              properties: ["id"],
+              input: { kind: "start", objectTypeId: "Customer" },
+            },
+          },
+        },
+        { ontology, storage }
+      )
+    ).rejects.toMatchObject({
+      code: "link_selector_output_shape_not_supported",
+      path: "$.query.input",
+    })
+
+    await expect(
+      executeObjectQueryLinks(
+        {
+          projectId: "p1",
+          query: {
+            kind: "filter",
+            predicate: { op: "eq", propertyId: "status", value: "active" },
+            input: {
+              kind: "page",
+              pageSize: 1,
+              input: { kind: "start", objectTypeId: "Customer" },
+            },
+          },
+        },
+        { ontology, storage }
+      )
+    ).rejects.toMatchObject({
+      code: "link_selector_page_must_be_root",
+      path: "$.query.input",
+    })
+  })
+
+  test("hydrates delimiter-bearing endpoint identities without collisions", async () => {
+    const { objects: storage, fixture } = createTestStorage()
+    await fixture.seed({
+      objects: [
+        {
+          ref: { objectTypeId: CollisionSource.id, primaryId: "source" },
+          properties: { id: "source" },
+        },
+        {
+          ref: { objectTypeId: CollisionLeft.id, primaryId: "B:C" },
+          properties: { id: "B:C", name: "Left" },
+        },
+        {
+          ref: { objectTypeId: CollisionRight.id, primaryId: "C" },
+          properties: { id: "C", name: "Right" },
+        },
+      ],
+      links: [
+        {
+          ref: {
+            source: { objectTypeId: CollisionSource.id, primaryId: "source" },
+            linkId: "related",
+            target: { objectTypeId: CollisionLeft.id, primaryId: "B:C" },
+          },
+        },
+        {
+          ref: {
+            source: { objectTypeId: CollisionSource.id, primaryId: "source" },
+            linkId: "related",
+            target: { objectTypeId: CollisionRight.id, primaryId: "C" },
+          },
+        },
+      ],
+    })
+
+    const result = await executeObjectQueryLinks(
+      {
+        projectId: "p1",
+        query: {
+          kind: "refs",
+          refs: [{ objectTypeId: CollisionSource.id, primaryId: "source" }],
+        },
+        direction: "outgoing",
+        includeObjects: true,
+      },
+      { ontology, storage }
+    )
+
+    expect(result.objects.map((row) => row.properties.name).filter(Boolean)).toEqual([
+      "Left",
+      "Right",
+    ])
   })
 
   test("filters and sorts decimals exactly beyond JS number precision", async () => {

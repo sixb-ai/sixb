@@ -1,6 +1,14 @@
 import type { EffectiveLinkSnapshot, EffectiveObjectSnapshot } from "../../materialization/model"
 import type { ObjectQuery, ObjectQueryPredicate, ObjectQuerySortField } from "../../objects/query"
 import { compareQueryScalarValues, queryScalarValuesEqual } from "../../objects/query/scalar-values"
+import type { LinkBatchKey, ObjectBatchKey } from "./keys"
+import {
+  compareObjectLinkCursors,
+  compareObjectLinks,
+  linkBatchKey,
+  objectBatchKey,
+  objectLinkCursor,
+} from "./keys"
 import type {
   CountObjectsInput,
   CountObjectsResult,
@@ -15,6 +23,8 @@ import type {
   ObjectQueryCapabilities,
   ObjectRow,
   ObjectStorage,
+  QueryObjectLinksInput,
+  QueryObjectLinksResult,
   QueryObjectsInput,
   QueryObjectsResult,
 } from "./types"
@@ -81,13 +91,23 @@ const IN_MEMORY_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
 }
 
 function objectRowKey(projectId: string, objectTypeId: string): string {
-  return `${projectId}:${objectTypeId}`
+  return JSON.stringify([projectId, objectTypeId])
+}
+
+function objectRowProjectPrefix(projectId: string): string {
+  return `[${JSON.stringify(projectId)},`
 }
 
 function compareStrings(left: string, right: string): number {
   if (left < right) return -1
   if (left > right) return 1
   return 0
+}
+
+function assertLinkQueryLimit(limit: number): void {
+  if (!Number.isSafeInteger(limit) || limit <= 0) {
+    throw new Error("Object link query limit must be a positive safe integer.")
+  }
 }
 
 function sourceLinkBucketKey(projectId: string, sourceTypeId: string, sourceId: string): string {
@@ -634,8 +654,8 @@ export class InMemoryObjectStorage implements ObjectStorage {
   async getByPrimaryIdBatch(params: {
     projectId: string
     items: readonly { objectTypeId: string; primaryId: string }[]
-  }): Promise<Map<string, ObjectRow>> {
-    const result = new Map<string, ObjectRow>()
+  }): Promise<Map<ObjectBatchKey, ObjectRow>> {
+    const result = new Map<ObjectBatchKey, ObjectRow>()
     for (const item of params.items) {
       const row = await this.getByPrimaryId({
         projectId: params.projectId,
@@ -643,7 +663,7 @@ export class InMemoryObjectStorage implements ObjectStorage {
         primaryId: item.primaryId,
       })
       if (row) {
-        result.set(`${item.objectTypeId}:${item.primaryId}`, row)
+        result.set(objectBatchKey(item.objectTypeId, item.primaryId), row)
       }
     }
     return result
@@ -652,8 +672,8 @@ export class InMemoryObjectStorage implements ObjectStorage {
   async listLinksBatch(params: {
     projectId: string
     items: readonly { objectTypeId: string; objectId: string; linkId: string }[]
-  }): Promise<Map<string, ObjectLinkRow[]>> {
-    const result = new Map<string, ObjectLinkRow[]>()
+  }): Promise<Map<LinkBatchKey, ObjectLinkRow[]>> {
+    const result = new Map<LinkBatchKey, ObjectLinkRow[]>()
     for (const item of params.items) {
       const rows = await this.listLinks({
         projectId: params.projectId,
@@ -662,10 +682,46 @@ export class InMemoryObjectStorage implements ObjectStorage {
         linkId: item.linkId,
       })
       if (rows.length > 0) {
-        result.set(`${item.objectTypeId}:${item.objectId}:${item.linkId}`, [...rows])
+        result.set(linkBatchKey(item.objectTypeId, item.objectId, item.linkId), [...rows])
       }
     }
     return result
+  }
+
+  async queryLinks(params: QueryObjectLinksInput): Promise<QueryObjectLinksResult> {
+    assertLinkQueryLimit(params.limit)
+    if (params.objectRefs.length === 0 || params.endpointObjectTypeIds?.length === 0) {
+      return { links: [], hasMore: false }
+    }
+
+    const allowedTypes = params.endpointObjectTypeIds
+      ? new Set(params.endpointObjectTypeIds)
+      : undefined
+    const deduped = new Map<string, ObjectLinkRow>()
+    for (const object of params.objectRefs) {
+      const rows = await this.listLinks({
+        projectId: params.projectId,
+        objectTypeId: object.objectTypeId,
+        objectId: object.primaryId,
+        direction: params.direction,
+        ...(params.linkId === undefined ? {} : { linkId: params.linkId }),
+      })
+      for (const row of rows) {
+        if (
+          allowedTypes &&
+          (!allowedTypes.has(row.sourceTypeId) || !allowedTypes.has(row.targetTypeId))
+        ) {
+          continue
+        }
+        if (params.after && compareObjectLinkCursors(objectLinkCursor(row), params.after) <= 0) {
+          continue
+        }
+        deduped.set(fullLinkRowKey(row), row)
+      }
+    }
+
+    const rows = [...deduped.values()].sort(compareObjectLinks).slice(0, params.limit + 1)
+    return { links: rows.slice(0, params.limit), hasMore: rows.length > params.limit }
   }
 
   async listIncidentLinksBatch(params: {
@@ -738,7 +794,7 @@ export class InMemoryObjectStorage implements ObjectStorage {
       }
     } else {
       for (const [key, bucket] of this.rows) {
-        if (key.startsWith(`${params.projectId}:`)) {
+        if (key.startsWith(objectRowProjectPrefix(params.projectId))) {
           allRows.push(...bucket.values())
         }
       }
@@ -1144,7 +1200,7 @@ function rowIdentityKey(row: ObjectRow): string {
 }
 
 function rowIdentityKeyParts(objectTypeId: string, primaryId: string): string {
-  return `${objectTypeId}:${primaryId}`
+  return objectBatchKey(objectTypeId, primaryId)
 }
 
 function upsertEntry(entriesByKey: Map<string, QueryEntry>, entry: QueryEntry): void {

@@ -7,6 +7,7 @@ import type {
   ExpandedLinkValue,
   ExpandedObjectRow,
   FacetObjectsResult,
+  ObjectBatchKey,
   ObjectFacetRequest,
   ObjectFacetResult,
   ObjectLinkRow,
@@ -16,6 +17,7 @@ import type {
   ObjectStorage,
   QueryObjectsResult,
 } from "../../storage"
+import { linkBatchKey, objectBatchKey } from "../../storage"
 import {
   ObjectQueryExecutionError,
   ObjectQueryPlanningError,
@@ -693,7 +695,7 @@ async function evaluateFallbackRefs(
   })
   return completeFallbackEvaluation(
     query.refs.flatMap((ref, order) => {
-      const row = rows.get(`${ref.objectTypeId}:${ref.primaryId}`)
+      const row = rows.get(objectBatchKey(ref.objectTypeId, ref.primaryId))
       return row ? [{ row, order }] : []
     })
   )
@@ -796,7 +798,9 @@ async function collectOutgoingEdges(
   })
 
   return parents.map((parent) => {
-    const links = linksByKey.get(`${parent.objectTypeId}:${parent.primaryId}:${expansion.linkId}`)
+    const links = linksByKey.get(
+      linkBatchKey(parent.objectTypeId, parent.primaryId, expansion.linkId)
+    )
     if (!links) return []
     return links.map((link) => ({
       neighborTypeId: link.targetTypeId,
@@ -848,8 +852,8 @@ async function fetchExpansionTargets(
   projectId: string,
   edgesByParent: readonly ExpansionEdge[][],
   options: QueryExecutorOptions
-): Promise<Map<string, ObjectRow>> {
-  const seen = new Set<string>()
+): Promise<ReadonlyMap<ObjectBatchKey, ObjectRow>> {
+  const seen = new Set<ObjectBatchKey>()
   const items: { objectTypeId: string; primaryId: string }[] = []
   for (const edges of edgesByParent) {
     for (const edge of edges) {
@@ -868,10 +872,10 @@ async function fetchExpansionTargets(
 async function enrichExpansionTargets(
   projectId: string,
   trimmedByParent: readonly ExpansionEdge[][],
-  baseTargets: Map<string, ObjectRow>,
+  baseTargets: ReadonlyMap<ObjectBatchKey, ObjectRow>,
   expansion: ObjectExpansion,
   options: QueryExecutorOptions
-): Promise<Map<string, ObjectRow>> {
+): Promise<ReadonlyMap<ObjectBatchKey, ObjectRow>> {
   if (!expansion.expand || expansion.expand.length === 0) {
     return baseTargets
   }
@@ -889,7 +893,7 @@ async function enrichExpansionTargets(
   }
 
   const enriched = await hydrateExpansions(projectId, uniqueTargets, expansion.expand, options)
-  const enrichedByKey = new Map<string, ObjectRow>()
+  const enrichedByKey = new Map<ObjectBatchKey, ObjectRow>()
   for (const row of enriched) {
     enrichedByKey.set(targetKey(row.objectTypeId, row.primaryId), row)
   }
@@ -899,7 +903,7 @@ async function enrichExpansionTargets(
 function trimExpansionEdges(
   edges: readonly ExpansionEdge[],
   expansion: ObjectExpansion,
-  baseTargets: Map<string, ObjectRow>,
+  baseTargets: ReadonlyMap<ObjectBatchKey, ObjectRow>,
   options: QueryExecutorOptions
 ): ExpansionEdge[] {
   let ordered = edges
@@ -926,7 +930,7 @@ function compareExpansionEdges(
   left: ExpansionEdge,
   right: ExpansionEdge,
   fields: readonly ObjectQuerySortField[],
-  baseTargets: Map<string, ObjectRow>
+  baseTargets: ReadonlyMap<ObjectBatchKey, ObjectRow>
 ): number {
   const leftRow = baseTargets.get(targetKey(left.neighborTypeId, left.neighborId))
   const rightRow = baseTargets.get(targetKey(right.neighborTypeId, right.neighborId))
@@ -981,8 +985,8 @@ function toLinkValue(
   return rows
 }
 
-function targetKey(objectTypeId: string, id: string): string {
-  return `${objectTypeId}:${id}`
+function targetKey(objectTypeId: string, id: string): ObjectBatchKey {
+  return objectBatchKey(objectTypeId, id)
 }
 
 async function evaluateFallbackStart(
@@ -1327,7 +1331,7 @@ function facetValueSortKey(value: unknown): string {
 }
 
 function rowIdentityKey(row: ObjectRow): string {
-  return `${row.objectTypeId}:${row.primaryId}`
+  return objectBatchKey(row.objectTypeId, row.primaryId)
 }
 
 function encodePageOffset(offset: number): string {

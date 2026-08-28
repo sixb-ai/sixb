@@ -9,16 +9,21 @@ import type {
   ExpandedObjectRow,
   FacetObjectsInput,
   FacetObjectsResult,
+  LinkBatchKey,
   LinkDirection,
+  ObjectBatchKey,
   ObjectFacetRequest,
   ObjectLinkRow,
   ObjectQueryCapabilities,
   ObjectRow,
   ObjectRowLinks,
   ObjectStorage,
+  QueryObjectLinksInput,
+  QueryObjectLinksResult,
   QueryObjectsInput,
   QueryObjectsResult,
 } from "@sixb/core/storage"
+import { linkBatchKey, objectBatchKey } from "@sixb/core/storage"
 import { installFreshSqliteSchema } from "./migrations"
 import { type CompiledObjectQuery, compileObjectQuery } from "./object-query-compiler"
 import {
@@ -220,8 +225,8 @@ export class SqliteObjectStorage implements ObjectStorage {
   async getByPrimaryIdBatch(params: {
     projectId: string
     items: readonly { objectTypeId: string; primaryId: string }[]
-  }): Promise<Map<string, ObjectRow>> {
-    const result = new Map<string, ObjectRow>()
+  }): Promise<Map<ObjectBatchKey, ObjectRow>> {
+    const result = new Map<ObjectBatchKey, ObjectRow>()
     if (params.items.length === 0) return result
 
     const rows = this.db
@@ -237,7 +242,7 @@ export class SqliteObjectStorage implements ObjectStorage {
       )
       .all(JSON.stringify(params.items), params.projectId) as DatabaseRow[]
     for (const row of rows) {
-      result.set(`${row.object_type_id}:${row.primary_id}`, this.rowToObject(row))
+      result.set(objectBatchKey(row.object_type_id, row.primary_id), this.rowToObject(row))
     }
     return result
   }
@@ -245,8 +250,8 @@ export class SqliteObjectStorage implements ObjectStorage {
   async listLinksBatch(params: {
     projectId: string
     items: readonly { objectTypeId: string; objectId: string; linkId: string }[]
-  }): Promise<Map<string, ObjectLinkRow[]>> {
-    const result = new Map<string, ObjectLinkRow[]>()
+  }): Promise<Map<LinkBatchKey, ObjectLinkRow[]>> {
+    const result = new Map<LinkBatchKey, ObjectLinkRow[]>()
     if (params.items.length === 0) return result
 
     const stmt = this.db.query(
@@ -261,12 +266,89 @@ export class SqliteObjectStorage implements ObjectStorage {
       ) as LinkDatabaseRow[]
       if (rows.length > 0) {
         result.set(
-          `${item.objectTypeId}:${item.objectId}:${item.linkId}`,
+          linkBatchKey(item.objectTypeId, item.objectId, item.linkId),
           rows.map((r) => this.rowToLink(r))
         )
       }
     }
     return result
+  }
+
+  async queryLinks(params: QueryObjectLinksInput): Promise<QueryObjectLinksResult> {
+    assertLinkQueryLimit(params.limit)
+    if (params.objectRefs.length === 0 || params.endpointObjectTypeIds?.length === 0) {
+      return { links: [], hasMore: false }
+    }
+
+    const sourceJoin = `
+      SELECT link.*
+      FROM links AS link
+      JOIN requested
+        ON requested.object_type_id = link.source_type_id
+       AND requested.object_id = link.source_id
+      WHERE link.project_id = ?
+    `
+    const targetJoin = `
+      SELECT link.*
+      FROM links AS link
+      JOIN requested
+        ON requested.object_type_id = link.target_type_id
+       AND requested.object_id = link.target_id
+      WHERE link.project_id = ?
+    `
+    const incidentSql =
+      params.direction === "outgoing"
+        ? sourceJoin
+        : params.direction === "incoming"
+          ? targetJoin
+          : `${sourceJoin} UNION ${targetJoin}`
+    const args: (string | number)[] = [JSON.stringify(params.objectRefs), params.projectId]
+    if (params.direction === "both") args.push(params.projectId)
+
+    const predicates: string[] = []
+    if (params.linkId !== undefined) {
+      predicates.push("link_id = ?")
+      args.push(params.linkId)
+    }
+    if (params.endpointObjectTypeIds !== undefined) {
+      const allowedTypes = JSON.stringify([...new Set(params.endpointObjectTypeIds)])
+      predicates.push(
+        "source_type_id IN (SELECT value FROM json_each(?))",
+        "target_type_id IN (SELECT value FROM json_each(?))"
+      )
+      args.push(allowedTypes, allowedTypes)
+    }
+    if (params.after) {
+      predicates.push(
+        "(source_type_id, source_id, link_id, target_type_id, target_id) > (?, ?, ?, ?, ?)"
+      )
+      args.push(...params.after)
+    }
+    args.push(params.limit + 1)
+
+    const whereSql = predicates.length > 0 ? `WHERE ${predicates.join(" AND ")}` : ""
+    const rows = this.db
+      .query(
+        `
+          WITH requested AS (
+            SELECT DISTINCT
+              json_extract(value, '$.objectTypeId') AS object_type_id,
+              json_extract(value, '$.primaryId') AS object_id
+            FROM json_each(?)
+          ), incident AS (${incidentSql})
+          SELECT *
+          FROM incident
+          ${whereSql}
+          ORDER BY source_type_id, source_id, link_id, target_type_id, target_id
+          LIMIT ?
+        `
+      )
+      .all(...args) as LinkDatabaseRow[]
+
+    return {
+      links: rows.slice(0, params.limit).map((row) => this.rowToLink(row)),
+      hasMore: rows.length > params.limit,
+    }
   }
 
   async listIncidentLinksBatch(params: {
@@ -301,12 +383,7 @@ export class SqliteObjectStorage implements ObjectStorage {
       )
       .all(JSON.stringify(params.items), params.projectId, params.projectId) as LinkDatabaseRow[]
 
-    const deduped = new Map<string, ObjectLinkRow>()
-    for (const row of rows) {
-      const link = this.rowToLink(row)
-      deduped.set(linkIdentity(link), link)
-    }
-    return [...deduped.values()]
+    return rows.map((row) => this.rowToLink(row))
   }
 
   async listByPrimaryIdPage(params: {
@@ -478,14 +555,10 @@ function assertReconciliationPageLimit(limit: number): void {
   }
 }
 
-function linkIdentity(link: ObjectLinkRow): string {
-  return JSON.stringify([
-    link.sourceTypeId,
-    link.sourceId,
-    link.linkId,
-    link.targetTypeId,
-    link.targetId,
-  ])
+function assertLinkQueryLimit(limit: number): void {
+  if (!Number.isSafeInteger(limit) || limit <= 0) {
+    throw new Error("Object link query limit must be a positive safe integer.")
+  }
 }
 
 function readTotal(db: Database, compiled: CompiledObjectQuery): number {

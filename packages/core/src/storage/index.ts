@@ -352,10 +352,13 @@ export type {
   ExpandedObjectRow,
   FacetObjectsInput,
   FacetObjectsResult,
+  LinkBatchKey,
   LinkDirection,
+  ObjectBatchKey,
   ObjectFacetBucket,
   ObjectFacetRequest,
   ObjectFacetResult,
+  ObjectLinkCursor,
   ObjectLinkRow,
   ObjectQueryCapabilities,
   ObjectQueryCapabilityMap,
@@ -364,8 +367,15 @@ export type {
   ObjectRow,
   ObjectRowLinks,
   ObjectStorage,
+  QueryObjectLinksInput,
+  QueryObjectLinksResult,
   QueryObjectsInput,
   QueryObjectsResult,
+} from "./objects"
+export {
+  linkBatchKey,
+  objectBatchKey,
+  objectLinkCursor,
 } from "./objects"
 export type {
   AbandonSourceMaterializationCandidateInput,

@@ -1,19 +1,21 @@
 import { createHash } from "node:crypto"
 import { isAllowed } from "../../authorization"
 import { stableJsonStringify } from "../../json"
-import type { LinkDirection, ObjectLinkRow, ObjectRow, ObjectStorage } from "../../storage"
+import {
+  type LinkDirection,
+  type ObjectBatchKey,
+  type ObjectLinkCursor,
+  type ObjectLinkRow,
+  type ObjectRow,
+  type ObjectStorage,
+  objectBatchKey,
+  objectLinkCursor,
+} from "../../storage"
 import { ObjectQueryExecutionError } from "./errors"
 import { executeObjectQuery, type QueryExecutorOptions } from "./executor"
 import type { ObjectQuery } from "./ir"
 import { normalizeObjectQuery } from "./normalize"
 import { validateObjectQuery } from "./validate"
-
-export interface ObjectQueryLinksExecutorOptions extends QueryExecutorOptions {
-  /** Maximum selector rows admitted by the incident-links terminal. */
-  maxLinkQueryObjects?: number
-  /** Maximum edge page size admitted by the incident-links terminal. */
-  maxLinkPageSize?: number
-}
 
 export interface ExecuteObjectQueryLinksInput {
   projectId: string
@@ -32,10 +34,10 @@ export interface ExecuteObjectQueryLinksResult {
   nextPageToken?: string
 }
 
-const DEFAULT_MAX_LINK_QUERY_OBJECTS = 1_000
-const DEFAULT_MAX_LINK_PAGE_SIZE = 1_000
+const MAX_LINK_QUERY_OBJECTS = 1_000
+const MAX_LINK_PAGE_SIZE = 1_000
 const DEFAULT_LINK_PAGE_SIZE = 100
-const LINK_PAGE_TOKEN_PREFIX = "link:v2:"
+const LINK_PAGE_TOKEN_PREFIX = "link:v1:"
 
 /**
  * Select a bounded object set with the query IR, then return physical links
@@ -44,17 +46,8 @@ const LINK_PAGE_TOKEN_PREFIX = "link:v2:"
  */
 export async function executeObjectQueryLinks(
   input: ExecuteObjectQueryLinksInput,
-  options: ObjectQueryLinksExecutorOptions
+  options: QueryExecutorOptions
 ): Promise<ExecuteObjectQueryLinksResult> {
-  const maxSelectedObjects = options.maxLinkQueryObjects ?? DEFAULT_MAX_LINK_QUERY_OBJECTS
-  const maxPageSize = options.maxLinkPageSize ?? DEFAULT_MAX_LINK_PAGE_SIZE
-  assertPositiveInteger(
-    maxSelectedObjects,
-    "invalid_link_query_object_limit",
-    "maxLinkQueryObjects"
-  )
-  assertPositiveInteger(maxPageSize, "invalid_link_page_size_limit", "maxLinkPageSize")
-
   const direction = input.direction ?? "both"
   if (direction !== "outgoing" && direction !== "incoming" && direction !== "both") {
     throw new ObjectQueryExecutionError(
@@ -68,16 +61,13 @@ export async function executeObjectQueryLinks(
   }
 
   const pageSize = input.pageSize ?? DEFAULT_LINK_PAGE_SIZE
-  if (!Number.isInteger(pageSize) || pageSize <= 0 || pageSize > maxPageSize) {
+  if (!Number.isInteger(pageSize) || pageSize <= 0 || pageSize > MAX_LINK_PAGE_SIZE) {
     throw new ObjectQueryExecutionError(
       "invalid_link_page_size",
-      `pageSize must be an integer between 1 and ${maxPageSize}`,
+      `pageSize must be an integer between 1 and ${MAX_LINK_PAGE_SIZE}`,
       "$.pageSize"
     )
   }
-  // Validate the complete authored query before removing output-only nodes.
-  // `project` and `expand` do not change selector membership, but malformed
-  // output-shaping instructions should not be silently accepted.
   const validated = validateObjectQuery(normalizeObjectQuery(input.query), {
     ontology: options.ontology,
     maxLimit: options.maxLimit,
@@ -85,31 +75,33 @@ export async function executeObjectQueryLinks(
     maxRefs: options.maxRefs,
     normalize: false,
   })
-  const selectorQuery = stripObjectQueryOutputShape(validated.query)
+  assertLinkSelectorShape(validated.query)
+  const selectorQuery = validated.query
   const pageScope = linkPageScope(input.projectId, selectorQuery, direction, input.linkId)
   const cursor = decodeLinkPageToken(input.pageToken, pageScope)
 
-  // Probe one extra selector row so an unbounded object query never turns the
-  // incident-link batch primitive into an unbounded graph scan.
+  // A root page already has an explicit result bound and must execute directly: nesting it under a
+  // probe limit would expose the provider's internal pageSize+1 row. All other selector shapes are
+  // capped here before the provider receives the selected identities.
+  const boundedSelector =
+    selectorQuery.kind === "page"
+      ? selectorQuery
+      : { kind: "limit" as const, limit: MAX_LINK_QUERY_OBJECTS + 1, input: selectorQuery }
   const selection = await executeObjectQuery(
     {
       projectId: input.projectId,
-      query: {
-        kind: "limit",
-        limit: maxSelectedObjects + 1,
-        input: selectorQuery,
-      },
+      query: boundedSelector,
       includeTotal: false,
     },
     {
       ...options,
-      maxLimit: Math.max(options.maxLimit ?? 1_000, maxSelectedObjects + 1),
+      maxLimit: Math.max(options.maxLimit ?? 1_000, MAX_LINK_QUERY_OBJECTS + 1),
     }
   )
-  if (selection.objects.length > maxSelectedObjects) {
+  if (selection.objects.length > MAX_LINK_QUERY_OBJECTS) {
     throw new ObjectQueryExecutionError(
       "link_query_object_limit_exceeded",
-      `Link query selected more than ${maxSelectedObjects} objects; add a limit or page node`,
+      `Link query selected more than ${MAX_LINK_QUERY_OBJECTS} objects; add a limit or page node`,
       "$.query"
     )
   }
@@ -119,115 +111,96 @@ export async function executeObjectQueryLinks(
     return { objects: [], links: [], hasMore: false }
   }
 
-  const selectedKeys = new Set(
-    selected.map((row) => objectIdentity(row.objectTypeId, row.primaryId))
-  )
-  const incident = await options.storage.listIncidentLinksBatch({
+  const endpointObjectTypeIds = visibleEndpointTypeIds(options)
+  const page = await options.storage.queryLinks({
     projectId: input.projectId,
-    items: selected.map((row) => ({ objectTypeId: row.objectTypeId, objectId: row.primaryId })),
+    objectRefs: selected.map((row) => ({
+      objectTypeId: row.objectTypeId,
+      primaryId: row.primaryId,
+    })),
+    direction,
+    ...(input.linkId === undefined ? {} : { linkId: input.linkId }),
+    ...(endpointObjectTypeIds === undefined ? {} : { endpointObjectTypeIds }),
+    ...(cursor === undefined ? {} : { after: cursor }),
+    limit: pageSize,
   })
-  const visibleLinks = incident
-    .filter((link) => linkMatchesSelection(link, selectedKeys, direction))
-    .filter((link) => input.linkId === undefined || link.linkId === input.linkId)
-    .filter(
-      (link) =>
-        isAllowed(options.authorization, {
-          kind: "object.view",
-          objectTypeId: link.sourceTypeId,
-        }) &&
-        isAllowed(options.authorization, {
-          kind: "object.view",
-          objectTypeId: link.targetTypeId,
-        })
-    )
-    .sort(compareObjectLinks)
-    .filter((link) => cursor === undefined || compareObjectLinkToCursor(link, cursor) > 0)
-
-  const hasMore = visibleLinks.length > pageSize
-  const links = visibleLinks.slice(0, pageSize)
-  const nextPageToken = hasMore
-    ? encodeLinkPageToken(linkCursor(links.at(-1)!), pageScope)
-    : undefined
+  const lastLink = page.links.at(-1)
+  let nextPageToken: string | undefined
+  if (page.hasMore) {
+    if (!lastLink) {
+      throw new Error("[Sixb] Object storage returned hasMore for an empty link page.")
+    }
+    nextPageToken = encodeLinkPageToken(objectLinkCursor(lastLink), pageScope)
+  }
   const objects = input.includeObjects
-    ? await hydrateLinkQueryObjects(input.projectId, selected, links, options.storage)
+    ? await hydrateLinkQueryObjects(input.projectId, selected, page.links, options.storage)
     : []
 
-  return { objects, links, hasMore, ...(nextPageToken ? { nextPageToken } : {}) }
+  return {
+    objects,
+    links: page.links,
+    hasMore: page.hasMore,
+    ...(nextPageToken ? { nextPageToken } : {}),
+  }
 }
 
-type ObjectLinkCursor = readonly [string, string, string, string, string]
-
 interface EncodedLinkPageToken {
-  version: 2
+  version: 1
   scope: string
   cursor: ObjectLinkCursor
 }
 
-function assertPositiveInteger(value: number, code: string, field: string): void {
-  if (Number.isInteger(value) && value > 0) return
-  throw new ObjectQueryExecutionError(code, `${field} must be a positive integer`, `$.${field}`)
-}
-
-function stripObjectQueryOutputShape(query: ObjectQuery): ObjectQuery {
+function assertLinkSelectorShape(query: ObjectQuery, path = "$.query", root = true): void {
   switch (query.kind) {
     case "project":
     case "expand":
-      return stripObjectQueryOutputShape(query.input)
+      throw new ObjectQueryExecutionError(
+        "link_selector_output_shape_not_supported",
+        `Link selectors do not support '${query.kind}' nodes; remove output shaping from the selector`,
+        path
+      )
+    case "page":
+      if (!root) {
+        throw new ObjectQueryExecutionError(
+          "link_selector_page_must_be_root",
+          "A page node in a link selector must be the outermost node",
+          path
+        )
+      }
+      assertLinkSelectorShape(query.input, `${path}.input`, false)
+      return
     case "start":
     case "refs":
-      return query
-    case "set":
-      return {
-        ...query,
-        inputs: query.inputs.map(stripObjectQueryOutputShape),
+      return
+    case "set": {
+      for (const [index, input] of query.inputs.entries()) {
+        assertLinkSelectorShape(input, `${path}.inputs[${index}]`, false)
       }
+      return
+    }
     case "filter":
     case "text":
     case "vector":
     case "traverse":
     case "sort":
     case "limit":
-    case "page":
-      return { ...query, input: stripObjectQueryOutputShape(query.input) }
+      assertLinkSelectorShape(query.input, `${path}.input`, false)
+      return
   }
 }
 
-function linkMatchesSelection(
-  link: ObjectLinkRow,
-  selectedKeys: ReadonlySet<string>,
-  direction: LinkDirection
-): boolean {
-  const outgoing = selectedKeys.has(objectIdentity(link.sourceTypeId, link.sourceId))
-  const incoming = selectedKeys.has(objectIdentity(link.targetTypeId, link.targetId))
-  return direction === "outgoing"
-    ? outgoing
-    : direction === "incoming"
-      ? incoming
-      : outgoing || incoming
+function visibleEndpointTypeIds(options: QueryExecutorOptions): readonly string[] | undefined {
+  if (!options.authorization) return undefined
+  return options.ontology
+    .listObjectTypes()
+    .filter((objectType) =>
+      isAllowed(options.authorization, { kind: "object.view", objectTypeId: objectType.id })
+    )
+    .map((objectType) => objectType.id)
 }
 
-function objectIdentity(objectTypeId: string, primaryId: string): string {
-  return JSON.stringify([objectTypeId, primaryId])
-}
-
-function linkCursor(link: ObjectLinkRow): ObjectLinkCursor {
-  return [link.sourceTypeId, link.sourceId, link.linkId, link.targetTypeId, link.targetId]
-}
-
-function compareObjectLinks(left: ObjectLinkRow, right: ObjectLinkRow): number {
-  return compareLinkCursors(linkCursor(left), linkCursor(right))
-}
-
-function compareObjectLinkToCursor(link: ObjectLinkRow, cursor: ObjectLinkCursor): number {
-  return compareLinkCursors(linkCursor(link), cursor)
-}
-
-function compareLinkCursors(left: ObjectLinkCursor, right: ObjectLinkCursor): number {
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index] < right[index]) return -1
-    if (left[index] > right[index]) return 1
-  }
-  return 0
+function objectIdentity(objectTypeId: string, primaryId: string): ObjectBatchKey {
+  return objectBatchKey(objectTypeId, primaryId)
 }
 
 function linkPageScope(
@@ -249,7 +222,7 @@ function linkPageScope(
 }
 
 function encodeLinkPageToken(cursor: ObjectLinkCursor, scope: string): string {
-  const payload: EncodedLinkPageToken = { version: 2, scope, cursor }
+  const payload: EncodedLinkPageToken = { version: 1, scope, cursor }
   return `${LINK_PAGE_TOKEN_PREFIX}${Buffer.from(JSON.stringify(payload)).toString("base64url")}`
 }
 
@@ -265,7 +238,7 @@ function decodeLinkPageToken(
     ) as unknown
     if (
       !isPlainObject(value) ||
-      value.version !== 2 ||
+      value.version !== 1 ||
       typeof value.scope !== "string" ||
       !isObjectLinkCursor(value.cursor)
     ) {
@@ -323,7 +296,7 @@ async function hydrateLinkQueryObjects(
   if (missingRefs.length > 0) {
     const hydrated = await storage.getByPrimaryIdBatch({ projectId, items: missingRefs })
     for (const ref of missingRefs) {
-      const row = hydrated.get(`${ref.objectTypeId}:${ref.primaryId}`)
+      const row = hydrated.get(objectBatchKey(ref.objectTypeId, ref.primaryId))
       if (row) byIdentity.set(objectIdentity(ref.objectTypeId, ref.primaryId), row)
     }
   }

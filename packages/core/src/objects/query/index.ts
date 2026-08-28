@@ -60,7 +60,6 @@ export type {
 export type {
   ExecuteObjectQueryLinksInput,
   ExecuteObjectQueryLinksResult,
-  ObjectQueryLinksExecutorOptions,
 } from "./links"
 export { executeObjectQueryLinks } from "./links"
 export { normalizeObjectQuery, normalizeObjectQueryPredicate } from "./normalize"
