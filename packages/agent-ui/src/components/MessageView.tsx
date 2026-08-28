@@ -2,11 +2,15 @@ import {
   Bubble,
   BubbleContent,
   Button,
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+  Markdown,
   Marker,
   MarkerContent,
   MarkerIcon,
 } from "@sixb/ui/components"
-import { AlertTriangle, ArrowRight, Clock3, RotateCcw } from "lucide-react"
+import { AlertTriangle, ArrowRight, ChevronRight, Clock3, FileText, RotateCcw } from "lucide-react"
 import { memo } from "react"
 import { createAgentDocumentSource } from "../document-preview/source"
 import type { AgentDocumentSource } from "../document-preview/types"
@@ -61,6 +65,7 @@ function UserMessage({ message }: { message: AgentMessage }) {
 function AssistantMessage({ message }: { message: AgentMessage }) {
   return (
     <div className="flex flex-col gap-2">
+      {message.compaction ? <CompactionResult summary={message.compaction.summary} /> : null}
       <AssistantBody
         parts={normalizeDurableParts(message.parts, {
           fileSource: (partIndex) => agentMessageDocumentSource(message, partIndex),
@@ -95,6 +100,24 @@ function AssistantMessage({ message }: { message: AgentMessage }) {
   )
 }
 
+function CompactionResult({ summary }: { summary: string }) {
+  return (
+    <Collapsible className="max-w-full">
+      <CollapsibleTrigger className="group flex w-fit max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-[13px] leading-normal text-muted-foreground outline-none transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+        <FileText className="size-3.5 shrink-0" aria-hidden="true" />
+        <span>Earlier conversation condensed</span>
+        <span className="text-muted-foreground/60">· View summary</span>
+        <ChevronRight className="size-4 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="scrollbar-thin mt-2 ml-1.5 max-h-[min(24rem,50vh)] overflow-y-auto overscroll-contain border-l-2 border-border py-0.5 pr-2 pl-3">
+          <Markdown className="prose-chat text-sm text-muted-foreground">{summary}</Markdown>
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
 /** The transient assistant row driven by the live `/ws/agents` stream. */
 export function LiveAssistant({
   live,
@@ -113,6 +136,9 @@ export function LiveAssistant({
   retrying?: boolean
   continuing?: boolean
 }) {
+  if (live.compacting && live.parts.length === 0) {
+    return <CompactionMarker />
+  }
   if (isAwaitingFirstToken(live)) {
     return <ThinkingMarker />
   }
@@ -158,6 +184,14 @@ export function LiveAssistant({
       ) : null}
       {live.finishStatus === "cancelled" ? <RunCancelledMarker /> : null}
     </div>
+  )
+}
+
+export function CompactionMarker() {
+  return (
+    <Marker role="status" aria-label="Agent is condensing earlier conversation">
+      <MarkerContent className="shimmer">Condensing earlier conversation…</MarkerContent>
+    </Marker>
   )
 }
 

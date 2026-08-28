@@ -5,6 +5,7 @@ import type {
   AiModelCallUsageRecord,
   AiUsageExecutionSummary,
   AiUsageStorage,
+  GetLatestAiModelCallForExecutionInput,
   RecordAiModelCallInput,
   RecordAiModelCallResult,
   SummarizeAiUsageExecutionInput,
@@ -67,6 +68,28 @@ export class InMemoryAiUsageStorage implements AiUsageStorage {
     }
 
     return { record: structuredClone(record), created: true }
+  }
+
+  async getLatestForExecution(
+    input: GetLatestAiModelCallForExecutionInput
+  ): Promise<AiModelCallUsageRecord | null> {
+    assertAiUsageExecutionId(input.executionId)
+    if (typeof input.projectId !== "string" || input.projectId.trim().length === 0) {
+      throw new TypeError("[Sixb] AI usage projectId must be nonblank.")
+    }
+
+    let latest: AiModelCallUsageRecord | null = null
+    for (const record of this.records.values()) {
+      if (record.projectId !== input.projectId || record.executionId !== input.executionId) continue
+      if (
+        !latest ||
+        record.occurredAt.getTime() > latest.occurredAt.getTime() ||
+        (record.occurredAt.getTime() === latest.occurredAt.getTime() && record.id > latest.id)
+      ) {
+        latest = record
+      }
+    }
+    return latest ? structuredClone(latest) : null
   }
 
   async summarizeExecution(

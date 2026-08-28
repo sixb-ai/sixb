@@ -7,6 +7,8 @@ export interface LiveRunState {
   readonly runId: string | null
   /** True once `agent.run.started` arrives and the run has not finished. */
   readonly active: boolean
+  /** True while the worker is condensing earlier turns before the normal model call. */
+  readonly compacting: boolean
   /** Ordered, render-ready parts of the in-flight assistant message, in first-chunk order. */
   readonly parts: readonly NormalizedPart[]
   /**
@@ -38,6 +40,7 @@ export function createLiveRunState(runId: string | null = null): LiveRunState {
   return {
     runId,
     active: false,
+    compacting: false,
     parts: [],
     partKeys: [],
     stepIndex: 0,
@@ -77,6 +80,11 @@ function reduceEvent(state: LiveRunState, event: AgentRunStreamEvent): LiveRunSt
   switch (event.type) {
     case "agent.run.started":
       return { ...state, runId: event.runId, active: true }
+    case "agent.compaction.started":
+      return { ...state, runId: event.runId, active: true, compacting: true }
+    case "agent.compaction.completed":
+    case "agent.compaction.failed":
+      return { ...state, compacting: false }
     case "agent.ui.chunk":
       return applyChunk(state, event.chunk)
     case "agent.message.finalized":
@@ -85,6 +93,7 @@ function reduceEvent(state: LiveRunState, event: AgentRunStreamEvent): LiveRunSt
       return {
         ...state,
         active: false,
+        compacting: false,
         finishStatus: event.status,
         finishReason: event.finishReason ?? null,
         finishError: event.error ?? null,

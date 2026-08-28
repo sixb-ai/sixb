@@ -11,6 +11,7 @@ import type {
 import { exa } from "@sixb/connector-exa"
 import { exaWebFetch, exaWebSearch } from "@sixb/connector-exa/agent-tools"
 import {
+  type AgentContextConfig,
   type AgentReasoningLevel,
   AgentRequestError,
   type AgentsRuntime,
@@ -106,6 +107,12 @@ const USAGE: LanguageModelV4Usage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
   outputTokens: { total: 7, text: 7, reasoning: 0 },
   raw: { input_tokens: 10, output_tokens: 7, provider_meter: 1 },
+}
+
+const COMPACTION_USAGE: LanguageModelV4Usage = {
+  inputTokens: { total: 3_500, noCache: 3_500, cacheRead: 0, cacheWrite: 0 },
+  outputTokens: { total: 100, text: 100, reasoning: 0 },
+  raw: { input_tokens: 3_500, output_tokens: 100 },
 }
 
 function stream(chunks: LanguageModelV4StreamPart[]) {
@@ -340,6 +347,74 @@ function answerModel(captureTools?: (names: readonly string[]) => void): MockLan
         { type: "text-end", id: "answer" },
         finish("stop"),
       ])
+    },
+  })
+}
+
+function compactingAnswerModel(input: {
+  readonly captureSummaryPrompt: (prompt: LanguageModelV4CallOptions["prompt"]) => void
+  readonly captureAnswerPrompt: (prompt: LanguageModelV4CallOptions["prompt"]) => void
+  readonly captureSummaryReasoning?: (reasoning: LanguageModelV4CallOptions["reasoning"]) => void
+  readonly captureAnswerReasoning?: (reasoning: LanguageModelV4CallOptions["reasoning"]) => void
+}): MockLanguageModelV4 {
+  return new MockLanguageModelV4({
+    modelId: "mock-model",
+    doGenerate: async (options) => {
+      input.captureSummaryPrompt(options.prompt)
+      input.captureSummaryReasoning?.(options.reasoning)
+      return {
+        content: [
+          {
+            type: "text",
+            text: [
+              "## Goal",
+              "Continue the durable test conversation.",
+              "## User Constraints and Preferences",
+              "Keep the answer concise.",
+              "## Established Facts and Results",
+              "Earlier turns were completed.",
+              "## Completed Actions",
+              "Recorded earlier answers.",
+              "## Open Work",
+              "Answer the latest request.",
+              "## Key Decisions",
+              "Retain the latest complete turn.",
+              "## Important Identifiers and Files",
+              "Thread remains authoritative.",
+            ].join("\n"),
+          },
+        ],
+        finishReason: { unified: "stop", raw: "stop" },
+        usage: COMPACTION_USAGE,
+        warnings: [],
+      }
+    },
+    doStream: async (options) => {
+      input.captureAnswerPrompt(options.prompt)
+      input.captureAnswerReasoning?.(options.reasoning)
+      return stream([
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "answer" },
+        { type: "text-delta", id: "answer", delta: "Continued after compaction." },
+        { type: "text-end", id: "answer" },
+        { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: COMPACTION_USAGE },
+      ])
+    },
+  })
+}
+
+function lengthLimitedSummaryModel(onAnswerCall: () => void): MockLanguageModelV4 {
+  return new MockLanguageModelV4({
+    modelId: "mock-model",
+    doGenerate: async () => ({
+      content: [{ type: "text", text: "## Goal\nPartial summary" }],
+      finishReason: { unified: "length", raw: "length" },
+      usage: USAGE,
+      warnings: [],
+    }),
+    doStream: async () => {
+      onAnswerCall()
+      return stream([finish("stop")])
     },
   })
 }
@@ -1194,6 +1269,7 @@ function buildSixb(
     readonly projectRoot?: string
     readonly agentTools?: readonly AgentToolDefinition[]
     readonly connectors?: readonly ConnectorDefinition[]
+    readonly context?: AgentContextConfig
   } = {}
 ): TestSixb {
   const agent = defineAgent("assistant", {
@@ -1204,7 +1280,10 @@ function buildSixb(
     instructions: "You are a helpful test assistant.",
     groups: [AGENT_RUNTIME_GROUP],
     ...(options.agentTools === undefined ? {} : { tools: options.agentTools }),
-    loop: { stopWhen: { maxSteps: 4 } },
+    loop: {
+      stopWhen: { maxSteps: 4 },
+      ...(options.context === undefined ? {} : { context: options.context }),
+    },
   })
   return new SixbHost({
     id: PROJECT_ID,
@@ -1621,6 +1700,89 @@ async function listRunStreamRecords(broker: Broker, runId: string) {
     .then((page) => page.records)
 }
 
+async function seedCompletedConversationTurn(input: {
+  readonly sixb: TestSixb
+  readonly threadId: string
+  readonly index: number
+  readonly text: string
+  readonly assistantText?: string
+  readonly includeAttachment?: boolean
+}): Promise<void> {
+  const storage = agentStorageOf(input.sixb)
+  const runId = `history_run_${input.index}`
+  const userMessageId = `history_user_${input.index}`
+  await storage.messages.append({
+    id: userMessageId,
+    projectId: PROJECT_ID,
+    threadId: input.threadId,
+    runId: null,
+    role: "user",
+    parts: [
+      { type: "text", text: `historical user ${input.index}: ${input.text}` },
+      ...(input.includeAttachment
+        ? [
+            {
+              type: "file" as const,
+              fileRef: {
+                blobId: `blob_${"0".repeat(64)}`,
+                digest: `sha256:${"0".repeat(64)}` as const,
+                sizeBytes: 32,
+                fileName: "historical.txt",
+                mediaType: "text/plain",
+              },
+            },
+          ]
+        : []),
+    ],
+    authorPrincipal: REQUESTER,
+  })
+  const executionId = await createTestAgentExecution(input.sixb.storage, {
+    projectId: PROJECT_ID,
+    agentId: "assistant",
+    runId,
+  })
+  await storage.runs.create({
+    id: runId,
+    projectId: PROJECT_ID,
+    executionId,
+    threadId: input.threadId,
+    agentId: "assistant",
+    triggerMessageId: userMessageId,
+    requesterGroupIds: [],
+  })
+  const executionToken = `history_execution_${input.index}`
+  await storage.runs.start({
+    id: runId,
+    projectId: PROJECT_ID,
+    execution: {
+      token: executionToken,
+      queueLeaseExpiresAt: new Date(Date.now() + 60_000),
+    },
+  })
+  await storage.messages.append({
+    id: `history_assistant_${input.index}`,
+    projectId: PROJECT_ID,
+    threadId: input.threadId,
+    runId,
+    role: "assistant",
+    parts: [
+      {
+        type: "text",
+        text: `historical assistant ${input.index}: ${input.assistantText ?? input.text}`,
+      },
+    ],
+    authorPrincipal: AGENT_PRINCIPAL,
+  })
+  await storage.runs.finish({
+    id: runId,
+    projectId: PROJECT_ID,
+    executionToken,
+    status: "succeeded",
+    modelId: "mock-model",
+    finishReason: "stop",
+  })
+}
+
 /**
  * Wrap root storage so agent `runs.finish` fails with a non-terminal (infra) error its first
  * `failTimes` calls, including when the worker finalizes through `storage.transaction(...)`.
@@ -1812,6 +1974,337 @@ describe("AgentWorker", () => {
       ).resolves.toBeNull()
     } finally {
       await worker.stop()
+    }
+  })
+
+  test("checkpoints an over-budget thread, continues, and preserves the full transcript", async () => {
+    const summaryPrompts: LanguageModelV4CallOptions["prompt"][] = []
+    const answerPrompts: LanguageModelV4CallOptions["prompt"][] = []
+    const summaryReasoning: LanguageModelV4CallOptions["reasoning"][] = []
+    const answerReasoning: LanguageModelV4CallOptions["reasoning"][] = []
+    const sixb = buildSixb(
+      compactingAnswerModel({
+        captureSummaryPrompt: (prompt) => {
+          summaryPrompts.push(prompt)
+        },
+        captureAnswerPrompt: (prompt) => {
+          answerPrompts.push(prompt)
+        },
+        captureSummaryReasoning: (reasoning) => {
+          summaryReasoning.push(reasoning)
+        },
+        captureAnswerReasoning: (reasoning) => {
+          answerReasoning.push(reasoning)
+        },
+      }),
+      new InMemoryBroker(),
+      new RecordingSandboxFactory(),
+      {
+        reasoning: "high",
+        context: { windowTokens: 5_000, reserveTokens: 1_000, keepRecentTokens: 700 },
+      }
+    )
+    const storage = agentStorageOf(sixb)
+    const threadId = "compaction_thread"
+    await storage.threads.create({
+      id: threadId,
+      projectId: PROJECT_ID,
+      agentId: "assistant",
+      ownerPrincipal: REQUESTER,
+    })
+    for (let index = 0; index < 6; index += 1) {
+      await seedCompletedConversationTurn({
+        sixb,
+        threadId,
+        index,
+        text: `${`turn-${index}-`}${"x".repeat(1_800)}`,
+        includeAttachment: index === 0,
+      })
+    }
+    const before = await listMessages(storage, threadId)
+    expect(before).toHaveLength(12)
+
+    const messageReads: Parameters<AgentStorage["messages"]["list"]>[0][] = []
+    const listStoredMessages = storage.messages.list.bind(storage.messages)
+    storage.messages.list = (input) => {
+      messageReads.push(input)
+      return listStoredMessages(input)
+    }
+    const blobStats: string[] = []
+    const statBlob = sixb.blobStorage.stat.bind(sixb.blobStorage)
+    sixb.blobStorage.stat = (blobId) => {
+      blobStats.push(blobId)
+      return statBlob(blobId)
+    }
+
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      const request = await requestAgentAs(sixb, REQUESTER, {
+        agentId: "assistant",
+        threadId,
+        text: "Continue from the latest completed turn.",
+      })
+      const run = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({
+            projectId: PROJECT_ID,
+            id: request.run.id,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "compacted agent run" }
+      )
+      expect(run.status).toBe("succeeded")
+
+      const checkpoint = await storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
+      expect(checkpoint).toMatchObject({
+        id: `agt_ctx_${run.id}`,
+        createdByRunId: run.id,
+        reason: "threshold",
+        observedHeadSeq: 13,
+        summaryModelId: "mock-model",
+      })
+      expect(checkpoint?.summarizedThroughSeq).toBeGreaterThan(0)
+      expect(checkpoint?.estimatedInputTokensBefore).toBeGreaterThan(
+        checkpoint?.estimatedInputTokensAfter ?? Number.POSITIVE_INFINITY
+      )
+      expect(messageReads.map((read) => read.afterSeq)).toEqual([
+        undefined,
+        checkpoint?.summarizedThroughSeq,
+      ])
+      expect(blobStats).toEqual([])
+
+      const summaryPrompt = summaryPrompts[0]
+      const answerPrompt = answerPrompts[0]
+      if (!summaryPrompt || !answerPrompt) {
+        throw new Error("Expected both summary and answer model calls.")
+      }
+      const serializedSummaryPrompt = JSON.stringify(summaryPrompt)
+      const serializedAnswerPrompt = JSON.stringify(answerPrompt)
+      expect(serializedSummaryPrompt).toContain("historical user 0")
+      expect(serializedSummaryPrompt).not.toContain("historical user 5")
+      expect(serializedAnswerPrompt).toContain("<sixb_thread_summary>")
+      expect(serializedAnswerPrompt).not.toContain("historical user 0")
+      expect(serializedAnswerPrompt).toContain("historical user 5")
+      expect(serializedAnswerPrompt).toContain("Continue from the latest completed turn.")
+
+      const transcript = await listMessages(storage, threadId)
+      expect(transcript).toHaveLength(14)
+      expect(transcript.slice(0, before.length)).toEqual([...before])
+      expect(transcript.at(-1)?.parts).toContainEqual({
+        type: "text",
+        text: "Continued after compaction.",
+      })
+
+      await expect(
+        aiUsageStorageOf(sixb).summarizeExecution({
+          projectId: PROJECT_ID,
+          executionId: run.executionId,
+        })
+      ).resolves.toMatchObject({ modelCallCount: 2 })
+
+      const streamRecords = await listRunStreamRecords(sixb.broker, run.id)
+      const streamNames = streamRecords.map((record) => record.name)
+      expect(streamNames[0]).toBe("agent.run.started")
+      expect(streamNames).toContain("agent.compaction.started")
+      expect(streamNames).toContain("agent.compaction.completed")
+      expect(streamNames.indexOf("agent.compaction.started")).toBeLessThan(
+        streamNames.indexOf("agent.compaction.completed")
+      )
+      expect(streamNames.indexOf("agent.compaction.completed")).toBeLessThan(
+        streamNames.indexOf("agent.ui.chunk")
+      )
+      const compactionPayloads = streamRecords
+        .filter((record) => record.name?.startsWith("agent.compaction."))
+        .map((record) => record.payload)
+      expect(JSON.stringify(compactionPayloads)).not.toContain("## Goal")
+
+      const secondRequest = await requestAgentAs(sixb, REQUESTER, {
+        agentId: "assistant",
+        threadId,
+        text: `second-compaction-${"y".repeat(3_000)}`,
+      })
+      const secondRun = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({
+            projectId: PROJECT_ID,
+            id: secondRequest.run.id,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "repeated compacted agent run" }
+      )
+      expect(secondRun.status).toBe("succeeded")
+      const secondCheckpoint = await storage.checkpoints.getLatest({
+        projectId: PROJECT_ID,
+        threadId,
+      })
+      expect(secondCheckpoint).toMatchObject({
+        id: `agt_ctx_${secondRun.id}`,
+        previousCheckpointId: checkpoint?.id,
+        createdByRunId: secondRun.id,
+      })
+      expect(secondCheckpoint?.summarizedThroughSeq).toBeGreaterThan(
+        checkpoint?.summarizedThroughSeq ?? Number.POSITIVE_INFINITY
+      )
+      expect(summaryPrompts).toHaveLength(2)
+      expect(JSON.stringify(summaryPrompts[1])).toContain("<sixb_previous_summary>")
+      expect(JSON.stringify(summaryPrompts[1])).toContain("Continue the durable test conversation")
+      expect(summaryReasoning).toEqual(["none", "none"])
+      expect(answerPrompts).toHaveLength(2)
+      expect(answerReasoning).toEqual(["high", "high"])
+      expect(await listMessages(storage, threadId)).toHaveLength(16)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("checkpoints one oversized completed turn before a short follow-up", async () => {
+    const summaryPrompts: LanguageModelV4CallOptions["prompt"][] = []
+    const answerPrompts: LanguageModelV4CallOptions["prompt"][] = []
+    const sixb = buildSixb(
+      compactingAnswerModel({
+        captureSummaryPrompt: (prompt) => {
+          summaryPrompts.push(prompt)
+        },
+        captureAnswerPrompt: (prompt) => {
+          answerPrompts.push(prompt)
+        },
+      }),
+      new InMemoryBroker(),
+      new RecordingSandboxFactory(),
+      {
+        context: { windowTokens: 5_000, reserveTokens: 1_000, keepRecentTokens: 700 },
+      }
+    )
+    const storage = agentStorageOf(sixb)
+    const threadId = "oversized_turn_compaction_thread"
+    await storage.threads.create({
+      id: threadId,
+      projectId: PROJECT_ID,
+      agentId: "assistant",
+      ownerPrincipal: REQUESTER,
+    })
+    await seedCompletedConversationTurn({
+      sixb,
+      threadId,
+      index: 0,
+      text: "Research this organization.",
+      assistantText: `oversized-result-marker ${"x".repeat(20_000)}`,
+    })
+
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      const request = await requestAgentAs(sixb, REQUESTER, {
+        agentId: "assistant",
+        threadId,
+        text: "Continue on.",
+      })
+      const run = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({
+            projectId: PROJECT_ID,
+            id: request.run.id,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "oversized completed turn compaction" }
+      )
+
+      expect(run.status).toBe("succeeded")
+      await expect(
+        storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
+      ).resolves.toMatchObject({
+        createdByRunId: run.id,
+        summarizedThroughSeq: 2,
+        observedHeadSeq: 3,
+      })
+      expect(JSON.stringify(summaryPrompts)).toContain("oversized-result-marker")
+      expect(JSON.stringify(answerPrompts)).not.toContain("oversized-result-marker")
+      expect(JSON.stringify(answerPrompts)).toContain("Continue on.")
+      expect(await listMessages(storage, threadId)).toHaveLength(4)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("rejects a length-limited summary without creating a checkpoint or calling the agent", async () => {
+    let answerCalls = 0
+    const sixb = buildSixb(
+      lengthLimitedSummaryModel(() => {
+        answerCalls += 1
+      }),
+      new InMemoryBroker(),
+      new RecordingSandboxFactory(),
+      {
+        context: { windowTokens: 2_500, reserveTokens: 1_000, keepRecentTokens: 500 },
+      }
+    )
+    const storage = agentStorageOf(sixb)
+    const threadId = "failed_compaction_thread"
+    await storage.threads.create({
+      id: threadId,
+      projectId: PROJECT_ID,
+      agentId: "assistant",
+      ownerPrincipal: REQUESTER,
+    })
+    for (let index = 0; index < 2; index += 1) {
+      await seedCompletedConversationTurn({
+        sixb,
+        threadId,
+        index,
+        text: `${`failed-turn-${index}-`}${"x".repeat(1_800)}`,
+      })
+    }
+
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const originalConsoleError = console.error
+    console.error = () => {}
+    await worker.start()
+    try {
+      const request = await requestAgentAs(sixb, REQUESTER, {
+        agentId: "assistant",
+        threadId,
+        text: "This should not run after a partial summary.",
+      })
+      const run = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({
+            projectId: PROJECT_ID,
+            id: request.run.id,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "failed compacted agent run" }
+      )
+      expect(run.status).toBe("failed")
+      expect(answerCalls).toBe(0)
+      await expect(
+        storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
+      ).resolves.toBeNull()
+      expect(await listMessages(storage, threadId)).toHaveLength(5)
+      await expect(
+        aiUsageStorageOf(sixb).summarizeExecution({
+          projectId: PROJECT_ID,
+          executionId: run.executionId,
+        })
+      ).resolves.toMatchObject({ modelCallCount: 1 })
+
+      const records = await listRunStreamRecords(sixb.broker, run.id)
+      expect(records.map((record) => record.name)).toEqual([
+        "agent.run.started",
+        "agent.compaction.started",
+        "agent.compaction.failed",
+        "agent.run.finished",
+      ])
+      expect(
+        records.find((record) => record.name === "agent.compaction.failed")?.payload
+      ).toMatchObject({ errorCode: "summary_failed", reason: "threshold" })
+    } finally {
+      await worker.stop()
+      console.error = originalConsoleError
     }
   })
 
@@ -5653,6 +6146,15 @@ describe("AgentWorker", () => {
       workerOptions({
         streamSink: {
           async publishStarted() {
+            throw new Error("sink down")
+          },
+          async publishCompactionStarted() {
+            throw new Error("sink down")
+          },
+          async publishCompactionCompleted() {
+            throw new Error("sink down")
+          },
+          async publishCompactionFailed() {
             throw new Error("sink down")
           },
           async publishUiChunk() {

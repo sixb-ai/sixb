@@ -73,7 +73,10 @@ const assistant = defineAgent("assistant", {
   model,
   reasoning: "medium",
   instructions: "Do not expose this over HTTP.",
-  loop: { stopWhen: { maxSteps: 4 } },
+  loop: {
+    stopWhen: { maxSteps: 4 },
+    context: { windowTokens: 10_000 },
+  },
 })
 
 const ops = defineAgent("ops", {
@@ -336,7 +339,14 @@ describe("agent routes", () => {
         modelId: "test-model",
         reasoning: "medium",
         groupIds: [],
-        loop: { stopWhen: { maxSteps: 4 } },
+        loop: {
+          stopWhen: { maxSteps: 4 },
+          context: {
+            windowTokens: 10_000,
+            reserveTokens: 2_500,
+            keepRecentTokens: 3_750,
+          },
+        },
       },
       {
         id: "ops",
@@ -618,6 +628,93 @@ describe("agent routes", () => {
     )
     expect(runResponse.status).toBe(200)
     expect(await runResponse.json()).toMatchObject({ diagnostics })
+  })
+
+  test("projects a run's context checkpoint onto its durable assistant message", async () => {
+    const { app, storage, sixb } = createApp()
+    const thread = await storage.agents.threads.create({
+      id: "thr-compaction",
+      projectId: sixb.id,
+      agentId: "assistant",
+      ownerPrincipal: { type: "system", id: "system" },
+    })
+    for (const message of [
+      { id: "msg-old-user", role: "user" as const, text: "Research the organization." },
+      { id: "msg-old-assistant", role: "assistant" as const, text: "I started the research." },
+      { id: "msg-current-user", role: "user" as const, text: "Continue." },
+    ]) {
+      await storage.agents.messages.append({
+        id: message.id,
+        projectId: sixb.id,
+        threadId: thread.id,
+        runId: null,
+        role: message.role,
+        parts: [{ type: "text", text: message.text }],
+      })
+    }
+
+    const executionToken = createAgentRunExecutionToken()
+    await createStartedRun(storage, {
+      id: "run-compaction",
+      projectId: sixb.id,
+      threadId: thread.id,
+      agentId: "assistant",
+      triggerMessageId: "msg-current-user",
+      requesterGroupIds: [],
+      execution: testExecution(executionToken),
+    })
+    const checkpoint = await storage.agents.checkpoints.create({
+      id: "checkpoint-compaction",
+      projectId: sixb.id,
+      threadId: thread.id,
+      createdByRunId: "run-compaction",
+      expectedPreviousCheckpointId: null,
+      expectedHeadSeq: 3,
+      executionToken,
+      reason: "threshold",
+      summary: "The user asked for organization research, and the initial review began.",
+      summaryFormatVersion: 1,
+      summarizedThroughSeq: 2,
+      observedHeadSeq: 3,
+      estimatedInputTokensBefore: 9_000,
+      estimatedInputTokensAfter: 2_000,
+      summaryModelId: "test-model",
+      createdAt: new Date("2026-08-28T10:00:00.000Z"),
+    })
+    await storage.agents.messages.append({
+      id: "msg-compacted-response",
+      projectId: sixb.id,
+      threadId: thread.id,
+      runId: "run-compaction",
+      role: "assistant",
+      parts: [{ type: "text", text: "Here is the completed research." }],
+    })
+    await storage.agents.runs.finish({
+      id: "run-compaction",
+      projectId: sixb.id,
+      executionToken,
+      status: "succeeded",
+    })
+
+    const response = await app.fetch(
+      new Request(`http://localhost/api/agent-threads/${thread.id}/messages`)
+    )
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as {
+      messages: { id: string; compaction?: unknown }[]
+    }
+    expect(body.messages.find((message) => message.id === "msg-compacted-response")).toMatchObject({
+      compaction: {
+        checkpointId: checkpoint.id,
+        summary: checkpoint.summary,
+        createdAt: checkpoint.createdAt.toISOString(),
+      },
+    })
+    expect(
+      body.messages.filter(
+        (message) => message.id !== "msg-compacted-response" && "compaction" in message
+      )
+    ).toEqual([])
   })
 
   test("returns 409 when posting to a thread with an active run", async () => {
@@ -1038,6 +1135,7 @@ describe("agent routes", () => {
     Object.defineProperty(storage, "aiUsage", {
       value: {
         recordModelCall: (input) => aiUsage.recordModelCall(input),
+        getLatestForExecution: (input) => aiUsage.getLatestForExecution(input),
         summarizeExecution: (input) => aiUsage.summarizeExecution(input),
         summarizeExecutions: (input) => {
           summaryInputs.push(input)

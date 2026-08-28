@@ -25,8 +25,8 @@ credentials.
 ### Optional Operations Assistant
 
 The button at the bottom-right opens an embedded agent panel with the current route and detail
-object attached as context. The demo uses the free-tier `poolside/laguna-s-2.1-free` model through
-Vercel AI Gateway. Run it with your own AI Gateway key:
+object attached as context. The demo uses `deepseek/deepseek-v4-flash-vision-exp` through Vercel AI
+Gateway. Run it with your own AI Gateway key:
 
 ```bash
 AI_GATEWAY_API_KEY=your_key bun --filter @sixb/example-northline dev
@@ -51,6 +51,29 @@ summary: RTU-7 supply fan VFD failed while the building is occupied.
 The single agent node calls `lookup_response_policy` and then produces a structured service
 assessment, making the prompt, tool call, tool result, agent response, and final workflow output
 available from one run.
+
+#### Test conversation compaction
+
+Enable an intentionally small 4,000-token input threshold so compaction is easy to exercise without
+constraining normal Northline conversations:
+
+```bash
+NORTHLINE_AGENT_COMPACTION_DEMO=1 \
+AI_GATEWAY_API_KEY=your_key \
+bun --filter @sixb/example-northline dev
+```
+
+Then, in one thread:
+
+1. Send six to eight messages of roughly 1,500–2,000 characters each, including a distinct fact in
+   the earliest and latest messages.
+2. Wait for each assistant response before sending the next message.
+3. After **Condensing earlier conversation…** appears, ask the assistant to recall both facts.
+
+The next response should continue normally, and every original message should remain visible in
+the thread. Outside this opt-in demonstration mode, Northline does not impose the artificial test
+budget. Production agents should set `windowTokens` to the selected model's actual context window
+and choose reserve and recent-history budgets for their workload.
 
 ### Hosted sandbox
 

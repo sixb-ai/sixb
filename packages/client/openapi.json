@@ -22916,6 +22916,28 @@
                               }
                             },
                             "additionalProperties": false
+                          },
+                          "context": {
+                            "type": "object",
+                            "properties": {
+                              "windowTokens": {
+                                "type": "integer",
+                                "exclusiveMinimum": true,
+                                "minimum": 0
+                              },
+                              "reserveTokens": {
+                                "type": "integer",
+                                "exclusiveMinimum": true,
+                                "minimum": 0
+                              },
+                              "keepRecentTokens": {
+                                "type": "integer",
+                                "exclusiveMinimum": true,
+                                "minimum": 0
+                              }
+                            },
+                            "required": ["windowTokens", "reserveTokens", "keepRecentTokens"],
+                            "additionalProperties": false
                           }
                         },
                         "additionalProperties": false
@@ -22997,6 +23019,28 @@
                               "minimum": 0
                             }
                           },
+                          "additionalProperties": false
+                        },
+                        "context": {
+                          "type": "object",
+                          "properties": {
+                            "windowTokens": {
+                              "type": "integer",
+                              "exclusiveMinimum": true,
+                              "minimum": 0
+                            },
+                            "reserveTokens": {
+                              "type": "integer",
+                              "exclusiveMinimum": true,
+                              "minimum": 0
+                            },
+                            "keepRecentTokens": {
+                              "type": "integer",
+                              "exclusiveMinimum": true,
+                              "minimum": 0
+                            }
+                          },
+                          "required": ["windowTokens", "reserveTokens", "keepRecentTokens"],
                           "additionalProperties": false
                         }
                       },
@@ -24139,6 +24183,22 @@
                               "required": ["code", "severity", "scope", "message"],
                               "additionalProperties": false
                             }
+                          },
+                          "compaction": {
+                            "type": "object",
+                            "properties": {
+                              "checkpointId": {
+                                "type": "string"
+                              },
+                              "summary": {
+                                "type": "string"
+                              },
+                              "createdAt": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["checkpointId", "summary", "createdAt"],
+                            "additionalProperties": false
                           },
                           "metadata": {
                             "description": "Any JSON-compatible value.",

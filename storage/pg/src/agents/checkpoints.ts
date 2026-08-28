@@ -24,6 +24,8 @@ import {
   rowToThreadRecord,
 } from "./rows"
 
+const PG_CHECKPOINT_RUN_ID_BATCH_SIZE = 10_000
+
 export class PgAgentContextCheckpointStore implements AgentContextCheckpointStore {
   constructor(private readonly sql: PgStoreClient) {}
 
@@ -171,5 +173,32 @@ export class PgAgentContextCheckpointStore implements AgentContextCheckpointStor
       LIMIT 1
     `
     return row ? rowToContextCheckpointRecord(row) : null
+  }
+
+  async getByRunIds(input: {
+    readonly projectId: string
+    readonly runIds: readonly string[]
+  }): Promise<readonly AgentContextCheckpointRecord[]> {
+    const runIds = [...new Set(input.runIds)]
+    if (runIds.length === 0) return []
+
+    const rows: AgentContextCheckpointRow[] = []
+    for (let offset = 0; offset < runIds.length; offset += PG_CHECKPOINT_RUN_ID_BATCH_SIZE) {
+      const batch = runIds.slice(offset, offset + PG_CHECKPOINT_RUN_ID_BATCH_SIZE)
+      const placeholders = batch.map((_, index) => `$${index + 2}`).join(", ")
+      rows.push(
+        ...(await this.sql.unsafe<AgentContextCheckpointRow[]>(
+          `SELECT * FROM agent_context_checkpoints WHERE project_id = $1 AND created_by_run_id IN (${placeholders})`,
+          [input.projectId, ...batch]
+        ))
+      )
+    }
+    const byRunId = new Map(
+      rows.map((row) => [row.created_by_run_id, rowToContextCheckpointRecord(row)] as const)
+    )
+    return runIds.flatMap((runId) => {
+      const checkpoint = byRunId.get(runId)
+      return checkpoint ? [checkpoint] : []
+    })
   }
 }

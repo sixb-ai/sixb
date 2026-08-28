@@ -138,6 +138,7 @@ export type {
   AiUsageReportingStatus,
   AiUsageStorage,
   AiUsageStorageErrorCode,
+  GetLatestAiModelCallForExecutionInput,
   InMemoryAiUsageGroupRow,
   InMemoryAiUsageStorageSnapshot,
   RecordAiModelCallInput,

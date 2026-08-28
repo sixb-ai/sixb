@@ -90,6 +90,44 @@ describe("agent run stream records", () => {
     ).toBe(false)
   })
 
+  test("validates compaction lifecycle events without exposing summary content", () => {
+    const base = {
+      schemaVersion: 1 as const,
+      projectId: "stream-records-tests",
+      runId: "agt_run_1",
+      threadId: "agt_thr_1",
+      agentId: "assistant",
+      attempt: 1,
+      occurredAt: OCCURRED_AT.toISOString(),
+      reason: "threshold" as const,
+    }
+    const started = {
+      ...base,
+      type: "agent.compaction.started" as const,
+      estimatedInputTokensBefore: 95_000,
+    }
+    const completed = {
+      ...base,
+      type: "agent.compaction.completed" as const,
+      checkpointId: "agt_ctx_agt_run_1",
+      estimatedInputTokensBefore: 95_000,
+      estimatedInputTokensAfter: 30_000,
+    }
+    const failed = {
+      ...base,
+      type: "agent.compaction.failed" as const,
+      errorCode: "summary_failed" as const,
+    }
+
+    expect(isAgentRunStreamEvent(started)).toBe(true)
+    expect(isAgentRunStreamEvent(completed)).toBe(true)
+    expect(isAgentRunStreamEvent(failed)).toBe(true)
+    expect(isAgentRunStreamEvent({ ...started, estimatedInputTokensBefore: -1 })).toBe(false)
+    expect(isAgentRunStreamEvent({ ...completed, checkpointId: 1 })).toBe(false)
+    expect(isAgentRunStreamEvent({ ...failed, errorCode: "raw_provider_error" })).toBe(false)
+    expect(Object.hasOwn(completed, "summary")).toBe(false)
+  })
+
   test("refuses to build a finished event for a non-terminal run", () => {
     expect(() => agentRunFinishedEvent(runRecord({ status: "queued" }))).toThrow("not terminal")
     expect(() => agentRunFinishedEvent(runRecord({ status: "running" }))).toThrow("not terminal")
@@ -114,6 +152,32 @@ describe("agent run stream records", () => {
     expect(
       agentRunStreamIdempotencyKey({ ...base, type: "agent.ui.chunk", chunkIndex: 7, chunk: null })
     ).toBe("agt_run_1:3:chunk:7")
+    expect(
+      agentRunStreamIdempotencyKey({
+        ...base,
+        type: "agent.compaction.started",
+        reason: "threshold",
+        estimatedInputTokensBefore: 95_000,
+      })
+    ).toBe("agt_run_1:3:compaction:threshold:started")
+    expect(
+      agentRunStreamIdempotencyKey({
+        ...base,
+        type: "agent.compaction.completed",
+        reason: "threshold",
+        checkpointId: "agt_ctx_agt_run_1",
+        estimatedInputTokensBefore: 95_000,
+        estimatedInputTokensAfter: 30_000,
+      })
+    ).toBe("agt_run_1:3:compaction:agt_ctx_agt_run_1:completed")
+    expect(
+      agentRunStreamIdempotencyKey({
+        ...base,
+        type: "agent.compaction.failed",
+        reason: "threshold",
+        errorCode: "summary_failed",
+      })
+    ).toBe("agt_run_1:3:compaction:threshold:failed:summary_failed")
     expect(
       agentRunStreamIdempotencyKey({
         ...base,

@@ -67,6 +67,9 @@ Each run has a broker stream named `agents.runs.${runId}`.
 The default `StreamSink` writes:
 
 - `agent.run.started`
+- `agent.compaction.started`
+- `agent.compaction.completed`
+- `agent.compaction.failed`
 - `agent.ui.chunk`
 - `agent.message.finalized`
 - `agent.run.finished`

@@ -7,6 +7,7 @@ import {
   AiUsageStorageError,
   aggregateAiModelCallUsage,
   assertAiUsageExecutionId,
+  type GetLatestAiModelCallForExecutionInput,
   normalizeAiModelCallRecord,
   type RecordAiModelCallInput,
   type RecordAiModelCallResult,
@@ -108,6 +109,20 @@ export class PgAiUsageStorage implements AiUsageStorage {
       executionIds: [input.executionId],
     })
     return summary!
+  }
+
+  async getLatestForExecution(
+    input: GetLatestAiModelCallForExecutionInput
+  ): Promise<AiModelCallUsageRecord | null> {
+    assertNonBlankProjectId(input.projectId)
+    assertAiUsageExecutionId(input.executionId)
+    const [row] = await this.sql<AiUsageRow[]>`
+      SELECT * FROM ai_model_call_usage
+      WHERE project_id = ${input.projectId} AND execution_id = ${input.executionId}
+      ORDER BY occurred_at DESC, id DESC
+      LIMIT 1
+    `
+    return row ? this.rowToRecord(this.sql, row) : null
   }
 
   async summarizeExecutions(
