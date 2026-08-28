@@ -1165,6 +1165,11 @@ async function runs(kind, args) {
 
 // src/agent-cli/commands/system.ts
 import { readFile as readFile3 } from "node:fs/promises";
+
+// src/agent-runtime/profile.ts
+var AGENT_RUNTIME_PROFILE = "sixb-agent-runtime/v1";
+
+// src/agent-cli/commands/system.ts
 async function doctor(args) {
   if (isHelp(args[0]))
     return writeText(GROUP_HELP.doctor);
@@ -1173,7 +1178,9 @@ async function doctor(args) {
   writeJson({
     ok: true,
     cliVersion: AGENT_CLI_VERSION,
+    runtimeProfile: AGENT_RUNTIME_PROFILE,
     runtime: runtimeInfo(),
+    dependencies: { fetch: true, json: true },
     project: await api.get("/api/project")
   });
 }

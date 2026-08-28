@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { createSixbError } from "@sixb/core/internal/errors"
+import { AgentRuntimeProfileError } from "../src/agent-runtime/errors"
+import { AGENT_RUNTIME_PROFILE } from "../src/agent-runtime/profile"
 import { toAgentExecutionFailure } from "../src/failure"
 
 const at = new Date("2026-08-14T12:00:00.000Z")
@@ -50,5 +52,26 @@ describe("Agent execution failure", () => {
       at: at.toISOString(),
       details,
     })
+  })
+
+  test("records actionable runtime-profile context without exposing a gateway URL", () => {
+    const error = new AgentRuntimeProfileError("smolvm", "javascript-runtime")
+    const failure = toAgentExecutionFailure(error, { status: "failed", at, details })
+
+    expect(failure).toEqual({
+      code: "agent.execution_failed",
+      message: "Agent execution failed.",
+      retryable: false,
+      at: at.toISOString(),
+      details: {
+        ...details,
+        provider: "smolvm",
+        runtimeProfile: AGENT_RUNTIME_PROFILE,
+        runtimeCheck: "javascript-runtime",
+        remediation:
+          "Rebuild the managed smolvm agent image with 'bun run agent:image', or configure a compatible runtime-v1 image.",
+      },
+    })
+    expect(JSON.stringify(failure)).not.toContain("http")
   })
 })
