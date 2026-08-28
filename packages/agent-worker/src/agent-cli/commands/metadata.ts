@@ -1,10 +1,18 @@
+import {
+  CLI_LIMITS,
+  DEFAULT_LIST_ORDER,
+  DEFAULT_OBJECT_ORDER_BY,
+  DEFAULT_TELEMETRY_ORDER,
+} from "../policies"
+
 export const MAIN_HELP = `Sixb agent CLI
 
 Usage:
   sixb <command> [options]
 
 The CLI uses the run-scoped SIXB_API_BASE_URL. Do not configure authentication or another origin.
-Every command emits JSON except file downloads and help.
+API commands emit JSON. Help, version, and examples emit text. Downloads write to --output and
+emit a JSON receipt.
 
 Discovery:
   sixb doctor                         Check the sandbox and API gateway
@@ -45,7 +53,7 @@ export const OBJECTS_HELP = `Usage:
   sixb objects inspect <object-type> <primary-id> [options]
   sixb objects list [options]
   sixb objects get <object-type> <primary-id>...
-  sixb objects search <text> [--limit <n>]
+  sixb objects search <text> [--limit <1-${CLI_LIMITS.search.maximum}>]
   sixb objects query --file <path|-> [--include-total|--no-total]
   sixb objects query --example <name>
   sixb objects count --file <path|->
@@ -56,10 +64,10 @@ export const OBJECTS_HELP = `Usage:
 
 List options:
   --type <id>                         Exact ontology object type id
-  --limit <n>                         0 through 1000; defaults to 20
-  --offset <n>
-  --order-by createdAt|updatedAt|primaryId
-  --order asc|desc
+  --limit <1-${CLI_LIMITS.list.maximum}>                    Defaults to ${CLI_LIMITS.list.default}
+  --offset <n>                        Non-negative; defaults to 0
+  --order-by createdAt|updatedAt|primaryId  Defaults to ${DEFAULT_OBJECT_ORDER_BY}
+  --order asc|desc                    Defaults to ${DEFAULT_LIST_ORDER}
   --id-prefix <value>                 Primary-id prefix
   --id-suffix <value>                 Primary-id suffix
   --created-after|--created-before <RFC3339>
@@ -68,20 +76,22 @@ List options:
 Links options:
   --link <link-id>
   --direction outgoing|incoming|both  Defaults to both
-  --page-size <1-1000>                Defaults to 100
+  --page-size <1-${CLI_LIMITS.linkPage.maximum}>                Defaults to ${CLI_LIMITS.linkPage.default}
   --page-token <token>                Continue an edge page
   --include-objects                   Include selected and current-page endpoint objects
 
 Inspect options:
-  --depth <0-3>                       Defaults to 2; use 0 for only the object
-  --max-objects <1-100>               Defaults to 20
-  --max-links <1-500>                 Defaults to 50
+  --depth <0-${CLI_LIMITS.inspect.depth.maximum}>                       Defaults to ${CLI_LIMITS.inspect.depth.default}; use 0 for only the object
+  --max-objects <1-${CLI_LIMITS.inspect.objects.maximum}>               Defaults to ${CLI_LIMITS.inspect.objects.default}
+  --max-links <1-${CLI_LIMITS.inspect.links.maximum}>                 Defaults to ${CLI_LIMITS.inspect.links.default}
   --full                              Include timestamps and encountered type definitions
 
 Use \`objects inspect\` first when context identifies an object. It follows both relationship
 directions to depth 2 by default and returns a bounded graph.
 Inspect omits materialization timestamps and ontology definitions by default. Use \`--full\` when
 storage timestamps, declared links, or available actions are needed.
+
+Search returns at most ${CLI_LIMITS.search.maximum} matches and defaults to ${CLI_LIMITS.search.default}.
 
 \`objects get\` uses a refs query without identity URL paths. Opaque ids containing :, /, #, ?, or
 % are safe. Identifiers are case-sensitive.`
@@ -126,12 +136,14 @@ export const GROUP_HELP = {
 History options:
   --from <RFC3339>
   --to <RFC3339>
-  --limit <n>
-  --order <asc|desc>`,
+  --limit <1-${CLI_LIMITS.telemetryHistory.maximum}>                  Defaults to ${CLI_LIMITS.telemetryHistory.default}
+  --order <asc|desc>                  Timestamp order; defaults to ${DEFAULT_TELEMETRY_ORDER}`,
   actions: `Usage:
   sixb actions list [--type <object-type>]
   sixb actions get <action-id>
-  sixb actions request <action-id> [--subject-type <type> --subject-id <id>] [--params-file <path|->] [--run-id <id>]`,
+  sixb actions request <action-id> [--subject-type <type> --subject-id <id>] [--file <path|->] [--run-id <id>]
+
+The JSON file contains the action parameter object. Use - to read standard input.`,
   "action-runs": `Usage:
   sixb action-runs list [options]
   sixb action-runs get <run-id>
@@ -140,9 +152,11 @@ List options:
   --action <action-id>
   --type <object-type>
   --id <primary-id>
-  --status <status>
+  --status queued|running|succeeded|failed|cancelled
   --started-after|--started-before <RFC3339>
-  --limit <n> --offset <n> --order <asc|desc>`,
+  --limit <1-${CLI_LIMITS.list.maximum}>              Defaults to ${CLI_LIMITS.list.default}
+  --offset <n>                  Non-negative; defaults to 0
+  --order <asc|desc>            Started-time order; defaults to ${DEFAULT_LIST_ORDER}`,
   files: `Usage:
   sixb files upload <local-path> [--logical-path <path>]
   sixb files download object <type> <id> --path <json-pointer> --output <local-path>
@@ -150,29 +164,31 @@ List options:
   workflows: `Usage:
   sixb workflows list
   sixb workflows get <workflow-id>
-  sixb workflows start <workflow-id> [--input-file <path|->]`,
+  sixb workflows start <workflow-id> [--file <path|->]
+
+The JSON file contains the workflow input object. Use - to read standard input.`,
   "workflow-runs": `Usage:
   sixb workflow-runs list [options]
   sixb workflow-runs get <run-id>
 
 List options:
   --workflow <workflow-id>
-  --status <status>
+  --status queued|running|waiting|succeeded|failed|cancelled
   --started-after|--started-before <RFC3339>
-  --limit <n> --offset <n> --order <asc|desc>`,
+  --limit <1-${CLI_LIMITS.list.maximum}>              Defaults to ${CLI_LIMITS.list.default}
+  --offset <n>                  Non-negative; defaults to 0
+  --order <asc|desc>            Started-time order; defaults to ${DEFAULT_LIST_ORDER}`,
 } as const
 
 export const QUERY_EXAMPLES: Readonly<Record<string, string>> = {
   exact:
     '{"kind":"refs","refs":[{"objectTypeId":"RepositoryIssue","primaryId":"github:issue:owner/repo#297"}]}',
-  filter:
-    '{"kind":"limit","input":{"kind":"filter","input":{"kind":"start","objectTypeId":"Customer"},"predicate":{"op":"eq","propertyId":"status","value":"active"}},"limit":20}',
+  filter: `{"kind":"limit","input":{"kind":"filter","input":{"kind":"start","objectTypeId":"Customer"},"predicate":{"op":"eq","propertyId":"status","value":"active"}},"limit":${CLI_LIMITS.list.default}}`,
   incoming:
     '{"kind":"traverse","input":{"kind":"refs","refs":[{"objectTypeId":"RepositoryIssue","primaryId":"github:issue:owner/repo#297"}]},"linkId":"issue","direction":"incoming","sourceObjectTypeId":"RepositoryComment"}',
-  expand:
-    '{"kind":"expand","input":{"kind":"refs","refs":[{"objectTypeId":"RepositoryIssue","primaryId":"github:issue:owner/repo#297"}]},"expansions":[{"linkId":"issue","direction":"incoming","sourceObjectTypeId":"RepositoryComment","limit":20}]}',
-  sort: '{"kind":"limit","input":{"kind":"sort","input":{"kind":"start","objectTypeId":"Customer"},"fields":[{"kind":"property","propertyId":"name","direction":"asc"}]},"limit":20}',
-  page: '{"kind":"page","input":{"kind":"start","objectTypeId":"Customer"},"pageSize":20}',
+  expand: `{"kind":"expand","input":{"kind":"refs","refs":[{"objectTypeId":"RepositoryIssue","primaryId":"github:issue:owner/repo#297"}]},"expansions":[{"linkId":"issue","direction":"incoming","sourceObjectTypeId":"RepositoryComment","limit":${CLI_LIMITS.list.default}}]}`,
+  sort: `{"kind":"limit","input":{"kind":"sort","input":{"kind":"start","objectTypeId":"Customer"},"fields":[{"kind":"property","propertyId":"name","direction":"asc"}]},"limit":${CLI_LIMITS.list.default}}`,
+  page: `{"kind":"page","input":{"kind":"start","objectTypeId":"Customer"},"pageSize":${CLI_LIMITS.list.default}}`,
 }
 
 export const FACETS_EXAMPLE =

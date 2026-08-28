@@ -132,6 +132,7 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
         ["doctor", "--help"],
         ["context", "--help"],
         ["project", "--help"],
+        ["project", "show", "--help"],
         ["ontology", "--help"],
         ["objects", "--help"],
         ["objects", "inspect", "--help"],
@@ -151,11 +152,22 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
         expect(result.stderr).toBe("")
       }
 
+      const mainHelp = await runCli(implementation, ["--help"])
+      expect(mainHelp.stdout).toContain("Downloads write to --output")
+      expect(mainHelp.stdout).toContain("emit a JSON receipt")
+
       const queryHelp = await runCli(implementation, ["objects", "query", "--help"])
       expect(queryHelp.stdout).toContain('"kind":"refs"')
       expect(queryHelp.stdout).toContain("directions are outgoing or incoming")
       expect(queryHelp.stdout).toContain('"op":"eq"')
       expect(queryHelp.stdout).toContain("sourceObjectTypeId")
+
+      const actionsHelp = await runCli(implementation, ["actions", "--help"])
+      expect(actionsHelp.stdout).toContain("--file <path|->")
+      expect(actionsHelp.stdout).not.toContain("--params-file")
+      const workflowsHelp = await runCli(implementation, ["workflows", "--help"])
+      expect(workflowsHelp.stdout).toContain("--file <path|->")
+      expect(workflowsHelp.stdout).not.toContain("--input-file")
 
       const pageExample = await runCli(implementation, ["objects", "query", "--example", "page"])
       expect(JSON.parse(pageExample.stdout)).toEqual({
@@ -213,6 +225,65 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
         }
       })
       try {
+        const invalidOptions = [
+          {
+            args: ["objects", "list", "--limit", "0"],
+            message: "--limit must be an integer from 1 through 1000.",
+          },
+          {
+            args: ["objects", "list", "--offset", "-1"],
+            message: "--offset must be a non-negative integer.",
+          },
+          {
+            args: ["objects", "list", "--order-by", "label"],
+            message: "--order-by must be createdAt, updatedAt, or primaryId.",
+          },
+          {
+            args: ["objects", "search", "customer", "--limit", "51"],
+            message: "--limit must be an integer from 1 through 50.",
+          },
+          {
+            args: ["action-runs", "list", "--status", "waiting"],
+            message: "--status must be queued, running, succeeded, failed, or cancelled.",
+          },
+          {
+            args: ["workflow-runs", "list", "--started-after", "yesterday"],
+            message: "--started-after must be an RFC 3339 timestamp.",
+          },
+          {
+            args: [
+              "workflow-runs",
+              "list",
+              "--started-after",
+              "2026-02-01T00:00:00Z",
+              "--started-before",
+              "2026-01-01T00:00:00Z",
+            ],
+            message: "--started-after must be before or equal to --started-before.",
+          },
+          {
+            args: ["telemetry", "history", "Device", "fan-1", "rpm", "--limit", "1001"],
+            message: "--limit must be an integer from 1 through 1000.",
+          },
+          {
+            args: ["actions", "request", "update-customer", "--params-file", "params.json"],
+            message: "Unknown actions request option '--params-file'.",
+          },
+          {
+            args: ["workflows", "start", "review-customer", "--input-file", "input.json"],
+            message: "workflows start requires --file <path|->.",
+          },
+        ] as const
+        for (const { args, message } of invalidOptions) {
+          const result = await runCli(implementation, args, apiEnv(api))
+          expect(result.exitCode).toBe(2)
+          expect(result.stdout).toBe("")
+          expect(JSON.parse(result.stderr)).toEqual({
+            error: { code: "invalid_arguments", message },
+          })
+        }
+        expect(api.requests).toHaveLength(0)
+
         const tempDir = await mkdtemp(join(tmpdir(), "sixb-agent-cli-json-"))
         try {
           const invalidJsonPath = join(tempDir, "invalid.json")
@@ -602,14 +673,26 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
         ])
 
         const commands = [
-          ["objects", "list", "--type", "Customer"],
+          ["objects", "list", "--type", "Customer", "--updated-after", "2026-01-01T00:00:00Z"],
           ["objects", "search", "north line", "--limit", "4"],
           ["objects", "query", "--file", queryPath, "--include-total"],
           ["objects", "count", "--file", queryPath],
           ["objects", "exists", "--file", queryPath],
           ["objects", "facets", "--file", facetsPath],
           ["telemetry", "latest", "Device", "fan/1", "rpm"],
-          ["telemetry", "history", "Device", "fan/1", "rpm", "--limit", "5"],
+          [
+            "telemetry",
+            "history",
+            "Device",
+            "fan/1",
+            "rpm",
+            "--limit",
+            "5",
+            "--from",
+            "2026-01-01T00:00:00Z",
+            "--to",
+            "2026-01-02T00:00:00+00:00",
+          ],
           ["telemetry", "query", "--file", dataPath],
           ["actions", "list", "--type", "Customer"],
           ["actions", "get", "dispatch/work"],
@@ -621,12 +704,21 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
             "Customer",
             "--subject-id",
             "customer/1",
-            "--params-file",
+            "--file",
             dataPath,
             "--run-id",
             "run-1",
           ],
-          ["action-runs", "list", "--action", "dispatch/work", "--status", "succeeded"],
+          [
+            "action-runs",
+            "list",
+            "--action",
+            "dispatch/work",
+            "--status",
+            "succeeded",
+            "--started-after",
+            "2026-01-01T00:00:00Z",
+          ],
           ["action-runs", "get", "run/1"],
           ["files", "upload", uploadPath, "--logical-path", "reports/upload.txt"],
           [
@@ -642,8 +734,17 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
           ],
           ["workflows", "list"],
           ["workflows", "get", "customer/review"],
-          ["workflows", "start", "customer/review", "--input-file", dataPath],
-          ["workflow-runs", "list", "--workflow", "customer/review", "--limit", "3"],
+          ["workflows", "start", "customer/review", "--file", dataPath],
+          [
+            "workflow-runs",
+            "list",
+            "--workflow",
+            "customer/review",
+            "--limit",
+            "3",
+            "--started-before",
+            "2026-01-02T00:00:00Z",
+          ],
           ["workflow-runs", "get", "workflow/run-1"],
         ] as const
 
@@ -679,7 +780,11 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
         ])
         expect(api.requests[0]?.url.searchParams.get("objectTypeId")).toBe("Customer")
         expect(api.requests[0]?.url.searchParams.get("limit")).toBe("20")
+        expect(api.requests[0]?.url.searchParams.get("orderBy")).toBe("updatedAt")
+        expect(api.requests[0]?.url.searchParams.get("order")).toBe("desc")
+        expect(api.requests[0]?.url.searchParams.get("updatedAfter")).toBe("2026-01-01T00:00:00Z")
         expect(api.requests[1]?.url.searchParams.get("q")).toBe("north line")
+        expect(api.requests[1]?.url.searchParams.get("limit")).toBe("4")
         expect(api.requests[2]?.body).toEqual({
           query: { kind: "start", objectTypeId: "Customer" },
           includeTotal: true,
@@ -689,7 +794,22 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
           subject: { kind: "object", objectTypeId: "Customer", primaryId: "customer/1" },
           runId: "run-1",
         })
+        expect(api.requests[7]?.url.searchParams.get("limit")).toBe("5")
+        expect(api.requests[7]?.url.searchParams.get("order")).toBe("desc")
+        expect(api.requests[7]?.url.searchParams.get("from")).toBe("2026-01-01T00:00:00Z")
+        expect(api.requests[7]?.url.searchParams.get("to")).toBe("2026-01-02T00:00:00+00:00")
+        expect(api.requests[8]?.body).toEqual({
+          value: "sent",
+          limitPerSeries: 100,
+          order: "desc",
+        })
+        expect(api.requests[12]?.url.searchParams.get("limit")).toBe("20")
+        expect(api.requests[12]?.url.searchParams.get("order")).toBe("desc")
+        expect(api.requests[12]?.url.searchParams.get("startedAfter")).toBe("2026-01-01T00:00:00Z")
         expect(api.requests[18]?.body).toEqual({ input: { value: "sent" } })
+        expect(api.requests[19]?.url.searchParams.get("limit")).toBe("3")
+        expect(api.requests[19]?.url.searchParams.get("order")).toBe("desc")
+        expect(api.requests[19]?.url.searchParams.get("startedBefore")).toBe("2026-01-02T00:00:00Z")
       } finally {
         api.close()
         await rm(tempDir, { recursive: true, force: true })

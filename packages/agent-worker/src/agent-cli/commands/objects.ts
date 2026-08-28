@@ -1,12 +1,23 @@
 import { ApiClient } from "../api-client"
-import { enumValue, integerInRange, isHelp, requireValue } from "../arguments"
-import { DEFAULT_INSPECT_MAX_LINKS, DEFAULT_INSPECT_MAX_OBJECTS, inspectGraph } from "../graph"
+import {
+  enumValue,
+  integerInRange,
+  isHelp,
+  requireOrderedRange,
+  requireValue,
+  rfc3339Value,
+} from "../arguments"
+import { inspectGraph } from "../graph"
 import { fail, writeJson, writeText } from "../output"
+import { CLI_LIMITS, DEFAULT_LIST_ORDER, DEFAULT_OBJECT_ORDER_BY } from "../policies"
 import { FACETS_EXAMPLE, OBJECTS_HELP, QUERY_EXAMPLES, QUERY_HELP } from "./metadata"
-import { asRecord, parseQueryOptions, readJson, singleFileOption } from "./shared"
-
-const DEFAULT_LIST_LIMIT = "20"
-const DEFAULT_LINK_PAGE_SIZE = 100
+import {
+  asRecord,
+  normalizeWindowOptions,
+  parseQueryOptions,
+  readJson,
+  singleFileOption,
+} from "./shared"
 
 export async function objects(args: string[]): Promise<void> {
   const [sub, ...rest] = args
@@ -38,19 +49,34 @@ async function objectsInspect(args: string[]): Promise<void> {
   if (isHelp(args[0])) return writeText(OBJECTS_HELP)
   const objectTypeId = requireValue("objects inspect object type", args[0])
   const primaryId = requireValue("objects inspect primary id", args[1])
-  let depth = 2
-  let maxObjects = DEFAULT_INSPECT_MAX_OBJECTS
-  let maxLinks = DEFAULT_INSPECT_MAX_LINKS
+  let depth: number = CLI_LIMITS.inspect.depth.default
+  let maxObjects: number = CLI_LIMITS.inspect.objects.default
+  let maxLinks: number = CLI_LIMITS.inspect.links.default
   let full = false
   for (let index = 2; index < args.length; index += 1) {
     const flag = args[index]
     if (flag === "--full") full = true
     else if (flag === "--depth") {
-      depth = integerInRange(flag, requireValue(flag, args[++index]), 0, 3)
+      depth = integerInRange(
+        flag,
+        requireValue(flag, args[++index]),
+        0,
+        CLI_LIMITS.inspect.depth.maximum
+      )
     } else if (flag === "--max-objects") {
-      maxObjects = integerInRange(flag, requireValue(flag, args[++index]), 1, 100)
+      maxObjects = integerInRange(
+        flag,
+        requireValue(flag, args[++index]),
+        1,
+        CLI_LIMITS.inspect.objects.maximum
+      )
     } else if (flag === "--max-links") {
-      maxLinks = integerInRange(flag, requireValue(flag, args[++index]), 1, 500)
+      maxLinks = integerInRange(
+        flag,
+        requireValue(flag, args[++index]),
+        1,
+        CLI_LIMITS.inspect.links.maximum
+      )
     } else fail(`Unknown objects inspect option '${flag}'.`)
   }
   writeJson(
@@ -78,13 +104,38 @@ async function objectsList(args: string[]): Promise<void> {
     "--updated-after": "updatedAfter",
     "--updated-before": "updatedBefore",
   }
-  const options = parseQueryOptions(args, optionNames, "objects list")
-  writeJson(
-    await new ApiClient().get("/api/objects", {
-      limit: DEFAULT_LIST_LIMIT,
-      ...options,
-    })
+  const options = normalizeWindowOptions(parseQueryOptions(args, optionNames, "objects list"), {
+    defaultLimit: CLI_LIMITS.list.default,
+    maximumLimit: CLI_LIMITS.list.maximum,
+    defaultOrder: DEFAULT_LIST_ORDER,
+    offset: true,
+  })
+  options.orderBy = enumValue("--order-by", options.orderBy ?? DEFAULT_OBJECT_ORDER_BY, [
+    "createdAt",
+    "updatedAt",
+    "primaryId",
+  ])
+  for (const [name, flag] of [
+    ["createdAfter", "--created-after"],
+    ["createdBefore", "--created-before"],
+    ["updatedAfter", "--updated-after"],
+    ["updatedBefore", "--updated-before"],
+  ] as const) {
+    if (options[name] !== undefined) options[name] = rfc3339Value(flag, options[name])
+  }
+  requireOrderedRange(
+    "--created-after",
+    options.createdAfter,
+    "--created-before",
+    options.createdBefore
   )
+  requireOrderedRange(
+    "--updated-after",
+    options.updatedAfter,
+    "--updated-before",
+    options.updatedBefore
+  )
+  writeJson(await new ApiClient().get("/api/objects", options))
 }
 
 async function objectsGet(args: string[]): Promise<void> {
@@ -103,9 +154,19 @@ async function objectsGet(args: string[]): Promise<void> {
 }
 
 async function objectsSearch(args: string[]): Promise<void> {
-  if (isHelp(args[0])) return writeText("Usage: sixb objects search <text> [--limit <1-50>]")
+  if (isHelp(args[0])) {
+    return writeText(`Usage: sixb objects search <text> [--limit <1-${CLI_LIMITS.search.maximum}>]`)
+  }
   const query = requireValue("objects search", args[0])
   const options = parseQueryOptions(args.slice(1), { "--limit": "limit" }, "objects search")
+  options.limit = String(
+    integerInRange(
+      "--limit",
+      options.limit ?? String(CLI_LIMITS.search.default),
+      1,
+      CLI_LIMITS.search.maximum
+    )
+  )
   writeJson(await new ApiClient().get("/api/objects/search", { q: query, ...options }))
 }
 
@@ -170,7 +231,7 @@ async function objectsLinks(args: string[]): Promise<void> {
   const primaryId = requireValue("objects links primary id", args[1])
   let linkId: string | undefined
   let direction: "outgoing" | "incoming" | "both" = "both"
-  let pageSize = DEFAULT_LINK_PAGE_SIZE
+  let pageSize: number = CLI_LIMITS.linkPage.default
   let pageToken: string | undefined
   let includeObjects = false
   for (let index = 2; index < args.length; index += 1) {
@@ -183,7 +244,12 @@ async function objectsLinks(args: string[]): Promise<void> {
         "both",
       ])
     } else if (flag === "--page-size") {
-      pageSize = integerInRange(flag, requireValue(flag, args[++index]), 1, 1_000)
+      pageSize = integerInRange(
+        flag,
+        requireValue(flag, args[++index]),
+        1,
+        CLI_LIMITS.linkPage.maximum
+      )
     } else if (flag === "--page-token") pageToken = requireValue(flag, args[++index])
     else if (flag === "--include-objects") includeObjects = true
     else fail(`Unknown objects links option '${flag}'.`)

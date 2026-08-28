@@ -1,5 +1,6 @@
 import type { ApiClient } from "./api-client"
 import { CliError, EXIT_API } from "./output"
+import { CLI_LIMITS } from "./policies"
 
 interface ObjectRef {
   readonly objectTypeId: string
@@ -36,11 +37,6 @@ interface LinksResponse {
   readonly hasMore: boolean
   readonly nextPageToken?: string
 }
-
-export const DEFAULT_INSPECT_MAX_OBJECTS = 20
-export const DEFAULT_INSPECT_MAX_LINKS = 50
-const MAX_INSPECT_PAGES = 10
-const INSPECT_PAGE_SIZE = 100
 
 interface InspectGraphOptions {
   readonly depth: number
@@ -80,7 +76,7 @@ export async function inspectGraph(
         linksTruncated = true
         break
       }
-      if (pagesRead >= MAX_INSPECT_PAGES) {
+      if (pagesRead >= CLI_LIMITS.inspect.maximumPages) {
         pagesTruncated = true
         break
       }
@@ -95,7 +91,7 @@ export async function inspectGraph(
           },
           direction: "both",
           includeObjects: true,
-          pageSize: Math.min(INSPECT_PAGE_SIZE, remainingLinks),
+          pageSize: Math.min(CLI_LIMITS.linkPage.default, remainingLinks),
           ...(pageToken ? { pageToken } : {}),
         })
       )
@@ -130,7 +126,7 @@ export async function inspectGraph(
         linksTruncated = true
         break
       }
-      if (pagesRead >= MAX_INSPECT_PAGES) {
+      if (pagesRead >= CLI_LIMITS.inspect.maximumPages) {
         pagesTruncated = true
         break
       }
@@ -210,7 +206,7 @@ export async function inspectGraph(
       depth: options.depth,
       maxObjects: options.maxObjects,
       maxLinks: options.maxLinks,
-      maxPages: MAX_INSPECT_PAGES,
+      maxPages: CLI_LIMITS.inspect.maximumPages,
       objectCount: 1 + relatedObjects.length,
       linkCount: filteredLinks.length,
       pagesRead,
@@ -259,7 +255,7 @@ async function inspectRoot(
       depth: 0,
       maxObjects: options.maxObjects,
       maxLinks: options.maxLinks,
-      maxPages: MAX_INSPECT_PAGES,
+      maxPages: CLI_LIMITS.inspect.maximumPages,
       objectCount: 1,
       linkCount: 0,
       pagesRead: 0,

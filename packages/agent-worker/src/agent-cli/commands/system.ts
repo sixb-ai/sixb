@@ -37,7 +37,9 @@ export async function context(args: string[]): Promise<void> {
 }
 
 export async function project(args: string[]): Promise<void> {
-  if (!args[0] || isHelp(args[0])) return writeText(GROUP_HELP.project)
+  if (!args[0] || isHelp(args[0]) || (args[0] === "show" && isHelp(args[1]))) {
+    return writeText(GROUP_HELP.project)
+  }
   if (args[0] !== "show") fail(`Unknown project command '${args[0]}'.`)
   requireExact(args, 1, "project show accepts no arguments.")
   writeJson(await new ApiClient().get("/api/project"))

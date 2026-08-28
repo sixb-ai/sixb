@@ -38,6 +38,7 @@ function reportError(error) {
 }
 
 // src/agent-cli/arguments.ts
+var RFC3339_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 function isHelp(value) {
   return value === "-h" || value === "--help" || value === "help";
 }
@@ -59,6 +60,27 @@ function integerInRange(flag, value, minimum, maximum) {
     fail(`${flag} must be an integer from ${minimum} through ${maximum}.`);
   }
   return parsed;
+}
+function nonNegativeInteger(flag, value) {
+  if (!/^[0-9]+$/.test(value)) {
+    fail(`${flag} must be a non-negative integer.`);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    fail(`${flag} must be a non-negative safe integer.`);
+  }
+  return parsed;
+}
+function rfc3339Value(flag, value) {
+  if (!RFC3339_TIMESTAMP.test(value) || Number.isNaN(Date.parse(value))) {
+    fail(`${flag} must be an RFC 3339 timestamp.`);
+  }
+  return value;
+}
+function requireOrderedRange(afterFlag, after, beforeFlag, before) {
+  if (after && before && Date.parse(after) > Date.parse(before)) {
+    fail(`${afterFlag} must be before or equal to ${beforeFlag}.`);
+  }
 }
 function enumValue(flag, value, allowed) {
   if (!allowed.includes(value))
@@ -182,6 +204,23 @@ function stringField(record, key) {
   return typeof value === "string" ? value : undefined;
 }
 
+// src/agent-cli/policies.ts
+var CLI_LIMITS = {
+  list: { default: 20, maximum: 1000 },
+  search: { default: 20, maximum: 50 },
+  telemetryHistory: { default: 100, maximum: 1000 },
+  linkPage: { default: 100, maximum: 1000 },
+  inspect: {
+    depth: { default: 2, maximum: 3 },
+    objects: { default: 20, maximum: 100 },
+    links: { default: 50, maximum: 500 },
+    maximumPages: 10
+  }
+};
+var DEFAULT_LIST_ORDER = "desc";
+var DEFAULT_OBJECT_ORDER_BY = "updatedAt";
+var DEFAULT_TELEMETRY_ORDER = "desc";
+
 // src/agent-cli/commands/metadata.ts
 var MAIN_HELP = `Sixb agent CLI
 
@@ -189,7 +228,8 @@ Usage:
   sixb <command> [options]
 
 The CLI uses the run-scoped SIXB_API_BASE_URL. Do not configure authentication or another origin.
-Every command emits JSON except file downloads and help.
+API commands emit JSON. Help, version, and examples emit text. Downloads write to --output and
+emit a JSON receipt.
 
 Discovery:
   sixb doctor                         Check the sandbox and API gateway
@@ -229,7 +269,7 @@ var OBJECTS_HELP = `Usage:
   sixb objects inspect <object-type> <primary-id> [options]
   sixb objects list [options]
   sixb objects get <object-type> <primary-id>...
-  sixb objects search <text> [--limit <n>]
+  sixb objects search <text> [--limit <1-${CLI_LIMITS.search.maximum}>]
   sixb objects query --file <path|-> [--include-total|--no-total]
   sixb objects query --example <name>
   sixb objects count --file <path|->
@@ -240,10 +280,10 @@ var OBJECTS_HELP = `Usage:
 
 List options:
   --type <id>                         Exact ontology object type id
-  --limit <n>                         0 through 1000; defaults to 20
-  --offset <n>
-  --order-by createdAt|updatedAt|primaryId
-  --order asc|desc
+  --limit <1-${CLI_LIMITS.list.maximum}>                    Defaults to ${CLI_LIMITS.list.default}
+  --offset <n>                        Non-negative; defaults to 0
+  --order-by createdAt|updatedAt|primaryId  Defaults to ${DEFAULT_OBJECT_ORDER_BY}
+  --order asc|desc                    Defaults to ${DEFAULT_LIST_ORDER}
   --id-prefix <value>                 Primary-id prefix
   --id-suffix <value>                 Primary-id suffix
   --created-after|--created-before <RFC3339>
@@ -252,20 +292,22 @@ List options:
 Links options:
   --link <link-id>
   --direction outgoing|incoming|both  Defaults to both
-  --page-size <1-1000>                Defaults to 100
+  --page-size <1-${CLI_LIMITS.linkPage.maximum}>                Defaults to ${CLI_LIMITS.linkPage.default}
   --page-token <token>                Continue an edge page
   --include-objects                   Include selected and current-page endpoint objects
 
 Inspect options:
-  --depth <0-3>                       Defaults to 2; use 0 for only the object
-  --max-objects <1-100>               Defaults to 20
-  --max-links <1-500>                 Defaults to 50
+  --depth <0-${CLI_LIMITS.inspect.depth.maximum}>                       Defaults to ${CLI_LIMITS.inspect.depth.default}; use 0 for only the object
+  --max-objects <1-${CLI_LIMITS.inspect.objects.maximum}>               Defaults to ${CLI_LIMITS.inspect.objects.default}
+  --max-links <1-${CLI_LIMITS.inspect.links.maximum}>                 Defaults to ${CLI_LIMITS.inspect.links.default}
   --full                              Include timestamps and encountered type definitions
 
 Use \`objects inspect\` first when context identifies an object. It follows both relationship
 directions to depth 2 by default and returns a bounded graph.
 Inspect omits materialization timestamps and ontology definitions by default. Use \`--full\` when
 storage timestamps, declared links, or available actions are needed.
+
+Search returns at most ${CLI_LIMITS.search.maximum} matches and defaults to ${CLI_LIMITS.search.default}.
 
 \`objects get\` uses a refs query without identity URL paths. Opaque ids containing :, /, #, ?, or
 % are safe. Identifiers are case-sensitive.`;
@@ -308,12 +350,14 @@ var GROUP_HELP = {
 History options:
   --from <RFC3339>
   --to <RFC3339>
-  --limit <n>
-  --order <asc|desc>`,
+  --limit <1-${CLI_LIMITS.telemetryHistory.maximum}>                  Defaults to ${CLI_LIMITS.telemetryHistory.default}
+  --order <asc|desc>                  Timestamp order; defaults to ${DEFAULT_TELEMETRY_ORDER}`,
   actions: `Usage:
   sixb actions list [--type <object-type>]
   sixb actions get <action-id>
-  sixb actions request <action-id> [--subject-type <type> --subject-id <id>] [--params-file <path|->] [--run-id <id>]`,
+  sixb actions request <action-id> [--subject-type <type> --subject-id <id>] [--file <path|->] [--run-id <id>]
+
+The JSON file contains the action parameter object. Use - to read standard input.`,
   "action-runs": `Usage:
   sixb action-runs list [options]
   sixb action-runs get <run-id>
@@ -322,9 +366,11 @@ List options:
   --action <action-id>
   --type <object-type>
   --id <primary-id>
-  --status <status>
+  --status queued|running|succeeded|failed|cancelled
   --started-after|--started-before <RFC3339>
-  --limit <n> --offset <n> --order <asc|desc>`,
+  --limit <1-${CLI_LIMITS.list.maximum}>              Defaults to ${CLI_LIMITS.list.default}
+  --offset <n>                  Non-negative; defaults to 0
+  --order <asc|desc>            Started-time order; defaults to ${DEFAULT_LIST_ORDER}`,
   files: `Usage:
   sixb files upload <local-path> [--logical-path <path>]
   sixb files download object <type> <id> --path <json-pointer> --output <local-path>
@@ -332,24 +378,28 @@ List options:
   workflows: `Usage:
   sixb workflows list
   sixb workflows get <workflow-id>
-  sixb workflows start <workflow-id> [--input-file <path|->]`,
+  sixb workflows start <workflow-id> [--file <path|->]
+
+The JSON file contains the workflow input object. Use - to read standard input.`,
   "workflow-runs": `Usage:
   sixb workflow-runs list [options]
   sixb workflow-runs get <run-id>
 
 List options:
   --workflow <workflow-id>
-  --status <status>
+  --status queued|running|waiting|succeeded|failed|cancelled
   --started-after|--started-before <RFC3339>
-  --limit <n> --offset <n> --order <asc|desc>`
+  --limit <1-${CLI_LIMITS.list.maximum}>              Defaults to ${CLI_LIMITS.list.default}
+  --offset <n>                  Non-negative; defaults to 0
+  --order <asc|desc>            Started-time order; defaults to ${DEFAULT_LIST_ORDER}`
 };
 var QUERY_EXAMPLES = {
   exact: '{"kind":"refs","refs":[{"objectTypeId":"RepositoryIssue","primaryId":"github:issue:owner/repo#297"}]}',
-  filter: '{"kind":"limit","input":{"kind":"filter","input":{"kind":"start","objectTypeId":"Customer"},"predicate":{"op":"eq","propertyId":"status","value":"active"}},"limit":20}',
+  filter: `{"kind":"limit","input":{"kind":"filter","input":{"kind":"start","objectTypeId":"Customer"},"predicate":{"op":"eq","propertyId":"status","value":"active"}},"limit":${CLI_LIMITS.list.default}}`,
   incoming: '{"kind":"traverse","input":{"kind":"refs","refs":[{"objectTypeId":"RepositoryIssue","primaryId":"github:issue:owner/repo#297"}]},"linkId":"issue","direction":"incoming","sourceObjectTypeId":"RepositoryComment"}',
-  expand: '{"kind":"expand","input":{"kind":"refs","refs":[{"objectTypeId":"RepositoryIssue","primaryId":"github:issue:owner/repo#297"}]},"expansions":[{"linkId":"issue","direction":"incoming","sourceObjectTypeId":"RepositoryComment","limit":20}]}',
-  sort: '{"kind":"limit","input":{"kind":"sort","input":{"kind":"start","objectTypeId":"Customer"},"fields":[{"kind":"property","propertyId":"name","direction":"asc"}]},"limit":20}',
-  page: '{"kind":"page","input":{"kind":"start","objectTypeId":"Customer"},"pageSize":20}'
+  expand: `{"kind":"expand","input":{"kind":"refs","refs":[{"objectTypeId":"RepositoryIssue","primaryId":"github:issue:owner/repo#297"}]},"expansions":[{"linkId":"issue","direction":"incoming","sourceObjectTypeId":"RepositoryComment","limit":${CLI_LIMITS.list.default}}]}`,
+  sort: `{"kind":"limit","input":{"kind":"sort","input":{"kind":"start","objectTypeId":"Customer"},"fields":[{"kind":"property","propertyId":"name","direction":"asc"}]},"limit":${CLI_LIMITS.list.default}}`,
+  page: `{"kind":"page","input":{"kind":"start","objectTypeId":"Customer"},"pageSize":${CLI_LIMITS.list.default}}`
 };
 var FACETS_EXAMPLE = '{"query":{"kind":"start","objectTypeId":"WorkOrder"},"facets":[{"propertyId":"status","limit":10}]}';
 
@@ -366,15 +416,23 @@ function parseQueryOptions(args, names, command) {
   }
   return query;
 }
-function singleFileOption(args, command) {
-  return singleNamedFileOption(args, "--file", command);
+function normalizeWindowOptions(options, policy) {
+  const normalized = {
+    ...options,
+    limit: String(integerInRange("--limit", options.limit ?? String(policy.defaultLimit), 1, policy.maximumLimit)),
+    order: enumValue("--order", options.order ?? policy.defaultOrder, ["asc", "desc"])
+  };
+  if (policy.offset && options.offset !== undefined) {
+    normalized.offset = String(nonNegativeInteger("--offset", options.offset));
+  }
+  return normalized;
 }
-function singleNamedFileOption(args, flag, command) {
-  if (args[0] !== flag)
-    fail(`${command} requires ${flag} <path|->.`);
-  const source = requireOptionValue(flag, args[1]);
+function singleFileOption(args, command) {
+  if (args[0] !== "--file")
+    fail(`${command} requires --file <path|->.`);
+  const source = requireOptionValue("--file", args[1]);
   if (args.length !== 2)
-    fail(`${command} accepts only ${flag} <path|->.`);
+    fail(`${command} accepts only --file <path|->.`);
   return source;
 }
 async function readJson(source) {
@@ -445,7 +503,7 @@ async function actions(args) {
         subjectType = requireValue(flag, rest[++index]);
       else if (flag === "--subject-id")
         subjectId = requireValue(flag, rest[++index]);
-      else if (flag === "--params-file")
+      else if (flag === "--file")
         paramsSource = requireValue(flag, rest[++index]);
       else if (flag === "--run-id")
         runId = requireValue(flag, rest[++index]);
@@ -518,10 +576,6 @@ async function files(args) {
 }
 
 // src/agent-cli/graph.ts
-var DEFAULT_INSPECT_MAX_OBJECTS = 20;
-var DEFAULT_INSPECT_MAX_LINKS = 50;
-var MAX_INSPECT_PAGES = 10;
-var INSPECT_PAGE_SIZE = 100;
 async function inspectGraph(api, objectTypeId, primaryId, options) {
   if (options.depth === 0)
     return inspectRoot(api, objectTypeId, primaryId, options);
@@ -546,7 +600,7 @@ async function inspectGraph(api, objectTypeId, primaryId, options) {
         linksTruncated = true;
         break;
       }
-      if (pagesRead >= MAX_INSPECT_PAGES) {
+      if (pagesRead >= CLI_LIMITS.inspect.maximumPages) {
         pagesTruncated = true;
         break;
       }
@@ -560,7 +614,7 @@ async function inspectGraph(api, objectTypeId, primaryId, options) {
         },
         direction: "both",
         includeObjects: true,
-        pageSize: Math.min(INSPECT_PAGE_SIZE, remainingLinks),
+        pageSize: Math.min(CLI_LIMITS.linkPage.default, remainingLinks),
         ...pageToken ? { pageToken } : {}
       }));
       pagesRead += 1;
@@ -595,7 +649,7 @@ async function inspectGraph(api, objectTypeId, primaryId, options) {
         linksTruncated = true;
         break;
       }
-      if (pagesRead >= MAX_INSPECT_PAGES) {
+      if (pagesRead >= CLI_LIMITS.inspect.maximumPages) {
         pagesTruncated = true;
         break;
       }
@@ -652,7 +706,7 @@ async function inspectGraph(api, objectTypeId, primaryId, options) {
       depth: options.depth,
       maxObjects: options.maxObjects,
       maxLinks: options.maxLinks,
-      maxPages: MAX_INSPECT_PAGES,
+      maxPages: CLI_LIMITS.inspect.maximumPages,
       objectCount: 1 + relatedObjects.length,
       linkCount: filteredLinks.length,
       pagesRead,
@@ -690,7 +744,7 @@ async function inspectRoot(api, objectTypeId, primaryId, options) {
       depth: 0,
       maxObjects: options.maxObjects,
       maxLinks: options.maxLinks,
-      maxPages: MAX_INSPECT_PAGES,
+      maxPages: CLI_LIMITS.inspect.maximumPages,
       objectCount: 1,
       linkCount: 0,
       pagesRead: 0,
@@ -775,8 +829,6 @@ function compareLinks(left, right) {
 }
 
 // src/agent-cli/commands/objects.ts
-var DEFAULT_LIST_LIMIT = "20";
-var DEFAULT_LINK_PAGE_SIZE = 100;
 async function objects(args) {
   const [sub, ...rest] = args;
   if (!sub || isHelp(sub))
@@ -808,20 +860,20 @@ async function objectsInspect(args) {
     return writeText(OBJECTS_HELP);
   const objectTypeId = requireValue("objects inspect object type", args[0]);
   const primaryId = requireValue("objects inspect primary id", args[1]);
-  let depth = 2;
-  let maxObjects = DEFAULT_INSPECT_MAX_OBJECTS;
-  let maxLinks = DEFAULT_INSPECT_MAX_LINKS;
+  let depth = CLI_LIMITS.inspect.depth.default;
+  let maxObjects = CLI_LIMITS.inspect.objects.default;
+  let maxLinks = CLI_LIMITS.inspect.links.default;
   let full = false;
   for (let index = 2;index < args.length; index += 1) {
     const flag = args[index];
     if (flag === "--full")
       full = true;
     else if (flag === "--depth") {
-      depth = integerInRange(flag, requireValue(flag, args[++index]), 0, 3);
+      depth = integerInRange(flag, requireValue(flag, args[++index]), 0, CLI_LIMITS.inspect.depth.maximum);
     } else if (flag === "--max-objects") {
-      maxObjects = integerInRange(flag, requireValue(flag, args[++index]), 1, 100);
+      maxObjects = integerInRange(flag, requireValue(flag, args[++index]), 1, CLI_LIMITS.inspect.objects.maximum);
     } else if (flag === "--max-links") {
-      maxLinks = integerInRange(flag, requireValue(flag, args[++index]), 1, 500);
+      maxLinks = integerInRange(flag, requireValue(flag, args[++index]), 1, CLI_LIMITS.inspect.links.maximum);
     } else
       fail(`Unknown objects inspect option '${flag}'.`);
   }
@@ -848,11 +900,29 @@ async function objectsList(args) {
     "--updated-after": "updatedAfter",
     "--updated-before": "updatedBefore"
   };
-  const options = parseQueryOptions(args, optionNames, "objects list");
-  writeJson(await new ApiClient().get("/api/objects", {
-    limit: DEFAULT_LIST_LIMIT,
-    ...options
-  }));
+  const options = normalizeWindowOptions(parseQueryOptions(args, optionNames, "objects list"), {
+    defaultLimit: CLI_LIMITS.list.default,
+    maximumLimit: CLI_LIMITS.list.maximum,
+    defaultOrder: DEFAULT_LIST_ORDER,
+    offset: true
+  });
+  options.orderBy = enumValue("--order-by", options.orderBy ?? DEFAULT_OBJECT_ORDER_BY, [
+    "createdAt",
+    "updatedAt",
+    "primaryId"
+  ]);
+  for (const [name, flag] of [
+    ["createdAfter", "--created-after"],
+    ["createdBefore", "--created-before"],
+    ["updatedAfter", "--updated-after"],
+    ["updatedBefore", "--updated-before"]
+  ]) {
+    if (options[name] !== undefined)
+      options[name] = rfc3339Value(flag, options[name]);
+  }
+  requireOrderedRange("--created-after", options.createdAfter, "--created-before", options.createdBefore);
+  requireOrderedRange("--updated-after", options.updatedAfter, "--updated-before", options.updatedBefore);
+  writeJson(await new ApiClient().get("/api/objects", options));
 }
 async function objectsGet(args) {
   if (isHelp(args[0]))
@@ -869,10 +939,12 @@ async function objectsGet(args) {
   }));
 }
 async function objectsSearch(args) {
-  if (isHelp(args[0]))
-    return writeText("Usage: sixb objects search <text> [--limit <1-50>]");
+  if (isHelp(args[0])) {
+    return writeText(`Usage: sixb objects search <text> [--limit <1-${CLI_LIMITS.search.maximum}>]`);
+  }
   const query = requireValue("objects search", args[0]);
   const options = parseQueryOptions(args.slice(1), { "--limit": "limit" }, "objects search");
+  options.limit = String(integerInRange("--limit", options.limit ?? String(CLI_LIMITS.search.default), 1, CLI_LIMITS.search.maximum));
   writeJson(await new ApiClient().get("/api/objects/search", { q: query, ...options }));
 }
 async function objectsQuery(args) {
@@ -940,7 +1012,7 @@ async function objectsLinks(args) {
   const primaryId = requireValue("objects links primary id", args[1]);
   let linkId;
   let direction = "both";
-  let pageSize = DEFAULT_LINK_PAGE_SIZE;
+  let pageSize = CLI_LIMITS.linkPage.default;
   let pageToken;
   let includeObjects = false;
   for (let index = 2;index < args.length; index += 1) {
@@ -954,7 +1026,7 @@ async function objectsLinks(args) {
         "both"
       ]);
     } else if (flag === "--page-size") {
-      pageSize = integerInRange(flag, requireValue(flag, args[++index]), 1, 1000);
+      pageSize = integerInRange(flag, requireValue(flag, args[++index]), 1, CLI_LIMITS.linkPage.maximum);
     } else if (flag === "--page-token")
       pageToken = requireValue(flag, args[++index]);
     else if (flag === "--include-objects")
@@ -1022,6 +1094,15 @@ async function ontology(args) {
 }
 
 // src/agent-cli/commands/runs.ts
+var ACTION_RUN_STATUSES = ["queued", "running", "succeeded", "failed", "cancelled"];
+var WORKFLOW_RUN_STATUSES = [
+  "queued",
+  "running",
+  "waiting",
+  "succeeded",
+  "failed",
+  "cancelled"
+];
 async function runs(kind, args) {
   const [sub, ...rest] = args;
   const group = `${kind}-runs`;
@@ -1048,7 +1129,24 @@ async function runs(kind, args) {
       "--id": "primaryId"
     };
     const workflow = { ...common, "--workflow": "workflowId" };
-    return writeJson(await api.get(`/api/${group}`, parseQueryOptions(rest, kind === "action" ? action : workflow, `${group} list`)));
+    const options = normalizeWindowOptions(parseQueryOptions(rest, kind === "action" ? action : workflow, `${group} list`), {
+      defaultLimit: CLI_LIMITS.list.default,
+      maximumLimit: CLI_LIMITS.list.maximum,
+      defaultOrder: DEFAULT_LIST_ORDER,
+      offset: true
+    });
+    if (options.status !== undefined) {
+      options.status = enumValue("--status", options.status, kind === "action" ? ACTION_RUN_STATUSES : WORKFLOW_RUN_STATUSES);
+    }
+    for (const [name, flag] of [
+      ["startedAfter", "--started-after"],
+      ["startedBefore", "--started-before"]
+    ]) {
+      if (options[name] !== undefined)
+        options[name] = rfc3339Value(flag, options[name]);
+    }
+    requireOrderedRange("--started-after", options.startedAfter, "--started-before", options.startedBefore);
+    return writeJson(await api.get(`/api/${group}`, options));
   }
   fail(`Unknown ${group} command '${sub}'.`);
 }
@@ -1089,8 +1187,9 @@ async function context(args) {
   }
 }
 async function project(args) {
-  if (!args[0] || isHelp(args[0]))
+  if (!args[0] || isHelp(args[0]) || args[0] === "show" && isHelp(args[1])) {
     return writeText(GROUP_HELP.project);
+  }
   if (args[0] !== "show")
     fail(`Unknown project command '${args[0]}'.`);
   requireExact(args, 1, "project show accepts no arguments.");
@@ -1116,16 +1215,51 @@ async function telemetry(args) {
   if (sub === "history") {
     if (rest.length < 3)
       fail("telemetry history requires object type, primary id, and property id.");
-    const query = parseQueryOptions(rest.slice(3), { "--from": "from", "--to": "to", "--limit": "limit", "--order": "order" }, "telemetry history");
+    const query = normalizeWindowOptions(parseQueryOptions(rest.slice(3), { "--from": "from", "--to": "to", "--limit": "limit", "--order": "order" }, "telemetry history"), {
+      defaultLimit: CLI_LIMITS.telemetryHistory.default,
+      maximumLimit: CLI_LIMITS.telemetryHistory.maximum,
+      defaultOrder: DEFAULT_TELEMETRY_ORDER
+    });
+    if (query.from !== undefined)
+      query.from = rfc3339Value("--from", query.from);
+    if (query.to !== undefined)
+      query.to = rfc3339Value("--to", query.to);
+    requireOrderedRange("--from", query.from, "--to", query.to);
     return writeJson(await api.get(telemetryPath(rest, "history"), query));
   }
   if (sub === "query") {
-    return writeJson(await api.post("/api/telemetry/history", await readJson(singleFileOption(rest, "telemetry query"))));
+    return writeJson(await api.post("/api/telemetry/history", normalizeTelemetryQueryInput(await readJson(singleFileOption(rest, "telemetry query")))));
   }
   fail(`Unknown telemetry command '${sub}'.`);
 }
 function telemetryPath(args, terminal) {
   return `/api/objects/${encodeURIComponent(args[0] ?? "")}/${encodeURIComponent(args[1] ?? "")}/telemetry/${encodeURIComponent(args[2] ?? "")}/${terminal}`;
+}
+function normalizeTelemetryQueryInput(input) {
+  if (Array.isArray(input) || typeof input !== "object" || input === null) {
+    fail("Telemetry query input must be a JSON object.");
+  }
+  const body = { ...input };
+  const rawLimit = body.limitPerSeries;
+  if (rawLimit !== undefined && typeof rawLimit !== "number") {
+    fail("limitPerSeries must be a number.");
+  }
+  body.limitPerSeries = integerInRange("limitPerSeries", String(rawLimit ?? CLI_LIMITS.telemetryHistory.default), 1, CLI_LIMITS.telemetryHistory.maximum);
+  const rawOrder = body.order;
+  if (rawOrder !== undefined && typeof rawOrder !== "string") {
+    fail("order must be a string.");
+  }
+  body.order = enumValue("order", rawOrder ?? DEFAULT_TELEMETRY_ORDER, ["asc", "desc"]);
+  for (const field of ["from", "to"]) {
+    const value = body[field];
+    if (value === undefined)
+      continue;
+    if (typeof value !== "string")
+      fail(`${field} must be an RFC 3339 timestamp.`);
+    body[field] = rfc3339Value(field, value);
+  }
+  requireOrderedRange("from", body.from, "to", body.to);
+  return body;
 }
 
 // src/agent-cli/commands/workflows.ts
@@ -1147,7 +1281,7 @@ async function workflows(args) {
     requireValue("workflows start", workflowId);
     let input = {};
     if (rest.length > 1) {
-      input = await readJson(singleNamedFileOption(rest.slice(1), "--input-file", "workflows start"));
+      input = await readJson(singleFileOption(rest.slice(1), "workflows start"));
     }
     if (Array.isArray(input) || typeof input !== "object" || input === null) {
       fail("Workflow input must be a JSON object.");

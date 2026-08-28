@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises"
+import { enumValue, integerInRange, nonNegativeInteger } from "../arguments"
 import { fail } from "../output"
 
 export type QueryOptions = Record<string, string | undefined>
@@ -18,18 +19,37 @@ export function parseQueryOptions(
   return query
 }
 
-export function singleFileOption(args: readonly string[], command: string): string {
-  return singleNamedFileOption(args, "--file", command)
+export function normalizeWindowOptions(
+  options: QueryOptions,
+  policy: {
+    readonly defaultLimit: number
+    readonly maximumLimit: number
+    readonly defaultOrder: "asc" | "desc"
+    readonly offset?: boolean
+  }
+): QueryOptions {
+  const normalized: QueryOptions = {
+    ...options,
+    limit: String(
+      integerInRange(
+        "--limit",
+        options.limit ?? String(policy.defaultLimit),
+        1,
+        policy.maximumLimit
+      )
+    ),
+    order: enumValue("--order", options.order ?? policy.defaultOrder, ["asc", "desc"]),
+  }
+  if (policy.offset && options.offset !== undefined) {
+    normalized.offset = String(nonNegativeInteger("--offset", options.offset))
+  }
+  return normalized
 }
 
-export function singleNamedFileOption(
-  args: readonly string[],
-  flag: string,
-  command: string
-): string {
-  if (args[0] !== flag) fail(`${command} requires ${flag} <path|->.`)
-  const source = requireOptionValue(flag, args[1])
-  if (args.length !== 2) fail(`${command} accepts only ${flag} <path|->.`)
+export function singleFileOption(args: readonly string[], command: string): string {
+  if (args[0] !== "--file") fail(`${command} requires --file <path|->.`)
+  const source = requireOptionValue("--file", args[1])
+  if (args.length !== 2) fail(`${command} accepts only --file <path|->.`)
   return source
 }
 
