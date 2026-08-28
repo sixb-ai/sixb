@@ -84,17 +84,16 @@ function resolveSourceAndEdits(
   editedAt: Readonly<Record<string, string>>
 ): Record<string, JsonValue> {
   const properties = { ...source.assertion.properties }
-  const policy = source.assertion.conflictResolution ?? { strategy: "editsWin" }
-  const projectedPropertyIds = new Set(
-    source.assertion.projectedPropertyIds ?? Object.keys(source.assertion.properties)
-  )
+  const absentSourcePropertyIds = new Set(source.assertion.absentSourcePropertyIds ?? [])
 
   for (const propertyId of objectEditCandidateIds(override, editedAt)) {
     const edit = objectEditCandidate(override, propertyId)
     const editTimestamp = editedAt[propertyId]
+    const hasSourceCandidate =
+      Object.hasOwn(source.assertion.properties, propertyId) ||
+      absentSourcePropertyIds.has(propertyId)
     const sourceWins =
-      projectedPropertyIds.has(propertyId) &&
-      policy.strategy === "mostRecent" &&
+      hasSourceCandidate &&
       source.assertion.sourceUpdatedAt !== undefined &&
       editTimestamp !== undefined &&
       source.assertion.sourceUpdatedAt.localeCompare(editTimestamp) >= 0

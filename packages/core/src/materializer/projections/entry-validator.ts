@@ -119,21 +119,27 @@ function validateObjectAssertion(
     )
   }
   const conflictResolution = resolved.definition.conflictResolution ?? { strategy: "editsWin" }
-  if (conflictResolution.strategy === "mostRecent" && assertion.sourceUpdatedAt === undefined) {
+  if (conflictResolution.strategy !== "mostRecent") {
+    return { kind: "object", ref: assertion.ref, properties }
+  }
+  if (assertion.sourceUpdatedAt === undefined) {
     throw new MaterializationValidationError(
       `Projection '${resolved.projectionId}' requires source update timestamp ` +
         `'${conflictResolution.sourceTimestamp}' on every object assertion.`
     )
   }
+  const primaryPropertyId = ontology.getPrimaryPropertyId(assertion.ref.objectTypeId)
+  const absentSourcePropertyIds = [...owned]
+    .filter(
+      (propertyId) => propertyId !== primaryPropertyId && !Object.hasOwn(properties, propertyId)
+    )
+    .sort()
   return {
     kind: "object",
     ref: assertion.ref,
     properties,
-    conflictResolution: { ...conflictResolution },
-    projectedPropertyIds: [...owned].sort(),
-    ...(conflictResolution.strategy === "mostRecent"
-      ? { sourceUpdatedAt: assertion.sourceUpdatedAt }
-      : {}),
+    sourceUpdatedAt: assertion.sourceUpdatedAt,
+    ...(absentSourcePropertyIds.length === 0 ? {} : { absentSourcePropertyIds }),
   }
 }
 
