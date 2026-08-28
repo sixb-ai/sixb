@@ -20,10 +20,10 @@ curl -sSL https://smolmachines.com/install.sh | bash
 bun run agent:image
 ```
 
-This builds [`agent-image/Dockerfile`](./agent-image/Dockerfile) — alpine plus
-`bash curl jq git ripgrep python3`, about 73 MB — and caches it at
-`~/.cache/sixb/smolvm/sixb-agent.tar`. Alpine's BusyBox base supplies `realpath`, `tail`, `head`, and
-`base64` for `read`.
+This builds [`agent-image/Dockerfile`](./agent-image/Dockerfile) — pinned Node 22 on Alpine plus
+Bash, Git, certificates, ripgrep, and Python — and caches the versioned image at
+`~/.cache/sixb/smolvm/sixb-agent-runtime-v1.tar`. Alpine's BusyBox base supplies `realpath`, `tail`,
+`head`, and `base64` for `read`.
 
 ## Use
 
@@ -41,9 +41,10 @@ telling you exactly what to run.
 
 ## Custom tools
 
-Edit the Dockerfile and rebuild. Custom agent images must provide `bash`, `curl`, `realpath`, `tail`,
-`head`, and `base64`. Keep it lean — boot time scales with image size, and run-time installs won't
-work (egress is locked down).
+Edit the Dockerfile and rebuild. Custom agent images must satisfy `sixb-agent-runtime/v1`: Bash,
+`realpath`, `tail`, `head`, `base64`, CA certificates, and Bun 1.3+ or Node 22+. `curl` and `jq` are
+not required. Keep the image lean — boot time scales with image size, and run-time installs will not
+work because egress is locked down.
 
 ```bash
 # edit agent-image/Dockerfile, then:
@@ -56,8 +57,8 @@ Docker is only needed to *build* the image. The server needs only the smolvm bin
 
 ```bash
 bun run agent:image --platform linux/amd64
-# Built agent image -> ~/.cache/sixb/smolvm/sixb-agent-amd64.tar
-scp ~/.cache/sixb/smolvm/sixb-agent-amd64.tar server:/opt/sixb/agent.tar
+# Built agent image -> ~/.cache/sixb/smolvm/sixb-agent-runtime-v1-amd64.tar
+scp ~/.cache/sixb/smolvm/sixb-agent-runtime-v1-amd64.tar server:/opt/sixb/agent.tar
 ```
 
 ```ts
@@ -90,3 +91,9 @@ bun test sandboxes/smolvm/tests/   # VM tests skip without a smolvm binary
 ```
 
 Pure unit tests cover the CLI flags and network policy; a fake `smolvm` covers the lifecycle and the full data path; `smolvm-integration.test.ts` runs a real VM when a binary is present.
+
+After building the managed image, run its agent-runtime conformance smoke explicitly:
+
+```bash
+SIXB_SMOLVM_AGENT_RUNTIME_INTEGRATION=1 bun test sandboxes/smolvm/tests/smolvm-integration.test.ts
+```

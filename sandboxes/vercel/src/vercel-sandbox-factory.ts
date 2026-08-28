@@ -16,6 +16,8 @@ import {
 
 export type VercelSandboxRuntime = "node26" | "node24" | "node22" | "python3.13"
 
+export const DEFAULT_VERCEL_SANDBOX_RUNTIME: VercelSandboxRuntime = "node24"
+
 export type VercelSandboxSource =
   | {
       readonly type: "git"
@@ -43,11 +45,11 @@ export interface VercelSnapshotRetentionPolicy {
 }
 
 export interface VercelSandboxFactoryOptions {
-  /** Stock Vercel runtime. Ignored when `image` or `snapshotId` is set. Defaults to Vercel's node24. */
+  /** Stock Vercel runtime. Ignored with `image`/`snapshotId`. Sixb explicitly defaults to node24. */
   readonly runtime?: VercelSandboxRuntime | (string & {})
-  /** VCR image reference; agent images need bash, curl, realpath, tail, head, and base64. */
+  /** VCR image reference; agent images must satisfy `sixb-agent-runtime/v1`. */
   readonly image?: string
-  /** Existing snapshot; agent snapshots need the same commands. Exclusive with `image`/`source`. */
+  /** Existing snapshot; agent snapshots must satisfy the same profile. Exclusive with image/source. */
   readonly snapshotId?: string
   /** Optional git/tarball source cloned or mounted by Vercel at sandbox creation. */
   readonly source?: VercelSandboxSource
@@ -163,7 +165,9 @@ function buildCreateParams(input: {
   return {
     ...base,
     ...(defaults.source !== undefined ? { source: normalizeSource(defaults.source) } : {}),
-    ...(defaults.image !== undefined ? { image: defaults.image } : { runtime: defaults.runtime }),
+    ...(defaults.image !== undefined
+      ? { image: defaults.image }
+      : { runtime: defaults.runtime ?? DEFAULT_VERCEL_SANDBOX_RUNTIME }),
   } as VercelCreateSandboxParams
 }
 

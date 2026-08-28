@@ -1,5 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test"
+import { existsSync } from "node:fs"
 import { join } from "node:path"
+import { defaultAgentImageCandidates } from "../src/agent-image"
 import { probeSmolvm } from "../src/preflight"
 import { SmolvmSandbox, type SmolvmSandboxOptions } from "../src/smolvm-sandbox"
 
@@ -13,7 +15,7 @@ import { SmolvmSandbox, type SmolvmSandboxOptions } from "../src/smolvm-sandbox"
  * in CI. It validates the real lifecycle, in-guest file materialization via
  * writeFiles, --workdir, --env, exit codes, and stream separation end to end.
  * The rootfs ships busybox `sh` (not bash), so commands use `sh`. (The factory
- * defaults to the managed bash+curl image; that path is covered by the manual
+ * defaults to the managed runtime-v1 image; that path is covered by the manual
  * build + docs.)
  */
 const available = probeSmolvm("smolvm").ok
@@ -80,3 +82,49 @@ guard("SmolvmSandbox (real bare VM)", () => {
     }
   }, 180_000)
 })
+
+const managedImage = defaultAgentImageCandidates().find((candidate) => existsSync(candidate))
+const managedGuard =
+  available && managedImage && process.env.SIXB_SMOLVM_AGENT_RUNTIME_INTEGRATION === "1"
+    ? describe
+    : describe.skip
+
+managedGuard("SmolvmSandbox (managed agent runtime)", () => {
+  test("satisfies the agent-runtime command profile", async () => {
+    if (!managedImage) throw new Error("Expected a built managed agent image.")
+    const sandbox = await SmolvmSandbox.create({
+      cli: { bin: "smolvm", image: managedImage },
+      timeout: 120_000,
+      network: { mode: "none" },
+    })
+    try {
+      const bashEnv = join(sandbox.workingDirectory, "runtime", "bash-env")
+      const fixture = join(sandbox.workingDirectory, "runtime", "probe.txt")
+      await sandbox.writeFiles([
+        { path: bashEnv, contents: "export SIXB_BASH_ENV_READY=1\n" },
+        { path: fixture, contents: "first\nsixb-runtime-probe\nthird\n" },
+      ])
+      const runtime = await sandbox.runCommand("bash", ["-lc", RUNTIME_COMMAND_PROBE], {
+        env: { BASH_ENV: bashEnv, SIXB_RUNTIME_PROBE_FILE: fixture },
+      })
+      expect(runtime.exitCode).toBe(0)
+      expect(runtime.stdout.trim()).toMatch(/^node:v?\d+\.\d+/)
+    } finally {
+      await sandbox.destroy()
+    }
+  }, 180_000)
+})
+
+const RUNTIME_COMMAND_PROBE = `set -u
+[ "\${SIXB_BASH_ENV_READY:-}" = "1" ] || exit 20
+for command_name in realpath tail head base64; do
+  command_path="$(command -v "$command_name" || true)"
+  [ -n "$command_path" ] || exit 21
+done
+probe="$(tail -n "+2" -- "$SIXB_RUNTIME_PROBE_FILE" | head -n 1 | head -c 19 | base64)"
+[ "$probe" = "c2l4Yi1ydW50aW1lLXByb2JlCg==" ] || exit 22
+node_version="$(node --version)" || exit 23
+node_major="\${node_version#v}"
+node_major="\${node_major%%.*}"
+[ "$node_major" -ge 22 ] || exit 23
+printf 'node:%s\n' "$node_version"`

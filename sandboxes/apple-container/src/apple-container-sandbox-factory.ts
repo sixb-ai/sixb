@@ -16,7 +16,7 @@ import {
 import { type AppleContainerProbe, probeAppleContainer } from "./preflight"
 
 export interface AppleContainerSandboxFactoryOptions {
-  /** Agent images need /bin/sh, bash, curl, realpath, tail, head, and base64. */
+  /** Agent images must satisfy `sixb-agent-runtime/v1`. */
   readonly image?: string
   /** Apple Container CLI binary name or absolute path. Defaults to "container". */
   readonly bin?: string
@@ -49,7 +49,9 @@ export interface AppleContainerSandboxFactoryOptions {
   readonly network?: SandboxNetworkPolicy
 }
 
-export const DEFAULT_APPLE_CONTAINER_IMAGE = "node:22-bookworm"
+/** Official multi-platform Node image, pinned to the 2026-08-25 OCI index. */
+export const DEFAULT_APPLE_CONTAINER_IMAGE =
+  "node:22-bookworm@sha256:8a34c4ab3ea2c5cd194f07e317b2a8f09461d3c8b05c4e34c8ccd56d56024c4d"
 const DEFAULT_BIN = "container"
 
 /**

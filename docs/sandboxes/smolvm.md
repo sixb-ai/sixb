@@ -46,9 +46,10 @@ curl -sSL https://smolmachines.com/install.sh | bash
 ## The agent image
 
 The VM boots from an OCI image that contains the tooling the agent uses. The package ships a
-canonical agent image — Alpine plus `bash curl jq git ripgrep python3`, roughly 73 MB — kept lean
-so boot stays fast. Alpine's BusyBox base provides the `realpath`, `tail`, `head`, and `base64`
-commands used by the built-in `read` tool.
+versioned canonical `sixb-agent-runtime/v1` image: pinned Node 22 on Alpine plus Bash, Git,
+certificates, ripgrep, and Python. Alpine's BusyBox base provides the `realpath`, `tail`, `head`,
+and `base64` commands used by the built-in `read` tool. `curl` and `jq` are not required by the
+portable CLI.
 
 Build it once with Docker or Podman. The build is the only step that needs a container builder; every
 run after reads the cached archive offline.
@@ -58,21 +59,25 @@ bun run agent:image
 ```
 
 This builds `agent-image/Dockerfile` and caches the archive at
-`~/.cache/sixb/smolvm/sixb-agent.tar` (honoring `XDG_CACHE_HOME`). To add tools, edit the Dockerfile
-and rebuild — keep it lean, and remember run-time installs will not work because egress is locked to
-the gateway.
+`~/.cache/sixb/smolvm/sixb-agent-runtime-v1.tar` (honoring `XDG_CACHE_HOME`). The versioned cache
+name prevents an older image from silently surviving a runtime-profile change. To add tools, edit
+the Dockerfile and rebuild — keep it lean, and remember run-time installs will not work because
+egress is locked to the gateway.
 
-Custom archives and registry images used by agents must retain `bash`, `curl`, `realpath`, `tail`,
-`head`, and `base64`. A bare BusyBox machine is not a complete Sixb agent image because it does not
-provide `bash`.
+The previous unversioned `sixb-agent.tar` is intentionally not selected. Re-run `bun run
+agent:image` once when upgrading to runtime-v1.
+
+Custom archives and registry images used by agents must satisfy `sixb-agent-runtime/v1`: Bash,
+`realpath`, `tail`, `head`, `base64`, CA certificates, and Bun 1.3+ or Node 22+. A bare BusyBox
+machine is not a complete Sixb agent image.
 
 For a server that has no Docker, cross-build the image elsewhere and copy it over. The build writes an
 arch-suffixed file so it does not clobber the host build:
 
 ```bash
 bun run agent:image --platform linux/amd64
-# Built agent image -> ~/.cache/sixb/smolvm/sixb-agent-amd64.tar
-scp ~/.cache/sixb/smolvm/sixb-agent-amd64.tar server:/opt/sixb/agent.tar
+# Built agent image -> ~/.cache/sixb/smolvm/sixb-agent-runtime-v1-amd64.tar
+scp ~/.cache/sixb/smolvm/sixb-agent-runtime-v1-amd64.tar server:/opt/sixb/agent.tar
 ```
 
 The server then needs only the `smolvm` binary and the `.tar`.
@@ -83,7 +88,7 @@ The `image` option selects what the VM boots from:
 
 | `image` value | Mode | Behavior |
 | --- | --- | --- |
-| `undefined` (default) | Managed archive | The cached `sixb-agent.tar` (or a cross-built `sixb-agent-<arch>.tar` in the cache). Offline, fast, strict egress |
+| `undefined` (default) | Managed archive | The cached `sixb-agent-runtime-v1.tar` (or a cross-built `sixb-agent-runtime-v1-<arch>.tar` in the cache). Offline, fast, strict egress |
 | a local `.tar` / `.tar.gz` / `.tgz` path | Local archive | Loaded at start with no network; boots fully offline |
 | a registry reference (e.g. `"node:22"`) | Registry pull | Pulled from the registry **at start**, from inside the guest |
 | `null` | Bare machine | smolvm's built-in busybox rootfs; no image, fully offline |

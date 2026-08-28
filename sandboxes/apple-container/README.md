@@ -13,13 +13,16 @@ Install Apple Container on an Apple silicon Mac running macOS 26 or newer, then 
 container system start
 ```
 
-The default image is `node:22-bookworm`. Custom agent images should include:
+The default is the official `node:22-bookworm` multi-platform image pinned to an immutable OCI
+digest. Custom agent images must satisfy `sixb-agent-runtime/v1`:
 
 - `bash`
 - `/bin/sh`
-- `curl`
 - `realpath`, `tail`, `head`, and `base64` for the built-in `read` tool
+- CA certificates and Bun 1.3+ or Node 22+ for the portable `sixb` CLI
 - `dirname`, `mkdir`, `cat`, and optionally `chmod` for file materialization
+
+`curl` and `jq` are not required.
 
 ## Use
 
@@ -53,7 +56,6 @@ reachable origin.
 
 ```ts
 new AppleContainerSandboxFactory({
-  image: "node:22-bookworm",
   timeout: 30_000,
   memory: "2G",
   cpus: 2,
@@ -64,7 +66,7 @@ new AppleContainerSandboxFactory({
 
 | Option | Default | Notes |
 | --- | --- | --- |
-| `image` | `node:22-bookworm` | OCI image used for each sandbox. |
+| `image` | pinned `node:22-bookworm` | OCI image used for each sandbox. |
 | `bin` | `container` | Apple Container CLI binary name or absolute path. |
 | `timeout` | - | Default per-command timeout, in ms. |
 | `setupTimeoutMs` | `30_000` | Timeout for provider bootstrap/cleanup commands. |
