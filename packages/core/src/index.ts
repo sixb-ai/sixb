@@ -917,6 +917,7 @@ export type {
   ActionRunFailureCode,
   ActionRunPhase,
   AgentRunFailureCode,
+  AiCostSummary,
   PipelineRunFailureCode,
   ProjectionRunFailureCode,
   SyncRunFailureCode,

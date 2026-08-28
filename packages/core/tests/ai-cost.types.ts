@@ -1,3 +1,4 @@
+import type { AiCostSummary } from "@sixb/core"
 import type { AiModelCallCostRecord, AiPricingContext } from "../src/storage/ai-cost"
 
 const context = {
@@ -22,4 +23,12 @@ const cost = {
   ratedAt: new Date(),
 } as const satisfies AiModelCallCostRecord
 
+const summary = {
+  amounts: [{ currency: "USD", amountNanos: "10000000" }],
+  ratedCallCount: 1,
+  unpriceableCallCount: 0,
+  unvaluedCallCount: 0,
+} as const satisfies AiCostSummary
+
 void cost
+void summary
