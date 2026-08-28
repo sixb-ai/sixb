@@ -71,6 +71,7 @@ import {
 import { jsonSchema, type ToolSet, tool } from "ai"
 import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test"
 import { AgentWorker, type AgentWorkerOptions } from "../src"
+import { renderAgentSystemPrompt } from "../src/agent-prompt"
 import { AGENT_RUNTIME_PROFILE } from "../src/agent-runtime/profile"
 import { loadAgentSkills } from "../src/agent-skills"
 import { normalizeApiBaseUrl } from "../src/api-url"
@@ -859,6 +860,16 @@ function workerOptions(
   }
 }
 
+function testSystemPrompt(sixb: TestSixb): string {
+  const agent = sixb.definitions.agents.getById("assistant")
+  if (!agent) throw new Error("Expected test agent.")
+  return renderAgentSystemPrompt({
+    mode: "conversation",
+    instructions: agent.instructions,
+    skills: [],
+  })
+}
+
 interface RecordedCommand {
   readonly command: string
   readonly args: readonly string[]
@@ -1038,6 +1049,8 @@ class RecordingSandbox implements Sandbox {
           `thread=${env.SIXB_THREAD_ID ?? ""}`,
           `run=${env.SIXB_RUN_ID ?? ""}`,
           `skills=${env.SIXB_SKILLS_DIR ?? ""}`,
+          `bin=${env.SIXB_BIN_DIR ?? ""}`,
+          `bashEnv=${env.BASH_ENV ?? ""}`,
           `context=${env.SIXB_RUN_CONTEXT ?? ""}`,
           `attachments=${env.SIXB_ATTACHMENTS ?? ""}`,
           `attachmentDir=${env.SIXB_ATTACHMENT_DIR ?? ""}`,
@@ -2055,9 +2068,10 @@ describe("AgentWorker", () => {
       const researchSystem = capturedCalls[0]?.options.prompt.find(
         (message) => message.role === "system"
       )?.content
-      expect(researchSystem).toContain("Execution mode: workflow-task")
-      expect(researchSystem).toContain("headless Sixb workflow agent")
-      expect(researchSystem).toContain("Do not ask a user follow-up question")
+      expect(researchSystem).toContain("headless workflow agent inside a Sixb project")
+      expect(researchSystem).toContain("Never start another workflow")
+      expect(researchSystem).toContain("never ask a user for approval or a follow-up question")
+      expect(researchSystem).toContain("everything the next workflow node needs")
       expect(researchSystem).not.toContain("structured output contract")
       const finalizer = capturedCalls[2]?.options
       const finalizerSystem = finalizer?.prompt.find(
@@ -2870,11 +2884,15 @@ describe("AgentWorker", () => {
       expect(stdoutValue(firstBash.stdout, "context")).not.toBe(
         stdoutValue(secondBash.stdout, "context")
       )
-      const systemAddendum = firstEnvironment.turnContext.systemAddendum ?? ""
-      expect(systemAddendum).toContain("Execution mode: conversation")
-      expect(systemAddendum).toContain("use relative paths from this catalog or sandboxPath values")
-      expect(systemAddendum).toContain("Path: .sixb/agent/skills/sixb-query/SKILL.md")
-      expect(systemAddendum).not.toContain("/tmp/sixb-recording-sandbox")
+      const systemPrompt = firstEnvironment.turnContext.systemPrompt
+      expect(systemPrompt).toContain("<sixb_mode_rules>")
+      expect(systemPrompt).toContain("use relative paths from this prompt or sandboxPath values")
+      expect(systemPrompt).toContain("inside a live Sixb project modeled as an ontology")
+      expect(systemPrompt).toContain("Use the `sixb` CLI to discover and interact with the project")
+      expect(systemPrompt).not.toContain("sixb objects inspect <type> <id>")
+      expect(systemPrompt).not.toContain("Available Agent Skills")
+      expect(systemPrompt).toContain("<agent_instructions>")
+      expect(systemPrompt).not.toContain("/tmp/sixb-recording-sandbox")
 
       await firstEnvironment.dispose()
       firstDisposed = true
@@ -3290,7 +3308,10 @@ describe("AgentWorker", () => {
     // Resolves while create() is still gated: the system prompt is ready and the
     // sandbox has not been built yet.
     const environment = await createConversationAgentEnvironment({ context, agent, run })
-    expect(environment.turnContext.systemAddendum).toContain("Available Agent Skills")
+    expect(environment.turnContext.systemPrompt).toContain(
+      "inside a live Sixb project modeled as an ontology"
+    )
+    expect(environment.turnContext.systemPrompt).not.toContain("Available Agent Skills")
     expect(recording.sandboxes).toHaveLength(0)
 
     try {
@@ -5055,9 +5076,10 @@ describe("AgentWorker", () => {
         expect(run.status).toBe("succeeded")
         expect(capturedSystem).toContain("Path: .sixb/agent/skills/acme-style/SKILL.md")
         expect(capturedSystem).toContain("Use when drafting Acme customer-facing messages.")
-        expect(capturedSystem).toContain("Path: .sixb/agent/skills/sixb-query/SKILL.md")
 
-        const command = sandboxes.sandboxes[0]?.commands[0]
+        const command = sandboxes.sandboxes[0]?.commands.find(
+          (candidate) => candidate.args.at(-1) === "print-sixb-env"
+        )
         const skillsDir = command?.options.env?.SIXB_SKILLS_DIR
         if (!skillsDir) {
           throw new Error("Expected project skill sandbox env.")
@@ -5072,14 +5094,58 @@ describe("AgentWorker", () => {
         expect(
           sandbox.readFileContents(join(skillsDir, "acme-style", "references", "examples.md"))
         ).toContain("Prefer concise")
-        expect(sandbox.readFileContents(join(skillsDir, "sixb-query", "SKILL.md"))).toContain(
-          "name: sixb-query"
-        )
+        expect(sandbox.writtenFiles.some((file) => file.path.includes("/skills/sixb/"))).toBe(false)
       } finally {
         await worker.stop()
       }
     } finally {
       await rm(projectRoot, { recursive: true, force: true })
+    }
+  })
+
+  test("pairs the canonical conversation prompt with the provisioned CLI runtime", async () => {
+    let capturedSystem: string | undefined
+    const sandboxes = new RecordingSandboxFactory()
+    const sixb = buildSixb(
+      apiBashThenAnswerModel((system) => {
+        capturedSystem = system
+      }),
+      new InMemoryBroker(),
+      sandboxes
+    )
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      const {
+        run: { threadId },
+      } = await requestAgent(sixb, { agentId: "assistant", text: "check the project" })
+      const run = await waitFor(
+        async () => {
+          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
+          const found = list.runs[0]
+          return found && found.status !== "queued" && found.status !== "running" ? found : null
+        },
+        { label: "canonical prompt CLI run terminal" }
+      )
+
+      expect(run.status).toBe("succeeded")
+      expect(capturedSystem).toContain("<sixb_mode_rules>")
+      expect(capturedSystem).toContain("<sixb_runtime_context>")
+      expect(capturedSystem).toContain("inside a live Sixb project modeled as an ontology")
+      expect(capturedSystem).toContain(
+        "Use the `sixb` CLI to discover and interact with the project"
+      )
+      expect(capturedSystem).toContain("<agent_instructions>")
+      expect(capturedSystem).toContain("You are a helpful test assistant.")
+      expect(capturedSystem).not.toContain("Available Agent Skills")
+
+      const sandbox = sandboxes.sandboxes[0]
+      if (!sandbox) throw new Error("Expected a provisioned sandbox.")
+      expect(sandbox.writtenFiles.some((file) => file.path.endsWith("/bin/sixb"))).toBe(true)
+      expect(sandbox.writtenFiles.some((file) => file.path.endsWith("/SKILL.md"))).toBe(false)
+    } finally {
+      await worker.stop()
     }
   })
 
@@ -5158,6 +5224,26 @@ describe("AgentWorker", () => {
         throw new Error("Expected a provisioned sandbox.")
       }
 
+      expect(sandbox.writtenFiles.some((file) => file.path.endsWith("/SKILL.md"))).toBe(false)
+
+      const sixbCliPath = join(env.SIXB_BIN_DIR, "sixb")
+      const sixbCli = sandbox.readFileContents(sixbCliPath)
+      expect(sixbCli).toContain("../lib/sixb.mjs")
+      expect(sixbCli).toContain("command -v bun")
+      expect(sixbCli).toContain("command -v node")
+      expect(sixbCli).not.toContain("SIXB_ACCESS_TOKEN")
+      expect(sandbox.writtenFiles.find((file) => file.path === sixbCliPath)?.mode).toBe(0o755)
+
+      const sixbArtifactPath = join(env.SIXB_CONTEXT_DIR, "lib", "sixb.mjs")
+      const sixbArtifact = sandbox.readFileContents(sixbArtifactPath)
+      expect(sixbArtifact).toContain("Sixb agent CLI")
+      expect(sixbArtifact).toContain("objects inspect <type> <id>")
+      expect(sixbArtifact).toContain("objects get <type> <id>")
+      expect(sixbArtifact).toContain('kind: "refs"')
+      expect(sixbArtifact).toContain("directions are outgoing or incoming")
+      expect(sixbArtifact).not.toContain("SIXB_ACCESS_TOKEN")
+      expect(sandbox.writtenFiles.find((file) => file.path === sixbArtifactPath)?.mode).toBe(0o644)
+
       const bashEnv = sandbox.readFileContents(env.BASH_ENV)
       expect(bashEnv).toContain('export PATH="$SIXB_BIN_DIR:$PATH"')
       expect(bashEnv).toContain("export SIXB_BASH_ENV_READY=1")
@@ -5167,85 +5253,6 @@ describe("AgentWorker", () => {
       expect(sandbox.readFileContents(env.SIXB_RUNTIME_PROBE_FILE)).toBe(
         "first\nsixb-runtime-probe\nthird\n"
       )
-
-      const querySkill = sandbox.readFileContents(
-        join(env.SIXB_SKILLS_DIR, "sixb-query", "SKILL.md")
-      )
-      expect(querySkill).toContain("name: sixb-query")
-      expect(querySkill).toContain("/api/object-types")
-      expect(querySkill).toContain("references/query-api.md")
-      expect(querySkill).toContain("Do not invent alternative")
-      expect(querySkill).not.toContain("SIXB_ACCESS_TOKEN")
-
-      const queryApiReference = sandbox.readFileContents(
-        join(env.SIXB_SKILLS_DIR, "sixb-query", "references", "query-api.md")
-      )
-      expect(queryApiReference).toContain("/api/objects/query")
-      expect(queryApiReference).toContain("/api/objects/query/facets")
-      expect(queryApiReference).toContain("Do not send top-level")
-      expect(queryApiReference).toContain("simple storage-backed browsing")
-      expect(queryApiReference).toContain("includeTotal: false")
-      expect(queryApiReference).toContain("Do not use `/api/objects/{objectTypeId}`")
-      expect(queryApiReference).toContain("Common Mistakes")
-      expect(queryApiReference).toContain('/api/objects/customer"')
-      expect(queryApiReference).toContain('"kind":"limit"')
-
-      const queryShapesReference = sandbox.readFileContents(
-        join(env.SIXB_SKILLS_DIR, "sixb-query", "references", "query-shapes.md")
-      )
-      expect(queryShapesReference).toContain('"kind": "page"')
-      expect(queryShapesReference).toContain('"pageSize": 20')
-      expect(queryShapesReference).toContain(
-        '"pageToken": "next-page-token-from-previous-response"'
-      )
-
-      const queryExamplesReference = sandbox.readFileContents(
-        join(env.SIXB_SKILLS_DIR, "sixb-query", "references", "examples.md")
-      )
-      expect(queryExamplesReference).toContain("keep pagination and limits inside")
-      expect(queryExamplesReference).toContain('"kind": "limit"')
-
-      const telemetrySkill = sandbox.readFileContents(
-        join(env.SIXB_SKILLS_DIR, "sixb-telemetry", "SKILL.md")
-      )
-      expect(telemetrySkill).toContain("name: sixb-telemetry")
-      expect(telemetrySkill).toContain("references/telemetry-api.md")
-
-      const telemetryApiReference = sandbox.readFileContents(
-        join(env.SIXB_SKILLS_DIR, "sixb-telemetry", "references", "telemetry-api.md")
-      )
-      expect(telemetryApiReference).toContain("/api/telemetry/history")
-      expect(telemetryApiReference).toContain("/telemetry/rpm/latest")
-
-      const actionsSkill = sandbox.readFileContents(
-        join(env.SIXB_SKILLS_DIR, "sixb-actions", "SKILL.md")
-      )
-      expect(actionsSkill).toContain("name: sixb-actions")
-      expect(actionsSkill).toContain("references/actions-api.md")
-
-      const actionsApiReference = sandbox.readFileContents(
-        join(env.SIXB_SKILLS_DIR, "sixb-actions", "references", "actions-api.md")
-      )
-      expect(actionsApiReference).toContain("/api/actions")
-      expect(actionsApiReference).toContain("ask for approval")
-      expect(actionsApiReference).toContain("Do not request the action until the user approves")
-      expect(actionsApiReference).toContain("/api/action-runs/action_run_id")
-      expect(actionsApiReference).toContain("without a `kind`")
-      expect(actionsApiReference).toContain('"objectTypeId": "customer", "primaryId": "cust-001"')
-
-      const filesSkill = sandbox.readFileContents(
-        join(env.SIXB_SKILLS_DIR, "sixb-files", "SKILL.md")
-      )
-      expect(filesSkill).toContain("name: sixb-files")
-      expect(filesSkill).toContain("POST /api/files")
-
-      const workflowsSkill = sandbox.readFileContents(
-        join(env.SIXB_SKILLS_DIR, "sixb-workflows", "SKILL.md")
-      )
-      expect(workflowsSkill).toContain("name: sixb-workflows")
-      expect(workflowsSkill).toContain("Ask for approval")
-      expect(workflowsSkill).toContain("never start another workflow")
-
       const runContext = JSON.parse(sandbox.readFileContents(env.SIXB_RUN_CONTEXT)) as unknown
       expect(runContext).toMatchObject({
         projectId: PROJECT_ID,
@@ -5280,6 +5287,8 @@ describe("AgentWorker", () => {
       })
       expect(stdout).toContain(`base=${env.SIXB_API_BASE_URL}`)
       expect(stdout).toContain(`skills=${env.SIXB_SKILLS_DIR}`)
+      expect(stdout).toContain(`bin=${env.SIXB_BIN_DIR}`)
+      expect(stdout).toContain(`bashEnv=${env.BASH_ENV}`)
       expect(stdout).toContain(`context=${env.SIXB_RUN_CONTEXT}`)
       expect(stdout).toContain(`outputDir=${env.SIXB_OUTPUT_DIR}`)
       expect(stdout).toContain(`outputStagingDir=${env.SIXB_OUTPUT_STAGING_DIR}`)
@@ -5831,6 +5840,7 @@ describe("AgentWorker", () => {
         storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
         tools: echoTool,
+        systemPrompt: testSystemPrompt(sixb),
         streamSink: NOOP_STREAM_SINK,
         recoverAiModelCall: recoverAiModelCall(sixb),
         defaultMaxSteps: 4,
@@ -5885,7 +5895,7 @@ describe("AgentWorker", () => {
         storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
         tools: {},
-        systemAddendum: "Extra sandbox context.",
+        systemPrompt: testSystemPrompt(sixb),
         streamSink: NOOP_STREAM_SINK,
         recoverAiModelCall: recoverAiModelCall(sixb),
         defaultMaxSteps: 4,
@@ -5899,14 +5909,13 @@ describe("AgentWorker", () => {
     expect(capturedSystem).toBeDefined()
     if (!capturedSystem) throw new Error("Expected a system prompt")
 
-    expect(capturedSystem).toContain("<sixb_core_rules>")
-    expect(capturedSystem).toContain("You are operating as a Sixb agent")
-    expect(capturedSystem).toContain("sandboxed read and bash tools")
+    expect(capturedSystem).toContain("<sixb_mode_rules>")
     expect(capturedSystem).toContain("<sixb_runtime_context>")
-    expect(capturedSystem).toContain("Extra sandbox context.")
+    expect(capturedSystem).toContain("inside a live Sixb project modeled as an ontology")
+    expect(capturedSystem).toContain("Use the `sixb` CLI to discover and interact with the project")
     expect(capturedSystem).toContain("<agent_instructions>")
     expect(capturedSystem).toContain("You are a helpful test assistant.")
-    expect(capturedSystem.indexOf("<sixb_core_rules>")).toBeLessThan(
+    expect(capturedSystem.indexOf("<sixb_mode_rules>")).toBeLessThan(
       capturedSystem.indexOf("<agent_instructions>")
     )
   })
@@ -5942,6 +5951,7 @@ describe("AgentWorker", () => {
         storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
         tools: {},
+        systemPrompt: testSystemPrompt(sixb),
         streamSink: NOOP_STREAM_SINK,
         recoverAiModelCall: recoverAiModelCall(sixb),
         defaultMaxSteps: 4,
@@ -6237,6 +6247,7 @@ describe("AgentWorker", () => {
           storage: workerStorageOf(failingStorage),
           blobStorage: sixb.blobStorage,
           tools: echoTool,
+          systemPrompt: testSystemPrompt(sixb),
           streamSink: createBrokerStreamSink({
             broker: sixb.broker,
             projectId: PROJECT_ID,
@@ -6275,6 +6286,7 @@ describe("AgentWorker", () => {
         storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
         tools: echoTool,
+        systemPrompt: testSystemPrompt(sixb),
         streamSink: createBrokerStreamSink({
           broker: sixb.broker,
           projectId: PROJECT_ID,
