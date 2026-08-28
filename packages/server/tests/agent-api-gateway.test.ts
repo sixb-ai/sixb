@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join, resolve } from "node:path"
 import {
   can,
   defineAction,
@@ -32,6 +35,10 @@ import { createTestBrowserPolicy } from "./helpers"
 
 const PROJECT_ID = "agent-api-gateway-tests"
 const NOW = new Date("2026-06-28T12:00:00.000Z")
+const AGENT_CLI_ARTIFACT = resolve(
+  import.meta.dir,
+  "../../agent-worker/src/agent-cli/generated/sixb.mjs"
+)
 
 function fileRefJson(fileRef: FileRef): Record<string, string | number> {
   return Object.fromEntries(
@@ -379,7 +386,148 @@ describe("agent API gateway", () => {
     const finishedRun = await app.fetch(new Request(`${gatewayBaseUrl}/api/object-types`))
     expect(finishedRun.status).toBe(403)
   })
+
+  test("keeps the generated agent CLI compatible with the real gateway", async () => {
+    const { app, gatewayBaseUrl } = await createGatewayRuntime()
+    const directory = await mkdtemp(join(tmpdir(), "sixb-agent-cli-gateway-"))
+    const listener = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: (request) => app.fetch(request),
+    })
+    const baseUrl = new URL(gatewayBaseUrl)
+    baseUrl.hostname = "127.0.0.1"
+    baseUrl.port = String(listener.port)
+
+    try {
+      const project = await runAgentCli(baseUrl.href, ["project", "show"])
+      expect(project.exitCode).toBe(0)
+      expect(JSON.parse(project.stdout)).toMatchObject({ id: PROJECT_ID })
+
+      const ontology = await runAgentCli(baseUrl.href, ["ontology", "get", "device"])
+      expect(ontology.exitCode).toBe(0)
+      expect(JSON.parse(ontology.stdout)).toMatchObject({
+        id: "device",
+        links: [expect.objectContaining({ id: "contract" })],
+      })
+
+      const objects = await runAgentCli(baseUrl.href, ["objects", "get", "device", "fan-1"])
+      expect(objects.exitCode).toBe(0)
+      expect(JSON.parse(objects.stdout)).toMatchObject({
+        objects: [expect.objectContaining({ objectTypeId: "device", primaryId: "fan-1" })],
+      })
+
+      const graph = await runAgentCli(baseUrl.href, [
+        "objects",
+        "inspect",
+        "device",
+        "fan-1",
+        "--depth",
+        "1",
+      ])
+      expect(graph.exitCode).toBe(0)
+      expect(JSON.parse(graph.stdout)).toMatchObject({
+        object: { objectTypeId: "device", primaryId: "fan-1" },
+        relatedObjects: expect.arrayContaining([
+          expect.objectContaining({ objectTypeId: "contract", primaryId: "contract-1" }),
+        ]),
+        links: [
+          expect.objectContaining({
+            sourceTypeId: "device",
+            sourceId: "fan-1",
+            linkId: "contract",
+            targetTypeId: "contract",
+            targetId: "contract-1",
+          }),
+        ],
+      })
+
+      const invalidQueryPath = join(directory, "invalid-query.json")
+      await writeFile(invalidQueryPath, JSON.stringify({ kind: "start" }))
+      const invalidQuery = await runAgentCli(baseUrl.href, [
+        "objects",
+        "query",
+        "--file",
+        invalidQueryPath,
+      ])
+      expect(invalidQuery.exitCode).toBe(3)
+      expect(JSON.parse(invalidQuery.stderr)).toMatchObject({
+        error: {
+          code: "http_error",
+          status: 400,
+          issues: [
+            expect.objectContaining({
+              code: expect.any(String),
+              message: expect.any(String),
+              path: expect.any(String),
+            }),
+          ],
+        },
+      })
+
+      const action = await runAgentCli(baseUrl.href, [
+        "actions",
+        "request",
+        "label-device",
+        "--subject-type",
+        "device",
+        "--subject-id",
+        "fan-1",
+      ])
+      expect(action.exitCode).toBe(0)
+      expect(JSON.parse(action.stdout)).toMatchObject({
+        created: true,
+        runId: expect.any(String),
+      })
+
+      const uploadPath = join(directory, "upload.txt")
+      await writeFile(uploadPath, "uploaded through the agent CLI")
+      const upload = await runAgentCli(baseUrl.href, ["files", "upload", uploadPath])
+      expect(upload.exitCode).toBe(0)
+      expect(JSON.parse(upload.stdout)).toMatchObject({
+        fileName: "upload.txt",
+        sizeBytes: 30,
+      })
+
+      const downloadPath = join(directory, "download.txt")
+      const download = await runAgentCli(baseUrl.href, [
+        "files",
+        "download",
+        "workflow-run",
+        "completed-workflow-run",
+        "--path",
+        "/output/document",
+        "--output",
+        downloadPath,
+      ])
+      expect(download.exitCode).toBe(0)
+      expect(JSON.parse(download.stdout)).toEqual({ downloaded: true, output: downloadPath })
+      expect(await readFile(downloadPath, "utf8")).toBe("workflow result")
+    } finally {
+      listener.stop(true)
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
 })
+
+async function runAgentCli(
+  baseUrl: string,
+  args: readonly string[]
+): Promise<{ readonly exitCode: number; readonly stdout: string; readonly stderr: string }> {
+  // This path-level dependency is intentional: it verifies the exact artifact copied into agent
+  // sandboxes without making @sixb/agent-worker a runtime dependency of @sixb/server.
+  const child = Bun.spawn([process.execPath, AGENT_CLI_ARTIFACT, ...args], {
+    env: { ...Bun.env, SIXB_API_BASE_URL: baseUrl },
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ])
+  return { exitCode, stdout, stderr }
+}
 
 async function createGatewayRuntime(
   options: {
