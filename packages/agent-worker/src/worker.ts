@@ -682,7 +682,6 @@ function buildAgentContext(
         : options.skillsDir,
   })
   agentSkills.catch(() => {})
-
   return {
     id: host.id,
     storage,

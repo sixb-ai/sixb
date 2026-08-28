@@ -1,8 +1,4 @@
 import type { AgentDefinition, AgentMessagePart, SchemaOrRef, ValueType } from "@sixb/core"
-import {
-  buildAgentSystemPrompt,
-  buildWorkflowOutputFinalizerPrompt,
-} from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { schemaRecordToJsonSchema } from "@sixb/core/internal/ontology"
 import {
@@ -13,6 +9,7 @@ import {
 } from "@sixb/core/internal/workflows"
 import { type AgentRunFinishReason, coerceAgentRunFinishReason } from "@sixb/core/storage"
 import { generateText, jsonSchema, type ModelMessage, NoObjectGeneratedError, Output } from "ai"
+import { renderWorkflowOutputFinalizerPrompt } from "./agent-prompt"
 import { type AiSdkTraceStep, agentTraceFromAiSdkSteps } from "./ai-sdk-adapters"
 import type { AiModelCallRecorder } from "./model-call-recorder"
 import { runAgentLoop } from "./run-agent-loop"
@@ -110,11 +107,7 @@ export async function runWorkflowAgentNode(
     let researchError: unknown
     const research = runAgentLoop({
       agent: input.agent,
-      system: buildAgentSystemPrompt({
-        instructions: input.agent.instructions,
-        addendum: input.context.systemAddendum,
-        mode: "workflow",
-      }),
+      system: input.context.systemPrompt,
       messages: [{ role: "user", content: input.prompt }],
       tools: input.context.tools,
       maxSteps,
@@ -168,7 +161,7 @@ export async function runWorkflowAgentNode(
           ...(input.agent.providerOptions === undefined
             ? {}
             : { providerOptions: input.agent.providerOptions }),
-          system: buildWorkflowOutputFinalizerPrompt({
+          system: renderWorkflowOutputFinalizerPrompt({
             instructions: input.agent.instructions,
           }),
           messages: finalizerMessages,

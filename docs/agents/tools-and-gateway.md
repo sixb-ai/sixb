@@ -235,7 +235,7 @@ data, not a snapshot. These routes are allowed (everything else returns `403`):
 | --- | --- |
 | Project | `GET /api/project` |
 | Object types | `GET /api/object-types`, `GET /api/object-types/:id` |
-| Objects | `GET /api/objects`, `POST /api/objects/query` (+ `/count`, `/exists`, `/facets`), `GET /api/objects/:objectTypeId/:objectId`, `GET .../:objectId/links` |
+| Objects | `GET /api/objects`, `POST /api/objects/query` (+ `/links`, `/count`, `/exists`, `/facets`), `GET /api/objects/:objectTypeId/:objectId` |
 | Telemetry | `POST /api/telemetry/history`, `GET .../telemetry/:propertyId/history`, `.../latest` |
 | Actions | `GET /api/actions`, `GET /api/actions/:actionId`, `POST /api/actions/:actionId`, `GET /api/action-runs`, `GET /api/action-runs/:runId` |
 | Workflows | `GET /api/workflows`, `GET /api/workflows/:workflowId`, `POST .../:workflowId/runs`, `GET /api/workflow-runs`, `GET /api/workflow-runs/:runId` |
@@ -255,11 +255,17 @@ infrastructure or administration routes remain outside the gateway.
 Workflow run detail includes the run's top-level output after success. Agent gateway responses omit
 the route's internal node records, and only top-level input/output file paths are available.
 
+## System prompts
+
+The agent worker owns one canonical system-prompt renderer with two modes: conversation and
+workflow task. It derives runtime guidance from the environment it provisions and appends the
+agent's project-authored `instructions`. Prompt composition is not worker configuration.
+
 ## Agent Skills in the sandbox
 
-Every run also gets Agent Skills under `$SIXB_SKILLS_DIR`. Sixb installs built-in API skills
-`sixb-query`, `sixb-telemetry`, `sixb-actions`, `sixb-files`, and `sixb-workflows`, then adds project
-skills from `skills/<name>/SKILL.md` when that folder exists.
+When a project defines Agent Skills under `skills/<name>/SKILL.md`, each run receives them under
+`$SIXB_SKILLS_DIR`. Sixb does not install a built-in skill; the `sixb` CLI is the authoritative,
+self-documenting interface for the framework.
 
 A project skill follows the Agent Skills folder format:
 

@@ -39,10 +39,6 @@
   "sixbBuild": {
     "assets": [
       {
-        "from": "./src/skills",
-        "to": "./dist/skills"
-      },
-      {
         "from": "./src/agent-cli/bin",
         "to": "./dist/agent-cli/bin"
       },

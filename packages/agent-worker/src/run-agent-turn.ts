@@ -1,10 +1,5 @@
 import type { AgentDefinition, AgentInboundUiMessagePart, AgentMessage, Storage } from "@sixb/core"
-import {
-  buildAgentSystemPrompt,
-  createAgentMessageId,
-  fromAiSdk,
-  toModelMessages,
-} from "@sixb/core/internal/agents"
+import { createAgentMessageId, fromAiSdk, toModelMessages } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { isAbortError, QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { AgentRunFinishReason, AgentRunRecord, AgentStorage } from "@sixb/core/storage"
@@ -137,10 +132,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
   const result = runAgentLoop({
     agent,
-    system: buildAgentSystemPrompt({
-      instructions: agent.instructions,
-      addendum: context.systemAddendum,
-    }),
+    system: context.systemPrompt,
     messages: modelMessages,
     tools,
     maxSteps,
