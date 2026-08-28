@@ -132,6 +132,13 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     agentApi: true,
   },
   {
+    operationId: "queryObjectLinks",
+    method: "POST",
+    path: "/api/objects/query/links",
+    accessToken: true,
+    agentApi: true,
+  },
+  {
     operationId: "countObjects",
     method: "POST",
     path: "/api/objects/query/count",
@@ -156,13 +163,6 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     operationId: "getObject",
     method: "GET",
     path: "/api/objects/:objectTypeId/:objectId",
-    accessToken: true,
-    agentApi: true,
-  },
-  {
-    operationId: "listObjectLinks",
-    method: "GET",
-    path: "/api/objects/:objectTypeId/:objectId/links",
     accessToken: true,
     agentApi: true,
   },

@@ -53,7 +53,7 @@ origins are shown as invitation destinations and participate in `can.access(appl
 | `GET` | `/api/objects` | List objects (`?objectTypeId=&idPrefix=&limit=&offset=&orderBy=&order=`) |
 | `GET` | `/api/objects/:objectTypeId/:objectKey` | Get object by key |
 | `PUT` | `/api/objects/:objectTypeId/:objectKey` | Create or update object |
-| `GET` | `/api/objects/:objectTypeId/:objectKey/links` | List object links (`?linkId=`) |
+| `POST` | `/api/objects/query/links` | Query physical links for a bounded object selector |
 | `PUT` | `/api/objects/:objectTypeId/:objectKey/links/:linkId` | Create or update link |
 | `DELETE` | `/api/objects/:objectTypeId/:objectKey/links/:linkId` | Remove link (`?targetTypeId=&targetKey=`) |
 | `POST` | `/api/objects/:objectTypeId/:objectKey/telemetry/:propertyId` | Append telemetry point |

@@ -273,20 +273,38 @@ export class SqliteObjectStorage implements ObjectStorage {
     projectId: string
     items: readonly { objectTypeId: string; objectId: string }[]
   }): Promise<readonly ObjectLinkRow[]> {
+    if (params.items.length === 0) return []
+
+    const rows = this.db
+      .query(
+        `
+          WITH requested AS (
+            SELECT
+              json_extract(value, '$.objectTypeId') AS object_type_id,
+              json_extract(value, '$.objectId') AS object_id
+            FROM json_each(?)
+          )
+          SELECT link.*
+          FROM links AS link
+          JOIN requested
+            ON requested.object_type_id = link.source_type_id
+           AND requested.object_id = link.source_id
+          WHERE link.project_id = ?
+          UNION
+          SELECT link.*
+          FROM links AS link
+          JOIN requested
+            ON requested.object_type_id = link.target_type_id
+           AND requested.object_id = link.target_id
+          WHERE link.project_id = ?
+        `
+      )
+      .all(JSON.stringify(params.items), params.projectId, params.projectId) as LinkDatabaseRow[]
+
     const deduped = new Map<string, ObjectLinkRow>()
-    for (const item of params.items) {
-      const rows = await this.listLinks({
-        projectId: params.projectId,
-        objectTypeId: item.objectTypeId,
-        objectId: item.objectId,
-        direction: "both",
-      })
-      for (const row of rows) {
-        deduped.set(
-          `${row.sourceTypeId}:${row.sourceId}:${row.linkId}:${row.targetTypeId}:${row.targetId}`,
-          row
-        )
-      }
+    for (const row of rows) {
+      const link = this.rowToLink(row)
+      deduped.set(linkIdentity(link), link)
     }
     return [...deduped.values()]
   }
@@ -458,6 +476,16 @@ function assertReconciliationPageLimit(limit: number): void {
   if (!Number.isSafeInteger(limit) || limit <= 0) {
     throw new Error("Object reconciliation page limit must be a positive safe integer.")
   }
+}
+
+function linkIdentity(link: ObjectLinkRow): string {
+  return JSON.stringify([
+    link.sourceTypeId,
+    link.sourceId,
+    link.linkId,
+    link.targetTypeId,
+    link.targetId,
+  ])
 }
 
 function readTotal(db: Database, compiled: CompiledObjectQuery): number {

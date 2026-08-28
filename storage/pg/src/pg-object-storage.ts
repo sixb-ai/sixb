@@ -338,10 +338,7 @@ export class PgObjectStorage implements ObjectStorage {
     const deduped = new Map<string, ObjectLinkRow>()
     for (const row of [...sourceRows, ...targetRows]) {
       const link = rowToLink(row)
-      deduped.set(
-        `${link.sourceTypeId}:${link.sourceId}:${link.linkId}:${link.targetTypeId}:${link.targetId}`,
-        link
-      )
+      deduped.set(linkIdentity(link), link)
     }
     return [...deduped.values()]
   }
@@ -600,6 +597,16 @@ function rowToLink(row: LinkDatabaseRow): ObjectLinkRow {
     updatedAt: new Date(row.updated_at),
     lastCommitId: row.last_commit_id,
   }
+}
+
+function linkIdentity(link: ObjectLinkRow): string {
+  return JSON.stringify([
+    link.sourceTypeId,
+    link.sourceId,
+    link.linkId,
+    link.targetTypeId,
+    link.targetId,
+  ])
 }
 
 interface ObjectDatabaseRow {

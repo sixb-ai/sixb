@@ -85,6 +85,49 @@ export function runEffectiveStorageContractSuite<TStorage extends Storage>(
       })
     })
 
+    test("preserves distinct incident links when opaque ids contain delimiters", async () => {
+      await withStorage(async (storage) => {
+        const opaqueIdsProjectId = `${projectId}-opaque-link-ids`
+        const firstSourceId = "opaque:source"
+        const firstTargetId = `target:peers:${Device.id}:opaque:end`
+        const secondSourceId = `${firstSourceId}:peers:${Device.id}:target`
+        const secondTargetId = "opaque:end"
+        const fixture = createMaterializerTestFixture({
+          projectId: opaqueIdsProjectId,
+          ontology,
+          storage,
+        })
+        await fixture.seed({
+          objects: [
+            device(firstSourceId, "First source"),
+            device(firstTargetId, "First target"),
+            device(secondSourceId, "Second source"),
+            device(secondTargetId, "Second target"),
+          ],
+          links: [peer(firstSourceId, firstTargetId), peer(secondSourceId, secondTargetId)],
+        })
+
+        const incident = await storage.objects.listIncidentLinksBatch({
+          projectId: opaqueIdsProjectId,
+          items: [
+            { objectTypeId: Device.id, objectId: firstSourceId },
+            { objectTypeId: Device.id, objectId: secondSourceId },
+          ],
+        })
+        const matching = incident.filter(
+          (row) => row.sourceId === firstSourceId || row.sourceId === secondSourceId
+        )
+
+        expect(matching.map((row) => [row.sourceId, row.linkId, row.targetId])).toEqual(
+          expect.arrayContaining([
+            [firstSourceId, "peers", firstTargetId],
+            [secondSourceId, "peers", secondTargetId],
+          ])
+        )
+        expect(matching).toHaveLength(2)
+      })
+    })
+
     test("pages Materializer-owned objects with a stable cursor", async () => {
       await withStorage(async (storage) => {
         const firstPage = await storage.objects.listByPrimaryIdPage({

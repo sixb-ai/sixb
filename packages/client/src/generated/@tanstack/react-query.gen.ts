@@ -84,7 +84,6 @@ import {
   listDatasetVersions,
   listEvents,
   listLogs,
-  listObjectLinks,
   listObjects,
   listObjectTypes,
   listPipelineRuns,
@@ -101,6 +100,7 @@ import {
   listWorkflows,
   type Options,
   postAgentThreadMessage,
+  queryObjectLinks,
   queryObjects,
   reactivateAuthMember,
   reauthorizeConnectorConnection,
@@ -346,9 +346,6 @@ import type {
   ListLogsData,
   ListLogsError,
   ListLogsResponse,
-  ListObjectLinksData,
-  ListObjectLinksError,
-  ListObjectLinksResponse,
   ListObjectsData,
   ListObjectsError,
   ListObjectsResponse,
@@ -388,6 +385,9 @@ import type {
   PostAgentThreadMessageData,
   PostAgentThreadMessageError,
   PostAgentThreadMessageResponse,
+  QueryObjectLinksData,
+  QueryObjectLinksError,
+  QueryObjectLinksResponse,
   QueryObjectsData,
   QueryObjectsError,
   QueryObjectsResponse,
@@ -2848,6 +2848,33 @@ export const queryObjectsMutation = (
 }
 
 /**
+ * Query object links
+ */
+export const queryObjectLinksMutation = (
+  options?: Partial<Options<QueryObjectLinksData>>
+): UseMutationOptions<
+  QueryObjectLinksResponse,
+  QueryObjectLinksError,
+  Options<QueryObjectLinksData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    QueryObjectLinksResponse,
+    QueryObjectLinksError,
+    Options<QueryObjectLinksData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await queryObjectLinks({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
  * Count objects
  */
 export const countObjectsMutation = (
@@ -3774,31 +3801,6 @@ export const getAgentRunOptions = (options: Options<GetAgentRunData>) =>
       return data
     },
     queryKey: getAgentRunQueryKey(options),
-  })
-
-export const listObjectLinksQueryKey = (options: Options<ListObjectLinksData>) =>
-  createQueryKey("listObjectLinks", options)
-
-/**
- * List object links
- */
-export const listObjectLinksOptions = (options: Options<ListObjectLinksData>) =>
-  queryOptions<
-    ListObjectLinksResponse,
-    ListObjectLinksError,
-    ListObjectLinksResponse,
-    ReturnType<typeof listObjectLinksQueryKey>
-  >({
-    queryFn: async ({ queryKey, signal }) => {
-      const { data } = await listObjectLinks({
-        ...options,
-        ...queryKey[0],
-        signal,
-        throwOnError: true,
-      })
-      return data
-    },
-    queryKey: listObjectLinksQueryKey(options),
   })
 
 /**

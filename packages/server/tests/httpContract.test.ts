@@ -1489,6 +1489,37 @@ describe("SixbServer HTTP contract", () => {
         issues: [{ path: "$.refs", code: "empty_refs" }],
       })
 
+      const queryLinksResponse = await fetch(`${baseUrl}/api/objects/query/links`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          query: {
+            kind: "refs",
+            refs: [
+              { objectTypeId: "space", primaryId: "system" },
+              { objectTypeId: "device", primaryId: "fan-1" },
+            ],
+          },
+          direction: "both",
+          includeObjects: true,
+        }),
+      })
+      expect(queryLinksResponse.status).toBe(200)
+      expect(await queryLinksResponse.json()).toMatchObject({
+        objects: [
+          { objectTypeId: "device", primaryId: "fan-1" },
+          { objectTypeId: "space", primaryId: "system" },
+        ],
+        links: [
+          {
+            source: { objectTypeId: "space", primaryId: "system" },
+            linkId: "contains",
+            target: { objectTypeId: "device", primaryId: "fan-1" },
+          },
+        ],
+        hasMore: false,
+      })
+
       const queryObjectsWithoutTotalResponse = await fetch(`${baseUrl}/api/objects/query`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -1630,6 +1661,22 @@ describe("SixbServer HTTP contract", () => {
         ],
       })
 
+      const invalidLinkPageTokenResponse = await fetch(`${baseUrl}/api/objects/query/links`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          query: {
+            kind: "refs",
+            refs: [{ objectTypeId: "device", primaryId: "fan-1" }],
+          },
+          pageToken: "not-a-link-token",
+        }),
+      })
+      expect(invalidLinkPageTokenResponse.status).toBe(400)
+      expect(await invalidLinkPageTokenResponse.json()).toMatchObject({
+        issues: [{ path: "$.pageToken", code: "invalid_link_page_token" }],
+      })
+
       const objectResponse = await fetch(`${baseUrl}/api/objects/device/fan-1`)
       expect(objectResponse.status).toBe(200)
       const objectBody = (await objectResponse.json()) as {
@@ -1639,36 +1686,8 @@ describe("SixbServer HTTP contract", () => {
       expect(objectBody.primaryId).toBe("fan-1")
       expect(objectBody.properties.rpm).toBe(1200)
 
-      const linksResponse = await fetch(`${baseUrl}/api/objects/space/system/links`)
-      expect(linksResponse.status).toBe(200)
-      const links = (await linksResponse.json()) as Array<{
-        sourceTypeId: string
-        sourceId: string
-        linkId: string
-        targetTypeId: string
-        targetId: string
-      }>
-      expect(links).toEqual([
-        expect.objectContaining({
-          sourceTypeId: "space",
-          sourceId: "system",
-          linkId: "contains",
-          targetTypeId: "device",
-          targetId: "fan-1",
-        }),
-      ])
-
-      const incomingLinksResponse = await fetch(
-        `${baseUrl}/api/objects/device/fan-1/links?direction=incoming`
-      )
-      expect(incomingLinksResponse.status).toBe(200)
-      const incomingLinks = (await incomingLinksResponse.json()) as Array<{ sourceId: string }>
-      expect(incomingLinks.map((link) => link.sourceId)).toEqual(["system"])
-
-      const invalidDirectionResponse = await fetch(
-        `${baseUrl}/api/objects/device/fan-1/links?direction=sideways`
-      )
-      expect(invalidDirectionResponse.status).toBe(422)
+      const removedLinkReadResponse = await fetch(`${baseUrl}/api/objects/device/fan-1/links`)
+      expect(removedLinkReadResponse.status).toBe(404)
 
       const historyResponse = await fetch(
         `${baseUrl}/api/objects/device/fan-1/telemetry/rpm/history?limit=2&order=desc`
@@ -2531,9 +2550,22 @@ describe("SixbServer HTTP contract", () => {
       expect(latestTelemetryResponse.status).toBe(200)
       expect(await latestTelemetryResponse.json()).toMatchObject({ value: 900 })
 
-      const linksResponse = await fetch(`${baseUrl}/api/objects/space/system/links?linkId=contains`)
-      const links = (await linksResponse.json()) as Array<{ targetId: string }>
-      expect(links.some((linkRow) => linkRow.targetId === "fan-2")).toBe(true)
+      const linksResponse = await fetch(`${baseUrl}/api/objects/query/links`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          query: {
+            kind: "refs",
+            refs: [{ objectTypeId: "space", primaryId: "system" }],
+          },
+          direction: "outgoing",
+          linkId: "contains",
+        }),
+      })
+      const links = (await linksResponse.json()) as {
+        links: Array<{ target: { primaryId: string } }>
+      }
+      expect(links.links.some((linkRow) => linkRow.target.primaryId === "fan-2")).toBe(true)
 
       const actionEvents = await events.read({
         topics: ["actions"],

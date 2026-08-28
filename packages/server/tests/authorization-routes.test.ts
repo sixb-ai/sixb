@@ -536,6 +536,57 @@ describe("authorized object routes", () => {
       })
     )
     expect(deniedRefs.status).toBe(403)
+
+    const filteredLinks = await app.fetch(
+      new Request("http://localhost/api/objects/query/links", {
+        method: "POST",
+        headers: session.csrfHeaders,
+        body: JSON.stringify({
+          query: {
+            kind: "refs",
+            refs: [{ objectTypeId: "contract", primaryId: "c1" }],
+          },
+          direction: "outgoing",
+          includeObjects: true,
+        }),
+      })
+    )
+    expect(filteredLinks.status).toBe(200)
+    expect(await filteredLinks.json()).toMatchObject({
+      objects: [{ objectTypeId: "contract", primaryId: "c1" }],
+      links: [],
+      hasMore: false,
+    })
+
+    const writer = await seedSession(storage, ["writers"], "usr_writer_links")
+    const visibleLinks = await app.fetch(
+      new Request("http://localhost/api/objects/query/links", {
+        method: "POST",
+        headers: writer.csrfHeaders,
+        body: JSON.stringify({
+          query: {
+            kind: "refs",
+            refs: [{ objectTypeId: "contract", primaryId: "c1" }],
+          },
+          direction: "outgoing",
+          includeObjects: true,
+        }),
+      })
+    )
+    expect(visibleLinks.status).toBe(200)
+    expect(await visibleLinks.json()).toMatchObject({
+      objects: [
+        { objectTypeId: "contract", primaryId: "c1" },
+        { objectTypeId: "invoice", primaryId: "i1" },
+      ],
+      links: [
+        {
+          source: { objectTypeId: "contract", primaryId: "c1" },
+          linkId: "invoice",
+          target: { objectTypeId: "invoice", primaryId: "i1" },
+        },
+      ],
+    })
   })
 
   test("disabled auth keeps object routes privileged", async () => {
@@ -838,37 +889,6 @@ describe("authorized object routes", () => {
 })
 
 describe("authorized adjacent read routes", () => {
-  test("link reads inherit source and target object visibility", async () => {
-    const { app, storage } = await createApp()
-    const operator = await seedSession(storage, ["commercial"], "usr_op")
-    const runner = await seedSession(storage, ["operations"], "usr_run")
-    const admin = await seedSession(storage, ["admins"], "usr_admin")
-
-    const operatorLinks = await app.fetch(
-      new Request("http://localhost/api/objects/contract/c1/links", {
-        headers: operator.headers,
-      })
-    )
-    expect(operatorLinks.status).toBe(200)
-    expect(await operatorLinks.json()).toEqual([])
-
-    const hiddenSource = await app.fetch(
-      new Request("http://localhost/api/objects/contract/c1/links", {
-        headers: runner.headers,
-      })
-    )
-    expect(hiddenSource.status).toBe(404)
-
-    const adminLinks = await app.fetch(
-      new Request("http://localhost/api/objects/contract/c1/links", {
-        headers: admin.headers,
-      })
-    )
-    expect(
-      ((await adminLinks.json()) as { targetTypeId: string }[]).map((link) => link.targetTypeId)
-    ).toEqual(["invoice"])
-  })
-
   test("telemetry reads inherit object visibility", async () => {
     const { app, storage } = await createApp()
     const operator = await seedSession(storage, ["commercial"], "usr_op")

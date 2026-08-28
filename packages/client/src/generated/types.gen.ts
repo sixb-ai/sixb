@@ -76,6 +76,30 @@ export type ObjectQueryFacetsResponse = {
   plan: ObjectQueryPlanSummary
 }
 
+export type ObjectQueryLink = {
+  source: ObjectRef
+  linkId: string
+  target: ObjectRef
+  properties?: {
+    [key: string]: unknown
+  }
+  createdAt: string
+  updatedAt: string
+}
+
+export type ObjectQueryLinksResponse = {
+  /**
+   * Selected objects followed by visible endpoint objects from this link page, de-duplicated. Empty unless includeObjects is true.
+   */
+  objects: Array<ObjectQueryObject>
+  /**
+   * Visible physical links in deterministic identity order.
+   */
+  links: Array<ObjectQueryLink>
+  hasMore: boolean
+  nextPageToken?: string
+}
+
 export type ObjectQueryErrorResponse = {
   error: string
   issues?: Array<ObjectQueryIssue>
@@ -102,6 +126,21 @@ export type ObjectQueryFacetRequest = {
 export type ObjectQueryFacetsRequest = {
   query: ObjectQuery
   facets: Array<ObjectQueryFacetRequest>
+}
+
+export type ObjectQueryLinksRequest = {
+  query: ObjectQuery
+  direction?: "outgoing" | "incoming" | "both"
+  linkId?: string
+  /**
+   * Include selected objects and visible endpoints from the current link page.
+   */
+  includeObjects?: boolean
+  pageSize?: number
+  /**
+   * Opaque token from the previous page. The project, normalized query, direction, and linkId must remain unchanged.
+   */
+  pageToken?: string
 }
 
 export type ObjectRef = {
@@ -6791,6 +6830,39 @@ export type QueryObjectsResponses = {
 
 export type QueryObjectsResponse = QueryObjectsResponses[keyof QueryObjectsResponses]
 
+export type QueryObjectLinksData = {
+  body: ObjectQueryLinksRequest
+  path?: never
+  query?: never
+  url: "/api/objects/query/links"
+}
+
+export type QueryObjectLinksErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ObjectQueryErrorResponse
+  /**
+   * Response for status 403
+   */
+  403: ErrorResponse
+  /**
+   * Response for status 500
+   */
+  500: ErrorResponse
+}
+
+export type QueryObjectLinksError = QueryObjectLinksErrors[keyof QueryObjectLinksErrors]
+
+export type QueryObjectLinksResponses = {
+  /**
+   * Response for status 200
+   */
+  200: ObjectQueryLinksResponse
+}
+
+export type QueryObjectLinksResponse = QueryObjectLinksResponses[keyof QueryObjectLinksResponses]
+
 export type CountObjectsData = {
   body: ObjectQueryCountRequest
   path?: never
@@ -9156,57 +9228,6 @@ export type GetAgentRunResponses = {
 }
 
 export type GetAgentRunResponse = GetAgentRunResponses[keyof GetAgentRunResponses]
-
-export type ListObjectLinksData = {
-  body?: never
-  path: {
-    objectTypeId: string
-    objectId: string
-  }
-  query?: {
-    linkId?: string
-    direction?: "outgoing" | "incoming" | "both"
-  }
-  url: "/api/objects/{objectTypeId}/{objectId}/links"
-}
-
-export type ListObjectLinksErrors = {
-  /**
-   * Response for status 400
-   */
-  400: {
-    error: string
-  }
-  /**
-   * Response for status 404
-   */
-  404: {
-    error: string
-  }
-}
-
-export type ListObjectLinksError = ListObjectLinksErrors[keyof ListObjectLinksErrors]
-
-export type ListObjectLinksResponses = {
-  /**
-   * Response for status 200
-   */
-  200: Array<{
-    projectId: string
-    sourceTypeId: string
-    sourceId: string
-    linkId: string
-    targetTypeId: string
-    targetId: string
-    properties?: {
-      [key: string]: unknown
-    }
-    createdAt: string
-    updatedAt: string
-  }>
-}
-
-export type ListObjectLinksResponse = ListObjectLinksResponses[keyof ListObjectLinksResponses]
 
 export type RemoveObjectLinkData = {
   body?: never

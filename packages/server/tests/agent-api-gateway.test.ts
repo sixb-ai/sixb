@@ -145,16 +145,34 @@ describe("agent API gateway", () => {
     const fileRef = await upload.json()
     expect(fileRef).toMatchObject({ fileName: "generated.bin", sizeBytes: 1_000_001 })
 
-    const links = await app.fetch(new Request(`${gatewayBaseUrl}/api/objects/device/fan-1/links`))
-    expect(links.status).toBe(200)
-    await expect(links.json()).resolves.toEqual([
-      expect.objectContaining({
-        linkId: "contract",
-        targetTypeId: "contract",
-        targetId: "contract-1",
-        properties: { relationship: "managed" },
-      }),
-    ])
+    const queriedLinks = await app.fetch(
+      new Request(`${gatewayBaseUrl}/api/objects/query/links`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          query: {
+            kind: "refs",
+            refs: [{ objectTypeId: "device", primaryId: "fan-1" }],
+          },
+          direction: "outgoing",
+          includeObjects: true,
+        }),
+      })
+    )
+    expect(queriedLinks.status).toBe(200)
+    await expect(queriedLinks.json()).resolves.toMatchObject({
+      objects: [
+        { objectTypeId: "device", primaryId: "fan-1" },
+        { objectTypeId: "contract", primaryId: "contract-1" },
+      ],
+      links: [
+        {
+          source: { objectTypeId: "device", primaryId: "fan-1" },
+          linkId: "contract",
+          target: { objectTypeId: "contract", primaryId: "contract-1" },
+        },
+      ],
+    })
 
     const action = await app.fetch(
       new Request(`${gatewayBaseUrl}/api/actions/label-device`, {

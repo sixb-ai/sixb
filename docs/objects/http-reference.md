@@ -16,6 +16,7 @@ registered ontology.
 | Route | Body | Returns |
 | --- | --- | --- |
 | `POST /api/objects/query` | `{ query, includeTotal? }` | `{ objects, hasMore, nextPageToken?, total?, plan }` |
+| `POST /api/objects/query/links` | `{ query, direction?, linkId?, includeObjects?, pageSize?, pageToken? }` | `{ objects, links, hasMore, nextPageToken? }` |
 | `POST /api/objects/query/count` | `{ query }` | `{ count, plan }` |
 | `POST /api/objects/query/exists` | `{ query }` | `{ exists, plan }` |
 | `POST /api/objects/query/facets` | `{ query, facets }` | `{ facets, plan }` |
@@ -26,6 +27,9 @@ count when it is not needed, because counting can be more expensive than fetchin
 Every response carries a diagnostic `plan` object for debugging. Application code ignores it and
 reads the result fields above. Validation and planning failures return HTTP 400 with a structured
 `issues` array (the client surfaces these as `SixbQueryError`).
+
+The links terminal has its own edge-page contract and therefore does not return an object-query
+plan.
 
 
 ## Raw Query JSON
@@ -104,6 +108,61 @@ PostgreSQL, and the in-memory provider execute it natively, so it composes with 
 filtering, projection, expansion, and pagination. Providers without native support use the storage
 batch identity primitive for the bounded core fallback.
 
+
+## Querying Physical Links
+
+`POST /api/objects/query/links` evaluates any bounded object query as a selector, then returns the
+physical links incident to that selected set. `direction` is relative to the selected objects and
+defaults to `both`; use `linkId` to restrict the returned edges. Set `includeObjects: true` to also
+return the selected objects and the visible endpoints of the current edge page, de-duplicated.
+Because this terminal returns its own canonical object and edge shapes, `project` and `expand`
+nodes are validated but do not shape its response.
+
+```json
+{
+  "query": {
+    "kind": "refs",
+    "refs": [{ "objectTypeId": "Customer", "primaryId": "cust-7" }]
+  },
+  "direction": "both",
+  "includeObjects": true,
+  "pageSize": 100
+}
+```
+
+```json
+{
+  "objects": [
+    {
+      "primaryId": "cust-7",
+      "objectTypeId": "Customer",
+      "properties": { "id": "cust-7", "name": "Globex" },
+      "createdAt": "2026-01-02T00:00:00.000Z",
+      "updatedAt": "2026-01-02T00:00:00.000Z"
+    }
+  ],
+  "links": [
+    {
+      "source": { "objectTypeId": "Invoice", "primaryId": "inv-1042" },
+      "linkId": "customer",
+      "target": { "objectTypeId": "Customer", "primaryId": "cust-7" },
+      "properties": {},
+      "createdAt": "2026-05-01T09:00:00.000Z",
+      "updatedAt": "2026-05-01T09:00:00.000Z"
+    }
+  ],
+  "hasMore": false
+}
+```
+
+The selector is capped at 1,000 objects. Edge pages default to 100 and accept at most 1,000;
+return `nextPageToken` as `pageToken` with the same selector, direction, and link filter. A caller
+must be able to view every type touched by the selector. Links to an endpoint type the caller cannot
+view are omitted, matching the singular link-read authorization behavior.
+
+Link page tokens are scoped to the project, normalized selector, direction, and link filter. A token
+cannot be reused with a different link query; `includeObjects` and `pageSize` may change between
+pages because neither changes which edges belong to the result set.
 
 ## Count, Exists, And Facets
 
@@ -315,7 +374,8 @@ property filters, text search, sorting, limits, cursor pages, link traversal, se
 projection.
 
 Exact `refs` sources are pushed down by the bundled providers and fall back to core's bounded batch
-primitive on providers without native support.
+primitive on providers without native support. Object-set link reads continue to use the portable
+bounded link batch primitives.
 
 Vector search and relevance sorting require explicit storage-provider support. When a provider
 can't execute a requested feature, Sixb returns a structured planning error rather than a partial
