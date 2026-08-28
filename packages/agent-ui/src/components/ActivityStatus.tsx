@@ -17,14 +17,6 @@ const THINKING_STATUS_STEPS: readonly ActivityStatusStep[] = [
   { afterMs: 55_000, label: "Still working" },
 ]
 
-const WORKING_STATUS_STEPS: readonly ActivityStatusStep[] = [
-  { afterMs: 0, label: "Working" },
-  { afterMs: 8_000, label: "Working through it" },
-  { afterMs: 20_000, label: "Taking a closer look" },
-  { afterMs: 35_000, label: "Checking the details" },
-  { afterMs: 55_000, label: "Still working" },
-]
-
 const CONTINUING_STATUS_DELAY_MS = 12_000
 
 /**
@@ -40,59 +32,41 @@ export function activityStatusAt(label: string, elapsedMs: number): string {
   return label
 }
 
-/** Animated status text whose widest phrase reserves the row width, so copy changes never jump. */
+/** Render the current status as one visible phrase so adjacent controls stay attached to it. */
 export function ActivityStatusText({
   label,
-  active = true,
   className,
 }: {
   readonly label: string
-  readonly active?: boolean
   readonly className?: string
 }) {
   const steps = useMemo(() => activityStatusSteps(label), [label])
-  const [phase, setPhase] = useState({ label, index: 0 })
-  // A real activity change can shorten the timeline. Select its first phrase during render rather
-  // than waiting for the effect, otherwise the old index can produce one blank or stale frame.
-  const activeIndex = active && phase.label === label ? phase.index : 0
+  const [elapsed, setElapsed] = useState({ label, elapsedMs: 0 })
+  // A real activity change resets immediately during render, before the effect replaces timers.
+  const elapsedMs = elapsed.label === label ? elapsed.elapsedMs : 0
+  const currentLabel = activityStatusAt(label, elapsedMs)
 
   useEffect(() => {
-    setPhase((current) =>
-      current.label === label && current.index === 0 ? current : { label, index: 0 }
+    setElapsed((current) =>
+      current.label === label && current.elapsedMs === 0 ? current : { label, elapsedMs: 0 }
     )
-    if (!active || steps.length < 2) return
+    if (steps.length < 2) return
 
     const timers = steps
       .slice(1)
-      .map((step, index) =>
-        window.setTimeout(() => setPhase({ label, index: index + 1 }), step.afterMs)
+      .map((step) =>
+        window.setTimeout(() => setElapsed({ label, elapsedMs: step.afterMs }), step.afterMs)
       )
     return () => {
       for (const timer of timers) window.clearTimeout(timer)
     }
-  }, [active, steps, label])
+  }, [steps, label])
 
-  return (
-    <span className={cn("inline-grid min-w-0 max-w-full", className)}>
-      {steps.map((step, index) => (
-        <span
-          key={`${step.afterMs}:${step.label}`}
-          aria-hidden={index !== activeIndex}
-          className={cn(
-            "col-start-1 row-start-1 min-w-0 truncate transition-opacity duration-300 motion-reduce:transition-none",
-            index === activeIndex ? "opacity-100" : "pointer-events-none opacity-0"
-          )}
-        >
-          {step.label}…
-        </span>
-      ))}
-    </span>
-  )
+  return <span className={cn("min-w-0 truncate text-left", className)}>{currentLabel}…</span>
 }
 
 function activityStatusSteps(label: string): readonly ActivityStatusStep[] {
   if (label === "Thinking") return THINKING_STATUS_STEPS
-  if (label === "Working") return WORKING_STATUS_STEPS
   return [
     { afterMs: 0, label },
     { afterMs: CONTINUING_STATUS_DELAY_MS, label: `Still ${lowercaseFirst(label)}` },

@@ -2,11 +2,11 @@ import { describe, expect, test } from "bun:test"
 import { createLiveRunState, type LiveRunState } from "../src/liveRun"
 import {
   type ActiveTurnSources,
-  DELAYED_WAITING_COPY_MS,
+  EXTENDED_WAITING_STATUS_MS,
   findPreStreamFailedRun,
   presentActiveTurn,
   selectActiveRunId,
-  shouldShowDelayedWaitingCopy,
+  shouldShowExtendedWaitingStatus,
 } from "../src/runPresentation"
 import type { AgentMessage, AgentRun } from "../src/types"
 
@@ -43,18 +43,20 @@ function assistantMessage(runId: string): AgentMessage {
 }
 
 describe("agent run presentation", () => {
-  test("delays extra waiting copy for queued runs only", () => {
+  test("delays the extended waiting status for queued runs only", () => {
     const queued = run({ id: "queued", status: "queued" })
     const createdAt = Date.parse(queued.createdAt)
 
-    expect(shouldShowDelayedWaitingCopy(queued, createdAt + DELAYED_WAITING_COPY_MS - 1)).toBe(
-      false
-    )
-    expect(shouldShowDelayedWaitingCopy(queued, createdAt + DELAYED_WAITING_COPY_MS)).toBe(true)
     expect(
-      shouldShowDelayedWaitingCopy(
+      shouldShowExtendedWaitingStatus(queued, createdAt + EXTENDED_WAITING_STATUS_MS - 1)
+    ).toBe(false)
+    expect(shouldShowExtendedWaitingStatus(queued, createdAt + EXTENDED_WAITING_STATUS_MS)).toBe(
+      true
+    )
+    expect(
+      shouldShowExtendedWaitingStatus(
         run({ id: "running", status: "running" }),
-        createdAt + DELAYED_WAITING_COPY_MS
+        createdAt + EXTENDED_WAITING_STATUS_MS
       )
     ).toBe(false)
   })
@@ -105,7 +107,7 @@ function liveState(overrides: Partial<LiveRunState>): LiveRunState {
 }
 
 describe("presentActiveTurn", () => {
-  test("a queued run responds with the queued run for the delayed copy", () => {
+  test("a queued run responds with the run needed for the extended waiting status", () => {
     const queued = run({ id: "r1", status: "queued" })
     const presentation = presentActiveTurn(
       sources({ activeRunId: "r1", pendingRun: queued, runs: [queued] })

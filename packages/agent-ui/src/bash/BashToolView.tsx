@@ -196,7 +196,7 @@ function BashResult({
     ) : null
   }
 
-  if (intent.kind === "generic") {
+  if (intent.kind === "generic" || intent.kind === "compound") {
     return <GenericCommandView parsed={parsed} command={command} />
   }
   if (intent.kind === "read-skill") return <StructuredDataView parsed={parsed} />

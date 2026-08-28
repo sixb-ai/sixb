@@ -17,11 +17,11 @@ import {
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
 import {
-  DELAYED_WAITING_COPY_MS,
+  EXTENDED_WAITING_STATUS_MS,
   isActiveAgentRunStatus,
   presentActiveTurn,
   selectActiveRunId,
-  shouldShowDelayedWaitingCopy,
+  shouldShowExtendedWaitingStatus,
 } from "../runPresentation"
 import { THREAD_PAGE_SIZE } from "../threadNavigation"
 import type { AgentContextEntryInput, AgentFileRef, AgentRun } from "../types"
@@ -206,7 +206,7 @@ export function useAgentConversation({
     messagesLoading: messagesQuery.isFetching,
   })
   const isRunning = presentation.kind === "responding"
-  const waitingLonger = useDelayedWaitingCopy(
+  const waitingLonger = useExtendedWaitingStatus(
     presentation.kind === "responding" ? presentation.queuedRun : null
   )
 
@@ -395,15 +395,15 @@ function deriveTitle(text: string): string {
   return firstLine.length <= 60 ? firstLine : `${firstLine.slice(0, 57)}...`
 }
 
-function useDelayedWaitingCopy(run: Pick<AgentRun, "status" | "createdAt"> | null): boolean {
-  const [visible, setVisible] = useState(() => shouldShowDelayedWaitingCopy(run))
+function useExtendedWaitingStatus(run: Pick<AgentRun, "status" | "createdAt"> | null): boolean {
+  const [visible, setVisible] = useState(() => shouldShowExtendedWaitingStatus(run))
 
   useEffect(() => {
     if (!run || run.status !== "queued") {
       setVisible(false)
       return
     }
-    const remaining = DELAYED_WAITING_COPY_MS - (Date.now() - Date.parse(run.createdAt))
+    const remaining = EXTENDED_WAITING_STATUS_MS - (Date.now() - Date.parse(run.createdAt))
     if (remaining <= 0) {
       setVisible(true)
       return
