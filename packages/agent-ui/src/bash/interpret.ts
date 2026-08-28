@@ -2,21 +2,13 @@
 // stable CLI command tree, so the UI only needs to tokenize one command and identify its group and
 // operation. Plain shell commands and the initial skill read keep neutral fallbacks.
 
+import { commandInvocation, executableName, lexShellCommand, type ShellSegment } from "./shell"
+
 /** The bash tool input as authored by the agent. */
 export interface BashInput {
   readonly command: string
   readonly cwd?: string
   readonly timeoutMs?: number
-}
-
-/** The bash tool output envelope returned by the sandbox (see agent-worker `BashToolOutput`). */
-export interface BashOutput {
-  readonly exitCode: number
-  readonly stdout: string
-  readonly stderr: string
-  readonly durationMs: number
-  readonly stdoutTruncated: boolean
-  readonly stderrTruncated: boolean
 }
 
 const CLI_COMMANDS = {
@@ -37,7 +29,7 @@ type CliCommandName = {
   [Group in CliGroup]: `${Group}.${(typeof CLI_COMMANDS)[Group][number]}`
 }[CliGroup]
 
-export type SixbCommandName =
+type SixbCommandName =
   | "help"
   | "version"
   | "doctor"
@@ -46,8 +38,7 @@ export type SixbCommandName =
   | CliCommandName
   | "unknown"
 
-/** What the agent was trying to do, derived from the command string. */
-export type BashIntent =
+type AtomicBashIntent =
   | {
       readonly kind: "sixb"
       readonly command: SixbCommandName
@@ -56,6 +47,16 @@ export type BashIntent =
     }
   | { readonly kind: "read-skill"; readonly skillName?: string; readonly reference?: string }
   | { readonly kind: "generic"; readonly command: string }
+
+/** What the agent was trying to do, derived from the command string. */
+export type BashIntent =
+  | AtomicBashIntent
+  | {
+      readonly kind: "compound"
+      /** The most meaningful segment, used only to present this work in product language. */
+      readonly primary: AtomicBashIntent
+      readonly stepCount: number
+    }
 
 /** Parsed bash output, with stdout JSON-decoded when it looks like JSON. */
 export interface ParsedBashOutput {
@@ -99,23 +100,82 @@ export function coerceBashOutput(output: unknown): ParsedBashOutput | null {
 // --- Command classification ------------------------------------------------
 
 export function classifyCommand(command: string): BashIntent {
-  const sixb = classifySixbCommand(command)
-  if (sixb) return sixb
-  const skill = classifySkillRead(command)
-  if (skill) return skill
-  return { kind: "generic", command: command.trim() }
+  const segments = lexShellCommand(command)
+  if (!segments) return { kind: "generic", command: command.trim() }
+  if (segments.length > 1) {
+    return {
+      kind: "compound",
+      primary: selectCompoundPrimary(segments),
+      stepCount: segments.length,
+    }
+  }
+  return classifyAtomicCommand(segments[0])
 }
 
-function classifySixbCommand(command: string): Extract<BashIntent, { kind: "sixb" }> | null {
-  const tokens = tokenizeShellCommand(command)
-  if (!tokens || executableName(tokens[0]) !== "sixb") return null
+function classifyAtomicCommand(segment: ShellSegment | undefined): AtomicBashIntent {
+  if (!segment) return { kind: "generic", command: "" }
+  const invocation = commandInvocation(segment.tokens)
+  const sixb = classifySixbCommand(invocation)
+  if (sixb) return sixb
+  const skill = classifySkillRead(segment, invocation)
+  if (skill) return skill
+  return { kind: "generic", command: segment.command }
+}
+
+function selectCompoundPrimary(segments: readonly ShellSegment[]): AtomicBashIntent {
+  const fallbackIndex = segments.findIndex((segment) => segment.operatorBefore === "||")
+  const primaryBranch = fallbackIndex === -1 ? segments : segments.slice(0, fallbackIndex)
+  const intents = primaryBranch.map((segment) => classifyAtomicCommand(segment))
+  let selected = intents[0] ?? classifyAtomicCommand(segments[0])
+  let selectedPriority = compoundIntentPriority(selected)
+
+  for (const intent of intents.slice(1)) {
+    const priority = compoundIntentPriority(intent)
+    // Prefer the final operation when two segments are equally meaningful.
+    if (priority >= selectedPriority) {
+      selected = intent
+      selectedPriority = priority
+    }
+  }
+  return selected
+}
+
+function compoundIntentPriority(intent: AtomicBashIntent): number {
+  if (intent.kind === "sixb" || intent.kind === "read-skill") return 3
+  const category = genericCommandCategory(intent.command)
+  if (category.kind === "unknown") return isShellPlumbing(intent.command) ? -1 : 0
+  if (
+    category.kind === "inspect-files" ||
+    category.kind === "workspace-location" ||
+    category.kind === "read-file"
+  ) {
+    return 1
+  }
+  return 2
+}
+
+function isShellPlumbing(command: string): boolean {
+  const executable = directCommandExecutable(command)
+  return Boolean(
+    executable &&
+      ["cd", "export", "set", "unset", "source", ".", "env", "jq", "true", "false"].includes(
+        executable
+      )
+  )
+}
+
+function classifySixbCommand(
+  tokens: readonly string[]
+): Extract<BashIntent, { kind: "sixb" }> | null {
+  if (executableName(tokens[0]) !== "sixb") return null
 
   const cliArgs = tokens.slice(1)
-  const helpIndex = cliArgs.findIndex(
-    (token) => token === "--help" || token === "-h" || token === "help"
-  )
-  if (helpIndex !== -1 || cliArgs.length === 0) {
-    return { kind: "sixb", command: "help", args: cliArgs.filter((_, i) => i !== helpIndex) }
+  if (cliArgs.length === 0 || isHelpToken(cliArgs[0])) {
+    return { kind: "sixb", command: "help", args: [] }
+  }
+  if (isHelpToken(cliArgs[1])) return { kind: "sixb", command: "help", args: [cliArgs[0]] }
+  if (isHelpToken(cliArgs[2])) {
+    return { kind: "sixb", command: "help", args: cliArgs.slice(0, 2) }
   }
   if (cliArgs[0] === "version" || cliArgs[0] === "--version") {
     return { kind: "sixb", command: "version", args: cliArgs.slice(1) }
@@ -137,6 +197,10 @@ function classifySixbCommand(command: string): Extract<BashIntent, { kind: "sixb
   return { kind: "sixb", command: `${group}.${operation}` as CliCommandName, args }
 }
 
+function isHelpToken(value: string | undefined): boolean {
+  return value === "--help" || value === "-h" || value === "help"
+}
+
 function isCliGroup(value: string): value is CliGroup {
   return Object.hasOwn(CLI_COMMANDS, value)
 }
@@ -148,62 +212,14 @@ function isCliOperation<Group extends CliGroup>(
   return (CLI_COMMANDS[group] as readonly string[]).includes(value)
 }
 
-/**
- * Tokenize the small shell subset needed for a direct CLI invocation. Compound shell expressions
- * intentionally fall back to the generic command view; guessing which command owns a pipeline or
- * redirection would make the transcript misleading.
- */
-function tokenizeShellCommand(command: string): string[] | null {
-  const tokens: string[] = []
-  let token = ""
-  let quote: "'" | '"' | null = null
-  let escaped = false
+const SKILL_READ_COMMANDS = new Set(["cat", "less", "bat", "head", "tail", "sed", "nl"])
 
-  const push = () => {
-    if (token) tokens.push(token)
-    token = ""
-  }
-
-  for (const character of command.trim()) {
-    if (escaped) {
-      token += character
-      escaped = false
-      continue
-    }
-    if (character === "\\" && quote !== "'") {
-      escaped = true
-      continue
-    }
-    if (quote) {
-      if (character === quote) quote = null
-      else token += character
-      continue
-    }
-    if (character === "'" || character === '"') {
-      quote = character
-      continue
-    }
-    if (/\s/.test(character)) {
-      push()
-      continue
-    }
-    if ("|;&<>()`".includes(character)) return null
-    token += character
-  }
-
-  if (quote || escaped) return null
-  push()
-  return tokens
-}
-
-function executableName(value: string | undefined): string | undefined {
-  return value?.split("/").at(-1)
-}
-
-const SKILL_READ_RE = /\b(?:cat|less|bat|head|tail|sed|nl)\b/
-
-function classifySkillRead(command: string): BashIntent | null {
-  const looksLikeRead = SKILL_READ_RE.test(command)
+function classifySkillRead(
+  segment: ShellSegment,
+  invocation: readonly string[]
+): Extract<AtomicBashIntent, { kind: "read-skill" }> | null {
+  const looksLikeRead = SKILL_READ_COMMANDS.has(executableName(invocation[0]) ?? "")
+  const command = segment.command
   const touchesSkill =
     command.includes("SKILL.md") ||
     command.includes("/skills/") ||
@@ -230,7 +246,7 @@ export type BashIcon =
   | "skill"
   | "terminal"
 
-export interface BashDescription {
+interface BashDescription {
   readonly icon: BashIcon
   /** Past-tense headline once the command has run, e.g. "Explored the ontology". */
   readonly title: string
@@ -241,6 +257,12 @@ export interface BashDescription {
 }
 
 export function describeBash(intent: BashIntent, parsed: ParsedBashOutput | null): BashDescription {
+  if (intent.kind === "compound") {
+    const primary = describeBash(intent.primary, parsed)
+    if (primary.runningTitle !== "Running a command") return primary
+    const steps = `${intent.stepCount.toLocaleString()} steps`
+    return icon("terminal", `Ran ${steps}`, `Running ${steps}`)
+  }
   if (intent.kind === "sixb") return describeSixb(intent, parsed)
   if (intent.kind === "read-skill") {
     const label = skillLabel(intent)
@@ -249,39 +271,109 @@ export function describeBash(intent: BashIntent, parsed: ParsedBashOutput | null
   return describeGenericCommand(intent.command)
 }
 
+type GenericCommandCategory =
+  | { readonly kind: "write-file"; readonly fileKind: string }
+  | {
+      readonly kind:
+        | "edit-files"
+        | "search-files"
+        | "run-tests"
+        | "create-folder"
+        | "copy-files"
+        | "move-files"
+        | "inspect-files"
+        | "workspace-location"
+        | "read-file"
+        | "unknown"
+    }
+
 function describeGenericCommand(command: string): BashDescription {
-  const firstLine = command.trim().split(/\r?\n/, 1)[0]?.trim() ?? ""
-  const fileKind = writtenFileKind(command, firstLine)
-  if (fileKind) {
-    return icon("terminal", `Created ${fileKind}`, `Creating ${fileKind}`)
+  const category = genericCommandCategory(command)
+  switch (category.kind) {
+    case "write-file":
+      return icon("terminal", `Created ${category.fileKind}`, `Creating ${category.fileKind}`)
+    case "edit-files":
+      return icon("terminal", "Edited files", "Editing files")
+    case "search-files":
+      return icon("terminal", "Searched files", "Searching files")
+    case "run-tests":
+      return icon("terminal", "Ran tests", "Running tests")
+    case "create-folder":
+      return icon("terminal", "Created a folder", "Creating a folder")
+    case "copy-files":
+      return icon("terminal", "Copied files", "Copying files")
+    case "move-files":
+      return icon("terminal", "Moved files", "Moving files")
+    case "inspect-files":
+      return icon("terminal", "Inspected files", "Inspecting files")
+    case "workspace-location":
+      return icon("terminal", "Checked the workspace location", "Checking the workspace location")
+    case "read-file":
+      return icon("terminal", "Read a file", "Reading a file")
+    default:
+      return icon("terminal", "Ran a command", "Running a command")
   }
-  if (/\bapply_patch\b/.test(firstLine)) {
-    return icon("terminal", "Edited files", "Editing files")
-  }
-  if (/(?:^|[;&|]\s*|\s)(?:rg|grep)(?:\s|$)/.test(firstLine)) {
-    return icon("terminal", "Searched files", "Searching files")
-  }
-  if (/(?:^|[;&|]\s*|\s)bun\s+test(?:\s|$)/.test(firstLine)) {
-    return icon("terminal", "Ran tests", "Running tests")
-  }
-  if (/(?:^|[;&|]\s*|\s)mkdir(?:\s|$)/.test(firstLine)) {
-    return icon("terminal", "Created a folder", "Creating a folder")
-  }
-  if (/(?:^|[;&|]\s*|\s)cp(?:\s|$)/.test(firstLine)) {
-    return icon("terminal", "Copied files", "Copying files")
-  }
-  if (/(?:^|[;&|]\s*|\s)mv(?:\s|$)/.test(firstLine)) {
-    return icon("terminal", "Moved files", "Moving files")
-  }
-  return icon("terminal", "Ran", "Running a command", commandPreview(command, 64))
 }
 
-function writtenFileKind(command: string, firstLine: string): string | null {
-  if (!/(?:^|\s)(?:cat|tee|printf|echo)(?:\s|$)/.test(firstLine)) return null
-  const redirect = firstLine.match(/(?:^|\s)>{1,2}\s*(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/)
-  if (!redirect) return null
+function genericCommandCategory(command: string): GenericCommandCategory {
+  const firstLine = command.trim().split(/\r?\n/, 1)[0]?.trim() ?? ""
+  const segment = directCommandSegment(command)
+  const invocation = commandInvocation(segment?.tokens ?? [])
+  const fileKind = writtenFileKind(command, firstLine, segment, invocation)
+  if (fileKind) return { kind: "write-file", fileKind }
+  const executable = executableName(invocation[0]) ?? leadingExecutable(firstLine)
+  if (executable === "apply_patch") return { kind: "edit-files" }
+  if (executable === "rg" || executable === "grep") return { kind: "search-files" }
+  if (executable === "bun" && invocation[1] === "test") return { kind: "run-tests" }
+  if (executable === "mkdir") return { kind: "create-folder" }
+  if (executable === "cp") return { kind: "copy-files" }
+  if (executable === "mv") return { kind: "move-files" }
+  if (executable === "ls" || executable === "find") return { kind: "inspect-files" }
+  if (executable === "pwd") return { kind: "workspace-location" }
+  if (executable === "head" && headReadsFile(invocation)) return { kind: "read-file" }
+  return { kind: "unknown" }
+}
 
-  const target = (redirect[1] ?? redirect[2] ?? redirect[3] ?? "").toLowerCase()
+function headReadsFile(tokens: readonly string[]): boolean {
+  return tokens.slice(1).some((token) => !token.startsWith("-") && !/^\d+$/.test(token))
+}
+
+function directCommandSegment(command: string): ShellSegment | undefined {
+  const segments = lexShellCommand(command)
+  return segments?.length === 1 ? segments[0] : undefined
+}
+
+function directCommandExecutable(command: string): string | undefined {
+  const invocation = commandInvocation(directCommandSegment(command)?.tokens ?? [])
+  return executableName(invocation[0])
+}
+
+function leadingExecutable(firstLine: string): string | undefined {
+  const match = firstLine.match(/^\s*(?:(?:[A-Za-z_][A-Za-z0-9_]*=[^\s]+)\s+)*([^\s;&|<>]+)/)
+  return executableName(match?.[1])
+}
+
+function writtenFileKind(
+  command: string,
+  firstLine: string,
+  segment: ShellSegment | undefined,
+  invocation: readonly string[]
+): string | null {
+  const executable = executableName(invocation[0]) ?? leadingExecutable(firstLine)
+  if (!executable || !["cat", "tee", "printf", "echo"].includes(executable)) return null
+
+  const directTarget = segment?.outputRedirects?.at(-1)
+  const heredocTarget = command.includes("<<")
+    ? firstLine.match(/(?:^|\s)>{1,2}\s*(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/)
+    : null
+  const target = (
+    directTarget ??
+    heredocTarget?.[1] ??
+    heredocTarget?.[2] ??
+    heredocTarget?.[3] ??
+    ""
+  ).toLowerCase()
+  if (!target) return null
   if (/<!doctype\s+html|<html(?:\s|>)/i.test(command) || /\.html?$/.test(target)) {
     return "an HTML file"
   }
@@ -624,7 +716,7 @@ function filePath(value: unknown): string | undefined {
   return undefined
 }
 
-export type ActionRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled"
+type ActionRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled"
 
 interface ActionRunInfo {
   readonly actionId?: string

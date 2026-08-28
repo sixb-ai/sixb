@@ -163,15 +163,11 @@ export function LiveAssistant({
 
 export function ThinkingMarker({ takingLonger = false }: { takingLonger?: boolean }) {
   return (
-    <div className="flex flex-col gap-1">
-      <div className={ACTIVITY_STATUS_ROW_CLASS_NAME} role="status" aria-label="Agent is working">
-        <ActivityStatusText label="Thinking" className="shimmer" />
-      </div>
-      {takingLonger ? (
-        <p className="px-1 text-xs text-muted-foreground" role="status">
-          Taking a little longer than usual…
-        </p>
-      ) : null}
+    <div className={ACTIVITY_STATUS_ROW_CLASS_NAME} role="status" aria-label="Agent is working">
+      <ActivityStatusText
+        label={takingLonger ? "Taking a little longer" : "Thinking"}
+        className="shimmer"
+      />
     </div>
   )
 }

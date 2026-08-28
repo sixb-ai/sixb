@@ -2,18 +2,18 @@ import type { LiveRunState } from "./liveRun"
 import type { NormalizedPart } from "./parts"
 import type { AgentMessage, AgentRun, AgentRunStatus } from "./types"
 
-export const DELAYED_WAITING_COPY_MS = 20_000
+export const EXTENDED_WAITING_STATUS_MS = 20_000
 
 export function isActiveAgentRunStatus(status: AgentRunStatus): boolean {
   return status === "queued" || status === "running"
 }
 
-/** The delayed copy belongs only to queue startup; running-before-content keeps the plain shimmer. */
-export function shouldShowDelayedWaitingCopy(
+/** The extended status belongs only to queue startup; running-before-content keeps plain thinking. */
+export function shouldShowExtendedWaitingStatus(
   run: Pick<AgentRun, "status" | "createdAt"> | null,
   now = Date.now()
 ): boolean {
-  return run?.status === "queued" && now - Date.parse(run.createdAt) >= DELAYED_WAITING_COPY_MS
+  return run?.status === "queued" && now - Date.parse(run.createdAt) >= EXTENDED_WAITING_STATUS_MS
 }
 
 /**
@@ -65,7 +65,7 @@ export interface ActiveTurnSources {
 
 export type ActiveTurnPresentation =
   /** Waiting or streaming. `queuedRun` is set only while the wait is queue-side, before the run
-   * announces itself on the stream — it feeds the delayed waiting copy. */
+   * announces itself on the stream — it controls the extended waiting status. */
   | { readonly kind: "responding"; readonly queuedRun: AgentRun | null }
   /** The newest run failed before any durable assistant message; `run` feeds the retry endpoint. */
   | { readonly kind: "failed"; readonly run: AgentRun }

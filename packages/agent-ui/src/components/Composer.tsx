@@ -97,6 +97,14 @@ type ComposerAttachment =
 
 const MAX_HEIGHT_PX = 200
 
+export function composerCanFocus({
+  disabled,
+  pending,
+  running,
+}: Pick<ComposerProps, "disabled" | "pending" | "running">): boolean {
+  return !disabled && !pending && !running
+}
+
 export function Composer({
   onSend,
   disabled,
@@ -223,15 +231,15 @@ export function Composer({
   useEffect(() => {
     const wasRunning = wasRunningRef.current
     wasRunningRef.current = Boolean(running)
-    if (!wasRunning || running || disabled) return
+    if (!wasRunning || !composerCanFocus({ disabled, pending, running })) return
 
     const frame = requestAnimationFrame(() => textareaRef.current?.focus())
     return () => cancelAnimationFrame(frame)
-  }, [disabled, running])
+  }, [disabled, pending, running])
 
   useEffect(() => {
     const focusWhenAvailable = () => {
-      if (disabled || pending || running) return
+      if (!composerCanFocus({ disabled, pending, running })) return
       textareaRef.current?.focus()
     }
     const handleVisibilityChange = () => {
@@ -580,7 +588,7 @@ export function Composer({
             </button>
             <Textarea
               ref={textareaRef}
-              autoFocus={!disabled && !pending && !running}
+              autoFocus={composerCanFocus({ disabled, pending, running })}
               value={value}
               onChange={(event) => {
                 setValue(event.target.value)

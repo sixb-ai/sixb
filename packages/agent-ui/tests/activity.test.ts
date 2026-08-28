@@ -3,7 +3,11 @@ import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { AgentExecutionTrace } from "../src/AgentExecutionTrace"
 import { BashToolView } from "../src/bash/BashToolView"
-import { ACTIVITY_STATUS_ROW_CLASS_NAME, activityStatusAt } from "../src/components/ActivityStatus"
+import {
+  ACTIVITY_STATUS_ROW_CLASS_NAME,
+  ActivityStatusText,
+  activityStatusAt,
+} from "../src/components/ActivityStatus"
 import { AssistantBody } from "../src/components/MessageParts"
 import { ThinkingMarker } from "../src/components/MessageView"
 import { type NormalizedPart, normalizeDurableParts } from "../src/parts"
@@ -125,6 +129,15 @@ describe("assistant work dropdowns", () => {
     expect(reasoningStarted).not.toContain(">Working…<")
   })
 
+  test("keeps a long pre-token wait in the same single status row", () => {
+    const html = renderToStaticMarkup(createElement(ThinkingMarker, { takingLonger: true }))
+
+    expect(html).toContain(ACTIVITY_STATUS_ROW_CLASS_NAME)
+    expect(html).toContain("Taking a little longer…")
+    expect(html).not.toContain("Taking a closer look")
+    expect(html.match(/role="status"/g)).toHaveLength(1)
+  })
+
   test("updates long indeterminate waits without inventing completion progress", () => {
     expect(activityStatusAt("Thinking", 0)).toBe("Thinking")
     expect(activityStatusAt("Thinking", 7_999)).toBe("Thinking")
@@ -133,6 +146,21 @@ describe("assistant work dropdowns", () => {
     expect(activityStatusAt("Thinking", 55_000)).toBe("Still working")
     expect(activityStatusAt("Preparing a command", 11_999)).toBe("Preparing a command")
     expect(activityStatusAt("Preparing a command", 12_000)).toBe("Still preparing a command")
+  })
+
+  test("renders only the current activity phrase", () => {
+    const html = renderToStaticMarkup(
+      createElement(ActivityStatusText, { label: "Thinking", className: "shimmer" })
+    )
+
+    expect(html).toContain("Thinking…")
+    expect(html).toContain("text-left")
+    expect(html).not.toContain("Working through it")
+    expect(html).not.toContain("Taking a closer look")
+    expect(html).not.toContain("Checking the details")
+    expect(html).not.toContain("Still working")
+    expect(html).not.toContain("invisible")
+    expect(html).not.toContain("opacity-0")
   })
 
   test("describes Sixb help as project work instead of CLI output", () => {
