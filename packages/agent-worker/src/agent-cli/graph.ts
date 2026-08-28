@@ -1,5 +1,5 @@
 import type { ApiClient } from "./api-client"
-import { fail } from "./output"
+import { CliError, EXIT_API } from "./output"
 
 interface ObjectRef {
   readonly objectTypeId: string
@@ -37,26 +37,53 @@ interface LinksResponse {
   readonly nextPageToken?: string
 }
 
+export const DEFAULT_INSPECT_MAX_OBJECTS = 20
+export const DEFAULT_INSPECT_MAX_LINKS = 50
+const MAX_INSPECT_PAGES = 10
+const INSPECT_PAGE_SIZE = 100
+
+interface InspectGraphOptions {
+  readonly depth: number
+  readonly maxObjects: number
+  readonly maxLinks: number
+  readonly full: boolean
+}
+
 export async function inspectGraph(
   api: ApiClient,
   objectTypeId: string,
   primaryId: string,
-  options: { readonly depth: number; readonly maxObjects: number; readonly full: boolean }
+  options: InspectGraphOptions
 ): Promise<unknown> {
+  if (options.depth === 0) return inspectRoot(api, objectTypeId, primaryId, options)
+
   let refs: LocatedRef[] = [{ objectTypeId, primaryId, distance: 0 }]
   let frontier = refs
   const objects = new Map<string, MaterializedObject>()
   const links = new Map<string, PhysicalLink>()
-  let truncated = false
-  const iterations = Math.max(options.depth, 1)
+  let objectsTruncated = false
+  let linksTruncated = false
+  let pagesTruncated = false
+  let pagesRead = 0
+  let linksExamined = 0
 
-  for (let level = 0; level < iterations && frontier.length > 0; level += 1) {
+  for (let level = 0; level < options.depth && frontier.length > 0; level += 1) {
     const levelObjects = new Map<string, MaterializedObject>()
     const levelLinks = new Map<string, PhysicalLink>()
+    const seenPageTokens = new Set<string>()
     let pageToken: string | undefined
     let continuePaging = true
 
     while (continuePaging) {
+      const remainingLinks = options.maxLinks - linksExamined
+      if (remainingLinks <= 0) {
+        linksTruncated = true
+        break
+      }
+      if (pagesRead >= MAX_INSPECT_PAGES) {
+        pagesTruncated = true
+        break
+      }
       const response = asLinksResponse(
         await api.post("/api/objects/query/links", {
           query: {
@@ -68,12 +95,23 @@ export async function inspectGraph(
           },
           direction: "both",
           includeObjects: true,
-          pageSize: 1_000,
+          pageSize: Math.min(INSPECT_PAGE_SIZE, remainingLinks),
           ...(pageToken ? { pageToken } : {}),
         })
       )
-      for (const object of response.objects) levelObjects.set(refKey(object), object)
-      for (const link of response.links) {
+      pagesRead += 1
+      const pageLinks = response.links.slice(0, remainingLinks)
+      linksExamined += pageLinks.length
+      linksTruncated ||= response.links.length > pageLinks.length
+      const relevantObjects = new Set(frontier.map(refKey))
+      for (const link of pageLinks) {
+        relevantObjects.add(refKey(link.source))
+        relevantObjects.add(refKey(link.target))
+      }
+      for (const object of response.objects) {
+        if (relevantObjects.has(refKey(object))) levelObjects.set(refKey(object), object)
+      }
+      for (const link of pageLinks) {
         const physical = {
           sourceTypeId: link.source.objectTypeId,
           sourceId: link.source.primaryId,
@@ -84,18 +122,31 @@ export async function inspectGraph(
         }
         levelLinks.set(linkKey(physical), physical)
       }
-      if (!response.hasMore || level >= options.depth) {
+      if (!response.hasMore) {
         continuePaging = false
         continue
       }
-      if (!response.nextPageToken) {
-        fail("The object-links API reported another page without a nextPageToken.")
+      if (linksExamined >= options.maxLinks) {
+        linksTruncated = true
+        break
       }
+      if (pagesRead >= MAX_INSPECT_PAGES) {
+        pagesTruncated = true
+        break
+      }
+      if (!response.nextPageToken) {
+        invalidApiResponse("The object-links API reported another page without a nextPageToken.")
+      }
+      if (seenPageTokens.has(response.nextPageToken)) {
+        invalidApiResponse(
+          "The object-links API repeated a nextPageToken while inspecting the graph."
+        )
+      }
+      seenPageTokens.add(response.nextPageToken)
       pageToken = response.nextPageToken
     }
 
     for (const [key, object] of levelObjects) objects.set(key, object)
-    if (level >= options.depth) continue
     for (const [key, link] of levelLinks) links.set(key, link)
 
     const frontierKeys = new Set(frontier.map(refKey))
@@ -109,9 +160,9 @@ export async function inspectGraph(
 
     const seen = new Set(refs.map(refKey))
     const all = dedupeRefs([...refs, ...candidates])
-    truncated ||= all.length > options.maxObjects
+    objectsTruncated ||= all.length > options.maxObjects
     refs = all.slice(0, options.maxObjects)
-    frontier = refs.filter((ref) => !seen.has(refKey(ref)))
+    frontier = linksTruncated || pagesTruncated ? [] : refs.filter((ref) => !seen.has(refKey(ref)))
   }
 
   const kept = new Set(refs.map(refKey))
@@ -135,7 +186,7 @@ export async function inspectGraph(
     )
 
   const root = objects.get(refKey({ objectTypeId, primaryId }))
-  if (!root) fail(`Object '${objectTypeId}/${primaryId}' was not found.`)
+  if (!root) objectNotFound(objectTypeId, primaryId)
   const relatedObjects = refs
     .filter((ref) => ref.distance > 0)
     .flatMap((ref) => {
@@ -158,9 +209,63 @@ export async function inspectGraph(
     graph: {
       depth: options.depth,
       maxObjects: options.maxObjects,
+      maxLinks: options.maxLinks,
+      maxPages: MAX_INSPECT_PAGES,
       objectCount: 1 + relatedObjects.length,
       linkCount: filteredLinks.length,
-      truncated,
+      pagesRead,
+      linksExamined,
+      truncated: objectsTruncated || linksTruncated || pagesTruncated,
+      truncation: {
+        objects: objectsTruncated,
+        links: linksTruncated,
+        pages: pagesTruncated,
+      },
+    },
+    ...(objectTypes ? { objectTypes } : {}),
+  }
+}
+
+async function inspectRoot(
+  api: ApiClient,
+  objectTypeId: string,
+  primaryId: string,
+  options: InspectGraphOptions
+): Promise<unknown> {
+  const response = await api.post("/api/objects/query", {
+    query: { kind: "refs", refs: [{ objectTypeId, primaryId }] },
+    includeTotal: false,
+  })
+  if (typeof response !== "object" || response === null || Array.isArray(response)) {
+    invalidApiResponse("The object query API returned an invalid response.")
+  }
+  const rows = (response as Record<string, unknown>).objects
+  if (!Array.isArray(rows)) invalidApiResponse("The object query API returned an invalid response.")
+  const root = rows.find(
+    (value): value is MaterializedObject =>
+      isMaterializedObject(value) &&
+      value.objectTypeId === objectTypeId &&
+      value.primaryId === primaryId
+  )
+  if (!root) objectNotFound(objectTypeId, primaryId)
+  const objectTypes = options.full
+    ? [await api.get(`/api/object-types/${encodeURIComponent(objectTypeId)}`)]
+    : undefined
+  return {
+    object: options.full ? root : compactObject(root),
+    relatedObjects: [],
+    links: [],
+    graph: {
+      depth: 0,
+      maxObjects: options.maxObjects,
+      maxLinks: options.maxLinks,
+      maxPages: MAX_INSPECT_PAGES,
+      objectCount: 1,
+      linkCount: 0,
+      pagesRead: 0,
+      linksExamined: 0,
+      truncated: false,
+      truncation: { objects: false, links: false, pages: false },
     },
     ...(objectTypes ? { objectTypes } : {}),
   }
@@ -171,11 +276,48 @@ function asLinksResponse(value: unknown): LinksResponse {
   const record = value as Record<string, unknown>
   if (!Array.isArray(record.objects) || !Array.isArray(record.links)) invalidLinksResponse()
   if (typeof record.hasMore !== "boolean") invalidLinksResponse()
+  if (record.nextPageToken !== undefined && typeof record.nextPageToken !== "string") {
+    invalidLinksResponse()
+  }
+  if (!record.objects.every(isMaterializedObject) || !record.links.every(isPhysicalLinkResponse)) {
+    invalidLinksResponse()
+  }
   return record as unknown as LinksResponse
 }
 
 function invalidLinksResponse(): never {
-  fail("The object-links API returned an invalid response.")
+  invalidApiResponse("The object-links API returned an invalid response.")
+}
+
+function invalidApiResponse(message: string): never {
+  throw new CliError({ code: "invalid_api_response", message }, EXIT_API)
+}
+
+function objectNotFound(objectTypeId: string, primaryId: string): never {
+  throw new CliError(
+    { code: "not_found", message: `Object '${objectTypeId}/${primaryId}' was not found.` },
+    EXIT_API
+  )
+}
+
+function isMaterializedObject(value: unknown): value is MaterializedObject {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false
+  const record = value as Record<string, unknown>
+  return typeof record.objectTypeId === "string" && typeof record.primaryId === "string"
+}
+
+function isPhysicalLinkResponse(value: unknown): value is LinksResponse["links"][number] {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false
+  const record = value as Record<string, unknown>
+  return (
+    typeof record.linkId === "string" && isObjectRef(record.source) && isObjectRef(record.target)
+  )
+}
+
+function isObjectRef(value: unknown): value is ObjectRef {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false
+  const record = value as Record<string, unknown>
+  return typeof record.objectTypeId === "string" && typeof record.primaryId === "string"
 }
 
 function compactObject<T extends MaterializedObject>(

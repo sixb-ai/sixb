@@ -87,25 +87,34 @@ export class ApiClient {
     }
     const record = asRecord(parsed)
     const error = record.error
-    const structured = asRecord(error)
+    const nested = asRecord(error)
+    const code = stringField(record, "code") ?? stringField(nested, "code") ?? "http_error"
+    const message =
+      stringField(record, "message") ??
+      stringField(nested, "message") ??
+      (typeof error === "string"
+        ? error
+        : `The Sixb API request failed with HTTP ${response.status}.`)
+    const hint = stringField(record, "hint") ?? stringField(nested, "hint")
+    const issues = Array.isArray(record.issues)
+      ? record.issues
+      : Array.isArray(nested.issues)
+        ? nested.issues
+        : undefined
     throw new CliError(
       {
-        code: typeof structured.code === "string" ? structured.code : "http_error",
+        code,
         status: response.status,
-        message:
-          typeof structured.message === "string"
-            ? structured.message
-            : typeof error === "string"
-              ? error
-              : `The Sixb API request failed with HTTP ${response.status}.`,
-        ...(typeof structured.hint === "string" ? { hint: structured.hint } : {}),
+        message,
+        ...(hint ? { hint } : {}),
+        ...(issues ? { issues } : {}),
       },
       EXIT_API
     )
   }
 }
 
-export function validateApiPath(path: string): void {
+function validateApiPath(path: string): void {
   const invalid = (): never => fail("API paths must be relative and start with /api/.")
   if (path.includes("\\") || path.includes("#")) invalid()
   const normalized = (() => {
@@ -127,4 +136,9 @@ function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {}
+}
+
+function stringField(record: Readonly<Record<string, unknown>>, key: string): string | undefined {
+  const value = record[key]
+  return typeof value === "string" ? value : undefined
 }

@@ -35,15 +35,14 @@ Actions and workflows:
   sixb workflows list|get|start ...
   sixb workflow-runs list|get ...
 
-Files and escape hatch:
+Files:
   sixb files upload|download ...
-  sixb api get|post ...
 
 Run \`sixb <group> --help\` or \`sixb <group> <command> --help\` for exact arguments.
 For query IR, run \`sixb objects query --help\` and \`sixb objects query --example list\`.`
 
 export const OBJECTS_HELP = `Usage:
-  sixb objects inspect <object-type> <primary-id> [--depth <0-3>] [--max-objects <1-100>] [--full]
+  sixb objects inspect <object-type> <primary-id> [options]
   sixb objects list [options]
   sixb objects get <object-type> <primary-id>...
   sixb objects search <text> [--limit <n>]
@@ -52,11 +51,12 @@ export const OBJECTS_HELP = `Usage:
   sixb objects count --file <path|->
   sixb objects exists --file <path|->
   sixb objects facets --file <path|->
+  sixb objects facets --example
   sixb objects links <object-type> <primary-id> [options]
 
 List options:
   --type <id>                         Exact ontology object type id
-  --limit <n>                         0 through 1000
+  --limit <n>                         0 through 1000; defaults to 20
   --offset <n>
   --order-by createdAt|updatedAt|primaryId
   --order asc|desc
@@ -68,12 +68,18 @@ List options:
 Links options:
   --link <link-id>
   --direction outgoing|incoming|both  Defaults to both
-  --page-size <1-1000>                Defaults to 1000
+  --page-size <1-1000>                Defaults to 100
   --page-token <token>                Continue an edge page
   --include-objects                   Include selected and current-page endpoint objects
 
+Inspect options:
+  --depth <0-3>                       Defaults to 2; use 0 for only the object
+  --max-objects <1-100>               Defaults to 20
+  --max-links <1-500>                 Defaults to 50
+  --full                              Include timestamps and encountered type definitions
+
 Use \`objects inspect\` first when context identifies an object. It follows both relationship
-directions to depth 2 by default and returns a bounded graph. Use \`--depth 0\` for only the object.
+directions to depth 2 by default and returns a bounded graph.
 Inspect omits materialization timestamps and ontology definitions by default. Use \`--full\` when
 storage timestamps, declared links, or available actions are needed.
 
@@ -82,7 +88,7 @@ storage timestamps, declared links, or available actions are needed.
 
 export const QUERY_HELP = `Usage:
   sixb objects query --file <path|-> [--include-total|--no-total]
-  sixb objects query --example <exact|filter|incoming|expand|sort|page|facets>
+  sixb objects query --example <exact|filter|incoming|expand|sort|page>
   sixb objects query --example list
 
 Input is a query node. A full {"query": ...} request is also accepted.
@@ -115,14 +121,28 @@ export const GROUP_HELP = {
   telemetry: `Usage:
   sixb telemetry latest <object-type> <primary-id> <property-id>
   sixb telemetry history <object-type> <primary-id> <property-id> [options]
-  sixb telemetry query --file <path|->`,
+  sixb telemetry query --file <path|->
+
+History options:
+  --from <RFC3339>
+  --to <RFC3339>
+  --limit <n>
+  --order <asc|desc>`,
   actions: `Usage:
   sixb actions list [--type <object-type>]
   sixb actions get <action-id>
   sixb actions request <action-id> [--subject-type <type> --subject-id <id>] [--params-file <path|->] [--run-id <id>]`,
   "action-runs": `Usage:
   sixb action-runs list [options]
-  sixb action-runs get <run-id>`,
+  sixb action-runs get <run-id>
+
+List options:
+  --action <action-id>
+  --type <object-type>
+  --id <primary-id>
+  --status <status>
+  --started-after|--started-before <RFC3339>
+  --limit <n> --offset <n> --order <asc|desc>`,
   files: `Usage:
   sixb files upload <local-path> [--logical-path <path>]
   sixb files download object <type> <id> --path <json-pointer> --output <local-path>
@@ -133,10 +153,13 @@ export const GROUP_HELP = {
   sixb workflows start <workflow-id> [--input-file <path|->]`,
   "workflow-runs": `Usage:
   sixb workflow-runs list [options]
-  sixb workflow-runs get <run-id>`,
-  api: `Usage:
-  sixb api get </api/path[?query]> [--output <local-path>]
-  sixb api post </api/path> --file <path|->`,
+  sixb workflow-runs get <run-id>
+
+List options:
+  --workflow <workflow-id>
+  --status <status>
+  --started-after|--started-before <RFC3339>
+  --limit <n> --offset <n> --order <asc|desc>`,
 } as const
 
 export const QUERY_EXAMPLES: Readonly<Record<string, string>> = {
@@ -149,7 +172,8 @@ export const QUERY_EXAMPLES: Readonly<Record<string, string>> = {
   expand:
     '{"kind":"expand","input":{"kind":"refs","refs":[{"objectTypeId":"RepositoryIssue","primaryId":"github:issue:owner/repo#297"}]},"expansions":[{"linkId":"issue","direction":"incoming","sourceObjectTypeId":"RepositoryComment","limit":20}]}',
   sort: '{"kind":"limit","input":{"kind":"sort","input":{"kind":"start","objectTypeId":"Customer"},"fields":[{"kind":"property","propertyId":"name","direction":"asc"}]},"limit":20}',
-  page: '{"kind":"page","input":{"kind":"start","objectTypeId":"Customer"},"pageSize":20,"pageToken":"optional-token-from-previous-response"}',
-  facets:
-    '{"query":{"kind":"start","objectTypeId":"WorkOrder"},"facets":[{"propertyId":"status","limit":10}]}',
+  page: '{"kind":"page","input":{"kind":"start","objectTypeId":"Customer"},"pageSize":20}',
 }
+
+export const FACETS_EXAMPLE =
+  '{"query":{"kind":"start","objectTypeId":"WorkOrder"},"facets":[{"propertyId":"status","limit":10}]}'

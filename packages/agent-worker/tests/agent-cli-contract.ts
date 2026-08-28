@@ -6,10 +6,6 @@ import { join } from "node:path"
 export interface AgentCliContractImplementation {
   readonly name: string
   readonly command: readonly string[]
-  readonly bootstrap?: {
-    readonly binDir: string
-    readonly resolvedPath: string
-  }
   readonly version: string
 }
 
@@ -146,7 +142,6 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
         ["files", "--help"],
         ["workflows", "--help"],
         ["workflow-runs", "--help"],
-        ["api", "--help"],
       ] as const
 
       for (const args of commands) {
@@ -161,6 +156,26 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
       expect(queryHelp.stdout).toContain("directions are outgoing or incoming")
       expect(queryHelp.stdout).toContain('"op":"eq"')
       expect(queryHelp.stdout).toContain("sourceObjectTypeId")
+
+      const pageExample = await runCli(implementation, ["objects", "query", "--example", "page"])
+      expect(JSON.parse(pageExample.stdout)).toEqual({
+        kind: "page",
+        input: { kind: "start", objectTypeId: "Customer" },
+        pageSize: 20,
+      })
+      const facetsExample = await runCli(implementation, ["objects", "facets", "--example"])
+      expect(JSON.parse(facetsExample.stdout)).toEqual({
+        query: { kind: "start", objectTypeId: "WorkOrder" },
+        facets: [{ propertyId: "status", limit: 10 }],
+      })
+      const mixedExample = await runCli(implementation, [
+        "objects",
+        "query",
+        "--example",
+        "page",
+        "--include-total",
+      ])
+      expect(mixedExample.exitCode).toBe(2)
 
       const version = await runCli(implementation, ["--version"])
       expect(version).toEqual({ exitCode: 0, stdout: `${implementation.version}\n`, stderr: "" })
@@ -188,11 +203,10 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
         if (request.url.pathname === "/api/project") {
           return json(
             {
-              error: {
-                code: "project_forbidden",
-                message: "The project is not visible.",
-                hint: "Use the current run-scoped project.",
-              },
+              error: "The project is not visible.",
+              code: "project_forbidden",
+              hint: "Use the current run-scoped project.",
+              issues: [{ path: "$", code: "forbidden", message: "Project is not visible." }],
             },
             403
           )
@@ -229,6 +243,7 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
             status: 403,
             message: "The project is not visible.",
             hint: "Use the current run-scoped project.",
+            issues: [{ path: "$", code: "forbidden", message: "Project is not visible." }],
           },
         })
       } finally {
@@ -300,10 +315,15 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
         expect(output.links).toHaveLength(3)
         expect(output.graph).toEqual({
           depth: 2,
-          maxObjects: 40,
+          maxObjects: 20,
+          maxLinks: 50,
+          maxPages: 10,
           objectCount: 4,
           linkCount: 3,
+          pagesRead: 2,
+          linksExamined: 4,
           truncated: false,
+          truncation: { objects: false, links: false, pages: false },
         })
 
         expect(api.requests.map((request) => request.url.pathname)).toEqual([
@@ -317,7 +337,7 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
           },
           direction: "both",
           includeObjects: true,
-          pageSize: 1_000,
+          pageSize: 50,
         })
         expect(api.requests[1]?.body).toEqual({
           query: {
@@ -326,7 +346,133 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
           },
           direction: "both",
           includeObjects: true,
-          pageSize: 1_000,
+          pageSize: 49,
+        })
+      } finally {
+        api.close()
+      }
+    })
+
+    test("stops graph pagination at its link budget", async () => {
+      const api = startTestApi((request) => {
+        if (request.method !== "POST" || request.url.pathname !== "/api/objects/query/links") {
+          return undefined
+        }
+        return json({
+          objects: [
+            object("Customer", "customer-1", { customerId: "customer-1" }),
+            object("ServiceCase", "case-1", { caseId: "case-1" }),
+          ],
+          links: [edge("ServiceCase", "case-1", "customer", "Customer", "customer-1")],
+          hasMore: true,
+          nextPageToken: "unread-page",
+        })
+      })
+      try {
+        const result = await runCli(
+          implementation,
+          ["objects", "inspect", "Customer", "customer-1", "--depth", "1", "--max-links", "1"],
+          apiEnv(api)
+        )
+
+        expect(result.exitCode).toBe(0)
+        expect(api.requests).toHaveLength(1)
+        expect(api.requests[0]?.body).toMatchObject({ pageSize: 1 })
+        expect(JSON.parse(result.stdout).graph).toMatchObject({
+          linkCount: 1,
+          pagesRead: 1,
+          linksExamined: 1,
+          truncated: true,
+          truncation: { objects: false, links: true, pages: false },
+        })
+      } finally {
+        api.close()
+      }
+    })
+
+    test("rejects repeated graph page tokens instead of looping", async () => {
+      const api = startTestApi((request) => {
+        if (request.method !== "POST" || request.url.pathname !== "/api/objects/query/links") {
+          return undefined
+        }
+        return json({
+          objects: [object("Customer", "customer-1", { customerId: "customer-1" })],
+          links: [],
+          hasMore: true,
+          nextPageToken: "repeated-token",
+        })
+      })
+      try {
+        const result = await runCli(
+          implementation,
+          ["objects", "inspect", "Customer", "customer-1", "--depth", "1"],
+          apiEnv(api)
+        )
+
+        expect(result.exitCode).toBe(3)
+        expect(api.requests).toHaveLength(2)
+        expect(JSON.parse(result.stderr)).toEqual({
+          error: {
+            code: "invalid_api_response",
+            message: "The object-links API repeated a nextPageToken while inspecting the graph.",
+          },
+        })
+      } finally {
+        api.close()
+      }
+    })
+
+    test("stops graph pagination at its request budget", async () => {
+      let page = 0
+      const api = startTestApi((request) => {
+        if (request.method !== "POST" || request.url.pathname !== "/api/objects/query/links") {
+          return undefined
+        }
+        page += 1
+        return json({
+          objects: [object("Customer", "customer-1", { customerId: "customer-1" })],
+          links: [],
+          hasMore: true,
+          nextPageToken: `page-${page}`,
+        })
+      })
+      try {
+        const result = await runCli(
+          implementation,
+          ["objects", "inspect", "Customer", "customer-1", "--depth", "1"],
+          apiEnv(api)
+        )
+
+        expect(result.exitCode).toBe(0)
+        expect(api.requests).toHaveLength(10)
+        expect(JSON.parse(result.stdout).graph).toMatchObject({
+          pagesRead: 10,
+          linksExamined: 0,
+          truncated: true,
+          truncation: { objects: false, links: false, pages: true },
+        })
+      } finally {
+        api.close()
+      }
+    })
+
+    test("uses an exact refs query when graph depth is zero", async () => {
+      const api = startGraphApi()
+      try {
+        const result = await runCli(
+          implementation,
+          ["objects", "inspect", "Customer", "customer-1", "--depth", "0"],
+          apiEnv(api)
+        )
+
+        expect(result.exitCode).toBe(0)
+        expect(api.requests).toHaveLength(1)
+        expect(api.requests[0]?.url.pathname).toBe("/api/objects/query")
+        expect(JSON.parse(result.stdout).graph).toMatchObject({
+          depth: 0,
+          pagesRead: 0,
+          linksExamined: 0,
+          truncated: false,
         })
       } finally {
         api.close()
@@ -394,7 +540,7 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
           },
           direction: "both",
           includeObjects: false,
-          pageSize: 1_000,
+          pageSize: 100,
         })
       } finally {
         api.close()
@@ -456,7 +602,7 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
         ])
 
         const commands = [
-          ["objects", "list", "--type", "Customer", "--limit", "2"],
+          ["objects", "list", "--type", "Customer"],
           ["objects", "search", "north line", "--limit", "4"],
           ["objects", "query", "--file", queryPath, "--include-total"],
           ["objects", "count", "--file", queryPath],
@@ -499,8 +645,6 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
           ["workflows", "start", "customer/review", "--input-file", dataPath],
           ["workflow-runs", "list", "--workflow", "customer/review", "--limit", "3"],
           ["workflow-runs", "get", "workflow/run-1"],
-          ["api", "get", "/api/project?view=compact"],
-          ["api", "post", "/api/custom", "--file", dataPath],
         ] as const
 
         for (const args of commands) {
@@ -532,10 +676,9 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
           "/api/workflows/customer%2Freview/runs",
           "/api/workflow-runs",
           "/api/workflow-runs/workflow%2Frun-1",
-          "/api/project",
-          "/api/custom",
         ])
         expect(api.requests[0]?.url.searchParams.get("objectTypeId")).toBe("Customer")
+        expect(api.requests[0]?.url.searchParams.get("limit")).toBe("20")
         expect(api.requests[1]?.url.searchParams.get("q")).toBe("north line")
         expect(api.requests[2]?.body).toEqual({
           query: { kind: "start", objectTypeId: "Customer" },
@@ -547,24 +690,23 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
           runId: "run-1",
         })
         expect(api.requests[18]?.body).toEqual({ input: { value: "sent" } })
-        expect(api.requests[21]?.url.searchParams.get("view")).toBe("compact")
-        expect(api.requests[22]?.body).toEqual({ value: "sent" })
       } finally {
         api.close()
         await rm(tempDir, { recursive: true, force: true })
       }
     })
 
-    test("accepts its origin only from the run environment and exposes no header override", async () => {
+    test("exposes no raw request, origin, or header override", async () => {
       const api = startGraphApi()
       try {
-        const absolute = await runCli(
-          implementation,
-          ["api", "get", "https://attacker.invalid/api/project"],
-          apiEnv(api)
-        )
-        expect(absolute.exitCode).toBe(2)
-        expect(JSON.parse(absolute.stderr).error.code).toBe("invalid_arguments")
+        const raw = await runCli(implementation, ["api", "get", "/api/project"], apiEnv(api))
+        expect(raw.exitCode).toBe(2)
+        expect(JSON.parse(raw.stderr)).toEqual({
+          error: {
+            code: "invalid_arguments",
+            message: "Unknown command 'api'. Run 'sixb --help'.",
+          },
+        })
 
         const originFlag = await runCli(
           implementation,
@@ -575,60 +717,16 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
 
         const headerFlag = await runCli(
           implementation,
-          ["api", "get", "/api/project", "--header", "Authorization: secret"],
+          ["project", "show", "--header", "Authorization: secret"],
           apiEnv(api)
         )
         expect(headerFlag.exitCode).toBe(2)
-
-        for (const path of [
-          "/api/../project",
-          "/api/%2e%2e/project",
-          "/api/..\\project",
-          "/api/project#ignored",
-        ]) {
-          const traversal = await runCli(implementation, ["api", "get", path], apiEnv(api))
-          expect(traversal.exitCode).toBe(2)
-          expect(JSON.parse(traversal.stderr).error.code).toBe("invalid_arguments")
-        }
         expect(api.requests).toHaveLength(0)
       } finally {
         api.close()
       }
     })
-
-    const bootstrap = implementation.bootstrap
-    if (bootstrap)
-      test("resolves as bare sixb through the sandbox Bash bootstrap", async () => {
-        const tempDir = await mkdtemp(join(tmpdir(), "sixb-agent-cli-path-"))
-        try {
-          const bashEnvPath = join(tempDir, "bash-env")
-          await writeFile(
-            bashEnvPath,
-            [
-              `if [ -n "\${SIXB_BIN_DIR:-}" ]; then`,
-              '  export PATH="$SIXB_BIN_DIR:$PATH"',
-              "fi",
-              "",
-            ].join("\n")
-          )
-
-          const result = await runCommand(["bash", "-lc", "command -v sixb && sixb --version"], {
-            BASH_ENV: bashEnvPath,
-            SIXB_BIN_DIR: bootstrap.binDir,
-          })
-
-          expect(result.exitCode).toBe(0)
-          expect(result.stdout).toBe(`${bootstrap.resolvedPath}\n${implementation.version}\n`)
-          expect(result.stderr).toBe("")
-        } finally {
-          await rm(tempDir, { recursive: true, force: true })
-        }
-      })
   })
-}
-
-export async function readAgentCliSource(path: string): Promise<string> {
-  return readFile(path, "utf8")
 }
 
 async function runCli(

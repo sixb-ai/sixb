@@ -1,26 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, readFile, rm, symlink } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import { readAgentCliSource, runAgentCliContractSuite } from "./agent-cli-contract"
+import { AGENT_API_ROUTES } from "@sixb/core/internal/agents"
+import { runAgentCliContractSuite } from "./agent-cli-contract"
 
-const bashPocPath = resolve(import.meta.dir, "fixtures", "agent-cli-poc", "sixb")
 const launcherPath = resolve(import.meta.dir, "..", "src", "agent-cli", "bin", "sixb")
 const artifactPath = resolve(import.meta.dir, "..", "src", "agent-cli", "generated", "sixb.mjs")
-
-runAgentCliContractSuite({
-  name: "Bash POC",
-  command: [bashPocPath],
-  bootstrap: { binDir: resolve(bashPocPath, ".."), resolvedPath: bashPocPath },
-  version: "sixb agent CLI poc-1",
-})
-
-runAgentCliContractSuite({
-  name: "production launcher",
-  command: [launcherPath],
-  bootstrap: { binDir: resolve(launcherPath, ".."), resolvedPath: launcherPath },
-  version: "sixb agent CLI 1",
-})
 
 runAgentCliContractSuite({
   name: "generated artifact on Bun",
@@ -34,14 +20,57 @@ runAgentCliContractSuite({
   version: "sixb agent CLI 1",
 })
 
-describe("Sixb agent CLI Bash implementation", () => {
-  test("never depends on writes to sandbox device paths", async () => {
-    const source = await readAgentCliSource(bashPocPath)
+const CLI_API_ROUTES = [
+  "GET /api/project",
+  "GET /api/object-types",
+  "GET /api/object-types/:objectTypeId",
+  "GET /api/objects",
+  "POST /api/objects/query",
+  "POST /api/objects/query/links",
+  "POST /api/objects/query/count",
+  "POST /api/objects/query/exists",
+  "POST /api/objects/query/facets",
+  "POST /api/telemetry/history",
+  "GET /api/objects/:objectTypeId/:objectId/telemetry/:propertyId/history",
+  "GET /api/objects/:objectTypeId/:objectId/telemetry/:propertyId/latest",
+  "GET /api/objects/:objectTypeId/:objectId/files/content",
+  "GET /api/actions",
+  "GET /api/actions/:actionId",
+  "POST /api/actions/:actionId",
+  "POST /api/files",
+  "GET /api/action-runs",
+  "GET /api/action-runs/:runId",
+  "GET /api/action-runs/:runId/files/content",
+  "GET /api/workflows",
+  "GET /api/workflows/:workflowId",
+  "POST /api/workflows/:workflowId/runs",
+  "GET /api/workflow-runs",
+  "GET /api/workflow-runs/:runId",
+  "GET /api/workflow-runs/:runId/files/content",
+  "GET /api/objects/search",
+] as const
 
-    // Real agent sandboxes can reject absolute writes before Bash opens the target. This assertion
-    // reproduces the regression caught when `command -v ... >/dev/null` blocked every API command.
-    expect(source).not.toContain("/dev/null")
-    expect(source).not.toMatch(/>\s*\/dev\//)
+const INTENTIONAL_CLI_ROUTE_ALTERNATIVES = new Map([
+  [
+    "GET /api/objects/:objectTypeId/:objectId",
+    "Exact object reads use POST /api/objects/query with opaque refs.",
+  ],
+  [
+    "GET /api/agent-threads/:threadId/messages/:messageId/files/content",
+    "Run attachments are materialized in the sandbox before the model starts.",
+  ],
+])
+
+describe("Sixb agent CLI route coverage", () => {
+  test("accounts for every route exposed by the agent API gateway", () => {
+    const direct = new Set<string>(CLI_API_ROUTES)
+    const alternatives = new Set(INTENTIONAL_CLI_ROUTE_ALTERNATIVES.keys())
+    expect([...direct].filter((route) => alternatives.has(route))).toEqual([])
+    expect([...INTENTIONAL_CLI_ROUTE_ALTERNATIVES.values()].every(Boolean)).toBe(true)
+
+    const accountedFor = [...direct, ...alternatives].sort()
+    const exposed = AGENT_API_ROUTES.map((route) => `${route.method} ${route.path}`).sort()
+    expect(accountedFor).toEqual(exposed)
   })
 })
 
@@ -122,6 +151,46 @@ describe("Sixb agent CLI generated artifact", () => {
           message: "The Sixb CLI artifact is missing.",
         },
       })
+    } finally {
+      await rm(tempDir, { recursive: true, force: true })
+    }
+  })
+
+  test("launcher resolves as bare sixb through the sandbox Bash bootstrap", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "sixb-agent-cli-path-"))
+    try {
+      const binDir = join(tempDir, "bin")
+      const libDir = join(tempDir, "lib")
+      const bashEnvPath = join(tempDir, "bash-env")
+      await mkdir(binDir)
+      await mkdir(libDir)
+      await Promise.all([
+        writeFile(join(binDir, "sixb"), await readFile(launcherPath)),
+        writeFile(join(libDir, "sixb.mjs"), await readFile(artifactPath)),
+      ])
+      await chmod(join(binDir, "sixb"), 0o755)
+      await writeFile(
+        bashEnvPath,
+        [
+          `if [ -n "\${SIXB_BIN_DIR:-}" ]; then`,
+          '  export PATH="$SIXB_BIN_DIR:$PATH"',
+          "fi",
+          "",
+        ].join("\n")
+      )
+      const child = Bun.spawn({
+        cmd: ["bash", "-lc", "command -v sixb && sixb --version"],
+        env: { ...process.env, BASH_ENV: bashEnvPath, SIXB_BIN_DIR: binDir },
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      const [exitCode, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ])
+      expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
+      expect(stdout).toBe(`${join(binDir, "sixb")}\nsixb agent CLI 1\n`)
     } finally {
       await rm(tempDir, { recursive: true, force: true })
     }
