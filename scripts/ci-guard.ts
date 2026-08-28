@@ -46,6 +46,12 @@ const USAGE_EXIT_CODE = 2
 /** How often progress is checked. Also the worst-case lateness of a stall report. */
 const POLL_MS = 1000
 
+/** A diagnostic must never become the reason the guard cannot reach process cleanup. */
+const PROCESS_TABLE_TIMEOUT_MS = 2000
+
+/** Signals relayed only after the guarded process group has been stopped. */
+const TERMINATION_SIGNALS = ["SIGHUP", "SIGINT", "SIGTERM"] as const
+
 if (import.meta.main) {
   try {
     process.exitCode = await main(process.argv.slice(2))
@@ -63,7 +69,35 @@ export async function main(argv: readonly string[]): Promise<number> {
     stdin: "inherit",
     stdout: "pipe",
     stderr: "pipe",
+    // A process group gives cleanup a reliable fallback when a restricted sandbox blocks `ps -A`.
+    // Pipes still keep the child attached; `detached` only establishes the group on POSIX.
+    detached: process.platform !== "win32",
   })
+
+  let stopChildPromise: Promise<void> | null = null
+  const stopChild = (): Promise<void> => {
+    stopChildPromise ??= killTree(child.pid)
+    return stopChildPromise
+  }
+
+  let relayingSignal = false
+  const signalHandlers = new Map<NodeJS.Signals, () => void>()
+  function removeSignalHandlers(): void {
+    for (const [signal, handler] of signalHandlers) process.off(signal, handler)
+  }
+  for (const signal of TERMINATION_SIGNALS) {
+    const handler = (): void => {
+      if (relayingSignal) return
+      relayingSignal = true
+      void stopChild().finally(() => {
+        removeSignalHandlers()
+        // Preserve the conventional signal exit status after giving descendants a chance to stop.
+        process.kill(process.pid, signal)
+      })
+    }
+    signalHandlers.set(signal, handler)
+    process.on(signal, handler)
+  }
 
   const tail: string[] = []
   let lastTestFile: string | null = null
@@ -87,6 +121,9 @@ export async function main(argv: readonly string[]): Promise<number> {
     forward(child.stdout, Bun.stdout, observe),
     forward(child.stderr, Bun.stderr, observe),
   ])
+  // The stall path does not await forwarding: if signaling is denied, waiting for pipe EOF would
+  // recreate the hang this guard exists to bound. Mark a broken downstream pipe as handled here.
+  void forwarding.catch(() => {})
 
   // The stall check runs on an interval that is cleared as soon as the race settles. A polling
   // loop built from awaited sleeps would instead leave a live timer behind and keep this process
@@ -112,32 +149,40 @@ export async function main(argv: readonly string[]): Promise<number> {
     }, POLL_MS)
   })
 
-  let verdict: { kind: "exited"; code: number } | { kind: "stalled"; reason: string }
   try {
-    verdict = await Promise.race([
-      child.exited.then((code) => ({ kind: "exited" as const, code })),
-      stalled,
-    ])
+    let verdict: { kind: "exited"; code: number } | { kind: "stalled"; reason: string }
+    try {
+      verdict = await Promise.race([
+        child.exited.then((code) => ({ kind: "exited" as const, code })),
+        stalled,
+      ])
+    } finally {
+      clearInterval(stallTimer)
+    }
+
+    if (verdict.kind === "exited") {
+      await forwarding
+      return verdict.code
+    }
+
+    // Snapshot the process state before killing anything, but stop the tree before writing the
+    // report: a closed parent pipe must not throw or SIGPIPE before cleanup gets its chance.
+    const report = await diagnose(child.pid, {
+      reason: verdict.reason,
+      elapsedSeconds: (performance.now() - started) / 1000,
+      silentSeconds: (performance.now() - lastOutputAt) / 1000,
+      lastTestFile,
+      tail,
+    })
+    await stopChild()
+    process.stderr.write(report)
+    return STALL_EXIT_CODE
+  } catch (error) {
+    await stopChild()
+    throw error
   } finally {
-    clearInterval(stallTimer)
+    removeSignalHandlers()
   }
-
-  if (verdict.kind === "exited") {
-    await forwarding
-    return verdict.code
-  }
-
-  // Snapshot the process state *before* killing anything, or the diagnosis dies with the process.
-  const report = await diagnose(child.pid, {
-    reason: verdict.reason,
-    elapsedSeconds: (performance.now() - started) / 1000,
-    silentSeconds: (performance.now() - lastOutputAt) / 1000,
-    lastTestFile,
-    tail,
-  })
-  process.stderr.write(report)
-  await killTree(child.pid)
-  return STALL_EXIT_CODE
 }
 
 async function forward(
@@ -239,12 +284,30 @@ interface ProcessEntry {
 
 /** `ps -A` with an explicit format: the one process listing that behaves the same on Linux and macOS. */
 async function processTable(): Promise<ProcessEntry[]> {
-  const proc = Bun.spawn(["ps", "-Ao", "pid=,ppid=,stat=,pcpu=,args="], {
-    stdout: "pipe",
-    stderr: "ignore",
-  })
-  const output = await new Response(proc.stdout).text()
-  await proc.exited
+  let proc: Bun.Subprocess<"ignore", "pipe", "ignore">
+  try {
+    proc = Bun.spawn(["ps", "-Ao", "pid=,ppid=,stat=,pcpu=,args="], {
+      stdout: "pipe",
+      stderr: "ignore",
+    })
+  } catch {
+    return []
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const output = await new Promise<string | null>((resolve) => {
+    timer = setTimeout(() => resolve(null), PROCESS_TABLE_TIMEOUT_MS)
+    void new Response(proc.stdout).text().then(resolve, () => resolve(null))
+  }).finally(() => clearTimeout(timer))
+
+  if (output === null) {
+    try {
+      proc.kill()
+    } catch {
+      // The process may already have failed under the same sandbox restriction as `ps -A`.
+    }
+    return []
+  }
 
   const entries: ProcessEntry[] = []
   for (const line of output.split("\n")) {
@@ -353,20 +416,46 @@ function read(path: string): string | null {
 }
 
 /**
- * Children first, then the root: killing the parent first can reparent a wedged grandchild to
- * init, which is exactly how an orphaned `bun` survives the job it belonged to.
+ * The guarded command owns a POSIX process group, so cleanup does not depend on `ps -A` being
+ * available. The discovered tree remains a second line of defence for descendants that create
+ * their own groups. Children are signaled before the root to avoid reparenting them mid-cleanup.
  */
 async function killTree(rootPid: number): Promise<void> {
-  const tree = descendants(await processTable(), rootPid)
-  for (const signal of ["SIGTERM", "SIGKILL"] as const) {
-    for (const entry of [...tree].reverse()) {
-      try {
-        process.kill(entry.pid, signal)
-      } catch {
-        // Already gone.
-      }
+  // Start discovery before signaling the root, while parent links still describe the whole tree.
+  const processes = processTable()
+
+  // The process group is the path that must not wait on `ps`: command runners commonly allow only
+  // a short grace before escalating their own SIGTERM to SIGKILL.
+  signalProcessGroup(rootPid, "SIGTERM")
+  signalProcesses([rootPid], "SIGTERM")
+  const forceGroup = Bun.sleep(TERM_GRACE_MS).then(() => {
+    signalProcessGroup(rootPid, "SIGKILL")
+    signalProcesses([rootPid], "SIGKILL")
+  })
+
+  const tree = descendants(await processes, rootPid)
+  const individualPids = [...new Set([...tree].reverse().map((entry) => entry.pid))]
+  signalProcesses(individualPids, "SIGTERM")
+  await forceGroup
+  signalProcesses(individualPids, "SIGKILL")
+}
+
+function signalProcessGroup(rootPid: number, signal: "SIGTERM" | "SIGKILL"): void {
+  if (process.platform === "win32") return
+  try {
+    process.kill(-rootPid, signal)
+  } catch {
+    // The group may already be gone, or a restricted host may only allow individual signals.
+  }
+}
+
+function signalProcesses(pids: readonly number[], signal: "SIGTERM" | "SIGKILL"): void {
+  for (const pid of pids) {
+    try {
+      process.kill(pid, signal)
+    } catch {
+      // Already gone or not visible to this process sandbox.
     }
-    if (signal === "SIGTERM") await Bun.sleep(TERM_GRACE_MS)
   }
 }
 
