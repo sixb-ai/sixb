@@ -239,9 +239,6 @@ import type {
   ListLogsData,
   ListLogsErrors,
   ListLogsResponses,
-  ListObjectLinksData,
-  ListObjectLinksErrors,
-  ListObjectLinksResponses,
   ListObjectsData,
   ListObjectsErrors,
   ListObjectsResponses,
@@ -281,6 +278,9 @@ import type {
   PostAgentThreadMessageData,
   PostAgentThreadMessageErrors,
   PostAgentThreadMessageResponses,
+  QueryObjectLinksData,
+  QueryObjectLinksErrors,
+  QueryObjectLinksResponses,
   QueryObjectsData,
   QueryObjectsErrors,
   QueryObjectsResponses,
@@ -1475,6 +1475,25 @@ export const queryObjects = <ThrowOnError extends boolean = false>(
   })
 
 /**
+ * Query object links
+ */
+export const queryObjectLinks = <ThrowOnError extends boolean = false>(
+  options: Options<QueryObjectLinksData, ThrowOnError>
+) =>
+  (options.client ?? client).post<QueryObjectLinksResponses, QueryObjectLinksErrors, ThrowOnError>({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/objects/query/links",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
  * Count objects
  */
 export const countObjects = <ThrowOnError extends boolean = false>(
@@ -1972,18 +1991,6 @@ export const getAgentRun = <ThrowOnError extends boolean = false>(
 ) =>
   (options.client ?? client).get<GetAgentRunResponses, GetAgentRunErrors, ThrowOnError>({
     url: "/api/agent-runs/{runId}",
-    ...options,
-  })
-
-/**
- * List object links
- */
-export const listObjectLinks = <ThrowOnError extends boolean = false>(
-  options: Options<ListObjectLinksData, ThrowOnError>
-) =>
-  (options.client ?? client).get<ListObjectLinksResponses, ListObjectLinksErrors, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
-    url: "/api/objects/{objectTypeId}/{objectId}/links",
     ...options,
   })
 

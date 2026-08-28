@@ -319,6 +319,17 @@ export const ObjectQueryFacetsRequestSchema = z
   })
   .strict()
 
+export const ObjectQueryLinksRequestSchema = z
+  .object({
+    query: ObjectQuerySchema,
+    direction: z.enum(["outgoing", "incoming", "both"]).default("both"),
+    linkId: z.string().min(1).optional(),
+    includeObjects: z.boolean().default(false),
+    pageSize: z.number().int().positive().max(1_000).default(100),
+    pageToken: z.string().min(1).optional(),
+  })
+  .strict()
+
 export const TwinObjectSchema = z.object({
   primaryId: z.string(),
   objectTypeId: z.string(),
@@ -490,6 +501,39 @@ export const ObjectQueryOpenApiSchemas = {
       plan: { $ref: "#/components/schemas/ObjectQueryPlanSummary" },
     },
   },
+  ObjectQueryLink: {
+    type: "object",
+    required: ["source", "linkId", "target", "createdAt", "updatedAt"],
+    additionalProperties: false,
+    properties: {
+      source: objectRefSchemaRef,
+      linkId: { type: "string" },
+      target: objectRefSchemaRef,
+      properties: { type: "object", additionalProperties: true },
+      createdAt: { type: "string" },
+      updatedAt: { type: "string" },
+    },
+  },
+  ObjectQueryLinksResponse: {
+    type: "object",
+    required: ["objects", "links", "hasMore"],
+    additionalProperties: false,
+    properties: {
+      objects: {
+        type: "array",
+        description:
+          "Selected objects followed by visible endpoint objects from this link page, de-duplicated. Empty unless includeObjects is true.",
+        items: { $ref: "#/components/schemas/ObjectQueryObject" },
+      },
+      links: {
+        type: "array",
+        description: "Visible physical links in deterministic identity order.",
+        items: { $ref: "#/components/schemas/ObjectQueryLink" },
+      },
+      hasMore: { type: "boolean" },
+      nextPageToken: { type: "string" },
+    },
+  },
   ObjectQueryErrorResponse: {
     type: "object",
     required: ["error"],
@@ -546,6 +590,28 @@ export const ObjectQueryOpenApiSchemas = {
         type: "array",
         minItems: 1,
         items: { $ref: "#/components/schemas/ObjectQueryFacetRequest" },
+      },
+    },
+  },
+  ObjectQueryLinksRequest: {
+    type: "object",
+    required: ["query"],
+    additionalProperties: false,
+    properties: {
+      query: objectQueryRef,
+      direction: { type: "string", enum: ["outgoing", "incoming", "both"], default: "both" },
+      linkId: { type: "string", minLength: 1 },
+      includeObjects: {
+        type: "boolean",
+        default: false,
+        description: "Include selected objects and visible endpoints from the current link page.",
+      },
+      pageSize: { type: "integer", minimum: 1, maximum: 1_000, default: 100 },
+      pageToken: {
+        type: "string",
+        minLength: 1,
+        description:
+          "Opaque token from the previous page. The project, normalized query, direction, and linkId must remain unchanged.",
       },
     },
   },

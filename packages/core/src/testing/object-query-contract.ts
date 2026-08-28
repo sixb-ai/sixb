@@ -4,6 +4,7 @@ import {
   collectObjectQueryValidationIssues,
   countObjects,
   executeObjectQuery,
+  executeObjectQueryLinks,
   existsObjects,
   facetObjects,
   normalizeObjectQuery,
@@ -462,6 +463,65 @@ export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
 
         expect(result.plan.mode).toBe("pushdown")
         expect(ids(result)).toEqual(["device-projector"])
+      })
+    })
+
+    test("queries and paginates incident links over a provider-backed object set", async () => {
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await seedObjectQueryContractData(fixture)
+        const query: ObjectQuery = {
+          kind: "refs",
+          refs: [{ objectTypeId: Device.id, primaryId: "device-projector" }],
+        }
+
+        const first = await executeObjectQueryLinks(
+          {
+            projectId,
+            query,
+            direction: "incoming",
+            includeObjects: true,
+            pageSize: 1,
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+        const second = await executeObjectQueryLinks(
+          {
+            projectId,
+            query,
+            direction: "incoming",
+            includeObjects: true,
+            pageSize: 1,
+            pageToken: first.nextPageToken,
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+
+        expect(first.links).toEqual([
+          expect.objectContaining({
+            sourceTypeId: Room.id,
+            sourceId: "room-alpha",
+            linkId: "hasDevice",
+            targetTypeId: Device.id,
+            targetId: "device-projector",
+          }),
+        ])
+        expect(first.objects.map((row) => row.primaryId)).toEqual([
+          "device-projector",
+          "room-alpha",
+        ])
+        expect(first.hasMore).toBe(true)
+        expect(first.nextPageToken).toBeTruthy()
+        expect(second.links).toEqual([
+          expect.objectContaining({
+            sourceTypeId: Zone.id,
+            sourceId: "zone-one",
+            linkId: "hasDevice",
+            targetTypeId: Device.id,
+            targetId: "device-projector",
+          }),
+        ])
+        expect(second.objects.map((row) => row.primaryId)).toEqual(["device-projector", "zone-one"])
+        expect(second.hasMore).toBe(false)
       })
     })
 

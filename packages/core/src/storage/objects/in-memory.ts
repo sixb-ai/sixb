@@ -91,15 +91,21 @@ function compareStrings(left: string, right: string): number {
 }
 
 function sourceLinkBucketKey(projectId: string, sourceTypeId: string, sourceId: string): string {
-  return `${projectId}:${sourceTypeId}:${sourceId}`
+  return JSON.stringify([projectId, sourceTypeId, sourceId])
 }
 
 function linkRowKey(linkId: string, targetTypeId: string, targetId: string): string {
-  return `${linkId}:${targetTypeId}:${targetId}`
+  return JSON.stringify([linkId, targetTypeId, targetId])
 }
 
 function fullLinkRowKey(row: ObjectLinkRow): string {
-  return `${row.sourceTypeId}:${row.sourceId}:${row.linkId}:${row.targetTypeId}:${row.targetId}`
+  return JSON.stringify([
+    row.sourceTypeId,
+    row.sourceId,
+    row.linkId,
+    row.targetTypeId,
+    row.targetId,
+  ])
 }
 
 type QueryEntry = {

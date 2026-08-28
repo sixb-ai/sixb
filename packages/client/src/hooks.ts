@@ -2,10 +2,10 @@ import { type InfiniteData, infiniteQueryOptions, queryOptions } from "@tanstack
 import {
   getObject,
   getTelemetryHistory,
-  listObjectLinks,
   listObjects,
   listObjectTypes,
   type Options,
+  queryObjectLinks,
 } from "./generated/sdk.gen"
 import type { GetObjectData, GetTelemetryHistoryData, ListObjectsData } from "./generated/types.gen"
 import {
@@ -147,20 +147,28 @@ export const listRelationshipsOptions = (options?: ListRelationshipsOptions) => 
       const requestedObject = objectId ? decodeObjectId(objectId) : null
       if (!requestedObject) return []
 
-      const { data = [] } = await listObjectLinks({
-        path: {
-          objectTypeId: requestedObject.objectTypeId,
-          objectId: requestedObject.primaryId,
-        },
-        query: {
-          direction: "both",
-        },
-        throwOnError: true,
-      })
+      const links = []
+      let pageToken: string | undefined
+      do {
+        const { data } = await queryObjectLinks({
+          body: {
+            query: {
+              kind: "refs",
+              refs: [requestedObject],
+            },
+            direction: "both",
+            pageSize: 1_000,
+            ...(pageToken ? { pageToken } : {}),
+          },
+          throwOnError: true,
+        })
+        links.push(...data.links)
+        pageToken = data.nextPageToken
+      } while (pageToken)
 
-      return data.map((link) => ({
-        source: encodeObjectId(link.sourceTypeId, link.sourceId),
-        target: encodeObjectId(link.targetTypeId, link.targetId),
+      return links.map((link) => ({
+        source: encodeObjectId(link.source.objectTypeId, link.source.primaryId),
+        target: encodeObjectId(link.target.objectTypeId, link.target.primaryId),
         type: link.linkId,
         properties: link.properties,
       }))

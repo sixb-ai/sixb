@@ -28,11 +28,11 @@ describe("access token auth boundary", () => {
       ["GET", "/api/objects?objectTypeId=device"],
       ["GET", "/api/objects/search?q=fan"],
       ["POST", "/api/objects/query"],
+      ["POST", "/api/objects/query/links"],
       ["POST", "/api/objects/query/count"],
       ["POST", "/api/objects/query/exists"],
       ["POST", "/api/objects/query/facets"],
       ["GET", "/api/objects/device/fan-1"],
-      ["GET", "/api/objects/device/fan-1/links"],
       ["PUT", "/api/objects/device/fan-1"],
       ["PUT", "/api/objects/device/fan-1/links/located-at"],
       ["DELETE", "/api/objects/device/fan-1/links/located-at"],
@@ -66,6 +66,7 @@ describe("access token auth boundary", () => {
       // The object, link, and telemetry writes moved out of this list: they enforce `edit:object`
       // and `append:telemetry` now, which is the precondition SIXB_API_ROUTES states for bearer
       // eligibility. Link reads moved out too now that they enforce both source and target view.
+      ["GET", "/api/objects/device/fan-1/links"],
       ["GET", "/api/workflow-interventions"],
       ["POST", "/api/workflow-interventions/int_1/submit"],
       ["GET", "/api/workflows/renew-contract/runs/run_1"],

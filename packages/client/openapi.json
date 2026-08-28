@@ -230,6 +230,59 @@
           }
         }
       },
+      "ObjectQueryLink": {
+        "type": "object",
+        "required": ["source", "linkId", "target", "createdAt", "updatedAt"],
+        "additionalProperties": false,
+        "properties": {
+          "source": {
+            "$ref": "#/components/schemas/ObjectRef"
+          },
+          "linkId": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/ObjectRef"
+          },
+          "properties": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        }
+      },
+      "ObjectQueryLinksResponse": {
+        "type": "object",
+        "required": ["objects", "links", "hasMore"],
+        "additionalProperties": false,
+        "properties": {
+          "objects": {
+            "type": "array",
+            "description": "Selected objects followed by visible endpoint objects from this link page, de-duplicated. Empty unless includeObjects is true.",
+            "items": {
+              "$ref": "#/components/schemas/ObjectQueryObject"
+            }
+          },
+          "links": {
+            "type": "array",
+            "description": "Visible physical links in deterministic identity order.",
+            "items": {
+              "$ref": "#/components/schemas/ObjectQueryLink"
+            }
+          },
+          "hasMore": {
+            "type": "boolean"
+          },
+          "nextPageToken": {
+            "type": "string"
+          }
+        }
+      },
       "ObjectQueryErrorResponse": {
         "type": "object",
         "required": ["error"],
@@ -308,6 +361,41 @@
             "items": {
               "$ref": "#/components/schemas/ObjectQueryFacetRequest"
             }
+          }
+        }
+      },
+      "ObjectQueryLinksRequest": {
+        "type": "object",
+        "required": ["query"],
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "$ref": "#/components/schemas/ObjectQuery"
+          },
+          "direction": {
+            "type": "string",
+            "enum": ["outgoing", "incoming", "both"],
+            "default": "both"
+          },
+          "linkId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "includeObjects": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include selected objects and visible endpoints from the current link page."
+          },
+          "pageSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 100
+          },
+          "pageToken": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Opaque token from the previous page. The project, normalized query, direction, and linkId must remain unchanged."
           }
         }
       },
@@ -19833,6 +19921,73 @@
         }
       }
     },
+    "/api/objects/query/links": {
+      "post": {
+        "summary": "Query object links",
+        "tags": ["Links"],
+        "operationId": "queryObjectLinks",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObjectQueryLinksRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectQueryLinksResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectQueryErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/objects/query/count": {
       "post": {
         "summary": "Count objects",
@@ -26563,146 +26718,6 @@
           },
           "501": {
             "description": "Response for status 501",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": ["error"],
-                  "additionalProperties": false
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/objects/{objectTypeId}/{objectId}/links": {
-      "get": {
-        "summary": "List object links",
-        "tags": ["Links"],
-        "operationId": "listObjectLinks",
-        "security": [
-          {
-            "sixbBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "objectTypeId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          {
-            "name": "objectId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          {
-            "name": "linkId",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "direction",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": ["outgoing", "incoming", "both"],
-              "default": "outgoing"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Response for status 200",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "projectId": {
-                        "type": "string"
-                      },
-                      "sourceTypeId": {
-                        "type": "string"
-                      },
-                      "sourceId": {
-                        "type": "string"
-                      },
-                      "linkId": {
-                        "type": "string"
-                      },
-                      "targetTypeId": {
-                        "type": "string"
-                      },
-                      "targetId": {
-                        "type": "string"
-                      },
-                      "properties": {
-                        "type": "object",
-                        "additionalProperties": {}
-                      },
-                      "createdAt": {
-                        "type": "string"
-                      },
-                      "updatedAt": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "projectId",
-                      "sourceTypeId",
-                      "sourceId",
-                      "linkId",
-                      "targetTypeId",
-                      "targetId",
-                      "createdAt",
-                      "updatedAt"
-                    ],
-                    "additionalProperties": false
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Response for status 400",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": ["error"],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Response for status 404",
             "content": {
               "application/json": {
                 "schema": {

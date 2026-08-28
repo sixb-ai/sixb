@@ -16,6 +16,7 @@ import {
   collectObjectQueryValidationIssues,
   countObjects,
   executeObjectQuery,
+  executeObjectQueryLinks,
   existsObjects,
   explainObjectQuery,
   facetObjects,
@@ -932,6 +933,97 @@ describe("object query planner and executor", () => {
       "Order:order-2",
     ])
     expect(result.total).toBe(2)
+  })
+
+  test("queries and paginates physical links incident to an object set", async () => {
+    const { objects: storage, fixture } = createTestStorage()
+    await seedCustomerOrders(fixture)
+    const query: ObjectQuery = {
+      kind: "refs",
+      refs: [
+        { objectTypeId: "Customer", primaryId: "cust-1" },
+        { objectTypeId: "Order", primaryId: "order-2" },
+      ],
+    }
+
+    const first = await executeObjectQueryLinks(
+      {
+        projectId: "p1",
+        query,
+        direction: "both",
+        includeObjects: true,
+        pageSize: 1,
+      },
+      { ontology, storage }
+    )
+    expect(first.links).toHaveLength(1)
+    expect(first.hasMore).toBe(true)
+    expect(first.nextPageToken).toBeDefined()
+    expect(first.objects.map((row) => `${row.objectTypeId}:${row.primaryId}`)).toEqual([
+      "Customer:cust-1",
+      "Order:order-2",
+      "Order:order-1",
+    ])
+
+    const second = await executeObjectQueryLinks(
+      {
+        projectId: "p1",
+        query,
+        direction: "both",
+        pageSize: 1,
+        pageToken: first.nextPageToken,
+      },
+      { ontology, storage }
+    )
+    expect(second.links).toHaveLength(1)
+    expect(second.links[0].targetId).toBe("order-2")
+    expect(second.hasMore).toBe(false)
+    expect(second.objects).toEqual([])
+
+    await expect(
+      executeObjectQueryLinks(
+        {
+          projectId: "p1",
+          query,
+          direction: "incoming",
+          pageSize: 1,
+          pageToken: first.nextPageToken,
+        },
+        { ontology, storage }
+      )
+    ).rejects.toMatchObject({ code: "invalid_link_page_token", path: "$.pageToken" })
+
+    await expect(
+      executeObjectQueryLinks(
+        {
+          projectId: "p1",
+          query: {
+            kind: "refs",
+            refs: [{ objectTypeId: "Customer", primaryId: "cust-2" }],
+          },
+          direction: "both",
+          pageSize: 1,
+          pageToken: first.nextPageToken,
+        },
+        { ontology, storage }
+      )
+    ).rejects.toMatchObject({ code: "invalid_link_page_token", path: "$.pageToken" })
+
+    const outgoing = await executeObjectQueryLinks(
+      { projectId: "p1", query, direction: "outgoing" },
+      { ontology, storage }
+    )
+    expect(outgoing.links.map((link) => link.targetId)).toEqual(["order-1"])
+
+    await expect(
+      executeObjectQueryLinks(
+        {
+          projectId: "p1",
+          query: { kind: "start", objectTypeId: "Customer" },
+        },
+        { ontology, storage, maxLinkQueryObjects: 2 }
+      )
+    ).rejects.toMatchObject({ code: "link_query_object_limit_exceeded", path: "$.query" })
   })
 
   test("filters and sorts decimals exactly beyond JS number precision", async () => {

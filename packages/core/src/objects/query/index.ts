@@ -57,6 +57,12 @@ export type {
   ObjectQueryVector,
   QueryScalarKind,
 } from "./ir"
+export type {
+  ExecuteObjectQueryLinksInput,
+  ExecuteObjectQueryLinksResult,
+  ObjectQueryLinksExecutorOptions,
+} from "./links"
+export { executeObjectQueryLinks } from "./links"
 export { normalizeObjectQuery, normalizeObjectQueryPredicate } from "./normalize"
 export type {
   ObjectQueryPlan,
