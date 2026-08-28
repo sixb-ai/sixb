@@ -125,19 +125,20 @@ export function AiUsagePage() {
   }
 
   const totals = overview.totals
-  const valuedCalls = totals.costs.ratedCallCount
-  const coverage = totals.modelCallCount === 0 ? 0 : (valuedCalls / totals.modelCallCount) * 100
+  const catalogValuedCalls = totals.costs.ratedCallCount
+  const coverage =
+    totals.modelCallCount === 0 ? 0 : (catalogValuedCalls / totals.modelCallCount) * 100
   const selectedAmount = amountForCurrency(totals.costs.amounts, currency)
   const tokenSeries = overview.series.map((period) => ({
     at: period.start,
     input: bucketTokenValue(period, "inputTokens"),
     output: bucketTokenValue(period, "outputTokens"),
   }))
-  const spendSeries = overview.series.map((period) => ({
+  const costSeries = overview.series.map((period) => ({
     at: period.start,
-    spend: nanosToChartValue(amountForCurrency(period.costs.amounts, currency)?.amountNanos),
+    cost: nanosToChartValue(amountForCurrency(period.costs.amounts, currency)?.amountNanos),
   }))
-  const modelSpend = overview.models
+  const modelCosts = overview.models
     .flatMap((model) => {
       const amount = amountForCurrency(model.costs.amounts, currency)
       return amount
@@ -152,7 +153,7 @@ export function AiUsagePage() {
     })
     .sort((left, right) => right.value - left.value)
     .slice(0, 8)
-  const agentSpend = overview.agents
+  const agentCosts = overview.agents
     .flatMap((agent) => {
       const amount = amountForCurrency(agent.costs.amounts, currency)
       return amount
@@ -167,7 +168,7 @@ export function AiUsagePage() {
     })
     .sort((left, right) => right.value - left.value)
     .slice(0, 8)
-  const workflowSpend = overview.workflows
+  const workflowCosts = overview.workflows
     .flatMap((workflow) => {
       const amount = amountForCurrency(workflow.costs.amounts, currency)
       return amount
@@ -183,7 +184,7 @@ export function AiUsagePage() {
     .sort((left, right) => right.value - left.value)
     .slice(0, 8)
   const valuationBreakdown = [
-    { key: "rated", label: "Catalog rated", value: totals.costs.ratedCallCount },
+    { key: "rated", label: "Catalog-valued", value: totals.costs.ratedCallCount },
     { key: "unpriceable", label: "Unpriceable", value: totals.costs.unpriceableCallCount },
     { key: "unvalued", label: "Unvalued", value: totals.costs.unvaluedCallCount },
   ].filter((item) => item.value > 0)
@@ -285,17 +286,15 @@ export function AiUsagePage() {
         <>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <AiUsageMetricCard
-              label="Rated spend"
-              value={
-                selectedAmount
-                  ? formatChartMoney(nanosToChartValue(selectedAmount.amountNanos), currency)
-                  : "—"
+              label="Catalog-estimated cost"
+              value={selectedAmount ? formatMoney(selectedAmount) : "—"}
+              description={
+                currency ? `Catalog-valued calls in ${currency}` : "No catalog-valued calls"
               }
-              description={currency ? `Rated values in ${currency}` : "No valued calls"}
               icon={<CircleDollarSign className="size-4" />}
-              sparkline={spendSeries.map((point) => ({
+              sparkline={costSeries.map((point) => ({
                 timestamp: point.at,
-                value: point.spend,
+                value: point.cost,
               }))}
             />
             <AiUsageMetricCard
@@ -317,7 +316,7 @@ export function AiUsagePage() {
             <AiUsageMetricCard
               label="Pricing coverage"
               value={`${coverage.toFixed(coverage >= 99.95 ? 0 : 1)}%`}
-              description={`${valuedCalls.toLocaleString()} of ${totals.modelCallCount.toLocaleString()} calls valued`}
+              description={`${catalogValuedCalls.toLocaleString()} of ${totals.modelCallCount.toLocaleString()} calls catalog-valued`}
               icon={<Coins className="size-4" />}
             />
           </div>
@@ -339,43 +338,43 @@ export function AiUsagePage() {
           <div className="grid items-start gap-4 xl:grid-cols-3">
             <ChartCard
               className="xl:col-span-2"
-              title="Daily spend"
+              title="Estimated cost over time"
               description={
                 currency
-                  ? `Rated model-call values in ${currency}`
-                  : "No rated monetary values in this range"
+                  ? `Catalog-valued model calls in ${currency}`
+                  : "No catalog-valued calls in this range"
               }
             >
               <AiUsageTimeSeries
-                data={selectedAmount ? spendSeries : []}
+                data={selectedAmount ? costSeries : []}
                 xKey="at"
                 variant="bar"
                 yAxisWidth={68}
                 showLegend={false}
                 series={[
                   {
-                    key: "spend",
-                    label: currency ? `Spend (${currency})` : "Spend",
+                    key: "cost",
+                    label: currency ? `Estimated cost (${currency})` : "Estimated cost",
                     color: "var(--chart-1)",
                   },
                 ]}
                 xFormatter={(value) => formatBucketLabel(value, bucket)}
                 valueFormatter={(value) => formatChartMoney(value, currency)}
-                emptyLabel="No valued spend in this range"
-                ariaLabel="Daily rated AI spend"
+                emptyLabel="No catalog-estimated cost in this range"
+                ariaLabel="Catalog-estimated AI cost over time"
               />
             </ChartCard>
             <ChartCard
               className="h-full"
-              title="Spend by model"
-              description="Highest rated cost for the selected currency"
+              title="Estimated cost by requested model"
+              description="Highest catalog-estimated cost for the selected currency"
             >
               <AiUsageBreakdown
-                data={modelSpend}
-                valueLabel="Spend"
+                data={modelCosts}
+                valueLabel="Estimated cost"
                 valueFormatter={(value) => formatChartMoney(value, currency)}
-                emptyLabel="No valued model costs in this range"
-                ariaLabel="AI spend by model"
+                emptyLabel="No catalog-estimated model cost in this range"
+                ariaLabel="Catalog-estimated AI cost by requested model"
               />
             </ChartCard>
             <ChartCard
@@ -413,28 +412,31 @@ export function AiUsagePage() {
             />
           </div>
 
-          {agentSpend.length > 1 || workflowSpend.length > 1 ? (
+          {agentCosts.length > 1 || workflowCosts.length > 1 ? (
             <div className="grid gap-4 xl:grid-cols-2">
-              {agentSpend.length > 1 ? (
-                <ChartCard title="Spend by agent" description="Highest-cost agents in this range">
+              {agentCosts.length > 1 ? (
+                <ChartCard
+                  title="Estimated cost by agent"
+                  description="Highest catalog-estimated cost in this range"
+                >
                   <AiUsageBreakdown
-                    data={agentSpend}
-                    valueLabel="Spend"
+                    data={agentCosts}
+                    valueLabel="Estimated cost"
                     valueFormatter={(value) => formatChartMoney(value, currency)}
-                    ariaLabel="AI spend by agent"
+                    ariaLabel="Catalog-estimated AI cost by agent"
                   />
                 </ChartCard>
               ) : null}
-              {workflowSpend.length > 1 ? (
+              {workflowCosts.length > 1 ? (
                 <ChartCard
-                  title="Spend by workflow"
-                  description="Highest-cost workflow agent nodes in this range"
+                  title="Estimated cost by workflow"
+                  description="Highest catalog-estimated workflow Agent nodes in this range"
                 >
                   <AiUsageBreakdown
-                    data={workflowSpend}
-                    valueLabel="Spend"
+                    data={workflowCosts}
+                    valueLabel="Estimated cost"
                     valueFormatter={(value) => formatChartMoney(value, currency)}
-                    ariaLabel="AI spend by workflow"
+                    ariaLabel="Catalog-estimated AI cost by workflow"
                   />
                 </ChartCard>
               ) : null}
@@ -511,7 +513,7 @@ function ModelCallsTable({
                 <TableHead className="pl-6">Time</TableHead>
                 <TableHead>Provider / model</TableHead>
                 <TableHead className="text-right">Tokens</TableHead>
-                <TableHead className="text-right">Rated cost</TableHead>
+                <TableHead className="text-right">Catalog-estimated cost</TableHead>
                 <TableHead>Valuation</TableHead>
                 <TableHead className="pr-6">Source</TableHead>
               </TableRow>
@@ -651,7 +653,7 @@ function AccountingQualityNotice({
   }
   if (coverage < 100) {
     messages.push(
-      `${overview.totals.costs.unpriceableCallCount + overview.totals.costs.unvaluedCallCount} calls do not have a rated cost`
+      `${overview.totals.costs.unpriceableCallCount + overview.totals.costs.unvaluedCallCount} calls do not have a catalog-estimated cost`
     )
   }
   const reviewStatus = overview.totals.costs.unpriceableCallCount > 0 ? "unpriceable" : "unvalued"
@@ -700,7 +702,9 @@ function AccountingInsights({
     <Card className="h-full">
       <CardHeader>
         <CardTitle>Efficiency and coverage</CardTitle>
-        <CardDescription>Token composition and confidence in rated spend</CardDescription>
+        <CardDescription>
+          Token composition and confidence in catalog-estimated cost
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="grid grid-cols-2 gap-x-6 gap-y-4">
@@ -726,7 +730,7 @@ function AccountingInsights({
           <div
             className="flex h-2.5 overflow-hidden rounded-full bg-muted"
             role="img"
-            aria-label={`${coverage.toFixed(1)}% of calls have a rated cost`}
+            aria-label={`${coverage.toFixed(1)}% of calls have a catalog-estimated cost`}
           >
             {valuationBreakdown.map((item) => (
               <div
@@ -1000,7 +1004,7 @@ function formatCallTime(value: string): string {
 function valuationStatusLabel(status: ValuationStatus): string {
   switch (status) {
     case "rated":
-      return "Catalog rated"
+      return "Catalog-valued"
     case "unpriceable":
       return "Unpriceable"
     case "unvalued":

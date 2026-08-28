@@ -66,7 +66,7 @@ export function AgentExecutionPanel({
           )}
           {data.cost ? (
             <>
-              <span>{formatAiCostAmounts(data.cost.amounts)} rated cost</span>
+              <span>{formatAiCostAmounts(data.cost.amounts)} catalog-estimated cost</span>
               <span>{formatAiCostCoverage(data.cost)}</span>
             </>
           ) : null}
