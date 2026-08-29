@@ -927,6 +927,10 @@
     {
       "name": "Auth Service Accounts",
       "description": "Service accounts and service-account access tokens"
+    },
+    {
+      "name": "Shared Access",
+      "description": "Scoped shared-access grant lifecycle"
     }
   ],
   "paths": {
@@ -18801,6 +18805,852 @@
           },
           "400": {
             "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/share-grants": {
+      "post": {
+        "summary": "Issue a shared-access grant",
+        "tags": ["Shared Access"],
+        "operationId": "issueSharedAccessGrant",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "definitionId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "target": {
+                    "type": "object",
+                    "properties": {
+                      "objectTypeId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "primaryId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["objectTypeId", "primaryId"],
+                    "additionalProperties": false
+                  },
+                  "destinationPath": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": ["definitionId", "target", "destinationPath", "expiresAt"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "definitionId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "target": {
+                    "type": "object",
+                    "properties": {
+                      "objectTypeId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "primaryId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["objectTypeId", "primaryId"],
+                    "additionalProperties": false
+                  },
+                  "destinationPath": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": ["definitionId", "target", "destinationPath", "expiresAt"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "definitionId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "target": {
+                    "type": "object",
+                    "properties": {
+                      "objectTypeId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "primaryId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["objectTypeId", "primaryId"],
+                    "additionalProperties": false
+                  },
+                  "destinationPath": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": ["definitionId", "target", "destinationPath", "expiresAt"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Response for status 201",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "grant": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "definitionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "target": {
+                          "type": "object",
+                          "properties": {
+                            "objectTypeId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "primaryId": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["objectTypeId", "primaryId"],
+                          "additionalProperties": false
+                        },
+                        "issuedBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "destinationPath": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "revokedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "revokedBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "definitionId",
+                        "target",
+                        "issuedBy",
+                        "destinationPath",
+                        "createdAt",
+                        "expiresAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "url": {
+                      "type": "string",
+                      "pattern": "^\\/shared\\/"
+                    }
+                  },
+                  "required": ["grant", "url"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List shared-access grants",
+        "tags": ["Shared Access"],
+        "operationId": "listSharedAccessGrants",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "definitionId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "primaryId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "includeRevoked",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "includeExpired",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "grants": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "definitionId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "target": {
+                            "type": "object",
+                            "properties": {
+                              "objectTypeId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "primaryId": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["objectTypeId", "primaryId"],
+                            "additionalProperties": false
+                          },
+                          "issuedBy": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user", "serviceAccount"]
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false
+                          },
+                          "destinationPath": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "expiresAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "revokedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "revokedBy": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user", "serviceAccount", "system"]
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "definitionId",
+                          "target",
+                          "issuedBy",
+                          "destinationPath",
+                          "createdAt",
+                          "expiresAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": ["grants", "hasMore", "total"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/share-grants/{grantId}": {
+      "delete": {
+        "summary": "Revoke a shared-access grant",
+        "tags": ["Shared Access"],
+        "operationId": "revokeSharedAccessGrant",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "grantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "grant": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "definitionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "target": {
+                          "type": "object",
+                          "properties": {
+                            "objectTypeId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "primaryId": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["objectTypeId", "primaryId"],
+                          "additionalProperties": false
+                        },
+                        "issuedBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "destinationPath": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "revokedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "revokedBy": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "definitionId",
+                        "target",
+                        "issuedBy",
+                        "destinationPath",
+                        "createdAt",
+                        "expiresAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["grant"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
             "content": {
               "application/json": {
                 "schema": {

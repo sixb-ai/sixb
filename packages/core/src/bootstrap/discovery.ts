@@ -22,6 +22,7 @@ import { isRuleDefinition } from "../rules"
 import { RuntimeError } from "../runtime/errors"
 import { isScheduleDefinition } from "../schedules"
 import { isGroupDefinition, isMembershipPolicyDefinition, isRoleDefinition } from "../security"
+import { isShareDefinition } from "../shares"
 import { isSyncDefinition } from "../syncs"
 import { isWorkflowDefinition } from "../workflows"
 
@@ -84,6 +85,7 @@ type DiscoveryModuleKind =
   | "role"
   | "rule"
   | "schedule"
+  | "share"
   | "sync"
   | "workflow"
 
@@ -139,6 +141,7 @@ const definitionDiscoveryRegistry = {
     isDefinition: isMembershipPolicyDefinition,
   },
   agents: { directory: ["agents"], kind: "agent", isDefinition: isAgentDefinition },
+  shares: { directory: ["shares"], kind: "share", isDefinition: isShareDefinition },
 } as const satisfies Record<string, DefinitionDiscoveryFamily<unknown>>
 
 type DefinitionFromFamily<TFamily> =

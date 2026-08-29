@@ -34,6 +34,25 @@ export function ref<const TObjectType extends ObjectType>(
   }
 }
 
+/** Build an exact, typed reference to one object instance. */
+export function objectRef<const TObjectType extends ObjectType>(
+  objectType: TObjectType,
+  primaryId: string
+): ObjectRef<TObjectType["id"]> {
+  if (
+    typeof objectType !== "object" ||
+    objectType === null ||
+    typeof objectType.id !== "string" ||
+    !objectType.id.trim()
+  ) {
+    throw new OntologyValidationError("[Sixb] Object reference type must be an object type.")
+  }
+  if (typeof primaryId !== "string" || !primaryId.trim()) {
+    throw new OntologyValidationError("[Sixb] Object reference primary id must not be empty.")
+  }
+  return Object.freeze({ objectTypeId: objectType.id, primaryId })
+}
+
 export function isObjectRefSchema(schema: SchemaOrRef): schema is ObjectRefSchema {
   return (
     typeof schema === "object" &&

@@ -182,6 +182,9 @@ import type {
   HeadWorkflowRunFileContentData,
   HeadWorkflowRunFileContentErrors,
   HeadWorkflowRunFileContentResponses,
+  IssueSharedAccessGrantData,
+  IssueSharedAccessGrantErrors,
+  IssueSharedAccessGrantResponses,
   ListActionRunsData,
   ListActionRunsErrors,
   ListActionRunsResponses,
@@ -262,6 +265,9 @@ import type {
   ListRuleStatesResponses,
   ListRulesData,
   ListRulesResponses,
+  ListSharedAccessGrantsData,
+  ListSharedAccessGrantsErrors,
+  ListSharedAccessGrantsResponses,
   ListSyncRunsData,
   ListSyncRunsErrors,
   ListSyncRunsResponses,
@@ -323,6 +329,9 @@ import type {
   RevokeConnectorConnectionData,
   RevokeConnectorConnectionErrors,
   RevokeConnectorConnectionResponses,
+  RevokeSharedAccessGrantData,
+  RevokeSharedAccessGrantErrors,
+  RevokeSharedAccessGrantResponses,
   SearchObjectsData,
   SearchObjectsErrors,
   SearchObjectsResponses,
@@ -1404,6 +1413,64 @@ export const listRuleStates = <ThrowOnError extends boolean = false>(
 ) =>
   (options?.client ?? client).get<ListRuleStatesResponses, ListRuleStatesErrors, ThrowOnError>({
     url: "/api/rule-states",
+    ...options,
+  })
+
+/**
+ * List shared-access grants
+ */
+export const listSharedAccessGrants = <ThrowOnError extends boolean = false>(
+  options: Options<ListSharedAccessGrantsData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    ListSharedAccessGrantsResponses,
+    ListSharedAccessGrantsErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/share-grants",
+    ...options,
+  })
+
+/**
+ * Issue a shared-access grant
+ */
+export const issueSharedAccessGrant = <ThrowOnError extends boolean = false>(
+  options: Options<IssueSharedAccessGrantData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    IssueSharedAccessGrantResponses,
+    IssueSharedAccessGrantErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/share-grants",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Revoke a shared-access grant
+ */
+export const revokeSharedAccessGrant = <ThrowOnError extends boolean = false>(
+  options: Options<RevokeSharedAccessGrantData, ThrowOnError>
+) =>
+  (options.client ?? client).delete<
+    RevokeSharedAccessGrantResponses,
+    RevokeSharedAccessGrantErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/share-grants/{grantId}",
     ...options,
   })
 

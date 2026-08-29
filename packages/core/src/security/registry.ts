@@ -27,6 +27,7 @@ export interface SecurityRegistryOptions {
   readonly pipelineIds?: ReadonlySet<string>
   readonly agentIds?: ReadonlySet<string>
   readonly connectorIds?: ReadonlySet<string>
+  readonly shareIds?: ReadonlySet<string>
   readonly getSubTypes?: (objectTypeId: string) => readonly string[]
 }
 
@@ -50,6 +51,7 @@ export class SecurityRegistry implements SecurityDefinitionCatalog {
       pipelineIds: input.pipelineIds,
       agentIds: input.agentIds,
       connectorIds: input.connectorIds,
+      shareIds: input.shareIds,
       observableIds: new Set(["logs"]),
     })
 
@@ -63,6 +65,7 @@ export class SecurityRegistry implements SecurityDefinitionCatalog {
       pipelineIds: input.pipelineIds ?? new Set<string>(),
       agentIds: input.agentIds ?? new Set<string>(),
       connectorIds: input.connectorIds ?? new Set<string>(),
+      shareIds: input.shareIds ?? new Set<string>(),
       observableIds: new Set(["logs"]),
       getSubTypes: input.getSubTypes ?? (() => []),
     }

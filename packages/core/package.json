@@ -251,6 +251,12 @@
       "import": "./dist/storage/projection-runs/provider.js",
       "default": "./dist/storage/projection-runs/provider.js"
     },
+    "./internal/share-grant-storage-provider": {
+      "types": "./dist/storage/share-grants/provider.d.ts",
+      "bun": "./src/storage/share-grants/provider.ts",
+      "import": "./dist/storage/share-grants/provider.js",
+      "default": "./dist/storage/share-grants/provider.js"
+    },
     "./internal/projections": {
       "types": "./dist/projections/internal.d.ts",
       "bun": "./src/projections/internal.ts",

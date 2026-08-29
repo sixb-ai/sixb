@@ -7,12 +7,20 @@
  * checks stay simple `set.has(id)` lookups.
  */
 
-import type { ActionDefinition } from "../actions/types"
+import type { ActionDefinition, ObjectActionDefinition } from "../actions/types"
+import { isObjectActionDefinition } from "../actions/validation"
 import type { AgentDefinition } from "../agents/types"
 import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets"
 import type { ObjectType } from "../ontology"
 import type { PipelineDefinition } from "../pipelines"
+import { createShareActionGrant, createShareViewGrant, isShareTarget } from "../shares/builders"
+import type {
+  ShareActionGrantBuilder,
+  ShareDefinition,
+  ShareTarget,
+  ShareViewGrantBuilder,
+} from "../shares/types"
 import type { SyncDefinition } from "../syncs"
 import type { WorkflowDefinition } from "../workflows/types"
 import { SecurityValidationError } from "./errors"
@@ -32,6 +40,7 @@ import type {
   ObserveGrant,
   RunGrant,
   Selection,
+  ShareGrant,
   ViewGrant,
 } from "./types"
 
@@ -56,6 +65,7 @@ const TARGET_BY_DEFINITION_KIND: Readonly<Partial<Record<string, BreadthTarget>>
   workflow: "workflow",
   application: "application",
   connector: "connector",
+  share: "share",
 }
 
 const UNDISCRIMINATED_TARGETS: readonly BreadthTarget[] = ["object", "action"]
@@ -153,9 +163,15 @@ function access(input: GrantInput<ApplicationDefinition, "application">): Access
   return { kind: "grant", capability: "access", target: "application", selection }
 }
 
+function view<const TObjectTypeId extends string>(
+  input: ShareTarget<TObjectTypeId>
+): ShareViewGrantBuilder<TObjectTypeId>
 function view(input: GrantInput<ObjectType, "object">): ViewGrant<"object">
 function view(input: GrantInput<DatasetDefinition, "dataset">): ViewGrant<"dataset">
-function view(input: GrantInput<ObjectType | DatasetDefinition, "object" | "dataset">): ViewGrant {
+function view(
+  input: ShareTarget | GrantInput<ObjectType | DatasetDefinition, "object" | "dataset">
+): ViewGrant | ShareViewGrantBuilder {
+  if (isShareTarget(input)) return createShareViewGrant(input)
   const { target, selection } = resolveGrant(input, "can.view", VIEW_TARGETS)
   return { kind: "grant", capability: "view", target, selection }
 }
@@ -176,11 +192,36 @@ function append(input: GrantInput<ObjectType, "object">): AppendGrant {
   }
 }
 
+function apply<const TAction extends ObjectActionDefinition>(
+  input: TAction
+): ApplyGrant & ShareActionGrantBuilder<TAction>
+function apply(input: GrantInput<ActionDefinition, "action">): ApplyGrant
 function apply(input: GrantInput<ActionDefinition, "action">): ApplyGrant {
-  return {
+  const grant: ApplyGrant = {
     kind: "grant",
     capability: "apply",
     selection: resolveGrant(input, "can.apply", ["action"]).selection,
+  }
+  // `Array.isArray` does not narrow a readonly array. This cast restores the branch already proved
+  // above; every non-selector, non-array GrantInput is one Action definition.
+  const one: ActionDefinition | undefined =
+    Array.isArray(input) || isBreadthSelector(input) ? undefined : (input as ActionDefinition)
+  if (one && isObjectActionDefinition(one)) {
+    Object.defineProperty(grant, "on", {
+      configurable: false,
+      enumerable: false,
+      writable: false,
+      value: (target: ShareTarget) => createShareActionGrant(one, target),
+    })
+  }
+  return grant
+}
+
+function share(input: GrantInput<ShareDefinition, "share">): ShareGrant {
+  return {
+    kind: "grant",
+    capability: "share",
+    selection: resolveGrant(input, "can.share", ["share"]).selection,
   }
 }
 
@@ -221,6 +262,7 @@ export const can = {
   edit,
   append,
   apply,
+  share,
   run,
   observe,
   manage,

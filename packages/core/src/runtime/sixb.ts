@@ -19,6 +19,7 @@ import { createPipelinesRuntime, type PipelinesRuntime } from "../pipelines/exec
 import { createProjectionsRuntime, type ProjectionsRuntime } from "../projections/execution"
 import { createRulesRuntime, type RulesRuntime } from "../rules/execution"
 import { createSchedulesRuntime, type SchedulesRuntime } from "../schedules/execution"
+import { createSharesRuntime, type SharesRuntime } from "../shares/execution"
 import { createSyncsRuntime, type SyncsRuntime } from "../syncs/execution"
 import { createWorkflowsRuntime, type WorkflowsRuntime } from "../workflows/execution"
 import type { SixbDefinitions } from "./definitions"
@@ -42,6 +43,7 @@ export interface Sixb<
   readonly events: EventsRuntime
   readonly logs: LogsRuntime
   readonly schedules: SchedulesRuntime
+  readonly shares: SharesRuntime
   readonly connector: ConnectorRuntime
   readonly blobs: BlobsRuntime
 }
@@ -114,6 +116,7 @@ function createExecutionFacades<TOntologySources extends readonly OntologySource
     events: createEventsRuntime(runtime),
     logs: createLogsRuntime(runtime, dependencies.logging),
     schedules: createSchedulesRuntime(runtime, dependencies.definitions.schedules),
+    shares: createSharesRuntime(runtime, execution, dependencies.definitions.shares),
     connector: createConnectorRuntime(runtime, execution, dependencies.connectorService),
     blobs: createBlobsRuntime(runtime, execution, dependencies.blobStorage),
   }

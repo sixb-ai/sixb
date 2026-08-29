@@ -6456,6 +6456,266 @@ export type ListRuleStatesResponses = {
 
 export type ListRuleStatesResponse = ListRuleStatesResponses[keyof ListRuleStatesResponses]
 
+export type ListSharedAccessGrantsData = {
+  body?: never
+  path?: never
+  query: {
+    definitionId: string
+    primaryId?: string
+    includeRevoked?: boolean
+    includeExpired?: boolean
+    limit?: number
+    offset?: number
+  }
+  url: "/api/share-grants"
+}
+
+export type ListSharedAccessGrantsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type ListSharedAccessGrantsError =
+  ListSharedAccessGrantsErrors[keyof ListSharedAccessGrantsErrors]
+
+export type ListSharedAccessGrantsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    grants: Array<{
+      id: string
+      definitionId: string
+      target: {
+        objectTypeId: string
+        primaryId: string
+      }
+      issuedBy: {
+        type: "user" | "serviceAccount"
+        id: string
+      }
+      destinationPath: string
+      createdAt: string
+      expiresAt: string
+      revokedAt?: string
+      revokedBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }>
+    hasMore: boolean
+    total: number
+  }
+}
+
+export type ListSharedAccessGrantsResponse =
+  ListSharedAccessGrantsResponses[keyof ListSharedAccessGrantsResponses]
+
+export type IssueSharedAccessGrantData = {
+  body: {
+    definitionId: string
+    target: {
+      objectTypeId: string
+      primaryId: string
+    }
+    destinationPath: string
+    expiresAt: string
+  }
+  path?: never
+  query?: never
+  url: "/api/share-grants"
+}
+
+export type IssueSharedAccessGrantErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type IssueSharedAccessGrantError =
+  IssueSharedAccessGrantErrors[keyof IssueSharedAccessGrantErrors]
+
+export type IssueSharedAccessGrantResponses = {
+  /**
+   * Response for status 201
+   */
+  201: {
+    grant: {
+      id: string
+      definitionId: string
+      target: {
+        objectTypeId: string
+        primaryId: string
+      }
+      issuedBy: {
+        type: "user" | "serviceAccount"
+        id: string
+      }
+      destinationPath: string
+      createdAt: string
+      expiresAt: string
+      revokedAt?: string
+      revokedBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+    url: string
+  }
+}
+
+export type IssueSharedAccessGrantResponse =
+  IssueSharedAccessGrantResponses[keyof IssueSharedAccessGrantResponses]
+
+export type RevokeSharedAccessGrantData = {
+  body?: never
+  path: {
+    grantId: string
+  }
+  query?: never
+  url: "/api/share-grants/{grantId}"
+}
+
+export type RevokeSharedAccessGrantErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type RevokeSharedAccessGrantError =
+  RevokeSharedAccessGrantErrors[keyof RevokeSharedAccessGrantErrors]
+
+export type RevokeSharedAccessGrantResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    grant: {
+      id: string
+      definitionId: string
+      target: {
+        objectTypeId: string
+        primaryId: string
+      }
+      issuedBy: {
+        type: "user" | "serviceAccount"
+        id: string
+      }
+      destinationPath: string
+      createdAt: string
+      expiresAt: string
+      revokedAt?: string
+      revokedBy?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+    }
+  }
+}
+
+export type RevokeSharedAccessGrantResponse =
+  RevokeSharedAccessGrantResponses[keyof RevokeSharedAccessGrantResponses]
+
 export type ListObjectTypesData = {
   body?: never
   path?: never

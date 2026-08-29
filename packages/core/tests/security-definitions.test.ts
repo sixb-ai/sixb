@@ -719,7 +719,7 @@ describe("role definitions", () => {
     }
 
     expect(() => createRuntime({ groups: [commercial], roles: [role] })).toThrow(
-      "grant capability must be 'access', 'view', 'edit', 'append', 'apply', 'run', 'observe', or 'manage'."
+      "grant capability must be 'access', 'view', 'edit', 'append', 'apply', 'share', 'run', 'observe', or 'manage'."
     )
   })
 

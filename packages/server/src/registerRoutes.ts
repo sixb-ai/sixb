@@ -22,6 +22,7 @@ import { registerPipelineRoutes } from "./routes/pipelines"
 import { registerProjectRoutes } from "./routes/project"
 import { registerProjectionRoutes } from "./routes/projections"
 import { registerRuleRoutes } from "./routes/rules"
+import { registerShareGrantRoutes } from "./routes/share-grants"
 import { registerStatusRoutes } from "./routes/status"
 import { registerSyncRoutes } from "./routes/syncs"
 import { registerTelemetryRoutes } from "./routes/telemetry"
@@ -45,6 +46,7 @@ export function registerHttpRoutes(app: Elysia, host: SixbHostView, options: Htt
   registerPipelineRoutes(app, host)
   registerWorkflowRoutes(app, host)
   registerRuleRoutes(app, host)
+  registerShareGrantRoutes(app, host)
   registerOntologyRoutes(app, host)
   registerObjectRoutes(app, host)
   registerActionRoutes(app, host)

@@ -46,6 +46,7 @@ import { PgTimeseriesStorage } from "./pg-timeseries-storage"
 import { PgWebhookRunStorage } from "./pg-webhook-run-storage"
 import { PgWorkflowInterventionStorage } from "./pg-workflow-intervention-storage"
 import { PgWorkflowRunStorage } from "./pg-workflow-run-storage"
+import { PgShareGrantStorage } from "./share-grant-storage"
 import { isRetryableTransactionConflict } from "./storage-errors"
 import { registerPostgresStorageTestingAdapter } from "./testing"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
@@ -149,6 +150,7 @@ export class PostgresStorage implements MigrationCapableStorage {
   readonly webhookRuns: PgWebhookRunStorage
   readonly rules: PgRulesStorage
   readonly connectorConnections: PgConnectorConnectionStorage
+  readonly shareGrants: PgShareGrantStorage
   readonly migrators: readonly StorageMigrator[]
 
   private readonly sql: SQL
@@ -223,6 +225,7 @@ export class PostgresStorage implements MigrationCapableStorage {
     this.webhookRuns = createOperationScopedFacade(stores.webhookRuns, scope)
     this.rules = createOperationScopedFacade(stores.rules, scope)
     this.connectorConnections = createOperationScopedFacade(stores.connectorConnections, scope)
+    this.shareGrants = createOperationScopedFacade(stores.shareGrants, scope)
     registerPostgresStorageTestingAdapter(this, (durationMs) =>
       stores.connectorConnections.advanceTimeForTesting(durationMs)
     )
@@ -353,6 +356,7 @@ function createPostgresStores(
     webhookRuns: new PgWebhookRunStorage(sql, executions),
     rules: new PgRulesStorage(sql),
     connectorConnections: new PgConnectorConnectionStorage(sql),
+    shareGrants: new PgShareGrantStorage(sql),
   }
 }
 
@@ -374,6 +378,7 @@ interface PostgresStoreSet {
   readonly webhookRuns: PgWebhookRunStorage
   readonly rules: PgRulesStorage
   readonly connectorConnections: PgConnectorConnectionStorage
+  readonly shareGrants: PgShareGrantStorage
 }
 
 function resolveTimeoutMillis(value: number | undefined, label: string): number | undefined {
