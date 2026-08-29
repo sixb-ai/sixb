@@ -209,7 +209,7 @@ describe("runtime access plans", () => {
     ).toThrow("maximum of 4096 scoped action subjects")
   })
 
-  test("binds non-principal delegation provenance without making it durable", () => {
+  test("makes only shared-session delegation provenance durable", () => {
     const access: RuntimeAccessPlan = { grants: [] }
     const scope = createDelegatedRequestScope({
       projectId: "project-1",
@@ -230,8 +230,24 @@ describe("runtime access plans", () => {
         sessionId: "session-1",
       },
     })
-    expect(() => getAuthorizationRef(scope.authorization)).toThrow(
-      "cannot cross a durable execution boundary yet"
+    expect(getAuthorizationRef(scope.authorization)).toEqual({
+      type: "delegated",
+      delegation: {
+        kind: "share",
+        grantId: "grant-1",
+        sessionId: "session-1",
+      },
+    })
+
+    const processLocal = createDelegatedRequestScope({
+      projectId: "project-1",
+      requestId: "request-process-local",
+      correlationId: "correlation-process-local",
+      access,
+      delegation: { kind: "share", id: "grant-1" },
+    })
+    expect(() => getAuthorizationRef(processLocal.authorization)).toThrow(
+      "Only shared-session delegation can cross a durable execution boundary"
     )
 
     const spoofed = createDelegatedRuntimeAuthorization({

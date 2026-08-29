@@ -1,8 +1,13 @@
 import { randomUUID } from "node:crypto"
-import type { AuthorizationContext } from "../authorization"
+import type { AuthorizationContext, RuntimeAccessPlan } from "../authorization"
 import type { OntologySource } from "../ontology"
 import { isBoundSixb, type Sixb } from "../runtime/sixb"
-import { createDisabledRequestScope, createPrincipalRequestScope } from "./scopes"
+import type { DelegatedExecutionLimits } from "./limits"
+import {
+  createDelegatedRequestScope,
+  createDisabledRequestScope,
+  createPrincipalRequestScope,
+} from "./scopes"
 import type { AuthorizationRef, ExecutionScope } from "./types"
 
 export type {
@@ -62,6 +67,16 @@ export type RequestExecutionAuthorization =
       readonly context: AuthorizationContext
       readonly credential?: Extract<AuthorizationRef, { readonly type: "principal" }>["credential"]
     }
+  | {
+      readonly type: "delegated"
+      readonly access: RuntimeAccessPlan
+      readonly limits?: DelegatedExecutionLimits
+      readonly delegation: {
+        readonly kind: "share"
+        readonly id: string
+        readonly sessionId: string
+      }
+    }
   | { readonly type: "disabled" }
 
 export interface BindRequestExecutionInput {
@@ -81,24 +96,42 @@ export function bindRequestExecution(
 ): Sixb<readonly OntologySource[]> {
   const requestId = requestIdentifier(input.request)
   const correlationId = correlationIdentifier(input.request, requestId)
-  const scope =
-    input.authorization.type === "principal"
-      ? createPrincipalRequestScope({
-          projectId: host.id,
-          requestId,
-          correlationId,
-          context: input.authorization.context,
-          ...(input.authorization.credential === undefined
-            ? {}
-            : { credential: input.authorization.credential }),
-        })
-      : createDisabledRequestScope({ projectId: host.id, requestId, correlationId })
+  const scope = createRequestScope(host.id, requestId, correlationId, input.authorization)
 
   const sixb = host.withScope(scope)
   if (!isBoundSixb(sixb)) {
     throw new Error("[Sixb] Request host did not return an execution-bound Sixb SDK.")
   }
   return sixb
+}
+
+function createRequestScope(
+  projectId: string,
+  requestId: string,
+  correlationId: string,
+  authorization: RequestExecutionAuthorization
+): ExecutionScope {
+  switch (authorization.type) {
+    case "principal":
+      return createPrincipalRequestScope({
+        projectId,
+        requestId,
+        correlationId,
+        context: authorization.context,
+        ...(authorization.credential === undefined ? {} : { credential: authorization.credential }),
+      })
+    case "delegated":
+      return createDelegatedRequestScope({
+        projectId,
+        requestId,
+        correlationId,
+        access: authorization.access,
+        ...(authorization.limits === undefined ? {} : { limits: authorization.limits }),
+        delegation: authorization.delegation,
+      })
+    case "disabled":
+      return createDisabledRequestScope({ projectId, requestId, correlationId })
+  }
 }
 
 function requestIdentifier(request: Request): string {

@@ -1,5 +1,6 @@
 import { AGENT_API_GATEWAY_PREFIX } from "@sixb/core/internal/agents"
 import { isCsrfExemptMethod } from "@sixb/core/internal/auth"
+import { isSharedAccessPublicPath } from "./shared-access"
 
 const CONNECTOR_OAUTH_CALLBACK_PATH = "/auth/connectors/callback"
 
@@ -40,6 +41,10 @@ export function isPublicRoute(pathname: string, method: string): boolean {
   const normalizedMethod = method.toUpperCase()
 
   if (normalizedMethod === "OPTIONS") {
+    return true
+  }
+
+  if (isSharedAccessPublicPath(pathname, method)) {
     return true
   }
 

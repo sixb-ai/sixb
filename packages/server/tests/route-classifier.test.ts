@@ -20,6 +20,9 @@ const PUBLIC: ReadonlyArray<readonly [string, string, string]> = [
   ["POST", "/api/webhooks/github/events", "third-party callers sign their payloads"],
   ["GET", "/api/auth/session", "answers whether a session exists"],
   ["POST", "/api/auth/sign-out", "must work with an expired session"],
+  ["POST", "/api/shared-access/shr_1/exchange", "link secret authenticates the exchange"],
+  ["GET", "/api/shared-access/shr_1/session", "grant-specific cookie authenticates the session"],
+  ["POST", "/api/shared-access/shr_1/sign-out", "shared CSRF authenticates sign-out"],
   ["GET", "/auth/assets/auth-example.js", "custom auth experience asset"],
   ["HEAD", "/auth/assets/auth-example.js", "custom auth experience asset metadata"],
   ["GET", "/auth/sign-in", "the page that creates a session"],
@@ -62,6 +65,26 @@ describe("classifyRoute", () => {
         classifyRoute(request(method, "/api/webhooks/github/events")).kind,
         `${method} /api/webhooks/github/events`
       ).toBe("api")
+    }
+  })
+
+  test("shared-access lifecycle routes are public only for their exact method and shape", () => {
+    const exact = [
+      ["POST", "/api/shared-access/shr_1/exchange"],
+      ["GET", "/api/shared-access/shr_1/session"],
+      ["POST", "/api/shared-access/shr_1/sign-out"],
+    ] as const
+    for (const [method, path] of exact) {
+      expect(classifyRoute(request(method, path)).kind).toBe("public")
+    }
+    for (const [method, path] of [
+      ["GET", "/api/shared-access/shr_1/exchange"],
+      ["POST", "/api/shared-access/shr_1/session"],
+      ["GET", "/api/shared-access/shr_1/sign-out"],
+      ["POST", "/api/shared-access/shr_1/unknown"],
+      ["POST", "/api/shared-access/shr_1/extra/exchange"],
+    ] as const) {
+      expect(classifyRoute(request(method, path)).kind, `${method} ${path}`).toBe("api")
     }
   })
 

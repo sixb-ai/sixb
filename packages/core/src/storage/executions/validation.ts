@@ -18,6 +18,10 @@ export interface ExecutionValidationLookup {
     readonly projectId: string
     readonly id: string
   }): Promise<ExecutionRecord | null>
+  getShareSession(params: {
+    readonly projectId: string
+    readonly id: string
+  }): Promise<{ readonly grantId: string } | null>
 }
 
 export function normalizeExecutionRecord(
@@ -54,6 +58,9 @@ export async function validateExecutionRecordReferences(
       lookup
     )
     await validateCredential(record, lookup)
+  }
+  if (record.authorizationRef.type === "delegated") {
+    await validateDelegation(record, lookup)
   }
 
   await validateParent(record, lookup)
@@ -144,6 +151,17 @@ function assertAuthorizationRef(ref: AuthorizationRef): void {
       assertNonBlank(ref.primitive.id, "Authority primitive id")
       assertNonBlank(ref.primitive.runId, "Authority primitive run id")
       return
+    case "delegated":
+      if (ref.delegation.kind !== "share") {
+        invalid(
+          `Unknown authority delegation kind '${String(
+            (ref.delegation as { kind?: unknown }).kind
+          )}'.`
+        )
+      }
+      assertNonBlank(ref.delegation.grantId, "Authority delegation grant id")
+      assertNonBlank(ref.delegation.sessionId, "Authority delegation session id")
+      return
     case "kernel":
       assertKernelOperation(ref.operation, "Authority kernel operation")
       return
@@ -174,7 +192,13 @@ function assertExecutorAuthority(record: ExecutionRecord): void {
         }
         return
       }
-      invalid("Request executions require principal or explicitly disabled authority.")
+      if (authorizationRef.type === "delegated") {
+        if (requestedBy !== undefined) {
+          invalid("Delegated request executions cannot have a requested-by principal.")
+        }
+        return
+      }
+      invalid("Request executions require principal, delegated, or explicitly disabled authority.")
       break
     }
     case "primitive": {
@@ -277,6 +301,27 @@ async function validateCredential(
     throw new ExecutionStorageError(
       "invalid_credential",
       `[Sixb] Authority access token '${credential.id}' does not belong to principal '${principal.id}'.`
+    )
+  }
+}
+
+async function validateDelegation(
+  record: ExecutionRecord,
+  lookup: ExecutionValidationLookup
+): Promise<void> {
+  if (record.authorizationRef.type !== "delegated") return
+  const { grantId, sessionId } = record.authorizationRef.delegation
+  const session = await lookup.getShareSession({ projectId: record.projectId, id: sessionId })
+  if (!session) {
+    throw new ExecutionStorageError(
+      "missing_credential",
+      `[Sixb] Authority shared session '${sessionId}' does not exist in project '${record.projectId}'.`
+    )
+  }
+  if (session.grantId !== grantId) {
+    throw new ExecutionStorageError(
+      "invalid_credential",
+      `[Sixb] Authority shared session '${sessionId}' does not belong to grant '${grantId}'.`
     )
   }
 }

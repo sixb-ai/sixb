@@ -699,7 +699,8 @@ describe("server auth guard", () => {
         headers: {
           origin: "http://atlas.localhost",
           "access-control-request-method": "PUT",
-          "access-control-request-headers": "content-type,x-sixb-csrf,x-sixb-session-activity",
+          "access-control-request-headers":
+            "content-type,x-sixb-csrf,x-sixb-session-activity,x-sixb-share-grant",
         },
       })
     )
@@ -717,7 +718,7 @@ describe("server auth guard", () => {
     expect(allowed.headers.get("access-control-allow-origin")).toBe("http://atlas.localhost")
     expect(allowed.headers.get("access-control-allow-credentials")).toBe("true")
     expect(allowed.headers.get("access-control-allow-headers")).toBe(
-      "authorization, content-type, x-sixb-csrf, x-sixb-session-activity"
+      "authorization, content-type, x-sixb-csrf, x-sixb-session-activity, x-sixb-share-grant"
     )
     expect(rejected.status).toBe(403)
   })

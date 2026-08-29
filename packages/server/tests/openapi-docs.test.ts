@@ -89,7 +89,7 @@ describe("OpenAPI docs", () => {
       in: "header",
       name: "x-sixb-csrf",
       description:
-        "Required for authenticated mutating requests. Use the csrfToken returned by GET /api/auth/session.",
+        "Required for cookie-authenticated mutating requests. Use the csrfToken returned by the corresponding session endpoint.",
     })
     expect(spec.components?.securitySchemes?.sixbBearer).toEqual({
       type: "http",
@@ -97,6 +97,13 @@ describe("OpenAPI docs", () => {
       bearerFormat: "Sixb access token",
       description:
         "Use a Sixb personal access token or service-account token. Bearer tokens are accepted only on routes that explicitly document this scheme.",
+    })
+    expect(spec.components?.securitySchemes?.sixbSharedGrant).toEqual({
+      type: "apiKey",
+      in: "header",
+      name: "x-sixb-share-grant",
+      description:
+        "Selects the shared grant whose grant-specific HttpOnly session cookie must authenticate the request.",
     })
 
     const declaredTags = new Set((spec.tags ?? []).map((tag) => tag.name).filter(Boolean))
@@ -167,9 +174,16 @@ describe("OpenAPI docs", () => {
       const method = route.method.toLowerCase()
       const path = toOpenApiPath(route.path)
       expectedBearer.add(`${method} ${path}`)
-      const expected = isCsrfExemptMethod(route.method)
+      const expected: Record<string, readonly unknown[]>[] = isCsrfExemptMethod(route.method)
         ? [{ sixbBearer: [] }]
         : [{ sixbCsrf: [] }, { sixbBearer: [] }]
+      if (route.sharedSession) {
+        expected.push(
+          isCsrfExemptMethod(route.method)
+            ? { sixbSharedGrant: [] }
+            : { sixbSharedGrant: [], sixbCsrf: [] }
+        )
+      }
       expect(spec.paths?.[path]?.[method]?.security, `${method} ${path}`).toEqual(expected)
     }
 

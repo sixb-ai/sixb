@@ -31,10 +31,17 @@ import { consumeInternalRequestAuthState } from "./auth/scope"
 import { SESSION_ACTIVITY_HEADER_NAME } from "./auth/session-activity"
 import { createSessionRenewalCookieHeaders } from "./auth/session-cookies"
 import {
+  SHARED_ACCESS_GRANT_HEADER_NAME,
+  SharedAccessBoundary,
+  type SixbSharedAccessOptions,
+} from "./auth/shared-access"
+import {
   SIXB_BEARER_SECURITY_SCHEME,
   SIXB_BEARER_SECURITY_SCHEME_ID,
   SIXB_CSRF_SECURITY_SCHEME,
   SIXB_CSRF_SECURITY_SCHEME_ID,
+  SIXB_SHARED_GRANT_SECURITY_SCHEME,
+  SIXB_SHARED_GRANT_SECURITY_SCHEME_ID,
 } from "./openapi/security"
 import { OPENAPI_TAG_METADATA } from "./openapi/tags"
 import { registerHttpRoutes } from "./registerRoutes"
@@ -52,6 +59,8 @@ export interface SixbServerOptions {
   browser: SixbApiBrowserPolicy
   /** Optional custom-app auth bundle mounted under the API's `/auth` routes. */
   authExperience?: SixbAuthExperienceOptions
+  /** Optional server limits for short-lived shared-access sessions. */
+  sharedAccess?: SixbSharedAccessOptions
 }
 
 export function createSixbServer(options: SixbServerOptions): SixbServer {
@@ -67,6 +76,7 @@ export class SixbServer {
   private readonly authContextResolver: ResolveRequestAuthContext
   private readonly authRedirectContextResolver: ResolveAuthRedirectContext
   private readonly authExperience?: SixbAuthExperienceOptions
+  private readonly sharedAccessOptions: SixbSharedAccessOptions
   private app: SixbApp | null = null
   private bunServer: ReturnType<typeof Bun.serve> | null = null
   private maintenance: OntologyMaintenanceHandle | null = null
@@ -82,6 +92,7 @@ export class SixbServer {
       this.apiBrowserPolicy
     )
     this.authExperience = options.authExperience
+    this.sharedAccessOptions = options.sharedAccess ?? {}
   }
 
   getHost(): SixbHostView {
@@ -124,6 +135,10 @@ export class SixbServer {
 
   getAuthExperience(): SixbAuthExperienceOptions | undefined {
     return this.authExperience
+  }
+
+  getSharedAccessOptions(): SixbSharedAccessOptions {
+    return this.sharedAccessOptions
   }
 
   async start(): Promise<void> {
@@ -179,6 +194,11 @@ export function createSixbApi(server: SixbServer) {
     host,
     resolveAuthContext: (request) => server.resolveAuthContext(request),
   })
+  const sharedAccess = new SharedAccessBoundary(host, server.getSharedAccessOptions())
+  const preparedSharedAccess = new WeakMap<
+    Request,
+    Awaited<ReturnType<SharedAccessBoundary["resolveRequest"]>>
+  >()
   guard.assertCanServeHttp({ production: process.env.NODE_ENV === "production" })
   const apiBrowserPolicy = server.getApiBrowserPolicy()
 
@@ -200,21 +220,65 @@ export function createSixbApi(server: SixbServer) {
         "content-type",
         CSRF_HEADER_NAME,
         SESSION_ACTIVITY_HEADER_NAME,
+        SHARED_ACCESS_GRANT_HEADER_NAME,
       ],
       exposeHeaders: [CSRF_TOKEN_RESPONSE_HEADER_NAME],
       maxAge: 600,
     })
   )
+  app.onRequest(async ({ request, set }) => {
+    // Resolve Share intent before Elysia parses route inputs. Otherwise an unsupported route or an
+    // invalid shared session could escape through a route-specific 4xx before this boundary ran.
+    // CORS is registered first so allowed app origins can read these generic boundary responses.
+    const shared = await sharedAccess.resolveRequest(request)
+    preparedSharedAccess.set(request, shared)
+    if (shared.kind === "allow") {
+      // Route parsing happens after onRequest but before derive. Set this here so parse/schema
+      // failures from an authenticated shared request cannot become cacheable.
+      setResponseHeader(set, "cache-control", "no-store")
+    }
+    return shared.kind === "deny" ? shared.response : undefined
+  })
 
   // Resolve authentication and bind one execution SDK at the request boundary. Protected routes
   // never choose between a principal SDK and the ambient runtime themselves.
   app
     .derive(async ({ request }) => {
+      const shared =
+        preparedSharedAccess.get(request) ?? (await sharedAccess.resolveRequest(request))
+      preparedSharedAccess.delete(request)
+      if (shared.kind === "deny") {
+        return {
+          auth: { kind: "deny" as const, response: shared.response },
+          sharedAccessCookies: null,
+          sixb: null,
+        }
+      }
+      if (shared.kind === "allow") {
+        return {
+          auth: { kind: "allow" as const, session: null },
+          sharedAccessCookies: shared.cookies,
+          sixb: bindRequestExecution(host, {
+            request,
+            authorization: {
+              type: "delegated",
+              access: shared.context.access,
+              delegation: {
+                kind: "share",
+                id: shared.context.grantId,
+                sessionId: shared.context.sessionId,
+              },
+            },
+          }),
+        }
+      }
+
       const internalAuthState = consumeInternalRequestAuthState(request)
       if (internalAuthState) {
         const { authorization, ...agentState } = internalAuthState
         return {
           auth: { kind: "allow" as const, session: null },
+          sharedAccessCookies: null,
           ...agentState,
           sixb: bindRequestExecution(host, {
             request,
@@ -227,6 +291,7 @@ export function createSixbApi(server: SixbServer) {
       if (auth.kind === "deny" || !auth.session?.authenticated) {
         return {
           auth,
+          sharedAccessCookies: null,
           sixb:
             auth.kind === "allow" && !guard.isAuthEnabled()
               ? bindRequestExecution(host, {
@@ -244,6 +309,7 @@ export function createSixbApi(server: SixbServer) {
           : { type: "accessToken" as const, id: auth.session.accessToken.id }
       return {
         auth,
+        sharedAccessCookies: null,
         sixb: bindRequestExecution(host, {
           request,
           authorization: { type: "principal", context: authz, credential },
@@ -251,7 +317,29 @@ export function createSixbApi(server: SixbServer) {
       }
     })
     .onBeforeHandle(({ auth }) => (auth.kind === "deny" ? auth.response : undefined))
-    .mapResponse(({ auth, request, set }) => {
+    .mapResponse(({ auth, request, responseValue, set, sharedAccessCookies }) => {
+      if (sharedAccessCookies) {
+        if (sharedAccessCookies.setCookies.length > 0) {
+          appendSetCookieHeaders(set, sharedAccessCookies.setCookies)
+        }
+        setResponseHeader(set, CSRF_TOKEN_RESPONSE_HEADER_NAME, sharedAccessCookies.csrfToken)
+        setResponseHeader(set, "cache-control", "no-store")
+
+        // Elysia intentionally gives headers from an explicit Response precedence over `set`.
+        // File reads carry their normal long-lived private cache policy on such a Response, so
+        // rebuild it with `no-store` at the same boundary that selected the Share authority.
+        if (responseValue instanceof Response) {
+          const headers = new Headers(responseValue.headers)
+          headers.set("cache-control", "no-store")
+          return new Response(responseValue.body, {
+            status: responseValue.status,
+            statusText: responseValue.statusText,
+            headers,
+          })
+        }
+        return
+      }
+
       if (
         !auth ||
         auth.kind !== "allow" ||
@@ -288,6 +376,7 @@ export function createSixbApi(server: SixbServer) {
           securitySchemes: {
             [SIXB_CSRF_SECURITY_SCHEME_ID]: SIXB_CSRF_SECURITY_SCHEME,
             [SIXB_BEARER_SECURITY_SCHEME_ID]: SIXB_BEARER_SECURITY_SCHEME,
+            [SIXB_SHARED_GRANT_SECURITY_SCHEME_ID]: SIXB_SHARED_GRANT_SECURITY_SCHEME,
           },
           schemas: ObjectQueryOpenApiSchemas,
         },
@@ -318,6 +407,7 @@ export function createSixbApi(server: SixbServer) {
       server.resolveInvitationRedirectContext(request, input),
   })
   registerHttpRoutes(app, host, {
+    sharedAccess,
     connectorConnections: {
       resolveReturnTo: (request, returnTo) => {
         const authContext = server.resolveAuthContext(request)

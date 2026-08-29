@@ -6716,6 +6716,137 @@ export type RevokeSharedAccessGrantResponses = {
 export type RevokeSharedAccessGrantResponse =
   RevokeSharedAccessGrantResponses[keyof RevokeSharedAccessGrantResponses]
 
+export type ExchangeSharedAccessData = {
+  body: {
+    secret: string
+  }
+  path: {
+    grantId: string
+  }
+  query?: never
+  url: "/api/shared-access/{grantId}/exchange"
+}
+
+export type ExchangeSharedAccessErrors = {
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 503
+   */
+  503: {
+    error: string
+  }
+}
+
+export type ExchangeSharedAccessError = ExchangeSharedAccessErrors[keyof ExchangeSharedAccessErrors]
+
+export type ExchangeSharedAccessResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    grantId: string
+    destinationPath: string
+    expiresAt: string
+    absoluteExpiresAt: string
+    csrfToken: string
+  }
+}
+
+export type ExchangeSharedAccessResponse =
+  ExchangeSharedAccessResponses[keyof ExchangeSharedAccessResponses]
+
+export type GetSharedAccessSessionData = {
+  body?: never
+  path: {
+    grantId: string
+  }
+  query?: never
+  url: "/api/shared-access/{grantId}/session"
+}
+
+export type GetSharedAccessSessionErrors = {
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 503
+   */
+  503: {
+    error: string
+  }
+}
+
+export type GetSharedAccessSessionError =
+  GetSharedAccessSessionErrors[keyof GetSharedAccessSessionErrors]
+
+export type GetSharedAccessSessionResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    grantId: string
+    destinationPath: string
+    expiresAt: string
+    absoluteExpiresAt: string
+    csrfToken: string
+  }
+}
+
+export type GetSharedAccessSessionResponse =
+  GetSharedAccessSessionResponses[keyof GetSharedAccessSessionResponses]
+
+export type SignOutSharedAccessData = {
+  body?: never
+  path: {
+    grantId: string
+  }
+  query?: never
+  url: "/api/shared-access/{grantId}/sign-out"
+}
+
+export type SignOutSharedAccessErrors = {
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 503
+   */
+  503: {
+    error: string
+  }
+}
+
+export type SignOutSharedAccessError = SignOutSharedAccessErrors[keyof SignOutSharedAccessErrors]
+
+export type SignOutSharedAccessResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    signedOut: true
+  }
+}
+
+export type SignOutSharedAccessResponse =
+  SignOutSharedAccessResponses[keyof SignOutSharedAccessResponses]
+
 export type ListObjectTypesData = {
   body?: never
   path?: never

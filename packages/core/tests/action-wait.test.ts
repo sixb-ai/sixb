@@ -1,10 +1,11 @@
 import { expect, spyOn, test } from "bun:test"
 import { waitForActionRun } from "../src/actions/request"
 import { emptyGrantIndex } from "../src/authorization"
-import { createTestingScope } from "../src/execution/scopes"
+import type { RuntimeAccessPlan } from "../src/authorization/access-plan"
+import { createDelegatedRequestScope, createTestingScope } from "../src/execution/scopes"
 import { ActionRunTimeoutError } from "../src/objects/action/errors"
 import type { SixbRuntimeContext } from "../src/runtime/types"
-import type { ActionRunRecord } from "../src/storage"
+import type { ActionRunRecord, ExecutionRecord } from "../src/storage"
 
 function runtimeWithSubscription(subscribe: () => Promise<() => void>): SixbRuntimeContext {
   return {
@@ -80,6 +81,93 @@ function principalRuntimeForRun(input: {
       },
     } as unknown as SixbRuntimeContext,
   }
+}
+
+function delegatedRuntimeForRun(
+  run: ActionRunRecord,
+  maxVisibleJsonBytes: number
+): SixbRuntimeContext {
+  const access: RuntimeAccessPlan = {
+    grants: [
+      {
+        kind: "object.view",
+        selection: {
+          kind: "selected",
+          roots: [
+            {
+              anchor: {
+                objectTypeId: run.subject.kind === "object" ? run.subject.objectTypeId : "Secret",
+                primaryId: run.subject.kind === "object" ? run.subject.primaryId : "secret-1",
+              },
+              node: {
+                objects: [{ objectTypeId: "Secret", propertyIds: ["id"] }],
+                links: [],
+              },
+            },
+          ],
+        },
+      },
+      {
+        kind: "action.apply",
+        actionId: run.actionId,
+        subjects: [{ objectTypeId: "Secret", primaryId: "secret-1" }],
+      },
+    ],
+  }
+  const scope = createDelegatedRequestScope({
+    projectId: "test",
+    requestId: "shared-request",
+    correlationId: "shared-correlation",
+    access,
+    limits: {
+      maxTraversalFacts: 100,
+      maxMaterializedObjects: 100,
+      maxTelemetrySeries: 10,
+      maxTelemetryPoints: 100,
+      maxVisibleJsonBytes,
+    },
+    delegation: { kind: "share", id: "share-grant", sessionId: "share-session" },
+  })
+  const parent: ExecutionRecord = {
+    id: "shared-request-execution",
+    projectId: "test",
+    executor: { type: "request", requestId: "shared-request" },
+    source: { type: "http", requestId: "shared-request" },
+    correlationId: "shared-correlation",
+    authorizationRef: {
+      type: "delegated",
+      delegation: { kind: "share", grantId: "share-grant", sessionId: "share-session" },
+    },
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+  }
+  const child: ExecutionRecord = {
+    id: run.executionId,
+    projectId: "test",
+    executor: { type: "primitive", kind: "action", runId: run.id },
+    source: { type: "execution", executionId: parent.id },
+    correlationId: parent.correlationId,
+    authorizationRef: {
+      type: "trustedPrimitive",
+      primitive: { kind: "action", id: run.actionId, runId: run.id },
+    },
+    createdAt: new Date("2026-01-01T00:00:00.001Z"),
+  }
+
+  return {
+    projectId: "test",
+    runtimeAuthorization: scope.authorization,
+    storage: {
+      actionRuns: { getById: async () => run },
+      executions: {
+        getById: async ({ id }: { readonly id: string }) => {
+          if (id === child.id) return child
+          if (id === parent.id) return parent
+          return null
+        },
+      },
+    },
+    events: { subscribe: async () => () => {} },
+  } as unknown as SixbRuntimeContext
 }
 
 /**
@@ -207,4 +295,23 @@ test("an authorized principal and unrestricted runtime can wait for a terminal r
   )
   expect(authorized.calls).toEqual({ reads: 1, subscriptions: 1 })
   expect(unrestricted.calls).toEqual({ reads: 1, subscriptions: 1 })
+})
+
+test("a delegated wait rejects an oversized terminal Action run", async () => {
+  const oversized: ActionRunRecord = {
+    ...terminalRun,
+    writeback: {
+      status: "succeeded",
+      completedAt: new Date("2026-01-01T00:00:01.000Z"),
+      result: { value: "x".repeat(1_024) },
+    },
+  }
+
+  await expect(
+    waitForActionRun(delegatedRuntimeForRun(oversized, 512), { runId: oversized.id })
+  ).rejects.toMatchObject({
+    code: "delegated_execution_limit_exceeded",
+    metric: "visibleJsonBytes",
+    limit: 512,
+  })
 })

@@ -96,6 +96,10 @@
       "@sixb/core/internal/share-grant-storage-provider": [
         "./packages/core/src/storage/share-grants/provider.ts"
       ],
+      "@sixb/core/internal/share-session-storage-provider": [
+        "./packages/core/src/storage/share-sessions/provider.ts"
+      ],
+      "@sixb/core/internal/shares": ["./packages/core/src/shares/internal.ts"],
       "@sixb/core/internal/sync-run-storage-provider": [
         "./packages/core/src/storage/sync-runs/provider.ts"
       ],

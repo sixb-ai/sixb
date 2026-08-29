@@ -1,9 +1,11 @@
 import type { SixbErrorCode } from "@sixb/core"
+import { assertSharedAccessGrantId, markClientSharedAuthority } from "./client-authority"
 import { type Auth, type Client, type Config, createClient, createConfig } from "./generated/client"
 import { client as sharedClient } from "./generated/client.gen"
 
 export const SIXB_CSRF_HEADER_NAME = "x-sixb-csrf"
 export const SIXB_CSRF_TOKEN_RESPONSE_HEADER_NAME = "x-sixb-csrf-token"
+export const SIXB_SHARED_ACCESS_GRANT_HEADER_NAME = "x-sixb-share-grant"
 
 export type SixbClient = Client
 
@@ -14,6 +16,11 @@ export type SixbClientAuth =
     }
   | {
       readonly kind: "cookie"
+      readonly csrfToken?: () => string | null | undefined
+    }
+  | {
+      readonly kind: "shared"
+      readonly grantId: string
       readonly csrfToken?: () => string | null | undefined
     }
   | {
@@ -86,6 +93,7 @@ export function isSixbApiError(value: unknown): value is SixbApiError {
 
 export function createSixbClient(options: SixbClientOptions = {}): SixbClient {
   const client = createClient(createSixbClientConfig(options))
+  markClientSharedAuthority(client, options.auth?.kind === "shared")
   installSixbErrorInterceptor(client)
   return client
 }
@@ -95,6 +103,7 @@ export function configureSixbClient(
   options: SixbClientOptions = {}
 ): SixbClient {
   client.setConfig(createSixbClientConfig(options))
+  markClientSharedAuthority(client, options.auth?.kind === "shared")
   installSixbErrorInterceptor(client)
   return client
 }
@@ -104,12 +113,26 @@ export function createSixbClientConfig(options: SixbClientOptions = {}): Config 
   if (auth.kind === "bearer" && !auth.token.trim()) {
     throw new Error("[SixbClient] Bearer token cannot be empty.")
   }
+  if (auth.kind === "shared") {
+    assertSharedAccessGrantId(auth.grantId)
+  }
+
+  const baseUrl =
+    options.baseUrl === undefined ? undefined : normalizeSixbApiBaseUrl(options.baseUrl)
+  const configuredFetch =
+    auth.kind === "shared"
+      ? createSharedAuthorityFetch({
+          baseUrl,
+          grantId: auth.grantId,
+          fetch: options.fetch ?? globalThis.fetch,
+        })
+      : options.fetch
 
   return createConfig({
-    ...(options.baseUrl === undefined ? {} : { baseUrl: normalizeSixbApiBaseUrl(options.baseUrl) }),
-    ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+    ...(baseUrl === undefined ? {} : { baseUrl }),
+    ...(configuredFetch === undefined ? {} : { fetch: configuredFetch }),
     ...(options.headers === undefined ? {} : { headers: options.headers }),
-    credentials: auth.kind === "cookie" ? "include" : options.credentials,
+    credentials: auth.kind === "cookie" || auth.kind === "shared" ? "include" : options.credentials,
     auth: auth.kind === "none" ? undefined : createSixbAuthResolver(auth),
   })
 }
@@ -142,6 +165,11 @@ function createSixbAuthResolver(auth: SixbClientAuth): Config["auth"] {
       return isCsrfAuth(scheme) ? (auth.csrfToken?.() ?? undefined) : undefined
     }
 
+    if (auth.kind === "shared") {
+      if (isSharedGrantAuth(scheme)) return auth.grantId
+      return isCsrfAuth(scheme) ? (auth.csrfToken?.() ?? undefined) : undefined
+    }
+
     return undefined
   }
 }
@@ -152,6 +180,67 @@ function isBearerAuth(auth: Auth): boolean {
 
 function isCsrfAuth(auth: Auth): boolean {
   return auth.type === "apiKey" && auth.in !== "query" && auth.name === SIXB_CSRF_HEADER_NAME
+}
+
+function isSharedGrantAuth(auth: Auth): boolean {
+  return (
+    auth.type === "apiKey" &&
+    auth.in !== "query" &&
+    auth.name === SIXB_SHARED_ACCESS_GRANT_HEADER_NAME
+  )
+}
+
+function createSharedAuthorityFetch(input: {
+  readonly baseUrl?: string
+  readonly grantId: string
+  readonly fetch: typeof fetch
+}): typeof fetch {
+  const apiOrigin = resolveSharedApiOrigin(input.baseUrl)
+  const terminalFetch = async (
+    requestInput: Parameters<typeof fetch>[0],
+    requestInit?: Parameters<typeof fetch>[1]
+  ): Promise<Response> => {
+    const request =
+      requestInput instanceof Request && requestInit === undefined
+        ? requestInput
+        : new Request(requestInput, requestInit)
+    if (new URL(request.url).origin !== apiOrigin) {
+      throw new Error("[SixbClient] Shared access requests cannot leave the configured API origin.")
+    }
+
+    // This is the terminal transport boundary: hey-api request interceptors have all run before
+    // the configured fetch is invoked, so none can merge ambient bearer authority into the Share.
+    const headers = new Headers(request.headers)
+    headers.delete("authorization")
+    headers.set(SIXB_SHARED_ACCESS_GRANT_HEADER_NAME, input.grantId)
+    const boundedRequest = new Request(request, {
+      credentials: "include",
+      headers,
+      redirect: "error",
+    })
+    return await input.fetch.call(globalThis, boundedRequest)
+  }
+
+  return Object.assign(terminalFetch, { preconnect: input.fetch.preconnect })
+}
+
+function resolveSharedApiOrigin(baseUrl: string | undefined): string {
+  const browserOrigin =
+    typeof globalThis.location === "object" && typeof globalThis.location.origin === "string"
+      ? globalThis.location.origin
+      : undefined
+  const resolvedBaseUrl = baseUrl || browserOrigin
+  if (resolvedBaseUrl === undefined) {
+    throw new Error(
+      "[SixbClient] Shared access requires an absolute API base URL outside the browser."
+    )
+  }
+
+  try {
+    return new URL(resolvedBaseUrl, browserOrigin).origin
+  } catch {
+    throw new Error("[SixbClient] Shared access API base URL is invalid.")
+  }
 }
 
 function stripTrailingApiPath(pathname: string): string {

@@ -9,6 +9,7 @@ import type {
   ListActionRunsInput,
   ListActionRunsResult,
 } from "../storage/action-runs"
+import { assertVisibleJsonWithinLimit } from "../storage/objects/execution-limits"
 import { type ActionDescriptor, snapshotActionDescriptor } from "./descriptor"
 import {
   type RequestActionAndWaitInput,
@@ -17,6 +18,7 @@ import {
   requestAction,
   requestActionAndWait,
 } from "./request"
+import { canDelegationAccessActionRun } from "./run-authorization"
 import type { ActionDefinition } from "./types"
 import { isExactObjectActionTarget } from "./validation"
 
@@ -109,10 +111,19 @@ export function createActionsRuntime(
       getById: async (runId) => {
         switch (authority.type) {
           case "denied":
-          case "delegated":
             return null
           case "principal":
           case "unrestricted":
+            break
+          case "delegated":
+            // Unsupported delegations and plans without Action authority cannot own a visible
+            // run. Reject them before storage so a guessed run id is not an existence oracle.
+            if (
+              authority.ref.kind !== "share" ||
+              !authority.access.grants.some((grant) => grant.kind === "action.apply")
+            ) {
+              return null
+            }
             break
         }
         const run =
@@ -121,9 +132,19 @@ export function createActionsRuntime(
             id: runId,
           })) ?? null
         if (!run) return null
-        return authority.type === "unrestricted" || canViewActionRun(authority.context, run)
-          ? run
-          : null
+        if (authority.type === "unrestricted") return run
+        if (authority.type === "principal") {
+          return canViewActionRun(authority.context, run) ? run : null
+        }
+        const visible = await canDelegationAccessActionRun({
+          storage: runtime.storage,
+          projectId: runtime.projectId,
+          authority,
+          run,
+        })
+        if (!visible) return null
+        assertVisibleJsonWithinLimit(run, authority.limits)
+        return run
       },
       list: (input = {}) => {
         switch (authority.type) {

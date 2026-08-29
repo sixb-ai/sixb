@@ -30,6 +30,7 @@ import { InMemoryPipelineRunStorage, type PipelineRunStorage } from "../pipeline
 import { InMemoryProjectionRunStorage } from "../projection-runs"
 import { InMemoryRulesStorage, type RulesStorage } from "../rules"
 import { InMemoryShareGrantStorage, type ShareGrantStorage } from "../share-grants"
+import { InMemoryShareSessionStorage, type ShareSessionStorage } from "../share-sessions"
 import { InMemorySyncRunStorage, type SyncRunStorage } from "../sync-runs"
 import type { TimeseriesStorage } from "../timeseries"
 import { InMemoryTimeseriesStorage } from "../timeseries/store"
@@ -67,7 +68,11 @@ export class InMemoryStorage implements Storage {
   private readonly timeseriesStorage = new InMemoryTimeseriesStorage()
   private readonly ontologyStorage: InMemoryOntologyStorage
   private readonly authStorage = new InMemoryAuthStorage()
-  private readonly executionStorage = new InMemoryExecutionStorage(this.authStorage)
+  private readonly shareGrantStorage = new InMemoryShareGrantStorage()
+  private readonly shareSessionStorage = new InMemoryShareSessionStorage(this.shareGrantStorage)
+  private readonly executionStorage = new InMemoryExecutionStorage(this.authStorage, {
+    shareSessions: this.shareSessionStorage,
+  })
   private readonly agentStorage = new InMemoryAgentStorage(this.executionStorage)
   private readonly aiUsageStorage = new InMemoryAiUsageStorage(this.executionStorage)
   private readonly aiCostStorage = new InMemoryAiCostStorage(this.aiUsageStorage, {
@@ -83,7 +88,6 @@ export class InMemoryStorage implements Storage {
   private readonly workflowInterventionStorage = new InMemoryWorkflowInterventionStorage()
   private readonly webhookRunStorage = new InMemoryWebhookRunStorage(this.executionStorage)
   private readonly rulesStorage = new InMemoryRulesStorage()
-  private readonly shareGrantStorage = new InMemoryShareGrantStorage()
   private readonly fileUploadSessionStorage = new InMemoryFileUploadSessions()
   private readonly connectorConnectionStorage: InMemoryConnectorConnectionStorage
   readonly auth: AuthStorage
@@ -100,6 +104,7 @@ export class InMemoryStorage implements Storage {
   readonly webhookRuns: WebhookRunStorage
   readonly rules: RulesStorage
   readonly shareGrants: ShareGrantStorage
+  readonly shareSessions: ShareSessionStorage
   readonly fileUploadSessions: FileUploadSessionStore
   readonly connectorConnections: ConnectorConnectionStorage
 
@@ -130,6 +135,7 @@ export class InMemoryStorage implements Storage {
     this.webhookRuns = createOperationScopedFacade(this.webhookRunStorage, scope)
     this.rules = createOperationScopedFacade(this.rulesStorage, scope)
     this.shareGrants = createOperationScopedFacade(this.shareGrantStorage, scope)
+    this.shareSessions = createOperationScopedFacade(this.shareSessionStorage, scope)
     this.fileUploadSessions = createOperationScopedFacade(this.fileUploadSessionStorage, scope)
     this.connectorConnections = createOperationScopedFacade(this.connectorConnectionStorage, scope)
     this.ontologyStorage = new InMemoryOntologyStorage(this.objectStorage, this.timeseriesStorage, {
@@ -311,6 +317,7 @@ export class InMemoryStorage implements Storage {
       webhookRuns: this.webhookRunStorage,
       rules: this.rulesStorage,
       shareGrants: this.shareGrantStorage,
+      shareSessions: this.shareSessionStorage,
       fileUploadSessions: this.fileUploadSessionStorage,
       connectorConnections: this.connectorConnectionStorage,
       ping: async () => undefined,
@@ -339,6 +346,7 @@ export class InMemoryStorage implements Storage {
       webhookRuns: this.webhookRunStorage.snapshot(),
       rules: this.rulesStorage.snapshot(),
       shareGrants: this.shareGrantStorage.snapshot(),
+      shareSessions: this.shareSessionStorage.snapshot(),
       fileUploadSessions: this.fileUploadSessionStorage.snapshot(),
       connectorConnections: this.connectorConnectionStorage.snapshot(),
     }
@@ -362,6 +370,7 @@ export class InMemoryStorage implements Storage {
     this.webhookRunStorage.restore(snapshot.webhookRuns)
     this.rulesStorage.restore(snapshot.rules)
     this.shareGrantStorage.restore(snapshot.shareGrants)
+    this.shareSessionStorage.restore(snapshot.shareSessions)
     this.fileUploadSessionStorage.restore(snapshot.fileUploadSessions)
     this.connectorConnectionStorage.restore(snapshot.connectorConnections)
   }
@@ -385,6 +394,7 @@ export interface InMemoryStorageSnapshot {
   readonly webhookRuns: ReturnType<InMemoryWebhookRunStorage["snapshot"]>
   readonly rules: ReturnType<InMemoryRulesStorage["snapshot"]>
   readonly shareGrants: ReturnType<InMemoryShareGrantStorage["snapshot"]>
+  readonly shareSessions: ReturnType<InMemoryShareSessionStorage["snapshot"]>
   readonly fileUploadSessions: ReturnType<InMemoryFileUploadSessions["snapshot"]>
   readonly connectorConnections: ReturnType<InMemoryConnectorConnectionStorage["snapshot"]>
 }

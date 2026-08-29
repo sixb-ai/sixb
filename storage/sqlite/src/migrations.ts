@@ -77,6 +77,8 @@ import objectOverrideEditTimesSql from "./migrations/028-object-override-edit-ti
   type: "text",
 }
 import shareGrantsSql from "./migrations/029-share-grants.sql" with { type: "text" }
+import shareSessionsSql from "./migrations/030-share-sessions.sql" with { type: "text" }
+import delegatedExecutionsSql from "./migrations/031-delegated-executions.sql" with { type: "text" }
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -161,6 +163,8 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("027-agent-context-checkpoints", agentContextCheckpointsSql),
     sqliteSql("028-object-override-edit-times", objectOverrideEditTimesSql),
     sqliteSql("029-share-grants", shareGrantsSql),
+    sqliteSql("030-share-sessions", shareSessionsSql),
+    sqliteSql("031-delegated-executions", delegatedExecutionsSql),
   ],
 })
 

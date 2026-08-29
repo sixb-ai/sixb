@@ -29,7 +29,7 @@ export type ResolvedRuntimeAuthorization =
   | {
       readonly type: "unrestricted"
       readonly projectId: string
-      readonly ref: Exclude<AuthorizationRef, { readonly type: "principal" }>
+      readonly ref: Exclude<AuthorizationRef, { readonly type: "principal" | "delegated" }>
     }
   | {
       readonly type: "delegated"
@@ -211,15 +211,21 @@ export function resolveRuntimeAuthorizationForProject(input: {
 
 function resolveDurableRuntimeAuthorization(
   authorization: RuntimeAuthorization
-): Extract<ResolvedRuntimeAuthorization, { readonly type: "principal" | "unrestricted" }> {
+): RegisteredRuntimeAuthorization {
   const resolved = resolveRuntimeAuthorization(authorization)
   if (resolved.type === "denied") {
     throw new Error("[Sixb] Runtime authorization is not a registered Core capability.")
   }
   if (resolved.type === "delegated") {
-    throw new Error(
-      "[Sixb] Delegated request authority cannot cross a durable execution boundary yet."
-    )
+    if (
+      resolved.ref.kind !== "share" ||
+      resolved.ref.sessionId === undefined ||
+      !resolved.ref.sessionId.trim()
+    ) {
+      throw new Error(
+        "[Sixb] Only shared-session delegation can cross a durable execution boundary."
+      )
+    }
   }
   return resolved
 }
@@ -233,6 +239,16 @@ export function assertRuntimeAuthorizationCanCrossDurableBoundary(
 
 export function getAuthorizationRef(authorization: RuntimeAuthorization): AuthorizationRef {
   const resolved = resolveDurableRuntimeAuthorization(authorization)
+  if (resolved.type === "delegated") {
+    return {
+      type: "delegated",
+      delegation: {
+        kind: "share",
+        grantId: resolved.ref.id,
+        sessionId: resolved.ref.sessionId!,
+      },
+    }
+  }
   return cloneAuthorizationRef(resolved.ref)
 }
 
@@ -637,6 +653,8 @@ function cloneAuthorizationRef(ref: AuthorizationRef): AuthorizationRef {
       }
     case "trustedPrimitive":
       return { type: "trustedPrimitive", primitive: { ...ref.primitive } }
+    case "delegated":
+      return { type: "delegated", delegation: { ...ref.delegation } }
     case "kernel":
       return { type: "kernel", operation: { ...ref.operation } }
     case "disabled":
