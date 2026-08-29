@@ -103,6 +103,30 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     accessToken: true,
     agentApi: false,
   },
+  // Share lifecycle management is bearer-capable for programmatic administration but never
+  // agent-proxied. Shared sessions themselves use the canonical object/action routes and land in
+  // the request boundary separately.
+  {
+    operationId: "issueSharedAccessGrant",
+    method: "POST",
+    path: "/api/share-grants",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
+    operationId: "listSharedAccessGrants",
+    method: "GET",
+    path: "/api/share-grants",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
+    operationId: "revokeSharedAccessGrant",
+    method: "DELETE",
+    path: "/api/share-grants/:grantId",
+    accessToken: true,
+    agentApi: false,
+  },
   {
     operationId: "listObjectTypes",
     method: "GET",

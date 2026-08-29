@@ -19,6 +19,7 @@ import {
   type RoleDefinition,
   SecurityRegistry,
 } from "../security"
+import { type ShareDefinition, validateSharesAtStartup } from "../shares"
 import type { SyncDefinition } from "../syncs"
 import {
   validateKeyedDatasetWriterTopology,
@@ -43,6 +44,7 @@ interface DefinitionOptions {
   readonly workflows?: readonly WorkflowDefinition[]
   readonly tools?: readonly AgentToolDefinition[]
   readonly models?: ModelCatalogInput
+  readonly shares?: readonly ShareDefinition[]
   readonly groups?: readonly GroupDefinition[]
   readonly roles?: readonly RoleDefinition[]
   readonly membershipPolicies?: readonly MembershipPolicyDefinition[]
@@ -61,6 +63,11 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
   const ontology = new OntologyRegistry({ sources: options.ontology })
   const actionRegistry = new ActionRegistry({ actions: options.actions ?? [], ontology })
   const registeredActionIds = new Set(actionRegistry.list().map((action) => action.id))
+  const sharesById = validateSharesAtStartup({
+    shares: options.shares ?? [],
+    ontology,
+    actions: actionRegistry,
+  })
 
   const models = options.models === undefined ? undefined : createModelCatalog(options.models)
   const tools = createAgentToolCatalog(options.tools)
@@ -142,6 +149,7 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
     pipelineIds: new Set(pipelinesById.keys()),
     agentAvailable: models !== undefined,
     connectorIds: new Set(connectorsById.keys()),
+    shareIds: new Set(sharesById.keys()),
     getSubTypes: (objectTypeId) => ontology.listSubTypes(objectTypeId),
   })
   validateWorkflowAgentStepGroupReferences(workflows, security)
@@ -168,6 +176,7 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
     rules: createDefinitionCatalog(rulesById),
     schedules: createDefinitionCatalog(schedulesById),
     security,
+    shares: createDefinitionCatalog(sharesById),
     syncs: createDefinitionCatalog(syncsById),
     workflows: createDefinitionCatalog(workflowsById),
   })

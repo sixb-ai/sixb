@@ -19,8 +19,12 @@ export {
   normalizeDecimalValue,
 } from "./decimal"
 export type { InferSchemaOrRef, ObjectRef, ObjectRefSchema, SchemaOrRef } from "./refs"
-export { isObjectRefSchema, ref, validateSchemaOrRefValue } from "./refs"
+export { isObjectRefSchema, objectRef, ref, validateSchemaOrRefValue } from "./refs"
 export type {
+  LinkPathSelection,
+  LinkPathSelectionBuilder,
+  LinkPathSelectionInput,
+  LinkPathSelectionMode,
   LinkToken,
   LinkTokenMap,
   ObjectTypeWithPropertyTokens,

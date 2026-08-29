@@ -9,6 +9,10 @@ export type {
   InferSchemaOrRef,
   Interface,
   LinkCardinality,
+  LinkPathSelection,
+  LinkPathSelectionBuilder,
+  LinkPathSelectionInput,
+  LinkPathSelectionMode,
   LinkToken,
   LinkTokenMap,
   MapSchema,
@@ -47,6 +51,7 @@ export {
   isObjectRefSchema,
   link,
   OntologyRegistry,
+  objectRef,
   prop,
   ref,
   stringEnum,
@@ -474,6 +479,7 @@ export type {
   RunGrantTarget,
   SecurityDefinitionCatalog,
   Selection,
+  ShareGrant,
   ViewGrant,
   ViewGrantTarget,
 } from "./security"
@@ -486,6 +492,29 @@ export {
   every,
   SecurityValidationError,
 } from "./security"
+
+// ── Shares ────────────────────────────────────────────────
+
+export type {
+  DefineShareOptions,
+  IssueSharedAccessByIdInput,
+  IssueSharedAccessInput,
+  ListSharedAccessByIdInput,
+  ListSharedAccessInput,
+  ShareActionGrant,
+  ShareActionGrantBuilder,
+  ShareDefinition,
+  SharedAccessGrant,
+  SharedAccessGrantListResult,
+  SharedAccessInvitation,
+  ShareErrorReason,
+  ShareScopeGrant,
+  SharesRuntime,
+  ShareTarget,
+  ShareViewGrant,
+  ShareViewGrantBuilder,
+} from "./shares"
+export { defineShare, ShareDefinitionError, ShareError } from "./shares"
 
 // ── Storage ────────────────────────────────────────────────
 // Config contract + operator migration API + in-memory dev providers.

@@ -126,6 +126,11 @@ export {
   type SandboxesContractSuiteOptions,
 } from "./sandboxes-contract"
 export {
+  createShareGrantStorageContractInput,
+  runShareGrantStorageContractSuite,
+  type ShareGrantStorageContractSuiteOptions,
+} from "./share-grant-storage-contract"
+export {
   createTestSyncExecution,
   queueTestSyncRun,
   startTestSyncRun,
