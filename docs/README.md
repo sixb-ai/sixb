@@ -4,7 +4,7 @@ Scaffold a Sixb project, run it, and trace live orbital data from a connector in
 and custom app. By the end you will have a local runtime tracking Sentinel-6B and understand how
 Sixb moves external data into the model your app reads.
 
-Sixb requires Bun 1.3 or later. Install [Bun](https://bun.sh) first.
+Sixb requires Bun 1.4 or later. Install [Bun](https://bun.sh) first.
 
 ## Scaffold a project
 

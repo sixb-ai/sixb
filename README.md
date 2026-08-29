@@ -48,7 +48,7 @@ With Sixb, you can:
 
 ## Quickstart
 
-You'll need [Bun 1.3 or later](https://bun.sh/docs/installation).
+You'll need [Bun 1.4 or later](https://bun.sh/docs/installation).
 
 ```bash
 bun create sixb my-app

@@ -103,9 +103,9 @@ export const resolutionBoundaryFile = "tsconfig.json"
  * to declare from above.
  *
  * This ships in the tarball rather than staying a repo detail, because the map that reaches a
- * built module belongs to whoever is bundling it. Measured on Bun 1.3.8 and 1.3.14, at build time
- * and at runtime, from a real `node_modules` install: without this file the consumer's `paths` map
- * applies inside our `dist`.
+ * built module belongs to whoever is bundling it. Measured on Bun 1.3.8, 1.3.14, and 1.4.0, at
+ * build time and at runtime, from a real `node_modules` install: without this file the consumer's
+ * `paths` map applies inside our `dist`.
  */
 export async function writeResolutionBoundary(directory: string): Promise<void> {
   await Bun.write(join(directory, resolutionBoundaryFile), resolutionBoundary)
@@ -133,9 +133,9 @@ export function siblingSpecifierPattern(manifest: ManifestDependencies): RegExp 
  * before any alias can rewrite it — which is the only place the boundary can be settled.
  *
  * `external` patterns are the obvious alternative and cannot express this: measured against Bun
- * 1.3.14, an exact `"@sixb/ui"` loses to a `paths` alias and only a wildcard pre-empts it, so the
- * boundary would have to be written `"@sixb/ui*"` — which also captures `@sixb/ui-anything` and
- * would externalize a package the manifest never declared.
+ * 1.3.14 and 1.4.0, an exact `"@sixb/ui"` loses to a `paths` alias and only a wildcard pre-empts
+ * it, so the boundary would have to be written `"@sixb/ui*"` — which also captures
+ * `@sixb/ui-anything` and would externalize a package the manifest never declared.
  */
 export function workspaceBoundaryPlugins(manifest: ManifestDependencies): BunPlugin[] {
   const filter = siblingSpecifierPattern(manifest)
