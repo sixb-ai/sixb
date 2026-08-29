@@ -1,5 +1,6 @@
-import { isAllowed } from "../authorization"
+import { assertAuthorized, isRuntimeAllowed } from "../authorization"
 import type { ExecutionContext } from "../execution"
+import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type {
   ListLatestSyncRunsResult,
@@ -29,26 +30,39 @@ export function createSyncsRuntime(
   execution: ExecutionContext,
   source: Pick<SyncsRuntime, "list" | "getById">
 ): SyncsRuntime {
-  const allowed = (syncId: string) => isAllowed(runtime.authorization, { kind: "sync.run", syncId })
+  const authority = resolveRuntimeAuthorizationForProject(runtime)
+  const allowed = (syncId: string) => isRuntimeAllowed(runtime, { kind: "sync.run", syncId })
   const visibleIds = () =>
     source
       .list()
       .filter((sync) => allowed(sync.id))
       .map((sync) => sync.id)
+  const historyFilterIds = () =>
+    authority.type === "unrestricted"
+      ? undefined
+      : authority.type === "principal"
+        ? visibleIds()
+        : []
 
   return {
-    list: () => source.list().filter((sync) => allowed(sync.id)),
+    list: () =>
+      authority.type === "denied" || authority.type === "delegated"
+        ? []
+        : source.list().filter((sync) => allowed(sync.id)),
     getById: (syncId) => {
+      if (authority.type === "denied" || authority.type === "delegated") return null
       const sync = source.getById(syncId)
       return sync && allowed(syncId) ? sync : null
     },
     request: async (input) => {
+      assertAuthorized(runtime, { kind: "sync.run", syncId: input.syncId })
       const sync = source.getById(input.syncId)
       if (!sync) throw new SyncValidationError(`[Sixb] Unknown sync '${input.syncId}'`)
       return requestSyncRun(runtime, execution, sync, input)
     },
     runs: {
       getById: async (runId) => {
+        if (authority.type === "denied" || authority.type === "delegated") return null
         const run =
           (await runtime.storage.syncRuns?.getById({
             projectId: runtime.projectId,
@@ -57,15 +71,21 @@ export function createSyncsRuntime(
         return run && allowed(run.syncId) ? run : null
       },
       list: (input = {}) => {
+        if (authority.type === "denied" || authority.type === "delegated") {
+          return Promise.resolve({ runs: [], hasMore: false, total: 0 })
+        }
         const storage = runtime.storage.syncRuns
         if (!storage) return Promise.resolve({ runs: [], hasMore: false, total: 0 })
         return storage.list({
-          projectId: runtime.projectId,
           ...input,
-          syncIds: runtime.authorization ? visibleIds() : undefined,
+          syncIds: historyFilterIds(),
+          projectId: runtime.projectId,
         })
       },
       listLatest: (syncIds) => {
+        if (authority.type === "denied" || authority.type === "delegated") {
+          return Promise.resolve({ runs: [] })
+        }
         const storage = runtime.storage.syncRuns
         if (!storage || syncIds.length === 0) return Promise.resolve({ runs: [] })
         const allowedIds = syncIds.filter(allowed)

@@ -467,6 +467,12 @@ src/
 In-memory implementations included: `InMemoryBroker`, `InMemoryObjectStorage`,
 `InMemoryTimeseriesStorage`, `InMemoryBlobStorage`, `InMemoryQueues`.
 
+> **0.1.x provider boundary:** `ObjectStorage` and its scoped `ObjectReadStorage` surface are
+> exported because the built-in PostgreSQL, SQLite, and in-memory adapters share them. The
+> materialization contract is still evolving, so third-party `ObjectStorage` implementations do
+> not carry a compatibility guarantee yet. The other dedicated provider subpaths remain the
+> supported extension points.
+
 ### Events
 
 Domain events include object/link mutations (`object.created`, `object.updated`, `object.deleted`, `link.created`, `link.updated`, `link.deleted`) and topic events such as `telemetry.appended`, `action.requested`, `schedule.triggered`, `sync.run.finished`, `pipeline.run.finished`, and `dataset.version.committed`.

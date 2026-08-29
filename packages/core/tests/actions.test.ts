@@ -4,6 +4,7 @@ import {
   ActionDefinitionError,
   defineAction,
   defineObjectType,
+  isActionDefinition,
   OntologyValidationError,
   optional,
   param,
@@ -188,6 +189,26 @@ describe("ActionRegistry", () => {
       "reboot",
       "prepareSuite",
     ])
+
+    const descriptors = sixb.actions.list()
+    const setTemperatureDescriptor = sixb.actions.getById("setTemperature")
+    expect(setTemperatureDescriptor).toMatchObject({
+      id: "setTemperature",
+      binding: { kind: "object", objectTypeId: Room.id },
+      phases: { validate: true, writeback: true, edits: false, effects: false },
+    })
+    expect(setTemperatureDescriptor).not.toBe(setTemperature)
+    expect(isActionDefinition(setTemperatureDescriptor)).toBe(false)
+    expect(setTemperatureDescriptor?.binding).not.toHaveProperty("objectType")
+    expect(setTemperatureDescriptor).not.toHaveProperty("edits")
+    expect(setTemperatureDescriptor).not.toHaveProperty("effects")
+    expect(Object.isFrozen(descriptors)).toBe(true)
+    expect(Object.isFrozen(setTemperatureDescriptor)).toBe(true)
+    expect(Object.isFrozen(setTemperatureDescriptor?.binding)).toBe(true)
+    expect(Object.isFrozen(setTemperatureDescriptor?.params)).toBe(true)
+    expect(Object.isFrozen(setTemperatureDescriptor?.params.target)).toBe(true)
+
+    expect(sixb.actions.getById("createRoom")?.binding).toEqual({ kind: "global" })
   })
 
   test("rejects duplicate action ids", () => {

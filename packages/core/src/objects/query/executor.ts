@@ -1,5 +1,4 @@
-import { type AuthorizationContext, assertAuthorized } from "../../authorization"
-import type { RuntimeAuthorization } from "../../execution/types"
+import type { ObjectQueryExecutionLimits } from "../../execution/limits"
 import type { OntologyRegistry } from "../../ontology"
 import type {
   CountObjectsResult,
@@ -9,13 +8,17 @@ import type {
   FacetObjectsResult,
   ObjectFacetRequest,
   ObjectFacetResult,
-  ObjectLinkRow,
   ObjectQueryCapabilities,
+  ObjectReadStorage,
   ObjectRow,
   ObjectRowLinks,
-  ObjectStorage,
   QueryObjectsResult,
 } from "../../storage"
+import { MAX_OBJECT_FACETS_PER_READ } from "../../storage"
+import {
+  assertVisibleJsonWithinLimit,
+  DelegatedExecutionLimitError,
+} from "../../storage/objects/execution-limits"
 import {
   ObjectQueryExecutionError,
   ObjectQueryPlanningError,
@@ -49,7 +52,7 @@ export interface QueryExecutorOptions
     | "hasFacetObjects"
   > {
   ontology: OntologyRegistry
-  storage: ObjectStorage
+  storage: ObjectReadStorage
   maxLimit?: number
   maxPageSize?: number
   maxRefs?: number
@@ -60,10 +63,8 @@ export interface QueryExecutorOptions
    * expansion's own `limit` narrows this further; the cap is the backstop.
    */
   maxExpansionFanout?: number
-  /** When present, every object type the query touches must be viewable. */
-  authorization?: AuthorizationContext
-  /** Registered execution capability for queries reached through a bound Sixb SDK. */
-  runtimeAuthorization?: RuntimeAuthorization
+  /** Resource budgets already resolved by the application-facing read boundary. */
+  executionLimits?: ObjectQueryExecutionLimits
 }
 
 export interface ExecuteObjectQueryInput {
@@ -128,6 +129,8 @@ export async function executeObjectQuery(
   input: ExecuteObjectQueryInput,
   options: QueryExecutorOptions
 ): Promise<ExecuteObjectQueryResult> {
+  const maxExpansionFanout = normalizeMaxExpansionFanout(options.maxExpansionFanout)
+  const executionOptions: QueryExecutorOptions = { ...options, maxExpansionFanout }
   const normalized = normalizeObjectQuery(input.query)
   const validated = validateObjectQuery(normalized, {
     ontology: options.ontology,
@@ -136,7 +139,15 @@ export async function executeObjectQuery(
     maxRefs: options.maxRefs,
     normalize: false,
   })
-  assertQueryViewable(validated, options)
+  const executionLimits = options.executionLimits
+  if (executionLimits) {
+    assertMaterializationPlanWithinLimits(
+      validated,
+      options.ontology,
+      executionLimits,
+      maxExpansionFanout
+    )
+  }
   const capabilities = options.storage.queryCapabilities()
   const hasQueryObjects = typeof options.storage.queryObjects === "function"
   const hasCountObjects = typeof options.storage.countObjects === "function"
@@ -155,7 +166,7 @@ export async function executeObjectQuery(
       maxFallbackRows: options.maxFallbackRows,
       requiresExplicitFallbackBound: options.requiresExplicitFallbackBound,
     },
-    options.maxExpansionFanout
+    maxExpansionFanout
   )
   const plan = planObjectQuery(plannedQuery, {
     capabilities,
@@ -181,15 +192,19 @@ export async function executeObjectQuery(
       query: plan.query,
       includeTotal: input.includeTotal,
     })
-    return { ...result, plan }
+    const output = { ...result, plan }
+    assertQueryResultWithinLimits(output, executionLimits)
+    return output
   }
 
   // The planner admits only the small fallback subset; unsupported cases below
   // remain as defensive guards against future planner drift.
-  const fallback = await executeFallbackQuery(input.projectId, validated.query, options, {
+  const fallback = await executeFallbackQuery(input.projectId, validated.query, executionOptions, {
     includeTotal: input.includeTotal,
   })
-  return { ...fallback, plan }
+  const output = { ...fallback, plan }
+  assertQueryResultWithinLimits(output, executionLimits)
+  return output
 }
 
 export async function countObjects(
@@ -204,7 +219,7 @@ export async function countObjects(
     maxRefs: options.maxRefs,
     normalize: false,
   })
-  assertQueryViewable(validated, options)
+  const executionLimits = options.executionLimits
   const capabilities = options.storage.queryCapabilities()
   const hasQueryObjects = typeof options.storage.queryObjects === "function"
   const hasCountObjects = typeof options.storage.countObjects === "function"
@@ -245,12 +260,12 @@ export async function countObjects(
       projectId: input.projectId,
       query: plan.query,
     })
-    return { ...result, plan }
+    return assertVisibleResultWithinLimits({ ...result, plan }, executionLimits)
   }
 
   const maxRows = options.maxFallbackRows ?? DEFAULT_MAX_FALLBACK_ROWS
   const evaluation = await evaluateFallbackQuery(input.projectId, aggregateQuery, options, maxRows)
-  return { count: evaluation.total, plan }
+  return assertVisibleResultWithinLimits({ count: evaluation.total, plan }, executionLimits)
 }
 
 export async function existsObjects(
@@ -265,7 +280,7 @@ export async function existsObjects(
     maxRefs: options.maxRefs,
     normalize: false,
   })
-  assertQueryViewable(validated, options)
+  const executionLimits = options.executionLimits
   const capabilities = options.storage.queryCapabilities()
   const hasQueryObjects = typeof options.storage.queryObjects === "function"
   const hasCountObjects = typeof options.storage.countObjects === "function"
@@ -306,12 +321,12 @@ export async function existsObjects(
       projectId: input.projectId,
       query: plan.query,
     })
-    return { ...result, plan }
+    return assertVisibleResultWithinLimits({ ...result, plan }, executionLimits)
   }
 
   const maxRows = options.maxFallbackRows ?? DEFAULT_MAX_FALLBACK_ROWS
   const evaluation = await evaluateFallbackQuery(input.projectId, aggregateQuery, options, maxRows)
-  return { exists: evaluation.total > 0, plan }
+  return assertVisibleResultWithinLimits({ exists: evaluation.total > 0, plan }, executionLimits)
 }
 
 export async function facetObjects(
@@ -326,7 +341,7 @@ export async function facetObjects(
     maxRefs: options.maxRefs,
     normalize: false,
   })
-  assertQueryViewable(validated, options)
+  const executionLimits = options.executionLimits
   const facets = validateFacetRequests(input.facets, validated.result.objectTypeIds, options)
   const aggregateQuery = stripOuterRowShape(validated.query)
   const capabilities = options.storage.queryCapabilities()
@@ -369,33 +384,184 @@ export async function facetObjects(
       query: plan.query,
       facets,
     })
-    return { ...result, plan }
+    return assertVisibleResultWithinLimits({ ...result, plan }, executionLimits)
   }
 
   const maxRows = options.maxFallbackRows ?? DEFAULT_MAX_FALLBACK_ROWS
   const evaluation = await evaluateFallbackQuery(input.projectId, aggregateQuery, options, maxRows)
-  return {
-    facets: buildFacetResults(
-      evaluation.entries.map((entry) => entry.row),
-      facets
-    ),
-    plan,
+  return assertVisibleResultWithinLimits(
+    {
+      facets: buildFacetResults(
+        evaluation.entries.map((entry) => entry.row),
+        facets
+      ),
+      plan,
+    },
+    executionLimits
+  )
+}
+
+function assertMaterializationPlanWithinLimits(
+  validated: ValidatedObjectQuery,
+  ontology: OntologyRegistry,
+  limits: ObjectQueryExecutionLimits,
+  maxExpansionFanout: number
+): void {
+  const overLimitSentinel = safeSuccessor(limits.maxMaterializedObjects)
+  const perRoot =
+    validated.query.kind === "expand"
+      ? estimateExpandedOccurrencesPerRoot(
+          validated.query.expansions,
+          validated.result,
+          ontology,
+          overLimitSentinel,
+          maxExpansionFanout,
+          "$.expansions"
+        )
+      : 1
+  const rootQuery = validated.query.kind === "expand" ? validated.query.input : validated.query
+  const rootBound = queryResultUpperBound(
+    rootQuery,
+    Math.min(limits.maxTraversalFacts, overLimitSentinel)
+  )
+  if (multiplySaturated(rootBound, perRoot, overLimitSentinel) > limits.maxMaterializedObjects) {
+    throw new DelegatedExecutionLimitError("materializedObjects", limits.maxMaterializedObjects)
   }
 }
 
-// Authorization happens at planning time: a scoped query must hold a view
-// grant for every object type it touches, before any storage call runs.
-function assertQueryViewable(
-  validated: ValidatedObjectQuery,
-  authorization: Pick<QueryExecutorOptions, "authorization" | "runtimeAuthorization">
+function estimateExpandedOccurrencesPerRoot(
+  expansions: readonly ObjectExpansion[],
+  parentShape: ObjectQueryResultShape,
+  ontology: OntologyRegistry,
+  ceiling: number,
+  maxExpansionFanout: number,
+  path: string
+): number {
+  let total = 1
+  for (const [index, expansion] of expansions.entries()) {
+    const expansionPath = `${path}[${index}]`
+    const cardinality = resolveUniformCardinality(expansion, parentShape, ontology)
+    if (cardinality !== "one" && expansion.limit === undefined) {
+      throw new ObjectQueryValidationError([
+        {
+          path: `${expansionPath}.limit`,
+          code: "delegated_expand_limit_required",
+          message: `Delegated expansion '${expansion.linkId}' can return many objects and requires an explicit limit`,
+        },
+      ])
+    }
+
+    const effectiveFanout = effectiveExpansionFanout(expansion.limit, maxExpansionFanout)
+    const fanout = cardinality === "one" ? (effectiveFanout === 0 ? 0 : 1) : effectiveFanout
+    const targetShape = resolveExpansionTargetShape(expansion, parentShape, ontology)
+    const nested = estimateExpandedOccurrencesPerRoot(
+      expansion.expand ?? [],
+      targetShape,
+      ontology,
+      ceiling,
+      maxExpansionFanout,
+      `${expansionPath}.expand`
+    )
+    total = addSaturated(total, multiplySaturated(fanout, nested, ceiling), ceiling)
+  }
+  return total
+}
+
+function queryResultUpperBound(query: ObjectQuery, ceiling: number): number {
+  switch (query.kind) {
+    case "start":
+    case "traverse":
+      return ceiling
+    case "refs":
+      return Math.min(query.refs.length, ceiling)
+    case "set": {
+      if (query.inputs.length === 0) return 0
+      if (query.op === "intersect") {
+        return Math.min(...query.inputs.map((input) => queryResultUpperBound(input, ceiling)))
+      }
+      if (query.op === "subtract") return queryResultUpperBound(query.inputs[0], ceiling)
+      return query.inputs.reduce(
+        (total, input) => addSaturated(total, queryResultUpperBound(input, ceiling), ceiling),
+        0
+      )
+    }
+    case "vector":
+      return Math.min(queryResultUpperBound(query.input, ceiling), Math.max(0, query.k))
+    case "limit":
+      return Math.min(queryResultUpperBound(query.input, ceiling), Math.max(0, query.limit))
+    case "page":
+      return Math.min(queryResultUpperBound(query.input, ceiling), Math.max(0, query.pageSize))
+    case "filter":
+    case "text":
+    case "sort":
+    case "project":
+    case "expand":
+      return queryResultUpperBound(query.input, ceiling)
+  }
+}
+
+function addSaturated(left: number, right: number, ceiling: number): number {
+  if (left >= ceiling || right >= ceiling || left > ceiling - right) return ceiling
+  return left + right
+}
+
+function multiplySaturated(left: number, right: number, ceiling: number): number {
+  if (left === 0 || right === 0) return 0
+  if (left >= ceiling || right >= ceiling || left > Math.floor(ceiling / right)) return ceiling
+  return left * right
+}
+
+function safeSuccessor(value: number): number {
+  return value === Number.MAX_SAFE_INTEGER ? value : value + 1
+}
+
+function assertQueryResultWithinLimits(
+  result: ExecuteObjectQueryResult,
+  limits: ObjectQueryExecutionLimits | undefined
 ): void {
-  // The query engine is also a storage-level utility. Authorization is activated by a runtime
-  // context; execution SDKs always provide a registered capability, including auth-disabled ones.
-  if (!authorization.runtimeAuthorization && !authorization.authorization) return
-  assertAuthorized(authorization, {
-    kind: "object.query",
-    touchedObjectTypeIds: validated.touchedObjectTypeIds,
-  })
+  if (!limits) return
+
+  if (result.objects.length > limits.maxMaterializedObjects) {
+    throw new DelegatedExecutionLimitError("materializedObjects", limits.maxMaterializedObjects)
+  }
+  let discoveredObjects = result.objects.length
+  const pending = [...result.objects]
+  while (pending.length > 0) {
+    const row = pending.pop()
+    if (!row) continue
+    for (const value of Object.values(row.links ?? {})) {
+      if (Array.isArray(value)) {
+        for (const child of value) {
+          discoveredObjects += 1
+          if (discoveredObjects > limits.maxMaterializedObjects) {
+            throw new DelegatedExecutionLimitError(
+              "materializedObjects",
+              limits.maxMaterializedObjects
+            )
+          }
+          pending.push(child)
+        }
+      } else if (value) {
+        discoveredObjects += 1
+        if (discoveredObjects > limits.maxMaterializedObjects) {
+          throw new DelegatedExecutionLimitError(
+            "materializedObjects",
+            limits.maxMaterializedObjects
+          )
+        }
+        pending.push(value as ExpandedObjectRow)
+      }
+    }
+  }
+  assertVisibleJsonWithinLimit(result, limits)
+}
+
+function assertVisibleResultWithinLimits<T>(
+  result: T,
+  limits: ObjectQueryExecutionLimits | undefined
+): T {
+  if (limits) assertVisibleJsonWithinLimit(result, limits)
+  return result
 }
 
 interface ExpansionResolutionContext {
@@ -687,13 +853,13 @@ async function evaluateFallbackRefs(
   query: Extract<ObjectQuery, { kind: "refs" }>,
   options: QueryExecutorOptions
 ): Promise<FallbackEvaluation> {
-  const rows = await options.storage.getByPrimaryIdBatch({
+  const rows = await options.storage.getByPrimaryIdMany({
     projectId,
     items: query.refs,
   })
   return completeFallbackEvaluation(
-    query.refs.flatMap((ref, order) => {
-      const row = rows.get(`${ref.objectTypeId}:${ref.primaryId}`)
+    query.refs.flatMap((_, order) => {
+      const row = rows[order]
       return row ? [{ row, order }] : []
     })
   )
@@ -786,7 +952,7 @@ async function collectOutgoingEdges(
   expansion: ObjectExpansion,
   options: QueryExecutorOptions
 ): Promise<ExpansionEdge[][]> {
-  const linksByKey = await options.storage.listLinksBatch({
+  const linksByParent = await options.storage.listLinksMany({
     projectId,
     items: parents.map((parent) => ({
       objectTypeId: parent.objectTypeId,
@@ -795,14 +961,20 @@ async function collectOutgoingEdges(
     })),
   })
 
-  return parents.map((parent) => {
-    const links = linksByKey.get(`${parent.objectTypeId}:${parent.primaryId}:${expansion.linkId}`)
-    if (!links) return []
-    return links.map((link) => ({
-      neighborTypeId: link.targetTypeId,
-      neighborId: link.targetId,
-      edgeProperties: link.properties,
-    }))
+  return parents.map((parent, index) => {
+    return (linksByParent[index] ?? [])
+      .filter(
+        (link) =>
+          link.projectId === projectId &&
+          link.sourceTypeId === parent.objectTypeId &&
+          link.sourceId === parent.primaryId &&
+          link.linkId === expansion.linkId
+      )
+      .map((link) => ({
+        neighborTypeId: link.targetTypeId,
+        neighborId: link.targetId,
+        edgeProperties: link.properties,
+      }))
   })
 }
 
@@ -812,35 +984,33 @@ async function collectIncomingEdges(
   expansion: ObjectExpansion,
   options: QueryExecutorOptions
 ): Promise<ExpansionEdge[][]> {
-  const incident = await options.storage.listIncidentLinksBatch({
+  const linksByParent = await options.storage.listLinksMany({
     projectId,
+    direction: "incoming",
     items: parents.map((parent) => ({
       objectTypeId: parent.objectTypeId,
       objectId: parent.primaryId,
+      linkId: expansion.linkId,
     })),
   })
 
-  // Index links that point AT a parent (incoming) by that parent. The incident
-  // batch also returns outgoing links, so filter on the parent being the target.
-  const byTarget = new Map<string, ObjectLinkRow[]>()
-  for (const link of incident) {
-    if (link.linkId !== expansion.linkId) continue
-    if (expansion.sourceObjectTypeId && link.sourceTypeId !== expansion.sourceObjectTypeId) continue
-    const key = targetKey(link.targetTypeId, link.targetId)
-    const bucket = byTarget.get(key)
-    if (bucket) bucket.push(link)
-    else byTarget.set(key, [link])
-  }
-
-  return parents.map((parent) => {
-    const links = byTarget.get(targetKey(parent.objectTypeId, parent.primaryId))
-    if (!links) return []
+  return parents.map((parent, index) => {
     // For an incoming expansion the hydrated object is the link's source.
-    return links.map((link) => ({
-      neighborTypeId: link.sourceTypeId,
-      neighborId: link.sourceId,
-      edgeProperties: link.properties,
-    }))
+    return (linksByParent[index] ?? [])
+      .filter(
+        (link) =>
+          link.projectId === projectId &&
+          link.targetTypeId === parent.objectTypeId &&
+          link.targetId === parent.primaryId &&
+          link.linkId === expansion.linkId &&
+          (expansion.sourceObjectTypeId === undefined ||
+            link.sourceTypeId === expansion.sourceObjectTypeId)
+      )
+      .map((link) => ({
+        neighborTypeId: link.sourceTypeId,
+        neighborId: link.sourceId,
+        edgeProperties: link.properties,
+      }))
   })
 }
 
@@ -860,7 +1030,19 @@ async function fetchExpansionTargets(
     }
   }
   if (items.length === 0) return new Map()
-  return options.storage.getByPrimaryIdBatch({ projectId, items })
+  const fetched = await options.storage.getByPrimaryIdMany({ projectId, items })
+  const targets = new Map<string, ObjectRow>()
+  items.forEach((item, index) => {
+    const row = fetched[index]
+    if (
+      row?.objectTypeId === item.objectTypeId &&
+      row.primaryId === item.primaryId &&
+      row.projectId === projectId
+    ) {
+      targets.set(targetKey(item.objectTypeId, item.primaryId), row)
+    }
+  })
+  return targets
 }
 
 // Recurse nested expansions over the unique retained targets so each target is
@@ -918,8 +1100,16 @@ function effectiveExpansionFanout(
   limit: number | undefined,
   maxExpansionFanout: number | undefined
 ): number {
-  const cap = maxExpansionFanout !== undefined ? maxExpansionFanout : DEFAULT_MAX_EXPANSION_FANOUT
+  const cap = normalizeMaxExpansionFanout(maxExpansionFanout)
   return limit !== undefined ? Math.min(limit, cap) : cap
+}
+
+function normalizeMaxExpansionFanout(value: number | undefined): number {
+  const fanout = value ?? DEFAULT_MAX_EXPANSION_FANOUT
+  if (!Number.isSafeInteger(fanout) || fanout < 0) {
+    throw new TypeError("[Sixb] maxExpansionFanout must be a non-negative safe integer.")
+  }
+  return fanout
 }
 
 function compareExpansionEdges(
@@ -982,7 +1172,7 @@ function toLinkValue(
 }
 
 function targetKey(objectTypeId: string, id: string): string {
-  return `${objectTypeId}:${id}`
+  return JSON.stringify([objectTypeId, id])
 }
 
 async function evaluateFallbackStart(
@@ -1183,6 +1373,16 @@ function validateFacetRequests(
 
   if (facets.length === 0) {
     addFacetIssue(issues, "$.facets", "empty_facets", "At least one facet is required")
+  }
+
+  if (facets.length > MAX_OBJECT_FACETS_PER_READ) {
+    throw new ObjectQueryValidationError([
+      {
+        path: "$.facets",
+        code: "facet_count_exceeded",
+        message: `At most ${MAX_OBJECT_FACETS_PER_READ} facets can be requested`,
+      },
+    ])
   }
 
   if (!Number.isInteger(maxLimit) || maxLimit <= 0) {

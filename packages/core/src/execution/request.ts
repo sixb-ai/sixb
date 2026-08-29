@@ -5,6 +5,12 @@ import { isBoundSixb, type Sixb } from "../runtime/sixb"
 import { createDisabledRequestScope, createPrincipalRequestScope } from "./scopes"
 import type { AuthorizationRef, ExecutionScope } from "./types"
 
+export type {
+  ActionDescriptor,
+  ActionDescriptorBinding,
+  ActionParamDescriptor,
+  ActionPhaseDescriptor,
+} from "../actions/descriptor"
 export type { ActionRunsRuntime, ActionsRuntime } from "../actions/execution"
 export type {
   AgentRunListResult,

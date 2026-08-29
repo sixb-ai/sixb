@@ -5,10 +5,10 @@
  */
 
 import type { ActionDefinition } from "../../actions"
-import type { AuthorizationContext } from "../../authorization"
 import { assertAuthorized } from "../../authorization"
 import { shareSixbErrorReporter } from "../../error-reporting/capability"
 import type { ExecutionContext } from "../../execution"
+import { assertAuthorizedObjectReaderBinding } from "../../execution/authorized-object-reader"
 import type { ValueType } from "../../ontology"
 import { OntologyValidationError } from "../../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
@@ -27,6 +27,7 @@ import type { ExecutionObjectContext, ResolvedLinkContext } from "../context"
 import { requireLinkDefinition } from "../context"
 import { removeLink as removeLinkLeaf, upsertLink as upsertLinkLeaf } from "../link"
 import { upsertObject as upsertObjectLeaf } from "../object"
+import { assertObjectListWithinWindow, resolveObjectListWindow } from "../service/list-window"
 import { appendTelemetryBatch as appendTelemetryBatchLeaf } from "../telemetry"
 import { createObjectByIdHandle } from "./object-handle"
 import { createObjectQueryBuilder } from "./query-builder"
@@ -40,9 +41,12 @@ export function createObjectSet<
   params: SixbRuntimeContext & {
     readonly execution: ExecutionContext
     readonly objectType: TObjectType
-    readonly authorization?: AuthorizationContext
   }
 ): ObjectSet<TObjectType, TValueTypes, TRegisteredObjectTypes> {
+  assertAuthorizedObjectReaderBinding({
+    reader: params.objectReader,
+    scope: { execution: params.execution, authorization: params.runtimeAuthorization },
+  })
   const { objectType } = params
   const primaryProp = objectType.properties.find((p) => p.primary)
   if (!primaryProp) {
@@ -57,17 +61,15 @@ export function createObjectSet<
     actionRegistry,
     events,
     storage,
+    objectReader,
     queues,
     runtimeAuthorization,
     authorization,
     execution,
   } = params
   const queryExecutor = createRuntimeQueryExecutor({
-    projectId,
     ontology,
-    storage,
-    runtimeAuthorization,
-    authorization,
+    objectReader,
   })
 
   const resolvedCtx: ExecutionObjectContext = {
@@ -77,6 +79,7 @@ export function createObjectSet<
     actionRegistry,
     events,
     storage,
+    objectReader,
     queues,
     runtimeAuthorization,
     authorization,
@@ -90,8 +93,7 @@ export function createObjectSet<
   const objectSet = {
     get: async (id: string) => {
       assertAuthorized(resolvedCtx, { kind: "object.view", objectTypeId: objectType.id })
-      const row = await storage.objects.getByPrimaryId({
-        projectId,
+      const row = await objectReader.getByPrimaryId({
         objectTypeId: objectType.id,
         primaryId: id,
       })
@@ -112,9 +114,9 @@ export function createObjectSet<
     byId: (id: string) => createObjectByIdHandle<TObjectType, TValueTypes>(resolvedCtx, id),
 
     list: async (input?: ObjectSetListInput) => {
+      const window = resolveObjectListWindow(resolvedCtx, input ?? {})
       assertAuthorized(resolvedCtx, { kind: "object.view", objectTypeId: objectType.id })
-      const result = await storage.objects.list({
-        projectId,
+      const result = await objectReader.list({
         objectTypeId: objectType.id,
         primaryIdPrefix: input?.idPrefix,
         primaryIdSuffix: input?.idSuffix,
@@ -122,11 +124,12 @@ export function createObjectSet<
         updatedBefore: input?.updatedBefore,
         createdAfter: input?.createdAfter,
         createdBefore: input?.createdBefore,
-        limit: input?.limit,
-        offset: input?.offset,
+        limit: window.limit,
+        offset: window.offset,
         orderBy: input?.orderBy,
         order: input?.order,
       })
+      assertObjectListWithinWindow(window, result.objects.length)
 
       return {
         objects: result.objects.map(

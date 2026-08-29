@@ -137,6 +137,14 @@ export function validateActionSubject(action: ActionDefinition, subject: ActionS
   }
 }
 
+/** Whether an object subject names the exact type an Action is defined on, excluding subtypes. */
+export function isExactObjectActionTarget(
+  action: ActionDefinition,
+  objectTypeId: string
+): action is ObjectActionDefinition {
+  return isObjectActionDefinition(action) && action.binding.objectType.id === objectTypeId
+}
+
 export function resolveObjectActionSubject(params: {
   readonly runtime: ActionValidationRuntime
   readonly action: ObjectActionDefinition

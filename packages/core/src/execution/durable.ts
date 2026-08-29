@@ -5,7 +5,11 @@ import {
   type ExecutionStorage,
   ExecutionStorageError,
 } from "../storage/executions"
-import { createTrustedPrimitiveRuntimeAuthorization, getAuthorizationRef } from "./authorization"
+import {
+  createTrustedPrimitiveRuntimeAuthorization,
+  getAuthorizationRef,
+  resolveExecutionScopeAuthorization,
+} from "./authorization"
 import type {
   ExecutionContext,
   ExecutionScope,
@@ -19,6 +23,13 @@ export function executionRecordInputFromRuntime(input: {
   readonly runtimeAuthorization: RuntimeAuthorization
 }): CreateExecutionInput {
   const execution = input.execution
+  // The execution and opaque authority travel as separate values through several public request
+  // helpers. Validate the pair at this shared serialization boundary before any caller can persist
+  // a forged project, principal, source, or executor attribution.
+  resolveExecutionScopeAuthorization(execution.projectId, {
+    execution,
+    authorization: input.runtimeAuthorization,
+  })
   return {
     id: execution.id,
     projectId: execution.projectId,
@@ -135,7 +146,7 @@ export function restoreTrustedPrimitiveExecutionScope(input: {
   return Object.freeze({
     execution: context,
     authorization: createTrustedPrimitiveRuntimeAuthorization({
-      projectId: input.execution.projectId,
+      execution: context,
       primitive: input.primitive,
     }),
   })

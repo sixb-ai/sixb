@@ -2,6 +2,7 @@
  * The authorization rule for writing a link, in one place because all three link leaves need it.
  */
 import { type AuthorizationContext, assertAuthorized, assertCanEdit } from "../../authorization"
+import type { RuntimeAuthorization } from "../../execution"
 
 /**
  * Assert a principal may create or remove a link.
@@ -18,7 +19,11 @@ import { type AuthorizationContext, assertAuthorized, assertCanEdit } from "../.
  * Call this *before* any endpoint lookup, for that second reason.
  */
 export function assertCanWriteLink(
-  ctx: { readonly authorization?: AuthorizationContext },
+  ctx: {
+    readonly projectId: string
+    readonly runtimeAuthorization?: RuntimeAuthorization
+    readonly authorization?: AuthorizationContext
+  },
   endpoints: { readonly sourceTypeId: string; readonly targetTypeId: string }
 ): void {
   assertCanEdit(ctx, endpoints.sourceTypeId)

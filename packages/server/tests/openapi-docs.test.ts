@@ -239,4 +239,69 @@ describe("OpenAPI docs", () => {
       }
     }
   })
+
+  test("keeps bounded read request bodies in the generated contract", async () => {
+    const app = createDocsApi()
+    const spec = await fetchDocsJsonWithoutWarnings(app)
+    const operation = spec.paths?.["/api/telemetry/history"]?.post as
+      | {
+          requestBody?: {
+            content?: {
+              "application/json"?: {
+                schema?: {
+                  required?: readonly string[]
+                  properties?: { series?: { maxItems?: number } }
+                }
+              }
+            }
+          }
+          responses?: Record<string, unknown>
+        }
+      | undefined
+
+    const bodySchema = operation?.requestBody?.content?.["application/json"]?.schema
+    expect(bodySchema?.required).toContain("series")
+    expect(bodySchema?.properties?.series?.maxItems).toBe(4_096)
+    expect(operation?.responses).toHaveProperty("413")
+
+    for (const path of [
+      "/api/objects/query",
+      "/api/objects/query/count",
+      "/api/objects/query/exists",
+      "/api/objects/query/facets",
+    ]) {
+      expect(spec.paths?.[path]?.post?.responses, path).toHaveProperty("413")
+    }
+  })
+
+  test("documents normalized action parameters and bounded identity reads", async () => {
+    const app = createDocsApi()
+    const spec = await fetchDocsJsonWithoutWarnings(app)
+    const actionResponse = spec.paths?.["/api/actions"]?.get?.responses?.["200"] as
+      | {
+          content?: {
+            "application/json"?: {
+              schema?: {
+                items?: {
+                  properties?: {
+                    params?: {
+                      items?: { required?: readonly string[] }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      | undefined
+    const actionParamRequired =
+      actionResponse?.content?.["application/json"]?.schema?.items?.properties?.params?.items
+        ?.required
+
+    expect(actionParamRequired).toContain("schema")
+    expect(actionParamRequired).toContain("required")
+    expect(spec.paths?.["/api/objects/{objectTypeId}/{objectId}"]?.get?.responses).toHaveProperty(
+      "400"
+    )
+  })
 })

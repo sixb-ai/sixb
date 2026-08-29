@@ -7,6 +7,7 @@ import {
   type ObjectQuerySortField,
   type QueryScalarKind,
 } from "@sixb/core"
+import type { CompiledObjectReadScope, ObjectReadExecutionLimits } from "@sixb/core/storage"
 
 export interface PgObjectQueryPageRow {
   object_type_id: string
@@ -35,6 +36,12 @@ export interface CompiledPgScalarQuery {
 export interface CompiledPgFacetQuery {
   sql: string
   args: unknown[]
+}
+
+export interface PgObjectQueryCompileOptions {
+  includeTotal?: boolean
+  readScope?: CompiledObjectReadScope
+  readLimits?: ObjectReadExecutionLimits
 }
 
 interface CompiledHasMoreProbe {
@@ -97,19 +104,44 @@ const DEFAULT_EXPANSION_FANOUT = 1_000
 export function compilePgObjectQuery(
   projectId: string,
   query: ObjectQuery,
-  options: { includeTotal?: boolean } = {}
+  options: PgObjectQueryCompileOptions = {}
 ): CompiledPgObjectQuery {
   const compiled = compileObjectQueryInternal(projectId, query, {
     probeLimit: options.includeTotal === false,
   })
+  const rows = applyObjectReadScope(
+    projectId,
+    options.readScope,
+    {
+      sql: compiled.sql,
+      args: compiled.args,
+    },
+    options.readLimits
+  )
+  const total = applyObjectReadScope(
+    projectId,
+    options.readScope,
+    {
+      sql: compiled.totalSql,
+      args: compiled.totalArgs,
+    },
+    options.readLimits
+  )
+  const rawHasMoreProbe = compiled.hasMoreProbe
+  const hasMoreProbe = rawHasMoreProbe
+    ? applyObjectReadScope(projectId, options.readScope, rawHasMoreProbe, options.readLimits)
+    : undefined
   return {
     ...compiled,
-    sql: numberPlaceholders(compiled.sql),
-    totalSql: numberPlaceholders(compiled.totalSql),
-    hasMoreProbe: compiled.hasMoreProbe
+    sql: numberPlaceholders(rows.sql),
+    args: rows.args,
+    totalSql: numberPlaceholders(total.sql),
+    totalArgs: total.args,
+    hasMoreProbe: hasMoreProbe
       ? {
-          ...compiled.hasMoreProbe,
-          sql: numberPlaceholders(compiled.hasMoreProbe.sql),
+          sql: numberPlaceholders(hasMoreProbe.sql),
+          args: hasMoreProbe.args,
+          hasMore: rawHasMoreProbe?.hasMore ?? (() => false),
         }
       : undefined,
   }
@@ -117,55 +149,103 @@ export function compilePgObjectQuery(
 
 export function compilePgObjectCountQuery(
   projectId: string,
-  query: ObjectQuery
+  query: ObjectQuery,
+  readScope?: CompiledObjectReadScope,
+  readLimits?: ObjectReadExecutionLimits
 ): CompiledPgScalarQuery {
   const source = compileAggregateSource(projectId, query)
-  return numberCompiledQuery({
-    sql: `
-      SELECT COUNT(*)::bigint AS count
-      FROM (${source.sql}) AS input
-    `,
-    args: source.args,
-  })
+  return compilePgObjectReadSql(
+    projectId,
+    readScope,
+    `
+        SELECT COUNT(*)::bigint AS count
+        FROM (${source.sql}) AS input
+      `,
+    source.args,
+    readLimits
+  )
 }
 
 export function compilePgObjectExistsQuery(
   projectId: string,
-  query: ObjectQuery
+  query: ObjectQuery,
+  readScope?: CompiledObjectReadScope,
+  readLimits?: ObjectReadExecutionLimits
 ): CompiledPgScalarQuery {
   const source = compileAggregateSource(projectId, query)
-  return numberCompiledQuery({
-    sql: `
-      SELECT 1
-      FROM (${source.sql}) AS input
-      LIMIT 1
-    `,
-    args: source.args,
-  })
+  return compilePgObjectReadSql(
+    projectId,
+    readScope,
+    `
+        SELECT 1
+        FROM (${source.sql}) AS input
+        LIMIT 1
+      `,
+    source.args,
+    readLimits
+  )
 }
 
 export function compilePgObjectFacetQuery(
   projectId: string,
   query: ObjectQuery,
   propertyId: string,
-  limit: number
+  limit: number,
+  readScope?: CompiledObjectReadScope,
+  readLimits?: ObjectReadExecutionLimits
 ): CompiledPgFacetQuery {
   const source = compileAggregateSource(projectId, query)
+  return compilePgObjectReadSql(
+    projectId,
+    readScope,
+    `
+        SELECT facet.value_type, facet.value_text, COUNT(*)::bigint AS count
+        FROM (
+          SELECT
+            jsonb_typeof(input.properties -> (?::text)) AS value_type,
+            input.properties ->> (?::text) AS value_text
+          FROM (${source.sql}) AS input
+          WHERE jsonb_exists(input.properties, ?::text)
+        ) AS facet
+        GROUP BY facet.value_type, facet.value_text
+        ORDER BY count DESC, facet.value_text ASC
+        LIMIT ?
+      `,
+    [propertyId, propertyId, ...source.args, propertyId, limit],
+    readLimits
+  )
+}
+
+/** Compile one direct object/link read against the same scope used by object-query pushdown. */
+export function compilePgObjectReadSql(
+  projectId: string,
+  readScope: CompiledObjectReadScope | undefined,
+  sql: string,
+  args: readonly unknown[] = [],
+  readLimits?: ObjectReadExecutionLimits
+): CompiledPgScalarQuery {
+  return numberCompiledQuery(
+    applyObjectReadScope(projectId, readScope, { sql, args: [...args] }, readLimits)
+  )
+}
+
+/** Compile an operation preflight that reads at most maxTraversalFacts + 1 live facts. */
+export function compilePgObjectReadScopeTraversalProbe(
+  projectId: string,
+  scope: Extract<CompiledObjectReadScope, { readonly kind: "selected" }>,
+  maxTraversalFacts: number
+): CompiledPgScalarQuery {
+  const prefix = compileSelectedReadScope(projectId, scope)
   return numberCompiledQuery({
-    sql: `
-      SELECT facet.value_type, facet.value_text, COUNT(*)::bigint AS count
+    sql: `${prefix.sql}
+      SELECT COUNT(*)::bigint AS total
       FROM (
-        SELECT
-          jsonb_typeof(input.properties -> (?::text)) AS value_type,
-          input.properties ->> (?::text) AS value_text
-        FROM (${source.sql}) AS input
-        WHERE jsonb_exists(input.properties, ?::text)
-      ) AS facet
-      GROUP BY facet.value_type, facet.value_text
-      ORDER BY count DESC, facet.value_text ASC
-      LIMIT ?
+        SELECT 1
+        FROM sixb_scope_walk
+        LIMIT (?::bigint + 1)
+      ) AS bounded_traversal_facts
     `,
-    args: [propertyId, propertyId, ...source.args, propertyId, limit],
+    args: [...prefix.args, maxTraversalFacts],
   })
 }
 
@@ -263,9 +343,8 @@ function compileRefs(
     FROM jsonb_array_elements(?::text::jsonb) AS ref(value)
   `
   const sql = `
-    WITH requested AS (${requested})
     SELECT selected.*, selected.properties AS _cursor_properties
-    FROM requested
+    FROM (${requested}) AS requested
     JOIN objects AS selected
       ON selected.project_id = ?
      AND selected.object_type_id = requested.object_type_id
@@ -277,9 +356,8 @@ function compileRefs(
     sql,
     args: [refsJson, projectId, ...selectedOrder.args],
     totalSql: `
-      WITH requested AS (${requested})
       SELECT COUNT(*)::bigint AS total
-      FROM requested
+      FROM (${requested}) AS requested
       JOIN objects AS selected
         ON selected.project_id = ?
        AND selected.object_type_id = requested.object_type_id
@@ -585,6 +663,10 @@ function compileExpansionValue(
   parent: ExpansionParent,
   path: string
 ): CompiledPredicate {
+  if (expansion.cardinality === "one" && expansion.limit === 0) {
+    return { sql: "NULL::jsonb", args: [] }
+  }
+
   const edge = `edge_${path}`
   const target = `tgt_${path}`
   const ranked = `ranked_${path}`
@@ -1593,6 +1675,354 @@ function sqlComparisonOperator(op: "lt" | "lte" | "gt" | "gte"): "<" | "<=" | ">
     case "gte":
       return ">="
   }
+}
+
+interface SqlFragment {
+  readonly sql: string
+  readonly args: unknown[]
+}
+
+type PgSelectedObjectReadScope = {
+  readonly kind: "selected"
+  readonly roots: readonly {
+    readonly nodeId: number
+    readonly objectTypeId: string
+    readonly primaryId: string
+  }[]
+  readonly objects: readonly {
+    readonly nodeId: number
+    readonly objectTypeId: string
+    readonly propertyIds: readonly string[]
+  }[]
+  readonly steps: readonly {
+    readonly nodeId: number
+    readonly parentNodeId: number
+    readonly sourceObjectTypeId: string
+    readonly linkId: string
+    readonly targetObjectTypeId: string
+    readonly propertyIds: readonly string[]
+  }[]
+}
+
+function applyObjectReadScope<T extends SqlFragment>(
+  projectId: string,
+  readScope: CompiledObjectReadScope | undefined,
+  compiled: T,
+  readLimits?: ObjectReadExecutionLimits
+): T {
+  if (!readScope || readScope.kind === "all") return compiled
+
+  const prefix = compileSelectedReadScope(projectId, readScope, readLimits)
+  return {
+    ...compiled,
+    sql: `${prefix.sql}\n${replaceObjectReadTables(compiled.sql)}`,
+    args: [...prefix.args, ...compiled.args],
+  }
+}
+
+function compileSelectedReadScope(
+  projectId: string,
+  scope: PgSelectedObjectReadScope,
+  readLimits?: ObjectReadExecutionLimits
+): SqlFragment {
+  // A scope can legally contain tens of thousands of selected properties. Transport the whole
+  // normalized relation as one JSONB parameter, then turn it back into typed sets in PostgreSQL.
+  // Expanding every cell into a bind parameter would hit PostgreSQL's 65,535-parameter limit.
+  const scopeDocument = JSON.stringify({
+    roots: scope.roots.map((root) => ({
+      node_id: root.nodeId,
+      object_type_id: root.objectTypeId,
+      primary_id: root.primaryId,
+    })),
+    objects: scope.objects.map((object) => ({
+      node_id: object.nodeId,
+      object_type_id: object.objectTypeId,
+      property_ids: object.propertyIds,
+    })),
+    steps: scope.steps.map((step, stepId) => ({
+      step_id: stepId,
+      node_id: step.nodeId,
+      parent_node_id: step.parentNodeId,
+      source_object_type_id: step.sourceObjectTypeId,
+      link_id: step.linkId,
+      target_object_type_id: step.targetObjectTypeId,
+      property_ids: step.propertyIds,
+    })),
+  })
+
+  return {
+    sql: `
+      WITH RECURSIVE
+      sixb_scope_document(value) AS (VALUES (?::text::jsonb)),
+      sixb_scope_roots(node_id, object_type_id, primary_id) AS (
+        SELECT root.node_id, root.object_type_id, root.primary_id
+        FROM sixb_scope_document AS document
+        CROSS JOIN LATERAL jsonb_to_recordset(document.value -> 'roots') AS root(
+          node_id integer,
+          object_type_id text,
+          primary_id text
+        )
+      ),
+      sixb_scope_objects(node_id, object_type_id, property_ids) AS (
+        SELECT selected.node_id, selected.object_type_id, selected.property_ids
+        FROM sixb_scope_document AS document
+        CROSS JOIN LATERAL jsonb_to_recordset(document.value -> 'objects') AS selected(
+          node_id integer,
+          object_type_id text,
+          property_ids jsonb
+        )
+      ),
+      sixb_scope_node_objects(node_id, object_type_id) AS (
+        SELECT node_id, object_type_id FROM sixb_scope_objects
+      ),
+      sixb_scope_object_properties(node_id, object_type_id, property_id) AS (
+        SELECT selected.node_id, selected.object_type_id, property.property_id
+        FROM sixb_scope_objects AS selected
+        CROSS JOIN LATERAL jsonb_array_elements_text(selected.property_ids) AS property(property_id)
+      ),
+      sixb_scope_steps(
+        step_id,
+        node_id,
+        parent_node_id,
+        source_object_type_id,
+        link_id,
+        target_object_type_id,
+        property_ids
+      ) AS (
+        SELECT
+          step.step_id,
+          step.node_id,
+          step.parent_node_id,
+          step.source_object_type_id,
+          step.link_id,
+          step.target_object_type_id,
+          step.property_ids
+        FROM sixb_scope_document AS document
+        CROSS JOIN LATERAL jsonb_to_recordset(document.value -> 'steps') AS step(
+          step_id integer,
+          node_id integer,
+          parent_node_id integer,
+          source_object_type_id text,
+          link_id text,
+          target_object_type_id text,
+          property_ids jsonb
+        )
+      ),
+      sixb_scope_link_properties(step_id, property_id) AS (
+        SELECT step.step_id, property.property_id
+        FROM sixb_scope_steps AS step
+        CROSS JOIN LATERAL jsonb_array_elements_text(step.property_ids) AS property(property_id)
+      ),
+      -- One row is one live traversal fact: either an exact root, or a selected step plus the
+      -- complete physical edge identity. UNION de-duplicates the same fact without collapsing
+      -- one edge selected through two different step ids.
+      sixb_scope_walk_raw(
+        node_id,
+        project_id,
+        object_type_id,
+        primary_id,
+        step_id,
+        edge_source_type_id,
+        edge_source_id,
+        edge_link_id,
+        edge_target_type_id,
+        edge_target_id
+      ) AS (
+        SELECT
+          root.node_id,
+          root_object.project_id,
+          root_object.object_type_id,
+          root_object.primary_id,
+          NULL::integer,
+          NULL::text,
+          NULL::text,
+          NULL::text,
+          NULL::text,
+          NULL::text
+        FROM sixb_scope_roots AS root
+        JOIN sixb_scope_node_objects AS selected_root
+          ON selected_root.node_id = root.node_id
+         AND selected_root.object_type_id = root.object_type_id
+        JOIN objects AS root_object
+          ON root_object.project_id = ?::text
+         AND root_object.object_type_id = root.object_type_id
+         AND root_object.primary_id = root.primary_id
+
+        UNION
+
+        SELECT
+          step.node_id,
+          target_object.project_id,
+          target_object.object_type_id,
+          target_object.primary_id,
+          step.step_id,
+          edge.source_type_id,
+          edge.source_id,
+          edge.link_id,
+          edge.target_type_id,
+          edge.target_id
+        FROM sixb_scope_walk_raw AS parent
+        JOIN sixb_scope_steps AS step
+          ON step.parent_node_id = parent.node_id
+         AND step.source_object_type_id = parent.object_type_id
+        JOIN sixb_scope_node_objects AS selected_target
+          ON selected_target.node_id = step.node_id
+         AND selected_target.object_type_id = step.target_object_type_id
+        JOIN links AS edge
+          ON edge.project_id = parent.project_id
+         AND edge.source_type_id = parent.object_type_id
+         AND edge.source_id = parent.primary_id
+         AND edge.link_id = step.link_id
+         AND edge.target_type_id = step.target_object_type_id
+        JOIN objects AS target_object
+          ON target_object.project_id = edge.project_id
+         AND target_object.object_type_id = edge.target_type_id
+         AND target_object.primary_id = edge.target_id
+      ),
+      ${
+        readLimits
+          ? `-- PostgreSQL evaluates a recursive CTE on demand. Materializing only limit + 1 rows
+      -- keeps an excessive live graph bounded before any terminal query can consume it. The
+      -- dynamic zero denominator raises SQLSTATE 22012 (it cannot be constant-folded); the object
+      -- reader converts only that scoped sentinel into DelegatedExecutionLimitError.
+      sixb_scope_walk_probe AS MATERIALIZED (
+        SELECT *
+        FROM sixb_scope_walk_raw
+        LIMIT (?::bigint + 1)
+      ),
+      sixb_scope_walk_probe_count(fact_count) AS MATERIALIZED (
+        SELECT COUNT(*)::bigint
+        FROM sixb_scope_walk_probe
+      ),
+      sixb_scope_walk AS MATERIALIZED (
+        SELECT probe.*
+        FROM sixb_scope_walk_probe AS probe
+        CROSS JOIN sixb_scope_walk_probe_count AS budget
+        WHERE 1 / CASE
+          WHEN budget.fact_count > ?::bigint THEN 0
+          ELSE 1
+        END = 1
+      ),`
+          : `sixb_scope_walk AS (
+        SELECT * FROM sixb_scope_walk_raw
+      ),`
+      }
+      sixb_scope_object_identities AS (
+        SELECT DISTINCT project_id, object_type_id, primary_id
+        FROM sixb_scope_walk
+      ),
+      sixb_scope_visible_object_properties AS (
+        SELECT DISTINCT
+          walk.project_id,
+          walk.object_type_id,
+          walk.primary_id,
+          property.property_id
+        FROM sixb_scope_walk AS walk
+        JOIN sixb_scope_object_properties AS property
+          ON property.node_id = walk.node_id
+         AND property.object_type_id = walk.object_type_id
+      ),
+      sixb_scope_link_identities AS (
+        SELECT DISTINCT
+          project_id,
+          edge_source_type_id AS source_type_id,
+          edge_source_id AS source_id,
+          edge_link_id AS link_id,
+          edge_target_type_id AS target_type_id,
+          edge_target_id AS target_id
+        FROM sixb_scope_walk
+        WHERE step_id IS NOT NULL
+      ),
+      sixb_scope_visible_link_properties AS (
+        SELECT DISTINCT
+          walk.project_id,
+          walk.edge_source_type_id AS source_type_id,
+          walk.edge_source_id AS source_id,
+          walk.edge_link_id AS link_id,
+          walk.edge_target_type_id AS target_type_id,
+          walk.edge_target_id AS target_id,
+          property.property_id
+        FROM sixb_scope_walk AS walk
+        JOIN sixb_scope_link_properties AS property ON property.step_id = walk.step_id
+        WHERE walk.step_id IS NOT NULL
+      ),
+      sixb_readable_objects AS (
+        SELECT
+          raw_object.project_id,
+          raw_object.object_type_id,
+          raw_object.primary_id,
+          COALESCE(
+            (
+              SELECT jsonb_object_agg(property.key, property.value)
+              FROM jsonb_each(raw_object.properties) AS property(key, value)
+              JOIN sixb_scope_visible_object_properties AS visible
+                ON visible.project_id = raw_object.project_id
+               AND visible.object_type_id = raw_object.object_type_id
+               AND visible.primary_id = raw_object.primary_id
+               AND visible.property_id = property.key
+            ),
+            '{}'::jsonb
+          ) AS properties,
+          raw_object.created_at,
+          raw_object.updated_at,
+          raw_object.version,
+          raw_object.last_commit_id
+        FROM objects AS raw_object
+        JOIN sixb_scope_object_identities AS allowed
+          ON allowed.project_id = raw_object.project_id
+         AND allowed.object_type_id = raw_object.object_type_id
+         AND allowed.primary_id = raw_object.primary_id
+      ),
+      sixb_readable_links AS (
+        SELECT
+          raw_link.project_id,
+          raw_link.source_type_id,
+          raw_link.source_id,
+          raw_link.link_id,
+          raw_link.target_type_id,
+          raw_link.target_id,
+          CASE
+            WHEN raw_link.properties IS NULL THEN NULL
+            ELSE (
+              SELECT jsonb_object_agg(property.key, property.value)
+              FROM jsonb_each(raw_link.properties) AS property(key, value)
+              JOIN sixb_scope_visible_link_properties AS visible
+                ON visible.project_id = raw_link.project_id
+               AND visible.source_type_id = raw_link.source_type_id
+               AND visible.source_id = raw_link.source_id
+               AND visible.link_id = raw_link.link_id
+               AND visible.target_type_id = raw_link.target_type_id
+               AND visible.target_id = raw_link.target_id
+               AND visible.property_id = property.key
+            )
+          END AS properties,
+          raw_link.created_at,
+          raw_link.updated_at,
+          raw_link.last_commit_id
+        FROM links AS raw_link
+        JOIN sixb_scope_link_identities AS allowed
+          ON allowed.project_id = raw_link.project_id
+         AND allowed.source_type_id = raw_link.source_type_id
+         AND allowed.source_id = raw_link.source_id
+         AND allowed.link_id = raw_link.link_id
+         AND allowed.target_type_id = raw_link.target_type_id
+         AND allowed.target_id = raw_link.target_id
+      )
+    `,
+    args: [
+      scopeDocument,
+      projectId,
+      ...(readLimits ? [readLimits.maxTraversalFacts, readLimits.maxTraversalFacts] : []),
+    ],
+  }
+}
+
+function replaceObjectReadTables(sql: string): string {
+  return sql
+    .replace(/\bFROM\s+objects\b/gi, "FROM sixb_readable_objects")
+    .replace(/\bJOIN\s+objects\b/gi, "JOIN sixb_readable_objects")
+    .replace(/\bFROM\s+links\b/gi, "FROM sixb_readable_links")
+    .replace(/\bJOIN\s+links\b/gi, "JOIN sixb_readable_links")
 }
 
 function numberPlaceholders(sql: string): string {

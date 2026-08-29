@@ -41,6 +41,20 @@ const hasDocumentRule: RuleDefinition = {
   predicate: { kind: "link", linkId: "document", op: "exists" },
 }
 
+const hasShortSeparatorLinkRule: RuleDefinition = {
+  kind: "rule",
+  id: "transaction.has-short-separator-link",
+  subject: { kind: "object", objectTypeId: "transaction" },
+  predicate: { kind: "link", linkId: "c", op: "exists" },
+}
+
+const missesLongSeparatorLinkRule: RuleDefinition = {
+  kind: "rule",
+  id: "transaction.misses-long-separator-link",
+  subject: { kind: "object", objectTypeId: "transaction" },
+  predicate: { kind: "link", linkId: "b:c", op: "isMissing" },
+}
+
 const alsoPostedRule: RuleDefinition = {
   ...postedRule,
   id: "transaction.also-posted",
@@ -55,7 +69,7 @@ const Transaction = defineObjectType({
   id: "transaction",
   name: "Transaction",
   properties: [prop("id", "string", { primary: true, required: true }), prop("status", "string")],
-  links: [link("document", Document)],
+  links: [link("document", Document), link("c", Document), link("b:c", Document)],
 })
 const ontology = new OntologyRegistry({ sources: [Transaction, Document] })
 const fixturesByStorage = new WeakMap<Storage, MaterializerTestFixture>()
@@ -327,6 +341,36 @@ describe("RulesWorker", () => {
     expect(objects.directReads).toBe(0)
   })
 
+  test("keeps reconciliation link requests distinct when ids contain separators", async () => {
+    const events = createDomainEventService()
+    const storage = createStorage()
+    await seedCurrentObject(storage, "draft", "a")
+    await seedCurrentObject(storage, "draft", "a:b")
+    await seedCurrentLink(storage, "a:b", "c")
+    const worker = track(
+      new RulesWorker(
+        createRuntime({
+          rules: [hasShortSeparatorLinkRule, missesLongSeparatorLinkRule],
+          events,
+          storage,
+        })
+      )
+    )
+
+    await worker.start()
+    await waitFor(async () => (await ruleEventTypes(events)).length === 3)
+    await worker.stop()
+
+    const missingStates = await storage.rules!.listActive({
+      projectId,
+      ruleId: missesLongSeparatorLinkRule.id,
+    })
+    expect(missingStates.states.map((state) => state.subject.primaryId).sort()).toEqual([
+      "a",
+      "a:b",
+    ])
+  })
+
   test("one failing candidate does not cancel the rest of its batch", async () => {
     const originalError = console.error
     console.error = () => {}
@@ -510,9 +554,9 @@ class RecordingBatchLinkObjectStorage {
 
   constructor(delegate: ObjectStorage) {
     this.storage = objectStorageFacade(delegate, {
-      listLinksBatch: async () => {
+      listLinksMany: async (params) => {
         this.batchReads += 1
-        return new Map()
+        return params.items.map(() => [])
       },
       listLinks: async (params) => {
         this.directReads += 1
@@ -620,6 +664,27 @@ async function seedCurrentObject(
       {
         ref: { objectTypeId: "transaction", primaryId },
         properties: { id: primaryId, status },
+      },
+    ],
+  })
+}
+
+async function seedCurrentLink(storage: Storage, sourceId: string, linkId: string): Promise<void> {
+  const targetId = `document-for-${sourceId}`
+  await materializerFixture(storage).seed({
+    objects: [
+      {
+        ref: { objectTypeId: "document", primaryId: targetId },
+        properties: { id: targetId },
+      },
+    ],
+    links: [
+      {
+        ref: {
+          source: { objectTypeId: "transaction", primaryId: sourceId },
+          linkId,
+          target: { objectTypeId: "document", primaryId: targetId },
+        },
       },
     ],
   })

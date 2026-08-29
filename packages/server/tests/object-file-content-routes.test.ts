@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   can,
+  DelegatedExecutionLimitError,
   defineGroup,
   defineObjectType,
   defineRole,
@@ -134,6 +135,24 @@ function contentRequest(
 }
 
 describe("object file content routes", () => {
+  test("maps delegated read limits consistently for object and file identity reads", async () => {
+    const { app, storage } = await createObjectFileApi()
+    storage.objects.getByPrimaryId = async () => {
+      throw new DelegatedExecutionLimitError("visibleJsonBytes", 1_024)
+    }
+
+    for (const path of [
+      "/api/objects/document/doc-1",
+      "/api/objects/document/doc-1/files/content?path=/properties/pdf",
+    ]) {
+      const response = await app.fetch(contentRequest(path))
+      expect(response.status).toBe(400)
+      expect(await response.json()).toEqual({
+        error: "[Sixb] Delegated execution exceeded its visibleJsonBytes limit (1024).",
+      })
+    }
+  })
+
   test("streams object-bound FileRef content with browser viewer headers", async () => {
     const { app } = await createObjectFileApi()
 

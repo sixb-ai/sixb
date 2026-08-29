@@ -4,7 +4,7 @@
  * per-property telemetry appenders with compile-time unit and value type safety.
  */
 import type { ActionDefinition } from "../../actions"
-import { assertAuthorized, assertPrivileged } from "../../authorization"
+import { assertAuthorized } from "../../authorization"
 import type { ObjectLink, ObjectRef, ValueType } from "../../ontology"
 import { OntologyValidationError } from "../../ontology/errors"
 import type { LinkToken, ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
@@ -29,8 +29,7 @@ export function createObjectByIdHandle<
   const objectHandle = {
     get: async () => {
       assertAuthorized(ctx, { kind: "object.view", objectTypeId: ctx.objectType.id })
-      const row = await ctx.storage.objects.getByPrimaryId({
-        projectId: ctx.projectId,
+      const row = await ctx.objectReader.getByPrimaryId({
         objectTypeId: ctx.objectType.id,
         primaryId,
       })
@@ -38,13 +37,13 @@ export function createObjectByIdHandle<
     },
 
     listLinks: async (linkToken?: AnyLinkToken) => {
-      // Link rows reveal target types; no link grant semantics exist yet.
-      assertPrivileged(ctx, "listLinks")
+      // Keep the typed handle aligned with `sixb.objects.listLinks`: the source must be viewable,
+      // both endpoints are filtered, and delegated readers additionally enforce exact edge paths.
+      assertAuthorized(ctx, { kind: "object.view", objectTypeId: ctx.objectType.id })
       if (linkToken) {
         assertLinkTokenBelongsToObjectType(ctx.objectType, linkToken)
       }
-      return ctx.storage.objects.listLinks({
-        projectId: ctx.projectId,
+      return ctx.objectReader.listLinks({
         objectTypeId: ctx.objectType.id,
         objectId: primaryId,
         linkId: linkToken?.id,

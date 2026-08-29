@@ -49,6 +49,7 @@ describe("Atlas action params", () => {
       id: "category",
       name: "Category",
       schema: { type: "enum", valueType: "string", values: ["general_services"] },
+      required: false,
       nullable: true,
     })
     const required = actionWithParam({
@@ -76,9 +77,10 @@ describe("Atlas action params", () => {
       errors: {},
     })
     expect(
-      buildActionParams(actionWithParam({ id: "category", name: "Category", schema: "string" }), {
-        category: null,
-      }).errors
+      buildActionParams(
+        actionWithParam({ id: "category", name: "Category", schema: "string", required: false }),
+        { category: null }
+      ).errors
     ).toEqual({ category: "This parameter cannot be null." })
   })
 

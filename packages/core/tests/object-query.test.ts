@@ -1281,6 +1281,31 @@ describe("object query planner and executor", () => {
     }
   })
 
+  test("rejects more than sixteen facets before calling storage", async () => {
+    const testStorage = createTestStorage()
+    const { storage, calls } = countQueryCalls(testStorage.objects)
+
+    try {
+      await facetObjects(
+        {
+          projectId: "p1",
+          query: { kind: "start", objectTypeId: "Customer" },
+          facets: Array.from({ length: 17 }, () => ({ propertyId: "status", limit: 10 })),
+        },
+        { ontology, storage }
+      )
+      throw new Error("expected facet validation to fail")
+    } catch (error) {
+      expect(error).toBeInstanceOf(ObjectQueryValidationError)
+      if (error instanceof ObjectQueryValidationError) {
+        expect(error.issues.map((issue) => issue.code)).toContain("facet_count_exceeded")
+      }
+    }
+
+    expect(calls.facetObjects).toBe(0)
+    expect(calls.queryObjects).toBe(0)
+  })
+
   test("falls back when provider capabilities are incomplete but fallback is safe", () => {
     const limitedCapabilities: ObjectQueryCapabilities = {
       queryObjects: true,

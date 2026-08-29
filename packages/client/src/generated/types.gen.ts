@@ -6539,10 +6539,10 @@ export type ListObjectTypesResponses = {
         id: string
         name: string
         description?: string
-        required?: boolean
+        required: boolean
         nullable?: boolean
         semanticType?: string
-        schema?: unknown
+        schema: unknown
       }>
     }>
   }>
@@ -6646,10 +6646,10 @@ export type GetObjectTypeResponses = {
         id: string
         name: string
         description?: string
-        required?: boolean
+        required: boolean
         nullable?: boolean
         semanticType?: string
-        schema?: unknown
+        schema: unknown
       }>
     }>
   }
@@ -6775,6 +6775,10 @@ export type QueryObjectsErrors = {
    */
   403: ErrorResponse
   /**
+   * Response for status 413
+   */
+  413: ErrorResponse
+  /**
    * Response for status 500
    */
   500: ErrorResponse
@@ -6807,6 +6811,10 @@ export type CountObjectsErrors = {
    * Response for status 403
    */
   403: ErrorResponse
+  /**
+   * Response for status 413
+   */
+  413: ErrorResponse
   /**
    * Response for status 500
    */
@@ -6841,6 +6849,10 @@ export type ExistsObjectsErrors = {
    */
   403: ErrorResponse
   /**
+   * Response for status 413
+   */
+  413: ErrorResponse
+  /**
    * Response for status 500
    */
   500: ErrorResponse
@@ -6873,6 +6885,10 @@ export type FacetObjectsErrors = {
    * Response for status 403
    */
   403: ErrorResponse
+  /**
+   * Response for status 413
+   */
+  413: ErrorResponse
   /**
    * Response for status 500
    */
@@ -6988,6 +7004,12 @@ export type GetObjectData = {
 
 export type GetObjectErrors = {
   /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
    * Response for status 404
    */
   404: {
@@ -7088,10 +7110,10 @@ export type ListActionsResponses = {
       id: string
       name: string
       description?: string
-      required?: boolean
+      required: boolean
       nullable?: boolean
       semanticType?: string
-      schema?: unknown
+      schema: unknown
     }>
     phases: {
       validate: boolean
@@ -7137,10 +7159,10 @@ export type GetActionResponses = {
       id: string
       name: string
       description?: string
-      required?: boolean
+      required: boolean
       nullable?: boolean
       semanticType?: string
-      schema?: unknown
+      schema: unknown
     }>
     phases: {
       validate: boolean
@@ -9384,6 +9406,12 @@ export type GetBulkTelemetryHistoryErrors = {
    * Response for status 403
    */
   403: {
+    error: string
+  }
+  /**
+   * Response for status 413
+   */
+  413: {
     error: string
   }
 }

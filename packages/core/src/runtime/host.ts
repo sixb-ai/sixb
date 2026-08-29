@@ -37,6 +37,7 @@ import {
   OntologyOutboxDispatcher,
 } from "../events"
 import { resolveExecutionScopeAuthorization } from "../execution/authorization"
+import { createAuthorizedObjectReader } from "../execution/authorized-object-reader"
 import type { ExecutionScope } from "../execution/types"
 import type { LakeStorage } from "../lake-storage"
 import { type LoggerProvider, LoggingService, type ObservabilityOptions } from "../logging"
@@ -241,9 +242,16 @@ export class SixbHost<
       throw new Error("[Sixb] Kernel authority cannot be bound to the domain SDK.")
     }
 
+    const objectReader = createAuthorizedObjectReader({
+      scope,
+      ontology: this.hostContext.ontology,
+      objectStorage: this.storage.objects,
+    })
+
     const runtime: SixbRuntimeContext = {
       ...this.hostContext,
       runtimeAuthorization: scope.authorization,
+      objectReader,
       ...(authorization.type === "principal" ? { authorization: authorization.context } : {}),
     }
     registerOntologyMutationRuntime(

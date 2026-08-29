@@ -6,6 +6,7 @@ import type {
   ObjectQuerySortField,
   QueryScalarKind,
 } from "../../objects/query"
+import type { ObjectReadExecutionLimits } from "./execution-limits"
 
 /**
  * Latest-state projection storage for objects and links.
@@ -63,6 +64,85 @@ export interface ObjectLinkRow {
 }
 
 export type LinkDirection = "outgoing" | "incoming" | "both"
+
+/**
+ * Provider-neutral read authority for the latest object projection.
+ *
+ * `selected` scopes snapshot ontology identifiers, while the concrete object and link instances
+ * reachable from their roots are resolved live by the storage provider for every operation.
+ */
+export type ObjectReadScope = AllObjectReadScope | SelectedObjectReadScope
+
+export interface AllObjectReadScope {
+  readonly kind: "all"
+}
+
+export interface SelectedObjectReadScope {
+  readonly kind: "selected"
+  readonly roots: readonly ObjectReadRoot[]
+}
+
+export interface ObjectReadRoot {
+  readonly anchor: {
+    readonly objectTypeId: string
+    readonly primaryId: string
+  }
+  readonly node: ObjectReadNode
+}
+
+export interface ObjectReadNode {
+  /** Visible properties for every concrete object type snapshotted at this position. */
+  readonly objects: readonly ObjectReadObjectSelection[]
+  readonly links: readonly ObjectReadLinkSelection[]
+}
+
+export interface ObjectReadObjectSelection {
+  readonly objectTypeId: string
+  readonly propertyIds: readonly string[]
+}
+
+export interface ObjectReadLinkSelection {
+  /** Physical ontology link definitions allowed from this exact position in the selection tree. */
+  readonly definitions: readonly ObjectReadLinkDefinitionSelection[]
+  readonly target: ObjectReadNode
+}
+
+export interface ObjectReadLinkDefinitionSelection {
+  readonly sourceObjectTypeId: string
+  readonly linkId: string
+  readonly targetObjectTypeIds: readonly string[]
+  readonly propertyIds: readonly string[]
+}
+
+/** Normalized static scope consumed by storage providers. */
+export type CompiledObjectReadScope = AllObjectReadScope | CompiledSelectedObjectReadScope
+
+export interface CompiledSelectedObjectReadScope {
+  readonly kind: "selected"
+  readonly roots: readonly CompiledObjectReadRoot[]
+  readonly objects: readonly CompiledObjectReadObjectSelection[]
+  readonly steps: readonly CompiledObjectReadStep[]
+}
+
+export interface CompiledObjectReadRoot {
+  readonly nodeId: number
+  readonly objectTypeId: string
+  readonly primaryId: string
+}
+
+export interface CompiledObjectReadObjectSelection extends ObjectReadObjectSelection {
+  readonly nodeId: number
+}
+
+export interface CompiledObjectReadStep {
+  /** The target selection node reached by this step. */
+  readonly nodeId: number
+  readonly parentNodeId: number
+  readonly sourceObjectTypeId: string
+  readonly linkId: string
+  readonly targetObjectTypeId: string
+  readonly propertyIds: readonly string[]
+}
 
 export type ObjectQueryCapabilityMap<T extends string> = Readonly<Partial<Record<T, boolean>>>
 
@@ -168,7 +248,17 @@ export interface FacetObjectsResult {
   facets: readonly ObjectFacetResult[]
 }
 
-export interface ObjectStorage {
+/** Cross-provider bound for one facet terminal. */
+export const MAX_OBJECT_FACETS_PER_READ = 16
+
+/**
+ * Provider-facing read-only projection surface consumed by Core.
+ *
+ * Read scopes returned by {@link ObjectStorage.createReadScope} are bound to one project and must
+ * reject calls carrying another project id. This is deliberately not an authorization API:
+ * application runtimes read through Core's `AuthorizedObjectReader`.
+ */
+export interface ObjectReadStorage {
   queryCapabilities(): ObjectQueryCapabilities
 
   queryObjects?(params: QueryObjectsInput): Promise<QueryObjectsResult>
@@ -182,6 +272,23 @@ export interface ObjectStorage {
     primaryId: string
   }): Promise<ObjectRow | null>
 
+  /**
+   * Collision-safe batch selection check. Results align exactly with `items`.
+   *
+   * Providers resolve the live read scope once for the whole batch. Duplicate items are retained
+   * so callers can remap results without constructing delimiter-based identity keys. Selection is
+   * independent from the property's current materialized value: a selected telemetry property
+   * remains selected when the object row does not presently carry that key.
+   */
+  selectsObjectProperties(params: {
+    projectId: string
+    items: readonly {
+      objectTypeId: string
+      primaryId: string
+      propertyId: string
+    }[]
+  }): Promise<readonly boolean[]>
+
   listLinks(params: {
     projectId: string
     objectTypeId: string
@@ -191,41 +298,21 @@ export interface ObjectStorage {
   }): Promise<readonly ObjectLinkRow[]>
 
   /**
-   * Batch fetch objects by (objectTypeId, primaryId) pairs.
-   * Returns a Map keyed by "objectTypeId:primaryId". Missing items are absent.
+   * Collision-safe batch object read. Results align exactly with `items`; missing rows are `null`.
    */
-  getByPrimaryIdBatch(params: {
+  getByPrimaryIdMany(params: {
     projectId: string
     items: readonly { objectTypeId: string; primaryId: string }[]
-  }): Promise<Map<string, ObjectRow>>
+  }): Promise<readonly (ObjectRow | null)[]>
 
   /**
-   * Batch fetch outgoing links by (objectTypeId, objectId, linkId) tuples.
-   * Returns a Map keyed by "objectTypeId:objectId:linkId". Missing entries are absent.
+   * Collision-safe batch link read. Each result array aligns with the item at the same index.
    */
-  listLinksBatch(params: {
+  listLinksMany(params: {
     projectId: string
+    direction?: LinkDirection
     items: readonly { objectTypeId: string; objectId: string; linkId: string }[]
-  }): Promise<Map<string, ObjectLinkRow[]>>
-
-  /**
-   * Batch fetch every link incident to any of the given objects, in BOTH directions (the object as
-   * link source or target). Returns a flat, de-duplicated list: a physical link incident to two
-   * listed objects appears once. Used to load cascade-delete state for `object.delete` operations,
-   * which {@link listLinksBatch} cannot express because it keys on a specific linkId.
-   */
-  listIncidentLinksBatch(params: {
-    projectId: string
-    items: readonly { objectTypeId: string; objectId: string }[]
-  }): Promise<readonly ObjectLinkRow[]>
-
-  /** Stable keyset page used by background reconciliation without a total-count scan. */
-  listByPrimaryIdPage(params: {
-    projectId: string
-    objectTypeId: string
-    afterPrimaryId?: string
-    limit: number
-  }): Promise<{ objects: readonly ObjectRow[]; nextPrimaryId?: string }>
+  }): Promise<readonly (readonly ObjectLinkRow[])[]>
 
   list(params: {
     projectId: string
@@ -241,4 +328,56 @@ export interface ObjectStorage {
     orderBy?: "createdAt" | "updatedAt" | "primaryId"
     order?: "asc" | "desc"
   }): Promise<{ objects: readonly ObjectRow[]; hasMore: boolean; total: number }>
+}
+
+/** Latest-state projection storage, including trusted internal read primitives. */
+export interface ObjectStorage extends ObjectReadStorage {
+  /**
+   * Create a live provider scope that constrains every storage operation before row shaping.
+   * Core owns authority resolution and is the only layer that should call this method.
+   */
+  createReadScope(params: {
+    projectId: string
+    scope: ObjectReadScope
+    limits: ObjectReadExecutionLimits
+  }): ObjectReadStorage
+
+  /**
+   * Legacy object batch keyed by "objectTypeId:primaryId". Missing items are absent.
+   * Colon-delimited keys are retained for compatibility and are not collision-safe. Prefer
+   * {@link ObjectReadStorage.getByPrimaryIdMany} in new read paths.
+   */
+  getByPrimaryIdBatch(params: {
+    projectId: string
+    items: readonly { objectTypeId: string; primaryId: string }[]
+  }): Promise<Map<string, ObjectRow>>
+
+  /**
+   * Legacy link batch keyed by "objectTypeId:objectId:linkId". Missing items are absent.
+   * Colon-delimited keys are retained for compatibility and are not collision-safe. Prefer
+   * {@link ObjectReadStorage.listLinksMany} in new read paths.
+   */
+  listLinksBatch(params: {
+    projectId: string
+    direction?: LinkDirection
+    items: readonly { objectTypeId: string; objectId: string; linkId: string }[]
+  }): Promise<Map<string, ObjectLinkRow[]>>
+
+  /**
+   * Batch fetch every link incident to any of the given objects, in BOTH directions. This trusted
+   * primitive is reserved for mutation planning and deliberately absent from
+   * {@link ObjectReadStorage}.
+   */
+  listIncidentLinksBatch(params: {
+    projectId: string
+    items: readonly { objectTypeId: string; objectId: string }[]
+  }): Promise<readonly ObjectLinkRow[]>
+
+  /** Stable keyset page used only by background reconciliation. */
+  listByPrimaryIdPage(params: {
+    projectId: string
+    objectTypeId: string
+    afterPrimaryId?: string
+    limit: number
+  }): Promise<{ objects: readonly ObjectRow[]; nextPrimaryId?: string }>
 }

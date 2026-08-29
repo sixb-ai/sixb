@@ -1,4 +1,6 @@
 import { StorageTransactionError } from "./errors"
+import { createGuardedObjectReadStorage } from "./objects/guard"
+import type { ObjectReadStorage } from "./objects/types"
 
 type ObjectLike = Record<PropertyKey, unknown>
 
@@ -23,7 +25,18 @@ export function createTransactionStorageProxy<T extends object>(
         if (typeof result === "function") {
           return (...args: unknown[]) => {
             assertTransactionActive(isActive)
-            return result.apply(current, args)
+            const returned = result.apply(current, args)
+            // ObjectStorage.createReadScope() is synchronous but returns another operation facade.
+            // Keep that facade under the transaction lifetime guard instead of letting it escape.
+            return isObjectReadStorageLike(returned)
+              ? createGuardedObjectReadStorage(returned, {
+                  assertAvailable: () => assertTransactionActive(isActive),
+                  run: async (operation) => {
+                    assertTransactionActive(isActive)
+                    return operation()
+                  },
+                })
+              : returned
           }
         }
         if (result && typeof result === "object") {
@@ -38,6 +51,16 @@ export function createTransactionStorageProxy<T extends object>(
   }
 
   return wrap(target)
+}
+
+function isObjectReadStorageLike(value: unknown): value is ObjectReadStorage {
+  if (!value || typeof value !== "object") return false
+  const candidate = value as ObjectLike
+  return (
+    typeof candidate.queryCapabilities === "function" &&
+    typeof candidate.getByPrimaryId === "function" &&
+    typeof candidate.list === "function"
+  )
 }
 
 export function assertTransactionActive(isActive: () => boolean): void {

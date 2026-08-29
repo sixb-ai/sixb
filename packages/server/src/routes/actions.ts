@@ -1,4 +1,4 @@
-import type { ActionDefinition, SixbHostView } from "@sixb/core"
+import type { ActionDescriptor, SixbHostView } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
@@ -13,13 +13,13 @@ import { ErrorResponseSchema } from "../schemas/common"
 import { handleRouteError } from "../utils/http"
 
 function serializeAction(
-  action: ActionDefinition
+  action: ActionDescriptor
 ): ReturnType<typeof ActionCatalogItemSchema.parse> {
   return ActionCatalogItemSchema.parse({
     id: action.id,
     name: action.id,
     description: action.description,
-    ...(action.binding.kind === "object" ? { objectTypeId: action.binding.objectType.id } : {}),
+    ...(action.binding.kind === "object" ? { objectTypeId: action.binding.objectTypeId } : {}),
     params: Object.entries(action.params).map(([id, config]) => ({
       id,
       name: id,
@@ -29,12 +29,7 @@ function serializeAction(
       description: config.description,
       semanticType: config.semanticType,
     })),
-    phases: {
-      validate: action.phases.validate.length > 0,
-      writeback: action.phases.writeback !== undefined,
-      edits: action.phases.edits !== undefined,
-      effects: action.phases.effects !== undefined,
-    },
+    phases: action.phases,
   })
 }
 

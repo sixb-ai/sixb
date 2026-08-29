@@ -19,6 +19,7 @@ import {
   defineWorkflow,
   defineWorkflowStep,
   link,
+  OntologyRegistry,
   type PipelineDefinition,
   prop,
   ref,
@@ -30,7 +31,11 @@ import {
   type WorkflowDefinition,
 } from "../src"
 import { agentServiceAccountId, ensureAgentExecutionIdentity } from "../src/agents/authority"
+import { requestAgentRun } from "../src/agents/request"
 import { restoreAgentExecutionScope } from "../src/execution/agent"
+import { createAuthorizedObjectReader } from "../src/execution/authorized-object-reader"
+import { createTestingScope } from "../src/execution/scopes"
+import type { SixbRuntimeContext } from "../src/runtime/types"
 import type { AuthStorage } from "../src/storage"
 import { createTestSixb, type TestExecutionHost } from "../src/testing"
 import { createTestRuntimeDeps, waitFor } from "./test-runtime-deps"
@@ -155,6 +160,7 @@ const blindWriters = defineGroup("blind-writers")
 const ingest = defineGroup("ingest")
 const linkers = defineGroup("linkers")
 const blindLinkers = defineGroup("blind-linkers")
+const signedOnly = defineGroup("signed-only")
 
 const contractOperator = defineRole("contract.operator", {
   grantedTo: [commercial],
@@ -216,6 +222,11 @@ const blindInvoiceLinker = defineRole("invoice.blind-linker", {
   grants: [can.view(Invoice), can.edit(Invoice)],
 })
 
+const signedContractSender = defineRole("signed-contract.sender", {
+  grantedTo: [signedOnly],
+  grants: [can.view(SignedContract), can.apply(sendContract)],
+})
+
 const principal = { type: "user", id: "adam" } as const
 
 // No explicit instance annotations anywhere in this file: naming
@@ -242,6 +253,7 @@ function createRuntime() {
       ingest,
       linkers,
       blindLinkers,
+      signedOnly,
     ],
     roles: [
       contractOperator,
@@ -254,6 +266,7 @@ function createRuntime() {
       contractIngestor,
       invoiceLinker,
       blindInvoiceLinker,
+      signedContractSender,
     ],
     ...createTestRuntimeDeps(),
   })
@@ -534,6 +547,14 @@ describe("bound Sixb operational access", () => {
 
     const runner = bindPrincipal(host, contextFor(host, ["operations"]))
     expect(runner.actions.list()).toEqual([])
+
+    const signedSender = bindPrincipal(host, contextFor(host, ["signed-only"]))
+    expect(signedSender.actions.list().map((action) => action.id)).toEqual(["send-contract"])
+    expect(signedSender.actions.getById("send-contract")?.id).toBe("send-contract")
+    expect(signedSender.actions.listForType(SignedContract).map((action) => action.id)).toEqual([
+      "send-contract",
+    ])
+    expect(signedSender.actions.listForType(Contract)).toEqual([])
   })
 
   test("dynamic action requests enforce apply and view", async () => {
@@ -747,6 +768,61 @@ describe("bound Sixb operational access", () => {
     ).rejects.toThrow(AuthorizationError)
   })
 
+  test("agent run attribution comes from the exact execution authority", async () => {
+    const host = createRuntime()
+    await seedPrincipal(host)
+    const authorization = contextFor(host, ["operations"])
+    const scope = createTestingScope({
+      projectId: host.id,
+      executionId: "execution-agent-attribution",
+      context: authorization,
+    })
+    const agent = host.definitions.agents.getById("contract-agent")
+    if (!agent) throw new Error("Expected Agent definition.")
+
+    const ontology = new OntologyRegistry({ sources: [Contract, SignedContract, Invoice] })
+    const runtime: SixbRuntimeContext = {
+      projectId: host.id,
+      broker: host.broker,
+      ontology,
+      actionRegistry: host.definitions.actions,
+      events: host.events,
+      storage: host.storage,
+      queues: host.queues,
+      objectReader: createAuthorizedObjectReader({
+        scope,
+        ontology,
+        objectStorage: host.storage.objects,
+      }),
+      runtimeAuthorization: scope.authorization,
+      authorization: {
+        ...authorization,
+        principal: { type: "user", id: "forged-runtime-principal" },
+      },
+    }
+
+    const result = await requestAgentRun(
+      runtime,
+      scope.execution,
+      host.definitions.security,
+      agent,
+      {
+        agentId: agent.id,
+        text: "Use the capability-bound principal.",
+        principal: { type: "user", id: "forged-input-principal" },
+      }
+    )
+    const thread = await host.storage.agents?.threads.getById({
+      projectId: host.id,
+      id: result.run.threadId,
+    })
+
+    expect(thread?.ownerPrincipal).toEqual(principal)
+    await expect(
+      host.storage.executions.getById({ projectId: host.id, id: result.run.executionId })
+    ).resolves.toMatchObject({ requestedBy: principal })
+  })
+
   test("agent run admission never reactivates a suspended managed identity", async () => {
     const host = createRuntime()
     const _sixb = createTestSixb(host)
@@ -822,6 +898,21 @@ describe("bound Sixb object writes", () => {
 
     await scoped.objects(Contract).upsert({ properties: { id: "c1" } })
     expect(await scoped.objects(Contract).byId("c1").get()).not.toBeNull()
+  })
+
+  test("path-identity upserts authorize before ontology lookup and override a body id", async () => {
+    const host = createRuntime()
+    await seedPrincipal(host)
+    const _sixb = createTestSixb(host)
+    const scoped = bindPrincipal(host, contextFor(host, ["editors"]))
+
+    await scoped.objects.upsertByPrimaryId("contract", "from-path", { id: "from-body" })
+
+    expect(await scoped.objects(Contract).byId("from-path").get()).not.toBeNull()
+    expect(await scoped.objects(Contract).byId("from-body").get()).toBeNull()
+    expect(
+      scoped.objects.upsertByPrimaryId("unknown-type", "unknown", { id: "unknown" })
+    ).rejects.toThrow(AuthorizationError)
   })
 
   test("edit without view is refused — an upsert answers with the merged row", async () => {
@@ -1055,18 +1146,30 @@ describe("direct writes are attributable", () => {
 })
 
 describe("bound Sixb fails closed on ungranted surfaces", () => {
-  test("listLinks denies even when reached at runtime", async () => {
+  test("typed and dynamic link reads share the same endpoint-view policy", async () => {
     const host = createRuntime()
     const sixb = createTestSixb(host)
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
-    const principalSixb = bindPrincipal(host, contextFor(host, ["editors"]))
+    await sixb.objects(Invoice).upsert({ properties: { id: "i1" } })
+    await sixb.objects(Invoice).upsertLink({
+      sourceId: "i1",
+      linkId: "contract",
+      targetTypeId: "contract",
+      targetId: "c1",
+    })
 
-    // Trusted executions need this method on the shared Sixb surface. A principal can reach it too,
-    // but link rows name target types no read grant covers, so the protected leaf fails closed even
-    // when the principal may edit the source type.
-    expect(principalSixb.objects(Contract).byId("c1").listLinks()).rejects.toThrow(
-      AuthorizationError
-    )
+    const linker = bindPrincipal(host, contextFor(host, ["linkers"]))
+    const typed = await linker.objects(Invoice).byId("i1").listLinks(Invoice.l.contract)
+    const dynamic = await linker.objects.listLinks({
+      objectTypeId: "invoice",
+      objectId: "i1",
+      linkId: "contract",
+    })
+    expect(typed).toEqual(dynamic)
+    expect(typed).toHaveLength(1)
+
+    const blindLinker = bindPrincipal(host, contextFor(host, ["blind-linkers"]))
+    expect(await blindLinker.objects(Invoice).byId("i1").listLinks()).toEqual([])
   })
 
   test("an explicit auth-disabled execution remains unrestricted", async () => {
@@ -1124,14 +1227,14 @@ describe("bound Sixb fails closed on ungranted surfaces", () => {
           executor: { type: "agent", agentId: "contract-agent", runId: "agent-run-2" },
         },
       })
-    ).toThrow("agent authority does not match its execution binding")
+    ).toThrow("authority is bound to different execution provenance")
 
     expect(() =>
       host.withScope({
         authorization: scope.authorization,
         execution: { ...scope.execution, id: "exec_forged" },
       })
-    ).toThrow("agent authority does not match its execution binding")
+    ).toThrow("authority is bound to different execution provenance")
   })
 })
 
@@ -1184,6 +1287,7 @@ describe("bound Sixb surface", () => {
         "resolveType",
         "upsert",
         "upsertBatch",
+        "upsertByPrimaryId",
         "upsertLink",
         "upsertLinkBatch",
       ].sort()

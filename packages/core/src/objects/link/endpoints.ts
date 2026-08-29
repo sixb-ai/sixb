@@ -16,22 +16,23 @@ export interface LinkEndpointItem {
   readonly targetId: string
 }
 
-export type EndpointExistence = ReadonlySet<string>
+export type EndpointExistence = ReadonlyMap<string, ReadonlySet<string>>
 
 export function collectEndpointLookups(
   items: readonly LinkEndpointItem[]
 ): { objectTypeId: string; primaryId: string }[] {
   const lookups: { objectTypeId: string; primaryId: string }[] = []
-  const seen = new Set<string>()
+  const seen = new Map<string, Set<string>>()
 
   for (const item of items) {
     for (const endpoint of [
       { objectTypeId: item.objectType.id, primaryId: item.sourceId },
       { objectTypeId: item.targetTypeId, primaryId: item.targetId },
     ]) {
-      const key = endpointKey(endpoint.objectTypeId, endpoint.primaryId)
-      if (seen.has(key)) continue
-      seen.add(key)
+      const primaryIds = seen.get(endpoint.objectTypeId) ?? new Set<string>()
+      if (primaryIds.has(endpoint.primaryId)) continue
+      primaryIds.add(endpoint.primaryId)
+      seen.set(endpoint.objectTypeId, primaryIds)
       lookups.push(endpoint)
     }
   }
@@ -43,24 +44,27 @@ export async function loadEndpointExistence(
   ctx: Pick<SixbRuntimeContext, "projectId" | "storage">,
   lookups: readonly { objectTypeId: string; primaryId: string }[]
 ): Promise<EndpointExistence> {
-  if (lookups.length === 0) return new Set()
-  const rows = await ctx.storage.objects.getByPrimaryIdBatch({
+  if (lookups.length === 0) return new Map()
+  const rows = await ctx.storage.objects.getByPrimaryIdMany({
     projectId: ctx.projectId,
     items: lookups,
   })
-  return new Set(rows.keys())
+  const existing = new Map<string, Set<string>>()
+  for (const [index, lookup] of lookups.entries()) {
+    if (!rows[index]) continue
+    const primaryIds = existing.get(lookup.objectTypeId) ?? new Set<string>()
+    primaryIds.add(lookup.primaryId)
+    existing.set(lookup.objectTypeId, primaryIds)
+  }
+  return existing
 }
 
 /** Throws {@link ObjectNotFoundError} for the first endpoint the read did not find. */
 export function requireEndpoints(item: LinkEndpointItem, existing: EndpointExistence): void {
-  if (!existing.has(endpointKey(item.objectType.id, item.sourceId))) {
+  if (!existing.get(item.objectType.id)?.has(item.sourceId)) {
     throw new ObjectNotFoundError(item.objectType.id, item.sourceId, "Source object not found")
   }
-  if (!existing.has(endpointKey(item.targetTypeId, item.targetId))) {
+  if (!existing.get(item.targetTypeId)?.has(item.targetId)) {
     throw new ObjectNotFoundError(item.targetTypeId, item.targetId, "Target object not found")
   }
-}
-
-function endpointKey(objectTypeId: string, primaryId: string): string {
-  return `${objectTypeId}:${primaryId}`
 }

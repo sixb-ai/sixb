@@ -9,6 +9,7 @@ import type {
 import { normalizeDecimalValue } from "../../ontology"
 import { formatUnknownObjectTypeMessage } from "../../ontology/errors"
 import { validatePropertyValue, validateSchemaValue } from "../../ontology/validation"
+import { assertObjectQueryComplexity } from "./complexity"
 import { ObjectQueryValidationError } from "./errors"
 import type {
   ObjectExpansion,
@@ -67,6 +68,7 @@ export function validateObjectQuery(
   query: ObjectQuery,
   options: ObjectQueryValidationOptions
 ): ValidatedObjectQuery {
+  assertObjectQueryComplexity(query)
   const normalized = options.normalize === false ? query : normalizeObjectQuery(query)
   const ctx = createValidationContext(options)
   const validation = validateQueryNode(normalized, "$", ctx)
@@ -86,6 +88,12 @@ export function collectObjectQueryValidationIssues(
   query: ObjectQuery,
   options: ObjectQueryValidationOptions
 ): readonly ObjectQueryValidationIssue[] {
+  try {
+    assertObjectQueryComplexity(query)
+  } catch (error) {
+    if (error instanceof ObjectQueryValidationError) return error.issues
+    throw error
+  }
   const normalized = options.normalize === false ? query : normalizeObjectQuery(query)
   const ctx = createValidationContext(options)
   validateQueryNode(normalized, "$", ctx)
@@ -978,12 +986,12 @@ function validateExpansionLimit(
   ctx: QueryValidationContext
 ): void {
   if (limit === undefined) return
-  if (!Number.isInteger(limit) || limit < 0) {
+  if (!Number.isSafeInteger(limit) || limit < 0) {
     addIssue(
       ctx,
       `${path}.limit`,
       "invalid_expand_limit",
-      "expand.limit must be a non-negative integer"
+      "expand.limit must be a non-negative safe integer"
     )
   }
 }
@@ -998,6 +1006,17 @@ function validateSet(
     addIssue(ctx, path, "empty_set", `Set operation '${op}' must include at least one input`)
     return { result: { objectTypeIds: [] }, query: { kind: "set", op, inputs } }
   }
+
+  inputs.forEach((input, index) => {
+    if (containsExpand(input)) {
+      addIssue(
+        ctx,
+        `${path}.inputs[${index}]`,
+        "expand_inside_set",
+        "Set inputs cannot contain expand; apply expand to the result of the set operation"
+      )
+    }
+  })
 
   const results = inputs.map((input, index) =>
     validateQueryNode(input, `${path}.inputs[${index}]`, ctx)
@@ -1020,6 +1039,18 @@ function validateSet(
     result: first,
     query: { kind: "set", op, inputs: results.map((result) => result.query) },
   }
+}
+
+function containsExpand(query: ObjectQuery): boolean {
+  const pending = [query]
+  while (pending.length > 0) {
+    const current = pending.pop()
+    if (!current) continue
+    if (current.kind === "expand") return true
+    if (current.kind === "set") pending.push(...current.inputs)
+    else if (current.kind !== "start" && current.kind !== "refs") pending.push(current.input)
+  }
+  return false
 }
 
 function validateSortFields(

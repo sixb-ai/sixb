@@ -6,6 +6,7 @@ import {
   type ObjectQuerySetOperation,
   type ObjectQuerySortField,
 } from "@sixb/core"
+import type { CompiledObjectReadScope, CompiledSelectedObjectReadScope } from "@sixb/core/storage"
 
 export type SqliteValue = string | number | bigint | boolean | null
 
@@ -36,6 +37,7 @@ interface CompiledHasMoreProbe {
 
 interface CompileContext {
   probeLimit: boolean
+  source: SqliteObjectReadSource
 }
 
 interface CompiledPredicate {
@@ -74,7 +76,6 @@ interface EncodedCursorValue {
 }
 
 const PAGE_TOKEN_PREFIX = "keyset:"
-const exactContext: CompileContext = { probeLimit: false }
 
 // Fallback fanout cap for a "many" expansion that arrives without an explicit
 // limit. The core executor normally bakes a limit in before pushdown; this only
@@ -84,10 +85,350 @@ const DEFAULT_EXPANSION_FANOUT = 1_000
 export function compileObjectQuery(
   projectId: string,
   query: ObjectQuery,
-  options: { includeTotal?: boolean } = {}
+  options: { includeTotal?: boolean; scope?: CompiledObjectReadScope } = {}
 ): CompiledObjectQuery {
-  const ctx: CompileContext = { probeLimit: options.includeTotal === false }
-  return compileObjectQueryInternal(projectId, query, ctx)
+  const source = compileSqliteObjectReadSource(projectId, options.scope ?? { kind: "all" })
+  const ctx: CompileContext = { probeLimit: options.includeTotal === false, source }
+  return source.scopeQuery(compileObjectQueryInternal(projectId, query, ctx))
+}
+
+/** SQL table source and CTE wrapper shared by object queries and direct object reads. */
+export interface SqliteObjectReadSource {
+  readonly objectsTable: string
+  readonly linksTable: string
+  /** Present for selected scopes; rows record authority independently from materialized values. */
+  readonly objectPropertyPermissionsTable?: string
+  scopeStatement(
+    sql: string,
+    args?: readonly SqliteValue[]
+  ): {
+    sql: string
+    args: SqliteValue[]
+  }
+  scopeQuery(query: CompiledObjectQuery): CompiledObjectQuery
+}
+
+/** Compile one immutable selection into live SQLite relations of visible objects and exact links. */
+export function compileSqliteObjectReadSource(
+  projectId: string,
+  scope: CompiledObjectReadScope
+): SqliteObjectReadSource {
+  if (scope.kind === "all") return ALL_OBJECT_READ_SOURCE
+
+  const compiled = compileSelectedReadScope(projectId, scope)
+  const scopeStatement = (sql: string, args: readonly SqliteValue[] = []) => ({
+    sql: `${compiled.sql}\n${sql}`,
+    args: [...compiled.args, ...args],
+  })
+
+  return {
+    objectsTable: "_sixb_scope_objects",
+    linksTable: "_sixb_scope_links",
+    objectPropertyPermissionsTable: "_sixb_scope_object_permissions",
+    scopeStatement,
+    scopeQuery: (query) => ({
+      ...query,
+      ...scopeStatement(query.sql, query.args),
+      totalSql: `${compiled.sql}\n${query.totalSql}`,
+      totalArgs: [...compiled.args, ...query.totalArgs],
+      ...(query.hasMoreProbe
+        ? {
+            hasMoreProbe: {
+              ...query.hasMoreProbe,
+              ...scopeStatement(query.hasMoreProbe.sql, query.hasMoreProbe.args),
+            },
+          }
+        : {}),
+    }),
+  }
+}
+
+/**
+ * Compile a bounded probe for the live traversal facts behind one selected scope.
+ *
+ * `bun:sqlite` 1.3.14 has no scalar-function registration or progress/interrupt hook, so the
+ * provider cannot raise Sixb's stable budget error from inside the recursive CTE. The caller runs
+ * this synchronous `limit + 1` probe immediately before the terminal statement and raises the
+ * public error before releasing any value.
+ */
+export function compileSqliteObjectReadScopeTraversalProbe(
+  projectId: string,
+  scope: CompiledSelectedObjectReadScope,
+  maxTraversalFacts: number
+): { readonly sql: string; readonly args: readonly SqliteValue[] } {
+  const compiled = compileSelectedReadScope(projectId, scope)
+  return {
+    sql: `${compiled.sql}
+      SELECT COUNT(*) AS total
+      FROM (
+        SELECT 1 AS traversal_fact
+        FROM _sixb_scope_root_facts
+
+        UNION ALL
+
+        SELECT 1 AS traversal_fact
+        FROM _sixb_scope_reached_links
+
+        LIMIT ?
+      ) AS bounded_traversal_facts
+    `,
+    args: [...compiled.args, BigInt(maxTraversalFacts) + 1n],
+  }
+}
+
+const ALL_OBJECT_READ_SOURCE: SqliteObjectReadSource = {
+  objectsTable: "objects",
+  linksTable: "links",
+  scopeStatement: (sql, args = []) => ({ sql, args: [...args] }),
+  scopeQuery: (query) => query,
+}
+
+function exactContext(ctx: CompileContext): CompileContext {
+  return ctx.probeLimit ? { ...ctx, probeLimit: false } : ctx
+}
+
+interface CompiledReadScopeCte {
+  sql: string
+  args: SqliteValue[]
+}
+
+function compileSelectedReadScope(
+  projectId: string,
+  scope: CompiledSelectedObjectReadScope
+): CompiledReadScopeCte {
+  return {
+    sql: `
+      WITH RECURSIVE
+      _sixb_scope_roots(root_id, node_id, object_type_id, primary_id) AS (
+        SELECT
+          CAST(root.key AS INTEGER),
+          CAST(json_extract(root.value, '$.nodeId') AS INTEGER),
+          CAST(json_extract(root.value, '$.objectTypeId') AS TEXT),
+          CAST(json_extract(root.value, '$.primaryId') AS TEXT)
+        FROM json_each(?) AS root
+      ),
+      _sixb_scope_root_facts(project_id, root_id, node_id, object_type_id, primary_id) AS (
+        SELECT anchor.project_id, root.root_id, root.node_id, root.object_type_id, root.primary_id
+        FROM _sixb_scope_roots AS root
+        JOIN objects AS anchor
+          ON anchor.project_id = ?
+         AND anchor.object_type_id = root.object_type_id
+         AND anchor.primary_id = root.primary_id
+      ),
+      _sixb_scope_object_selections(node_id, object_type_id, property_ids) AS (
+        SELECT
+          CAST(json_extract(selection.value, '$.nodeId') AS INTEGER),
+          CAST(json_extract(selection.value, '$.objectTypeId') AS TEXT),
+          json_extract(selection.value, '$.propertyIds')
+        FROM json_each(?) AS selection
+      ),
+      _sixb_scope_link_selections(
+        step_id,
+        node_id,
+        parent_node_id,
+        source_object_type_id,
+        link_id,
+        target_object_type_id,
+        property_ids
+      ) AS (
+        SELECT
+          CAST(step.key AS INTEGER),
+          CAST(json_extract(step.value, '$.nodeId') AS INTEGER),
+          CAST(json_extract(step.value, '$.parentNodeId') AS INTEGER),
+          CAST(json_extract(step.value, '$.sourceObjectTypeId') AS TEXT),
+          CAST(json_extract(step.value, '$.linkId') AS TEXT),
+          CAST(json_extract(step.value, '$.targetObjectTypeId') AS TEXT),
+          json_extract(step.value, '$.propertyIds')
+        FROM json_each(?) AS step
+      ),
+      _sixb_scope_reachable(project_id, node_id, object_type_id, primary_id) AS (
+        SELECT root.project_id, root.node_id, root.object_type_id, root.primary_id
+        FROM _sixb_scope_root_facts AS root
+
+        UNION
+
+        SELECT edge.project_id, selection.node_id, edge.target_type_id, edge.target_id
+        FROM _sixb_scope_reachable AS parent
+        JOIN _sixb_scope_link_selections AS selection
+          ON selection.parent_node_id = parent.node_id
+         AND selection.source_object_type_id = parent.object_type_id
+        JOIN links AS edge
+          ON edge.project_id = parent.project_id
+         AND edge.source_type_id = parent.object_type_id
+         AND edge.source_id = parent.primary_id
+         AND edge.link_id = selection.link_id
+         AND edge.target_type_id = selection.target_object_type_id
+        JOIN objects AS target
+          ON target.project_id = edge.project_id
+         AND target.object_type_id = edge.target_type_id
+         AND target.primary_id = edge.target_id
+      ),
+      _sixb_scope_object_permissions(project_id, object_type_id, primary_id, property_id) AS (
+        SELECT DISTINCT
+          reachable.project_id,
+          reachable.object_type_id,
+          reachable.primary_id,
+          CAST(selected_property.value AS TEXT)
+        FROM _sixb_scope_reachable AS reachable
+        JOIN _sixb_scope_object_selections AS selection
+          ON selection.node_id = reachable.node_id
+         AND selection.object_type_id = reachable.object_type_id
+        JOIN json_each(selection.property_ids) AS selected_property
+      ),
+      _sixb_scope_object_ids(project_id, object_type_id, primary_id) AS (
+        SELECT DISTINCT project_id, object_type_id, primary_id
+        FROM _sixb_scope_reachable
+      ),
+      _sixb_scope_objects AS (
+        SELECT
+          stored.project_id,
+          stored.object_type_id,
+          stored.primary_id,
+          COALESCE(
+            (
+              SELECT json_group_object(property.key, ${jsonEachValue("property")})
+              FROM json_each(stored.properties) AS property
+              JOIN _sixb_scope_object_permissions AS permission
+                ON permission.project_id = stored.project_id
+               AND permission.object_type_id = stored.object_type_id
+               AND permission.primary_id = stored.primary_id
+               AND permission.property_id = property.key
+            ),
+            json('{}')
+          ) AS properties,
+          stored.created_at,
+          stored.updated_at,
+          stored.version,
+          stored.last_commit_id
+        FROM objects AS stored
+        JOIN _sixb_scope_object_ids AS visible
+          ON visible.project_id = stored.project_id
+         AND visible.object_type_id = stored.object_type_id
+         AND visible.primary_id = stored.primary_id
+      ),
+      _sixb_scope_reached_links(
+        project_id,
+        step_id,
+        node_id,
+        parent_node_id,
+        source_type_id,
+        source_id,
+        link_id,
+        target_type_id,
+        target_id,
+        property_ids
+      ) AS (
+        SELECT
+          edge.project_id,
+          selection.step_id,
+          selection.node_id,
+          selection.parent_node_id,
+          edge.source_type_id,
+          edge.source_id,
+          edge.link_id,
+          edge.target_type_id,
+          edge.target_id,
+          selection.property_ids
+        FROM _sixb_scope_reachable AS parent
+        JOIN _sixb_scope_link_selections AS selection
+          ON selection.parent_node_id = parent.node_id
+         AND selection.source_object_type_id = parent.object_type_id
+        JOIN links AS edge
+          ON edge.project_id = parent.project_id
+         AND edge.source_type_id = parent.object_type_id
+         AND edge.source_id = parent.primary_id
+         AND edge.link_id = selection.link_id
+         AND edge.target_type_id = selection.target_object_type_id
+        JOIN objects AS target
+          ON target.project_id = edge.project_id
+         AND target.object_type_id = edge.target_type_id
+         AND target.primary_id = edge.target_id
+      ),
+      _sixb_scope_link_permissions(
+        project_id,
+        source_type_id,
+        source_id,
+        link_id,
+        target_type_id,
+        target_id,
+        property_id
+      ) AS (
+        SELECT DISTINCT
+          reached.project_id,
+          reached.source_type_id,
+          reached.source_id,
+          reached.link_id,
+          reached.target_type_id,
+          reached.target_id,
+          CAST(selected_property.value AS TEXT)
+        FROM _sixb_scope_reached_links AS reached
+        JOIN json_each(reached.property_ids) AS selected_property
+      ),
+      _sixb_scope_link_ids(
+        project_id,
+        source_type_id,
+        source_id,
+        link_id,
+        target_type_id,
+        target_id
+      ) AS (
+        SELECT DISTINCT
+          project_id,
+          source_type_id,
+          source_id,
+          link_id,
+          target_type_id,
+          target_id
+        FROM _sixb_scope_reached_links
+      ),
+      _sixb_scope_links AS (
+        SELECT
+          stored.project_id,
+          stored.source_type_id,
+          stored.source_id,
+          stored.link_id,
+          stored.target_type_id,
+          stored.target_id,
+          CASE
+            WHEN stored.properties IS NULL THEN NULL
+            ELSE NULLIF(
+              (
+                SELECT json_group_object(property.key, ${jsonEachValue("property")})
+                FROM json_each(stored.properties) AS property
+                JOIN _sixb_scope_link_permissions AS permission
+                  ON permission.project_id = stored.project_id
+                 AND permission.source_type_id = stored.source_type_id
+                 AND permission.source_id = stored.source_id
+                 AND permission.link_id = stored.link_id
+                 AND permission.target_type_id = stored.target_type_id
+                 AND permission.target_id = stored.target_id
+                 AND permission.property_id = property.key
+              ),
+              json('{}')
+            )
+          END AS properties,
+          stored.created_at,
+          stored.updated_at,
+          stored.last_commit_id
+        FROM links AS stored
+        JOIN _sixb_scope_link_ids AS visible
+          ON visible.project_id = stored.project_id
+         AND visible.source_type_id = stored.source_type_id
+         AND visible.source_id = stored.source_id
+         AND visible.link_id = stored.link_id
+         AND visible.target_type_id = stored.target_type_id
+         AND visible.target_id = stored.target_id
+      )
+    `,
+    // Packing each normalized relation as JSON keeps one scope well below SQLite's host-parameter
+    // limit even when `.withLinks()` snapshots a large ontology surface.
+    args: [
+      JSON.stringify(scope.roots),
+      projectId,
+      JSON.stringify(scope.objects),
+      JSON.stringify(scope.steps),
+    ],
+  }
 }
 
 function compileObjectQueryInternal(
@@ -97,27 +438,28 @@ function compileObjectQueryInternal(
 ): CompiledObjectQuery {
   switch (query.kind) {
     case "start":
-      return compileStart(projectId, query)
+      return compileStart(projectId, query, ctx)
     case "refs":
-      return compileRefs(projectId, query)
+      return compileRefs(projectId, query, ctx)
     case "filter":
-      return compileFilter(projectId, query.input, query.predicate)
+      return compileFilter(projectId, query.input, query.predicate, ctx)
     case "sort":
       return compileSort(projectId, query.input, query.fields, ctx)
     case "limit":
       return compileLimit(projectId, query.input, query.limit, ctx)
     case "page":
-      return compilePage(projectId, query.input, query.pageSize, query.pageToken)
+      return compilePage(projectId, query.input, query.pageSize, query.pageToken, ctx)
     case "traverse":
       return compileTraversal(
         projectId,
         query.input,
         query.linkId,
         query.direction,
-        query.sourceObjectTypeId
+        query.sourceObjectTypeId,
+        ctx
       )
     case "set":
-      return compileSet(projectId, query.op, query.inputs)
+      return compileSet(projectId, query.op, query.inputs, ctx)
     case "project":
       return compileProject(projectId, query.input, query.properties, ctx)
     case "text":
@@ -126,10 +468,11 @@ function compileObjectQueryInternal(
         query.input,
         query.query,
         query.fields,
-        query.fieldsByObjectType
+        query.fieldsByObjectType,
+        ctx
       )
     case "expand":
-      return compileExpand(projectId, query.input, query.expansions)
+      return compileExpand(projectId, query.input, query.expansions, ctx)
     case "vector":
       throw new Error(`[Sixb] SQLite object storage does not support query node '${query.kind}'`)
   }
@@ -137,7 +480,8 @@ function compileObjectQueryInternal(
 
 function compileStart(
   projectId: string,
-  query: Extract<ObjectQuery, { kind: "start" }>
+  query: Extract<ObjectQuery, { kind: "start" }>,
+  ctx: CompileContext
 ): CompiledObjectQuery {
   if (query.includeSubtypes === true) {
     throw new Error("[Sixb] SQLite object storage does not support start.includeSubtypes")
@@ -146,7 +490,7 @@ function compileStart(
   const order = compileOrder(identityOrderFields())
   const sql = `
     SELECT *, properties AS _cursor_properties
-    FROM objects
+    FROM ${ctx.source.objectsTable}
     WHERE project_id = ? AND object_type_id = ?
     ORDER BY ${order.sql}
   `
@@ -155,7 +499,7 @@ function compileStart(
   return {
     sql,
     args,
-    totalSql: "SELECT COUNT(*) as total FROM objects WHERE project_id = ? AND object_type_id = ?",
+    totalSql: `SELECT COUNT(*) as total FROM ${ctx.source.objectsTable} WHERE project_id = ? AND object_type_id = ?`,
     totalArgs: [projectId, query.objectTypeId],
     order,
     hasMore: () => false,
@@ -166,7 +510,8 @@ function compileStart(
 
 function compileRefs(
   projectId: string,
-  query: Extract<ObjectQuery, { kind: "refs" }>
+  query: Extract<ObjectQuery, { kind: "refs" }>,
+  ctx: CompileContext
 ): CompiledObjectQuery {
   if (query.refs.length === 0) {
     throw new Error("[Sixb] SQLite object storage requires at least one ref")
@@ -182,10 +527,9 @@ function compileRefs(
     FROM json_each(?) AS ref
   `
   const sql = `
-    WITH requested AS (${requested})
     SELECT selected.*, selected.properties AS _cursor_properties
-    FROM requested
-    JOIN objects AS selected
+    FROM (${requested}) AS requested
+    JOIN ${ctx.source.objectsTable} AS selected
       ON selected.project_id = ?
      AND selected.object_type_id = requested.object_type_id
      AND selected.primary_id = requested.primary_id
@@ -196,10 +540,9 @@ function compileRefs(
     sql,
     args: [refsJson, projectId, ...selectedOrder.args],
     totalSql: `
-      WITH requested AS (${requested})
       SELECT COUNT(*) AS total
-      FROM requested
-      JOIN objects AS selected
+      FROM (${requested}) AS requested
+      JOIN ${ctx.source.objectsTable} AS selected
         ON selected.project_id = ?
        AND selected.object_type_id = requested.object_type_id
        AND selected.primary_id = requested.primary_id
@@ -215,18 +558,20 @@ function compileRefs(
 function compileFilter(
   projectId: string,
   inputQuery: ObjectQuery,
-  predicateNode: ObjectQueryPredicate
+  predicateNode: ObjectQueryPredicate,
+  ctx: CompileContext
 ): CompiledObjectQuery {
   const predicate = compilePredicate(predicateNode)
-  return compileWhere(projectId, inputQuery, predicate)
+  return compileWhere(projectId, inputQuery, predicate, ctx)
 }
 
 function compileWhere(
   projectId: string,
   inputQuery: ObjectQuery,
-  predicate: CompiledPredicate
+  predicate: CompiledPredicate,
+  ctx: CompileContext
 ): CompiledObjectQuery {
-  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext)
+  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext(ctx))
   const sql = `
     SELECT *
     FROM (${input.sql}) AS input
@@ -255,7 +600,8 @@ function compileText(
   inputQuery: ObjectQuery,
   query: string,
   fields: readonly string[] | undefined,
-  fieldsByObjectType: Readonly<Record<string, readonly string[]>> | undefined
+  fieldsByObjectType: Readonly<Record<string, readonly string[]>> | undefined,
+  ctx: CompileContext
 ): CompiledObjectQuery {
   const predicate =
     fields && fields.length > 0
@@ -265,7 +611,7 @@ function compileText(
   if (!predicate) {
     throw new Error("[Sixb] SQLite object text search requires fields or resolved text defaults")
   }
-  return compileWhere(projectId, inputQuery, predicate)
+  return compileWhere(projectId, inputQuery, predicate, ctx)
 }
 
 function compileSort(
@@ -274,7 +620,7 @@ function compileSort(
   fields: readonly ObjectQuerySortField[],
   ctx: CompileContext
 ): CompiledObjectQuery {
-  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext)
+  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext(ctx))
   const probeInput =
     ctx.probeLimit && needsLimitProbe(inputQuery)
       ? compileObjectQueryInternal(projectId, inputQuery, ctx)
@@ -313,7 +659,7 @@ function compileLimit(
   rawLimit: number,
   ctx: CompileContext
 ): CompiledObjectQuery {
-  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext)
+  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext(ctx))
   const limit = Math.max(0, rawLimit)
   const rowLimit = ctx.probeLimit ? limit + 1 : limit
 
@@ -342,9 +688,10 @@ function compilePage(
   projectId: string,
   inputQuery: ObjectQuery,
   rawPageSize: number,
-  pageToken: string | undefined
+  pageToken: string | undefined,
+  ctx: CompileContext
 ): CompiledObjectQuery {
-  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext)
+  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext(ctx))
   const pageSize = Math.max(0, rawPageSize)
   const cursor = pageToken ? decodePageToken(pageToken, input.order.fields) : undefined
   const cursorPredicate = cursor
@@ -381,30 +728,31 @@ function compileTraversal(
   inputQuery: ObjectQuery,
   linkId: string,
   direction: "outgoing" | "incoming",
-  sourceObjectTypeId?: string
+  sourceObjectTypeId: string | undefined,
+  ctx: CompileContext
 ): CompiledObjectQuery {
-  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext)
+  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext(ctx))
   const outputAlias = direction === "outgoing" ? "target_object" : "source_object"
   const joinSql =
     direction === "outgoing"
       ? `
-        JOIN links AS edge
+        JOIN ${ctx.source.linksTable} AS edge
           ON edge.project_id = input.project_id
          AND edge.source_type_id = input.object_type_id
          AND edge.source_id = input.primary_id
          AND edge.link_id = ?
-        JOIN objects AS target_object
+        JOIN ${ctx.source.objectsTable} AS target_object
           ON target_object.project_id = edge.project_id
          AND target_object.object_type_id = edge.target_type_id
          AND target_object.primary_id = edge.target_id
       `
       : `
-        JOIN links AS edge
+        JOIN ${ctx.source.linksTable} AS edge
           ON edge.project_id = input.project_id
          AND edge.target_type_id = input.object_type_id
          AND edge.target_id = input.primary_id
          AND edge.link_id = ?${sourceObjectTypeId === undefined ? "" : "\n         AND edge.source_type_id = ?"}
-        JOIN objects AS source_object
+        JOIN ${ctx.source.objectsTable} AS source_object
           ON source_object.project_id = edge.project_id
          AND source_object.object_type_id = edge.source_type_id
          AND source_object.primary_id = edge.source_id
@@ -451,13 +799,15 @@ interface ExpansionParent {
 function compileExpand(
   projectId: string,
   inputQuery: ObjectQuery,
-  expansions: readonly ObjectExpansion[]
+  expansions: readonly ObjectExpansion[],
+  ctx: CompileContext
 ): CompiledObjectQuery {
-  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext)
+  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext(ctx))
   const expand = compileExpansionsObject(
     expansions,
     { project: "input.project_id", type: "input.object_type_id", id: "input.primary_id" },
-    ""
+    "",
+    ctx
   )
   const inputOrder = compileOrder(input.order.fields, "input", "input._cursor_properties")
   const sql = `
@@ -487,13 +837,14 @@ function compileExpand(
 function compileExpansionsObject(
   expansions: readonly ObjectExpansion[],
   parent: ExpansionParent,
-  pathPrefix: string
+  pathPrefix: string,
+  ctx: CompileContext
 ): CompiledPredicate {
   const parts: string[] = []
   const args: SqliteValue[] = []
   expansions.forEach((expansion, index) => {
     const path = pathPrefix === "" ? `${index}` : `${pathPrefix}_${index}`
-    const value = compileExpansionValue(expansion, parent, path)
+    const value = compileExpansionValue(expansion, parent, path, ctx)
     parts.push("?", `json(${value.sql})`)
     args.push(expansion.linkId, ...value.args)
   })
@@ -509,8 +860,13 @@ function compileExpansionsObject(
 function compileExpansionValue(
   expansion: ObjectExpansion,
   parent: ExpansionParent,
-  path: string
+  path: string,
+  ctx: CompileContext
 ): CompiledPredicate {
+  if (expansion.cardinality === "one" && expansion.limit === 0) {
+    return { sql: "NULL", args: [] }
+  }
+
   const edge = `edge_${path}`
   const target = `tgt_${path}`
   const ranked = `ranked_${path}`
@@ -522,7 +878,7 @@ function compileExpansionValue(
   const parentType = incoming ? `${edge}.target_type_id` : `${edge}.source_type_id`
   const parentId = incoming ? `${edge}.target_id` : `${edge}.source_id`
 
-  const child = compileExpansionChildJson(expansion, edge, target, path)
+  const child = compileExpansionChildJson(expansion, edge, target, path, ctx)
   const order = compileExpansionOrder(expansion, target, neighborType, neighborId)
 
   const whereParts = [
@@ -539,8 +895,8 @@ function compileExpansionValue(
 
   const inner = `
     SELECT ${child.sql} AS elem, row_number() OVER (ORDER BY ${order.sql}) AS _ord
-    FROM links AS ${edge}
-    JOIN objects AS ${target}
+    FROM ${ctx.source.linksTable} AS ${edge}
+    JOIN ${ctx.source.objectsTable} AS ${target}
       ON ${target}.project_id = ${edge}.project_id
      AND ${target}.object_type_id = ${neighborType}
      AND ${target}.primary_id = ${neighborId}
@@ -574,7 +930,8 @@ function compileExpansionChildJson(
   expansion: ObjectExpansion,
   edge: string,
   target: string,
-  path: string
+  path: string,
+  ctx: CompileContext
 ): CompiledPredicate {
   const fields = [
     `'projectId', ${target}.project_id`,
@@ -597,7 +954,8 @@ function compileExpansionChildJson(
         type: `${target}.object_type_id`,
         id: `${target}.primary_id`,
       },
-      path
+      path,
+      ctx
     )
     fields.push(`'links', ${nested.sql}`)
     args.push(...nested.args)
@@ -645,14 +1003,15 @@ function compileExpansionOrder(
 function compileSet(
   projectId: string,
   op: ObjectQuerySetOperation,
-  inputs: readonly ObjectQuery[]
+  inputs: readonly ObjectQuery[],
+  ctx: CompileContext
 ): CompiledObjectQuery {
   if (inputs.length === 0) {
     const order = compileOrder(identityOrderFields())
     return {
       sql: `
         SELECT *
-        FROM objects
+        FROM ${ctx.source.objectsTable}
         WHERE 1 = 0
         ORDER BY ${order.sql}
       `,
@@ -667,7 +1026,7 @@ function compileSet(
   }
 
   const compiledInputs = inputs.map((input) =>
-    compileObjectQueryInternal(projectId, input, exactContext)
+    compileObjectQueryInternal(projectId, input, exactContext(ctx))
   )
   const identities = compileSetIdentities(op, compiledInputs)
   const order = compileOrder(identityOrderFields())
@@ -675,7 +1034,7 @@ function compileSet(
   const sql = `
     SELECT selected.*, selected.properties AS _cursor_properties
     FROM (${identities.sql}) AS ids
-    JOIN objects AS selected
+    JOIN ${ctx.source.objectsTable} AS selected
       ON selected.project_id = ?
      AND selected.object_type_id = ids.object_type_id
      AND selected.primary_id = ids.primary_id
@@ -778,7 +1137,7 @@ function compileProjectionExpression(properties: readonly string[]): CompiledPre
     sql: `
       COALESCE(
         (
-          SELECT json_group_object(projected.key, projected.value)
+          SELECT json_group_object(projected.key, ${jsonEachValue("projected")})
           FROM json_each(input.properties) AS projected
           WHERE projected.key IN (${properties.map(() => "?").join(", ")})
         ),
@@ -787,6 +1146,15 @@ function compileProjectionExpression(properties: readonly string[]): CompiledPre
     `,
     args: [...properties],
   }
+}
+
+/** json_each exposes JSON booleans as integer SQL values; restore their JSON representation. */
+function jsonEachValue(alias: string): string {
+  return `CASE ${alias}.type
+    WHEN 'true' THEN json('true')
+    WHEN 'false' THEN json('false')
+    ELSE ${alias}.value
+  END`
 }
 
 function compilePredicate(predicate: ObjectQueryPredicate): CompiledPredicate {

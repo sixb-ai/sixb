@@ -5,7 +5,7 @@ import {
 } from "@sixb/core/storage"
 import { z } from "zod"
 import { JsonValueSchema, sixbFailureSchema } from "./common"
-import { ActionParamSchema } from "./ontology"
+import { ActionParamResponseSchema } from "./ontology"
 
 export const ActionIdParamsSchema = z.object({
   actionId: z.string().min(1),
@@ -44,7 +44,7 @@ export const ActionCatalogItemSchema = z.object({
   name: z.string(),
   description: z.string().optional(),
   objectTypeId: z.string().optional(),
-  params: z.array(ActionParamSchema),
+  params: z.array(ActionParamResponseSchema),
   phases: z.object({
     validate: z.boolean(),
     writeback: z.boolean(),

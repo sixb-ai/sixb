@@ -18,10 +18,7 @@ import type {
   StoredTelemetryAppendedEvent,
   StoredWorkflowRunStartedEvent,
 } from "../src/events"
-import {
-  createDisabledRuntimeAuthorization,
-  createPrincipalRuntimeAuthorization,
-} from "../src/execution/authorization"
+import { createTestingScope } from "../src/execution/scopes"
 
 function context(grants: {
   applications?: readonly string[]
@@ -58,16 +55,17 @@ function context(grants: {
 }
 
 function principalRuntime(grants: Parameters<typeof context>[0]) {
+  const scope = createTestingScope({ projectId: "decision-test", context: context(grants) })
   return {
-    runtimeAuthorization: createPrincipalRuntimeAuthorization({
-      projectId: "decision-test",
-      context: context(grants),
-    }),
+    projectId: "decision-test",
+    runtimeAuthorization: scope.authorization,
   }
 }
 
+const unrestrictedScope = createTestingScope({ projectId: "decision-test" })
 const unrestrictedRuntime = {
-  runtimeAuthorization: createDisabledRuntimeAuthorization("decision-test"),
+  projectId: "decision-test",
+  runtimeAuthorization: unrestrictedScope.authorization,
 }
 
 describe("evaluate", () => {
@@ -260,8 +258,12 @@ describe("write asserts", () => {
   })
 
   test("both asserts fail closed without registered execution authority", () => {
-    expect(() => assertCanEdit({}, "quote")).toThrow("registered execution scope")
-    expect(() => assertCanAppendTelemetry({}, "sensor")).toThrow("registered execution scope")
+    expect(() => assertCanEdit({ projectId: "decision-test" }, "quote")).toThrow(
+      "registered execution scope"
+    )
+    expect(() => assertCanAppendTelemetry({ projectId: "decision-test" }, "sensor")).toThrow(
+      "registered execution scope"
+    )
   })
 })
 

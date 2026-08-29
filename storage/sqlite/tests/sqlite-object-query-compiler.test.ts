@@ -55,6 +55,18 @@ test("expand SQL takes the first ranked element for a one link", () => {
   expect(compiled.args).toEqual(["manager", "manager", "project-a", "User", 5])
 })
 
+test("expand SQL returns null for a cardinality-one link limited to zero", () => {
+  const compiled = compileObjectQuery("project-a", {
+    kind: "expand",
+    input: { kind: "limit", limit: 5, input: { kind: "start", objectTypeId: "User" } },
+    expansions: [{ linkId: "manager", direction: "outgoing", cardinality: "one", limit: 0 }],
+  })
+
+  expect(compiled.sql).toContain("json_object(?, json(NULL))")
+  expect(compiled.sql).not.toContain("edge_0")
+  expect(compiled.args).toEqual(["manager", "project-a", "User", 5])
+})
+
 test("expand SQL flips parent/neighbour columns and filters source type for incoming", () => {
   const compiled = compileObjectQuery("project-a", {
     kind: "expand",

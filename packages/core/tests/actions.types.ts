@@ -1,5 +1,6 @@
 import {
   type ActionDefinition,
+  type ActionDescriptor,
   type DecimalValue,
   decimal,
   defineAction,
@@ -21,6 +22,20 @@ import { createTestRuntimeDeps } from "./test-runtime-deps"
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false
 type Expect<T extends true> = T
+
+function assertActionDescriptorSchemaReadonly(descriptor: ActionDescriptor): void {
+  const schema = descriptor.params.payload.schema
+  if (typeof schema === "object" && schema.type === "object") {
+    // @ts-expect-error descriptors expose a deeply immutable schema snapshot
+    schema.properties.nested = { schema: "string" }
+  }
+  if (typeof schema === "object" && schema.type === "enum") {
+    // @ts-expect-error descriptor enum values are immutable too
+    schema.values.pop()
+  }
+}
+
+void assertActionDescriptorSchemaReadonly
 
 function actionDefinition(action: unknown): ActionDefinition {
   return action as ActionDefinition

@@ -17,13 +17,13 @@ import type {
   TelemetryHistoryInput,
   TelemetryPropertyToken,
 } from "../../runtime/types"
-import type { ResolvedObjectContext } from "../context"
+import type { ExecutionObjectContext } from "../context"
 import { getTelemetryHistoryBatch, writeTelemetryBatch } from "../telemetry"
 
 export function createTelemetryChannel<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TValueTypes extends readonly ValueType[],
->(ctx: ResolvedObjectContext, primaryId: string) {
+>(ctx: ExecutionObjectContext, primaryId: string) {
   return <TToken extends TelemetryPropertyToken<TObjectType>>(
     property: TToken
   ): TelemetryChannel<TToken, TValueTypes> => {
@@ -57,7 +57,6 @@ export function createTelemetryChannel<
 
         const [result] = await getTelemetryHistoryBatch(
           {
-            projectId: ctx.projectId,
             series: [series],
             ...(input.from !== undefined ? { from: input.from } : {}),
             ...(input.to !== undefined ? { to: input.to } : {}),
@@ -66,8 +65,7 @@ export function createTelemetryChannel<
           },
           {
             storage: timeseries,
-            runtimeAuthorization: ctx.runtimeAuthorization,
-            authorization: ctx.authorization,
+            objectReader: ctx.objectReader,
           }
         )
 

@@ -1,5 +1,11 @@
-import { canViewWorkflowIntervention, canViewWorkflowRun, isAllowed } from "../authorization"
+import {
+  assertAuthorized,
+  canViewWorkflowIntervention,
+  canViewWorkflowRun,
+  isRuntimeAllowed,
+} from "../authorization"
 import type { AuthorizablePrincipal, ExecutionContext } from "../execution"
+import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
 import { resolveExecutionCosts } from "../runtime/ai-cost"
 import { resolveExecutionUsage } from "../runtime/ai-usage"
 import type { SixbRuntimeContext } from "../runtime/types"
@@ -100,22 +106,40 @@ export function createWorkflowsRuntime(
   execution: ExecutionContext,
   source: Pick<WorkflowsRuntime, "list" | "getById">
 ): WorkflowsRuntime {
+  const authority = resolveRuntimeAuthorizationForProject(runtime)
   const allowed = (workflowId: string) =>
-    isAllowed(runtime.authorization, { kind: "workflow.run", workflowId })
-  const canAccessHistory = (workflowId: string) =>
-    allowed(workflowId) && (!runtime.authorization || source.getById(workflowId) !== null)
+    isRuntimeAllowed(runtime, { kind: "workflow.run", workflowId })
+  const canAccessHistory = (workflowId: string) => {
+    switch (authority.type) {
+      case "denied":
+      case "delegated":
+        return false
+      case "unrestricted":
+        return true
+      case "principal":
+        return allowed(workflowId) && source.getById(workflowId) !== null
+    }
+  }
   const visibleIds = () =>
     source
       .list()
       .filter((workflow) => allowed(workflow.id))
       .map((workflow) => workflow.id)
+  const historyFilterIds = () =>
+    authority.type === "unrestricted"
+      ? undefined
+      : authority.type === "principal"
+        ? visibleIds()
+        : []
   const getVisibleRunRecord = async (runId: string): Promise<WorkflowRunRecord | null> => {
+    if (authority.type === "denied" || authority.type === "delegated") return null
     const run =
       (await runtime.storage.workflowRuns?.getById({
         projectId: runtime.projectId,
         id: runId,
       })) ?? null
-    return run && canViewWorkflowRun(runtime.authorization, run) && canAccessHistory(run.workflowId)
+    if (!run || !canAccessHistory(run.workflowId)) return null
+    return authority.type === "unrestricted" || canViewWorkflowRun(authority.context, run)
       ? run
       : null
   }
@@ -130,9 +154,9 @@ export function createWorkflowsRuntime(
     const storage = runtime.storage.workflowRuns
     if (!storage || !(await getVisibleRunRecord(runId))) return null
     const result = await storage.nodes.list({
-      projectId: runtime.projectId,
       ...input,
       workflowRunId: runId,
+      projectId: runtime.projectId,
     })
     return {
       ...result,
@@ -141,13 +165,18 @@ export function createWorkflowsRuntime(
   }
 
   return {
-    list: () => source.list().filter((workflow) => allowed(workflow.id)),
+    list: () =>
+      authority.type === "denied" || authority.type === "delegated"
+        ? []
+        : source.list().filter((workflow) => allowed(workflow.id)),
     getById: (workflowId) => {
+      if (authority.type === "denied" || authority.type === "delegated") return null
       const workflow = source.getById(workflowId)
       return workflow && allowed(workflowId) ? workflow : null
     },
     request: (workflow, options) => requestWorkflowRun(runtime, execution, workflow, options),
     requestById: async (input) => {
+      assertAuthorized(runtime, { kind: "workflow.run", workflowId: input.workflowId })
       const workflow = source.getById(input.workflowId)
       if (!workflow) {
         throw new WorkflowValidationError(`[Sixb] Unknown workflow '${input.workflowId}'`)
@@ -157,12 +186,15 @@ export function createWorkflowsRuntime(
     runs: {
       getById: getRun,
       list: async (input = {}) => {
+        if (authority.type === "denied" || authority.type === "delegated") {
+          return { runs: [], hasMore: false, total: 0 }
+        }
         const storage = runtime.storage.workflowRuns
         if (!storage) return { runs: [], hasMore: false, total: 0 }
         const result = await storage.list({
-          projectId: runtime.projectId,
           ...input,
-          workflowIds: runtime.authorization ? visibleIds() : undefined,
+          workflowIds: historyFilterIds(),
+          projectId: runtime.projectId,
         })
         return {
           ...result,
@@ -170,6 +202,9 @@ export function createWorkflowsRuntime(
         }
       },
       listLatest: async (workflowIds) => {
+        if (authority.type === "denied" || authority.type === "delegated") {
+          return { runs: [] }
+        }
         const storage = runtime.storage.workflowRuns
         if (!storage || workflowIds.length === 0) return { runs: [] }
         const allowedIds = workflowIds.filter(canAccessHistory)
@@ -186,24 +221,28 @@ export function createWorkflowsRuntime(
     },
     interventions: {
       getById: async (interventionId) => {
+        if (authority.type === "denied" || authority.type === "delegated") return null
         const intervention =
           (await runtime.storage.workflowInterventions?.getById({
             projectId: runtime.projectId,
             id: interventionId,
           })) ?? null
-        return intervention &&
-          canViewWorkflowIntervention(runtime.authorization, intervention) &&
-          canAccessHistory(intervention.workflowId)
+        if (!intervention || !canAccessHistory(intervention.workflowId)) return null
+        return authority.type === "unrestricted" ||
+          canViewWorkflowIntervention(authority.context, intervention)
           ? intervention
           : null
       },
       list: (input = {}) => {
+        if (authority.type === "denied" || authority.type === "delegated") {
+          return Promise.resolve({ interventions: [], hasMore: false, total: 0 })
+        }
         const storage = runtime.storage.workflowInterventions
         if (!storage) return Promise.resolve({ interventions: [], hasMore: false, total: 0 })
         return storage.list({
-          projectId: runtime.projectId,
           ...input,
-          workflowIds: runtime.authorization ? visibleIds() : undefined,
+          workflowIds: historyFilterIds(),
+          projectId: runtime.projectId,
         })
       },
     },

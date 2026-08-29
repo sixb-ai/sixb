@@ -25,8 +25,7 @@ export async function resolveAgentContextParts(
     }
 
     assertAuthorized(runtime, { kind: "object.view", objectTypeId })
-    const object = await runtime.storage.objects.getByPrimaryId({
-      projectId: runtime.projectId,
+    const object = await runtime.objectReader.getByPrimaryId({
       objectTypeId,
       primaryId,
     })

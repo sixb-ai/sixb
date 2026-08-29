@@ -35,21 +35,26 @@ export const LinkDefinitionSchema = z.object({
   properties: z.array(PropertyDefinitionSchema).optional(),
 })
 
-export const ActionParamSchema = z.object({
+const RequiredActionParamSchemaValue = z
+  .unknown()
+  .refine((value) => value !== undefined, "Action parameter schemas are required")
+
+/** Normalized action metadata returned by catalog and ontology routes. */
+export const ActionParamResponseSchema = z.object({
   id: z.string(),
   name: z.string(),
   description: z.string().optional(),
-  required: z.boolean().optional(),
+  required: z.boolean(),
   nullable: z.boolean().optional(),
   semanticType: z.string().optional(),
-  schema: z.unknown(),
+  schema: RequiredActionParamSchemaValue,
 })
 
 export const ActionSchema = z.object({
   id: z.string(),
   name: z.string(),
   description: z.string().optional(),
-  params: z.array(ActionParamSchema),
+  params: z.array(ActionParamResponseSchema),
 })
 
 export const ObjectTypeSchema = z.object({

@@ -14,6 +14,38 @@ import {
   TelemetryPointSchema,
 } from "../schemas/telemetry"
 import { handleRouteError, parseDate, parseOptionalInt, toIsoString } from "../utils/http"
+import {
+  MAX_TELEMETRY_HISTORY_SERIES_PER_HTTP_REQUEST,
+  mapReadRequestParseError,
+  parseBoundedTelemetryHistoryBody,
+} from "../utils/read-request-admission"
+
+const BulkTelemetryHistoryRequestOpenApiSchema = {
+  type: "object",
+  required: ["series"] as string[],
+  additionalProperties: false,
+  properties: {
+    series: {
+      type: "array",
+      minItems: 1,
+      maxItems: MAX_TELEMETRY_HISTORY_SERIES_PER_HTTP_REQUEST,
+      items: {
+        type: "object",
+        required: ["objectTypeId", "objectId", "propertyId"] as string[],
+        additionalProperties: false,
+        properties: {
+          objectTypeId: { type: "string", minLength: 1 },
+          objectId: { type: "string", minLength: 1 },
+          propertyId: { type: "string", minLength: 1 },
+        },
+      },
+    },
+    from: { type: "string" },
+    to: { type: "string" },
+    limitPerSeries: { type: "integer", minimum: 0 },
+    order: { type: "string", enum: ["asc", "desc"] as string[] },
+  },
+} as const
 
 function serializeTelemetryPoint(point: TimeseriesPoint) {
   return {
@@ -96,17 +128,27 @@ export function registerTelemetryRoutes(app: Elysia, _host: SixbHostView) {
         }
       },
       {
-        body: BulkTelemetryHistoryBodySchema,
+        parse: parseBoundedTelemetryHistoryBody,
+        error: mapReadRequestParseError,
         response: {
           200: BulkTelemetryHistoryResponseSchema,
           400: ErrorResponseSchema,
           403: ErrorResponseSchema,
+          413: ErrorResponseSchema,
         },
         detail: {
           summary: "Get bulk telemetry history",
           tags: [OPENAPI_TAGS.telemetry.name],
           operationId: "getBulkTelemetryHistory",
           security: bearerSecurityRequirement("getBulkTelemetryHistory"),
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: BulkTelemetryHistoryRequestOpenApiSchema,
+              },
+            },
+          },
         },
       }
     )

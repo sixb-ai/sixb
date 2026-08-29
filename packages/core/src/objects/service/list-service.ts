@@ -6,9 +6,14 @@
  * narrow to the principal's viewable types instead of post-filtering rows.
  */
 
-import { assertAuthorized } from "../../authorization"
+import {
+  assertAuthorized,
+  assertRuntimeAuthorizationBound,
+  isRuntimeAllowed,
+} from "../../authorization"
 import type { ListResult, SixbRuntimeContext } from "../../runtime/types"
 import type { ObjectRow } from "../../storage"
+import { assertObjectListWithinWindow, resolveObjectListWindow } from "./list-window"
 
 export interface ListObjectsParams {
   objectTypeIds?: readonly string[]
@@ -28,14 +33,14 @@ export async function listObjects(
   runtime: SixbRuntimeContext,
   params: ListObjectsParams
 ): Promise<ListResult<ObjectRow>> {
+  const window = resolveObjectListWindow(runtime, params)
   const objectTypeIds = resolveAuthorizedTypeFilter(runtime, params.objectTypeIds)
 
-  if (runtime.authorization && objectTypeIds !== undefined && objectTypeIds.length === 0) {
+  if (objectTypeIds !== undefined && objectTypeIds.length === 0) {
     return { objects: [], hasMore: false, total: 0 }
   }
 
-  const result = await runtime.storage.objects.list({
-    projectId: runtime.projectId,
+  const result = await runtime.objectReader.list({
     objectTypeId: objectTypeIds?.length === 1 ? objectTypeIds[0] : objectTypeIds,
     primaryIdPrefix: params.idPrefix,
     primaryIdSuffix: params.idSuffix,
@@ -43,11 +48,12 @@ export async function listObjects(
     updatedBefore: params.updatedBefore,
     createdAfter: params.createdAfter,
     createdBefore: params.createdBefore,
-    limit: params.limit,
-    offset: params.offset,
+    limit: window.limit,
+    offset: window.offset,
     orderBy: params.orderBy,
     order: params.order,
   })
+  assertObjectListWithinWindow(window, result.objects.length)
 
   return {
     objects: [...result.objects],
@@ -60,6 +66,7 @@ function resolveAuthorizedTypeFilter(
   runtime: SixbRuntimeContext,
   requested: readonly string[] | undefined
 ): readonly string[] | undefined {
+  const authority = assertRuntimeAuthorizationBound(runtime)
   if (requested) {
     for (const objectTypeId of requested) {
       runtime.ontology.resolveObjectType(objectTypeId)
@@ -70,14 +77,27 @@ function resolveAuthorizedTypeFilter(
     ? [...new Set(requested.flatMap((id) => [id, ...runtime.ontology.listSubTypes(id)]))]
     : undefined
 
-  if (!runtime.authorization) {
-    return expanded
+  if (!expanded) {
+    if (authority.type === "unrestricted") return undefined
+
+    // Broad listings narrow to the visible universe rather than failing. The
+    // current ontology is intersected with principal grants or the immutable delegated snapshot.
+    return runtime.ontology
+      .listObjectTypes()
+      .map((objectType) => objectType.id)
+      .filter((objectTypeId) => isRuntimeAllowed(runtime, { kind: "object.view", objectTypeId }))
   }
 
-  if (!expanded) {
-    // Broad listings narrow to the visible universe rather than failing. The
-    // set already contains every registered type when "all" was granted.
-    return [...runtime.authorization.grants["view:object"]]
+  if (authority.type === "delegated") {
+    // The requested base types must be selected, but newly registered subtypes are simply
+    // intersected out. This preserves an issued snapshot without widening it or breaking it when
+    // the current ontology later gains another subtype.
+    for (const objectTypeId of requested ?? []) {
+      assertAuthorized(runtime, { kind: "object.view", objectTypeId })
+    }
+    return expanded.filter((objectTypeId) =>
+      isRuntimeAllowed(runtime, { kind: "object.view", objectTypeId })
+    )
   }
 
   // Explicitly requested types must all be viewable.

@@ -19118,7 +19118,7 @@
                                   },
                                   "schema": {}
                                 },
-                                "required": ["id", "name"],
+                                "required": ["id", "name", "required", "schema"],
                                 "additionalProperties": false
                               }
                             }
@@ -19429,7 +19429,7 @@
                                 },
                                 "schema": {}
                               },
-                              "required": ["id", "name"],
+                              "required": ["id", "name", "required", "schema"],
                               "additionalProperties": false
                             }
                           }
@@ -19820,6 +19820,16 @@
               }
             }
           },
+          "413": {
+            "description": "Response for status 413",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "500": {
             "description": "Response for status 500",
             "content": {
@@ -19879,6 +19889,16 @@
           },
           "403": {
             "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Response for status 413",
             "content": {
               "application/json": {
                 "schema": {
@@ -19954,6 +19974,16 @@
               }
             }
           },
+          "413": {
+            "description": "Response for status 413",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "500": {
             "description": "Response for status 500",
             "content": {
@@ -20013,6 +20043,16 @@
           },
           "403": {
             "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Response for status 413",
             "content": {
               "application/json": {
                 "schema": {
@@ -20271,6 +20311,23 @@
               }
             }
           },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
           "404": {
             "description": "Response for status 404",
             "content": {
@@ -20508,7 +20565,7 @@
                             },
                             "schema": {}
                           },
-                          "required": ["id", "name"],
+                          "required": ["id", "name", "required", "schema"],
                           "additionalProperties": false
                         }
                       },
@@ -20608,7 +20665,7 @@
                           },
                           "schema": {}
                         },
-                        "required": ["id", "name"],
+                        "required": ["id", "name", "required", "schema"],
                         "additionalProperties": false
                       }
                     },
@@ -27216,11 +27273,17 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "required": ["series"],
+                "additionalProperties": false,
                 "properties": {
                   "series": {
                     "type": "array",
+                    "minItems": 1,
+                    "maxItems": 4096,
                     "items": {
                       "type": "object",
+                      "required": ["objectTypeId", "objectId", "propertyId"],
+                      "additionalProperties": false,
                       "properties": {
                         "objectTypeId": {
                           "type": "string",
@@ -27234,11 +27297,8 @@
                           "type": "string",
                           "minLength": 1
                         }
-                      },
-                      "required": ["objectTypeId", "objectId", "propertyId"],
-                      "additionalProperties": false
-                    },
-                    "minItems": 1
+                      }
+                    }
                   },
                   "from": {
                     "type": "string"
@@ -27254,101 +27314,7 @@
                     "type": "string",
                     "enum": ["asc", "desc"]
                   }
-                },
-                "required": ["series"],
-                "additionalProperties": false
-              }
-            },
-            "application/x-www-form-urlencoded": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "series": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "objectTypeId": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "objectId": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "propertyId": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": ["objectTypeId", "objectId", "propertyId"],
-                      "additionalProperties": false
-                    },
-                    "minItems": 1
-                  },
-                  "from": {
-                    "type": "string"
-                  },
-                  "to": {
-                    "type": "string"
-                  },
-                  "limitPerSeries": {
-                    "type": "integer",
-                    "minimum": 0
-                  },
-                  "order": {
-                    "type": "string",
-                    "enum": ["asc", "desc"]
-                  }
-                },
-                "required": ["series"],
-                "additionalProperties": false
-              }
-            },
-            "multipart/form-data": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "series": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "objectTypeId": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "objectId": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "propertyId": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "required": ["objectTypeId", "objectId", "propertyId"],
-                      "additionalProperties": false
-                    },
-                    "minItems": 1
-                  },
-                  "from": {
-                    "type": "string"
-                  },
-                  "to": {
-                    "type": "string"
-                  },
-                  "limitPerSeries": {
-                    "type": "integer",
-                    "minimum": 0
-                  },
-                  "order": {
-                    "type": "string",
-                    "enum": ["asc", "desc"]
-                  }
-                },
-                "required": ["series"],
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -27441,6 +27407,23 @@
           },
           "403": {
             "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Response for status 413",
             "content": {
               "application/json": {
                 "schema": {

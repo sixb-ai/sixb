@@ -1,4 +1,16 @@
-import { assertAuthorized } from "../authorization"
+import {
+  AuthorizationError,
+  assertAuthorized,
+  assertCanApplyActionOn,
+  assertPrivileged,
+  canViewActionRun,
+  hasDelegatedRuntimeAuthority,
+} from "../authorization"
+import {
+  assertRuntimeAuthorizationCanCrossDurableBoundary,
+  resolveExecutionScopeAuthorization,
+  resolveRuntimeAuthorizationForProject,
+} from "../execution/authorization"
 import {
   createPrimitiveExecutionRecord,
   ensureExecutionRecord,
@@ -19,6 +31,7 @@ import { dispatchActionRun } from "./run-dispatch"
 import { createActionRunId } from "./run-id"
 import type { ActionDefinition, ActionSubject } from "./types"
 import {
+  isExactObjectActionTarget,
   isObjectActionDefinition,
   normalizeActionParams,
   resolveObjectActionSubject,
@@ -83,19 +96,47 @@ export async function requestAction(
   execution: ExecutionContext,
   input: RequestActionInput
 ): Promise<RequestActionResult> {
+  const request = snapshotActionRequest(input)
+  resolveExecutionScopeAuthorization(runtime.projectId, {
+    execution,
+    authorization: runtime.runtimeAuthorization,
+  })
+  assertAuthorized(runtime, { kind: "action.apply", actionId: request.actionId })
   requireActionRunStorage(runtime)
-  const action = getActionDefinition(runtime, input.actionId)
+  const action = getActionDefinition(runtime, request.actionId)
   const actionId = action.id
-  const rawParams: Record<string, unknown> = input.params ?? {}
-  const subject: ActionSubject = input.subject ?? { kind: "none" }
-
-  assertAuthorized(runtime, { kind: "action.apply", actionId })
-  if (action.binding.kind === "object") {
-    // Object actions also require visibility of the subject's object type.
-    assertAuthorized(runtime, { kind: "object.view", objectTypeId: action.binding.objectType.id })
-  }
+  const rawParams = request.params
+  const subject = request.subject
 
   validateActionSubject(action, subject)
+
+  if (subject.kind === "object") {
+    if (
+      hasDelegatedRuntimeAuthority(runtime) &&
+      !isExactObjectActionTarget(action, subject.objectTypeId)
+    ) {
+      throw new AuthorizationError(
+        `apply:action:${actionId}:${subject.objectTypeId}:${subject.primaryId}`,
+        `[Sixb] Delegated authority cannot apply action '${actionId}' to '${subject.objectTypeId}:${subject.primaryId}'.`
+      )
+    }
+    assertCanApplyActionOn(runtime, actionId, subject)
+    if (hasDelegatedRuntimeAuthority(runtime)) {
+      const visible = await runtime.objectReader.getByPrimaryId({
+        objectTypeId: subject.objectTypeId,
+        primaryId: subject.primaryId,
+      })
+      if (!visible) {
+        throw new AuthorizationError(
+          `apply:action:${actionId}:${subject.objectTypeId}:${subject.primaryId}`,
+          `[Sixb] Delegated authority cannot apply action '${actionId}' to '${subject.objectTypeId}:${subject.primaryId}'.`
+        )
+      }
+    }
+  } else if (hasDelegatedRuntimeAuthority(runtime)) {
+    // V1 delegations never authorize global Actions.
+    assertPrivileged(runtime, `action.apply:${actionId}:global`)
+  }
 
   let pathPrefix = action.id
   let objectType: ObjectTypeWithPropertyTokens | null = null
@@ -107,6 +148,11 @@ export async function requestAction(
 
   const actionParams = normalizeActionParams(runtime, action.params, rawParams, pathPrefix)
 
+  // This must precede dispatch: dispatch checks run-id idempotency before it creates an execution.
+  // A delegated request must not use that lookup as an oracle or requeue an existing run until
+  // durable delegation provenance exists.
+  assertRuntimeAuthorizationCanCrossDurableBoundary(runtime.runtimeAuthorization)
+
   return dispatchActionRun({
     errorReporterHost: runtime,
     projectId: runtime.projectId,
@@ -116,7 +162,7 @@ export async function requestAction(
     actionId,
     subject,
     params: actionParams,
-    runId: input.runId,
+    runId: request.runId,
     createExecution: async (executionId, runId) => {
       const caller = await ensureExecutionRecord(
         runtime.storage.executions,
@@ -131,6 +177,24 @@ export async function requestAction(
         origin: { type: "execution", parent: caller },
       })
     },
+  })
+}
+
+function snapshotActionRequest(input: RequestActionInput): {
+  readonly actionId: string
+  readonly subject: ActionSubject
+  readonly params: Record<string, unknown>
+  readonly runId?: string
+} {
+  const actionId = input.actionId
+  const subject = input.subject
+  const params = input.params
+  const runId = input.runId
+  return structuredClone({
+    actionId,
+    subject: subject ?? { kind: "none" },
+    params: params ?? {},
+    ...(runId === undefined ? {} : { runId }),
   })
 }
 
@@ -158,6 +222,18 @@ export async function waitForActionRun(
   runtime: SixbRuntimeContext,
   input: WaitForActionRunInput
 ): Promise<ActionRunRecord> {
+  // Waiting observes durable run params and results just like `actions.runs.getById`. Keep the
+  // guard ahead of storage lookup and broker subscription so unsupported delegations cannot use
+  // either dependency as an existence oracle. M03 replaces this blanket delegated denial with
+  // same-grant/session run attribution.
+  assertRuntimeAuthorizationCanCrossDurableBoundary(runtime.runtimeAuthorization)
+  const authority = resolveRuntimeAuthorizationForProject(runtime)
+  if (authority.type === "denied") {
+    throw new AuthorizationError(
+      "runtime:unbound",
+      "[Sixb] Protected operations require a registered execution scope for this project."
+    )
+  }
   const actionRuns = requireActionRunStorage(runtime)
   const timeoutMs = input.timeoutMs ?? DEFAULT_ACTION_WAIT_TIMEOUT_MS
   const signal = input.signal
@@ -216,7 +292,11 @@ export async function waitForActionRun(
           projectId: runtime.projectId,
           id: input.runId,
         })
-        if (record && isTerminalActionRun(record)) {
+        const visible =
+          record &&
+          (authority.type === "unrestricted" ||
+            (authority.type === "principal" && canViewActionRun(authority.context, record)))
+        if (visible && isTerminalActionRun(record)) {
           cleanup()
           resolve(record)
           return

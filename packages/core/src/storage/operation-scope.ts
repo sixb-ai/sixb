@@ -1,6 +1,8 @@
 import { AsyncLocalStorage } from "node:async_hooks"
 import type { AgentStorage } from "./agents"
 import type { AuthStorage } from "./auth"
+import type { ObjectStorage } from "./objects"
+import { createGuardedObjectReadStorage } from "./objects/guard"
 import type { OntologyStorage } from "./ontology"
 import type { WorkflowRunStorage } from "./workflow-runs"
 
@@ -238,6 +240,19 @@ export function createWorkflowRunOperationScope<T extends WorkflowRunStorage>(
   return createOperationScopedFacade<WorkflowRunStorage>(target, scope, {
     nodes: createOperationScopedFacade(target.nodes, scope),
     agentNodes: createOperationScopedFacade(target.agentNodes, scope),
+  }) as T
+}
+
+/** Keep readers created synchronously by object storage inside the provider operation scope. */
+export function createObjectOperationScope<T extends ObjectStorage>(
+  target: T,
+  scope: StorageOperationScope
+): T {
+  return createOperationScopedFacade<ObjectStorage>(target, scope, {
+    createReadScope: (params) => {
+      scope.assertAvailable()
+      return createGuardedObjectReadStorage(target.createReadScope(params), scope)
+    },
   }) as T
 }
 

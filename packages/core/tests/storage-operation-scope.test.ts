@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test"
+import type { ObjectReadStorage } from "../src/storage"
+import { InMemoryStorage } from "../src/storage/in-memory"
 import {
   createOperationScopedFacade,
   createStorageOperationScope,
@@ -81,5 +83,40 @@ describe("storage operation scope", () => {
     })
 
     await expect(facade.read()).rejects.toThrow("scope became unavailable")
+  })
+
+  test("keeps created object readers inside the root lock and transaction lifetime", async () => {
+    const storage = new InMemoryStorage()
+    const readerInput = {
+      projectId: "operation-scope-project",
+      scope: { kind: "all" as const },
+      limits: {
+        maxTraversalFacts: 10,
+        maxVisibleJsonBytes: 1_000,
+      },
+    }
+    const rootReader = storage.objects.createReadScope(readerInput)
+    let escapedReader: ObjectReadStorage | undefined
+
+    await storage.transaction(async (tx) => {
+      await expect(rootReader.list({ projectId: readerInput.projectId })).rejects.toMatchObject({
+        name: "StorageTransactionError",
+      })
+
+      const transactionReader = tx.objects.createReadScope(readerInput)
+      await expect(transactionReader.list({ projectId: readerInput.projectId })).resolves.toEqual({
+        objects: [],
+        hasMore: false,
+        total: 0,
+      })
+      escapedReader = transactionReader
+    })
+
+    await expect(
+      Promise.resolve().then(() => escapedReader?.list({ projectId: readerInput.projectId }))
+    ).rejects.toMatchObject({
+      name: "StorageTransactionError",
+      code: "transaction_inactive",
+    })
   })
 })

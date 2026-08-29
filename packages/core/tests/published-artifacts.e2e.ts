@@ -177,6 +177,7 @@ describe("published artifacts", () => {
       `import { change } from "@sixb/core"
 import type { DatasetPrimaryKey as RootDatasetPrimaryKey, LakeStorage as RootLakeStorage, MergeChange as RootMergeChange } from "@sixb/core"
 import type { BeginDatasetMergeInput, DatasetPrimaryKey as LakeDatasetPrimaryKey, DatasetVersionMode, LakeStorage, MergeChange as LakeMergeChange } from "@sixb/core/lake-storage"
+import type { NormalizedObjectListWindow, ObjectQuery, ObjectQueryDirection, ObjectQueryPredicate, ObjectQuerySetOperation, ObjectQuerySortField, ObjectReadStorage, QueryScalarKind } from "@sixb/core/storage"
 ${subpaths.map((subpath, index) => `import * as m${index} from "${subpath}"`).join("\n")}
 const rootPrimaryKey: RootDatasetPrimaryKey<"tenantId" | "id"> = ["tenantId", "id"]
 const lakePrimaryKey: LakeDatasetPrimaryKey<"tenantId" | "id"> = rootPrimaryKey
@@ -187,12 +188,34 @@ declare const lakeStorage: LakeStorage
 const rootLakeStorage: RootLakeStorage = lakeStorage
 declare const beginMergeInput: BeginDatasetMergeInput
 const mergeSession = lakeStorage.beginMerge(beginMergeInput)
+const listWindow: NormalizedObjectListWindow = { limit: 50, offset: 0 }
+declare const objectReadStorage: ObjectReadStorage
+const selectedProperties = objectReadStorage.selectsObjectProperties({
+  projectId: "project",
+  items: [{ objectTypeId: "Proposal", primaryId: "proposal-1", propertyId: "title" }],
+})
+const query: ObjectQuery = { kind: "start", objectTypeId: "Proposal" }
+const direction: ObjectQueryDirection = "outgoing"
+const predicate: ObjectQueryPredicate = { op: "exists", propertyId: "title", value: true }
+const setOperation: ObjectQuerySetOperation = "union"
+const sortField: ObjectQuerySortField = { kind: "property", propertyId: "title" }
+const scalarKind: QueryScalarKind = "string"
+// @ts-expect-error providers expose only the collision-safe batch selection primitive
+objectReadStorage.canReadObjectProperty
 export const loaded = [${subpaths.map((_, index) => `m${index}`).join(", ")}].length
 void lakePrimaryKey
 void lakeMergeChange
 void mergeVersionMode
 void rootLakeStorage
 void mergeSession
+void listWindow
+void selectedProperties
+void query
+void direction
+void predicate
+void setOperation
+void sortField
+void scalarKind
 `
     )
 

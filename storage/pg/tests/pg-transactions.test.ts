@@ -21,6 +21,19 @@ function fakeSql(): { sql: PgStoreClient; beginCalls: unknown[][] } {
 }
 
 describe("runPgTransaction isolation", () => {
+  test("folds repeatable-read isolation into BEGIN", async () => {
+    const { sql, beginCalls } = fakeSql()
+
+    const result = await runPgTransaction(sql, async () => "ok", {
+      isolation: "repeatable-read",
+    })
+
+    expect(result).toBe("ok")
+    expect(beginCalls).toHaveLength(1)
+    expect(beginCalls[0]?.[0]).toBe("isolation level repeatable read")
+    expect(typeof beginCalls[0]?.[1]).toBe("function")
+  })
+
   test("folds serializable isolation into BEGIN", async () => {
     const { sql, beginCalls } = fakeSql()
 

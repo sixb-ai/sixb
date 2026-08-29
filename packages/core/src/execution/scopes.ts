@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto"
-import type { AuthorizationContext } from "../authorization"
+import type { AuthorizationContext, RuntimeAccessPlan } from "../authorization"
+import type { RuntimeDelegationRef } from "./authorization"
 import {
+  createDelegatedRuntimeAuthorization,
   createDisabledRuntimeAuthorization,
   createKernelRuntimeAuthorization,
   createPrincipalRuntimeAuthorization,
 } from "./authorization"
+import type { DelegatedExecutionLimits } from "./limits"
 import type {
   AuthorizablePrincipal,
   AuthorizationRef,
@@ -31,7 +34,7 @@ export function createPrincipalRequestScope(input: {
   return Object.freeze({
     execution,
     authorization: createPrincipalRuntimeAuthorization({
-      projectId: input.projectId,
+      execution,
       context: input.context,
       ...(input.credential === undefined ? {} : { credential: input.credential }),
     }),
@@ -43,9 +46,31 @@ export function createDisabledRequestScope(input: {
   readonly requestId: string
   readonly correlationId: string
 }): ExecutionScope {
+  const execution = createRequestExecution(input)
   return Object.freeze({
-    execution: createRequestExecution(input),
-    authorization: createDisabledRuntimeAuthorization(input.projectId),
+    execution,
+    authorization: createDisabledRuntimeAuthorization(execution),
+  })
+}
+
+/** Internal request scope for a non-principal delegation such as a shared session. */
+export function createDelegatedRequestScope(input: {
+  readonly projectId: string
+  readonly requestId: string
+  readonly correlationId: string
+  readonly access: RuntimeAccessPlan
+  readonly limits?: DelegatedExecutionLimits
+  readonly delegation: Omit<RuntimeDelegationRef, "type">
+}): ExecutionScope {
+  const execution = createRequestExecution(input)
+  return Object.freeze({
+    execution,
+    authorization: createDelegatedRuntimeAuthorization({
+      execution,
+      access: input.access,
+      limits: input.limits,
+      delegation: input.delegation,
+    }),
   })
 }
 
@@ -64,7 +89,7 @@ export function createKernelScope(input: {
   })
   return Object.freeze({
     execution,
-    authorization: createKernelRuntimeAuthorization({ projectId: input.projectId, operation }),
+    authorization: createKernelRuntimeAuthorization({ execution, operation }),
   })
 }
 
@@ -110,8 +135,8 @@ export function createTestingScope(input: {
   return Object.freeze({
     execution,
     authorization: context
-      ? createPrincipalRuntimeAuthorization({ projectId: input.projectId, context })
-      : createDisabledRuntimeAuthorization(input.projectId),
+      ? createPrincipalRuntimeAuthorization({ execution, context })
+      : createDisabledRuntimeAuthorization(execution),
   })
 }
 

@@ -1,5 +1,6 @@
 import { snapshotRequesterGroupIds } from "../auth/attribution"
 import { assertAuthorized } from "../authorization"
+import { resolveExecutionScopeAuthorization } from "../execution/authorization"
 import {
   createPrimitiveExecutionRecord,
   ensureExecutionRecord,
@@ -44,6 +45,10 @@ export async function requestWorkflowRun(
   workflow: WorkflowDefinition,
   options: WorkflowRunRequestOptions = {}
 ): Promise<WorkflowRunRequestResult> {
+  resolveExecutionScopeAuthorization(runtime.projectId, {
+    execution,
+    authorization: runtime.runtimeAuthorization,
+  })
   assertAuthorized(runtime, { kind: "workflow.run", workflowId: workflow.id })
   const requesterGroupIds = execution.requestedBy
     ? await snapshotRequesterGroupIds({

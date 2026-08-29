@@ -1,9 +1,13 @@
 import { expect, test } from "bun:test"
 import type { ObjectQuery } from "@sixb/core"
+import type { CompiledObjectReadScope } from "@sixb/core/storage"
 import {
   compilePgObjectCountQuery,
+  compilePgObjectExistsQuery,
   compilePgObjectFacetQuery,
   compilePgObjectQuery,
+  compilePgObjectReadScopeTraversalProbe,
+  compilePgObjectReadSql,
 } from "../src/pg-object-query-compiler"
 
 const sitePointQuery: ObjectQuery = {
@@ -30,6 +34,39 @@ test("refs compile to one de-duplicated JSONB table source in canonical order", 
   expect(counted.sql).toContain("FROM jsonb_array_elements($1::text::jsonb)")
   expect(counted.args).toEqual([JSON.stringify(refs), "project-a"])
 })
+
+const selectedReadScope: CompiledObjectReadScope = {
+  kind: "selected",
+  roots: [{ nodeId: 0, objectTypeId: "Proposal", primaryId: "proposal-a" }],
+  objects: [
+    { nodeId: 0, objectTypeId: "Proposal", propertyIds: ["id", "title"] },
+    { nodeId: 1, objectTypeId: "LineItem", propertyIds: ["id", "quantity"] },
+    { nodeId: 2, objectTypeId: "Product", propertyIds: ["id", "name"] },
+  ],
+  steps: [
+    {
+      nodeId: 1,
+      parentNodeId: 0,
+      sourceObjectTypeId: "Proposal",
+      linkId: "items",
+      targetObjectTypeId: "LineItem",
+      propertyIds: ["position"],
+    },
+    {
+      nodeId: 2,
+      parentNodeId: 1,
+      sourceObjectTypeId: "LineItem",
+      linkId: "product",
+      targetObjectTypeId: "Product",
+      propertyIds: ["featured"],
+    },
+  ],
+}
+
+const selectedReadLimits = {
+  maxTraversalFacts: 37,
+  maxVisibleJsonBytes: 1_024,
+}
 
 test("decimal predicates and ordering compile to exact PostgreSQL numeric operations", () => {
   const compiled = compilePgObjectQuery("project-a", {
@@ -223,6 +260,18 @@ test("expand SQL takes the first ranked element for a one link", () => {
   expect(compiled.args).toEqual(["manager", "manager", "project-a", "User", 5])
 })
 
+test("expand SQL returns null for a cardinality-one link limited to zero", () => {
+  const compiled = compilePgObjectQuery("project-a", {
+    kind: "expand",
+    input: { kind: "limit", limit: 5, input: { kind: "start", objectTypeId: "User" } },
+    expansions: [{ linkId: "manager", direction: "outgoing", cardinality: "one", limit: 0 }],
+  })
+
+  expect(compiled.sql).toContain("NULL::jsonb")
+  expect(compiled.sql).not.toContain("edge_0")
+  expect(compiled.args).toEqual(["manager", "project-a", "User", 5])
+})
+
 test("expand SQL flips parent/neighbour columns and filters source type for incoming", () => {
   const compiled = compilePgObjectQuery("project-a", {
     kind: "expand",
@@ -319,3 +368,169 @@ test("expand SQL nests a child expansion correlated on the parent neighbour", ()
   expect(compiled.sql).toContain("edge_0_0.source_id = tgt_0.primary_id")
   expect(compiled.sql).toContain("jsonb_agg(ranked_0_0.elem")
 })
+
+test("selected scope replaces every query read before expansion and keeps response keys", () => {
+  const compiled = compilePgObjectQuery(
+    "project-a",
+    {
+      kind: "expand",
+      input: { kind: "start", objectTypeId: "Proposal" },
+      expansions: [
+        {
+          linkId: "items",
+          direction: "outgoing",
+          cardinality: "many",
+          limit: 10,
+          expand: [
+            {
+              linkId: "product",
+              direction: "outgoing",
+              cardinality: "one",
+              limit: 1,
+            },
+          ],
+        },
+      ],
+    },
+    { readScope: selectedReadScope }
+  )
+
+  expect(compiled.sql).toContain("WITH RECURSIVE")
+  expect(compiled.sql).toContain("FROM sixb_readable_objects")
+  expect(compiled.sql).toContain("FROM sixb_readable_links AS edge_0")
+  expect(compiled.sql).toContain("JOIN sixb_readable_objects AS tgt_0")
+  expect(compiled.sql).toContain("FROM sixb_readable_links AS edge_0_0")
+  expect(compiled.sql).toContain("'links', jsonb_build_object(")
+  expect(compiled.totalSql).toContain("WITH RECURSIVE")
+  expect(compiled.totalSql).toContain("FROM sixb_readable_objects")
+  expect(maxPlaceholder(compiled.sql)).toBe(compiled.args.length)
+  expect(maxPlaceholder(compiled.totalSql)).toBe(compiled.totalArgs.length)
+})
+
+test("selected scope constrains exact refs without introducing a second WITH clause", () => {
+  const refs = [
+    { objectTypeId: "Proposal", primaryId: "proposal-hidden" },
+    { objectTypeId: "Proposal", primaryId: "proposal-a" },
+  ]
+  const compiled = compilePgObjectQuery(
+    "project-a",
+    { kind: "refs", refs },
+    { readScope: selectedReadScope }
+  )
+
+  expect(compiled.sql).toContain("WITH RECURSIVE")
+  expect(compiled.sql).not.toContain("WITH requested")
+  expect(compiled.sql).toContain("FROM jsonb_array_elements($3::text::jsonb) AS ref(value)")
+  expect(compiled.sql).toContain("JOIN sixb_readable_objects AS selected")
+  expect(compiled.args.slice(-2)).toEqual([JSON.stringify(refs), "project-a"])
+  expect(maxPlaceholder(compiled.sql)).toBe(compiled.args.length)
+  expect(maxPlaceholder(compiled.totalSql)).toBe(compiled.totalArgs.length)
+})
+
+test("selected scope wraps aggregate and direct object/link reads", () => {
+  const count = compilePgObjectCountQuery("project-a", sitePointQuery, selectedReadScope)
+  const exists = compilePgObjectExistsQuery("project-a", sitePointQuery, selectedReadScope)
+  const facet = compilePgObjectFacetQuery(
+    "project-a",
+    sitePointQuery,
+    "siteId",
+    10,
+    selectedReadScope
+  )
+  const directLinkRead = compilePgObjectReadSql(
+    "project-a",
+    selectedReadScope,
+    "SELECT * FROM links WHERE project_id = ? AND source_id = ?",
+    ["project-a", "proposal-a"]
+  )
+
+  for (const compiled of [count, exists, facet, directLinkRead]) {
+    expect(compiled.sql).toContain("WITH RECURSIVE")
+    expect(maxPlaceholder(compiled.sql)).toBe(compiled.args.length)
+  }
+  expect(count.sql).toContain("FROM sixb_readable_objects")
+  expect(exists.sql).toContain("FROM sixb_readable_objects")
+  expect(facet.sql).toContain("FROM sixb_readable_objects")
+  expect(directLinkRead.sql).toContain("FROM sixb_readable_links")
+})
+
+test("selected scope redacts object and exact physical-link properties in SQL", () => {
+  const compiled = compilePgObjectReadSql(
+    "project-a",
+    selectedReadScope,
+    "SELECT * FROM objects WHERE project_id = ?",
+    ["project-a"]
+  )
+
+  expect(compiled.sql).toContain("sixb_scope_visible_object_properties")
+  expect(compiled.sql).toContain("sixb_scope_visible_link_properties")
+  expect(compiled.sql).toContain("jsonb_each(raw_object.properties)")
+  expect(compiled.sql).toContain("jsonb_each(raw_link.properties)")
+  expect(compiled.sql).toContain("allowed.target_id = raw_link.target_id")
+  expect(compiled.sql).toContain("jsonb_to_recordset")
+  expect(compiled.sql).toContain("jsonb_array_elements_text")
+  const document = parseScopeDocument(compiled.args[0])
+  expect(document.steps.map((step) => step.property_ids)).toEqual([["position"], ["featured"]])
+})
+
+test("selected scope keeps bind parameters bounded for tens of thousands of properties", () => {
+  const propertyIds = Array.from({ length: 22_000 }, (_, index) => `property-${index}`)
+  const largeScope: CompiledObjectReadScope = {
+    kind: "selected",
+    roots: [{ nodeId: 0, objectTypeId: "Proposal", primaryId: "proposal-a" }],
+    objects: [{ nodeId: 0, objectTypeId: "Proposal", propertyIds }],
+    steps: [],
+  }
+  const compiled = compilePgObjectReadSql(
+    "project-a",
+    largeScope,
+    "SELECT * FROM objects WHERE project_id = ?",
+    ["project-a"]
+  )
+
+  // Scope document + scope project + caller query. The old VALUES transport needed >66k args.
+  expect(compiled.args).toHaveLength(3)
+  expect(maxPlaceholder(compiled.sql)).toBe(3)
+  expect(parseScopeDocument(compiled.args[0]).objects[0]?.property_ids).toHaveLength(22_000)
+})
+
+test("selected scope limits the recursive walk at maxTraversalFacts plus one", () => {
+  const compiled = compilePgObjectReadSql(
+    "project-a",
+    selectedReadScope,
+    "SELECT * FROM objects WHERE project_id = ?",
+    ["project-a"],
+    selectedReadLimits
+  )
+
+  expect(compiled.sql).toContain("sixb_scope_walk_probe AS MATERIALIZED")
+  expect(compiled.sql).toContain("LIMIT ($3::bigint + 1)")
+  expect(compiled.sql).toContain("budget.fact_count > $4::bigint")
+  expect(compiled.sql).toContain("edge_source_type_id")
+  expect(compiled.sql).toContain("edge_target_id")
+  expect(compiled.args).toEqual([expect.any(String), "project-a", 37, 37, "project-a"])
+  expect(maxPlaceholder(compiled.sql)).toBe(compiled.args.length)
+
+  const preflight = compilePgObjectReadScopeTraversalProbe(
+    "project-a",
+    selectedReadScope,
+    selectedReadLimits.maxTraversalFacts
+  )
+  expect(preflight.sql).toContain("LIMIT ($3::bigint + 1)")
+  expect(preflight.args).toEqual([expect.any(String), "project-a", 37])
+  expect(maxPlaceholder(preflight.sql)).toBe(preflight.args.length)
+})
+
+function maxPlaceholder(sql: string): number {
+  return Math.max(0, ...[...sql.matchAll(/\$(\d+)/g)].map((match) => Number(match[1])))
+}
+
+function parseScopeDocument(value: unknown): {
+  objects: { property_ids: string[] }[]
+  steps: { property_ids: string[] }[]
+} {
+  return JSON.parse(String(value)) as {
+    objects: { property_ids: string[] }[]
+    steps: { property_ids: string[] }[]
+  }
+}

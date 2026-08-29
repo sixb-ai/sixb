@@ -66,8 +66,52 @@ const Project = defineObjectType({
   ],
 })
 
+// These type/id pairs deliberately collide under the legacy `${type}:${id}` batch keys.
+const CollisionTargetA = defineObjectType({
+  id: "CollisionTarget",
+  name: "Collision target A",
+  properties: [prop("id", "string", { required: true, primary: true })],
+})
+
+const CollisionTargetB = defineObjectType({
+  id: "CollisionTarget:Y",
+  name: "Collision target B",
+  properties: [prop("id", "string", { required: true, primary: true })],
+})
+
+const CollisionParentA = defineObjectType({
+  id: "CollisionParent",
+  name: "Collision parent A",
+  properties: [prop("id", "string", { required: true, primary: true })],
+  links: [link("edge", CollisionTargetA, { cardinality: "one" })],
+})
+
+const CollisionParentB = defineObjectType({
+  id: "CollisionParent:B",
+  name: "Collision parent B",
+  extends: CollisionParentA,
+  properties: [],
+})
+
+const CollisionSource = defineObjectType({
+  id: "CollisionSource",
+  name: "Collision source",
+  properties: [prop("id", "string", { required: true, primary: true })],
+  links: [link("reverse", [CollisionParentA, CollisionParentB])],
+})
+
 const ontology = new OntologyRegistry({
   sources: [Project, Opportunity, Company, Contact],
+})
+
+const collisionOntology = new OntologyRegistry({
+  sources: [
+    CollisionTargetA,
+    CollisionTargetB,
+    CollisionParentA,
+    CollisionParentB,
+    CollisionSource,
+  ],
 })
 
 const PROJECT = "p1"
@@ -79,16 +123,16 @@ function recordBatchFetches(storage: ObjectStorage): {
   readonly fetchedKeys: string[]
 } {
   const fetchedKeys: string[] = []
-  const getByPrimaryIdBatch = storage.getByPrimaryIdBatch
+  const getByPrimaryIdMany = storage.getByPrimaryIdMany.bind(storage)
   return {
     storage: new Proxy(storage, {
       get(target, property) {
-        if (property === "getByPrimaryIdBatch") {
-          return async (params: Parameters<ObjectStorage["getByPrimaryIdBatch"]>[0]) => {
+        if (property === "getByPrimaryIdMany") {
+          return async (params: Parameters<ObjectStorage["getByPrimaryIdMany"]>[0]) => {
             for (const item of params.items) {
               fetchedKeys.push(`${item.objectTypeId}:${item.primaryId}`)
             }
-            return getByPrimaryIdBatch(params)
+            return getByPrimaryIdMany(params)
           }
         }
         return Reflect.get(target, property, target)
@@ -378,9 +422,37 @@ describe("object query expand — execution", () => {
     )
 
     expect(list(byId(result.objects, "proj-1").links?.members)).toHaveLength(1)
+
+    const none = await executeObjectQuery(
+      { projectId: PROJECT, query: expandProjects([{ linkId: "members", direction: "outgoing" }]) },
+      { ontology, storage, maxExpansionFanout: 0 }
+    )
+    expect(list(byId(none.objects, "proj-1").links?.members)).toEqual([])
   })
 
   test("hydrates an incoming expansion as an array of sources", async () => {
+    let singleLinkReads = 0
+    let batchedLinkReads = 0
+    const listLinks = storage.listLinks.bind(storage)
+    const listLinksMany = storage.listLinksMany.bind(storage)
+    const countedStorage = new Proxy(storage, {
+      get(target, property) {
+        if (property === "listLinks") {
+          return async (params: Parameters<ObjectStorage["listLinks"]>[0]) => {
+            singleLinkReads += 1
+            return listLinks(params)
+          }
+        }
+        if (property === "listLinksMany") {
+          return async (params: Parameters<ObjectStorage["listLinksMany"]>[0]) => {
+            batchedLinkReads += 1
+            return listLinksMany(params)
+          }
+        }
+        return Reflect.get(target, property, target)
+      },
+    })
+
     const result = await executeObjectQuery(
       {
         projectId: PROJECT,
@@ -392,7 +464,7 @@ describe("object query expand — execution", () => {
           input: { kind: "limit", limit: 100, input: { kind: "start", objectTypeId: "Company" } },
         },
       },
-      { ontology, storage }
+      { ontology, storage: countedStorage }
     )
 
     const opportunities = list(byId(result.objects, "acme").links?.company)
@@ -400,6 +472,143 @@ describe("object query expand — execution", () => {
       "opp-1",
       "opp-2",
     ])
+    expect(batchedLinkReads).toBe(1)
+    expect(singleLinkReads).toBe(0)
+  })
+
+  test("keeps colliding legacy batch keys isolated in outgoing and incoming expansions", async () => {
+    const provider = new InMemoryStorage()
+    const collisionFixture = createMaterializerTestFixture({
+      projectId: PROJECT,
+      ontology: collisionOntology,
+      storage: provider,
+    })
+    await collisionFixture.seed({
+      objects: [
+        {
+          ref: { objectTypeId: CollisionParentA.id, primaryId: "B:C" },
+          properties: { id: "B:C" },
+        },
+        {
+          ref: { objectTypeId: CollisionParentB.id, primaryId: "C" },
+          properties: { id: "C" },
+        },
+        {
+          ref: { objectTypeId: CollisionTargetA.id, primaryId: "Y:Z" },
+          properties: { id: "Y:Z" },
+        },
+        {
+          ref: { objectTypeId: CollisionTargetB.id, primaryId: "Z" },
+          properties: { id: "Z" },
+        },
+        {
+          ref: { objectTypeId: CollisionTargetA.id, primaryId: "target-b" },
+          properties: { id: "target-b" },
+        },
+        {
+          ref: { objectTypeId: CollisionSource.id, primaryId: "source-a" },
+          properties: { id: "source-a" },
+        },
+        {
+          ref: { objectTypeId: CollisionSource.id, primaryId: "source-b" },
+          properties: { id: "source-b" },
+        },
+      ],
+      links: [
+        {
+          ref: {
+            source: { objectTypeId: CollisionParentA.id, primaryId: "B:C" },
+            linkId: "edge",
+            target: { objectTypeId: CollisionTargetA.id, primaryId: "Y:Z" },
+          },
+        },
+        {
+          ref: {
+            source: { objectTypeId: CollisionParentB.id, primaryId: "C" },
+            linkId: "edge",
+            target: { objectTypeId: CollisionTargetA.id, primaryId: "target-b" },
+          },
+        },
+        {
+          ref: {
+            source: { objectTypeId: CollisionSource.id, primaryId: "source-a" },
+            linkId: "reverse",
+            target: { objectTypeId: CollisionParentA.id, primaryId: "B:C" },
+          },
+        },
+        {
+          ref: {
+            source: { objectTypeId: CollisionSource.id, primaryId: "source-b" },
+            linkId: "reverse",
+            target: { objectTypeId: CollisionParentB.id, primaryId: "C" },
+          },
+        },
+      ],
+    })
+    const collidingObjects = await provider.objects.getByPrimaryIdMany({
+      projectId: PROJECT,
+      items: [
+        { objectTypeId: CollisionTargetA.id, primaryId: "Y:Z" },
+        { objectTypeId: CollisionTargetB.id, primaryId: "Z" },
+      ],
+    })
+    expect(collidingObjects.map((row) => row?.objectTypeId)).toEqual([
+      CollisionTargetA.id,
+      CollisionTargetB.id,
+    ])
+    const parents = {
+      kind: "limit",
+      limit: 10,
+      input: { kind: "start", objectTypeId: CollisionParentA.id, includeSubtypes: true },
+    } as const
+
+    const outgoing = await executeObjectQuery(
+      {
+        projectId: PROJECT,
+        query: {
+          kind: "expand",
+          expansions: [{ linkId: "edge", direction: "outgoing" }],
+          input: parents,
+        },
+      },
+      { ontology: collisionOntology, storage: provider.objects }
+    )
+    const parentA = outgoing.objects.find(
+      (row) => row.objectTypeId === CollisionParentA.id && row.primaryId === "B:C"
+    )
+    const parentB = outgoing.objects.find(
+      (row) => row.objectTypeId === CollisionParentB.id && row.primaryId === "C"
+    )
+    expect(single(parentA?.links?.edge).objectTypeId).toBe(CollisionTargetA.id)
+    expect(single(parentA?.links?.edge).primaryId).toBe("Y:Z")
+    expect(single(parentB?.links?.edge).objectTypeId).toBe(CollisionTargetA.id)
+    expect(single(parentB?.links?.edge).primaryId).toBe("target-b")
+
+    const incoming = await executeObjectQuery(
+      {
+        projectId: PROJECT,
+        query: {
+          kind: "expand",
+          expansions: [
+            {
+              linkId: "reverse",
+              direction: "incoming",
+              sourceObjectTypeId: CollisionSource.id,
+            },
+          ],
+          input: parents,
+        },
+      },
+      { ontology: collisionOntology, storage: provider.objects }
+    )
+    const incomingA = incoming.objects.find(
+      (row) => row.objectTypeId === CollisionParentA.id && row.primaryId === "B:C"
+    )
+    const incomingB = incoming.objects.find(
+      (row) => row.objectTypeId === CollisionParentB.id && row.primaryId === "C"
+    )
+    expect(list(incomingA?.links?.reverse).map((row) => row.primaryId)).toEqual(["source-a"])
+    expect(list(incomingB?.links?.reverse).map((row) => row.primaryId)).toEqual(["source-b"])
   })
 
   test("hydrates a missing 'one' link target to null", async () => {
@@ -411,25 +620,33 @@ describe("object query expand — execution", () => {
         },
       ],
     })
-    const listLinksBatch = storage.listLinksBatch
+    const listLinksMany = storage.listLinksMany.bind(storage)
     const storageWithConcurrentDeletion = new Proxy(storage, {
       get(target, property) {
-        if (property !== "listLinksBatch") return Reflect.get(target, property, target)
-        return async (params: Parameters<ObjectStorage["listLinksBatch"]>[0]) => {
-          const result = await listLinksBatch(params)
-          result.set("Project:proj-3:opportunity", [
-            {
-              projectId: PROJECT,
-              sourceTypeId: "Project",
-              sourceId: "proj-3",
-              linkId: "opportunity",
-              targetTypeId: "Opportunity",
-              targetId: "ghost",
-              createdAt: new Date("2026-01-01T00:00:00.000Z"),
-              updatedAt: new Date("2026-01-01T00:00:00.000Z"),
-              lastCommitId: "concurrent-delete",
-            },
-          ])
+        if (property !== "listLinksMany") return Reflect.get(target, property, target)
+        return async (params: Parameters<ObjectStorage["listLinksMany"]>[0]) => {
+          const result = (await listLinksMany(params)).map((links) => [...links])
+          const index = params.items.findIndex(
+            (item) =>
+              item.objectTypeId === "Project" &&
+              item.objectId === "proj-3" &&
+              item.linkId === "opportunity"
+          )
+          if (index >= 0) {
+            result[index] = [
+              {
+                projectId: PROJECT,
+                sourceTypeId: "Project",
+                sourceId: "proj-3",
+                linkId: "opportunity",
+                targetTypeId: "Opportunity",
+                targetId: "ghost",
+                createdAt: new Date("2026-01-01T00:00:00.000Z"),
+                updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+                lastCommitId: "concurrent-delete",
+              },
+            ]
+          }
           return result
         }
       },

@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite"
 import type { ObjectQuery } from "@sixb/core"
 import type {
+  CompiledObjectReadScope,
   CountObjectsInput,
   CountObjectsResult,
   ExistsObjectsInput,
@@ -9,18 +10,36 @@ import type {
   ExpandedObjectRow,
   FacetObjectsInput,
   FacetObjectsResult,
-  LinkDirection,
   ObjectFacetRequest,
   ObjectLinkRow,
   ObjectQueryCapabilities,
+  ObjectReadExecutionLimits,
+  ObjectReadScope,
+  ObjectReadStorage,
   ObjectRow,
   ObjectRowLinks,
   ObjectStorage,
   QueryObjectsInput,
   QueryObjectsResult,
 } from "@sixb/core/storage"
+import {
+  assertObjectReaderProject,
+  assertVisibleJsonWithinLimit,
+  compileObjectReadScope,
+  DelegatedExecutionLimitError,
+  MAX_OBJECT_FACETS_PER_READ,
+  normalizeObjectListWindow,
+  objectListHasMore,
+  objectListLookaheadLimit,
+  snapshotObjectReadExecutionLimits,
+} from "@sixb/core/storage"
 import { installFreshSqliteSchema } from "./migrations"
-import { type CompiledObjectQuery, compileObjectQuery } from "./object-query-compiler"
+import {
+  type CompiledObjectQuery,
+  compileObjectQuery,
+  compileSqliteObjectReadScopeTraversalProbe,
+  compileSqliteObjectReadSource,
+} from "./object-query-compiler"
 import {
   closeSqliteStoreConnection,
   openSqliteStoreConnection,
@@ -100,6 +119,17 @@ const SQLITE_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
   ],
 }
 
+const ALL_OBJECT_READ_SCOPE: CompiledObjectReadScope = { kind: "all" }
+
+type GetObjectInput = Parameters<ObjectReadStorage["getByPrimaryId"]>[0]
+type SelectsObjectPropertiesInput = Parameters<ObjectReadStorage["selectsObjectProperties"]>[0]
+type ListLinksInput = Parameters<ObjectReadStorage["listLinks"]>[0]
+type GetObjectsManyInput = Parameters<ObjectReadStorage["getByPrimaryIdMany"]>[0]
+type ListLinksManyInput = Parameters<ObjectReadStorage["listLinksMany"]>[0]
+type GetObjectsBatchInput = Parameters<ObjectStorage["getByPrimaryIdBatch"]>[0]
+type ListLinksBatchInput = Parameters<ObjectStorage["listLinksBatch"]>[0]
+type ListObjectsInput = Parameters<ObjectReadStorage["list"]>[0]
+
 /**
  * SQLite-based ObjectStorage implementation.
  *
@@ -123,9 +153,85 @@ export class SqliteObjectStorage implements ObjectStorage {
     return SQLITE_OBJECT_QUERY_CAPABILITIES
   }
 
+  createReadScope(params: {
+    projectId: string
+    scope: ObjectReadScope
+    limits: ObjectReadExecutionLimits
+  }): ObjectReadStorage {
+    const projectId = params.projectId
+    const scope = compileObjectReadScope(params.scope)
+    const limits = snapshotObjectReadExecutionLimits(params.limits)
+    const traversalProbe =
+      scope.kind === "selected"
+        ? compileSqliteObjectReadScopeTraversalProbe(projectId, scope, limits.maxTraversalFacts)
+        : undefined
+    const assertProject = (actualProjectId: string) =>
+      assertObjectReaderProject(projectId, actualProjectId)
+    const read = <T>(run: () => T): T =>
+      runReadSnapshot(this.db, () => {
+        assertTraversalBudget(this.db, traversalProbe, limits)
+        const value = run()
+        assertVisibleJsonWithinLimit(value, limits)
+        return value
+      })
+
+    const reader: ObjectReadStorage = {
+      queryCapabilities: () => this.queryCapabilities(),
+      queryObjects: async (input) => {
+        assertProject(input.projectId)
+        return read(() => this.queryObjectsWithScope(input, scope))
+      },
+      countObjects: async (input) => {
+        assertProject(input.projectId)
+        return read(() => this.countObjectsWithScope(input, scope))
+      },
+      existsObjects: async (input) => {
+        assertProject(input.projectId)
+        return read(() => this.existsObjectsWithScope(input, scope))
+      },
+      facetObjects: async (input) => {
+        assertProject(input.projectId)
+        return read(() => this.facetObjectsWithScope(input, scope))
+      },
+      getByPrimaryId: async (input) => {
+        assertProject(input.projectId)
+        return read(() => this.getByPrimaryIdWithScope(input, scope))
+      },
+      selectsObjectProperties: async (input) => {
+        assertProject(input.projectId)
+        return read(() => this.selectsObjectPropertiesWithScope(input, scope))
+      },
+      listLinks: async (input) => {
+        assertProject(input.projectId)
+        return read(() => this.listLinksWithScope(input, scope))
+      },
+      getByPrimaryIdMany: async (input) => {
+        assertProject(input.projectId)
+        return read(() => this.getByPrimaryIdManyWithScope(input, scope))
+      },
+      listLinksMany: async (input) => {
+        assertProject(input.projectId)
+        return read(() => this.listLinksManyWithScope(input, scope))
+      },
+      list: async (input) => {
+        assertProject(input.projectId)
+        return read(() => this.listWithScope(input, scope))
+      },
+    }
+    return Object.freeze(reader)
+  }
+
   async queryObjects(params: QueryObjectsInput): Promise<QueryObjectsResult> {
+    return this.queryObjectsWithScope(params, ALL_OBJECT_READ_SCOPE)
+  }
+
+  private queryObjectsWithScope(
+    params: QueryObjectsInput,
+    scope: CompiledObjectReadScope
+  ): QueryObjectsResult {
     const compiled = compileObjectQuery(params.projectId, params.query, {
       includeTotal: params.includeTotal,
+      scope,
     })
     const total = params.includeTotal === false ? undefined : readTotal(this.db, compiled)
     const rawRows = this.db.query(compiled.sql).all(...compiled.args) as ObjectQueryDatabaseRow[]
@@ -146,21 +252,49 @@ export class SqliteObjectStorage implements ObjectStorage {
   }
 
   async countObjects(params: CountObjectsInput): Promise<CountObjectsResult> {
+    return this.countObjectsWithScope(params, ALL_OBJECT_READ_SCOPE)
+  }
+
+  private countObjectsWithScope(
+    params: CountObjectsInput,
+    scope: CompiledObjectReadScope
+  ): CountObjectsResult {
     return {
       count: readTotal(
         this.db,
-        compileObjectQuery(params.projectId, stripOuterRowShape(params.query))
+        compileObjectQuery(params.projectId, stripOuterRowShape(params.query), { scope })
       ),
     }
   }
 
   async existsObjects(params: ExistsObjectsInput): Promise<ExistsObjectsResult> {
-    const compiled = compileObjectQuery(params.projectId, existsProbeQuery(params.query))
+    return this.existsObjectsWithScope(params, ALL_OBJECT_READ_SCOPE)
+  }
+
+  private existsObjectsWithScope(
+    params: ExistsObjectsInput,
+    scope: CompiledObjectReadScope
+  ): ExistsObjectsResult {
+    const compiled = compileObjectQuery(params.projectId, existsProbeQuery(params.query), { scope })
     return { exists: this.db.query(compiled.sql).get(...compiled.args) !== null }
   }
 
   async facetObjects(params: FacetObjectsInput): Promise<FacetObjectsResult> {
-    const compiled = compileObjectQuery(params.projectId, stripOuterRowShape(params.query))
+    return this.facetObjectsWithScope(params, ALL_OBJECT_READ_SCOPE)
+  }
+
+  private facetObjectsWithScope(
+    params: FacetObjectsInput,
+    scope: CompiledObjectReadScope
+  ): FacetObjectsResult {
+    if (params.facets.length > MAX_OBJECT_FACETS_PER_READ) {
+      throw new Error(
+        `[SixbSqlite] A facet read supports at most ${MAX_OBJECT_FACETS_PER_READ} facets.`
+      )
+    }
+    const compiled = compileObjectQuery(params.projectId, stripOuterRowShape(params.query), {
+      scope,
+    })
     return {
       facets: params.facets.map((facet) => ({
         propertyId: facet.propertyId,
@@ -169,25 +303,73 @@ export class SqliteObjectStorage implements ObjectStorage {
     }
   }
 
-  async getByPrimaryId(params: {
-    projectId: string
-    objectTypeId: string
-    primaryId: string
-  }): Promise<ObjectRow | null> {
-    const row = this.db
-      .query("SELECT * FROM objects WHERE project_id = ? AND object_type_id = ? AND primary_id = ?")
-      .get(params.projectId, params.objectTypeId, params.primaryId) as DatabaseRow | null
+  async getByPrimaryId(params: GetObjectInput): Promise<ObjectRow | null> {
+    return this.getByPrimaryIdWithScope(params, ALL_OBJECT_READ_SCOPE)
+  }
+
+  private getByPrimaryIdWithScope(
+    params: GetObjectInput,
+    scope: CompiledObjectReadScope
+  ): ObjectRow | null {
+    const source = compileSqliteObjectReadSource(params.projectId, scope)
+    const statement = source.scopeStatement(
+      `SELECT * FROM ${source.objectsTable} WHERE project_id = ? AND object_type_id = ? AND primary_id = ?`,
+      [params.projectId, params.objectTypeId, params.primaryId]
+    )
+    const row = this.db.query(statement.sql).get(...statement.args) as DatabaseRow | null
 
     return row ? this.rowToObject(row) : null
   }
 
-  async listLinks(params: {
-    projectId: string
-    objectTypeId: string
-    objectId: string
-    linkId?: string
-    direction?: LinkDirection
-  }): Promise<readonly ObjectLinkRow[]> {
+  async selectsObjectProperties(params: SelectsObjectPropertiesInput): Promise<readonly boolean[]> {
+    return this.selectsObjectPropertiesWithScope(params, ALL_OBJECT_READ_SCOPE)
+  }
+
+  private selectsObjectPropertiesWithScope(
+    params: SelectsObjectPropertiesInput,
+    scope: CompiledObjectReadScope
+  ): readonly boolean[] {
+    const result = params.items.map(() => false)
+    if (params.items.length === 0) return result
+
+    const source = compileSqliteObjectReadSource(params.projectId, scope)
+    const items = params.items.map((item, batchIndex) => ({ ...item, batchIndex }))
+    const requestedType = "CAST(json_extract(requested.value, '$.objectTypeId') AS TEXT)"
+    const requestedId = "CAST(json_extract(requested.value, '$.primaryId') AS TEXT)"
+    const requestedProperty = "CAST(json_extract(requested.value, '$.propertyId') AS TEXT)"
+    const storedTable = source.objectPropertyPermissionsTable ?? source.objectsTable
+    const propertyJoin = source.objectPropertyPermissionsTable
+      ? `AND stored.property_id = ${requestedProperty}`
+      : ""
+    const statement = source.scopeStatement(
+      `SELECT DISTINCT
+         CAST(json_extract(requested.value, '$.batchIndex') AS INTEGER) AS _batch_index
+       FROM ${storedTable} AS stored
+       JOIN json_each(?) AS requested
+         ON stored.object_type_id = ${requestedType}
+        AND stored.primary_id = ${requestedId}
+        ${propertyJoin}
+       WHERE stored.project_id = ?`,
+      [JSON.stringify(items), params.projectId]
+    )
+    const rows = this.db
+      .query(statement.sql)
+      .all(...statement.args) as PropertyPermissionBatchDatabaseRow[]
+    for (const row of rows) {
+      result[row._batch_index] = true
+    }
+    return result
+  }
+
+  async listLinks(params: ListLinksInput): Promise<readonly ObjectLinkRow[]> {
+    return this.listLinksWithScope(params, ALL_OBJECT_READ_SCOPE)
+  }
+
+  private listLinksWithScope(
+    params: ListLinksInput,
+    scope: CompiledObjectReadScope
+  ): readonly ObjectLinkRow[] {
+    const source = compileSqliteObjectReadSource(params.projectId, scope)
     const direction = params.direction ?? "outgoing"
     const directionWhere =
       direction === "incoming"
@@ -195,7 +377,7 @@ export class SqliteObjectStorage implements ObjectStorage {
         : direction === "both"
           ? "((source_type_id = ? AND source_id = ?) OR (target_type_id = ? AND target_id = ?))"
           : "source_type_id = ? AND source_id = ?"
-    let query = `SELECT * FROM links WHERE project_id = ? AND ${directionWhere}`
+    let query = `SELECT * FROM ${source.linksTable} WHERE project_id = ? AND ${directionWhere}`
     const args: (string | number)[] =
       direction === "both"
         ? [
@@ -212,61 +394,104 @@ export class SqliteObjectStorage implements ObjectStorage {
       args.push(params.linkId)
     }
 
-    const rows = this.db.query(query).all(...args) as LinkDatabaseRow[]
+    const statement = source.scopeStatement(query, args)
+    const rows = this.db.query(statement.sql).all(...statement.args) as LinkDatabaseRow[]
 
     return rows.map((row) => this.rowToLink(row))
   }
 
-  async getByPrimaryIdBatch(params: {
-    projectId: string
-    items: readonly { objectTypeId: string; primaryId: string }[]
-  }): Promise<Map<string, ObjectRow>> {
-    const result = new Map<string, ObjectRow>()
+  async getByPrimaryIdMany(params: GetObjectsManyInput): Promise<readonly (ObjectRow | null)[]> {
+    return this.getByPrimaryIdManyWithScope(params, ALL_OBJECT_READ_SCOPE)
+  }
+
+  private getByPrimaryIdManyWithScope(
+    params: GetObjectsManyInput,
+    scope: CompiledObjectReadScope
+  ): readonly (ObjectRow | null)[] {
+    const result = params.items.map<ObjectRow | null>(() => null)
     if (params.items.length === 0) return result
 
-    const rows = this.db
-      .query(
-        `
-          SELECT object.*
-          FROM json_each(?) AS requested
-          JOIN objects AS object
-            ON object.project_id = ?
-           AND object.object_type_id = json_extract(requested.value, '$.objectTypeId')
-           AND object.primary_id = json_extract(requested.value, '$.primaryId')
-        `
-      )
-      .all(JSON.stringify(params.items), params.projectId) as DatabaseRow[]
+    const source = compileSqliteObjectReadSource(params.projectId, scope)
+    const items = params.items.map((item, batchIndex) => ({ ...item, batchIndex }))
+    const statement = source.scopeStatement(
+      `SELECT
+         stored.*,
+         CAST(json_extract(requested.value, '$.batchIndex') AS INTEGER) AS _batch_index
+       FROM ${source.objectsTable} AS stored
+       JOIN json_each(?) AS requested
+         ON stored.object_type_id = CAST(json_extract(requested.value, '$.objectTypeId') AS TEXT)
+        AND stored.primary_id = CAST(json_extract(requested.value, '$.primaryId') AS TEXT)
+       WHERE stored.project_id = ?`,
+      [JSON.stringify(items), params.projectId]
+    )
+    const rows = this.db.query(statement.sql).all(...statement.args) as ObjectBatchDatabaseRow[]
     for (const row of rows) {
-      result.set(`${row.object_type_id}:${row.primary_id}`, this.rowToObject(row))
+      result[row._batch_index] = this.rowToObject(row)
     }
     return result
   }
 
-  async listLinksBatch(params: {
-    projectId: string
-    items: readonly { objectTypeId: string; objectId: string; linkId: string }[]
-  }): Promise<Map<string, ObjectLinkRow[]>> {
-    const result = new Map<string, ObjectLinkRow[]>()
-    if (params.items.length === 0) return result
+  async getByPrimaryIdBatch(params: GetObjectsBatchInput): Promise<Map<string, ObjectRow>> {
+    const rows = await this.getByPrimaryIdManyWithScope(params, ALL_OBJECT_READ_SCOPE)
+    return toLegacyObjectBatchMap(params.items, rows)
+  }
 
-    const stmt = this.db.query(
-      "SELECT * FROM links WHERE project_id = ? AND source_type_id = ? AND source_id = ? AND link_id = ?"
+  async listLinksMany(params: ListLinksManyInput): Promise<readonly (readonly ObjectLinkRow[])[]> {
+    return this.listLinksManyWithScope(params, ALL_OBJECT_READ_SCOPE)
+  }
+
+  private listLinksManyWithScope(
+    params: ListLinksManyInput,
+    scope: CompiledObjectReadScope
+  ): readonly (readonly ObjectLinkRow[])[] {
+    const result = params.items.map(() => new Map<string, ObjectLinkRow>())
+    if (params.items.length === 0) return []
+
+    const source = compileSqliteObjectReadSource(params.projectId, scope)
+    const items = params.items.map((item, batchIndex) => ({ ...item, batchIndex }))
+    const direction = params.direction ?? "outgoing"
+    const requestedType = "CAST(json_extract(requested.value, '$.objectTypeId') AS TEXT)"
+    const requestedId = "CAST(json_extract(requested.value, '$.objectId') AS TEXT)"
+    const requestedLink = "CAST(json_extract(requested.value, '$.linkId') AS TEXT)"
+    const outgoing = `stored.source_type_id = ${requestedType} AND stored.source_id = ${requestedId}`
+    const incoming = `stored.target_type_id = ${requestedType} AND stored.target_id = ${requestedId}`
+    const directionJoin =
+      direction === "both"
+        ? `((${outgoing}) OR (${incoming}))`
+        : direction === "incoming"
+          ? incoming
+          : outgoing
+    const statement = source.scopeStatement(
+      `SELECT
+         stored.*,
+         CAST(json_extract(requested.value, '$.batchIndex') AS INTEGER) AS _batch_index
+       FROM ${source.linksTable} AS stored
+       JOIN json_each(?) AS requested
+         ON ${directionJoin}
+        AND stored.link_id = ${requestedLink}
+       WHERE stored.project_id = ?`,
+      [JSON.stringify(items), params.projectId]
     )
-    for (const item of params.items) {
-      const rows = stmt.all(
-        params.projectId,
-        item.objectTypeId,
-        item.objectId,
-        item.linkId
-      ) as LinkDatabaseRow[]
-      if (rows.length > 0) {
-        result.set(
-          `${item.objectTypeId}:${item.objectId}:${item.linkId}`,
-          rows.map((r) => this.rowToLink(r))
-        )
-      }
+    const rows = this.db.query(statement.sql).all(...statement.args) as LinkBatchDatabaseRow[]
+    for (const row of rows) {
+      const link = this.rowToLink(row)
+      result[row._batch_index].set(
+        JSON.stringify([
+          link.sourceTypeId,
+          link.sourceId,
+          link.linkId,
+          link.targetTypeId,
+          link.targetId,
+        ]),
+        link
+      )
     }
-    return result
+    return result.map((links) => [...links.values()])
+  }
+
+  async listLinksBatch(params: ListLinksBatchInput): Promise<Map<string, ObjectLinkRow[]>> {
+    const rows = await this.listLinksManyWithScope(params, ALL_OBJECT_READ_SCOPE)
+    return toLegacyLinkBatchMap(params.items, rows)
   }
 
   async listIncidentLinksBatch(params: {
@@ -282,10 +507,7 @@ export class SqliteObjectStorage implements ObjectStorage {
         direction: "both",
       })
       for (const row of rows) {
-        deduped.set(
-          `${row.sourceTypeId}:${row.sourceId}:${row.linkId}:${row.targetTypeId}:${row.targetId}`,
-          row
-        )
+        deduped.set(fullLinkIdentity(row), row)
       }
     }
     return [...deduped.values()]
@@ -313,7 +535,7 @@ export class SqliteObjectStorage implements ObjectStorage {
         params.objectTypeId,
         params.afterPrimaryId ?? null,
         params.afterPrimaryId ?? null,
-        params.limit + 1
+        objectListLookaheadLimit(params.limit)
       ) as DatabaseRow[]
     const hasMore = rows.length > params.limit
     const objects = rows.slice(0, params.limit).map((row) => this.rowToObject(row))
@@ -324,21 +546,20 @@ export class SqliteObjectStorage implements ObjectStorage {
     }
   }
 
-  async list(params: {
-    projectId: string
-    objectTypeId?: string | readonly string[]
-    primaryIdPrefix?: string
-    primaryIdSuffix?: string
-    updatedAfter?: Date
-    updatedBefore?: Date
-    createdAfter?: Date
-    createdBefore?: Date
-    limit?: number
-    offset?: number
-    orderBy?: "createdAt" | "updatedAt" | "primaryId"
-    order?: "asc" | "desc"
-  }): Promise<{ objects: readonly ObjectRow[]; hasMore: boolean; total: number }> {
-    let query = "SELECT * FROM objects WHERE project_id = ?"
+  async list(params: ListObjectsInput): Promise<{
+    objects: readonly ObjectRow[]
+    hasMore: boolean
+    total: number
+  }> {
+    return this.listWithScope(params, ALL_OBJECT_READ_SCOPE)
+  }
+
+  private listWithScope(
+    params: ListObjectsInput,
+    scope: CompiledObjectReadScope
+  ): { objects: readonly ObjectRow[]; hasMore: boolean; total: number } {
+    const source = compileSqliteObjectReadSource(params.projectId, scope)
+    let query = `SELECT * FROM ${source.objectsTable} WHERE project_id = ?`
     const args: (string | number | null)[] = [params.projectId]
 
     if (params.objectTypeId) {
@@ -382,13 +603,13 @@ export class SqliteObjectStorage implements ObjectStorage {
     }
 
     // Get total count
-    const countResult = this.db.query(`SELECT COUNT(*) as total FROM (${query})`).get(...args) as {
+    const countStatement = source.scopeStatement(`SELECT COUNT(*) as total FROM (${query})`, args)
+    const countResult = this.db.query(countStatement.sql).get(...countStatement.args) as {
       total: number
     }
     const total = countResult.total
 
-    const offset = params.offset ?? 0
-    const limit = params.limit ?? 50
+    const { limit, offset } = normalizeObjectListWindow(params)
     if (limit === 0) return { objects: [], hasMore: offset < total, total }
 
     // Add ordering
@@ -400,11 +621,12 @@ export class SqliteObjectStorage implements ObjectStorage {
 
     // Add pagination
     query += " LIMIT ? OFFSET ?"
-    args.push(limit + 1, offset) // +1 to check for hasMore
+    args.push(limit, offset)
 
-    const rows = this.db.query(query).all(...args) as DatabaseRow[]
-    const hasMore = rows.length > limit
-    const objects = rows.slice(0, limit).map((row) => this.rowToObject(row))
+    const rowsStatement = source.scopeStatement(query, args)
+    const rows = this.db.query(rowsStatement.sql).all(...rowsStatement.args) as DatabaseRow[]
+    const objects = rows.map((row) => this.rowToObject(row))
+    const hasMore = objectListHasMore({ total, offset, returnedRows: objects.length })
 
     return { objects, hasMore, total }
   }
@@ -432,6 +654,9 @@ export class SqliteObjectStorage implements ObjectStorage {
   }
 
   private rowToLink(row: LinkDatabaseRow): ObjectLinkRow {
+    const properties = row.properties
+      ? (JSON.parse(row.properties) as Record<string, unknown>)
+      : null
     return {
       projectId: row.project_id,
       sourceTypeId: row.source_type_id,
@@ -439,7 +664,7 @@ export class SqliteObjectStorage implements ObjectStorage {
       linkId: row.link_id,
       targetTypeId: row.target_type_id,
       targetId: row.target_id,
-      properties: row.properties ? JSON.parse(row.properties) : undefined,
+      ...(properties ? { properties } : {}),
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
       lastCommitId: row.last_commit_id,
@@ -451,6 +676,45 @@ export class SqliteObjectStorage implements ObjectStorage {
    */
   close(): void {
     closeSqliteStoreConnection(this.connection)
+  }
+}
+
+function fullLinkIdentity(link: ObjectLinkRow): string {
+  return JSON.stringify([
+    link.sourceTypeId,
+    link.sourceId,
+    link.linkId,
+    link.targetTypeId,
+    link.targetId,
+  ])
+}
+
+/**
+ * Keep a scoped reader's budget probe and terminal statements on one SQLite snapshot.
+ *
+ * Every SQLite object read is synchronous, so a deferred transaction cannot overlap another
+ * operation on this connection. An enclosing storage transaction already owns the connection and
+ * its snapshot; joining it avoids a nested BEGIN while preserving the same guarantee.
+ */
+function runReadSnapshot<T>(db: Database, run: () => T): T {
+  if (db.inTransaction) return run()
+  return db.transaction(run).deferred()
+}
+
+function assertTraversalBudget(
+  db: Database,
+  probe:
+    | {
+        readonly sql: string
+        readonly args: readonly (string | number | bigint | boolean | null)[]
+      }
+    | undefined,
+  limits: ObjectReadExecutionLimits
+): void {
+  if (!probe) return
+  const row = db.query(probe.sql).get(...probe.args) as { total: number | bigint }
+  if (BigInt(row.total) > BigInt(limits.maxTraversalFacts)) {
+    throw new DelegatedExecutionLimitError("traversalFacts", limits.maxTraversalFacts)
   }
 }
 
@@ -588,6 +852,14 @@ interface ObjectQueryDatabaseRow extends DatabaseRow {
   _expand?: string | null
 }
 
+interface ObjectBatchDatabaseRow extends DatabaseRow {
+  _batch_index: number
+}
+
+interface PropertyPermissionBatchDatabaseRow {
+  _batch_index: number
+}
+
 interface FacetDatabaseRow {
   value_type: string | null
   value: unknown
@@ -605,4 +877,38 @@ interface LinkDatabaseRow {
   created_at: string
   updated_at: string
   last_commit_id: string
+}
+
+interface LinkBatchDatabaseRow extends LinkDatabaseRow {
+  _batch_index: number
+}
+
+function toLegacyObjectBatchMap(
+  items: readonly { readonly objectTypeId: string; readonly primaryId: string }[],
+  rows: readonly (ObjectRow | null)[]
+): Map<string, ObjectRow> {
+  const result = new Map<string, ObjectRow>()
+  items.forEach((item, index) => {
+    const row = rows[index]
+    if (row) result.set(`${item.objectTypeId}:${item.primaryId}`, row)
+  })
+  return result
+}
+
+function toLegacyLinkBatchMap(
+  items: readonly {
+    readonly objectTypeId: string
+    readonly objectId: string
+    readonly linkId: string
+  }[],
+  rows: readonly (readonly ObjectLinkRow[])[]
+): Map<string, ObjectLinkRow[]> {
+  const result = new Map<string, ObjectLinkRow[]>()
+  items.forEach((item, index) => {
+    const links = rows[index]
+    if (links.length > 0) {
+      result.set(`${item.objectTypeId}:${item.objectId}:${item.linkId}`, [...links])
+    }
+  })
+  return result
 }

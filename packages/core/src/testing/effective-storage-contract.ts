@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { defineObjectType, link, OntologyRegistry, prop } from "../ontology"
 import type { Storage } from "../storage"
-import { createMaterializerTestFixture } from "./materializer-fixture"
+import { createMaterializerTestFixture, type MaterializerTestFixture } from "./materializer-fixture"
 
 export interface EffectiveStorageContractSuiteOptions<TStorage extends Storage> {
   readonly createStorage: () => TStorage | Promise<TStorage>
@@ -17,7 +17,11 @@ const Device = defineObjectType({
     prop("name", "string", { required: true }),
     prop("temperature", "double", { mode: "telemetry" }),
   ],
-  links: [link.self("peers", { cardinality: "many" })],
+  links: [
+    link.self("peers", { cardinality: "many" }),
+    link.self("c", { cardinality: "many" }),
+    link.self("b:c", { cardinality: "many" }),
+  ],
 })
 const ontology = new OntologyRegistry({ sources: [Device] })
 
@@ -25,11 +29,14 @@ export function runEffectiveStorageContractSuite<TStorage extends Storage>(
   name: string,
   provider: EffectiveStorageContractSuiteOptions<TStorage>
 ): void {
-  const withStorage = async (body: (storage: TStorage) => Promise<void>): Promise<void> => {
+  const withStorage = async (
+    body: (storage: TStorage, fixture: MaterializerTestFixture) => Promise<void>
+  ): Promise<void> => {
     const storage = await provider.createStorage()
     try {
-      await seedEffectiveState(storage)
-      await body(storage)
+      const fixture = createMaterializerTestFixture({ projectId, ontology, storage })
+      await seedEffectiveState(fixture)
+      await body(storage, fixture)
     } finally {
       await provider.cleanup?.(storage)
     }
@@ -49,14 +56,14 @@ export function runEffectiveStorageContractSuite<TStorage extends Storage>(
         })
         expect(typeof object?.lastCommitId).toBe("string")
 
-        const batch = await storage.objects.getByPrimaryIdBatch({
+        const batch = await storage.objects.getByPrimaryIdMany({
           projectId,
           items: [
             { objectTypeId: Device.id, primaryId: "a" },
             { objectTypeId: Device.id, primaryId: "missing" },
           ],
         })
-        expect([...batch.keys()]).toEqual([`${Device.id}:a`])
+        expect(batch.map((row) => row?.primaryId ?? null)).toEqual(["a", null])
       })
     })
 
@@ -77,11 +84,42 @@ export function runEffectiveStorageContractSuite<TStorage extends Storage>(
         expect(incoming).toHaveLength(1)
         expect(incoming[0]).toMatchObject({ sourceId: "a", targetId: "b" })
 
-        const linksByScope = await storage.objects.listLinksBatch({
+        const linksByScope = await storage.objects.listLinksMany({
           projectId,
           items: [{ objectTypeId: Device.id, objectId: "a", linkId: "peers" }],
         })
-        expect(linksByScope.get(`${Device.id}:a:peers`)).toHaveLength(2)
+        expect(linksByScope[0]).toHaveLength(2)
+      })
+    })
+
+    test("keeps batched links distinct when ontology ids contain separators", async () => {
+      await withStorage(async (storage, fixture) => {
+        await fixture.seed({
+          objects: [device("a:b", "Colon source"), device("d", "Target")],
+          links: [linkedBy("a:b", "c", "d"), linkedBy("a", "b:c", "d")],
+        })
+
+        const links = await storage.objects.listLinksMany({
+          projectId,
+          items: [
+            { objectTypeId: Device.id, objectId: "a:b", linkId: "c" },
+            { objectTypeId: Device.id, objectId: "a", linkId: "b:c" },
+          ],
+        })
+        expect(links.map((rows) => rows.map((row) => [row.sourceId, row.linkId]))).toEqual([
+          [["a:b", "c"]],
+          [["a", "b:c"]],
+        ])
+
+        const incident = await storage.objects.listIncidentLinksBatch({
+          projectId,
+          items: [{ objectTypeId: Device.id, objectId: "d" }],
+        })
+
+        expect(incident.map((row) => [row.sourceId, row.linkId]).sort()).toEqual([
+          ["a", "b:c"],
+          ["a:b", "c"],
+        ])
       })
     })
 
@@ -101,6 +139,42 @@ export function runEffectiveStorageContractSuite<TStorage extends Storage>(
           limit: 2,
         })
         expect(secondPage.objects.map((row) => row.primaryId)).toEqual(["c"])
+      })
+    })
+
+    test("validates and reports ordinary object list windows consistently", async () => {
+      await withStorage(async (storage) => {
+        const firstPage = await storage.objects.list({
+          projectId,
+          objectTypeId: Device.id,
+          limit: 2,
+          orderBy: "primaryId",
+          order: "asc",
+        })
+        expect(firstPage.objects.map((row) => row.primaryId).sort()).toEqual(["a", "b"])
+        expect(firstPage).toMatchObject({ hasMore: true, total: 3 })
+
+        const lastPage = await storage.objects.list({
+          projectId,
+          objectTypeId: Device.id,
+          limit: 2,
+          offset: 2,
+          orderBy: "primaryId",
+          order: "asc",
+        })
+        expect(lastPage.objects.map((row) => row.primaryId)).toEqual(["a", "b", "c"].slice(2))
+        expect(lastPage).toMatchObject({ hasMore: false, total: 3 })
+
+        await expect(
+          storage.objects.list({ projectId, objectTypeId: Device.id, limit: -1 })
+        ).rejects.toThrow("Object list limit must be a non-negative safe integer")
+        await expect(
+          storage.objects.list({
+            projectId,
+            objectTypeId: Device.id,
+            offset: Number.POSITIVE_INFINITY,
+          })
+        ).rejects.toThrow("Object list offset must be a non-negative safe integer")
       })
     })
 
@@ -140,8 +214,7 @@ export function runEffectiveStorageContractSuite<TStorage extends Storage>(
   })
 }
 
-async function seedEffectiveState(storage: Storage): Promise<void> {
-  const fixture = createMaterializerTestFixture({ projectId, ontology, storage })
+async function seedEffectiveState(fixture: MaterializerTestFixture): Promise<void> {
   await fixture.seed({
     objects: [device("a", "Alpha"), device("b", "Beta"), device("c", "Gamma")],
     links: [peer("a", "b"), peer("a", "c")],
@@ -161,10 +234,14 @@ function device(primaryId: string, name: string) {
 }
 
 function peer(sourceId: string, targetId: string) {
+  return linkedBy(sourceId, "peers", targetId)
+}
+
+function linkedBy(sourceId: string, linkId: string, targetId: string) {
   return {
     ref: {
       source: { objectTypeId: Device.id, primaryId: sourceId },
-      linkId: "peers",
+      linkId,
       target: { objectTypeId: Device.id, primaryId: targetId },
     },
   }

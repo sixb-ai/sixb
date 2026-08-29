@@ -6,6 +6,12 @@ export type {
   FindActionEditCommitInput,
 } from "./commit-edits"
 export { commitActionEdits, findActionEditCommit } from "./commit-edits"
+export type {
+  ActionDescriptor,
+  ActionDescriptorBinding,
+  ActionParamDescriptor,
+  ActionPhaseDescriptor,
+} from "./descriptor"
 export { ActionDefinitionError, ActionEditCommitError } from "./errors"
 export type { ActionReadFacadeOptions, ActionReadObjectSetSource } from "./read-facade"
 export { ActionReadRecorder, createActionReadFacade } from "./read-facade"

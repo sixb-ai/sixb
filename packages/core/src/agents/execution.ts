@@ -1,6 +1,7 @@
 import { principalsEqual, SYSTEM_PRINCIPAL } from "../auth"
-import { assertAuthorized, isAllowed } from "../authorization"
+import { assertAuthorized, isRuntimeAllowed } from "../authorization"
 import type { AuthorizablePrincipal, ExecutionContext } from "../execution"
+import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
 import { resolveExecutionCosts } from "../runtime/ai-cost"
 import { resolveExecutionUsage } from "../runtime/ai-usage"
 import type { SixbRuntimeContext } from "../runtime/types"
@@ -83,28 +84,31 @@ export function createAgentsRuntime(
   source: Pick<AgentsRuntime, "list" | "getById">,
   security: SecurityDefinitionCatalog
 ): AgentsRuntime {
-  const principal = runtime.authorization?.principal ?? SYSTEM_PRINCIPAL
-  const allowed = (agentId: string) =>
-    isAllowed(runtime.authorization, { kind: "agent.run", agentId })
+  const authority = resolveRuntimeAuthorizationForProject(runtime)
+  const principal = authority.type === "principal" ? authority.context.principal : SYSTEM_PRINCIPAL
+  const allowed = (agentId: string) => isRuntimeAllowed(runtime, { kind: "agent.run", agentId })
 
   const getThread = async (threadId: string) => {
+    if (authority.type === "denied" || authority.type === "delegated") return null
     const thread =
       (await runtime.storage.agents?.threads.getById({
         projectId: runtime.projectId,
         id: threadId,
       })) ?? null
     if (!thread || !allowed(thread.agentId)) return null
-    return runtime.authorization && !principalsEqual(principal, thread.ownerPrincipal)
+    return authority.type === "principal" && !principalsEqual(principal, thread.ownerPrincipal)
       ? null
       : thread
   }
 
   const getAgent = (agentId: string) => {
+    if (authority.type === "denied" || authority.type === "delegated") return null
     const agent = source.getById(agentId)
     return agent && allowed(agentId) ? agent : null
   }
 
   const getVisibleRunRecord = async (runId: string): Promise<AgentRunRecord | null> => {
+    if (authority.type === "denied" || authority.type === "delegated") return null
     const run =
       (await runtime.storage.agents?.runs.getById({
         projectId: runtime.projectId,
@@ -121,7 +125,10 @@ export function createAgentsRuntime(
   }
 
   return {
-    list: () => source.list().filter((agent) => allowed(agent.id)),
+    list: () =>
+      authority.type === "denied" || authority.type === "delegated"
+        ? []
+        : source.list().filter((agent) => allowed(agent.id)),
     getById: getAgent,
     threads: {
       create: async (input) => {
@@ -146,25 +153,27 @@ export function createAgentsRuntime(
       },
       getById: getThread,
       list: (input = {}) => {
+        if (authority.type === "denied" || authority.type === "delegated") {
+          return Promise.resolve({ threads: [], hasMore: false, total: 0 })
+        }
         const storage = runtime.storage.agents
         if (!storage) return Promise.resolve({ threads: [], hasMore: false, total: 0 })
         return storage.threads.list({
-          projectId: runtime.projectId,
           ...input,
-          agentIds: runtime.authorization
-            ? [...runtime.authorization.grants["run:agent"]]
-            : undefined,
-          ownerPrincipal: runtime.authorization ? principal : undefined,
+          agentIds:
+            authority.type === "principal" ? [...authority.context.grants["run:agent"]] : undefined,
+          ownerPrincipal: authority.type === "principal" ? principal : undefined,
+          projectId: runtime.projectId,
         })
       },
     },
     runs: {
       request: async (input) => {
+        assertAuthorized(runtime, { kind: "agent.run", agentId: input.agentId })
         const agent = source.getById(input.agentId)
         if (!agent) {
           throw new AgentRequestError("agent_not_found", `[Sixb] Unknown agent '${input.agentId}'.`)
         }
-        assertAuthorized(runtime, { kind: "agent.run", agentId: agent.id })
         if (input.threadId && !(await getThread(input.threadId))) {
           throw new AgentRequestError(
             "thread_not_found",
@@ -197,9 +206,9 @@ export function createAgentsRuntime(
         const storage = runtime.storage.agents
         if (!storage || !(await getThread(threadId))) return null
         const result = await storage.runs.list({
-          projectId: runtime.projectId,
           ...input,
           threadId,
+          projectId: runtime.projectId,
         })
         return {
           ...result,

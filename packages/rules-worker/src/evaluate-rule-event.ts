@@ -278,7 +278,7 @@ async function loadCurrentLinks(
 ): Promise<ReadonlyMap<string, readonly ObjectLinkRow[]>> {
   const linkIds = referencedLinkIds(input.rule)
   const links = new Map<string, readonly ObjectLinkRow[]>()
-  const rows = await input.runtime.storage.objects.listLinksBatch({
+  const rows = await input.runtime.storage.objects.listLinksMany({
     projectId: input.runtime.projectId,
     items: linkIds.map((linkId) => ({
       objectTypeId: input.subject.objectTypeId,
@@ -286,11 +286,8 @@ async function loadCurrentLinks(
       linkId,
     })),
   })
-  for (const linkId of linkIds) {
-    links.set(
-      linkId,
-      rows.get(`${input.subject.objectTypeId}:${input.subject.primaryId}:${linkId}`) ?? []
-    )
+  for (const [index, linkId] of linkIds.entries()) {
+    links.set(linkId, rows[index] ?? [])
   }
 
   return links

@@ -1,5 +1,7 @@
-import { assertAuthorized, isAllowed } from "../authorization"
+import { assertAuthorized } from "../authorization"
 import type { ExecutionContext } from "../execution"
+import { resolveExecutionScopeAuthorization } from "../execution/authorization"
+import { assertAuthorizedObjectReaderBinding } from "../execution/authorized-object-reader"
 import type { ValueType } from "../ontology"
 import { assertObjectTypeRegistered } from "../ontology"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
@@ -20,24 +22,21 @@ import type {
   TimeseriesHistoryBatchResult,
   TimeseriesPoint,
 } from "../storage"
-import {
-  countObjects,
-  type ExecuteObjectCountInput,
-  type ExecuteObjectCountResult,
-  type ExecuteObjectExistsInput,
-  type ExecuteObjectExistsResult,
-  type ExecuteObjectFacetsInput,
-  type ExecuteObjectFacetsResult,
-  type ExecuteObjectQueryInput,
-  type ExecuteObjectQueryResult,
-  executeObjectQuery,
-  existsObjects,
-  facetObjects,
+import { createExposedOntologyCatalog } from "./ontology-catalog"
+import type {
+  ExecuteObjectCountInput,
+  ExecuteObjectCountResult,
+  ExecuteObjectExistsInput,
+  ExecuteObjectExistsResult,
+  ExecuteObjectFacetsInput,
+  ExecuteObjectFacetsResult,
+  ExecuteObjectQueryInput,
+  ExecuteObjectQueryResult,
 } from "./query"
 import { createObjectSet } from "./sdk"
 import type { ListObjectsParams } from "./service"
 import * as objectService from "./service"
-import { getTelemetryHistoryBatch } from "./telemetry"
+import { getLatestTelemetryPoint, getTelemetryHistoryBatch } from "./telemetry/history"
 
 export interface ExecutionObjectOperations {
   listTypes(): readonly ObjectTypeWithPropertyTokens[]
@@ -50,6 +49,11 @@ export interface ExecutionObjectOperations {
   get(objectTypeId: string, primaryId: string): Promise<ObjectRow | null>
   list(params: ListObjectsParams): Promise<ListResult<ObjectRow>>
   upsert(objectTypeId: string, properties: Record<string, unknown>): Promise<ObjectRow>
+  upsertByPrimaryId(
+    objectTypeId: string,
+    primaryId: string,
+    properties: Record<string, unknown>
+  ): Promise<ObjectRow>
   upsertBatch(
     objectTypeId: string,
     items: readonly { properties: Record<string, unknown> }[]
@@ -163,6 +167,24 @@ export function createObjectsRuntime<TOntologySources extends readonly OntologyS
   runtime: SixbRuntimeContext,
   execution: ExecutionContext
 ): ObjectsRuntime<TOntologySources> {
+  let ontologyCatalog: ReturnType<typeof createExposedOntologyCatalog> | undefined
+  const getOntologyCatalog = (): ReturnType<typeof createExposedOntologyCatalog> => {
+    ontologyCatalog ??= createExposedOntologyCatalog(runtime, execution)
+    return ontologyCatalog
+  }
+  let executionAuthority: ReturnType<typeof resolveExecutionScopeAuthorization> | undefined
+  const getExecutionAuthority = (): ReturnType<typeof resolveExecutionScopeAuthorization> => {
+    executionAuthority ??= resolveExecutionScopeAuthorization(runtime.projectId, {
+      authorization: runtime.runtimeAuthorization,
+      execution,
+    })
+    return executionAuthority
+  }
+  getExecutionAuthority()
+  assertAuthorizedObjectReaderBinding({
+    reader: runtime.objectReader,
+    scope: { execution, authorization: runtime.runtimeAuthorization },
+  })
   const objects = Object.assign(
     <TObjectType extends RegisteredObjectType<TOntologySources>>(objectType: TObjectType) => {
       assertObjectTypeRegistered(runtime.ontology.getObjectTypesById(), objectType)
@@ -177,67 +199,21 @@ export function createObjectsRuntime<TOntologySources extends readonly OntologyS
       >
     },
     {
-      listTypes: () =>
-        runtime.ontology.listObjectTypes().filter((objectType) =>
-          isAllowed(runtime.authorization, {
-            kind: "object.view",
-            objectTypeId: objectType.id,
-          })
-        ),
-      getTypeById: (objectTypeId: string) => {
-        const objectType = runtime.ontology.getObjectTypeById(objectTypeId)
-        return objectType && isAllowed(runtime.authorization, { kind: "object.view", objectTypeId })
-          ? objectType
-          : null
-      },
-      resolveType: (objectTypeId: string) => {
-        assertAuthorized(runtime, { kind: "object.view", objectTypeId })
-        return runtime.ontology.resolveObjectType(objectTypeId)
-      },
-      getValueTypesById: () => runtime.ontology.getValueTypesById(),
-      listSubTypes: (objectTypeId: string) => runtime.ontology.listSubTypes(objectTypeId),
+      listTypes: () => getOntologyCatalog().listObjectTypes(),
+      getTypeById: (objectTypeId: string) => getOntologyCatalog().getObjectTypeById(objectTypeId),
+      resolveType: (objectTypeId: string) => getOntologyCatalog().resolveObjectType(objectTypeId),
+      getValueTypesById: () => getOntologyCatalog().getValueTypesById(),
+      listSubTypes: (objectTypeId: string) => getOntologyCatalog().listSubTypes(objectTypeId),
       isValidLinkTarget: (expected: string | string[], actual: string) =>
-        runtime.ontology.isValidLinkTarget(expected, actual),
+        getOntologyCatalog().isValidLinkTarget(expected, actual),
       executeQuery: (input: Omit<ExecuteObjectQueryInput, "projectId">) =>
-        executeObjectQuery(
-          { projectId: runtime.projectId, ...input },
-          {
-            ontology: runtime.ontology,
-            storage: runtime.storage.objects,
-            runtimeAuthorization: runtime.runtimeAuthorization,
-            authorization: runtime.authorization,
-          }
-        ),
+        runtime.objectReader.executeQuery(input),
       count: (input: Omit<ExecuteObjectCountInput, "projectId">) =>
-        countObjects(
-          { projectId: runtime.projectId, ...input },
-          {
-            ontology: runtime.ontology,
-            storage: runtime.storage.objects,
-            runtimeAuthorization: runtime.runtimeAuthorization,
-            authorization: runtime.authorization,
-          }
-        ),
+        runtime.objectReader.count(input),
       exists: (input: Omit<ExecuteObjectExistsInput, "projectId">) =>
-        existsObjects(
-          { projectId: runtime.projectId, ...input },
-          {
-            ontology: runtime.ontology,
-            storage: runtime.storage.objects,
-            runtimeAuthorization: runtime.runtimeAuthorization,
-            authorization: runtime.authorization,
-          }
-        ),
+        runtime.objectReader.exists(input),
       facet: (input: Omit<ExecuteObjectFacetsInput, "projectId">) =>
-        facetObjects(
-          { projectId: runtime.projectId, ...input },
-          {
-            ontology: runtime.ontology,
-            storage: runtime.storage.objects,
-            runtimeAuthorization: runtime.runtimeAuthorization,
-            authorization: runtime.authorization,
-          }
-        ),
+        runtime.objectReader.facet(input),
       listLinks: async (input: {
         objectTypeId: string
         objectId: string
@@ -245,32 +221,25 @@ export function createObjectsRuntime<TOntologySources extends readonly OntologyS
         direction?: LinkDirection
       }) => {
         assertAuthorized(runtime, { kind: "object.view", objectTypeId: input.objectTypeId })
-        const links = await runtime.storage.objects.listLinks({
-          projectId: runtime.projectId,
+        return runtime.objectReader.listLinks({
           ...input,
         })
-        return links.filter(
-          (link) =>
-            isAllowed(runtime.authorization, {
-              kind: "object.view",
-              objectTypeId: link.sourceTypeId,
-            }) &&
-            isAllowed(runtime.authorization, {
-              kind: "object.view",
-              objectTypeId: link.targetTypeId,
-            })
-        )
       },
       getTelemetryHistoryBatch: (input: Omit<TimeseriesHistoryBatchInput, "projectId">) =>
         getTelemetryHistoryBatch(
-          { projectId: runtime.projectId, ...input },
+          {
+            series: input.series,
+            ...(input.from === undefined ? {} : { from: input.from }),
+            ...(input.to === undefined ? {} : { to: input.to }),
+            ...(input.limitPerSeries === undefined ? {} : { limitPerSeries: input.limitPerSeries }),
+            ...(input.order === undefined ? {} : { order: input.order }),
+          },
           {
             storage: runtime.storage.timeseries,
-            runtimeAuthorization: runtime.runtimeAuthorization,
-            authorization: runtime.authorization,
+            objectReader: runtime.objectReader,
           }
         ),
-      getTelemetryHistory: (input: {
+      getTelemetryHistory: async (input: {
         objectTypeId: string
         objectId: string
         propertyId: string
@@ -279,38 +248,52 @@ export function createObjectsRuntime<TOntologySources extends readonly OntologyS
         limit?: number
         order?: "asc" | "desc"
       }) => {
-        assertAuthorized(runtime, { kind: "object.view", objectTypeId: input.objectTypeId })
-        return runtime.storage.timeseries.getHistory({
-          projectId: runtime.projectId,
-          ...input,
-        })
+        const [result] = await getTelemetryHistoryBatch(
+          {
+            series: [
+              {
+                objectTypeId: input.objectTypeId,
+                objectId: input.objectId,
+                propertyId: input.propertyId,
+              },
+            ],
+            ...(input.from === undefined ? {} : { from: input.from }),
+            ...(input.to === undefined ? {} : { to: input.to }),
+            ...(input.limit === undefined ? {} : { limitPerSeries: input.limit }),
+            ...(input.order === undefined ? {} : { order: input.order }),
+          },
+          { storage: runtime.storage.timeseries, objectReader: runtime.objectReader }
+        )
+        return result?.points ?? []
       },
-      getLatestTelemetry: (input: {
+      getLatestTelemetry: async (input: {
         objectTypeId: string
         objectId: string
         propertyId: string
       }) => {
-        assertAuthorized(runtime, { kind: "object.view", objectTypeId: input.objectTypeId })
-        return runtime.storage.timeseries.getLatest({
-          projectId: runtime.projectId,
-          ...input,
+        return getLatestTelemetryPoint(input, {
+          storage: runtime.storage.timeseries,
+          objectReader: runtime.objectReader,
         })
       },
       list: (params: ListObjectsParams) => objectService.listObjects(runtime, params),
       get: async (objectTypeId: string, primaryId: string) => {
         assertAuthorized(runtime, { kind: "object.view", objectTypeId })
-        return runtime.storage.objects.getByPrimaryId({
-          projectId: runtime.projectId,
+        return runtime.objectReader.getByPrimaryId({
           objectTypeId,
           primaryId,
         })
       },
       getPrimaryPropertyId: (objectTypeId: string) => {
-        assertAuthorized(runtime, { kind: "object.view", objectTypeId })
-        return runtime.ontology.getPrimaryPropertyId(objectTypeId)
+        return getOntologyCatalog().getPrimaryPropertyId(objectTypeId)
       },
       upsert: (objectTypeId: string, properties: Record<string, unknown>) =>
         objectService.upsertObject(runtime, objectTypeId, properties),
+      upsertByPrimaryId: (
+        objectTypeId: string,
+        primaryId: string,
+        properties: Record<string, unknown>
+      ) => objectService.upsertObjectByPrimaryId(runtime, objectTypeId, primaryId, properties),
       upsertBatch: (
         objectTypeId: string,
         items: readonly { properties: Record<string, unknown> }[]

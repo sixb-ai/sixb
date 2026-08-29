@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { DelegatedExecutionLimitError } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { codedErrorResponseSchema } from "../src/schemas/common"
 import { handleRouteError } from "../src/utils/http"
@@ -37,6 +38,15 @@ describe("handleRouteError", () => {
       expect(handleRouteError(new Error(message), set)).toEqual({ error: message })
       expect(set.status).toBe(400)
     }
+  })
+
+  test("maps delegated execution limits by error identity", () => {
+    const set: { status?: number | string } = {}
+
+    expect(handleRouteError(new DelegatedExecutionLimitError("telemetryPoints", 10), set)).toEqual({
+      error: "[Sixb] Delegated execution exceeded its telemetryPoints limit (10).",
+    })
+    expect(set.status).toBe(400)
   })
 
   test("treats uncategorized coded exceptions as internal failures", () => {

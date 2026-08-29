@@ -5,6 +5,7 @@ import { snapshotRequesterGroupIds } from "../auth/attribution"
 import { assertAuthorized } from "../authorization"
 import type { FileRef } from "../blob-storage"
 import { createAgentExecutionRecord } from "../execution/agent"
+import { resolveExecutionScopeAuthorization } from "../execution/authorization"
 import { ensureExecutionRecord, executionRecordInputFromRuntime } from "../execution/durable"
 import type { ExecutionContext } from "../execution/types"
 import type { SixbRuntimeContext } from "../runtime/types"
@@ -68,6 +69,10 @@ export async function requestAgentRun(
   agent: AgentDefinition,
   input: RequestAgentRunInput
 ): Promise<RequestAgentRunResult> {
+  const authority = resolveExecutionScopeAuthorization(runtime.projectId, {
+    execution,
+    authorization: runtime.runtimeAuthorization,
+  })
   assertAuthorized(runtime, { kind: "agent.run", agentId: agent.id })
 
   // Resolve context before creating a thread: invalid or inaccessible references must not leave an
@@ -76,9 +81,13 @@ export async function requestAgentRun(
 
   const agents = requireAgentStorage(runtime)
   const projectId = runtime.projectId
-  // A scoped runtime is authoritative for caller identity. `input.principal` remains available to
-  // privileged server integrations that have already authenticated their request.
-  const principal = runtime.authorization?.principal ?? input.principal ?? SYSTEM_PRINCIPAL
+  // Attribution comes from the exact capability/execution pair, never the optional context cache
+  // on the runtime. `input.principal` remains available only to explicitly unrestricted server
+  // integrations that have already authenticated their request.
+  const principal =
+    authority.type === "principal"
+      ? authority.context.principal
+      : (input.principal ?? SYSTEM_PRINCIPAL)
   const { thread, createdThread } = await resolveThread(agents, {
     projectId,
     agentId: agent.id,
@@ -170,6 +179,10 @@ export async function retryAgentRun(
   agent: AgentDefinition,
   failedRun: AgentRunRecord
 ): Promise<RequestAgentRunResult> {
+  resolveExecutionScopeAuthorization(runtime.projectId, {
+    execution,
+    authorization: runtime.runtimeAuthorization,
+  })
   assertAuthorized(runtime, { kind: "agent.run", agentId: agent.id })
   if (failedRun.agentId !== agent.id) {
     throw new AgentRequestError(

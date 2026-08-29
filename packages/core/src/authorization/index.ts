@@ -1,14 +1,31 @@
+export type {
+  RuntimeAccessPlan,
+  RuntimeScopedActionGrant,
+  RuntimeScopedGrant,
+  RuntimeScopedViewGrant,
+} from "./access-plan"
+export {
+  accessPlanCanApplyAction,
+  accessPlanCanApplyActionOn,
+  objectReadScopeForAccessPlan,
+  snapshotRuntimeAccessPlan,
+} from "./access-plan"
 export { canAccessApplication, isApplicationAccessControlled } from "./application-access"
 export type { AuthzDecision, AuthzRequest } from "./decision"
 export {
   assertAuthorized,
   assertCanAppendTelemetry,
+  assertCanApplyActionOn,
   assertCanEdit,
   assertCanManageConnector,
+  assertCanReadObjectProperty,
   assertPrivileged,
   assertProviderAccess,
+  assertRuntimeAuthorizationBound,
   evaluate,
+  hasDelegatedRuntimeAuthority,
   isAllowed,
+  isRuntimeAllowed,
 } from "./decision"
 export { AuthorizationError } from "./errors"
 export { canViewEvent } from "./event-visibility"

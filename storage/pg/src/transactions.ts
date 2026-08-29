@@ -4,8 +4,8 @@ import type { SQL, SQLClient } from "./pg-client"
 export type PgStoreClient = SQL | SQLClient
 
 export interface RunPgTransactionOptions {
-  /** Open the transaction at `SERIALIZABLE`; omit for the server default (`READ COMMITTED`). */
-  readonly isolation?: "serializable"
+  /** Open the transaction at an explicit isolation level; omit for `READ COMMITTED`. */
+  readonly isolation?: "repeatable-read" | "serializable"
 }
 
 export async function runPgTransaction<T>(
@@ -26,6 +26,9 @@ export async function runPgTransaction<T>(
   // guaranteed to take effect before any data statement of the transaction runs.
   if (options.isolation === "serializable") {
     return sql.begin("isolation level serializable", run) as Promise<T>
+  }
+  if (options.isolation === "repeatable-read") {
+    return sql.begin("isolation level repeatable read", run) as Promise<T>
   }
   return sql.begin(run) as Promise<T>
 }

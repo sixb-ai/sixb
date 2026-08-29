@@ -581,6 +581,53 @@ describe("SixbHost runtime", () => {
     expect(
       await sixb.objects(Room).byId("room:102").telemetry(Room.p.currentTemperature).history()
     ).toEqual([])
+
+    // Principal/unrestricted telemetry keeps its historical type-level semantics even after the
+    // materialized object disappears. Only delegated reads require an exact selected instance.
+    await sixb.objects(Room).byId("room:101").delete()
+    expect((await temperature.history()).map((point) => point.value)).toEqual([21.5, 22, 22.5])
+  })
+
+  test("snapshots latest telemetry identity and keeps it bound to the runtime project", async () => {
+    const runtimeDeps = createTestRuntimeDeps()
+    const observed: Parameters<typeof runtimeDeps.storage.timeseries.getLatest>[0][] = []
+    runtimeDeps.storage.timeseries.getLatest = async (input) => {
+      observed.push(input)
+      return {
+        ...input,
+        value: 22,
+        at: new Date("2026-01-01T00:00:00.000Z"),
+        lastCommitId: "commit-latest-snapshot",
+      }
+    }
+    const sixb = createTestSixb({ id: "project-a", ontology: [Room], ...runtimeDeps })
+    let propertyIdReads = 0
+    const authoredInput = Object.defineProperties(
+      {},
+      {
+        objectTypeId: { enumerable: true, value: Room.id },
+        objectId: { enumerable: true, value: "room:101" },
+        propertyId: {
+          enumerable: true,
+          get: () =>
+            propertyIdReads++ === 0 ? Room.p.currentTemperature.id : Room.p.exactReading.id,
+        },
+        projectId: { enumerable: true, value: "project-b" },
+      }
+    ) as Parameters<typeof sixb.objects.getLatestTelemetry>[0]
+
+    const result = await sixb.objects.getLatestTelemetry(authoredInput)
+
+    expect(propertyIdReads).toBe(1)
+    expect(observed).toEqual([
+      {
+        projectId: "project-a",
+        objectTypeId: Room.id,
+        objectId: "room:101",
+        propertyId: Room.p.currentTemperature.id,
+      },
+    ])
+    expect(result?.propertyId).toBe(Room.p.currentTemperature.id)
   })
 
   test("emits typed events and projects through the runtime dependencies", async () => {

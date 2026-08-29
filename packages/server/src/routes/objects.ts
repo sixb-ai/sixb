@@ -1,5 +1,6 @@
 import {
   AuthorizationError,
+  DelegatedExecutionLimitError,
   type ObjectQuery,
   ObjectQueryExecutionError,
   ObjectQueryPlanningError,
@@ -39,6 +40,10 @@ import {
   UpsertObjectBodySchema,
 } from "../schemas/objects"
 import { handleRouteError, parseOptionalInt, toIsoString } from "../utils/http"
+import {
+  mapReadRequestParseError,
+  parseBoundedObjectQueryBody,
+} from "../utils/read-request-admission"
 
 const ObjectFileContentQuerySchema = FileContentQuerySchema.extend({
   path: z
@@ -114,7 +119,7 @@ function serializePlan(plan: {
   }
 }
 
-function handleObjectQueryError(error: unknown, set: { status?: number | string }) {
+export function handleObjectQueryError(error: unknown, set: { status?: number | string }) {
   if (error instanceof AuthorizationError) {
     set.status = 403
     return { error: error.message }
@@ -130,6 +135,11 @@ function handleObjectQueryError(error: unknown, set: { status?: number | string 
         message: issue.message,
       })),
     }
+  }
+
+  if (error instanceof DelegatedExecutionLimitError) {
+    set.status = 400
+    return { error: error.message }
   }
 
   if (error instanceof ObjectQueryValidationError || error instanceof ObjectQueryPlanningError) {
@@ -258,23 +268,30 @@ async function objectFileContentResponse(
 ) {
   const sixb = requireRequestSixb(context)
 
-  return createContextualFileContentResponse({
-    blobStorage: host.blobStorage,
-    query: context.query,
-    querySchema: ObjectFileContentQuerySchema,
-    request: context.request,
-    set: context.set,
-    head: options.head,
-    hideError: (error) => error instanceof AuthorizationError,
-    resolveRoot: async () => {
-      const row = await getObjectRow(sixb, context.params)
-      if (!row) {
-        return null
-      }
+  try {
+    return await createContextualFileContentResponse({
+      blobStorage: host.blobStorage,
+      query: context.query,
+      querySchema: ObjectFileContentQuerySchema,
+      request: context.request,
+      set: context.set,
+      head: options.head,
+      hideError: (error) => error instanceof AuthorizationError,
+      resolveRoot: async () => {
+        const row = await getObjectRow(sixb, context.params)
+        if (!row) {
+          return null
+        }
 
-      return serializeObject(row)
-    },
-  })
+        return serializeObject(row)
+      },
+    })
+  } catch (error) {
+    if (error instanceof DelegatedExecutionLimitError) {
+      return handleRouteError(error, context.set)
+    }
+    throw error
+  }
 }
 
 export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
@@ -395,6 +412,8 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
         }
       },
       {
+        parse: parseBoundedObjectQueryBody,
+        error: mapReadRequestParseError,
         detail: {
           summary: "Query objects",
           tags: [OPENAPI_TAGS.objects.name],
@@ -433,6 +452,14 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
                 },
               },
             },
+            413: {
+              description: "Response for status 413",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
             500: {
               description: "Response for status 500",
               content: {
@@ -464,6 +491,8 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
         }
       },
       {
+        parse: parseBoundedObjectQueryBody,
+        error: mapReadRequestParseError,
         detail: {
           summary: "Count objects",
           tags: [OPENAPI_TAGS.objects.name],
@@ -502,6 +531,14 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
                 },
               },
             },
+            413: {
+              description: "Response for status 413",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
             500: {
               description: "Response for status 500",
               content: {
@@ -533,6 +570,8 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
         }
       },
       {
+        parse: parseBoundedObjectQueryBody,
+        error: mapReadRequestParseError,
         detail: {
           summary: "Check object existence",
           tags: [OPENAPI_TAGS.objects.name],
@@ -565,6 +604,14 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
             },
             403: {
               description: "Response for status 403",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            413: {
+              description: "Response for status 413",
               content: {
                 "application/json": {
                   schema: { $ref: "#/components/schemas/ErrorResponse" },
@@ -606,6 +653,8 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
         }
       },
       {
+        parse: parseBoundedObjectQueryBody,
+        error: mapReadRequestParseError,
         detail: {
           summary: "Facet objects",
           tags: [OPENAPI_TAGS.objects.name],
@@ -638,6 +687,14 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
             },
             403: {
               description: "Response for status 403",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            413: {
+              description: "Response for status 413",
               content: {
                 "application/json": {
                   schema: { $ref: "#/components/schemas/ErrorResponse" },
@@ -719,12 +776,20 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
             return { error: "Object not found" }
           }
 
+          if (error instanceof DelegatedExecutionLimitError) {
+            return handleRouteError(error, set)
+          }
+
           throw error
         }
       },
       {
         params: ObjectParamsSchema,
-        response: { 200: TwinObjectSchema, 404: ErrorResponseSchema },
+        response: {
+          200: TwinObjectSchema,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
         detail: {
           summary: "Get object by id",
           tags: [OPENAPI_TAGS.objects.name],
@@ -740,13 +805,14 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
         const sixb = requireRequestSixb(context)
         try {
           const parsedBody = UpsertObjectBodySchema.parse(body)
-          // The same bound SDK performs the primary-property lookup and the write. Otherwise an
-          // ambient host lookup could answer 404 for an unregistered type before the principal's
-          // grant is checked, distinguishing it from a registered but ungranted type (403) and
-          // leaking the type universe that `listObjectTypes` filters out.
-          const primaryPropertyId = sixb.objects.getPrimaryPropertyId(params.objectTypeId)
-          const properties = { ...parsedBody.properties, [primaryPropertyId]: params.objectId }
-          const object = await sixb.objects.upsert(params.objectTypeId, properties)
+          // Core authorizes the requested type id before resolving its primary property. An
+          // ambient host lookup would answer 404 for an unregistered type before checking the
+          // principal's grant, distinguishing it from a registered but ungranted type (403).
+          const object = await sixb.objects.upsertByPrimaryId(
+            params.objectTypeId,
+            params.objectId,
+            parsedBody.properties
+          )
           return serializeObject(object)
         } catch (error) {
           // Was a local catch mapping every error to 404/400, which turned a missing grant into

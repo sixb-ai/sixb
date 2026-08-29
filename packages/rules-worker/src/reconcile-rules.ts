@@ -106,18 +106,15 @@ async function loadPageLinks(
       linkId,
     }))
   )
-  const rowsByRequest = await runtime.storage.objects.listLinksBatch({
+  const rowsByRequest = await runtime.storage.objects.listLinksMany({
     projectId: runtime.projectId,
     items,
   })
   const linksByObject = new Map<string, Map<string, readonly ObjectLinkRow[]>>()
-  for (const object of objects) {
+  for (const [objectIndex, object] of objects.entries()) {
     const links = new Map<string, readonly ObjectLinkRow[]>()
-    for (const linkId of linkIds) {
-      links.set(
-        linkId,
-        rowsByRequest.get(linkRequestKey(object.objectTypeId, object.primaryId, linkId)) ?? []
-      )
+    for (const [linkIndex, linkId] of linkIds.entries()) {
+      links.set(linkId, rowsByRequest[objectIndex * linkIds.length + linkIndex] ?? [])
     }
     linksByObject.set(object.primaryId, links)
   }
@@ -149,7 +146,7 @@ async function resolveMissingSubjects(
   states: readonly RuleStateRecord[]
 ): Promise<void> {
   if (states.length === 0) return
-  const objects = await runtime.storage.objects.getByPrimaryIdBatch({
+  const objects = await runtime.storage.objects.getByPrimaryIdMany({
     projectId: runtime.projectId,
     items: states.map((state) => ({
       objectTypeId: state.subject.objectTypeId,
@@ -158,8 +155,8 @@ async function resolveMissingSubjects(
   })
   const evaluatedAt = new Date().toISOString()
   const transitions: RuleTransition[] = []
-  for (const state of states) {
-    const object = objects.get(objectKey(state.subject.objectTypeId, state.subject.primaryId))
+  for (const [index, state] of states.entries()) {
+    const object = objects[index]
     const rule = rulesById.get(state.ruleId)
     const stillOwned = rule?.subject.objectTypeId === state.subject.objectTypeId
     if (object && stillOwned) continue
@@ -237,14 +234,6 @@ function subjectForObject(object: ObjectRow): RuleEventSubject {
 
 function ruleSubjectKey(ruleId: string, subject: RuleEventSubject): string {
   return JSON.stringify([ruleId, subject.kind, subject.objectTypeId, subject.primaryId])
-}
-
-function objectKey(objectTypeId: string, primaryId: string): string {
-  return `${objectTypeId}:${primaryId}`
-}
-
-function linkRequestKey(objectTypeId: string, primaryId: string, linkId: string): string {
-  return `${objectTypeId}:${primaryId}:${linkId}`
 }
 
 function groupRulesByObjectType(

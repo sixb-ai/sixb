@@ -1,5 +1,6 @@
 import {
   AuthorizationError,
+  DelegatedExecutionLimitError,
   OntologyNotFoundError,
   OntologyValidationError,
   type SixbErrorCode,
@@ -91,6 +92,11 @@ export function handleRouteError(
 
   if (error instanceof AuthorizationError) {
     set.status = 403
+    return { error: error.message }
+  }
+
+  if (error instanceof DelegatedExecutionLimitError) {
+    set.status = 400
     return { error: error.message }
   }
 

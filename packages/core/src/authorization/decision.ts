@@ -13,9 +13,17 @@
 import type { AuthSessionAudience } from "../auth/audience"
 import {
   type ResolvedRuntimeAuthorization,
-  resolveRuntimeAuthorization,
+  resolveExecutionScopeAuthorization,
+  resolveRuntimeAuthorizationForProject,
 } from "../execution/authorization"
 import type { ExecutionContext, RuntimeAuthorization } from "../execution/types"
+import type { ObjectRef } from "../ontology"
+import {
+  accessPlanCanApplyAction,
+  accessPlanCanApplyActionOn,
+  accessPlanSelectsObjectPropertyAnywhere,
+  accessPlanSelectsObjectTypeAnywhere,
+} from "./access-plan"
 import { AuthorizationError } from "./errors"
 import type { GrantKind } from "./grant-kinds"
 import type { AuthorizationContext, GrantIndex } from "./types"
@@ -45,6 +53,7 @@ export interface AuthzDecision {
 }
 
 interface AuthorizedRuntime {
+  readonly projectId: string
   readonly runtimeAuthorization?: RuntimeAuthorization
   readonly authorization?: AuthorizationContext
 }
@@ -121,22 +130,121 @@ export function isAllowed(
 export function assertAuthorized(runtime: AuthorizedRuntime, request: AuthzRequest): void {
   const resolved = assertRuntimeAuthorizationBound(runtime)
   const authorization = resolved.type === "principal" ? resolved.context : undefined
-  const decision = evaluate(authorization, request)
+  const decision =
+    resolved.type === "unrestricted"
+      ? allowedDecision(request)
+      : resolved.type === "delegated"
+        ? evaluateDelegated(resolved.access, request)
+        : evaluate(resolved.context, request)
   if (decision.allowed) {
     return
   }
 
   throw new AuthorizationError(
     decision.missing[0] ?? request.kind,
-    deniedMessage(authorization, request)
+    resolved.type === "delegated"
+      ? delegatedDeniedMessage(decision.missing[0] ?? request.kind)
+      : deniedMessage(authorization, request)
   )
+}
+
+/** Boolean counterpart to {@link assertAuthorized} for runtime catalogs and optional resources. */
+export function isRuntimeAllowed(runtime: AuthorizedRuntime, request: AuthzRequest): boolean {
+  const resolved = resolveRuntimeAuthorizationForProject(runtime)
+  if (resolved.type === "denied") return false
+  if (resolved.type === "unrestricted") return true
+  if (resolved.type === "delegated") return evaluateDelegated(resolved.access, request).allowed
+  return evaluate(resolved.context, request).allowed
+}
+
+export function hasDelegatedRuntimeAuthority(runtime: AuthorizedRuntime): boolean {
+  return resolveRuntimeAuthorizationForProject(runtime).type === "delegated"
+}
+
+/** Preserve the `(action, exact subject)` pair carried by one scoped grant. */
+export function assertCanApplyActionOn(
+  runtime: AuthorizedRuntime,
+  actionId: string,
+  subject: ObjectRef
+): void {
+  const resolved = assertRuntimeAuthorizationBound(runtime)
+  if (resolved.type === "unrestricted") return
+  if (resolved.type === "principal") {
+    assertAuthorized(runtime, { kind: "action.apply", actionId })
+    assertAuthorized(runtime, { kind: "object.view", objectTypeId: subject.objectTypeId })
+    return
+  }
+  if (
+    accessPlanCanApplyActionOn(resolved.access, actionId, subject) &&
+    accessPlanSelectsObjectTypeAnywhere(resolved.access, subject.objectTypeId)
+  ) {
+    return
+  }
+  throw new AuthorizationError(
+    `apply:action:${actionId}:${subject.objectTypeId}:${subject.primaryId}`,
+    `[Sixb] Delegated authority cannot apply action '${actionId}' to '${subject.objectTypeId}:${subject.primaryId}'.`
+  )
+}
+
+export function assertCanReadObjectProperty(
+  runtime: AuthorizedRuntime,
+  objectTypeId: string,
+  propertyId: string
+): void {
+  const resolved = assertRuntimeAuthorizationBound(runtime)
+  if (resolved.type === "unrestricted") return
+  if (resolved.type === "principal") {
+    assertAuthorized(runtime, { kind: "object.view", objectTypeId })
+    return
+  }
+  if (accessPlanSelectsObjectPropertyAnywhere(resolved.access, objectTypeId, propertyId)) return
+  throw new AuthorizationError(
+    `view:object:${objectTypeId}:property:${propertyId}`,
+    `[Sixb] Delegated authority cannot read property '${objectTypeId}.${propertyId}'.`
+  )
+}
+
+function allowedDecision(request: AuthzRequest): AuthzDecision {
+  const requirements = atomsFor(request).map(atomKey)
+  return { allowed: true, requirements, missing: [] }
+}
+
+function evaluateDelegated(
+  access: Extract<ResolvedRuntimeAuthorization, { readonly type: "delegated" }>["access"],
+  request: AuthzRequest
+): AuthzDecision {
+  const requirements = atomsFor(request).map(atomKey)
+  const allowed = (() => {
+    switch (request.kind) {
+      case "object.view":
+        return accessPlanSelectsObjectTypeAnywhere(access, request.objectTypeId)
+      case "object.query":
+        return request.touchedObjectTypeIds.every((objectTypeId) =>
+          accessPlanSelectsObjectTypeAnywhere(access, objectTypeId)
+        )
+      case "action.apply":
+        return accessPlanCanApplyAction(access, request.actionId)
+      case "application.access":
+      case "dataset.view":
+      case "object.edit":
+      case "telemetry.append":
+      case "workflow.run":
+      case "sync.run":
+      case "pipeline.run":
+      case "agent.run":
+      case "logs.observe":
+      case "connector.manage":
+        return false
+    }
+  })()
+  return { allowed, requirements, missing: allowed ? [] : requirements }
 }
 
 /** Resolve registered process-local authority before a protected leaf makes a decision. */
 export function assertRuntimeAuthorizationBound(
   runtime: AuthorizedRuntime
 ): Exclude<ResolvedRuntimeAuthorization, { readonly type: "denied" }> {
-  const resolved = resolveRuntimeAuthorization(runtime.runtimeAuthorization)
+  const resolved = resolveRuntimeAuthorizationForProject(runtime)
   if (resolved.type === "denied") {
     throw new AuthorizationError(
       "runtime:unbound",
@@ -184,15 +292,22 @@ export function assertCanManageConnector(runtime: AuthorizedRuntime, connectorId
 /**
  * Fail closed for operations that have no grant semantics yet.
  *
- * One caller left — `listLinks`, whose rows reveal target types that no read grant covers. Object,
- * link, and telemetry writes moved to {@link assertCanEdit} / {@link assertCanAppendTelemetry}.
- * Keeps unsupported surfaces denied even if a principal-bound runtime context reaches a code path
- * the execution SDK does not expose.
+ * This covers direct edge reads on the typed object handle, domain-event authoring, and global
+ * Actions under delegated authority. Object, link, and telemetry writes use their dedicated grant
+ * assertions instead. Keeping this guard explicit prevents unsupported surfaces from inheriting
+ * access merely because they are reachable from the shared execution SDK.
  */
 export function assertPrivileged(runtime: AuthorizedRuntime, operation: string): void {
   const resolved = assertRuntimeAuthorizationBound(runtime)
   if (resolved.type === "unrestricted") {
     return
+  }
+
+  if (resolved.type === "delegated") {
+    throw new AuthorizationError(
+      `privileged:${operation}`,
+      `[Sixb] Operation '${operation}' is not covered by delegated authority.`
+    )
   }
 
   throw new AuthorizationError(
@@ -205,27 +320,29 @@ export function assertPrivileged(runtime: AuthorizedRuntime, operation: string):
  * Assert access to process providers that trusted executions and genuine agent runs may use.
  *
  * Agent provenance alone is not authority: the registered capability must be bound to the exact
- * same agent and run before this check succeeds.
+ * same immutable execution before this check succeeds.
  */
 export function assertProviderAccess(
-  runtime: AuthorizedRuntime,
+  runtime: AuthorizedRuntime & { readonly runtimeAuthorization: RuntimeAuthorization },
   execution: ExecutionContext,
   operation: string
 ): void {
-  const resolved = assertRuntimeAuthorizationBound(runtime)
+  const resolved = resolveExecutionScopeAuthorization(runtime.projectId, {
+    execution,
+    authorization: runtime.runtimeAuthorization,
+  })
   if (resolved.type === "unrestricted") {
     return
   }
 
-  const binding = resolved.executionBinding
-  const executor = execution.executor
-  if (
-    binding?.type === "agent" &&
-    executor.type === "agent" &&
-    binding.executionId === execution.id &&
-    binding.agentId === executor.agentId &&
-    binding.runId === executor.runId
-  ) {
+  if (resolved.type === "delegated") {
+    throw new AuthorizationError(
+      `privileged:${operation}`,
+      `[Sixb] Operation '${operation}' is not covered by delegated authority.`
+    )
+  }
+
+  if (execution.executor.type === "agent") {
     return
   }
 
@@ -233,6 +350,10 @@ export function assertProviderAccess(
     `privileged:${operation}`,
     `[Sixb] Operation '${operation}' is not covered by scoped authorization grants.`
   )
+}
+
+function delegatedDeniedMessage(requirement: string): string {
+  return `[Sixb] Delegated authority does not include required grant '${requirement}'.`
 }
 
 function deniedMessage(

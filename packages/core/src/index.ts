@@ -62,13 +62,17 @@ export type {
   ActionBuilder,
   ActionDefinition,
   ActionDefinitionCatalog,
+  ActionDescriptor,
+  ActionDescriptorBinding,
   ActionEditsContext,
   ActionEditsHandler,
   ActionEffectsContext,
   ActionEffectsHandler,
   ActionObjectSubject,
   ActionParamConfig,
+  ActionParamDescriptor,
   ActionParamsConfig,
+  ActionPhaseDescriptor,
   ActionReadFacade,
   ActionReadObjectByIdHandle,
   ActionReadObjectSet,
@@ -815,6 +819,8 @@ export type {
   TrustedPrimitiveKind,
   TrustedPrimitiveRef,
 } from "./execution"
+export type { DelegatedExecutionLimitMetric } from "./storage/objects/execution-limits"
+export { DelegatedExecutionLimitError } from "./storage/objects/execution-limits"
 
 // ── Runtime ─────────────────────────────────────────────────
 

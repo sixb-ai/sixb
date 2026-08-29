@@ -46,6 +46,19 @@ const Sensor = defineObjectType({
   properties: [prop("id", "string", { required: true, primary: true }), prop("name", "string")],
 })
 
+const SeparatorTarget = defineObjectType({
+  id: "separator",
+  name: "Separator target",
+  properties: [prop("id", "string", { required: true, primary: true })],
+})
+
+const SeparatorSource = defineObjectType({
+  id: "separator:source",
+  name: "Separator source",
+  properties: [prop("id", "string", { required: true, primary: true })],
+  links: [link("target", SeparatorTarget)],
+})
+
 // ── upsertObjectBatch ────────────────────────────────────────
 
 describe("upsertObjectBatch", () => {
@@ -247,6 +260,27 @@ describe("upsertLinkBatch", () => {
     if (!results[1].ok) {
       expect(results[1].error).toBeInstanceOf(ObjectNotFoundError)
       expect(results[1].error.message).toContain("Target object not found")
+    }
+  })
+
+  test("does not alias endpoint identities containing separators", async () => {
+    const deps = createTestRuntimeDeps()
+    const sixb = createTestSixb({ ontology: [SeparatorSource, SeparatorTarget], ...deps })
+    await sixb.objects.upsert("separator:source", { id: "id" })
+
+    const [result] = await sixb.objects.upsertLinkBatch([
+      {
+        objectTypeId: "separator:source",
+        sourceId: "id",
+        linkId: "target",
+        target: { targetTypeId: "separator", targetId: "source:id" },
+      },
+    ])
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error).toBeInstanceOf(ObjectNotFoundError)
+      expect(result.error.message).toContain("Target object not found")
     }
   })
 
