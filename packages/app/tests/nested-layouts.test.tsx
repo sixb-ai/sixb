@@ -67,7 +67,10 @@ afterAll(async () => {
 })
 
 describe("generated nested layouts", () => {
-  test("preserves layout instances and route params while navigating between children", async () => {
+  test.each([
+    "",
+    "/shared/shr_1",
+  ])("preserves nested layout state and params with basename '%s'", async (basename) => {
     const projectRoot = await mkdtemp(join(tmpdir(), "sixb-app-layout-runtime-"))
     const appDir = join(projectRoot, "app")
     const reportDir = join(appDir, "analytics", "reports", "[reportId]")
@@ -152,7 +155,10 @@ describe("generated nested layouts", () => {
       }
 
       const rendered = render(
-        <MemoryRouter initialEntries={["/analytics/reports/first"]}>
+        <MemoryRouter
+          basename={basename || "/"}
+          initialEntries={[`${basename}/analytics/reports/first`]}
+        >
           <TestRoutes />
         </MemoryRouter>
       )
@@ -161,6 +167,9 @@ describe("generated nested layouts", () => {
       expect(rendered.getByTestId("report-instance").textContent).toBe("1")
       expect(rendered.getByTestId("layout-param").textContent).toBe("first")
       expect(rendered.getByTestId("page-param").textContent).toBe("summary:first")
+      expect(rendered.getByRole("link", { name: "Report details" }).getAttribute("href")).toBe(
+        `${basename}/analytics/reports/first/details`
+      )
 
       fireEvent.click(rendered.getByRole("link", { name: "Report details" }))
 

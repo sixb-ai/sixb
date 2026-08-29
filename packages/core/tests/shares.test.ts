@@ -256,6 +256,18 @@ describe("Share lifecycle", () => {
       })
     ).rejects.toMatchObject({ reason: "invalid_input" })
     await expect(
+      sixb.shares.issue(PublishedReport, {
+        ...valid,
+        destinationPath: "/shared/report-1",
+      })
+    ).rejects.toMatchObject({ reason: "invalid_input" })
+    await expect(
+      sixb.shares.issue(PublishedReport, {
+        ...valid,
+        destinationPath: "/%73hared/report-1",
+      })
+    ).rejects.toMatchObject({ reason: "invalid_input" })
+    await expect(
       sixb.shares.issueById({ ...valid, definitionId: "missing" })
     ).rejects.toBeInstanceOf(AuthorizationError)
     await expect(

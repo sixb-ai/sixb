@@ -2,7 +2,7 @@ import { readdir } from "node:fs/promises"
 import { join, relative } from "node:path"
 
 const dynamicSegmentPattern = /^\[([\w-]+)\]$/
-const reservedRoutePrefixes = ["/api", "/auth", "/ws", "/docs", "/__sixb"] as const
+const reservedRoutePrefixes = ["/api", "/auth", "/ws", "/docs", "/__sixb", "/shared"] as const
 const reservedRoutePaths = new Set(["/app.webmanifest"])
 
 export interface PageRoute {
@@ -134,6 +134,12 @@ function validateChildDirectories(
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue
+    if (!relativeDir && entry.name.toLowerCase() === "shared") {
+      throw new Error(
+        "[SixbCustomApp] app/shared is reserved for framework-managed shared links. " +
+          "Move this page to another route."
+      )
+    }
     const segment = routeSegment(entry.name, join(relativeDir, entry.name))
     const key = segment.startsWith(":") ? ":" : segment.toLowerCase()
     const existing = claimedSegments.get(key)
@@ -188,7 +194,7 @@ function assertRouteIsAvailable(path: string, relativePath: string): void {
   if (!reserved) return
 
   throw new Error(
-    `[SixbCustomApp] Page ${displayAppPath(relativePath)} resolves to reserved framework path '${path}'. Choose a route outside /api, /auth, /ws, /docs, /__sixb, and /app.webmanifest.`
+    `[SixbCustomApp] Page ${displayAppPath(relativePath)} resolves to reserved framework path '${path}'. Choose a route outside /api, /auth, /ws, /docs, /__sixb, /shared, and /app.webmanifest.`
   )
 }
 
