@@ -94,11 +94,11 @@ The terminal run state is stored on the run record:
 ## Options
 
 - `apiBaseUrl`: required Sixb server origin that hosts the agent API gateway. The worker injects a
-  run-scoped gateway URL into sandboxes as `SIXB_API_BASE_URL`, writes Agent Skills into
-  `SIXB_SKILLS_DIR`, and creates the sandbox with a restricted network policy allowing the server
-  origin. The gateway authorizes scoped ontology, object, telemetry, file publication, action, and
-  workflow routes from the run execution token and managed agent service account; no bearer token
-  is exposed to the sandbox.
+  run-scoped gateway URL into sandboxes as `SIXB_API_BASE_URL`, installs the self-documenting `sixb`
+  CLI on `PATH`, writes configured project skills into `SIXB_SKILLS_DIR`, and creates the sandbox
+  with a restricted network policy allowing the server origin. The gateway authorizes scoped
+  ontology, object, telemetry, file publication, action, and workflow routes from the run execution
+  token and managed agent service account; no bearer token is exposed to the sandbox.
 - `skillsDir`: optional project Agent Skills directory. Defaults to `<projectRoot>/skills`. Set to
   `false` to disable project skills.
 - `concurrency`: maximum number of agent run jobs this worker claims and executes at once; defaults

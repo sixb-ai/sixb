@@ -227,9 +227,10 @@ real Exa usage.
 
 ## Reaching your data
 
-Inside the sandbox, the run gets a base URL and credentials in its environment to call a scoped
-slice of your HTTP API — typically with `curl` from `bash`. So an agent works against live project
-data, not a snapshot. These routes are allowed (everything else returns `403`):
+Inside the sandbox, the `sixb` CLI calls a run-scoped gateway that exposes a restricted slice of
+the live project API. The worker configures that transport without exposing a bearer token, so the
+agent works against current project data instead of a snapshot. These routes are available through
+the CLI and gateway (everything else returns `403`):
 
 | Area | Routes |
 | --- | --- |
@@ -258,8 +259,9 @@ the route's internal node records, and only top-level input/output file paths ar
 ## System prompts
 
 The agent worker owns one canonical system-prompt renderer with two modes: conversation and
-workflow task. It derives runtime guidance from the environment it provisions and appends the
-agent's project-authored `instructions`. Prompt composition is not worker configuration.
+workflow task. It combines project-authored `instructions` with runtime guidance and final
+worker-owned rules that preserve the mode's approval, output, and user-communication boundaries.
+Prompt composition is not worker configuration.
 
 ## Agent Skills in the sandbox
 

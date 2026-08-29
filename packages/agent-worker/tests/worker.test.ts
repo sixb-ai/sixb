@@ -5915,8 +5915,8 @@ describe("AgentWorker", () => {
     expect(capturedSystem).toContain("Use the `sixb` CLI to discover and interact with the project")
     expect(capturedSystem).toContain("<agent_instructions>")
     expect(capturedSystem).toContain("You are a helpful test assistant.")
-    expect(capturedSystem.indexOf("<sixb_mode_rules>")).toBeLessThan(
-      capturedSystem.indexOf("<agent_instructions>")
+    expect(capturedSystem.indexOf("<agent_instructions>")).toBeLessThan(
+      capturedSystem.indexOf("<sixb_mode_rules>")
     )
   })
 
