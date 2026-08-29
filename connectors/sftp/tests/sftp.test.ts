@@ -331,6 +331,9 @@ describe("sftp connector", () => {
     await adapter.disconnect?.(client)
 
     await expect(firstRead).rejects.toThrow()
+    await server.waitForIdle()
+    Bun.gc(true)
+    await Bun.sleep(0)
   })
 
   test("validates read-ahead configuration before connecting", () => {
