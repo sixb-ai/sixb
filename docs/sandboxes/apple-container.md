@@ -23,10 +23,10 @@ container system start
 ```
 
 The default is the official multi-platform `node:22-bookworm` image pinned to an immutable OCI
-digest. Custom images must satisfy `sixb-agent-runtime/v1`: `/bin/sh`, Bash, `realpath`, `tail`,
-`head`, `base64`, CA certificates, and Bun 1.3+ or Node 22+. The provider's file materialization
-also uses `mkdir`, `dirname`, `cat`, and optionally `chmod`. Debian `coreutils` or BusyBox supplies
-these standard file utilities. `curl` and `jq` are not required.
+digest. For agent use, custom images need `/bin/sh`, Bash, standard file utilities, CA certificates,
+and Bun 1.3+ or Node 22+. The provider's file materialization also uses `mkdir`, `dirname`, `cat`,
+and optionally `chmod`. Debian `coreutils` or BusyBox supplies these utilities. `curl` and `jq` are
+not required.
 
 ## Network policy
 

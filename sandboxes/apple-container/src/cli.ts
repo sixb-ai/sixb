@@ -19,7 +19,7 @@ export interface NormalizedAppleContainerMount {
 export interface AppleContainerCliConfig {
   /** Resolved Apple Container CLI binary name or absolute path. */
   readonly bin: string
-  /** Agent images must satisfy `sixb-agent-runtime/v1`. */
+  /** For agent use, the image must include the worker's CLI runtime and shell utilities. */
   readonly image: string
   readonly cpus?: string
   readonly memory?: string

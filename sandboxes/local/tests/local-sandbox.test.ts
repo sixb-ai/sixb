@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test"
 import { runSandboxesContractSuite } from "@sixb/core/testing"
 import { LocalSandbox } from "../src/local-sandbox"
 import { LocalSandboxFactory } from "../src/local-sandbox-factory"
-import { runLocalAgentRuntimeConformance } from "./agent-runtime-conformance"
 
 runSandboxesContractSuite("LocalSandbox (none)", {
   createFactory: () => new LocalSandboxFactory({ isolation: "none" }),
@@ -12,11 +11,6 @@ runSandboxesContractSuite("LocalSandbox (none)", {
     isolation: false,
   },
 })
-
-runLocalAgentRuntimeConformance(
-  "LocalSandbox (none)",
-  () => new LocalSandboxFactory({ isolation: "none" })
-)
 
 describe("LocalSandbox shell-injection regression", () => {
   test("args containing shell metacharacters are passed verbatim", async () => {

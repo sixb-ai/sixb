@@ -37,7 +37,7 @@ describe("agent image paths", () => {
     }
   })
 
-  test("the canonical Dockerfile ships with the package", () => {
+  test("the managed Dockerfile ships with the package", () => {
     expect(existsSync(agentDockerfilePath())).toBe(true)
     const dockerfile = readFileSync(agentDockerfilePath(), "utf8")
     expect(dockerfile).toMatch(/^FROM node:22-alpine@sha256:[a-f0-9]{64}$/m)
@@ -50,12 +50,12 @@ describe("agent image paths", () => {
     expect(agentImageName("arm64")).toBe("sixb-agent-runtime-v1-arm64.tar")
   })
 
-  test("default lookup prefers the canonical archive, then a cross-built arch archive", () => {
+  test("default lookup prefers the managed archive, then a cross-built arch archive", () => {
     const prev = process.env.XDG_CACHE_HOME
     process.env.XDG_CACHE_HOME = "/tmp/xdg-cache-test"
     try {
       const candidates = defaultAgentImageCandidates()
-      // The canonical host build is preferred over the arch-suffixed cross-build archive.
+      // The managed host build is preferred over the arch-suffixed cross-build archive.
       expect(candidates[0]).toBe("/tmp/xdg-cache-test/sixb/smolvm/sixb-agent-runtime-v1.tar")
       expect(candidates[1]).toMatch(
         /\/sixb\/smolvm\/sixb-agent-runtime-v1-(amd64|arm64|[^/]+)\.tar$/

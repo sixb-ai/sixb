@@ -74,19 +74,21 @@ command is data, not an exception:
 `CreateSandboxOptions` sets the per-run defaults at `create()` time: `workingDirectory`, `env`,
 `timeout`, and `network`.
 
-### Agent runtime profile
+### Agent runtime expectations
 
 The generic `Sandbox` contract remains command-agnostic. Images and hosts used by the agent worker
-must satisfy the separate `sixb-agent-runtime/v1` behavioral profile:
+must still provide the behavior its installed CLI and file tools use:
 
 - Bash must load the worker's `BASH_ENV` bootstrap.
-- `realpath`, `tail`, `head`, and `base64` must support the bounded `read` pipeline.
+- Standard file utilities must support bounded reads and output collection, including `realpath`,
+  `tail`, `head`, `base64`, `find`, `wc`, and `tr`.
 - Bun 1.3+ or Node 22+ must execute the portable `sixb` CLI.
-- The installed CLI, file modes, `PATH`, and run environment must be correct.
+- CA certificates must allow the CLI to reach an HTTPS API gateway.
 
-`curl` and `jq` are not runtime-profile dependencies. The production CLI uses the JavaScript
-runtime's native fetch and JSON support. Bake shared dependencies into versioned images or
-snapshots; never install packages during an individual run.
+These are agent-environment expectations, not additional `Sandbox` interface fields. `curl` and
+`jq` are not required because the production CLI uses the JavaScript runtime's native fetch and
+JSON support. Bake shared dependencies into versioned images or snapshots; never install packages
+during an individual run.
 
 ## Wiring
 

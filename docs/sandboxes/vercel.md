@@ -106,9 +106,9 @@ new VercelSandboxFactory({
 })
 ```
 
-The stock Node runtime satisfies `sixb-agent-runtime/v1`. A custom image or snapshot must provide
-Bash, `realpath`, `tail`, `head`, `base64`, CA certificates, and Bun 1.3+ or Node 22+. On a
-Debian-compatible image, the read utilities come from `coreutils`. `curl` and `jq` are not required.
+The stock Node runtime provides the current agent baseline. For agent use, a custom image or
+snapshot needs Bash, standard file utilities, CA certificates, and Bun 1.3+ or Node 22+. On a
+Debian-compatible image, the file utilities come from `coreutils`. `curl` and `jq` are not required.
 
 For heavier setup, prefer a snapshot or Vercel Container Registry image instead of installing
 packages on every agent run:
@@ -134,7 +134,7 @@ package repositories and add latency to every run.
 | --- | --- |
 | `timeout` | Default per-command timeout in milliseconds. |
 | `sessionTimeoutMs` | Vercel sandbox session lifetime. Different from `timeout`. |
-| `runtime` | Stock Vercel runtime. Sixb explicitly defaults to `node24`; a Python-only runtime does not satisfy the agent profile. |
+| `runtime` | Stock Vercel runtime. Sixb explicitly defaults to `node24`; a Python-only runtime cannot execute the portable agent CLI. |
 | `image` | Vercel Container Registry image reference. |
 | `snapshotId` | Existing Vercel Sandbox snapshot to boot from. |
 | `resources` | Vercel resources, e.g. `{ vcpus: 2 }`. |

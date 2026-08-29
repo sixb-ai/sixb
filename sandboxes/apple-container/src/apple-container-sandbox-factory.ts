@@ -16,7 +16,7 @@ import {
 import { type AppleContainerProbe, probeAppleContainer } from "./preflight"
 
 export interface AppleContainerSandboxFactoryOptions {
-  /** Agent images must satisfy `sixb-agent-runtime/v1`. */
+  /** For agent use, the image must include the worker's CLI runtime and shell utilities. */
   readonly image?: string
   /** Apple Container CLI binary name or absolute path. Defaults to "container". */
   readonly bin?: string

@@ -64,8 +64,8 @@ For production, expose the Sixb API gateway at a public HTTPS origin reachable f
 ## Runtime and dependencies
 
 Sixb explicitly selects Vercel's stock `node24` runtime by default. Custom images and snapshots used
-by agents must satisfy `sixb-agent-runtime/v1`: Bash, `realpath`, `tail`, `head`, `base64`, CA
-certificates, and Bun 1.3+ or Node 22+. `curl` and `jq` are not required.
+by agents need Bash, standard file utilities, CA certificates, and Bun 1.3+ or Node 22+. `curl` and
+`jq` are not required.
 
 For additional tools, prefer one of these setup strategies:
 
@@ -91,7 +91,7 @@ new VercelSandboxFactory({
 
 | Option | Default | Notes |
 | --- | --- | --- |
-| `runtime` | `node24` | `"node26"`, `"node24"`, `"node22"`, or `"python3.13"`; ignored with `image`/`snapshotId`. Python alone is not agent-profile compatible. |
+| `runtime` | `node24` | `"node26"`, `"node24"`, `"node22"`, or `"python3.13"`; ignored with `image`/`snapshotId`. Python alone cannot execute the portable agent CLI. |
 | `image` | — | Vercel Container Registry image reference. |
 | `snapshotId` | — | Boot from a Vercel Sandbox snapshot; mutually exclusive with `runtime`, `image`, and `source`. |
 | `source` | — | Git or tarball source for Vercel to clone/mount at create time. |
