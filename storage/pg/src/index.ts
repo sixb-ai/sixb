@@ -49,6 +49,7 @@ import { PgWebhookRunStorage } from "./pg-webhook-run-storage"
 import { PgWorkflowInterventionStorage } from "./pg-workflow-intervention-storage"
 import { PgWorkflowRunStorage } from "./pg-workflow-run-storage"
 import { PgShareGrantStorage } from "./share-grant-storage"
+import { PgShareSessionStorage } from "./share-session-storage"
 import { isRetryableTransactionConflict } from "./storage-errors"
 import { registerPostgresStorageTestingAdapter } from "./testing"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
@@ -154,6 +155,7 @@ export class PostgresStorage implements MigrationCapableStorage {
   readonly rules: PgRulesStorage
   readonly connectorConnections: PgConnectorConnectionStorage
   readonly shareGrants: PgShareGrantStorage
+  readonly shareSessions: PgShareSessionStorage
   readonly migrators: readonly StorageMigrator[]
 
   private readonly sql: SQL
@@ -230,6 +232,7 @@ export class PostgresStorage implements MigrationCapableStorage {
     this.rules = createOperationScopedFacade(stores.rules, scope)
     this.connectorConnections = createOperationScopedFacade(stores.connectorConnections, scope)
     this.shareGrants = createOperationScopedFacade(stores.shareGrants, scope)
+    this.shareSessions = createOperationScopedFacade(stores.shareSessions, scope)
     registerPostgresStorageTestingAdapter(this, (durationMs) =>
       stores.connectorConnections.advanceTimeForTesting(durationMs)
     )
@@ -338,7 +341,9 @@ function createPostgresStores(
   }
 ): PostgresStoreSet {
   const auth = new PgAuthStorage({ sql })
-  const executions = new PgExecutionStorage(sql, auth)
+  const shareGrants = new PgShareGrantStorage(sql)
+  const shareSessions = new PgShareSessionStorage(sql)
+  const executions = new PgExecutionStorage(sql, auth, shareSessions)
   return {
     objects: new PgObjectStorage(sql),
     ontology: new PgOntologyStorage({
@@ -362,7 +367,8 @@ function createPostgresStores(
     webhookRuns: new PgWebhookRunStorage(sql, executions),
     rules: new PgRulesStorage(sql),
     connectorConnections: new PgConnectorConnectionStorage(sql),
-    shareGrants: new PgShareGrantStorage(sql),
+    shareGrants,
+    shareSessions,
   }
 }
 
@@ -386,6 +392,7 @@ interface PostgresStoreSet {
   readonly rules: PgRulesStorage
   readonly connectorConnections: PgConnectorConnectionStorage
   readonly shareGrants: PgShareGrantStorage
+  readonly shareSessions: PgShareSessionStorage
 }
 
 function resolveTimeoutMillis(value: number | undefined, label: string): number | undefined {

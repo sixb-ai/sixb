@@ -5,6 +5,8 @@
  * reader, which owns authorization and provider-scope enforcement.
  */
 
+import { resolveRuntimeAuthorizationForProject } from "../../execution/authorization"
+import { getAuthorizedOntologyView } from "../../execution/authorized-object-reader"
 import type { ListResult, SixbRuntimeContext } from "../../runtime/types"
 import type { ObjectRow } from "../../storage"
 
@@ -57,13 +59,17 @@ function resolveTypeFilter(
   runtime: SixbRuntimeContext,
   requested: readonly string[] | undefined
 ): readonly string[] | undefined {
+  const ontology =
+    resolveRuntimeAuthorizationForProject(runtime).type === "delegated"
+      ? getAuthorizedOntologyView(runtime.objectReader)
+      : runtime.ontology
   if (requested) {
     for (const objectTypeId of requested) {
-      runtime.ontology.resolveObjectType(objectTypeId)
+      ontology.resolveObjectType(objectTypeId)
     }
   }
 
   return requested
-    ? [...new Set(requested.flatMap((id) => [id, ...runtime.ontology.listSubTypes(id)]))]
+    ? [...new Set(requested.flatMap((id) => [id, ...ontology.listSubTypes(id)]))]
     : undefined
 }

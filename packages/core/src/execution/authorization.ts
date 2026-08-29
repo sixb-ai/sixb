@@ -37,13 +37,14 @@ export type ResolvedRuntimeAuthorization =
   | {
       readonly type: "unrestricted"
       readonly projectId: string
-      readonly ref: Exclude<AuthorizationRef, { readonly type: "principal" }>
+      readonly ref: Exclude<AuthorizationRef, { readonly type: "principal" | "delegated" }>
     }
   | {
       readonly type: "delegated"
       readonly projectId: string
       readonly objectRead: DelegatedObjectReadAuthorization
       readonly actionApply: readonly DelegatedActionApplyTarget[]
+      readonly delegation?: Extract<AuthorizationRef, { readonly type: "delegated" }>["delegation"]
     }
   | { readonly type: "denied" }
 
@@ -166,10 +167,14 @@ export function createDelegatedRuntimeAuthorization(input: {
     readonly limits: ObjectReadExecutionLimits
   }
   readonly actionApply?: readonly DelegatedActionApplyTarget[]
+  readonly delegation?: Extract<AuthorizationRef, { readonly type: "delegated" }>["delegation"]
 }): RuntimeAuthorization {
   const execution = input.execution
   const objectReadInput = input.objectRead
   const actionApplyInput = input.actionApply
+  const delegationInput = input.delegation
+  const delegation =
+    delegationInput === undefined ? undefined : snapshotSharedDelegation(delegationInput)
   if (execution.executor.type !== "request" || execution.requestedBy !== undefined) {
     throw new Error(
       "[Sixb] Delegated runtime authorization requires a request execution without a principal."
@@ -185,6 +190,7 @@ export function createDelegatedRuntimeAuthorization(input: {
     projectId: execution.projectId,
     objectRead,
     actionApply: snapshotDelegatedActionApply(actionApplyInput ?? []),
+    ...(delegation === undefined ? {} : { delegation }),
   })
 }
 
@@ -246,11 +252,26 @@ export function getAuthorizationRef(authorization: RuntimeAuthorization): Author
     throw new Error("[Sixb] Runtime authorization is not a registered Core capability.")
   }
   if (resolved.type === "delegated") {
+    if (resolved.delegation) {
+      return { type: "delegated", delegation: { ...resolved.delegation } }
+    }
     throw new Error(
       "[Sixb] Delegated runtime authorization cannot cross a durable execution boundary."
     )
   }
   return cloneAuthorizationRef(resolved.ref)
+}
+
+function snapshotSharedDelegation(
+  input: Extract<AuthorizationRef, { readonly type: "delegated" }>["delegation"]
+): Extract<AuthorizationRef, { readonly type: "delegated" }>["delegation"] {
+  const kind = input.kind
+  const grantId = input.grantId
+  const sessionId = input.sessionId
+  if (kind !== "share") throw new Error("[Sixb] Unknown delegated authority provenance.")
+  assertNonEmpty(grantId, "Share grant id")
+  assertNonEmpty(sessionId, "Share session id")
+  return Object.freeze({ kind, grantId, sessionId })
 }
 
 export function assertExecutionScopeProject(projectId: string, scope: ExecutionScope): void {
@@ -770,6 +791,8 @@ function cloneAuthorizationRef(ref: AuthorizationRef): AuthorizationRef {
       }
     case "trustedPrimitive":
       return { type: "trustedPrimitive", primitive: { ...ref.primitive } }
+    case "delegated":
+      return { type: "delegated", delegation: { ...ref.delegation } }
     case "kernel":
       return { type: "kernel", operation: { ...ref.operation } }
     case "disabled":

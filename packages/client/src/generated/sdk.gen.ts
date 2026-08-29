@@ -67,6 +67,9 @@ import type {
   DisconnectConnectorConnectionResponses,
   ExchangeDeviceAuthorizationData,
   ExchangeDeviceAuthorizationResponses,
+  ExchangeSharedAccessData,
+  ExchangeSharedAccessErrors,
+  ExchangeSharedAccessResponses,
   ExistsObjectsData,
   ExistsObjectsErrors,
   ExistsObjectsResponses,
@@ -158,6 +161,9 @@ import type {
   GetRuleData,
   GetRuleErrors,
   GetRuleResponses,
+  GetSharedAccessSessionData,
+  GetSharedAccessSessionErrors,
+  GetSharedAccessSessionResponses,
   GetStatusData,
   GetStatusResponses,
   GetSyncData,
@@ -370,6 +376,9 @@ import type {
   SignOutData,
   SignOutErrors,
   SignOutResponses,
+  SignOutSharedAccessData,
+  SignOutSharedAccessErrors,
+  SignOutSharedAccessResponses,
   StartConnectorConnectionRunData,
   StartConnectorConnectionRunErrors,
   StartConnectorConnectionRunResponses,
@@ -1667,13 +1676,63 @@ export const revokeSharedAccessGrant = <ThrowOnError extends boolean = false>(
   })
 
 /**
+ * Exchange a shared link for a short-lived session
+ */
+export const exchangeSharedAccess = <ThrowOnError extends boolean = false>(
+  options: Options<ExchangeSharedAccessData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    ExchangeSharedAccessResponses,
+    ExchangeSharedAccessErrors,
+    ThrowOnError
+  >({
+    url: "/api/shared-access/{grantId}/exchange",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Get the current shared-access session
+ */
+export const getSharedAccessSession = <ThrowOnError extends boolean = false>(
+  options: Options<GetSharedAccessSessionData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetSharedAccessSessionResponses,
+    GetSharedAccessSessionErrors,
+    ThrowOnError
+  >({ url: "/api/shared-access/{grantId}/session", ...options })
+
+/**
+ * Sign out a shared-access session
+ */
+export const signOutSharedAccess = <ThrowOnError extends boolean = false>(
+  options: Options<SignOutSharedAccessData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    SignOutSharedAccessResponses,
+    SignOutSharedAccessErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/shared-access/{grantId}/sign-out",
+    ...options,
+  })
+
+/**
  * List registered object types
  */
 export const listObjectTypes = <ThrowOnError extends boolean = false>(
   options?: Options<ListObjectTypesData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListObjectTypesResponses, unknown, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
     url: "/api/object-types",
     ...options,
   })
@@ -1685,7 +1744,10 @@ export const getObjectType = <ThrowOnError extends boolean = false>(
   options: Options<GetObjectTypeData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetObjectTypeResponses, GetObjectTypeErrors, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
     url: "/api/object-types/{objectTypeId}",
     ...options,
   })
@@ -1697,7 +1759,10 @@ export const searchObjects = <ThrowOnError extends boolean = false>(
   options: Options<SearchObjectsData, ThrowOnError>
 ) =>
   (options.client ?? client).get<SearchObjectsResponses, SearchObjectsErrors, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
     url: "/api/objects/search",
     ...options,
   })
@@ -1709,7 +1774,10 @@ export const listObjects = <ThrowOnError extends boolean = false>(
   options?: Options<ListObjectsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListObjectsResponses, ListObjectsErrors, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
     url: "/api/objects",
     ...options,
   })
@@ -1724,6 +1792,7 @@ export const queryObjects = <ThrowOnError extends boolean = false>(
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
       { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/objects/query",
     ...options,
@@ -1743,6 +1812,7 @@ export const queryObjectLinks = <ThrowOnError extends boolean = false>(
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
       { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/objects/query/links",
     ...options,
@@ -1762,6 +1832,7 @@ export const countObjects = <ThrowOnError extends boolean = false>(
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
       { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/objects/query/count",
     ...options,
@@ -1781,6 +1852,7 @@ export const existsObjects = <ThrowOnError extends boolean = false>(
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
       { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/objects/query/exists",
     ...options,
@@ -1800,6 +1872,7 @@ export const facetObjects = <ThrowOnError extends boolean = false>(
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
       { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/objects/query/facets",
     ...options,
@@ -1820,7 +1893,10 @@ export const getObjectFileContent = <ThrowOnError extends boolean = false>(
     GetObjectFileContentErrors,
     ThrowOnError
   >({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
     url: "/api/objects/{objectTypeId}/{objectId}/files/content",
     ...options,
   })
@@ -1836,7 +1912,10 @@ export const headObjectFileContent = <ThrowOnError extends boolean = false>(
     HeadObjectFileContentErrors,
     ThrowOnError
   >({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
     url: "/api/objects/{objectTypeId}/{objectId}/files/content",
     ...options,
   })
@@ -1848,7 +1927,10 @@ export const getObject = <ThrowOnError extends boolean = false>(
   options: Options<GetObjectData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetObjectResponses, GetObjectErrors, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
     url: "/api/objects/{objectTypeId}/{objectId}",
     ...options,
   })
@@ -1879,7 +1961,10 @@ export const listActions = <ThrowOnError extends boolean = false>(
   options?: Options<ListActionsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListActionsResponses, unknown, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
     url: "/api/actions",
     ...options,
   })
@@ -1891,7 +1976,10 @@ export const getAction = <ThrowOnError extends boolean = false>(
   options: Options<GetActionData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetActionResponses, GetActionErrors, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
     url: "/api/actions/{actionId}",
     ...options,
   })
@@ -1906,6 +1994,7 @@ export const requestAction = <ThrowOnError extends boolean = false>(
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
       { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/actions/{actionId}",
     ...options,
@@ -2037,7 +2126,10 @@ export const getActionRun = <ThrowOnError extends boolean = false>(
   options: Options<GetActionRunData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetActionRunResponses, GetActionRunErrors, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
     url: "/api/action-runs/{runId}",
     ...options,
   })
@@ -2324,6 +2416,7 @@ export const getBulkTelemetryHistory = <ThrowOnError extends boolean = false>(
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
       { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/telemetry/history",
     ...options,
@@ -2344,7 +2437,10 @@ export const getTelemetryHistory = <ThrowOnError extends boolean = false>(
     GetTelemetryHistoryErrors,
     ThrowOnError
   >({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
     url: "/api/objects/{objectTypeId}/{objectId}/telemetry/{propertyId}/history",
     ...options,
   })
@@ -2360,7 +2456,10 @@ export const getLatestTelemetry = <ThrowOnError extends boolean = false>(
     GetLatestTelemetryErrors,
     ThrowOnError
   >({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { name: "x-sixb-share-grant", type: "apiKey" },
+    ],
     url: "/api/objects/{objectTypeId}/{objectId}/telemetry/{propertyId}/latest",
     ...options,
   })

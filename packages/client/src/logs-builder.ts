@@ -5,8 +5,10 @@ import {
   type SixbRunKind,
   type StoredLogLine,
 } from "@sixb/core/logging"
+import { hasClientSharedAuthority, SHARED_ACCESS_REALTIME_UNAVAILABLE } from "./client-authority"
 import { listLogs } from "./generated"
 import type { Client } from "./generated/client"
+import { client as generatedClient } from "./generated/client.gen"
 import { createLogSocket, type LogSocketState } from "./logs-transport"
 
 export interface LogsFilterIR {
@@ -80,6 +82,17 @@ class LogsBuilderImpl implements RunScopedLogsBuilder {
   }
 
   subscribe(handler: (line: StoredLogLine) => void, options?: LogSubscribeOptions): () => void {
+    const transportClient = this.options?.client ?? generatedClient
+    if (hasClientSharedAuthority(transportClient)) {
+      options?.onError?.(SHARED_ACCESS_REALTIME_UNAVAILABLE)
+      options?.onStateChange?.({
+        connected: false,
+        reconnecting: false,
+        error: SHARED_ACCESS_REALTIME_UNAVAILABLE,
+      })
+      return () => undefined
+    }
+
     const socket = createLogSocket({
       kinds: this.ir.kinds,
       run: this.ir.run,
@@ -87,7 +100,7 @@ class LogsBuilderImpl implements RunScopedLogsBuilder {
       afterCursor: options?.afterCursor,
       reconnect: options?.reconnect,
       reconnectDelayMs: options?.reconnectDelayMs,
-      baseUrl: this.options?.client?.getConfig().baseUrl,
+      baseUrl: transportClient.getConfig().baseUrl,
       onLog: handler,
       onError: options?.onError,
       onReset: options?.onReset,

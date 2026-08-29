@@ -39,6 +39,48 @@ import {
 import type { SelectedObjectReadScope } from "../src/storage"
 
 describe("runtime authorization capabilities", () => {
+  test("snapshots shared provenance without making an ordinary process-local scope durable", () => {
+    const delegation = { kind: "share" as const, grantId: "grant-1", sessionId: "session-1" }
+    const input = {
+      projectId: "project-1",
+      requestId: "shared-request",
+      correlationId: "shared-correlation",
+      objectRead: {
+        selection: { kind: "selected" as const, roots: [] },
+        limits: { maxTraversalFacts: 100, maxOutputJsonBytes: 1024 },
+      },
+    }
+    const shared = createDelegatedRequestScope({ ...input, delegation })
+    delegation.grantId = "another-grant"
+    const expected = {
+      type: "delegated" as const,
+      delegation: {
+        kind: "share" as const,
+        grantId: "grant-1",
+        sessionId: "session-1",
+      },
+    }
+    expect(getAuthorizationRef(shared.authorization)).toEqual(expected)
+    expect(
+      executionRecordInputFromRuntime({
+        execution: shared.execution,
+        runtimeAuthorization: shared.authorization,
+      })
+    ).toMatchObject({ authorizationRef: expected })
+    expect(shared.execution.requestedBy).toBeUndefined()
+    const copy = getAuthorizationRef(shared.authorization)
+    if (copy.type === "delegated") Object.assign(copy.delegation, { grantId: "mutated" })
+    expect(getAuthorizationRef(shared.authorization)).toEqual(expected)
+    const local = createDelegatedRequestScope(input)
+    expect(() => getAuthorizationRef(local.authorization)).toThrow("cannot cross a durable")
+    expect(() =>
+      createDelegatedRequestScope({
+        ...input,
+        delegation: { kind: "share", grantId: "grant-1", sessionId: "" },
+      })
+    ).toThrow("Share session id")
+  })
+
   test("snapshots principal authority and exposes only a defensive durable reference", () => {
     const context = authorizationContext({ type: "user", id: "user-1" }, "session-1")
     const groups = context.groupIds as string[]

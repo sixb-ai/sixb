@@ -5,7 +5,12 @@ import {
   normalizeExecutionRecord,
   validateExecutionRecordReferences,
 } from "@sixb/core/internal/execution-storage"
-import type { CreateExecutionInput, ExecutionRecord, ExecutionStorage } from "@sixb/core/storage"
+import type {
+  CreateExecutionInput,
+  ExecutionRecord,
+  ExecutionStorage,
+  ShareSessionStorage,
+} from "@sixb/core/storage"
 import { ExecutionStorageError } from "@sixb/core/storage"
 import type { PgAuthStorage } from "./auth-storage"
 import { isUniqueViolation } from "./storage-errors"
@@ -14,7 +19,8 @@ import type { PgStoreClient } from "./transactions"
 export class PgExecutionStorage implements ExecutionStorage {
   constructor(
     private readonly sql: PgStoreClient,
-    private readonly auth: PgAuthStorage
+    private readonly auth: PgAuthStorage,
+    private readonly shareSessions: Pick<ShareSessionStorage, "getById">
   ) {}
 
   async create(input: CreateExecutionInput): Promise<ExecutionRecord> {
@@ -22,6 +28,7 @@ export class PgExecutionStorage implements ExecutionStorage {
     await validateExecutionRecordReferences(record, {
       auth: this.auth,
       getExecution: (params) => this.getById(params),
+      getShareSession: (params) => this.shareSessions.getById(params),
     })
     const row = executionRecordToStorageRow(record)
 
@@ -46,6 +53,9 @@ export class PgExecutionStorage implements ExecutionStorage {
           authority_primitive_kind,
           authority_primitive_id,
           authority_kernel_operation,
+          authority_delegation_kind,
+          authority_delegation_id,
+          authority_delegation_session_id,
           created_at
         ) VALUES (
           ${row.projectId},
@@ -66,6 +76,9 @@ export class PgExecutionStorage implements ExecutionStorage {
           ${row.authorityPrimitiveKind},
           ${row.authorityPrimitiveId},
           ${row.authorityKernelOperation},
+          ${row.authorityDelegationKind},
+          ${row.authorityDelegationId},
+          ${row.authorityDelegationSessionId},
           ${row.createdAt}
         )
         RETURNING *
@@ -120,6 +133,9 @@ function toStorageRow(row: PgExecutionRow): ExecutionStorageRow {
     authorityPrimitiveKind: row.authority_primitive_kind,
     authorityPrimitiveId: row.authority_primitive_id,
     authorityKernelOperation: row.authority_kernel_operation,
+    authorityDelegationKind: row.authority_delegation_kind,
+    authorityDelegationId: row.authority_delegation_id,
+    authorityDelegationSessionId: row.authority_delegation_session_id,
     createdAt: new Date(row.created_at),
   }
 }
@@ -143,5 +159,8 @@ interface PgExecutionRow {
   readonly authority_primitive_kind: ExecutionStorageRow["authorityPrimitiveKind"]
   readonly authority_primitive_id: string | null
   readonly authority_kernel_operation: ExecutionStorageRow["authorityKernelOperation"]
+  readonly authority_delegation_kind: ExecutionStorageRow["authorityDelegationKind"]
+  readonly authority_delegation_id: string | null
+  readonly authority_delegation_session_id: string | null
   readonly created_at: Date | string
 }
