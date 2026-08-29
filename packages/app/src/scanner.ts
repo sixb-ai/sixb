@@ -41,6 +41,12 @@ async function walkDir(dir: string, appDir: string, routes: PageRoute[]): Promis
     const fullPath = join(dir, name)
 
     if (entry.isDirectory()) {
+      if (dir === appDir && name === "shared") {
+        throw new Error(
+          "[SixbCustomApp] app/shared is reserved for framework-managed shared links. " +
+            "Move this page to another route."
+        )
+      }
       await walkDir(fullPath, appDir, routes)
       continue
     }

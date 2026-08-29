@@ -15,7 +15,10 @@ async function linkDependencies(projectRoot: string, packages: readonly string[]
   const atlasRoot = resolve(import.meta.dir, "..", "..", "atlas")
 
   for (const name of packages) {
-    const packageDir = dirname(Bun.resolveSync(`${name}/package.json`, atlasRoot))
+    const packageDir =
+      name === "@sixb/app"
+        ? resolve(import.meta.dir, "..")
+        : dirname(Bun.resolveSync(`${name}/package.json`, atlasRoot))
     const target = join(projectRoot, "node_modules", ...name.split("/"))
     await mkdir(dirname(target), { recursive: true })
     await symlink(packageDir, target)
@@ -71,6 +74,20 @@ describe("createCustomApp.start", () => {
     )
     await writeFile(join(outdir, "main.js"), "console.log('fixture app')\n")
     await writeFile(
+      join(outdir, "shared-index.html"),
+      [
+        "<!DOCTYPE html>",
+        "<html>",
+        "  <head>",
+        '    <meta name="referrer" content="no-referrer" />',
+        "    <script>window.__SIXB_RUNTIME__ = {};</script>",
+        "  </head>",
+        '  <body><div id="root"></div><script>void import("/shared-ab12cd34.js")</script></body>',
+        "</html>",
+      ].join("\n")
+    )
+    await writeFile(join(outdir, "shared-ab12cd34.js"), "console.log('shared fixture app')\n")
+    await writeFile(
       join(outdir, "app.webmanifest"),
       '{"id":"/","name":"Fixture App","start_url":"/","scope":"/","display":"standalone"}\n'
     )
@@ -120,6 +137,16 @@ describe("createCustomApp.start", () => {
     } finally {
       await server.stop()
     }
+  })
+
+  test("fails fast when an older build has no shared shell", async () => {
+    const outdir = join(tempRoot, ".sixb", "dist", "app")
+    await rm(join(outdir, "shared-index.html"))
+
+    const app = await createCustomApp({ rootDir: tempRoot })
+    await expect(app.start({ host: "127.0.0.1", port: await getFreePort() })).rejects.toThrow(
+      /\[SixbCustomApp\] Built app in .*shared-index\.html; rebuild required/
+    )
   })
 
   test("serves the manifest with revalidation headers for GET and HEAD", async () => {
@@ -236,6 +263,81 @@ describe("createCustomApp.start", () => {
       await server.stop()
     }
   })
+
+  test("serves only canonical shared deep links through a nonce-secured shell", async () => {
+    const port = await getFreePort()
+    const app = await createCustomApp({ rootDir: tempRoot, audience: "app" })
+    const server = await app.start({
+      host: "127.0.0.1",
+      port,
+      apiBaseUrl: "https://api.example.test/base",
+    })
+
+    try {
+      const shared = await fetch(`http://127.0.0.1:${port}/shared/shr_1/reports/report-1`)
+      expect(shared.status).toBe(200)
+      expect(shared.headers.get("cache-control")).toBe("no-store")
+      expect(shared.headers.get("referrer-policy")).toBe("no-referrer")
+      expect(shared.headers.get("permissions-policy")).toContain("camera=()")
+      expect(shared.headers.get("x-content-type-options")).toBe("nosniff")
+      expect(shared.headers.get("x-robots-tag")).toBe("noindex, nofollow, noarchive")
+      expect(shared.headers.get("link")).toBeNull()
+
+      const html = await shared.text()
+      const nonces = [...html.matchAll(/<script nonce="([^"]+)"/g)].map((match) => match[1])
+      expect(nonces).toHaveLength(2)
+      expect(new Set(nonces).size).toBe(1)
+      const csp = shared.headers.get("content-security-policy") ?? ""
+      expect(csp).toContain(`script-src 'nonce-${nonces[0]}'`)
+      expect(csp).toContain("connect-src 'self' https://api.example.test")
+      expect(csp).toContain("frame-ancestors 'none'")
+      expect(csp).toContain("form-action 'none'")
+      expect(csp).toContain("manifest-src 'none'")
+
+      const head = await fetch(`http://127.0.0.1:${port}/shared/shr_1/`, { method: "HEAD" })
+      expect(head.status).toBe(200)
+      expect(await head.text()).toBe("")
+      expect(head.headers.get("cache-control")).toBe("no-store")
+      expect(head.headers.get("content-security-policy")).not.toBe(csp)
+
+      const root = await fetch(`http://127.0.0.1:${port}/shared/shr_1`)
+      expect(root.status).toBe(200)
+      expect(root.headers.get("cache-control")).toBe("no-store")
+
+      for (const pathname of [
+        "/shared",
+        "/shared/",
+        "/shared/shr_1/missing.js",
+        "/shared%2Fshr_1%2Freports%2Freport-1",
+        "/shared-index.html",
+        "/%73hared-index.html",
+        "/__sixb/generated/app-shell",
+        "/__sixb/generated/shared-app-shell",
+      ]) {
+        const response = await fetch(`http://127.0.0.1:${port}${pathname}`)
+        expect(response.status).toBe(404)
+        expect(response.headers.get("cache-control")).toBe("no-store")
+      }
+
+      const mutation = await fetch(`http://127.0.0.1:${port}/shared/shr_1/reports/report-1`, {
+        method: "POST",
+      })
+      expect(mutation.status).toBe(404)
+      expect(mutation.headers.get("cache-control")).toBe("no-store")
+      expect(
+        (
+          await fetch(`http://127.0.0.1:${port}/shared/shr_1`, {
+            method: "DELETE",
+          })
+        ).status
+      ).toBe(404)
+
+      const ordinary = await fetch(`http://127.0.0.1:${port}/`)
+      expect(ordinary.headers.get("content-security-policy")).toBeNull()
+    } finally {
+      await server.stop()
+    }
+  })
 })
 
 describe("createCustomApp.dev", () => {
@@ -246,6 +348,14 @@ describe("createCustomApp.dev", () => {
     const appDir = join(tempRoot, "app")
     await mkdir(appDir, { recursive: true })
     await writeFile(join(appDir, "page.tsx"), "export default function Page() { return null }\n")
+    await linkDependencies(tempRoot, [
+      "@sixb/app",
+      "@sixb/client",
+      "@tanstack/react-query",
+      "react",
+      "react-dom",
+      "react-router-dom",
+    ])
   })
 
   afterEach(async () => {
@@ -289,6 +399,21 @@ describe("createCustomApp.dev", () => {
       expect(icon.headers.get("content-type")).toBe("image/png")
       expect((await fetch(`http://127.0.0.1:${port}/missing-icon.png`)).status).toBe(404)
       expect((await fetch(`http://127.0.0.1:${port}/other.webmanifest`)).status).toBe(404)
+    } finally {
+      await server.stop()
+    }
+  })
+
+  test("does not build the shared browser graph for an ordinary dev server", async () => {
+    const port = await getFreePort()
+    const sharedDevRoot = join(tempRoot, ".sixb", "generated", "shared-dev")
+    const app = await createCustomApp({ rootDir: tempRoot, authEnabled: false, agentRoutes: false })
+    const server = await app.dev({ host: "127.0.0.1", port })
+
+    try {
+      // Regression proof: eagerly calling buildSharedAppDev() here makes the global parallel suite
+      // hit Bun 1.3.14's shared native bundler state and report EISDIR/Unseekable reads.
+      expect(await Bun.file(join(sharedDevRoot, "0")).exists()).toBe(false)
     } finally {
       await server.stop()
     }
@@ -363,21 +488,38 @@ describe("createCustomApp.dev", () => {
     }
   })
 
+  test("rejects the framework-owned app/shared directory with an actionable error", async () => {
+    await mkdir(join(tempRoot, "app", "shared"), { recursive: true })
+    await writeFile(
+      join(tempRoot, "app", "shared", "page.tsx"),
+      "export default function SharedPage() { return null }\n"
+    )
+    const app = await createCustomApp({ rootDir: tempRoot, agentRoutes: false })
+
+    await expect(app.scanRoutes()).rejects.toThrow(
+      "[SixbCustomApp] app/shared is reserved for framework-managed shared links"
+    )
+  })
+
   test("generates an eager entry with no lazy routes or Suspense gap", async () => {
-    const { mainPath } = await generateAppEntry(tempRoot, join(tempRoot, ".sixb", "generated"))
+    const { mainPath, runtimePath } = await generateAppEntry(
+      tempRoot,
+      join(tempRoot, ".sixb", "generated")
+    )
     const main = await readFile(mainPath, "utf-8")
+    const runtime = await readFile(runtimePath, "utf-8")
 
     // Routes render synchronously after auth — no Suspense fallback frame.
-    expect(main).not.toContain("lazy(")
-    expect(main).not.toContain("Suspense")
+    expect(runtime).not.toContain("lazy(")
+    expect(runtime).not.toContain("Suspense")
     expect(main).toContain("requireSixbBrowserAuthSession(runtimeConfig")
     expect(main).toContain("import.meta.hot.dispose")
     expect(main).toContain("browserClient.dispose()")
-    expect(main).toContain("import.meta.hot.data as CustomAppHotData")
-    expect(main).toContain("data.root ??= createRoot(element)")
-    expect(main).toContain("data.queryClient ??= createQueryClient()")
-    expect(main).toContain("getRoot().render(<App />)")
-    expect(main).not.toContain('createRoot(document.getElementById("root")!).render')
+    expect(runtime).toContain("import.meta.hot.data as CustomAppHotData")
+    expect(runtime).toContain("data.root ??= createRoot(element)")
+    expect(runtime).toContain("data.queryClient ??= createQueryClient()")
+    expect(runtime).toContain("getRoot().render(<App basename={options.basename} />)")
+    expect(runtime).not.toContain('createRoot(document.getElementById("root")!).render')
   })
 
   test("generates a separate pre-auth entry when app/auth.tsx exists", async () => {
@@ -405,29 +547,33 @@ describe("createCustomApp.dev", () => {
   })
 
   test("renders an access-denied view without starting the application", async () => {
-    const { mainPath } = await generateAppEntry(tempRoot, join(tempRoot, ".sixb", "generated"))
+    const { mainPath, runtimePath } = await generateAppEntry(
+      tempRoot,
+      join(tempRoot, ".sixb", "generated")
+    )
     const main = await readFile(mainPath, "utf-8")
+    const runtime = await readFile(runtimePath, "utf-8")
 
     expect(main).toContain("!authSession.applicationAccess.allowed")
-    expect(main).toContain("function AccessDeniedView()")
-    expect(main).toContain("<AccessDeniedView />")
-    expect(main).toContain("await signOut({ throwOnError: true })")
+    expect(runtime).toContain("function AccessDeniedView()")
+    expect(runtime).toContain("<AccessDeniedView />")
+    expect(runtime).toContain("await signOut({ throwOnError: true })")
   })
 
   test("wraps routes in an error boundary that special-cases 404s", async () => {
-    const { mainPath } = await generateAppEntry(tempRoot, join(tempRoot, ".sixb", "generated"))
-    const main = await readFile(mainPath, "utf-8")
+    const { runtimePath } = await generateAppEntry(tempRoot, join(tempRoot, ".sixb", "generated"))
+    const runtime = await readFile(runtimePath, "utf-8")
 
     // A safety net catches uncaught render throws instead of blanking the page.
-    expect(main).toContain("class AppErrorBoundary")
-    expect(main).toContain("getDerivedStateFromError")
-    expect(main).toContain("<RoutedErrorBoundary>")
+    expect(runtime).toContain("class AppErrorBoundary")
+    expect(runtime).toContain("getDerivedStateFromError")
+    expect(runtime).toContain("function RoutedErrorBoundary")
     // A 404 is an expected "not found" state, not the generic crash screen.
-    expect(main).toContain("isSixbApiError(error) && error.status === 404")
-    expect(main).toContain("import {\n  configureSixbBrowserClient,\n  isSixbApiError,")
+    expect(runtime).toContain("isSixbApiError(error) && error.status === 404")
+    expect(runtime).toContain('import { isSixbApiError } from "@sixb/client/browser"')
     // Unmatched client routes render the not-found view instead of a blank page.
-    expect(main).toContain('<Route path="*" element={<NotFoundView />} />')
-    expect(main).toContain("function NotFoundView()")
+    expect(runtime).toContain('<Route path="*" element={<NotFoundView />} />')
+    expect(runtime).toContain("function NotFoundView()")
   })
 
   test("route manifest statically imports every page", async () => {
@@ -495,16 +641,16 @@ describe("createCustomApp.dev", () => {
     await writeFile(appCssPath, "body { margin: 0; }\n")
     await writeFile(frameworkCssPath, "body { color: black; }\n")
 
-    const { mainPath } = await generateAppEntry(tempRoot, generatedDir, {
+    const { runtimePath } = await generateAppEntry(tempRoot, generatedDir, {
       stylesheetPath: appCssPath,
       frameworkStylesheetPaths: [frameworkCssPath],
     })
-    const main = await readFile(mainPath, "utf-8")
+    const runtime = await readFile(runtimePath, "utf-8")
 
-    expect(main.indexOf('import "./agent-ui.css"')).toBeGreaterThan(-1)
-    expect(main.indexOf('import "../../app/globals.css"')).toBeGreaterThan(-1)
-    expect(main.indexOf('import "./agent-ui.css"')).toBeLessThan(
-      main.indexOf('import "../../app/globals.css"')
+    expect(runtime.indexOf('import "./agent-ui.css"')).toBeGreaterThan(-1)
+    expect(runtime.indexOf('import "../../app/globals.css"')).toBeGreaterThan(-1)
+    expect(runtime.indexOf('import "./agent-ui.css"')).toBeLessThan(
+      runtime.indexOf('import "../../app/globals.css"')
     )
   })
 
@@ -519,8 +665,17 @@ describe("createCustomApp.dev", () => {
     ]
 
     const routeManifestPath = await generateRouteManifest(routes, generatedDir)
-    const { htmlPath, mainPath, manifestPath } = await generateAppEntry(tempRoot, generatedDir)
-    const files = [routeManifestPath, mainPath, htmlPath, manifestPath]
+    const { htmlPath, mainPath, manifestPath, runtimePath, sharedHtmlPath, sharedMainPath } =
+      await generateAppEntry(tempRoot, generatedDir)
+    const files = [
+      routeManifestPath,
+      mainPath,
+      runtimePath,
+      sharedMainPath,
+      htmlPath,
+      sharedHtmlPath,
+      manifestPath,
+    ]
     const before = await mtimes(files)
 
     await wait(25)
@@ -531,10 +686,10 @@ describe("createCustomApp.dev", () => {
   })
 
   test("generated entry intercepts internal anchors conservatively", async () => {
-    const { mainPath } = await generateAppEntry(tempRoot, join(tempRoot, ".sixb", "generated"))
-    const main = await readFile(mainPath, "utf-8")
+    const { runtimePath } = await generateAppEntry(tempRoot, join(tempRoot, ".sixb", "generated"))
+    const runtime = await readFile(runtimePath, "utf-8")
 
-    expect(main).toContain("<InternalLinkInterceptor />")
+    expect(runtime).toContain("<InternalLinkInterceptor basename={basename} />")
     // The guard list is the contract: anything unusual must fall through to
     // native browser navigation.
     for (const guard of [
@@ -545,10 +700,10 @@ describe("createCustomApp.dev", () => {
       'anchor.hasAttribute("download")',
       'anchor.relList.contains("external")',
       "url.origin !== window.location.origin",
-      "isReservedPath(url.pathname)",
-      "matchPath(route.path, url.pathname)",
+      "isReservedPath(appPath)",
+      "matchPath(route.path, appPath)",
     ]) {
-      expect(main).toContain(guard)
+      expect(runtime).toContain(guard)
     }
   })
 
@@ -593,8 +748,11 @@ describe("createCustomApp.dev", () => {
       expect(manifest).toContain('{ path: "/agents/new/:agentId", component: BuiltInPage1 },')
       expect(manifest).toContain('{ path: "/agents/:threadId", component: BuiltInPage2 },')
 
-      const main = await readFile(join(tempRoot, ".sixb", "generated", "main.tsx"), "utf-8")
-      expect(main).toContain('import "./agent-ui.css"')
+      const runtime = await readFile(
+        join(tempRoot, ".sixb", "generated", "app-runtime.tsx"),
+        "utf-8"
+      )
+      expect(runtime).toContain('import "./agent-ui.css"')
     } finally {
       await server.stop()
     }

@@ -19,6 +19,7 @@ const DEFAULT_LIST_LIMIT = 50
 const MAX_LIST_LIMIT = 200
 const MAX_DESTINATION_PATH_LENGTH = 4_096
 const SHA256_HEX = /^[0-9a-f]{64}$/
+const SHARED_APP_PATH_PREFIX = "/shared"
 
 /** Normalize, detach, and derive every persisted field owned by Share grant storage. */
 export function normalizeShareGrantCreate(input: CreateShareGrantInput): ShareGrantRecord {
@@ -273,6 +274,17 @@ function normalizeDestinationPath(value: unknown): string {
   const normalized = new URL(value, "https://sixb.invalid").pathname
   if (normalized !== value) {
     throw invalidInput("Share destination path must already be canonical.")
+  }
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(value).replaceAll("\\", "/")
+  } catch {
+    throw invalidInput("Share destination path must contain valid percent-encoding.")
+  }
+  if (decoded === SHARED_APP_PATH_PREFIX || decoded.startsWith(`${SHARED_APP_PATH_PREFIX}/`)) {
+    throw invalidInput(
+      "Share destination path must not use the framework-owned '/shared' namespace."
+    )
   }
   return value
 }

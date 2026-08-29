@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import { builtAtlasOutdir, resolveProductionPaths } from "../src/lib/production"
+import { builtAtlasOutdir, hasBuiltCustomApp, resolveProductionPaths } from "../src/lib/production"
 
 const repoRoot = resolve(import.meta.dir, "..", "..", "..")
 const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
@@ -109,6 +109,17 @@ describe("sixb command dispatch", () => {
 })
 
 describe("production asset paths", () => {
+  test("requires both ordinary and shared shells for a built custom app", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "sixb-cli-production-app-"))
+    tempDirs.push(tempDir)
+
+    expect(await hasBuiltCustomApp(tempDir)).toBe(false)
+    await writeFile(join(tempDir, "index.html"), "ordinary")
+    expect(await hasBuiltCustomApp(tempDir)).toBe(false)
+    await writeFile(join(tempDir, "shared-index.html"), "shared")
+    expect(await hasBuiltCustomApp(tempDir)).toBe(true)
+  })
+
   test("resolves default .sixb/dist assets from the source project root", async () => {
     const projectRoot = resolve(import.meta.dir, "fixtures", "valid-project")
     const paths = await resolveProductionPaths(join(projectRoot, ".sixb", "dist", "sixb.config.js"))

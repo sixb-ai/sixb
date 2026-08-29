@@ -81,9 +81,10 @@ are the union of every role whose `grantedTo` group it belongs to.
 
 ## Grants
 
-A grant pairs a capability with the definitions it covers. Eight capability builders —
+A grant pairs a capability with the definitions it covers. Nine capability builders —
 `can.access`, `can.view`, `can.edit`, `can.append`, `can.apply`, `can.run`, `can.manage`, and
-`can.observe` — resolve to **twelve grant kinds**, one per protected target family.
+`can.observe`, plus `can.share` — resolve to **thirteen grant kinds**, one per protected target
+family.
 
 | Grant kind | Builder | Allows | Targets |
 | --- | --- | --- | --- |
@@ -93,6 +94,7 @@ A grant pairs a capability with the definitions it covers. Eight capability buil
 | `edit:object` | `can.edit(...)` | Write objects: properties, links, `delete`, `restore` | [Object types](../ontology/object-types.md) |
 | `append:telemetry` | `can.append(...)` | Append telemetry points | [Object types](../ontology/object-types.md) |
 | `apply:action` | `can.apply(...)` | Request actions | [Actions](../actions/overview.md) |
+| `share:share` | `can.share(...)` | Issue, list, and revoke grants from Share definitions | [Shared access](#shared-access) |
 | `run:workflow` | `can.run(...)` | Start workflows | [Workflows](../workflows/overview.md) |
 | `run:sync` | `can.run(...)` | Run syncs | [Syncs](../data/syncs.md) |
 | `run:pipeline` | `can.run(...)` | Run pipelines | [Pipelines](../data/pipelines.md) |
@@ -105,7 +107,8 @@ A grant pairs a capability with the definitions it covers. Eight capability buil
 picks between `run:workflow`, `run:sync`, `run:pipeline`, and `run:agent` the same way. Each is
 type-checked, so mixing target families in one call does not compile. `can.manage` accepts connector
 definitions. `can.observe` takes the `"logs"` target literal and grants `observe:logs`, which gates
-reading captured [logs](../logging/overview.md).
+reading captured [logs](../logging/overview.md). `can.share` accepts Share definitions and controls
+their grant lifecycle; it does not itself grant access to the shared objects.
 
 > **Only `can.view(Type)` reaches subtypes.** `can.edit` and `can.append` cover exactly the types
 > you name, so adding a type under one you granted never makes it writable on its own.
@@ -131,6 +134,7 @@ Each builder takes one definition, a list, or a breadth selector.
 | Every pipeline | `can.run(every.pipeline())` |
 | Every agent | `can.run(every.agent())` |
 | Every connector | `can.manage(every.connector())` |
+| Every Share definition | `can.share(every.share())` |
 | Every application | `can.access(every.application())` |
 | Everything but a few | `can.view(every.object().except([Customer]))` |
 
@@ -138,6 +142,52 @@ The breadth selectors live on one `every` namespace exported from `@sixb/core`. 
 family's whole registered universe and is branded by target, so `can.view(every.action())` does not
 compile — and passing the wrong family from untyped code throws at definition time rather than
 silently granting the wrong universe.
+
+## Shared access
+
+A Share definition describes the maximum authority a bearer link may delegate for one exact object.
+The target placeholder is contextual: it becomes the `ObjectRef` supplied when the grant is issued.
+
+```ts
+import { can, defineShare, objectRef } from "@sixb/core"
+import { approveProposal } from "../actions/approve-proposal"
+import { LineItem } from "../ontology/line-item"
+import { Proposal } from "../ontology/proposal"
+
+export const ProposalShare = defineShare("proposal", {
+  target: Proposal,
+  grants: ({ target }) => [
+    can.view(target).withLinks([
+      Proposal.l.customer,
+      Proposal.l.items.withLinks([LineItem.l.product]),
+    ]),
+    can.apply(approveProposal).on(target),
+  ],
+})
+
+const invitation = await sixb.shares.issue(ProposalShare, {
+  target: objectRef(Proposal, proposalId),
+  destinationPath: `/proposals/${proposalId}`,
+  expiresAt,
+})
+```
+
+`can.view(target)` exposes only the target object. `.withLinks([Proposal.l.items])` additionally
+exposes that link, its properties, and its live targets. Nested links remain closed unless selected
+explicitly. Calling `.withLinks()` with no argument selects every direct link available when the
+grant is issued, never their nested links.
+
+Put `can.share(ProposalShare)` in the issuer's role. Issuance snapshots the definition and the
+effective authority is always that snapshot intersected with the current definition, so editing a
+Share cannot widen an existing link. Removing the definition suspends its grants; revoke grants
+before permanently reusing its ID.
+
+The runtime returns `{ grant, secret }` once. The HTTP operation `issueSharedAccessGrant` instead
+returns `{ grant, url }`, ready to render as a native link; React callers can use
+`issueSharedAccessGrantMutation`. The destination is an ordinary app path. Shared sessions reuse its
+normal queries and action mutations while the server limits them to the exact target and selected
+link paths. Guessing a sibling primary ID remains unauthorized. V1 rejects direct writes, uploads,
+WebSockets, and action parameters containing nested object or file references.
 
 ## Broad grants
 

@@ -324,6 +324,34 @@ describe("shared browser client", () => {
     )
     expect(controller.getCsrfToken()).toBeNull()
   })
+
+  test.each([
+    "/shared/proposal-1",
+    "/shared%2Fproposal-1",
+    "/shared%5Cproposal-1",
+    "/%73hared/proposal-1",
+  ])("rejects the framework-owned shared destination %s", async (destinationPath) => {
+    const controller = configureSixbSharedBrowserClient(runtimeConfig, {
+      grantId: "shr_1",
+      fetch: Object.assign(
+        async () =>
+          Response.json({
+            grantId: "shr_1",
+            destinationPath,
+            expiresAt: "2026-08-29T10:15:00.000Z",
+            absoluteExpiresAt: "2026-08-30T10:00:00.000Z",
+            csrfToken: "C".repeat(43),
+          }),
+        { preconnect: fetch.preconnect }
+      ),
+    })
+    controllers.push(controller)
+
+    await expect(controller.getSession()).rejects.toThrow(
+      "Shared access session response is invalid"
+    )
+    expect(controller.getCsrfToken()).toBeNull()
+  })
 })
 
 describe("browser client auth", () => {
