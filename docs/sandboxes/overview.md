@@ -90,10 +90,11 @@ command can run. The profile requires behavior, not an `agentReady` provider fla
 
 `curl` and `jq` are not runtime-profile dependencies because the production CLI uses the JavaScript
 runtime's native fetch and JSON support. The worker performs one network-free behavioral probe
-after materializing its files, then verifies the project identity through the gateway. An
-incompatible environment cannot execute a sandbox command. Its failure records the provider,
-profile, and failed check without recording the gateway capability URL. Bake shared dependencies
-into versioned images or snapshots; never install packages during an individual run.
+after materializing its files, then runs `sixb doctor` to verify the installed CLI contract and
+project identity through the gateway. An incompatible environment cannot execute a sandbox
+command. Its failure records the provider, profile, failed check, and safe failure classification
+without recording raw command output or the gateway capability URL. Bake shared dependencies into
+versioned images or snapshots; never install packages during an individual run.
 
 ## Wiring
 

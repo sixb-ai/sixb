@@ -1,4 +1,8 @@
-import { AGENT_RUNTIME_PROFILE, type AgentRuntimeProfileCheck } from "./profile"
+import {
+  AGENT_RUNTIME_PROFILE,
+  type AgentRuntimeFailureReason,
+  type AgentRuntimeProfileCheck,
+} from "./profile"
 
 /** A provisioned sandbox does not satisfy the worker's versioned agent-runtime contract. */
 export class AgentRuntimeProfileError extends Error {
@@ -8,27 +12,36 @@ export class AgentRuntimeProfileError extends Error {
 
   constructor(
     readonly provider: string,
-    readonly check: AgentRuntimeProfileCheck
+    readonly check: AgentRuntimeProfileCheck,
+    readonly reason: AgentRuntimeFailureReason,
+    readonly exitCode?: number
   ) {
-    const remediation = remediationFor(provider)
+    const remediation = remediationFor(check)
+    const failure = exitCode === undefined ? reason : `${reason} (exit ${exitCode})`
     super(
-      `[SixbAgentWorker] Sandbox provider '${provider}' failed '${AGENT_RUNTIME_PROFILE}' check '${check}'. ${remediation}`
+      `[SixbAgentWorker] Sandbox provider '${provider}' failed '${AGENT_RUNTIME_PROFILE}' check '${check}': ${failure}. ${remediation}`
     )
     this.remediation = remediation
   }
 }
 
-function remediationFor(provider: string): string {
-  switch (provider) {
-    case "local":
-      return "Install Bash, the required POSIX read utilities, and Bun 1.3+ or Node 22+ in the worker environment."
-    case "smolvm":
-      return "Rebuild the managed smolvm agent image with 'bun run agent:image', or configure a compatible runtime-v1 image."
-    case "apple-container":
-      return "Use the pinned Sixb Node image or configure an image that satisfies sixb-agent-runtime/v1."
-    case "vercel":
-      return "Use the explicit node24 runtime, or configure a compatible Vercel image or snapshot."
-    default:
-      return `Configure provider '${provider}' with an image or runtime that satisfies sixb-agent-runtime/v1.`
+function remediationFor(check: AgentRuntimeProfileCheck): string {
+  switch (check) {
+    case "bash":
+      return "Provide Bash in the configured sandbox host or image."
+    case "environment-bootstrap":
+      return "Ensure sandbox commands preserve the worker-provided environment and load BASH_ENV."
+    case "path-bootstrap":
+      return "Ensure BASH_ENV can prepend the worker-installed Sixb CLI directory to PATH."
+    case "cli-installation":
+      return "Ensure sandbox file materialization preserves the Sixb CLI bytes and executable mode."
+    case "file-tools":
+      return "Provide compatible realpath, tail, head, base64, find, wc, and tr utilities in the sandbox."
+    case "javascript-runtime":
+      return "Provide Bun 1.3+ or Node 22+ in the configured sandbox host or image."
+    case "cli-execution":
+      return "Ensure the worker-installed Sixb CLI artifact can execute without modifying it."
+    case "gateway-connectivity":
+      return "Ensure the run-scoped Sixb API gateway is reachable from the sandbox and identifies the current project."
   }
 }

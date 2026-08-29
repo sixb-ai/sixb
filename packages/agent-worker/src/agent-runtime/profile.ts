@@ -12,17 +12,26 @@ export type AgentRuntimeProfileCheck =
   | "environment-bootstrap"
   | "path-bootstrap"
   | "cli-installation"
-  | "read-tool"
+  | "file-tools"
   | "javascript-runtime"
   | "cli-execution"
   | "gateway-connectivity"
 
-export interface AgentRuntimeInfo {
+export type AgentRuntimeFailureReason =
+  | "command-error"
+  | "timed-out"
+  | "nonzero-exit"
+  | "invalid-output"
+  | "unsupported-version"
+
+/** Stable JSON emitted by `sixb doctor` and consumed by worker preflight. */
+export interface AgentDoctorReport {
+  readonly ok: true
   readonly profile: typeof AGENT_RUNTIME_PROFILE
-  readonly provider: string
+  readonly cli: { readonly version: string }
   readonly javascript: {
     readonly name: AgentJavascriptRuntime
     readonly version: string
   }
-  readonly cliVersion: string
+  readonly project: { readonly id: string }
 }

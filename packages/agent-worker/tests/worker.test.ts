@@ -457,6 +457,20 @@ function structuredAnswerModel(): MockLanguageModelV4 {
   })
 }
 
+function structuredAnswerUntilAbortedModel(): MockLanguageModelV4 {
+  return new MockLanguageModelV4({
+    modelId: "mock-model",
+    doGenerate: async (options) => {
+      await new Promise<void>((_resolve, reject) => {
+        const abort = () => reject(new DOMException("Aborted", "AbortError"))
+        if (options.abortSignal?.aborted) abort()
+        else options.abortSignal?.addEventListener("abort", abort, { once: true })
+      })
+      throw new Error("unreachable")
+    },
+  })
+}
+
 function invalidStructuredAnswerModel(): MockLanguageModelV4 {
   return new MockLanguageModelV4({
     modelId: "mock-model",
@@ -915,10 +929,16 @@ class RecordingSandbox implements Sandbox {
         durationMs: 1,
       }
     }
-    if (command === "bash" && script === "sixb project show") {
+    if (command === "bash" && script === "sixb doctor") {
       return {
         exitCode: 0,
-        stdout: JSON.stringify({ id: PROJECT_ID }),
+        stdout: JSON.stringify({
+          ok: true,
+          profile: AGENT_RUNTIME_PROFILE,
+          cli: { version: "1" },
+          javascript: { name: "node", version: "22.0.0" },
+          project: { id: PROJECT_ID },
+        }),
         stderr: "",
         durationMs: 1,
       }
@@ -1137,7 +1157,7 @@ class IncompatibleRuntimeSandbox extends RecordingSandbox {
       script.includes("SIXB_BASH_ENV_READY")
     ) {
       this.commands.push({ command, args, options })
-      return { exitCode: 29, stdout: "", stderr: "node: not found", durationMs: 1 }
+      return { exitCode: 24, stdout: "", stderr: "node: not found", durationMs: 1 }
     }
     return super.runCommand(command, args, options)
   }
@@ -1257,6 +1277,7 @@ async function queueWorkflowAgentNode(input: {
   readonly model: LanguageModelV4
   readonly tools?: readonly AgentToolDefinition[]
   readonly storage?: Storage
+  readonly sandboxes?: SandboxFactory
   readonly runId: string
   readonly requestedByPrincipal?: typeof REQUESTER
   readonly requesterGroupIds?: readonly string[]
@@ -1284,7 +1305,7 @@ async function queueWorkflowAgentNode(input: {
     lakeStorage: new InMemoryLakeStorage(),
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
-    sandboxes: new RecordingSandboxFactory(),
+    sandboxes: input.sandboxes ?? new RecordingSandboxFactory(),
   })
   const runs = sixb.storage.workflowRuns
   if (!runs) throw new Error("expected workflow run storage")
@@ -2065,6 +2086,57 @@ describe("AgentWorker", () => {
           nodeRunId,
         },
       })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("fails a workflow agent node when concurrent sandbox preflight fails", async () => {
+    const sandboxes = new IncompatibleRuntimeSandboxFactory()
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: structuredAnswerUntilAbortedModel(),
+      sandboxes,
+      runId: "workflow-runtime-profile-failure",
+    })
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+
+    await worker.start()
+    try {
+      const execution = await waitFor(
+        async () => {
+          const record = await runs.agentNodes.getByNodeRunId({
+            projectId: PROJECT_ID,
+            nodeRunId,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "workflow runtime profile failure" }
+      )
+
+      expect(execution).toMatchObject({
+        status: "failed",
+        error: {
+          code: "agent.execution_failed",
+          details: {
+            agentId: "workflow-usage-agent",
+            workflowId: "workflow-usage-test",
+            workflowRunId: "workflow-runtime-profile-failure",
+            nodeId: "workflow-usage-step",
+            nodeRunId,
+            provider: "smolvm",
+            runtimeProfile: AGENT_RUNTIME_PROFILE,
+            runtimeCheck: "javascript-runtime",
+            runtimeFailure: "nonzero-exit",
+            runtimeExitCode: "24",
+            remediation: "Provide Bun 1.3+ or Node 22+ in the configured sandbox host or image.",
+          },
+        },
+      })
+      await expect(
+        runs.getById({ projectId: PROJECT_ID, id: "workflow-runtime-profile-failure" })
+      ).resolves.toMatchObject({ status: "failed" })
+      expect(sandboxes.sandbox.destroyed).toBe(true)
+      expect(JSON.stringify(execution.error)).not.toContain("node: not found")
     } finally {
       await worker.stop()
     }
@@ -6040,7 +6112,9 @@ describe("AgentWorker", () => {
           provider: "smolvm",
           runtimeProfile: AGENT_RUNTIME_PROFILE,
           runtimeCheck: "javascript-runtime",
-          remediation: expect.stringContaining("bun run agent:image"),
+          runtimeFailure: "nonzero-exit",
+          runtimeExitCode: "24",
+          remediation: "Provide Bun 1.3+ or Node 22+ in the configured sandbox host or image.",
         },
       })
       expect(JSON.stringify(run.error)).not.toContain("node: not found")
