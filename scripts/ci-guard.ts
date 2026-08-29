@@ -16,6 +16,7 @@
  *   bun scripts/ci-guard.ts --stall 60 [--max 420] bun test
  */
 
+import type { EventEmitter } from "node:events"
 import { existsSync, readdirSync, readFileSync, readlinkSync } from "node:fs"
 import { join } from "node:path"
 
@@ -83,7 +84,8 @@ export async function main(argv: readonly string[]): Promise<number> {
   let relayingSignal = false
   const signalHandlers = new Map<NodeJS.Signals, () => void>()
   function removeSignalHandlers(): void {
-    for (const [signal, handler] of signalHandlers) process.off(signal, handler)
+    const processEvents: EventEmitter = process
+    for (const [signal, handler] of signalHandlers) processEvents.off(signal, handler)
   }
   for (const signal of TERMINATION_SIGNALS) {
     const handler = (): void => {

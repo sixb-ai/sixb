@@ -12,9 +12,10 @@ import { join } from "node:path"
  * `paths` entry pointing at a sibling's source. Drop the `paths` block and the build is correct
  * either way; that is the control, and it is why the block is not incidental setup.
  *
- * Each test names the line to delete to watch it fail. One of them needs Bun 1.3.14
- * (`.bun-version`) to reach its trigger at all; the other fails on any version. That difference is
- * the reason the release gate asserts on the artifact and does not rely on these tests alone.
+ * Each test names the line to delete to watch it fail. One of them needs Bun 1.3.14 or newer
+ * (`.bun-version` is currently 1.4.0) to reach its trigger at all; the other fails on every tested
+ * version. That difference is the reason the release gate asserts on the artifact and does not
+ * rely on these tests alone.
  */
 
 const buildPackageScript = join(import.meta.dir, "..", "build-package.ts")
@@ -33,7 +34,7 @@ describe("build-package", () => {
 
     // Delete `plugins: workspaceBoundaryPlugins(...)` from `build-package.ts` to watch these fail.
     // Bun 1.3.8 resolved through `packages: "external"` before it consulted `paths`, so this
-    // passes either way there; 1.3.14 is where the alias wins and the sibling gets absorbed.
+    // passes either way there; in 1.3.14 and 1.4.0 the alias wins and the sibling gets absorbed.
     expect(output).toContain('from "@sixb/fixture-dependency"')
     expect(output).toContain('from "@sixb/fixture-dependency/subpath"')
     expect(output).not.toContain('from "fixture-third-party"')
@@ -45,7 +46,7 @@ describe("build-package", () => {
 
     // Delete `writeResolutionBoundary(distRoot)` from `build-package.ts` to watch these fail: the
     // consumer's own `paths` map reaches inside its dist and the bundle follows the alias into
-    // source that the build never saw. Fails on 1.3.8 and 1.3.14 alike.
+    // source that the build never saw. Fails on 1.3.8, 1.3.14, and 1.4.0 alike.
     expect(browserBundle).not.toContain("source-only-after-build")
     expect(browserBundle).toContain('thirdPartyValue = "root"')
   }, 20_000)

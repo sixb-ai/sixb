@@ -10,7 +10,7 @@ const args = process.argv.slice(2)
  * `bun install` only warns about `engines`, so without this check an older Bun fails later on
  * whichever API it happens to be missing, far from the cause.
  */
-const MINIMUM_BUN_VERSION = "1.3.0"
+const MINIMUM_BUN_VERSION = "1.4.0"
 
 assertSupportedBunVersion()
 
