@@ -4,8 +4,10 @@ import {
   createAuthPersonalAccessToken,
   createSixbClient,
   isSixbApiError,
+  listActions,
   listAuthAccessTokens,
   normalizeSixbApiBaseUrl,
+  requestAction,
   requestSyncRun,
   SixbApiError,
 } from "../src"
@@ -117,6 +119,76 @@ describe("createSixbClient", () => {
     expect(requests[0]?.credentials).toBe("include")
     expect(requests[0]?.headers.get("x-sixb-csrf")).toBe("csrf_1")
     expect(requests[0]?.headers.get("authorization")).toBeNull()
+  })
+
+  test("enforces shared authority after every request interceptor", async () => {
+    const { fetchMock, requests } = createObservedFetch({
+      runId: "run_1",
+      queuedAt: "2026-08-29T10:00:00.000Z",
+      created: true,
+    })
+    const sharedClient = createSixbClient({
+      baseUrl: "https://api.example.test",
+      auth: {
+        kind: "shared",
+        grantId: "shr_1",
+        csrfToken: () => "csrf_1",
+      },
+      fetch: fetchMock,
+    })
+    sharedClient.interceptors.request.use((request) => {
+      const headers = new Headers(request.headers)
+      headers.set("authorization", "Bearer ambient")
+      headers.set("x-sixb-share-grant", "shr_other")
+      return new Request(request, { credentials: "omit", headers, redirect: "follow" })
+    })
+
+    await requestAction({
+      client: sharedClient,
+      path: { actionId: "approve" },
+      body: { subject: { kind: "none" } },
+    })
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.credentials).toBe("include")
+    expect(requests[0]?.redirect).toBe("error")
+    expect(requests[0]?.headers.get("authorization")).toBeNull()
+    expect(requests[0]?.headers.get("x-sixb-share-grant")).toBe("shr_1")
+    expect(requests[0]?.headers.get("x-sixb-csrf")).toBe("csrf_1")
+  })
+
+  test("refuses to send shared authority outside the configured API origin", async () => {
+    let fetchCalled = false
+    const fetchMock = Object.assign(
+      async () => {
+        fetchCalled = true
+        return Response.json([])
+      },
+      { preconnect: fetch.preconnect }
+    ) satisfies typeof fetch
+    const sharedClient = createSixbClient({
+      baseUrl: "https://api.example.test",
+      auth: { kind: "shared", grantId: "shr_1" },
+      fetch: fetchMock,
+    })
+
+    await expect(
+      listActions({
+        client: sharedClient,
+        baseUrl: "https://other.example.test",
+        throwOnError: true,
+      })
+    ).rejects.toThrow("Shared access requests cannot leave the configured API origin")
+    expect(fetchCalled).toBe(false)
+  })
+
+  test("rejects invalid shared grant ids before configuring a transport", () => {
+    expect(() =>
+      createSixbClient({
+        baseUrl: "https://api.example.test",
+        auth: { kind: "shared", grantId: " shr_1 " },
+      })
+    ).toThrow("Shared access grant id is invalid")
   })
 })
 

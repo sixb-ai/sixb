@@ -36,9 +36,11 @@ import {
   events as selectEvents,
 } from "@sixb/core/events/selectors"
 import type { LinkToken, ObjectTypeWithTokens, Property, PropertyToken } from "@sixb/core/ontology"
+import { hasClientSharedAuthority, SHARED_ACCESS_REALTIME_UNAVAILABLE } from "./client-authority"
 import type { SixbEvent, SixbEventOfTopic, SixbEventOfType, SixbEventTopic } from "./events-model"
 import { createEventSocket, type EventSocketState } from "./events-transport"
 import type { Client } from "./generated/client"
+import { client as generatedClient } from "./generated/client.gen"
 
 /**
  * Conjunctive event-filter scope. Event subscriptions are a single flat scope
@@ -340,7 +342,22 @@ export interface EventSubscribeExecutor {
  * filtering an optimization rather than a correctness dependency.
  */
 export function createWsSubscribeExecutor(options?: { client?: Client }): EventSubscribeExecutor {
-  const baseUrl = options?.client?.getConfig().baseUrl
+  const transportClient = options?.client ?? generatedClient
+  const baseUrl = transportClient.getConfig().baseUrl
+  if (hasClientSharedAuthority(transportClient)) {
+    return {
+      subscribe(_filter, _handler, subscribeOptions) {
+        subscribeOptions?.onError?.(SHARED_ACCESS_REALTIME_UNAVAILABLE)
+        subscribeOptions?.onStateChange?.({
+          connected: false,
+          reconnecting: false,
+          error: SHARED_ACCESS_REALTIME_UNAVAILABLE,
+        })
+        return () => undefined
+      },
+    }
+  }
+
   return {
     subscribe(filter, handler, subscribeOptions) {
       const matches = buildEventPredicate(filter)

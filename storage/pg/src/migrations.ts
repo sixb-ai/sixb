@@ -86,6 +86,8 @@ import deviceAuthorizationsSql from "./migrations/034-device-authorizations.sql"
   type: "text",
 }
 import shareGrantsSql from "./migrations/035-share-grants.sql" with { type: "text" }
+import shareSessionsSql from "./migrations/036-share-sessions.sql" with { type: "text" }
+import delegatedExecutionsSql from "./migrations/037-delegated-executions.sql" with { type: "text" }
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -374,6 +376,8 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("033-retire-agent-definitions", retireAgentDefinitionsSql),
     pgSql("034-device-authorizations", deviceAuthorizationsSql),
     pgSql("035-share-grants", shareGrantsSql),
+    pgSql("036-share-sessions", shareSessionsSql),
+    pgSql("037-delegated-executions", delegatedExecutionsSql),
   ],
 })
 

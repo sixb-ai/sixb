@@ -1,4 +1,5 @@
 import type { AuthStorage } from "../auth"
+import type { ShareSessionStorage } from "../share-sessions"
 import { ExecutionStorageError } from "./errors"
 import type { CreateExecutionInput, ExecutionRecord, ExecutionStorage } from "./types"
 import {
@@ -18,12 +19,17 @@ function executionKey(projectId: string, id: string): string {
 export class InMemoryExecutionStorage implements ExecutionStorage {
   private readonly rows = new Map<string, ExecutionRecord>()
   private readonly runRootOperation: RunRootOperation
+  private readonly shareSessions?: Pick<ShareSessionStorage, "getById">
 
   constructor(
     private readonly auth: AuthStorage,
-    input: { readonly runRootOperation?: RunRootOperation } = {}
+    input: {
+      readonly runRootOperation?: RunRootOperation
+      readonly shareSessions?: Pick<ShareSessionStorage, "getById">
+    } = {}
   ) {
     this.runRootOperation = input.runRootOperation ?? runDirectly
+    this.shareSessions = input.shareSessions
   }
 
   snapshot(): InMemoryExecutionStorageSnapshot {
@@ -54,6 +60,8 @@ export class InMemoryExecutionStorage implements ExecutionStorage {
           const existing = this.rows.get(executionKey(projectId, id))
           return existing ? cloneExecutionRecord(existing) : null
         },
+        getShareSession: async ({ projectId, id }) =>
+          (await this.shareSessions?.getById({ projectId, id })) ?? null,
       })
 
       this.rows.set(key, cloneExecutionRecord(record))

@@ -30,6 +30,7 @@ import {
   disableAuthServiceAccount,
   disconnectConnectorConnection,
   exchangeDeviceAuthorization,
+  exchangeSharedAccess,
   existsObjects,
   facetObjects,
   getAction,
@@ -61,6 +62,7 @@ import {
   getProjection,
   getProjectionRun,
   getRule,
+  getSharedAccessSession,
   getStatus,
   getSync,
   getTelemetryHistory,
@@ -131,6 +133,7 @@ import {
   signFileUploadPart,
   signOut,
   signOutAll,
+  signOutSharedAccess,
   startConnectorConnectionRun,
   submitWorkflowIntervention,
   suspendAuthMember,
@@ -201,6 +204,9 @@ import type {
   DisconnectConnectorConnectionResponse,
   ExchangeDeviceAuthorizationData,
   ExchangeDeviceAuthorizationResponse,
+  ExchangeSharedAccessData,
+  ExchangeSharedAccessError,
+  ExchangeSharedAccessResponse,
   ExistsObjectsData,
   ExistsObjectsError,
   ExistsObjectsResponse,
@@ -292,6 +298,9 @@ import type {
   GetRuleData,
   GetRuleError,
   GetRuleResponse,
+  GetSharedAccessSessionData,
+  GetSharedAccessSessionError,
+  GetSharedAccessSessionResponse,
   GetStatusData,
   GetStatusResponse,
   GetSyncData,
@@ -489,6 +498,9 @@ import type {
   SignOutData,
   SignOutError,
   SignOutResponse,
+  SignOutSharedAccessData,
+  SignOutSharedAccessError,
+  SignOutSharedAccessResponse,
   StartConnectorConnectionRunData,
   StartConnectorConnectionRunError,
   StartConnectorConnectionRunResponse,
@@ -3126,6 +3138,85 @@ export const revokeSharedAccessGrantMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await revokeSharedAccessGrant({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Exchange a shared link for a short-lived session
+ */
+export const exchangeSharedAccessMutation = (
+  options?: Partial<Options<ExchangeSharedAccessData>>
+): UseMutationOptions<
+  ExchangeSharedAccessResponse,
+  ExchangeSharedAccessError,
+  Options<ExchangeSharedAccessData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    ExchangeSharedAccessResponse,
+    ExchangeSharedAccessError,
+    Options<ExchangeSharedAccessData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await exchangeSharedAccess({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const getSharedAccessSessionQueryKey = (options: Options<GetSharedAccessSessionData>) =>
+  createQueryKey("getSharedAccessSession", options)
+
+/**
+ * Get the current shared-access session
+ */
+export const getSharedAccessSessionOptions = (options: Options<GetSharedAccessSessionData>) =>
+  queryOptions<
+    GetSharedAccessSessionResponse,
+    GetSharedAccessSessionError,
+    GetSharedAccessSessionResponse,
+    ReturnType<typeof getSharedAccessSessionQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getSharedAccessSession({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getSharedAccessSessionQueryKey(options),
+  })
+
+/**
+ * Sign out a shared-access session
+ */
+export const signOutSharedAccessMutation = (
+  options?: Partial<Options<SignOutSharedAccessData>>
+): UseMutationOptions<
+  SignOutSharedAccessResponse,
+  SignOutSharedAccessError,
+  Options<SignOutSharedAccessData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    SignOutSharedAccessResponse,
+    SignOutSharedAccessError,
+    Options<SignOutSharedAccessData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await signOutSharedAccess({
         ...options,
         ...fnOptions,
         throwOnError: true,

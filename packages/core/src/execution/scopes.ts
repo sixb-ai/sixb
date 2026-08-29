@@ -63,15 +63,18 @@ export function createDelegatedRequestScope(input: {
     readonly limits: ObjectReadExecutionLimits
   }
   readonly actionApply?: readonly DelegatedActionApplyTarget[]
+  readonly delegation?: Extract<AuthorizationRef, { readonly type: "delegated" }>["delegation"]
 }): ExecutionScope {
   const execution = createRequestExecution(input)
   const actionApply = input.actionApply
+  const delegation = input.delegation
   return Object.freeze({
     execution,
     authorization: createDelegatedRuntimeAuthorization({
       execution,
       objectRead: input.objectRead,
       ...(actionApply === undefined ? {} : { actionApply }),
+      ...(delegation === undefined ? {} : { delegation }),
     }),
   })
 }
