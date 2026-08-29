@@ -1,4 +1,4 @@
-# Canonical sixb agent sandbox image.
+# Managed SmolVM agent sandbox image.
 #
 # Spin-up scales with image size, so this stays lean — only what the agent
 # actually uses through the API gateway:
@@ -10,7 +10,7 @@
 #                   unreachable under the sandbox's gateway-only egress)
 #
 # The multi-platform base digest is pinned so rebuilding runtime-v1 is reproducible. Bump both this
-# digest and the cache namespace in src/agent-image.ts when the runtime profile changes.
+# digest and the cache namespace in src/agent-image.ts when the managed image requirements change.
 FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
 
 RUN apk add --no-cache bash git ca-certificates ripgrep python3

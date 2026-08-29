@@ -10,7 +10,7 @@ export interface SmolvmCliConfig {
   /** Resolved smolvm binary name or absolute path. */
   readonly bin: string
   /**
-   * OCI image the VM boots from. Sixb agent images need Bash, realpath, tail, head, base64, CA
+   * OCI image the VM boots from. Sixb agent images need Bash, standard file utilities, CA
    * certificates, and Bun 1.3+ or Node 22+.
    *
    * IMPORTANT: smolvm pulls the image at `start` from inside the guest, so an

@@ -14,11 +14,11 @@ container system start
 ```
 
 The default is the official `node:22-bookworm` multi-platform image pinned to an immutable OCI
-digest. Custom agent images must satisfy `sixb-agent-runtime/v1`:
+digest. Custom images used by agents need:
 
 - `bash`
 - `/bin/sh`
-- `realpath`, `tail`, `head`, and `base64` for the built-in `read` tool
+- standard file utilities for reads and output collection
 - CA certificates and Bun 1.3+ or Node 22+ for the portable `sixb` CLI
 - `dirname`, `mkdir`, `cat`, and optionally `chmod` for file materialization
 

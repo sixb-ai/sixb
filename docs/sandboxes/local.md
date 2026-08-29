@@ -14,9 +14,9 @@ createSixb({ sandboxes: new LocalSandboxFactory() })
 See the [overview](./overview.md) for the shared `Sandbox` / `SandboxFactory` contract this provider
 implements.
 
-The built-in agent tools use the host's `PATH`. To satisfy `sixb-agent-runtime/v1`, the host must
-provide Bash, `realpath`, `tail`, `head`, `base64`, CA certificates, and either Bun 1.3+ or Node
-22+. `curl` and `jq` are not required.
+The built-in agent tools use the host's `PATH`. For agent use, the host needs Bash, the standard
+file utilities used by reads and output collection, CA certificates, and either Bun 1.3+ or Node
+22+. The local provider does not install or modify host tools. `curl` and `jq` are not required.
 
 ## Isolation backends
 
