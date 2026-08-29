@@ -291,7 +291,7 @@ async function resolveGatewayRunAuthorization(input: {
 function inheritedRequestAuthorization(
   resolved: AgentExecutionAuthorization,
   authorizationRef: ExecutionRecord["authorizationRef"]
-): RequestExecutionAuthorization {
+): Extract<RequestExecutionAuthorization, { readonly type: "principal" | "disabled" }> {
   if (
     resolved.type !== "principal" ||
     authorizationRef.type !== "principal" ||

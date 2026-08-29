@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { defineObjectType, prop } from "@sixb/core/ontology"
+import {
+  configureSixbSharedBrowserClient,
+  type SixbSharedBrowserClientController,
+} from "../src/browser"
 import type { SixbEvent } from "../src/events"
 import { events } from "../src/events-builder"
 import { createEventsRegistry } from "../src/events-provider"
@@ -69,15 +73,69 @@ const tick = (ms = 5) => new Promise((resolve) => setTimeout(resolve, ms))
 
 describe("createEventsRegistry", () => {
   let originalWebSocket: typeof WebSocket
+  let sharedController: SixbSharedBrowserClientController | null
 
   beforeEach(() => {
     originalWebSocket = globalThis.WebSocket
+    sharedController = null
     FakeWebSocket.instances = []
     globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket
   })
 
   afterEach(() => {
+    sharedController?.dispose()
     globalThis.WebSocket = originalWebSocket
+  })
+
+  test("does not construct the provider socket under singleton shared authority", () => {
+    sharedController = configureSixbSharedBrowserClient(
+      {
+        api: { baseUrl: "https://api.example.test" },
+        auth: { audience: "app", enabled: true },
+      },
+      {
+        grantId: "shr_1",
+        fetch: Object.assign(async () => Response.json({}), { preconnect: fetch.preconnect }),
+      }
+    )
+    const registry = createEventsRegistry()
+    const errors: string[] = []
+    const states: Array<{ connected: boolean; reconnecting: boolean; error: string | null }> = []
+
+    registry.register(events.object(Device).telemetry().ir, () => undefined, {
+      onError: (error) => errors.push(error),
+      onStateChange: (state) => states.push(state),
+    })
+
+    expect(FakeWebSocket.instances).toHaveLength(0)
+    expect(errors).toEqual(["Live updates are unavailable during shared access."])
+    expect(states.at(-1)).toEqual({
+      connected: false,
+      reconnecting: false,
+      error: "Live updates are unavailable during shared access.",
+    })
+    registry.close()
+  })
+
+  test("re-enables provider sockets after shared authority is disposed", () => {
+    sharedController = configureSixbSharedBrowserClient(
+      {
+        api: { baseUrl: "https://api.example.test" },
+        auth: { audience: "app", enabled: true },
+      },
+      {
+        grantId: "shr_1",
+        fetch: Object.assign(async () => Response.json({}), { preconnect: fetch.preconnect }),
+      }
+    )
+    sharedController.dispose()
+    sharedController = null
+
+    const registry = createEventsRegistry()
+    registry.register(events.object(Device).telemetry().ir, () => undefined)
+
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    registry.close()
   })
 
   test("shares one socket and closes it after the last unregister", async () => {

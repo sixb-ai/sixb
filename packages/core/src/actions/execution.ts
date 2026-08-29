@@ -21,6 +21,7 @@ import {
   requestAction,
   requestActionAndWait,
 } from "./request"
+import { canDelegationAccessActionRun } from "./run-authorization"
 import type { ActionDefinition } from "./types"
 
 export interface ActionRunsRuntime {
@@ -109,15 +110,28 @@ export function createActionsRuntime(
     requestAndWait: (input) => requestActionAndWait(runtime, execution, input),
     runs: {
       getById: async (runId) => {
-        if (authorization.type === "denied" || authorization.type === "delegated") return null
+        if (
+          authorization.type === "denied" ||
+          (authorization.type === "delegated" &&
+            (!authorization.delegation || authorization.actionApply.length === 0))
+        )
+          return null
         const run =
           (await runtime.storage.actionRuns?.getById({
             projectId,
             id: runId,
           })) ?? null
         return run &&
-          (authorization.type === "unrestricted" || canViewActionRun(authorization.context, run))
-          ? run
+          (authorization.type === "unrestricted" ||
+            (authorization.type === "principal" && canViewActionRun(authorization.context, run)) ||
+            (authorization.type === "delegated" &&
+              (await canDelegationAccessActionRun({
+                storage: runtime.storage,
+                projectId,
+                authority: authorization,
+                run,
+              }))))
+          ? release(run)
           : null
       },
       list: (input = {}) => {
