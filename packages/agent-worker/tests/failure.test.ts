@@ -55,7 +55,11 @@ describe("Agent execution failure", () => {
   })
 
   test("records actionable runtime-profile context without exposing a gateway URL", () => {
-    const error = new AgentRuntimeProfileError("smolvm", "javascript-runtime")
+    const error = new AgentRuntimeProfileError(
+      "smolvm",
+      "javascript-runtime",
+      "unsupported-version"
+    )
     const failure = toAgentExecutionFailure(error, { status: "failed", at, details })
 
     expect(failure).toEqual({
@@ -68,8 +72,8 @@ describe("Agent execution failure", () => {
         provider: "smolvm",
         runtimeProfile: AGENT_RUNTIME_PROFILE,
         runtimeCheck: "javascript-runtime",
-        remediation:
-          "Rebuild the managed smolvm agent image with 'bun run agent:image', or configure a compatible runtime-v1 image.",
+        runtimeFailure: "unsupported-version",
+        remediation: "Provide Bun 1.3+ or Node 22+ in the configured sandbox host or image.",
       },
     })
     expect(JSON.stringify(failure)).not.toContain("http")

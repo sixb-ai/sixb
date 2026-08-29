@@ -16,6 +16,7 @@ import { generateText, jsonSchema, type ModelMessage, NoObjectGeneratedError, Ou
 import { type AiSdkTraceStep, agentTraceFromAiSdkSteps } from "./ai-sdk-adapters"
 import type { AiModelCallRecorder } from "./model-call-recorder"
 import { runAgentLoop } from "./run-agent-loop"
+import { monitorSandboxReadiness } from "./sandbox-readiness"
 import type { AgentTurnContext } from "./types"
 
 const WORKFLOW_OUTPUT_FINALIZATION_ATTEMPTS = 2
@@ -94,7 +95,8 @@ export async function runWorkflowAgentNode(
 
   const timeout = new AbortController()
   const timer = setTimeout(() => timeout.abort(), input.context.turnTimeoutMs)
-  const abortSignal = AbortSignal.any([input.signal, timeout.signal])
+  const sandboxReadiness = monitorSandboxReadiness(input.context.sandboxReady)
+  const abortSignal = AbortSignal.any([input.signal, timeout.signal, sandboxReadiness.signal])
   const completedSteps: AiSdkTraceStep[] = []
   const traceDetails = {
     agentId: input.agent.id,
@@ -133,6 +135,7 @@ export async function runWorkflowAgentNode(
       },
     })
     input.usageRecorder.assertHealthy()
+    sandboxReadiness.throwIfFailed()
     if (researchError !== undefined) throw researchError
 
     const researchText = await research.text
@@ -211,6 +214,7 @@ export async function runWorkflowAgentNode(
       )
     }
 
+    sandboxReadiness.throwIfFailed()
     const output = snapshotWorkflowAgentStepOutput({
       workflowId: input.workflowId,
       agentStep: input.agentStep,
@@ -224,6 +228,8 @@ export async function runWorkflowAgentNode(
       trace: agentTraceFromAiSdkSteps(completedSteps, traceDetails),
     }
   } catch (cause) {
+    // Prefer the concrete provisioning failure over the abort it causes in either model phase.
+    sandboxReadiness.throwIfFailed()
     throw new WorkflowAgentNodeExecutionError({
       phase,
       finishReason,

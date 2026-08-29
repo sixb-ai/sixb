@@ -7,6 +7,7 @@ export interface AgentCliContractImplementation {
   readonly name: string
   readonly command: readonly string[]
   readonly version: string
+  readonly runtime: "bun" | "node"
 }
 
 interface CliResult {
@@ -191,6 +192,30 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
 
       const version = await runCli(implementation, ["--version"])
       expect(version).toEqual({ exitCode: 0, stdout: `${implementation.version}\n`, stderr: "" })
+    })
+
+    test("reports one compact, stable doctor contract", async () => {
+      const api = startGraphApi()
+      try {
+        const result = await runCli(implementation, ["doctor"], apiEnv(api))
+        expect(result.exitCode).toBe(0)
+        expect(result.stderr).toBe("")
+        const report = JSON.parse(result.stdout)
+        expect(report).toEqual({
+          ok: true,
+          profile: "sixb-agent-runtime/v1",
+          cli: { version: implementation.version.split(" ").at(-1) },
+          javascript: {
+            name: implementation.runtime,
+            version: expect.stringMatching(/^\d+\.\d+(?:\.\d+)?/),
+          },
+          project: { id: "contract-project" },
+        })
+        expect(report.project.name).toBeUndefined()
+        expect(api.requests.map((request) => request.url.pathname)).toEqual(["/api/project"])
+      } finally {
+        api.close()
+      }
     })
 
     test("uses stable JSON errors and exit codes for local and API failures", async () => {

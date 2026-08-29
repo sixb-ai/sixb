@@ -62,6 +62,7 @@
     "@ai-sdk/provider": "^4.0.0",
     "@sixb/connector-exa": "workspace:*",
     "@sixb/core": "workspace:*",
+    "@sixb/sandboxes-local": "workspace:*",
     "@types/bun": "latest",
     "typescript": "^5.7.0"
   },

@@ -1,23 +1,29 @@
 import { readFile } from "node:fs/promises"
-import { AGENT_RUNTIME_PROFILE } from "../../agent-runtime/profile"
+import { AGENT_RUNTIME_PROFILE, type AgentDoctorReport } from "../../agent-runtime/profile"
 import { ApiClient } from "../api-client"
 import { isHelp, requireExact } from "../arguments"
-import { AGENT_CLI_VERSION, fail, writeJson, writeText } from "../output"
+import { AGENT_CLI_VERSION, CliError, EXIT_API, fail, writeJson, writeText } from "../output"
 import { GROUP_HELP } from "./metadata"
-import { isFileError } from "./shared"
+import { asRecord, isFileError } from "./shared"
 
 export async function doctor(args: string[]): Promise<void> {
   if (isHelp(args[0])) return writeText(GROUP_HELP.doctor)
   requireExact(args, 0, "doctor accepts no arguments.")
-  const api = new ApiClient()
-  writeJson({
+  const project = asRecord(await new ApiClient().get("/api/project"))
+  if (typeof project.id !== "string" || project.id.length === 0) {
+    throw new CliError(
+      { code: "invalid_api_response", message: "The Sixb API returned an invalid project." },
+      EXIT_API
+    )
+  }
+  const report: AgentDoctorReport = {
     ok: true,
-    cliVersion: AGENT_CLI_VERSION,
-    runtimeProfile: AGENT_RUNTIME_PROFILE,
-    runtime: runtimeInfo(),
-    dependencies: { fetch: true, json: true },
-    project: await api.get("/api/project"),
-  })
+    profile: AGENT_RUNTIME_PROFILE,
+    cli: { version: AGENT_CLI_VERSION },
+    javascript: javascriptRuntime(),
+    project: { id: project.id },
+  }
+  writeJson(report)
 }
 
 export async function context(args: string[]): Promise<void> {
@@ -48,7 +54,7 @@ export async function project(args: string[]): Promise<void> {
   writeJson(await new ApiClient().get("/api/project"))
 }
 
-function runtimeInfo(): { readonly name: "bun" | "node"; readonly version: string } {
+function javascriptRuntime(): AgentDoctorReport["javascript"] {
   if (typeof globalThis.Bun === "object") {
     return { name: "bun", version: globalThis.Bun.version }
   }

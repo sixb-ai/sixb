@@ -46,6 +46,8 @@ function translateAgentExecutionError(
         provider: error.provider,
         runtimeProfile: error.profile,
         runtimeCheck: error.check,
+        runtimeFailure: error.reason,
+        ...(error.exitCode === undefined ? {} : { runtimeExitCode: String(error.exitCode) }),
         remediation: error.remediation,
       },
     })

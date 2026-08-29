@@ -23,6 +23,7 @@ import { appendMessageAndFinishRunOrThrow, finishRunOrThrow } from "./finalize"
 import { AiModelCallRecorder } from "./model-call-recorder"
 import { collectAgentOutputAttachments } from "./output-attachments"
 import { runAgentLoop } from "./run-agent-loop"
+import { monitorSandboxReadiness } from "./sandbox-readiness"
 import { loadAgentThreadModelContext } from "./thread-context"
 import type { AgentTurnContext } from "./types"
 
@@ -130,14 +131,9 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   // turn ends now. We do NOT await provisioning before finalizing: a turn that out-runs a slow boot
   // keeps the latency win, so a boot that fails only after the turn has drained still finalizes
   // (best-effort strict).
-  const provisionAbort = new AbortController()
-  let provisionError: unknown
-  context.sandboxReady?.catch((error) => {
-    provisionError = error
-    provisionAbort.abort()
-  })
+  const sandboxReadiness = monitorSandboxReadiness(context.sandboxReady)
 
-  const abortSignal = AbortSignal.any([signal, timeoutAbort.signal, provisionAbort.signal])
+  const abortSignal = AbortSignal.any([signal, timeoutAbort.signal, sandboxReadiness.signal])
 
   const result = runAgentLoop({
     agent,
@@ -199,9 +195,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     // interpreting the stream as a success or cancellation.
     usageRecorder.assertHealthy()
     // A sandbox failure and a timeout take precedence over the abort-shaped error they cause.
-    if (provisionError !== undefined) {
-      throw provisionError
-    }
+    sandboxReadiness.throwIfFailed()
     if (timedOut) {
       const completedAt = new Date()
       return finalizeInterruptedTurn({

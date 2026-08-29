@@ -13,12 +13,14 @@ runAgentCliContractSuite({
   name: "generated artifact on Bun",
   command: [process.execPath, artifactPath],
   version: "sixb agent CLI 1",
+  runtime: "bun",
 })
 
 runAgentCliContractSuite({
   name: "generated artifact on Node",
   command: ["node", artifactPath],
   version: "sixb agent CLI 1",
+  runtime: "node",
 })
 
 const CLI_API_ROUTES = [

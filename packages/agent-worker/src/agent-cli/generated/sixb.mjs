@@ -1174,15 +1174,18 @@ async function doctor(args) {
   if (isHelp(args[0]))
     return writeText(GROUP_HELP.doctor);
   requireExact(args, 0, "doctor accepts no arguments.");
-  const api = new ApiClient;
-  writeJson({
+  const project = asRecord2(await new ApiClient().get("/api/project"));
+  if (typeof project.id !== "string" || project.id.length === 0) {
+    throw new CliError({ code: "invalid_api_response", message: "The Sixb API returned an invalid project." }, EXIT_API);
+  }
+  const report = {
     ok: true,
-    cliVersion: AGENT_CLI_VERSION,
-    runtimeProfile: AGENT_RUNTIME_PROFILE,
-    runtime: runtimeInfo(),
-    dependencies: { fetch: true, json: true },
-    project: await api.get("/api/project")
-  });
+    profile: AGENT_RUNTIME_PROFILE,
+    cli: { version: AGENT_CLI_VERSION },
+    javascript: javascriptRuntime(),
+    project: { id: project.id }
+  };
+  writeJson(report);
 }
 async function context(args) {
   if (isHelp(args[0]))
@@ -1214,7 +1217,7 @@ async function project(args) {
   requireExact(args, 1, "project show accepts no arguments.");
   writeJson(await new ApiClient().get("/api/project"));
 }
-function runtimeInfo() {
+function javascriptRuntime() {
   if (typeof globalThis.Bun === "object") {
     return { name: "bun", version: globalThis.Bun.version };
   }
