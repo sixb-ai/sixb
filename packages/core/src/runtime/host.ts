@@ -67,6 +67,7 @@ import type {
   RoleDefinition,
   SecurityDefinitionCatalog,
 } from "../security"
+import type { ShareDefinition } from "../shares"
 import type { Storage } from "../storage"
 import type { SyncDefinition } from "../syncs"
 import type { RegisteredWebhook } from "../webhooks"
@@ -118,6 +119,7 @@ export interface SixbHostOptions<TOntologySources extends readonly OntologySourc
   groups?: readonly GroupDefinition[]
   roles?: readonly RoleDefinition[]
   membershipPolicies?: readonly MembershipPolicyDefinition[]
+  shares?: readonly ShareDefinition[]
   auth?: SixbAuthConfig
 }
 

@@ -1185,6 +1185,7 @@ describe("bound Sixb surface", () => {
         "projections",
         "rules",
         "schedules",
+        "shares",
         "syncs",
         "workflows",
       ].sort()

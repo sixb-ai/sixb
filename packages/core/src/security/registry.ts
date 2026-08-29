@@ -27,6 +27,7 @@ export interface SecurityRegistryOptions {
   readonly pipelineIds?: ReadonlySet<string>
   readonly agentAvailable?: boolean
   readonly connectorIds?: ReadonlySet<string>
+  readonly shareIds?: ReadonlySet<string>
   readonly getSubTypes?: (objectTypeId: string) => readonly string[]
 }
 
@@ -52,6 +53,7 @@ export class SecurityRegistry implements SecurityDefinitionCatalog {
       connectorIds: input.connectorIds,
       observableIds: new Set(["logs", "aiUsage"]),
       manageableIds: new Set(["aiUsage"]),
+      shareIds: input.shareIds,
     })
 
     const universe = {
@@ -65,6 +67,7 @@ export class SecurityRegistry implements SecurityDefinitionCatalog {
       connectorIds: input.connectorIds ?? new Set<string>(),
       observableIds: new Set(["logs", "aiUsage"]),
       manageableIds: new Set(["aiUsage"]),
+      shareIds: input.shareIds ?? new Set<string>(),
       getSubTypes: input.getSubTypes ?? (() => []),
     }
 

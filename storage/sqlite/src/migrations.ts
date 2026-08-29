@@ -88,6 +88,7 @@ import retireAgentDefinitionsSql from "./migrations/033-retire-agent-definitions
 import deviceAuthorizationsSql from "./migrations/034-device-authorizations.sql" with {
   type: "text",
 }
+import shareGrantsSql from "./migrations/035-share-grants.sql" with { type: "text" }
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -177,6 +178,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("032-conversation-run-spec", conversationRunSpecSql),
     sqliteSql("033-retire-agent-definitions", retireAgentDefinitionsSql),
     sqliteSql("034-device-authorizations", deviceAuthorizationsSql),
+    sqliteSql("035-share-grants", shareGrantsSql),
   ],
 })
 

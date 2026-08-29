@@ -198,6 +198,77 @@ export const syncOrders = defineSync("sync-orders")
     expect(client).toEqual({ source: "discovered" })
   })
 
+  test("discovers Shares before validating security references", async () => {
+    const projectRoot = await createTempProjectRoot()
+
+    await writeProjectFile(
+      projectRoot,
+      "ontology/report.ts",
+      `import { defineObjectType, prop } from "${coreModuleUrl}"
+
+export const Report = defineObjectType({
+  id: "report",
+  name: "Report",
+  properties: [prop("id", "string", { required: true, primary: true })],
+})
+`
+    )
+    await writeProjectFile(
+      projectRoot,
+      "actions/acknowledge.ts",
+      `import { defineAction } from "${coreModuleUrl}"
+import { Report } from "../ontology/report"
+
+export const acknowledge = defineAction("acknowledge-report")
+  .on(Report)
+  .params({})
+  .edits(() => {})
+`
+    )
+    await writeProjectFile(
+      projectRoot,
+      "shares/published-report.ts",
+      `import { can, defineShare } from "${coreModuleUrl}"
+import { acknowledge } from "../actions/acknowledge"
+import { Report } from "../ontology/report"
+
+export const PublishedReport = defineShare("published-report", {
+  target: Report,
+  grants: ({ target }) => [can.view(target), can.apply(acknowledge).on(target)],
+})
+`
+    )
+    await writeProjectFile(
+      projectRoot,
+      "security/groups/publishers.ts",
+      `import { defineGroup } from "${coreModuleUrl}"
+
+export const Publishers = defineGroup("publishers")
+`
+    )
+    await writeProjectFile(
+      projectRoot,
+      "security/roles/publisher.ts",
+      `import { can, defineRole } from "${coreModuleUrl}"
+import { PublishedReport } from "../../shares/published-report"
+import { Publishers } from "../groups/publishers"
+
+export const Publisher = defineRole("publisher", {
+  grantedTo: [Publishers],
+  grants: [can.share(PublishedReport)],
+})
+`
+    )
+
+    const sixb = await createSixb({ projectRoot, ...createTestRuntimeDeps() })
+
+    expect(sixb.definitions.shares.list().map((share) => share.id)).toEqual(["published-report"])
+    expect(sixb.definitions.security.getRoleById("publisher")?.grants[0]).toMatchObject({
+      capability: "share",
+      selection: { ids: ["published-report"] },
+    })
+  })
+
   test("uses explicit workflows when provided", async () => {
     const projectRoot = await createTempProjectRoot()
 

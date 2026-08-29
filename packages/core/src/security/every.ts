@@ -16,6 +16,7 @@ import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets"
 import type { ObjectType } from "../ontology"
 import type { PipelineDefinition } from "../pipelines"
+import type { ShareDefinition } from "../shares"
 import type { SyncDefinition } from "../syncs"
 import type { WorkflowDefinition } from "../workflows/types"
 import { SecurityValidationError } from "./errors"
@@ -31,6 +32,7 @@ export const BREADTH_TARGETS = [
   "pipeline",
   "application",
   "connector",
+  "share",
 ] as const
 
 export type BreadthTarget = (typeof BREADTH_TARGETS)[number]
@@ -44,6 +46,7 @@ interface BreadthTargetInput {
   pipeline: PipelineDefinition
   application: ApplicationDefinition
   connector: ConnectorDefinition
+  share: ShareDefinition
 }
 
 /**
@@ -105,4 +108,5 @@ export const every = {
   pipeline: (): BreadthSelector<"pipeline"> => all("pipeline"),
   application: (): BreadthSelector<"application"> => all("application"),
   connector: (): BreadthSelector<"connector"> => all("connector"),
+  share: (): BreadthSelector<"share"> => all("share"),
 }

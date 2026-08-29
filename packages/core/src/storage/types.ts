@@ -12,6 +12,7 @@ import type { OntologyStorage } from "./ontology"
 import type { PipelineRunStorage } from "./pipeline-runs"
 import type { ProjectionRunStorage } from "./projection-runs"
 import type { RulesStorage } from "./rules"
+import type { ShareGrantStorage } from "./share-grants"
 import type { SyncRunStorage } from "./sync-runs"
 import type { TimeseriesStorage } from "./timeseries/types"
 import type { WebhookRunStorage } from "./webhook-runs"
@@ -232,6 +233,19 @@ export type {
   RulesStorage,
 } from "./rules"
 export type {
+  CreateShareGrantInput,
+  GetShareGrantByIdInput,
+  ListShareGrantsInput,
+  ListShareGrantsResult,
+  RevokeShareGrantInput,
+  ShareAuthoritySnapshot,
+  ShareAuthoritySnapshotV1,
+  ShareGrantRecord,
+  ShareGrantStorage,
+  ShareGrantStorageErrorCode,
+} from "./share-grants"
+export { ShareGrantStorageError } from "./share-grants"
+export type {
   FinishSyncRunInput,
   ListSyncRunsInput,
   ListSyncRunsResult,
@@ -340,6 +354,7 @@ export interface Storage {
   workflowInterventions?: WorkflowInterventionStorage
   webhookRuns?: WebhookRunStorage
   rules?: RulesStorage
+  shareGrants?: ShareGrantStorage
   fileUploadSessions?: FileUploadSessionStore
   connectorConnections?: ConnectorConnectionStorage
 

@@ -246,7 +246,7 @@ interface CapturedArray {
  * Read every caller-controlled property once and detach it before another getter can mutate it.
  * The compiler only ever observes the resulting plain, deeply frozen snapshot.
  */
-function captureSelectedObjectReadScope(value: unknown): SelectedObjectReadScope {
+export function captureSelectedObjectReadScope(value: unknown): SelectedObjectReadScope {
   if (!isRecord(value)) {
     throw invalidScope("scope must be a selected scope with a roots array")
   }

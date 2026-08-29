@@ -17,6 +17,7 @@ export type GrantKind =
   | "edit:object"
   | "append:telemetry"
   | "apply:action"
+  | "share:share"
   | "run:workflow"
   | "run:sync"
   | "run:pipeline"
@@ -35,6 +36,7 @@ export interface GrantUniverse {
   readonly objectTypeIds: ReadonlySet<string>
   readonly datasetIds: ReadonlySet<string>
   readonly actionIds: ReadonlySet<string>
+  readonly shareIds: ReadonlySet<string>
   readonly workflowIds: ReadonlySet<string>
   readonly syncIds: ReadonlySet<string>
   readonly pipelineIds: ReadonlySet<string>
@@ -108,6 +110,11 @@ export const GRANT_KINDS: {
     subject: "action",
     fix: "Add it to 'actions/' or pass it to createSixb({ actions }).",
   },
+  "share:share": {
+    universeKey: "shareIds",
+    subject: "share",
+    fix: "Add it to 'shares/' or pass it to createSixb({ shares }).",
+  },
   "run:workflow": {
     universeKey: "workflowIds",
     subject: "workflow",
@@ -171,6 +178,8 @@ export function grantKindOf(grant: GrantDefinition): GrantKind {
       return "append:telemetry"
     case "apply":
       return "apply:action"
+    case "share":
+      return "share:share"
     case "run":
       return `run:${grant.target}`
     case "observe":
@@ -193,6 +202,7 @@ export function emptyGrantSets(): MutableGrantIndex {
     "edit:object": new Set(),
     "append:telemetry": new Set(),
     "apply:action": new Set(),
+    "share:share": new Set(),
     "run:workflow": new Set(),
     "run:sync": new Set(),
     "run:pipeline": new Set(),
