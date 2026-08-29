@@ -403,7 +403,15 @@ function isSameOriginDestinationPath(value: unknown): value is string {
     return false
   }
 
-  return new URL(value, "https://sixb.invalid").pathname === value
+  if (new URL(value, "https://sixb.invalid").pathname !== value) return false
+
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(value).replaceAll("\\", "/")
+  } catch {
+    return false
+  }
+  return decoded !== "/shared" && !decoded.startsWith("/shared/")
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

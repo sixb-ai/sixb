@@ -66,6 +66,7 @@ describe("sixb build", () => {
 
     await stat(join(outdir, "sixb.config.js"))
     await stat(join(outdir, "app", "index.html"))
+    await stat(join(outdir, "app", "shared-index.html"))
     const atlasAssets = await readdir(join(outdir, "atlas"))
 
     // Exactly one entry: the Atlas build splits, and chunks are named `chunk-*` so they can never
@@ -106,10 +107,12 @@ describe("sixb build", () => {
     expect(result.exitCode).toBe(0)
     expect(result.stderr).toBe("")
     await stat(join(outdir, "app", "index.html"))
+    await stat(join(outdir, "app", "shared-index.html"))
     for (const [name, content] of devFiles) {
       expect(await readFile(join(devGeneratedDir, name), "utf-8")).toBe(content)
     }
     await stat(join(tempDir, ".sixb", "build", "app", "index.html"))
+    await stat(join(tempDir, ".sixb", "build", "app", "shared-index.html"))
   })
 
   buildTest("externalizes package dependencies when bundling runtime config", async () => {

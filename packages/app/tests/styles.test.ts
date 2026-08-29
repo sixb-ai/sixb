@@ -252,9 +252,12 @@ describe("custom app Tailwind build (e2e)", () => {
       generatedCss.lastIndexOf("--background: #fafafa")
     )
 
-    const generatedMain = await readFile(join(tempRoot, ".sixb", "generated", "main.tsx"), "utf-8")
-    expect(generatedMain).toContain('import "./app.css"')
-    expect(generatedMain).not.toContain('import "./agent-ui.css"')
+    const generatedRuntime = await readFile(
+      join(tempRoot, ".sixb", "generated", "app-runtime.tsx"),
+      "utf-8"
+    )
+    expect(generatedRuntime).toContain('import "./app.css"')
+    expect(generatedRuntime).not.toContain('import "./agent-ui.css"')
 
     // The bundled output ships the compiled utility, proving the generated
     // entry imported the compiled CSS rather than the raw Tailwind source.
@@ -269,6 +272,13 @@ describe("custom app Tailwind build (e2e)", () => {
     const builtHtml = await readFile(join(outdir, "index.html"), "utf-8")
     const entryFile = builtHtml.match(/src="\/(app-[a-z0-9]+\.js)"/)?.[1]
     expect(entryFile).toBeDefined()
+    const sharedHtml = await readFile(join(outdir, "shared-index.html"), "utf-8")
+    expect(sharedHtml).toContain("async loadAppStyles()")
+    expect(sharedHtml).toContain('link.addEventListener("load", resolve, { once: true })')
+    expect(sharedHtml).toContain('link.addEventListener("error", resolve, { once: true })')
+    expect(sharedHtml.indexOf("await Promise.all(")).toBeLessThan(
+      sharedHtml.indexOf("document.head.append(link)")
+    )
     const javascriptFiles = await Array.fromAsync(new Bun.Glob("*.js").scan({ cwd: outdir }))
     expect(javascriptFiles.length).toBeGreaterThan(1)
     const hasDynamicChunk = await Promise.all(
