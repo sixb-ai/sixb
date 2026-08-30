@@ -430,39 +430,37 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
       )
       throwIfAborted(signal)
 
-      if (rowsRead === 0) {
+      if (rowsRead === 0 && sync.config.mode === "append") {
         const version = await lakeStorage.getLatestVersion(dataset.id)
-        if (sync.config.mode === "append" || !version) {
-          await rowWrite.abort()
-          abortWrite = undefined
-          const finishedRun = await syncRunsStorage.finish({
-            projectId: runtime.id,
-            id: job.id,
-            status: "succeeded",
-            rowsRead,
-            ...(version
-              ? { output: { datasetId: version.datasetId, versionId: version.versionId } }
-              : {}),
-            checkpoint: nextCheckpoint,
-          })
-          const finishedAt = requireFinishedAt({
-            syncId: sync.id,
-            runId: job.id,
-            finishedAt: finishedRun.finishedAt,
-          })
-          await notifyRunFinished(input.onRunFinished, finishedRun)
+        await rowWrite.abort()
+        abortWrite = undefined
+        const finishedRun = await syncRunsStorage.finish({
+          projectId: runtime.id,
+          id: job.id,
+          status: "succeeded",
+          rowsRead,
+          ...(version
+            ? { output: { datasetId: version.datasetId, versionId: version.versionId } }
+            : {}),
+          checkpoint: nextCheckpoint,
+        })
+        const finishedAt = requireFinishedAt({
+          syncId: sync.id,
+          runId: job.id,
+          finishedAt: finishedRun.finishedAt,
+        })
+        await notifyRunFinished(input.onRunFinished, finishedRun)
 
-          return {
-            id: job.id,
-            syncId: sync.id,
-            datasetId: dataset.id,
-            mode: sync.config.mode,
-            startedAt: requireStartedAt(job.id, startedRun.startedAt),
-            finishedAt,
-            rowsRead,
-            ...(version ? { version } : {}),
-            versionCreated: false,
-          }
+        return {
+          id: job.id,
+          syncId: sync.id,
+          datasetId: dataset.id,
+          mode: sync.config.mode,
+          startedAt: requireStartedAt(job.id, startedRun.startedAt),
+          finishedAt,
+          rowsRead,
+          ...(version ? { version } : {}),
+          versionCreated: false,
         }
       }
 

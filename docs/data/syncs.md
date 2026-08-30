@@ -233,9 +233,12 @@ never received a row, that run does not create a dataset version, so dataset-upd
 not fire. This lets incremental readers advance an initial cursor without inventing placeholder
 rows.
 
-A first snapshot that returns no rows behaves the same way: it succeeds without creating a dataset
-version. Once a previous version exists, an empty snapshot still commits a new empty version so
-projections can withdraw source-owned objects that disappeared upstream.
+A snapshot is the complete source state, including when that state is empty. A first snapshot that
+returns no rows therefore commits an addressable empty dataset version. Pipelines and projections
+can consume that version normally, and later empty snapshots reuse it until the visible contents
+change. The initial version emits the normal dataset-version event, so dataset-updated schedules can
+run against the known-empty state. An empty snapshot after a non-empty version still commits a new
+empty version so projections can withdraw source-owned objects that disappeared upstream.
 
 A merge run may also succeed and advance its checkpoint without creating a version. This happens
 when an initial run only deletes absent keys, or when every staged change leaves the current rows
