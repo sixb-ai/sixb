@@ -616,7 +616,7 @@ describe("SyncWorker", () => {
     })
   })
 
-  test("finishes a first empty snapshot without emitting a dataset version", async () => {
+  test("commits and emits a dataset version for a first empty snapshot", async () => {
     const dataset = defineDataset("raw.erp.empty-orders", {
       schema: [col("orderId", "string")],
     })
@@ -641,16 +641,30 @@ describe("SyncWorker", () => {
     await Bun.sleep(50)
     await worker.stop()
 
-    expect(run?.output).toBeUndefined()
+    expect(run?.output).toMatchObject({ datasetId: dataset.id })
     const events = await sixb.events.read({
       types: ["sync.run.started", "dataset.version.committed", "sync.run.finished"],
     })
-    expect(events.map((event) => event.type)).toEqual(["sync.run.started", "sync.run.finished"])
-    expect(events[1]?.payload).toEqual({
+    expect(events.map((event) => event.type)).toEqual([
+      "sync.run.started",
+      "dataset.version.committed",
+      "sync.run.finished",
+    ])
+    expect(events[1]?.payload).toMatchObject({
+      datasetId: dataset.id,
+      versionId: run?.output?.versionId,
+      producer: {
+        kind: "sync",
+        id: sync.id,
+        runId: "run-first-empty-snapshot",
+      },
+    })
+    expect(events[2]?.payload).toEqual({
       syncId: sync.id,
       runId: "run-first-empty-snapshot",
       status: "succeeded",
       datasetId: dataset.id,
+      versionId: run?.output?.versionId,
     })
   })
 

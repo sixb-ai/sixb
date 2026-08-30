@@ -755,30 +755,36 @@ describe("DuckLakeStorage writes and latest reads", () => {
     ])
   })
 
-  test("throws a clear no-op error when an empty first snapshot changes nothing", async () => {
+  test("creates a metadata-backed version for an empty first snapshot", async () => {
     const write = await storage.beginWrite({
       dataset: ordersDataset,
       mode: "snapshot",
     })
 
-    await expect(write.commit()).rejects.toThrow(
-      `No DuckLake changes were committed for dataset '${ordersDataset.id}', and no previous version exists.`
-    )
-    expect(await storage.getLatestVersion(ordersDataset.id)).toBeNull()
-    expect(await storage.listVersions(ordersDataset.id)).toEqual([])
+    const version = await write.commit()
+
+    expect(version).toMatchObject({ outcome: "created", mode: "snapshot", rowCount: 0 })
+    expect(await storage.getLatestVersion(ordersDataset.id)).toMatchObject({
+      versionId: version.versionId,
+    })
+    expect(await storage.listVersions(ordersDataset.id)).toHaveLength(1)
+    expect(await storage.getDataset(ordersDataset.id)).toEqual(ordersDataset)
   })
 
-  test("throws a clear no-op error when an empty first append changes nothing", async () => {
+  test("creates a metadata-backed version for an empty first append", async () => {
     const write = await storage.beginWrite({
       dataset: ordersDataset,
       mode: "append",
     })
 
-    await expect(write.commit()).rejects.toThrow(
-      `No DuckLake changes were committed for dataset '${ordersDataset.id}', and no previous version exists.`
-    )
-    expect(await storage.getLatestVersion(ordersDataset.id)).toBeNull()
-    expect(await storage.listVersions(ordersDataset.id)).toEqual([])
+    const version = await write.commit()
+
+    expect(version).toMatchObject({ outcome: "created", mode: "append" })
+    expect(await storage.getLatestVersion(ordersDataset.id)).toMatchObject({
+      versionId: version.versionId,
+    })
+    expect(await storage.listVersions(ordersDataset.id)).toHaveLength(1)
+    expect(await storage.getDataset(ordersDataset.id)).toEqual(ordersDataset)
   })
 })
 

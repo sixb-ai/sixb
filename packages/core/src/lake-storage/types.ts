@@ -84,7 +84,8 @@ export interface DatasetWriteCommitResult extends DatasetVersion {
    * report `unchanged` and reuse it for commits that cannot change visible
    * dataset content: a snapshot whose rows equal the latest visible rows
    * (order-insensitive, with equal duplicate counts), or an append of zero
-   * rows.
+   * rows. Without a latest version, an empty snapshot or append still creates
+   * the first addressable dataset version.
    */
   readonly outcome: "created" | "unchanged"
 }
