@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { ConnectorOAuthError } from "@sixb/core"
-import { LINKEDIN_ACCESS_TOKEN_URL, LINKEDIN_AUTHORIZATION_URL, linkedin } from "../src"
+import {
+  LINKEDIN_ACCESS_TOKEN_URL,
+  LINKEDIN_AUTHORIZATION_URL,
+  LINKEDIN_PERMITTED_SERVICES_URL,
+  linkedin,
+} from "../src"
 import { CONTEXT, DEFAULT_OPTIONS, json, mockFetch, type RecordedCall } from "./helpers"
 
 const originalFetch = globalThis.fetch
@@ -114,5 +119,15 @@ describe("linkedin managed OAuth", () => {
     ).rejects.toMatchObject({
       kind: "terminal",
     })
+  })
+
+  test("exposes manual grant removal without claiming provider revocation support", () => {
+    const authentication = linkedin(DEFAULT_OPTIONS).authentication
+
+    // LinkedIn documents manual removal but no OAuth revocation endpoint for this flow.
+    expect(authentication.revoke).toBeUndefined()
+    expect(LINKEDIN_PERMITTED_SERVICES_URL).toBe(
+      "https://www.linkedin.com/psettings/permitted-services"
+    )
   })
 })

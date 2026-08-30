@@ -11,6 +11,8 @@ import type { LinkedinOAuthScope } from "./types/options"
 
 export const LINKEDIN_AUTHORIZATION_URL = "https://www.linkedin.com/oauth/v2/authorization"
 export const LINKEDIN_ACCESS_TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken"
+export const LINKEDIN_PERMITTED_SERVICES_URL =
+  "https://www.linkedin.com/psettings/permitted-services"
 
 export interface LinkedinOAuthOptions {
   readonly clientId: string

@@ -6,7 +6,11 @@ export {
   LINKEDIN_RESTLI_PROTOCOL_VERSION,
   linkedin,
 } from "./linkedin"
-export { LINKEDIN_ACCESS_TOKEN_URL, LINKEDIN_AUTHORIZATION_URL } from "./oauth"
+export {
+  LINKEDIN_ACCESS_TOKEN_URL,
+  LINKEDIN_AUTHORIZATION_URL,
+  LINKEDIN_PERMITTED_SERVICES_URL,
+} from "./oauth"
 export type { AdAccountUsersResource } from "./resources/ad-account-users"
 export type { AdAccountsResource } from "./resources/ad-accounts"
 export type { AdAnalyticsResource } from "./resources/ad-analytics"
