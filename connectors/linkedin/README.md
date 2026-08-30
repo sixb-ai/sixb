@@ -109,6 +109,11 @@ token lifetime, which the current core credential contract cannot store. When th
 the provider's definitive `invalid_grant` response moves the connection to the same reauthorization
 state.
 
+LinkedIn does not document a programmatic revocation endpoint for this flow. Sixb's revoke
+operation therefore deletes its stored credentials and disconnects the local connections, but the
+member must also remove the application from LinkedIn to revoke the upstream grant. Applications
+can link to the exported `LINKEDIN_PERMITTED_SERVICES_URL` constant for that manual step.
+
 ### LinkedIn PKCE compatibility
 
 Sixb currently requires every managed OAuth adapter to preserve its `state`, `code_challenge`, and
@@ -328,6 +333,7 @@ the served region.
 - [Marketing API versioning](https://learn.microsoft.com/en-us/linkedin/marketing/versioning?view=li-lms-2026-08)
 - [Rest.li query tunneling](https://learn.microsoft.com/en-us/linkedin/shared/api-guide/concepts/query-tunneling)
 - [LinkedIn authorization code flow](https://learn.microsoft.com/en-us/linkedin/shared/authentication/authorization-code-flow)
+- [LinkedIn third-party application removal](https://www.linkedin.com/help/linkedin/answer/a519947/third-party-applications-data-use)
 - [LinkedIn programmatic refresh tokens](https://learn.microsoft.com/en-us/linkedin/shared/authentication/programmatic-refresh-tokens)
 - [LinkedIn native PKCE flow](https://learn.microsoft.com/en-us/linkedin/shared/authentication/authorization-code-flow-native)
 - [Sixb connectors](https://docs.sixb.ai/data/connectors)

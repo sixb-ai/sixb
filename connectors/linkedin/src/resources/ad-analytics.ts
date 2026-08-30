@@ -1,5 +1,5 @@
 import type { LinkedinHttp } from "../http"
-import { restliDateRange, restliList, withQuery } from "../restli"
+import { restliDateRange, restliList, restliProjection, withQuery } from "../restli"
 import type {
   LinkedinAdAnalyticsQuery,
   LinkedinAdAnalyticsRow,
@@ -37,7 +37,7 @@ export function createAdAnalyticsResource(http: LinkedinHttp): AdAnalyticsResour
           pivot: query.pivot,
           dateRange: restliDateRange(query.dateRange),
           timeGranularity: query.timeGranularity,
-          fields: query.fields.join(","),
+          fields: restliProjection(query.fields),
           campaignType: query.campaignType,
           shares: list(query.shares),
           campaigns: list(query.campaigns),
@@ -61,7 +61,7 @@ export function createAdAnalyticsResource(http: LinkedinHttp): AdAnalyticsResour
           pivots: restliList(query.pivots),
           dateRange: restliDateRange(query.dateRange),
           timeGranularity: query.timeGranularity,
-          fields: query.fields.join(","),
+          fields: restliProjection(query.fields),
           objectiveType: query.objectiveType,
           campaignType: query.campaignType,
           shares: list(query.shares),
@@ -89,7 +89,7 @@ export function createAdAnalyticsResource(http: LinkedinHttp): AdAnalyticsResour
           pivots: restliList(query.pivots),
           account: restliList([query.account]),
           dateRange: restliDateRange(query.dateRange),
-          fields: query.fields.join(","),
+          fields: restliProjection(query.fields),
           campaigns: list(query.campaigns),
           campaignGroups: list(query.campaignGroups),
         })

@@ -41,6 +41,9 @@ describe("linkedin ad analytics", () => {
     )
     expect(params.get("accounts")).toBe("List(urn:li:sponsoredAccount:123)")
     expect(params.get("fields")).toBe("impressions,costInLocalCurrency,pivotValues")
+    // Regression guard: join(",") percent-encodes separators and fails this raw URL assertion.
+    expect(calls[0]?.url).toContain("fields=impressions,costInLocalCurrency,pivotValues")
+    expect(calls[0]?.url).not.toContain("fields=impressions%2CcostInLocalCurrency")
     expect(params.get("sortBy.field")).toBe("IMPRESSIONS")
     expect(rows[0]?.costInLocalCurrency).toBe("12.50")
   })
@@ -58,6 +61,7 @@ describe("linkedin ad analytics", () => {
     })
 
     expect(new URL(calls[0]?.url ?? "").searchParams.get("pivots")).toBe("List(CAMPAIGN,CREATIVE)")
+    expect(calls[0]?.url).toContain("fields=impressions,pivotValues")
   })
 
   test("serializes the attributed-revenue account as a Rest.li list", async () => {
@@ -74,6 +78,7 @@ describe("linkedin ad analytics", () => {
     const params = new URL(calls[0]?.url ?? "").searchParams
     expect(params.get("q")).toBe("attributedRevenueMetrics")
     expect(params.get("account")).toBe("List(urn:li:sponsoredAccount:123)")
+    expect(calls[0]?.url).toContain("fields=revenueAttributionMetrics,dateRange,pivotValues")
   })
 
   test("tunnels long GET queries through a form-encoded POST", async () => {
@@ -94,6 +99,8 @@ describe("linkedin ad analytics", () => {
     expect(calls[0]?.headers.get("content-type")).toBe("application/x-www-form-urlencoded")
     expect(calls[0]?.body).toContain("q=analytics")
     expect(calls[0]?.body).toContain("accounts=List(urn%3Ali%3AsponsoredAccount%3A123)")
+    expect(calls[0]?.body).toContain("fields=impressions,clicks")
+    expect(calls[0]?.body).not.toContain("fields=impressions%2Cclicks")
   })
 
   test("rejects invalid report shapes before making a request", async () => {

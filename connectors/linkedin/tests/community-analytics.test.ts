@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { organizationUrn, shareUrn, ugcPostUrn } from "../src"
+import {
+  type LinkedinOrganizationFollowerStatistic,
+  type LinkedinOrganizationPageStatistic,
+  organizationUrn,
+  shareUrn,
+  ugcPostUrn,
+} from "../src"
 import { createTestClient, json, recorder } from "./helpers"
 
 const originalFetch = globalThis.fetch
@@ -8,23 +14,49 @@ afterEach(() => {
 })
 
 describe("linkedin community analytics", () => {
-  test("serializes organization follower, Page, share, and video analytics", async () => {
+  test("serializes organization follower, page, share, and video analytics", async () => {
     const organization = organizationUrn(123)
     const share = shareUrn(456)
     const ugcPost = ugcPostUrn(789)
+    // Regression guard: these 202608-shaped fixtures must satisfy the public wire types.
+    const followerStatistic = {
+      organizationalEntity: organization,
+      followerGains: { organicFollowerGain: 223, paidFollowerGain: 12 },
+      timeRange: { start: 1_700_000_000_000, end: 1_700_086_400_000 },
+    } as const satisfies LinkedinOrganizationFollowerStatistic
+    const pageStatistic = {
+      organization,
+      totalPageStatistics: {
+        clicks: {
+          desktopCustomButtonClickCounts: [{ clicks: 4, customButtonType: "VISIT_WEBSITE" }],
+          mobileCustomButtonClickCounts: [{ clicks: 2, customButtonType: "VISIT_WEBSITE" }],
+        },
+        views: {
+          allPageViews: { pageViews: 42, uniquePageViews: 31 },
+          overviewPageViews: { pageViews: 40, uniquePageViews: 30 },
+        },
+      },
+      pageStatisticsByIndustryV2: [
+        {
+          industryV2: "urn:li:industry:4",
+          pageStatistics: { views: { allPageViews: { pageViews: 6 } } },
+        },
+      ],
+      timeRange: { start: 1_700_000_000_000, end: 1_700_086_400_000 },
+    } as const satisfies LinkedinOrganizationPageStatistic
     const calls = recorder([
-      json({ elements: [{ organizationalEntity: organization, followerGains: {} }] }),
-      json({ elements: [{ organization, totalPageStatistics: {} }] }),
+      json({ elements: [followerStatistic] }),
+      json({ elements: [pageStatistic] }),
       json({ elements: [{ organizationalEntity: organization, totalShareStatistics: {} }] }),
       json({ elements: [{ entity: ugcPost, value: 100 }] }),
     ])
     const client = await createTestClient()
 
-    await client.organizationAnalytics.followers(organization, {
+    const followers = await client.organizationAnalytics.followers(organization, {
       timeRange: { start: 1_700_000_000_000, end: 1_700_086_400_000 },
       timeGranularityType: "DAY",
     })
-    await client.organizationAnalytics.pages(organization)
+    const pages = await client.organizationAnalytics.pages(organization)
     await client.organizationAnalytics.shares(organization, { posts: [share, ugcPost] })
     await client.organizationAnalytics.video({
       entity: ugcPost,
@@ -45,6 +77,14 @@ describe("linkedin community analytics", () => {
     expect(new URL(calls[3]?.url ?? "").searchParams.get("timeRange")).toBe(
       "(start:1700000000000,end:1700086400000)"
     )
+    expect(followers[0]?.followerGains?.organicFollowerGain).toBe(223)
+    expect(pages[0]?.totalPageStatistics?.views?.allPageViews?.uniquePageViews).toBe(31)
+    expect(pages[0]?.totalPageStatistics?.clicks?.desktopCustomButtonClickCounts?.[0]?.clicks).toBe(
+      4
+    )
+    expect(pages[0]?.pageStatisticsByIndustryV2?.[0]?.pageStatistics.views?.allPageViews).toEqual({
+      pageViews: 6,
+    })
   })
 
   test("serializes authenticated-member follower, post, and video analytics", async () => {

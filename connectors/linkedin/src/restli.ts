@@ -37,6 +37,11 @@ export function restliList(values: readonly QueryScalar[]): RestliQueryValue {
   return restli(`List(${values.map((value) => encodeURIComponent(String(value))).join(",")})`)
 }
 
+/** Comma-delimited field projection with encoded values and preserved separators. */
+export function restliProjection(fields: readonly string[]): RestliQueryValue {
+  return restli(fields.map((field) => encodeURIComponent(field)).join(","))
+}
+
 /** Search document used by ad account, campaign group, and campaign finders. */
 export function restliSearch(
   fields: Readonly<Record<string, readonly QueryScalar[] | boolean | undefined>>

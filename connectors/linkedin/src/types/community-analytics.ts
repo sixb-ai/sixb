@@ -16,6 +16,11 @@ export interface LinkedinFollowerCounts {
   readonly paidFollowerCount: number
 }
 
+export interface LinkedinFollowerGains {
+  readonly organicFollowerGain: number
+  readonly paidFollowerGain: number
+}
+
 export interface LinkedinFollowerFacetCount {
   readonly followerCounts: LinkedinFollowerCounts
   readonly associationType?: string
@@ -36,29 +41,37 @@ export interface LinkedinOrganizationFollowerStatistic {
   readonly followerCountsByIndustry?: readonly LinkedinFollowerFacetCount[]
   readonly followerCountsBySeniority?: readonly LinkedinFollowerFacetCount[]
   readonly followerCountsByStaffCountRange?: readonly LinkedinFollowerFacetCount[]
-  readonly followerGains?: LinkedinFollowerCounts
+  readonly followerGains?: LinkedinFollowerGains
   readonly timeRange?: LinkedinTimeRange
   [field: string]: unknown
 }
 
-export interface LinkedinPageViews {
-  readonly allPageViews?: number
-  readonly overviewPageViews?: number
-  readonly careersPageViews?: number
-  readonly jobsPageViews?: number
-  readonly peoplePageViews?: number
-  readonly productsPageViews?: number
+export interface LinkedinPageViewMetric {
+  readonly pageViews: number
+  /** Returned for time-bound metrics when LinkedIn can provide a deduplicated count. */
   readonly uniquePageViews?: number
-  [metric: string]: number | undefined
+}
+
+export interface LinkedinPageViews {
+  readonly allPageViews?: LinkedinPageViewMetric
+  readonly overviewPageViews?: LinkedinPageViewMetric
+  readonly careersPageViews?: LinkedinPageViewMetric
+  readonly jobsPageViews?: LinkedinPageViewMetric
+  readonly peoplePageViews?: LinkedinPageViewMetric
+  readonly productsPageViews?: LinkedinPageViewMetric
+  [metric: string]: LinkedinPageViewMetric | undefined
+}
+
+export interface LinkedinCustomButtonClickCount {
+  readonly clicks: number
+  readonly customButtonType?: string
+  [field: string]: unknown
 }
 
 export interface LinkedinPageClicks {
-  readonly careersPageClicks?: number
-  readonly careersPagePromoLinksClicks?: number
-  readonly customButtonClicks?: number
-  readonly desktopCustomButtonClicks?: number
-  readonly mobileCustomButtonClicks?: number
-  [metric: string]: number | undefined
+  readonly desktopCustomButtonClickCounts?: readonly LinkedinCustomButtonClickCount[]
+  readonly mobileCustomButtonClickCounts?: readonly LinkedinCustomButtonClickCount[]
+  [metric: string]: readonly LinkedinCustomButtonClickCount[] | undefined
 }
 
 export interface LinkedinPageStatistics {
@@ -67,15 +80,27 @@ export interface LinkedinPageStatistics {
   [group: string]: unknown
 }
 
+export interface LinkedinPageStatisticFacet {
+  readonly pageStatistics: LinkedinPageStatistics
+  readonly function?: LinkedinUrn
+  readonly geo?: LinkedinUrn
+  readonly industry?: LinkedinUrn
+  readonly industryV2?: LinkedinUrn
+  readonly seniority?: LinkedinUrn
+  readonly staffCountRange?: string
+  [field: string]: unknown
+}
+
 export interface LinkedinOrganizationPageStatistic {
   readonly organization: LinkedinOrganizationUrn
   readonly totalPageStatistics?: LinkedinPageStatistics
-  readonly pageStatisticsBySeniority?: readonly Readonly<Record<string, unknown>>[]
-  readonly pageStatisticsByIndustry?: readonly Readonly<Record<string, unknown>>[]
-  readonly pageStatisticsByStaffCountRange?: readonly Readonly<Record<string, unknown>>[]
-  readonly pageStatisticsByFunction?: readonly Readonly<Record<string, unknown>>[]
-  readonly pageStatisticsByGeoCountry?: readonly Readonly<Record<string, unknown>>[]
-  readonly pageStatisticsByGeo?: readonly Readonly<Record<string, unknown>>[]
+  readonly pageStatisticsBySeniority?: readonly LinkedinPageStatisticFacet[]
+  readonly pageStatisticsByIndustry?: readonly LinkedinPageStatisticFacet[]
+  readonly pageStatisticsByIndustryV2?: readonly LinkedinPageStatisticFacet[]
+  readonly pageStatisticsByStaffCountRange?: readonly LinkedinPageStatisticFacet[]
+  readonly pageStatisticsByFunction?: readonly LinkedinPageStatisticFacet[]
+  readonly pageStatisticsByGeoCountry?: readonly LinkedinPageStatisticFacet[]
+  readonly pageStatisticsByGeo?: readonly LinkedinPageStatisticFacet[]
   readonly timeRange?: LinkedinTimeRange
   [field: string]: unknown
 }
