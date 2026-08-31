@@ -1,4 +1,5 @@
 import { assertAuthorized } from "../authorization"
+import { resolveExecutionScopeAuthorization } from "../execution/authorization"
 import {
   createPrimitiveExecutionRecord,
   ensureExecutionRecord,
@@ -83,6 +84,10 @@ export async function requestAction(
   execution: ExecutionContext,
   input: RequestActionInput
 ): Promise<RequestActionResult> {
+  resolveExecutionScopeAuthorization(runtime.projectId, {
+    execution,
+    authorization: runtime.runtimeAuthorization,
+  })
   requireActionRunStorage(runtime)
   const action = getActionDefinition(runtime, input.actionId)
   const actionId = action.id

@@ -1,4 +1,5 @@
 import { assertAuthorized } from "../authorization"
+import { resolveExecutionScopeAuthorization } from "../execution/authorization"
 import {
   createPrimitiveExecutionRecord,
   ensureExecutionRecord,
@@ -45,6 +46,10 @@ export async function requestSyncRun(
   sync: SyncDefinition,
   options: SyncRunRequestOptions = {}
 ): Promise<SyncRunRequestResult> {
+  resolveExecutionScopeAuthorization(runtime.projectId, {
+    execution,
+    authorization: runtime.runtimeAuthorization,
+  })
   assertAuthorized(runtime, { kind: "sync.run", syncId: sync.id })
   if (!runtime.storage.syncRuns) {
     throw new SyncValidationError("[Sixb] Sync run storage is not configured.")
