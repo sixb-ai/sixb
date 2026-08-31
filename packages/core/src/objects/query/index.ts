@@ -1,3 +1,11 @@
+export type {
+  ObjectQueryStructureIssue,
+  ObjectQueryStructureRoot,
+} from "./complexity"
+export {
+  findObjectQueryStructureIssue,
+  OBJECT_QUERY_STRUCTURE_LIMITS,
+} from "./complexity"
 export type { ObjectQueryPlanningIssue } from "./errors"
 export {
   ObjectQueryExecutionError,
