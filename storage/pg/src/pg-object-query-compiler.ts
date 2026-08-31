@@ -45,6 +45,7 @@ interface CompiledHasMoreProbe {
 
 interface CompileContext {
   probeLimit: boolean
+  source: PgObjectQuerySource
 }
 
 interface CompiledPredicate {
@@ -89,7 +90,6 @@ interface EncodedCursorValue {
 }
 
 const PAGE_TOKEN_PREFIX = "keyset:"
-const exactContext: CompileContext = { probeLimit: false }
 // Per-parent fanout the core executor bakes into every pushed-down expansion;
 // this default only guards a malformed (un-baked) IR and mirrors the core cap.
 const DEFAULT_EXPANSION_FANOUT = 1_000
@@ -97,11 +97,15 @@ const DEFAULT_EXPANSION_FANOUT = 1_000
 export function compilePgObjectQuery(
   projectId: string,
   query: ObjectQuery,
-  options: { includeTotal?: boolean } = {}
+  options: { includeTotal?: boolean; source?: PgObjectQuerySource } = {}
 ): CompiledPgObjectQuery {
-  const compiled = compileObjectQueryInternal(projectId, query, {
-    probeLimit: options.includeTotal === false,
-  })
+  const source = options.source ?? DEFAULT_OBJECT_QUERY_SOURCE
+  const compiled = source.wrapQuery(
+    compileObjectQueryInternal(projectId, query, {
+      probeLimit: options.includeTotal === false,
+      source,
+    })
+  )
   return {
     ...compiled,
     sql: numberPlaceholders(compiled.sql),
@@ -115,44 +119,90 @@ export function compilePgObjectQuery(
   }
 }
 
+/** Physical relations used by the PostgreSQL object-query compiler. */
+export interface PgObjectQuerySource {
+  readonly objectsTable: string
+  readonly linksTable: string
+  /** Wrap a terminal SELECT without its own WITH clause; the selected source owns the only WITH. */
+  wrapStatement(
+    sql: string,
+    args?: readonly unknown[]
+  ): {
+    readonly sql: string
+    readonly args: unknown[]
+  }
+  wrapQuery(query: CompiledPgObjectQuery): CompiledPgObjectQuery
+}
+
+/** Prefix an optional query source, then assign PostgreSQL positional placeholders. */
+export function compilePgObjectStatement(
+  sql: string,
+  args: readonly unknown[] = [],
+  source?: PgObjectQuerySource
+): CompiledPgScalarQuery {
+  return numberCompiledQuery((source ?? DEFAULT_OBJECT_QUERY_SOURCE).wrapStatement(sql, args))
+}
+
+const DEFAULT_OBJECT_QUERY_SOURCE: PgObjectQuerySource = {
+  objectsTable: "objects",
+  linksTable: "links",
+  wrapStatement: (sql, args = []) => ({ sql, args: [...args] }),
+  wrapQuery: (query) => query,
+}
+
+function exactContext(ctx: CompileContext): CompileContext {
+  return ctx.probeLimit ? { ...ctx, probeLimit: false } : ctx
+}
+
 export function compilePgObjectCountQuery(
   projectId: string,
-  query: ObjectQuery
+  query: ObjectQuery,
+  options: { source?: PgObjectQuerySource } = {}
 ): CompiledPgScalarQuery {
-  const source = compileAggregateSource(projectId, query)
-  return numberCompiledQuery({
-    sql: `
+  const querySource = options.source ?? DEFAULT_OBJECT_QUERY_SOURCE
+  const source = compileAggregateSource(projectId, query, querySource)
+  return numberCompiledQuery(
+    querySource.wrapStatement(
+      `
       SELECT COUNT(*)::bigint AS count
       FROM (${source.sql}) AS input
     `,
-    args: source.args,
-  })
+      source.args
+    )
+  )
 }
 
 export function compilePgObjectExistsQuery(
   projectId: string,
-  query: ObjectQuery
+  query: ObjectQuery,
+  options: { source?: PgObjectQuerySource } = {}
 ): CompiledPgScalarQuery {
-  const source = compileAggregateSource(projectId, query)
-  return numberCompiledQuery({
-    sql: `
+  const querySource = options.source ?? DEFAULT_OBJECT_QUERY_SOURCE
+  const source = compileAggregateSource(projectId, query, querySource)
+  return numberCompiledQuery(
+    querySource.wrapStatement(
+      `
       SELECT 1
       FROM (${source.sql}) AS input
       LIMIT 1
     `,
-    args: source.args,
-  })
+      source.args
+    )
+  )
 }
 
 export function compilePgObjectFacetQuery(
   projectId: string,
   query: ObjectQuery,
   propertyId: string,
-  limit: number
+  limit: number,
+  options: { source?: PgObjectQuerySource } = {}
 ): CompiledPgFacetQuery {
-  const source = compileAggregateSource(projectId, query)
-  return numberCompiledQuery({
-    sql: `
+  const querySource = options.source ?? DEFAULT_OBJECT_QUERY_SOURCE
+  const source = compileAggregateSource(projectId, query, querySource)
+  return numberCompiledQuery(
+    querySource.wrapStatement(
+      `
       SELECT facet.value_type, facet.value_text, COUNT(*)::bigint AS count
       FROM (
         SELECT
@@ -165,8 +215,9 @@ export function compilePgObjectFacetQuery(
       ORDER BY count DESC, facet.value_text ASC
       LIMIT ?
     `,
-    args: [propertyId, propertyId, ...source.args, propertyId, limit],
-  })
+      [propertyId, propertyId, ...source.args, propertyId, limit]
+    )
+  )
 }
 
 function compileObjectQueryInternal(
@@ -176,27 +227,28 @@ function compileObjectQueryInternal(
 ): CompiledPgObjectQuery {
   switch (query.kind) {
     case "start":
-      return compileStart(projectId, query)
+      return compileStart(projectId, query, ctx)
     case "refs":
-      return compileRefs(projectId, query)
+      return compileRefs(projectId, query, ctx)
     case "filter":
-      return compileFilter(projectId, query.input, query.predicate)
+      return compileFilter(projectId, query.input, query.predicate, ctx)
     case "sort":
       return compileSort(projectId, query.input, query.fields, ctx)
     case "limit":
       return compileLimit(projectId, query.input, query.limit, ctx)
     case "page":
-      return compilePage(projectId, query.input, query.pageSize, query.pageToken)
+      return compilePage(projectId, query.input, query.pageSize, query.pageToken, ctx)
     case "traverse":
       return compileTraversal(
         projectId,
         query.input,
         query.linkId,
         query.direction,
-        query.sourceObjectTypeId
+        query.sourceObjectTypeId,
+        ctx
       )
     case "set":
-      return compileSet(projectId, query.op, query.inputs)
+      return compileSet(projectId, query.op, query.inputs, ctx)
     case "project":
       return compileProject(projectId, query.input, query.properties, ctx)
     case "text":
@@ -205,10 +257,11 @@ function compileObjectQueryInternal(
         query.input,
         query.query,
         query.fields,
-        query.fieldsByObjectType
+        query.fieldsByObjectType,
+        ctx
       )
     case "expand":
-      return compileExpand(projectId, query.input, query.expansions)
+      return compileExpand(projectId, query.input, query.expansions, ctx)
     case "vector":
       throw new Error(
         `[SixbPg] PostgreSQL object storage does not support query node '${query.kind}'`
@@ -218,7 +271,8 @@ function compileObjectQueryInternal(
 
 function compileStart(
   projectId: string,
-  query: Extract<ObjectQuery, { kind: "start" }>
+  query: Extract<ObjectQuery, { kind: "start" }>,
+  ctx: CompileContext
 ): CompiledPgObjectQuery {
   if (query.includeSubtypes === true) {
     throw new Error("[SixbPg] PostgreSQL object storage does not support start.includeSubtypes")
@@ -227,7 +281,7 @@ function compileStart(
   const order = compileOrder(identityOrderFields())
   const sql = `
     SELECT *, properties AS _cursor_properties
-    FROM objects
+    FROM ${ctx.source.objectsTable}
     WHERE project_id = ? AND object_type_id = ?
     ORDER BY ${order.sql}
   `
@@ -235,8 +289,7 @@ function compileStart(
   return {
     sql,
     args: [projectId, query.objectTypeId, ...order.args],
-    totalSql:
-      "SELECT COUNT(*)::bigint AS total FROM objects WHERE project_id = ? AND object_type_id = ?",
+    totalSql: `SELECT COUNT(*)::bigint AS total FROM ${ctx.source.objectsTable} WHERE project_id = ? AND object_type_id = ?`,
     totalArgs: [projectId, query.objectTypeId],
     order,
     hasMore: () => false,
@@ -247,7 +300,8 @@ function compileStart(
 
 function compileRefs(
   projectId: string,
-  query: Extract<ObjectQuery, { kind: "refs" }>
+  query: Extract<ObjectQuery, { kind: "refs" }>,
+  ctx: CompileContext
 ): CompiledPgObjectQuery {
   if (query.refs.length === 0) {
     throw new Error("[SixbPg] PostgreSQL object storage requires at least one ref")
@@ -263,10 +317,9 @@ function compileRefs(
     FROM jsonb_array_elements(?::text::jsonb) AS ref(value)
   `
   const sql = `
-    WITH requested AS (${requested})
     SELECT selected.*, selected.properties AS _cursor_properties
-    FROM requested
-    JOIN objects AS selected
+    FROM (${requested}) AS requested
+    JOIN ${ctx.source.objectsTable} AS selected
       ON selected.project_id = ?
      AND selected.object_type_id = requested.object_type_id
      AND selected.primary_id = requested.primary_id
@@ -277,10 +330,9 @@ function compileRefs(
     sql,
     args: [refsJson, projectId, ...selectedOrder.args],
     totalSql: `
-      WITH requested AS (${requested})
       SELECT COUNT(*)::bigint AS total
-      FROM requested
-      JOIN objects AS selected
+      FROM (${requested}) AS requested
+      JOIN ${ctx.source.objectsTable} AS selected
         ON selected.project_id = ?
        AND selected.object_type_id = requested.object_type_id
        AND selected.primary_id = requested.primary_id
@@ -296,17 +348,19 @@ function compileRefs(
 function compileFilter(
   projectId: string,
   inputQuery: ObjectQuery,
-  predicateNode: ObjectQueryPredicate
+  predicateNode: ObjectQueryPredicate,
+  ctx: CompileContext
 ): CompiledPgObjectQuery {
-  return compileWhere(projectId, inputQuery, compilePredicate(predicateNode))
+  return compileWhere(projectId, inputQuery, compilePredicate(predicateNode), ctx)
 }
 
 function compileWhere(
   projectId: string,
   inputQuery: ObjectQuery,
-  predicate: CompiledPredicate
+  predicate: CompiledPredicate,
+  ctx: CompileContext
 ): CompiledPgObjectQuery {
-  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext)
+  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext(ctx))
   const sql = `
     SELECT *
     FROM (${input.sql}) AS input
@@ -335,12 +389,14 @@ function compileText(
   inputQuery: ObjectQuery,
   query: string,
   fields: readonly string[] | undefined,
-  fieldsByObjectType: Readonly<Record<string, readonly string[]>> | undefined
+  fieldsByObjectType: Readonly<Record<string, readonly string[]>> | undefined,
+  ctx: CompileContext
 ): CompiledPgObjectQuery {
   return compileWhere(
     projectId,
     inputQuery,
-    compileTextSearchPredicate(query, fields, fieldsByObjectType)
+    compileTextSearchPredicate(query, fields, fieldsByObjectType),
+    ctx
   )
 }
 
@@ -350,7 +406,7 @@ function compileSort(
   fields: readonly ObjectQuerySortField[],
   ctx: CompileContext
 ): CompiledPgObjectQuery {
-  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext)
+  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext(ctx))
   const probeInput =
     ctx.probeLimit && needsLimitProbe(inputQuery)
       ? compileObjectQueryInternal(projectId, inputQuery, ctx)
@@ -389,7 +445,7 @@ function compileLimit(
   rawLimit: number,
   ctx: CompileContext
 ): CompiledPgObjectQuery {
-  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext)
+  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext(ctx))
   const limit = Math.max(0, rawLimit)
   const rowLimit = ctx.probeLimit ? limit + 1 : limit
 
@@ -418,9 +474,10 @@ function compilePage(
   projectId: string,
   inputQuery: ObjectQuery,
   rawPageSize: number,
-  pageToken: string | undefined
+  pageToken: string | undefined,
+  ctx: CompileContext
 ): CompiledPgObjectQuery {
-  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext)
+  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext(ctx))
   const pageSize = Math.max(0, rawPageSize)
   const cursor = pageToken ? decodePageToken(pageToken, input.order.fields) : undefined
   const cursorPredicate = cursor
@@ -457,30 +514,31 @@ function compileTraversal(
   inputQuery: ObjectQuery,
   linkId: string,
   direction: "outgoing" | "incoming",
-  sourceObjectTypeId?: string
+  sourceObjectTypeId: string | undefined,
+  ctx: CompileContext
 ): CompiledPgObjectQuery {
-  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext)
+  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext(ctx))
   const outputAlias = direction === "outgoing" ? "target_object" : "source_object"
   const joinSql =
     direction === "outgoing"
       ? `
-        JOIN links AS edge
+        JOIN ${ctx.source.linksTable} AS edge
           ON edge.project_id = input.project_id
          AND edge.source_type_id = input.object_type_id
          AND edge.source_id = input.primary_id
          AND edge.link_id = ?
-        JOIN objects AS target_object
+        JOIN ${ctx.source.objectsTable} AS target_object
           ON target_object.project_id = edge.project_id
          AND target_object.object_type_id = edge.target_type_id
          AND target_object.primary_id = edge.target_id
       `
       : `
-        JOIN links AS edge
+        JOIN ${ctx.source.linksTable} AS edge
           ON edge.project_id = input.project_id
          AND edge.target_type_id = input.object_type_id
          AND edge.target_id = input.primary_id
          AND edge.link_id = ?${sourceObjectTypeId === undefined ? "" : "\n         AND edge.source_type_id = ?"}
-        JOIN objects AS source_object
+        JOIN ${ctx.source.objectsTable} AS source_object
           ON source_object.project_id = edge.project_id
          AND source_object.object_type_id = edge.source_type_id
          AND source_object.primary_id = edge.source_id
@@ -527,13 +585,15 @@ interface ExpansionParent {
 function compileExpand(
   projectId: string,
   inputQuery: ObjectQuery,
-  expansions: readonly ObjectExpansion[]
+  expansions: readonly ObjectExpansion[],
+  ctx: CompileContext
 ): CompiledPgObjectQuery {
-  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext)
+  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext(ctx))
   const expand = compileExpansionsObject(
     expansions,
     { project: "input.project_id", type: "input.object_type_id", id: "input.primary_id" },
-    ""
+    "",
+    ctx
   )
   const inputOrder = compileOrder(input.order.fields, "input", "input._cursor_properties")
   const sql = `
@@ -561,13 +621,14 @@ function compileExpand(
 function compileExpansionsObject(
   expansions: readonly ObjectExpansion[],
   parent: ExpansionParent,
-  pathPrefix: string
+  pathPrefix: string,
+  ctx: CompileContext
 ): CompiledPredicate {
   const parts: string[] = []
   const args: unknown[] = []
   expansions.forEach((expansion, index) => {
     const path = pathPrefix === "" ? `${index}` : `${pathPrefix}_${index}`
-    const value = compileExpansionValue(expansion, parent, path)
+    const value = compileExpansionValue(expansion, parent, path, ctx)
     parts.push("?::text", value.sql)
     args.push(expansion.linkId, ...value.args)
   })
@@ -583,7 +644,8 @@ function compileExpansionsObject(
 function compileExpansionValue(
   expansion: ObjectExpansion,
   parent: ExpansionParent,
-  path: string
+  path: string,
+  ctx: CompileContext
 ): CompiledPredicate {
   const edge = `edge_${path}`
   const target = `tgt_${path}`
@@ -596,7 +658,7 @@ function compileExpansionValue(
   const parentType = incoming ? `${edge}.target_type_id` : `${edge}.source_type_id`
   const parentId = incoming ? `${edge}.target_id` : `${edge}.source_id`
 
-  const child = compileExpansionChildJson(expansion, edge, target, path)
+  const child = compileExpansionChildJson(expansion, edge, target, path, ctx)
   const order = compileExpansionOrder(expansion, target, neighborType, neighborId)
 
   const whereParts = [
@@ -613,8 +675,8 @@ function compileExpansionValue(
 
   const inner = `
     SELECT ${child.sql} AS elem, row_number() OVER (ORDER BY ${order.sql}) AS _ord
-    FROM links AS ${edge}
-    JOIN objects AS ${target}
+    FROM ${ctx.source.linksTable} AS ${edge}
+    JOIN ${ctx.source.objectsTable} AS ${target}
       ON ${target}.project_id = ${edge}.project_id
      AND ${target}.object_type_id = ${neighborType}
      AND ${target}.primary_id = ${neighborId}
@@ -644,7 +706,8 @@ function compileExpansionChildJson(
   expansion: ObjectExpansion,
   edge: string,
   target: string,
-  path: string
+  path: string,
+  ctx: CompileContext
 ): CompiledPredicate {
   const fields = [
     `'projectId', ${target}.project_id`,
@@ -667,7 +730,8 @@ function compileExpansionChildJson(
         type: `${target}.object_type_id`,
         id: `${target}.primary_id`,
       },
-      path
+      path,
+      ctx
     )
     fields.push(`'links', ${nested.sql}`)
     args.push(...nested.args)
@@ -711,14 +775,15 @@ function compileExpansionOrder(
 function compileSet(
   projectId: string,
   op: ObjectQuerySetOperation,
-  inputs: readonly ObjectQuery[]
+  inputs: readonly ObjectQuery[],
+  ctx: CompileContext
 ): CompiledPgObjectQuery {
   if (inputs.length === 0) {
     const order = compileOrder(identityOrderFields())
     return {
       sql: `
         SELECT *, properties AS _cursor_properties
-        FROM objects
+        FROM ${ctx.source.objectsTable}
         WHERE 1 = 0
         ORDER BY ${order.sql}
       `,
@@ -733,7 +798,7 @@ function compileSet(
   }
 
   const compiledInputs = inputs.map((input) =>
-    compileObjectQueryInternal(projectId, input, exactContext)
+    compileObjectQueryInternal(projectId, input, exactContext(ctx))
   )
   const identities = compileSetIdentities(op, compiledInputs)
   const order = compileOrder(identityOrderFields())
@@ -741,7 +806,7 @@ function compileSet(
   const sql = `
     SELECT selected.*, selected.properties AS _cursor_properties
     FROM (${identities.sql}) AS ids
-    JOIN objects AS selected
+    JOIN ${ctx.source.objectsTable} AS selected
       ON selected.project_id = ?
      AND selected.object_type_id = ids.object_type_id
      AND selected.primary_id = ids.primary_id
@@ -799,19 +864,29 @@ function compileProject(
   }
 }
 
-function compileAggregateSource(projectId: string, query: ObjectQuery): CompiledAggregateSource {
+function compileAggregateSource(
+  projectId: string,
+  query: ObjectQuery,
+  source: PgObjectQuerySource
+): CompiledAggregateSource {
   switch (query.kind) {
     case "start":
-      return compileAggregateStart(projectId, query)
+      return compileAggregateStart(projectId, query, source)
     case "refs":
-      return compileAggregateRefs(projectId, query)
+      return compileAggregateRefs(projectId, query, source)
     case "filter":
-      return compileAggregateWhere(projectId, query.input, compilePredicate(query.predicate))
+      return compileAggregateWhere(
+        projectId,
+        query.input,
+        compilePredicate(query.predicate),
+        source
+      )
     case "text": {
       return compileAggregateWhere(
         projectId,
         query.input,
-        compileTextSearchPredicate(query.query, query.fields, query.fieldsByObjectType)
+        compileTextSearchPredicate(query.query, query.fields, query.fieldsByObjectType),
+        source
       )
     }
     case "traverse":
@@ -820,18 +895,19 @@ function compileAggregateSource(projectId: string, query: ObjectQuery): Compiled
         query.input,
         query.linkId,
         query.direction,
-        query.sourceObjectTypeId
+        query.sourceObjectTypeId,
+        source
       )
     case "set":
-      return compileAggregateSet(projectId, query.op, query.inputs)
+      return compileAggregateSet(projectId, query.op, query.inputs, source)
     case "sort":
     case "project":
     // `expand` is output-shaping, like sort/project: aggregates ignore it.
     case "expand":
-      return compileAggregateSource(projectId, query.input)
+      return compileAggregateSource(projectId, query.input, source)
     case "limit":
     case "page":
-      return compileRowQueryAggregateSource(projectId, query)
+      return compileRowQueryAggregateSource(projectId, query, source)
     case "vector":
       throw new Error(
         `[SixbPg] PostgreSQL object storage does not support query node '${query.kind}'`
@@ -841,7 +917,8 @@ function compileAggregateSource(projectId: string, query: ObjectQuery): Compiled
 
 function compileAggregateStart(
   projectId: string,
-  query: Extract<ObjectQuery, { kind: "start" }>
+  query: Extract<ObjectQuery, { kind: "start" }>,
+  source: PgObjectQuerySource
 ): CompiledAggregateSource {
   if (query.includeSubtypes === true) {
     throw new Error("[SixbPg] PostgreSQL object storage does not support start.includeSubtypes")
@@ -850,7 +927,7 @@ function compileAggregateStart(
   return {
     sql: `
       SELECT project_id, object_type_id, primary_id, properties
-      FROM objects
+      FROM ${source.objectsTable}
       WHERE project_id = ? AND object_type_id = ?
     `,
     args: [projectId, query.objectTypeId],
@@ -859,7 +936,8 @@ function compileAggregateStart(
 
 function compileAggregateRefs(
   projectId: string,
-  query: Extract<ObjectQuery, { kind: "refs" }>
+  query: Extract<ObjectQuery, { kind: "refs" }>,
+  source: PgObjectQuerySource
 ): CompiledAggregateSource {
   if (query.refs.length === 0) {
     throw new Error("[SixbPg] PostgreSQL object storage requires at least one ref")
@@ -874,7 +952,7 @@ function compileAggregateRefs(
           ref.value ->> 'primaryId' AS primary_id
         FROM jsonb_array_elements(?::text::jsonb) AS ref(value)
       ) AS requested
-      JOIN objects AS selected
+      JOIN ${source.objectsTable} AS selected
         ON selected.project_id = ?
        AND selected.object_type_id = requested.object_type_id
        AND selected.primary_id = requested.primary_id
@@ -886,9 +964,10 @@ function compileAggregateRefs(
 function compileAggregateWhere(
   projectId: string,
   inputQuery: ObjectQuery,
-  predicate: CompiledPredicate
+  predicate: CompiledPredicate,
+  source: PgObjectQuerySource
 ): CompiledAggregateSource {
-  const input = compileAggregateSource(projectId, inputQuery)
+  const input = compileAggregateSource(projectId, inputQuery, source)
   return {
     sql: `
       SELECT input.project_id, input.object_type_id, input.primary_id, input.properties
@@ -904,30 +983,31 @@ function compileAggregateTraversal(
   inputQuery: ObjectQuery,
   linkId: string,
   direction: "outgoing" | "incoming",
-  sourceObjectTypeId?: string
+  sourceObjectTypeId: string | undefined,
+  source: PgObjectQuerySource
 ): CompiledAggregateSource {
-  const input = compileAggregateSource(projectId, inputQuery)
+  const input = compileAggregateSource(projectId, inputQuery, source)
   const outputAlias = direction === "outgoing" ? "target_object" : "source_object"
   const joinSql =
     direction === "outgoing"
       ? `
-        JOIN links AS edge
+        JOIN ${source.linksTable} AS edge
           ON edge.project_id = input.project_id
          AND edge.source_type_id = input.object_type_id
          AND edge.source_id = input.primary_id
          AND edge.link_id = ?
-        JOIN objects AS target_object
+        JOIN ${source.objectsTable} AS target_object
           ON target_object.project_id = edge.project_id
          AND target_object.object_type_id = edge.target_type_id
          AND target_object.primary_id = edge.target_id
       `
       : `
-        JOIN links AS edge
+        JOIN ${source.linksTable} AS edge
           ON edge.project_id = input.project_id
          AND edge.target_type_id = input.object_type_id
          AND edge.target_id = input.primary_id
          AND edge.link_id = ?${sourceObjectTypeId === undefined ? "" : "\n         AND edge.source_type_id = ?"}
-        JOIN objects AS source_object
+        JOIN ${source.objectsTable} AS source_object
           ON source_object.project_id = edge.project_id
          AND source_object.object_type_id = edge.source_type_id
          AND source_object.primary_id = edge.source_id
@@ -954,26 +1034,27 @@ function compileAggregateTraversal(
 function compileAggregateSet(
   projectId: string,
   op: ObjectQuerySetOperation,
-  inputs: readonly ObjectQuery[]
+  inputs: readonly ObjectQuery[],
+  source: PgObjectQuerySource
 ): CompiledAggregateSource {
   if (inputs.length === 0) {
     return {
       sql: `
         SELECT project_id, object_type_id, primary_id, properties
-        FROM objects
+        FROM ${source.objectsTable}
         WHERE 1 = 0
       `,
       args: [],
     }
   }
 
-  const compiledInputs = inputs.map((input) => compileAggregateSource(projectId, input))
+  const compiledInputs = inputs.map((input) => compileAggregateSource(projectId, input, source))
   const identities = compileSetIdentities(op, compiledInputs)
   return {
     sql: `
       SELECT selected.project_id, selected.object_type_id, selected.primary_id, selected.properties
       FROM (${identities.sql}) AS ids
-      JOIN objects AS selected
+      JOIN ${source.objectsTable} AS selected
         ON selected.project_id = ?
        AND selected.object_type_id = ids.object_type_id
        AND selected.primary_id = ids.primary_id
@@ -984,9 +1065,13 @@ function compileAggregateSet(
 
 function compileRowQueryAggregateSource(
   projectId: string,
-  query: ObjectQuery
+  query: ObjectQuery,
+  source: PgObjectQuerySource
 ): CompiledAggregateSource {
-  const rowQuery = compileObjectQueryInternal(projectId, query, exactContext)
+  const rowQuery = compileObjectQueryInternal(projectId, query, {
+    probeLimit: false,
+    source,
+  })
   return {
     sql: `
       SELECT input.project_id, input.object_type_id, input.primary_id, input.properties
