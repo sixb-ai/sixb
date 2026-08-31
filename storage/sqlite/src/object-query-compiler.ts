@@ -36,6 +36,7 @@ interface CompiledHasMoreProbe {
 
 interface CompileContext {
   probeLimit: boolean
+  source: SqliteObjectQuerySource
 }
 
 interface CompiledPredicate {
@@ -74,7 +75,6 @@ interface EncodedCursorValue {
 }
 
 const PAGE_TOKEN_PREFIX = "keyset:"
-const exactContext: CompileContext = { probeLimit: false }
 
 // Fallback fanout cap for a "many" expansion that arrives without an explicit
 // limit. The core executor normally bakes a limit in before pushdown; this only
@@ -84,10 +84,37 @@ const DEFAULT_EXPANSION_FANOUT = 1_000
 export function compileObjectQuery(
   projectId: string,
   query: ObjectQuery,
-  options: { includeTotal?: boolean } = {}
+  options: { includeTotal?: boolean; source?: SqliteObjectQuerySource } = {}
 ): CompiledObjectQuery {
-  const ctx: CompileContext = { probeLimit: options.includeTotal === false }
-  return compileObjectQueryInternal(projectId, query, ctx)
+  const source = options.source ?? DEFAULT_OBJECT_QUERY_SOURCE
+  const ctx: CompileContext = { probeLimit: options.includeTotal === false, source }
+  return source.wrapQuery(compileObjectQueryInternal(projectId, query, ctx))
+}
+
+/** Physical relations used by the object-query compiler. */
+export interface SqliteObjectQuerySource {
+  readonly objectsTable: string
+  readonly linksTable: string
+  /** Wrap a terminal SELECT without its own WITH clause; the selected source owns the only WITH. */
+  wrapStatement(
+    sql: string,
+    args?: readonly SqliteValue[]
+  ): {
+    readonly sql: string
+    readonly args: readonly SqliteValue[]
+  }
+  wrapQuery(query: CompiledObjectQuery): CompiledObjectQuery
+}
+
+const DEFAULT_OBJECT_QUERY_SOURCE: SqliteObjectQuerySource = {
+  objectsTable: "objects",
+  linksTable: "links",
+  wrapStatement: (sql, args = []) => ({ sql, args: [...args] }),
+  wrapQuery: (query) => query,
+}
+
+function exactContext(ctx: CompileContext): CompileContext {
+  return ctx.probeLimit ? { ...ctx, probeLimit: false } : ctx
 }
 
 function compileObjectQueryInternal(
@@ -97,27 +124,28 @@ function compileObjectQueryInternal(
 ): CompiledObjectQuery {
   switch (query.kind) {
     case "start":
-      return compileStart(projectId, query)
+      return compileStart(projectId, query, ctx)
     case "refs":
-      return compileRefs(projectId, query)
+      return compileRefs(projectId, query, ctx)
     case "filter":
-      return compileFilter(projectId, query.input, query.predicate)
+      return compileFilter(projectId, query.input, query.predicate, ctx)
     case "sort":
       return compileSort(projectId, query.input, query.fields, ctx)
     case "limit":
       return compileLimit(projectId, query.input, query.limit, ctx)
     case "page":
-      return compilePage(projectId, query.input, query.pageSize, query.pageToken)
+      return compilePage(projectId, query.input, query.pageSize, query.pageToken, ctx)
     case "traverse":
       return compileTraversal(
         projectId,
         query.input,
         query.linkId,
         query.direction,
-        query.sourceObjectTypeId
+        query.sourceObjectTypeId,
+        ctx
       )
     case "set":
-      return compileSet(projectId, query.op, query.inputs)
+      return compileSet(projectId, query.op, query.inputs, ctx)
     case "project":
       return compileProject(projectId, query.input, query.properties, ctx)
     case "text":
@@ -126,10 +154,11 @@ function compileObjectQueryInternal(
         query.input,
         query.query,
         query.fields,
-        query.fieldsByObjectType
+        query.fieldsByObjectType,
+        ctx
       )
     case "expand":
-      return compileExpand(projectId, query.input, query.expansions)
+      return compileExpand(projectId, query.input, query.expansions, ctx)
     case "vector":
       throw new Error(`[Sixb] SQLite object storage does not support query node '${query.kind}'`)
   }
@@ -137,7 +166,8 @@ function compileObjectQueryInternal(
 
 function compileStart(
   projectId: string,
-  query: Extract<ObjectQuery, { kind: "start" }>
+  query: Extract<ObjectQuery, { kind: "start" }>,
+  ctx: CompileContext
 ): CompiledObjectQuery {
   if (query.includeSubtypes === true) {
     throw new Error("[Sixb] SQLite object storage does not support start.includeSubtypes")
@@ -146,7 +176,7 @@ function compileStart(
   const order = compileOrder(identityOrderFields())
   const sql = `
     SELECT *, properties AS _cursor_properties
-    FROM objects
+    FROM ${ctx.source.objectsTable}
     WHERE project_id = ? AND object_type_id = ?
     ORDER BY ${order.sql}
   `
@@ -155,7 +185,7 @@ function compileStart(
   return {
     sql,
     args,
-    totalSql: "SELECT COUNT(*) as total FROM objects WHERE project_id = ? AND object_type_id = ?",
+    totalSql: `SELECT COUNT(*) as total FROM ${ctx.source.objectsTable} WHERE project_id = ? AND object_type_id = ?`,
     totalArgs: [projectId, query.objectTypeId],
     order,
     hasMore: () => false,
@@ -166,7 +196,8 @@ function compileStart(
 
 function compileRefs(
   projectId: string,
-  query: Extract<ObjectQuery, { kind: "refs" }>
+  query: Extract<ObjectQuery, { kind: "refs" }>,
+  ctx: CompileContext
 ): CompiledObjectQuery {
   if (query.refs.length === 0) {
     throw new Error("[Sixb] SQLite object storage requires at least one ref")
@@ -182,10 +213,9 @@ function compileRefs(
     FROM json_each(?) AS ref
   `
   const sql = `
-    WITH requested AS (${requested})
     SELECT selected.*, selected.properties AS _cursor_properties
-    FROM requested
-    JOIN objects AS selected
+    FROM (${requested}) AS requested
+    JOIN ${ctx.source.objectsTable} AS selected
       ON selected.project_id = ?
      AND selected.object_type_id = requested.object_type_id
      AND selected.primary_id = requested.primary_id
@@ -196,10 +226,9 @@ function compileRefs(
     sql,
     args: [refsJson, projectId, ...selectedOrder.args],
     totalSql: `
-      WITH requested AS (${requested})
       SELECT COUNT(*) AS total
-      FROM requested
-      JOIN objects AS selected
+      FROM (${requested}) AS requested
+      JOIN ${ctx.source.objectsTable} AS selected
         ON selected.project_id = ?
        AND selected.object_type_id = requested.object_type_id
        AND selected.primary_id = requested.primary_id
@@ -215,18 +244,20 @@ function compileRefs(
 function compileFilter(
   projectId: string,
   inputQuery: ObjectQuery,
-  predicateNode: ObjectQueryPredicate
+  predicateNode: ObjectQueryPredicate,
+  ctx: CompileContext
 ): CompiledObjectQuery {
   const predicate = compilePredicate(predicateNode)
-  return compileWhere(projectId, inputQuery, predicate)
+  return compileWhere(projectId, inputQuery, predicate, ctx)
 }
 
 function compileWhere(
   projectId: string,
   inputQuery: ObjectQuery,
-  predicate: CompiledPredicate
+  predicate: CompiledPredicate,
+  ctx: CompileContext
 ): CompiledObjectQuery {
-  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext)
+  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext(ctx))
   const sql = `
     SELECT *
     FROM (${input.sql}) AS input
@@ -255,7 +286,8 @@ function compileText(
   inputQuery: ObjectQuery,
   query: string,
   fields: readonly string[] | undefined,
-  fieldsByObjectType: Readonly<Record<string, readonly string[]>> | undefined
+  fieldsByObjectType: Readonly<Record<string, readonly string[]>> | undefined,
+  ctx: CompileContext
 ): CompiledObjectQuery {
   const predicate =
     fields && fields.length > 0
@@ -265,7 +297,7 @@ function compileText(
   if (!predicate) {
     throw new Error("[Sixb] SQLite object text search requires fields or resolved text defaults")
   }
-  return compileWhere(projectId, inputQuery, predicate)
+  return compileWhere(projectId, inputQuery, predicate, ctx)
 }
 
 function compileSort(
@@ -274,7 +306,7 @@ function compileSort(
   fields: readonly ObjectQuerySortField[],
   ctx: CompileContext
 ): CompiledObjectQuery {
-  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext)
+  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext(ctx))
   const probeInput =
     ctx.probeLimit && needsLimitProbe(inputQuery)
       ? compileObjectQueryInternal(projectId, inputQuery, ctx)
@@ -313,7 +345,7 @@ function compileLimit(
   rawLimit: number,
   ctx: CompileContext
 ): CompiledObjectQuery {
-  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext)
+  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext(ctx))
   const limit = Math.max(0, rawLimit)
   const rowLimit = ctx.probeLimit ? limit + 1 : limit
 
@@ -342,9 +374,10 @@ function compilePage(
   projectId: string,
   inputQuery: ObjectQuery,
   rawPageSize: number,
-  pageToken: string | undefined
+  pageToken: string | undefined,
+  ctx: CompileContext
 ): CompiledObjectQuery {
-  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext)
+  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext(ctx))
   const pageSize = Math.max(0, rawPageSize)
   const cursor = pageToken ? decodePageToken(pageToken, input.order.fields) : undefined
   const cursorPredicate = cursor
@@ -381,30 +414,31 @@ function compileTraversal(
   inputQuery: ObjectQuery,
   linkId: string,
   direction: "outgoing" | "incoming",
-  sourceObjectTypeId?: string
+  sourceObjectTypeId: string | undefined,
+  ctx: CompileContext
 ): CompiledObjectQuery {
-  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext)
+  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext(ctx))
   const outputAlias = direction === "outgoing" ? "target_object" : "source_object"
   const joinSql =
     direction === "outgoing"
       ? `
-        JOIN links AS edge
+        JOIN ${ctx.source.linksTable} AS edge
           ON edge.project_id = input.project_id
          AND edge.source_type_id = input.object_type_id
          AND edge.source_id = input.primary_id
          AND edge.link_id = ?
-        JOIN objects AS target_object
+        JOIN ${ctx.source.objectsTable} AS target_object
           ON target_object.project_id = edge.project_id
          AND target_object.object_type_id = edge.target_type_id
          AND target_object.primary_id = edge.target_id
       `
       : `
-        JOIN links AS edge
+        JOIN ${ctx.source.linksTable} AS edge
           ON edge.project_id = input.project_id
          AND edge.target_type_id = input.object_type_id
          AND edge.target_id = input.primary_id
          AND edge.link_id = ?${sourceObjectTypeId === undefined ? "" : "\n         AND edge.source_type_id = ?"}
-        JOIN objects AS source_object
+        JOIN ${ctx.source.objectsTable} AS source_object
           ON source_object.project_id = edge.project_id
          AND source_object.object_type_id = edge.source_type_id
          AND source_object.primary_id = edge.source_id
@@ -451,13 +485,15 @@ interface ExpansionParent {
 function compileExpand(
   projectId: string,
   inputQuery: ObjectQuery,
-  expansions: readonly ObjectExpansion[]
+  expansions: readonly ObjectExpansion[],
+  ctx: CompileContext
 ): CompiledObjectQuery {
-  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext)
+  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext(ctx))
   const expand = compileExpansionsObject(
     expansions,
     { project: "input.project_id", type: "input.object_type_id", id: "input.primary_id" },
-    ""
+    "",
+    ctx
   )
   const inputOrder = compileOrder(input.order.fields, "input", "input._cursor_properties")
   const sql = `
@@ -487,13 +523,14 @@ function compileExpand(
 function compileExpansionsObject(
   expansions: readonly ObjectExpansion[],
   parent: ExpansionParent,
-  pathPrefix: string
+  pathPrefix: string,
+  ctx: CompileContext
 ): CompiledPredicate {
   const parts: string[] = []
   const args: SqliteValue[] = []
   expansions.forEach((expansion, index) => {
     const path = pathPrefix === "" ? `${index}` : `${pathPrefix}_${index}`
-    const value = compileExpansionValue(expansion, parent, path)
+    const value = compileExpansionValue(expansion, parent, path, ctx)
     parts.push("?", `json(${value.sql})`)
     args.push(expansion.linkId, ...value.args)
   })
@@ -509,7 +546,8 @@ function compileExpansionsObject(
 function compileExpansionValue(
   expansion: ObjectExpansion,
   parent: ExpansionParent,
-  path: string
+  path: string,
+  ctx: CompileContext
 ): CompiledPredicate {
   const edge = `edge_${path}`
   const target = `tgt_${path}`
@@ -522,7 +560,7 @@ function compileExpansionValue(
   const parentType = incoming ? `${edge}.target_type_id` : `${edge}.source_type_id`
   const parentId = incoming ? `${edge}.target_id` : `${edge}.source_id`
 
-  const child = compileExpansionChildJson(expansion, edge, target, path)
+  const child = compileExpansionChildJson(expansion, edge, target, path, ctx)
   const order = compileExpansionOrder(expansion, target, neighborType, neighborId)
 
   const whereParts = [
@@ -539,8 +577,8 @@ function compileExpansionValue(
 
   const inner = `
     SELECT ${child.sql} AS elem, row_number() OVER (ORDER BY ${order.sql}) AS _ord
-    FROM links AS ${edge}
-    JOIN objects AS ${target}
+    FROM ${ctx.source.linksTable} AS ${edge}
+    JOIN ${ctx.source.objectsTable} AS ${target}
       ON ${target}.project_id = ${edge}.project_id
      AND ${target}.object_type_id = ${neighborType}
      AND ${target}.primary_id = ${neighborId}
@@ -574,7 +612,8 @@ function compileExpansionChildJson(
   expansion: ObjectExpansion,
   edge: string,
   target: string,
-  path: string
+  path: string,
+  ctx: CompileContext
 ): CompiledPredicate {
   const fields = [
     `'projectId', ${target}.project_id`,
@@ -597,7 +636,8 @@ function compileExpansionChildJson(
         type: `${target}.object_type_id`,
         id: `${target}.primary_id`,
       },
-      path
+      path,
+      ctx
     )
     fields.push(`'links', ${nested.sql}`)
     args.push(...nested.args)
@@ -645,14 +685,15 @@ function compileExpansionOrder(
 function compileSet(
   projectId: string,
   op: ObjectQuerySetOperation,
-  inputs: readonly ObjectQuery[]
+  inputs: readonly ObjectQuery[],
+  ctx: CompileContext
 ): CompiledObjectQuery {
   if (inputs.length === 0) {
     const order = compileOrder(identityOrderFields())
     return {
       sql: `
         SELECT *
-        FROM objects
+        FROM ${ctx.source.objectsTable}
         WHERE 1 = 0
         ORDER BY ${order.sql}
       `,
@@ -667,7 +708,7 @@ function compileSet(
   }
 
   const compiledInputs = inputs.map((input) =>
-    compileObjectQueryInternal(projectId, input, exactContext)
+    compileObjectQueryInternal(projectId, input, exactContext(ctx))
   )
   const identities = compileSetIdentities(op, compiledInputs)
   const order = compileOrder(identityOrderFields())
@@ -675,7 +716,7 @@ function compileSet(
   const sql = `
     SELECT selected.*, selected.properties AS _cursor_properties
     FROM (${identities.sql}) AS ids
-    JOIN objects AS selected
+    JOIN ${ctx.source.objectsTable} AS selected
       ON selected.project_id = ?
      AND selected.object_type_id = ids.object_type_id
      AND selected.primary_id = ids.primary_id
@@ -778,7 +819,7 @@ function compileProjectionExpression(properties: readonly string[]): CompiledPre
     sql: `
       COALESCE(
         (
-          SELECT json_group_object(projected.key, projected.value)
+          SELECT json_group_object(projected.key, ${sqliteJsonEachValue("projected")})
           FROM json_each(input.properties) AS projected
           WHERE projected.key IN (${properties.map(() => "?").join(", ")})
         ),
@@ -787,6 +828,15 @@ function compileProjectionExpression(properties: readonly string[]): CompiledPre
     `,
     args: [...properties],
   }
+}
+
+/** json_each exposes JSON booleans as integer SQL values; restore their JSON representation. */
+export function sqliteJsonEachValue(alias: string): string {
+  return `CASE ${alias}.type
+    WHEN 'true' THEN json('true')
+    WHEN 'false' THEN json('false')
+    ELSE ${alias}.value
+  END`
 }
 
 function compilePredicate(predicate: ObjectQueryPredicate): CompiledPredicate {
