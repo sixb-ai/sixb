@@ -84,6 +84,7 @@ import {
   listDatasetVersions,
   listEvents,
   listLogs,
+  listModels,
   listObjects,
   listObjectTypes,
   listPipelineRuns,
@@ -346,6 +347,8 @@ import type {
   ListLogsData,
   ListLogsError,
   ListLogsResponse,
+  ListModelsData,
+  ListModelsResponse,
   ListObjectsData,
   ListObjectsError,
   ListObjectsResponse,
@@ -3801,6 +3804,31 @@ export const getAgentRunOptions = (options: Options<GetAgentRunData>) =>
       return data
     },
     queryKey: getAgentRunQueryKey(options),
+  })
+
+export const listModelsQueryKey = (options?: Options<ListModelsData>) =>
+  createQueryKey("listModels", options)
+
+/**
+ * List the project model catalog
+ */
+export const listModelsOptions = (options?: Options<ListModelsData>) =>
+  queryOptions<
+    ListModelsResponse,
+    DefaultError,
+    ListModelsResponse,
+    ReturnType<typeof listModelsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listModels({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listModelsQueryKey(options),
   })
 
 /**

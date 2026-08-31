@@ -239,6 +239,8 @@ import type {
   ListLogsData,
   ListLogsErrors,
   ListLogsResponses,
+  ListModelsData,
+  ListModelsResponses,
   ListObjectsData,
   ListObjectsErrors,
   ListObjectsResponses,
@@ -1991,6 +1993,17 @@ export const getAgentRun = <ThrowOnError extends boolean = false>(
 ) =>
   (options.client ?? client).get<GetAgentRunResponses, GetAgentRunErrors, ThrowOnError>({
     url: "/api/agent-runs/{runId}",
+    ...options,
+  })
+
+/**
+ * List the project model catalog
+ */
+export const listModels = <ThrowOnError extends boolean = false>(
+  options?: Options<ListModelsData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<ListModelsResponses, unknown, ThrowOnError>({
+    url: "/api/models",
     ...options,
   })
 
