@@ -5,12 +5,15 @@ import type {
   StoredRuleTriggeredEvent,
 } from "@sixb/core/internal/events"
 import type {
+  LinkBatchKey,
+  ObjectBatchKey,
   ObjectLinkRow,
   ObjectRow,
   RuleStateRecord,
   RuleStateTransitionEvent,
   RulesStorage,
 } from "@sixb/core/storage"
+import { linkBatchKey, objectBatchKey } from "@sixb/core/storage"
 import { evaluateRulePredicate } from "./evaluate-predicate"
 import { referencedLinkIds } from "./evaluate-rule-event"
 import type { RuleLinkMap, RulesWorkerContext } from "./types"
@@ -239,12 +242,12 @@ function ruleSubjectKey(ruleId: string, subject: RuleEventSubject): string {
   return JSON.stringify([ruleId, subject.kind, subject.objectTypeId, subject.primaryId])
 }
 
-function objectKey(objectTypeId: string, primaryId: string): string {
-  return `${objectTypeId}:${primaryId}`
+function objectKey(objectTypeId: string, primaryId: string): ObjectBatchKey {
+  return objectBatchKey(objectTypeId, primaryId)
 }
 
-function linkRequestKey(objectTypeId: string, primaryId: string, linkId: string): string {
-  return `${objectTypeId}:${primaryId}:${linkId}`
+function linkRequestKey(objectTypeId: string, primaryId: string, linkId: string): LinkBatchKey {
+  return linkBatchKey(objectTypeId, primaryId, linkId)
 }
 
 function groupRulesByObjectType(

@@ -1,6 +1,6 @@
 {
   "name": "@sixb/connector-meta",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Meta connector for Sixb — Instagram & Facebook Page reads via the Graph API",
   "keywords": [
     "sixb",

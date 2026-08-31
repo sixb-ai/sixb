@@ -22,6 +22,7 @@ import {
   startScopeAccumulator,
 } from "@sixb/core/internal/ontology-storage-provider"
 import type {
+  MaterializationLinkScopeRevision,
   MaterializationLinkScopeState,
   MaterializationLinkState,
   MaterializationObjectState,
@@ -98,6 +99,7 @@ interface LinkScopeRow extends EffectiveLinkRow {
 interface ObjectOverrideRow extends PgStoredOverrideRow {
   readonly object_type_id: string
   readonly primary_id: string
+  readonly edited_at: unknown
 }
 
 interface LinkOverrideRow extends PgStoredOverrideRow {
@@ -406,7 +408,14 @@ export class PgMaterializationStateReader {
     })
   }
 
-  async linkScopes(
+  async linkScopeRevisions(
+    scopes: readonly { readonly source: OntologyObjectRef; readonly linkId: string }[]
+  ): Promise<readonly MaterializationLinkScopeRevision[]> {
+    if (scopes.length === 0) return []
+    return (await this.readEffectiveLinkScopes(scopes)).revisions
+  }
+
+  async linkSlotStates(
     scopes: readonly { readonly source: OntologyObjectRef; readonly linkId: string }[]
   ): Promise<readonly MaterializationLinkScopeState[]> {
     if (scopes.length === 0) return []
@@ -416,12 +425,6 @@ export class PgMaterializationStateReader {
       source_id: source.primaryId,
       link_id: linkId,
     }))
-    const accumulators = new Map(
-      scopes.map(({ source, linkId }) => {
-        const key = linkScopeSortKey(source, linkId)
-        return [key, startScopeAccumulator(source, linkId)] as const
-      })
-    )
     const requestedParameter = jsonParameter(this.sql, requested)
     const [sourceRows, slotOverrideRows] = await Promise.all([
       this.sql<PgOntologySourceAssertionRow[]>`
@@ -469,6 +472,37 @@ export class PgMaterializationStateReader {
         return [linkScopeSortKey(stored.ref.source, stored.ref.linkId), stored] as const
       })
     )
+    const { revisions, effective } = await this.readEffectiveLinkScopes(scopes)
+    return scopes.map(({ source, linkId }, index) => {
+      const key = linkScopeSortKey(source, linkId)
+      return {
+        ...revisions[index]!,
+        sourceAssertion: sources.get(key) ?? null,
+        override: overrides.get(key) ?? null,
+        effective: effective.get(key) ?? null,
+      }
+    })
+  }
+
+  private async readEffectiveLinkScopes(
+    scopes: readonly { readonly source: OntologyObjectRef; readonly linkId: string }[]
+  ): Promise<{
+    readonly revisions: readonly MaterializationLinkScopeRevision[]
+    readonly effective: ReadonlyMap<string, EffectiveLinkSnapshot | null>
+  }> {
+    const requested = scopes.map(({ source, linkId }) => ({
+      scope_sort_key: linkScopeSortKey(source, linkId),
+      source_type_id: source.objectTypeId,
+      source_id: source.primaryId,
+      link_id: linkId,
+    }))
+    const requestedParameter = jsonParameter(this.sql, requested)
+    const accumulators = new Map(
+      scopes.map(({ source, linkId }) => {
+        const key = linkScopeSortKey(source, linkId)
+        return [key, startScopeAccumulator(source, linkId)] as const
+      })
+    )
     const effective = new Map<string, EffectiveLinkSnapshot | null>()
     let scopeCursor: string | null = null
     let linkCursor: string | null = null
@@ -509,29 +543,12 @@ export class PgMaterializationStateReader {
       scopeCursor = last.scope_sort_key
       linkCursor = last.link_sort_key
     }
-    return scopes.map(({ source, linkId }) => {
-      const key = linkScopeSortKey(source, linkId)
-      return {
-        ...finishScopeAccumulator(accumulators.get(key)!),
-        sourceAssertion: sources.get(key) ?? null,
-        override: overrides.get(key) ?? null,
-        effective: effective.get(key) ?? null,
-      }
-    })
-  }
-
-  async linkScope(
-    source: OntologyObjectRef,
-    linkId: string
-  ): Promise<MaterializationLinkScopeState> {
-    const [scope] = await this.linkScopes([{ source, linkId }])
-    if (!scope) {
-      throw new MaterializationConflictError(
-        "effective-state",
-        "Link scope lookup returned no row."
-      )
+    return {
+      revisions: scopes.map(({ source, linkId }) =>
+        finishScopeAccumulator(accumulators.get(linkScopeSortKey(source, linkId))!)
+      ),
+      effective,
     }
-    return scope
   }
 
   async *incidentLinks(
@@ -1060,6 +1077,7 @@ function storedObjectOverride(row: ObjectOverrideRow): StoredObjectOverride {
   return {
     ref,
     value: structuredClone(row.value) as StoredObjectOverride["value"],
+    editedAt: structuredClone(row.edited_at) as Readonly<Record<string, string>>,
     lastCommitId: row.last_commit_id,
     updatedAt: toIsoString(row.updated_at),
   }

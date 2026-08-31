@@ -439,6 +439,7 @@ export type {
   GrantDefinition,
   GroupDefinition,
   GroupReference,
+  ManageGrant,
   MembershipOperation,
   MembershipPolicyDefinition,
   ObserveGrant,
@@ -472,6 +473,7 @@ export type {
   DurableExecutionSource,
   ExecutionRecord,
   ExecutionStorage,
+  InMemoryStorageOptions,
   MigrationCapableStorage,
   MigrationReport,
   // `status()` returns these, so reading a migrator from here needs them; without them
@@ -572,6 +574,7 @@ export type {
   ObjectQueryPredicateIn,
   ObjectQueryPredicateNot,
   ObjectQueryProject,
+  ObjectQueryRefs,
   ObjectQueryResultShape,
   ObjectQuerySet,
   ObjectQuerySetOperation,
@@ -596,12 +599,30 @@ export {
 // ── Connectors ─────────────────────────────────────────────
 
 export type {
+  AnyConnectorAdapter,
+  ConnectorAccessToken,
+  ConnectorAccountCandidate,
   ConnectorAdapter,
   ConnectorClient,
+  ConnectorConnectionClientContext,
+  ConnectorConnectionMetadata,
+  ConnectorConnectionOptions,
+  ConnectorConnectionOwner,
+  ConnectorConnectionSelector,
   ConnectorContext,
   ConnectorDefinition,
+  ConnectorOAuth2Authentication,
+  ConnectorOAuthCredentials,
+  ConnectorOAuthErrorKind,
+  ConnectorTokenSource,
+  OAuthConnectorAdapter,
+  OAuthConnectorAuthorizationContext,
+  OAuthConnectorAuthorizationUrlInput,
+  OAuthConnectorCodeExchangeInput,
+  ProjectConnectorConnectionOwner,
+  StaticConnectorDefinition,
 } from "./connectors"
-export { defineConnector } from "./connectors"
+export { ConnectorOAuthError, defineConnector } from "./connectors"
 
 // ── Webhooks ───────────────────────────────────────────────
 
@@ -639,6 +660,7 @@ export type {
   DatasetSyncTarget,
   RequestSyncRunInput,
   SyncBuilder,
+  SyncConnectorConnection,
   SyncDefinition,
   SyncMode,
   SyncReadBuilder,
@@ -839,6 +861,8 @@ export type {
 export type {
   ExecutionObjectByIdHandle,
   ExecutionObjectSet,
+  ObjectQueryLinksInput,
+  ObjectQueryLinksResult,
   ObjectsRuntime,
 } from "./objects/execution"
 export type { PipelineRunsRuntime, PipelinesRuntime } from "./pipelines/execution"
@@ -902,6 +926,7 @@ export type {
   ActionRunFailureCode,
   ActionRunPhase,
   AgentRunFailureCode,
+  AiCostSummary,
   PipelineRunFailureCode,
   ProjectionRunFailureCode,
   SyncRunFailureCode,
@@ -954,17 +979,25 @@ export type {
   AgentRequestErrorCode,
   AgentStepStartPart,
   AgentTextPart,
+  AgentToolArtifact,
+  AgentToolArtifactPutInput,
+  AgentToolArtifacts,
   AgentToolCallPart,
   AgentToolCallState,
+  AgentToolContent,
   AgentToolDefinition,
   AgentToolDescriptionBuilder,
+  AgentToolFileContent,
   AgentToolHandler,
   AgentToolHandlerResult,
   AgentToolInputBuilder,
   AgentToolInputSchema,
+  AgentToolResult,
+  AgentToolResultFileResolverInput,
   AgentToolRunBuilder,
   AgentToolRunContext,
   AgentToolRunInfo,
+  AgentToolTextContent,
   AgentUiMessage,
   AgentUiMessagePart,
   AgentUiToolPart,
@@ -990,6 +1023,15 @@ export {
   requestAgentRun,
 } from "./agents"
 
+// ── Models ──────────────────────────────────────────────────
+
+export type {
+  LanguageModelCatalog,
+  LanguageModelEntry,
+  ModelCatalog,
+  ModelCatalogInput,
+} from "./models"
+
 // ── Scheduling ──────────────────────────────────────────────
 
 export { CronValidationError } from "./schedules"
@@ -1000,13 +1042,18 @@ export type {
   ForeignKeyDescriptor,
   LinkProjectionDefinition,
   LinkProjectionTarget,
+  ObjectProjectionBuilder,
+  ObjectProjectionConflictResolution,
   ObjectProjectionDefinition,
   ObjectProjectionTarget,
   ProjectionDefinition,
   ProjectionDefinitionCatalog,
+  ProjectionForeignKeyInput,
   ProjectionTarget,
   ProjectionTargetByKind,
+  SourceEditConflictResolution,
   TelemetryProjectionDefinition,
+  TelemetryProjectionPropertyMapping,
 } from "./projections"
 
 export {

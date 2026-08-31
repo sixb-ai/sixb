@@ -13,7 +13,7 @@ import { SmolvmSandbox, type SmolvmSandboxOptions } from "../src/smolvm-sandbox"
  * in CI. It validates the real lifecycle, in-guest file materialization via
  * writeFiles, --workdir, --env, exit codes, and stream separation end to end.
  * The rootfs ships busybox `sh` (not bash), so commands use `sh`. (The factory
- * defaults to the managed bash+curl image; that path is covered by the manual
+ * defaults to the managed runtime-v1 image; that path is covered by the manual
  * build + docs.)
  */
 const available = probeSmolvm("smolvm").ok

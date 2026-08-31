@@ -7,7 +7,13 @@ const ProjectionRunFailureSchema: z.ZodType<SixbFailure<ProjectionRunFailureCode
   sixbFailureSchema(PROJECTION_RUN_FAILURE_CODES)
 
 export const ProjectionKindSchema = z.enum(["object", "link", "telemetry"])
-export const ProjectionRunStatusSchema = z.enum(["running", "succeeded", "failed", "cancelled"])
+export const ProjectionRunStatusSchema = z.enum([
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+  "cancelled",
+])
 
 const ProjectionRunIdentityBaseSchema = z.object({
   projectionId: z.string(),
@@ -24,13 +30,15 @@ const ProjectionRunIdentityBaseSchema = z.object({
 const ProjectionRunBaseSchema = z.object({
   id: z.string(),
   projectId: z.string(),
+  executionId: z.string(),
   status: ProjectionRunStatusSchema,
   attempt: z.number(),
   progress: z.object({
     sourceRowsRead: z.number(),
     sourceRowsSkipped: z.number(),
   }),
-  startedAt: z.string(),
+  queuedAt: z.string(),
+  startedAt: z.string().optional(),
   finishedAt: z.string().optional(),
   error: ProjectionRunFailureSchema.optional(),
 })
@@ -75,6 +83,11 @@ export const ForeignKeyDescriptorSchema = z.object({
   targetObjectTypeId: z.string(),
 })
 
+export const SourceEditConflictResolutionSchema = z.union([
+  z.object({ strategy: z.literal("editsWin") }),
+  z.object({ strategy: z.literal("mostRecent"), sourceTimestamp: z.string() }),
+])
+
 export const ObjectProjectionSchema = z.object({
   _tag: z.literal("ObjectProjectionDefinition"),
   id: z.string(),
@@ -82,6 +95,7 @@ export const ObjectProjectionSchema = z.object({
   datasetId: z.string(),
   properties: z.record(z.string()),
   links: z.record(ForeignKeyDescriptorSchema),
+  conflictResolution: SourceEditConflictResolutionSchema,
   latestRun: ProjectionRunSchema.nullable(),
 })
 
@@ -101,12 +115,15 @@ export const TelemetryProjectionSchema = z.object({
   _tag: z.literal("TelemetryProjectionDefinition"),
   id: z.string(),
   objectTypeId: z.string(),
-  propertyId: z.string(),
   datasetId: z.string(),
   objectIdField: z.string(),
   atField: z.string(),
-  valueField: z.string(),
-  unitField: z.string().optional(),
+  properties: z.record(
+    z.object({
+      valueField: z.string(),
+      unitField: z.string().optional(),
+    })
+  ),
   latestRun: ProjectionRunSchema.nullable(),
 })
 

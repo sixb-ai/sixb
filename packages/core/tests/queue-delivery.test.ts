@@ -11,7 +11,7 @@ async function claimOne(
 ): Promise<ClaimedQueueJob<SyncRunRequestedQueueJob>> {
   await queues.syncRuns.enqueue({
     projectId: PROJECT_ID,
-    jobs: [{ type: "sync.run.requested", payload: { syncId: "sync" } }],
+    jobs: [{ type: "sync.run.requested", payload: { runId: "sync" } }],
   })
   const [claimed] = await queues.syncRuns.claim({
     projectId: PROJECT_ID,

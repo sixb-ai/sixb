@@ -27,6 +27,23 @@ test("PgProjectionRunStorage serializes concurrent reclaims", async () => {
       identity: replacementIdentity,
       target: { objectTypeId: "Device" },
     } as const
+    const executionId = "execution:stable-run"
+    await storage.executions.create({
+      id: executionId,
+      projectId: input.projectId,
+      executor: { type: "primitive", kind: "projection", runId: input.id },
+      source: {
+        type: "datasetVersion",
+        datasetId: input.identity.datasetVersion.datasetId,
+        versionId: input.identity.datasetVersion.versionId,
+      },
+      correlationId: input.id,
+      authorizationRef: {
+        type: "trustedPrimitive",
+        primitive: { kind: "projection", id: input.identity.projectionId, runId: input.id },
+      },
+    })
+    await storage.projectionRuns.queue({ ...input, executionId })
     const claims = await Promise.all([
       storage.projectionRuns.startOrReclaim(input),
       storage.projectionRuns.startOrReclaim(input),
@@ -56,10 +73,10 @@ runProjectionRunStorageContractSuite("PgProjectionRunStorage contract", {
   createStorage: async () => {
     const { storage } = await createTestStorage()
     contractStorageOwners.set(storage.projectionRuns, storage)
-    return storage.projectionRuns
+    return { projectionRuns: storage.projectionRuns, executions: storage.executions }
   },
-  cleanup: async (projectionRuns) => {
-    const owner = contractStorageOwners.get(projectionRuns)
+  cleanup: async (context) => {
+    const owner = contractStorageOwners.get(context.projectionRuns)
     if (!owner) return
     await owner.dropSchema()
     await owner.close()

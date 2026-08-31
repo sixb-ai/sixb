@@ -31,6 +31,7 @@ import {
   ObjectQueryCountRequestSchema,
   ObjectQueryExistsRequestSchema,
   ObjectQueryFacetsRequestSchema,
+  ObjectQueryLinksRequestSchema,
   ObjectQueryRequestSchema,
   ObjectSearchQuerySchema,
   ObjectSearchResponseSchema,
@@ -60,6 +61,32 @@ function serializeObject(row: {
     properties: row.properties,
     createdAt: toIsoString(row.createdAt),
     updatedAt: toIsoString(row.updatedAt),
+  }
+}
+
+function serializeObjectLink(link: {
+  sourceTypeId: string
+  sourceId: string
+  linkId: string
+  targetTypeId: string
+  targetId: string
+  properties?: Record<string, unknown>
+  createdAt: Date
+  updatedAt: Date
+}) {
+  return {
+    source: {
+      objectTypeId: link.sourceTypeId,
+      primaryId: link.sourceId,
+    },
+    linkId: link.linkId,
+    target: {
+      objectTypeId: link.targetTypeId,
+      primaryId: link.targetId,
+    },
+    ...(link.properties === undefined ? {} : { properties: link.properties }),
+    createdAt: toIsoString(link.createdAt),
+    updatedAt: toIsoString(link.updatedAt),
   }
 }
 
@@ -414,6 +441,82 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
               content: {
                 "application/json": {
                   schema: { $ref: "#/components/schemas/ObjectQueryResponse" },
+                },
+              },
+            },
+            400: {
+              description: "Response for status 400",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ObjectQueryErrorResponse" },
+                },
+              },
+            },
+            403: {
+              description: "Response for status 403",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            500: {
+              description: "Response for status 500",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+          },
+        },
+      }
+    )
+    .post(
+      "/api/objects/query/links",
+      async (context) => {
+        const { body, set } = context
+        try {
+          const parsed = ObjectQueryLinksRequestSchema.parse(body) as {
+            query: ObjectQuery
+            direction: "outgoing" | "incoming" | "both"
+            linkId?: string
+            includeObjects: boolean
+            pageSize: number
+            pageToken?: string
+          }
+          const result = await requireRequestSixb(context).objects.queryLinks(parsed)
+
+          return {
+            objects: result.objects.map(serializeObject),
+            links: result.links.map(serializeObjectLink),
+            hasMore: result.hasMore,
+            ...(result.nextPageToken === undefined ? {} : { nextPageToken: result.nextPageToken }),
+          }
+        } catch (error) {
+          return handleObjectQueryError(error, set)
+        }
+      },
+      {
+        detail: {
+          summary: "Query object links",
+          tags: [OPENAPI_TAGS.links.name],
+          operationId: "queryObjectLinks",
+          security: bearerSecurityRequirement("queryObjectLinks"),
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ObjectQueryLinksRequest" },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Response for status 200",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ObjectQueryLinksResponse" },
                 },
               },
             },

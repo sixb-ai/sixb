@@ -97,6 +97,14 @@ type ComposerAttachment =
 
 const MAX_HEIGHT_PX = 200
 
+export function composerCanFocus({
+  disabled,
+  pending,
+  running,
+}: Pick<ComposerProps, "disabled" | "pending" | "running">): boolean {
+  return !disabled && !pending && !running
+}
+
 export function Composer({
   onSend,
   disabled,
@@ -223,11 +231,28 @@ export function Composer({
   useEffect(() => {
     const wasRunning = wasRunningRef.current
     wasRunningRef.current = Boolean(running)
-    if (!wasRunning || running || disabled) return
+    if (!wasRunning || !composerCanFocus({ disabled, pending, running })) return
 
     const frame = requestAnimationFrame(() => textareaRef.current?.focus())
     return () => cancelAnimationFrame(frame)
-  }, [disabled, running])
+  }, [disabled, pending, running])
+
+  useEffect(() => {
+    const focusWhenAvailable = () => {
+      if (!composerCanFocus({ disabled, pending, running })) return
+      textareaRef.current?.focus()
+    }
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") focusWhenAvailable()
+    }
+
+    window.addEventListener("focus", focusWhenAvailable)
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    return () => {
+      window.removeEventListener("focus", focusWhenAvailable)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+    }
+  }, [disabled, pending, running])
 
   // Grow the textarea to fit its content, up to a max height where it starts scrolling.
   // Keep overflow hidden until the content actually exceeds the cap so an empty input does not
@@ -563,6 +588,7 @@ export function Composer({
             </button>
             <Textarea
               ref={textareaRef}
+              autoFocus={composerCanFocus({ disabled, pending, running })}
               value={value}
               onChange={(event) => {
                 setValue(event.target.value)

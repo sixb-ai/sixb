@@ -39,6 +39,9 @@ import {
   createTestSixb,
   createTestWorkflowExecution,
   queueTestActionRun,
+  startTestPipelineRun,
+  startTestSyncRun,
+  startTestWebhookRun,
 } from "@sixb/core/testing"
 import { SqliteStorage } from "@sixb/sqlite"
 import { SixbServer } from "../src/server"
@@ -394,7 +397,7 @@ describe("SixbServer HTTP contract", () => {
     ])
     const committedVersion = await write.commit({ commitMessage: "previous import" })
 
-    await sixb.storage.syncRuns!.start({
+    await startTestSyncRun(sixb.storage, {
       id: "run-previous",
       projectId: "contract-project",
       syncId: "sync-github-events",
@@ -416,7 +419,7 @@ describe("SixbServer HTTP contract", () => {
       checkpoint: { cursor: "secret-sync-cursor" },
     })
 
-    await sixb.storage.pipelineRuns!.start({
+    await startTestPipelineRun(sixb.storage, {
       id: "pipeline-run-previous",
       projectId: "contract-project",
       pipelineId: "github-events-pipeline",
@@ -501,13 +504,15 @@ describe("SixbServer HTTP contract", () => {
       finishedAt: new Date("2026-02-18T09:07:02.000Z"),
     })
 
-    await sixb.storage.webhookRuns!.start({
+    await startTestWebhookRun(sixb.storage, {
       id: "webhook-run-previous",
       projectId: "contract-project",
       connectorId: "github",
       webhookId: "events",
       method: "POST",
       route: "/api/webhooks/github/events",
+      requestBodyBytes: 18,
+      requestBodySha256: "0".repeat(64),
       startedAt: new Date("2026-02-18T09:10:00.000Z"),
     })
     await sixb.storage.webhookRuns!.finish({
@@ -515,7 +520,6 @@ describe("SixbServer HTTP contract", () => {
       projectId: "contract-project",
       status: "succeeded",
       finishedAt: new Date("2026-02-18T09:10:01.000Z"),
-      requestBodyBytes: 18,
       responseStatus: 202,
     })
 
@@ -592,7 +596,7 @@ describe("SixbServer HTTP contract", () => {
   }
 
   test("serves documented read endpoints", async () => {
-    await withHttpContractServer(async ({ baseUrl }) => {
+    await withHttpContractServer(async ({ baseUrl, sixb }) => {
       const projectResponse = await fetch(`${baseUrl}/api/project`)
       expect(projectResponse.status).toBe(200)
       expect(await projectResponse.json()).toEqual({ id: "contract-project" })
@@ -626,6 +630,7 @@ describe("SixbServer HTTP contract", () => {
         {
           id: "github",
           type: "test",
+          connection: null,
           syncIds: ["sync-github-events"],
           webhooks: [
             {
@@ -645,6 +650,7 @@ describe("SixbServer HTTP contract", () => {
       expect(await connectorResponse.json()).toEqual({
         id: "github",
         type: "test",
+        connection: null,
         syncIds: ["sync-github-events"],
         webhooks: [
           {
@@ -1290,6 +1296,14 @@ describe("SixbServer HTTP contract", () => {
             required: true,
           },
         ],
+        inputSchema: {
+          type: "object",
+          properties: {
+            note: { type: "string" },
+          },
+          required: ["note"],
+          additionalProperties: false,
+        },
         phases: {
           validate: false,
           writeback: true,
@@ -1448,6 +1462,72 @@ describe("SixbServer HTTP contract", () => {
         }),
       ])
 
+      const queryRefsResponse = await fetch(`${baseUrl}/api/objects/query`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          query: {
+            kind: "refs",
+            refs: [
+              { objectTypeId: "space", primaryId: "system" },
+              { objectTypeId: "device", primaryId: "fan-1" },
+              { objectTypeId: "space", primaryId: "system" },
+              { objectTypeId: "device", primaryId: "missing" },
+            ],
+          },
+        }),
+      })
+      expect(queryRefsResponse.status).toBe(200)
+      expect(await queryRefsResponse.json()).toMatchObject({
+        objects: [
+          { objectTypeId: "device", primaryId: "fan-1" },
+          { objectTypeId: "space", primaryId: "system" },
+        ],
+        total: 2,
+        plan: { mode: "pushdown" },
+      })
+
+      const emptyRefsResponse = await fetch(`${baseUrl}/api/objects/query`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ query: { kind: "refs", refs: [] } }),
+      })
+      expect(emptyRefsResponse.status).toBe(400)
+      expect(await emptyRefsResponse.json()).toMatchObject({
+        issues: [{ path: "$.refs", code: "empty_refs" }],
+      })
+
+      const queryLinksResponse = await fetch(`${baseUrl}/api/objects/query/links`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          query: {
+            kind: "refs",
+            refs: [
+              { objectTypeId: "space", primaryId: "system" },
+              { objectTypeId: "device", primaryId: "fan-1" },
+            ],
+          },
+          direction: "both",
+          includeObjects: true,
+        }),
+      })
+      expect(queryLinksResponse.status).toBe(200)
+      expect(await queryLinksResponse.json()).toMatchObject({
+        objects: [
+          { objectTypeId: "device", primaryId: "fan-1" },
+          { objectTypeId: "space", primaryId: "system" },
+        ],
+        links: [
+          {
+            source: { objectTypeId: "space", primaryId: "system" },
+            linkId: "contains",
+            target: { objectTypeId: "device", primaryId: "fan-1" },
+          },
+        ],
+        hasMore: false,
+      })
+
       const queryObjectsWithoutTotalResponse = await fetch(`${baseUrl}/api/objects/query`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -1523,6 +1603,28 @@ describe("SixbServer HTTP contract", () => {
         plan: { mode: "pushdown", providerIssues: [] },
       })
 
+      const opaquePrimaryId = "github:issue:sixb-ai/sixb#297"
+      await createTestSixb(sixb).objects.upsert("device", {
+        id: opaquePrimaryId,
+        label: "Opaque ID",
+      })
+      const opaqueRefResponse = await fetch(`${baseUrl}/api/objects/query`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          query: {
+            kind: "refs",
+            refs: [{ objectTypeId: "device", primaryId: opaquePrimaryId }],
+          },
+          includeTotal: false,
+        }),
+      })
+      expect(opaqueRefResponse.status).toBe(200)
+      expect(await opaqueRefResponse.json()).toMatchObject({
+        objects: [{ objectTypeId: "device", primaryId: opaquePrimaryId }],
+        hasMore: false,
+      })
+
       const invalidQueryObjectsResponse = await fetch(`${baseUrl}/api/objects/query`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -1567,6 +1669,22 @@ describe("SixbServer HTTP contract", () => {
         ],
       })
 
+      const invalidLinkPageTokenResponse = await fetch(`${baseUrl}/api/objects/query/links`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          query: {
+            kind: "refs",
+            refs: [{ objectTypeId: "device", primaryId: "fan-1" }],
+          },
+          pageToken: "not-a-link-token",
+        }),
+      })
+      expect(invalidLinkPageTokenResponse.status).toBe(400)
+      expect(await invalidLinkPageTokenResponse.json()).toMatchObject({
+        issues: [{ path: "$.pageToken", code: "invalid_link_page_token" }],
+      })
+
       const objectResponse = await fetch(`${baseUrl}/api/objects/device/fan-1`)
       expect(objectResponse.status).toBe(200)
       const objectBody = (await objectResponse.json()) as {
@@ -1576,36 +1694,8 @@ describe("SixbServer HTTP contract", () => {
       expect(objectBody.primaryId).toBe("fan-1")
       expect(objectBody.properties.rpm).toBe(1200)
 
-      const linksResponse = await fetch(`${baseUrl}/api/objects/space/system/links`)
-      expect(linksResponse.status).toBe(200)
-      const links = (await linksResponse.json()) as Array<{
-        sourceTypeId: string
-        sourceId: string
-        linkId: string
-        targetTypeId: string
-        targetId: string
-      }>
-      expect(links).toEqual([
-        expect.objectContaining({
-          sourceTypeId: "space",
-          sourceId: "system",
-          linkId: "contains",
-          targetTypeId: "device",
-          targetId: "fan-1",
-        }),
-      ])
-
-      const incomingLinksResponse = await fetch(
-        `${baseUrl}/api/objects/device/fan-1/links?direction=incoming`
-      )
-      expect(incomingLinksResponse.status).toBe(200)
-      const incomingLinks = (await incomingLinksResponse.json()) as Array<{ sourceId: string }>
-      expect(incomingLinks.map((link) => link.sourceId)).toEqual(["system"])
-
-      const invalidDirectionResponse = await fetch(
-        `${baseUrl}/api/objects/device/fan-1/links?direction=sideways`
-      )
-      expect(invalidDirectionResponse.status).toBe(422)
+      const removedLinkReadResponse = await fetch(`${baseUrl}/api/objects/device/fan-1/links`)
+      expect(removedLinkReadResponse.status).toBe(404)
 
       const historyResponse = await fetch(
         `${baseUrl}/api/objects/device/fan-1/telemetry/rpm/history?limit=2&order=desc`
@@ -1798,7 +1888,7 @@ describe("SixbServer HTTP contract", () => {
         type: "workflow.run.resume.requested",
         payload: {
           runId: pending.workflowRunId,
-          resume: { kind: "intervention", interventionId: pending.id },
+          nodeRunId: pending.nodeRunId,
         },
       })
 
@@ -1964,7 +2054,7 @@ describe("SixbServer HTTP contract", () => {
           projectId: sixb.id,
           agentId: "device-resolver",
           runId: nodeRunId,
-          parentExecutionId: workflowExecutionId,
+          sourceExecutionId: workflowExecutionId,
         })
         executionIds.push(executionId)
         await runs.agentNodes.create({
@@ -2054,7 +2144,7 @@ describe("SixbServer HTTP contract", () => {
         projectId: sixb.id,
         agentId: "device-resolver",
         runId: nodeRunId,
-        parentExecutionId: workflowExecutionId,
+        sourceExecutionId: workflowExecutionId,
       })
       await runs.agentNodes.create({
         projectId: sixb.id,
@@ -2108,8 +2198,26 @@ describe("SixbServer HTTP contract", () => {
           cacheWriteInputTokens: 2,
           reportingStatus: "complete",
         },
+        cost: {
+          amounts: [],
+          ratedCallCount: 0,
+          unpriceableCallCount: 0,
+          unvaluedCallCount: 1,
+        },
       })
       expect(JSON.stringify(detail)).not.toContain("secret-execution-token")
+
+      Object.defineProperty(sixb.storage, "aiCosts", { value: undefined })
+      const unavailableResponse = await fetch(
+        `${baseUrl}/api/workflow-runs/${runId}/nodes/resolveDevice/agent-execution`
+      )
+      expect(unavailableResponse.status).toBe(200)
+      const unavailableDetail = (await unavailableResponse.json()) as Record<string, unknown>
+      expect(unavailableDetail).toMatchObject({
+        nodeRunId,
+        usage: { inputTokens: 15, outputTokens: 5, reportingStatus: "complete" },
+      })
+      expect("cost" in unavailableDetail).toBe(false)
 
       const cancelResponse = await fetch(`${baseUrl}/api/workflow-runs/${runId}/cancel`, {
         method: "POST",
@@ -2154,6 +2262,111 @@ describe("SixbServer HTTP contract", () => {
         },
       })
       expect(cancelledExecution.error.at).toBe(cancelledExecution.completedAt)
+    })
+  })
+
+  test("returns a typed workflow agent trace and failure phase", async () => {
+    await withHttpContractServer(async ({ baseUrl, sixb }) => {
+      const runs = sixb.storage.workflowRuns!
+      const runId = "workflow-agent-failed-trace"
+      const nodeRunId = `${runId}:node:0`
+      const workflowExecutionId = await createTestWorkflowExecution(sixb.storage.executions, {
+        projectId: sixb.id,
+        workflowId: "review-device-health-workflow",
+        runId,
+      })
+      await runs.queue({
+        id: runId,
+        projectId: sixb.id,
+        executionId: workflowExecutionId,
+        workflowId: "review-device-health-workflow",
+        input: { deviceId: "fan-1" },
+        requesterGroupIds: [],
+      })
+      await runs.start({ id: runId, projectId: sixb.id })
+      await runs.nodes.start({
+        id: nodeRunId,
+        projectId: sixb.id,
+        workflowRunId: runId,
+        workflowId: "review-device-health-workflow",
+        nodeIndex: 0,
+        nodeType: "agent",
+        nodeId: "resolve-device",
+        nodeKey: "resolveDevice",
+        input: { deviceId: "fan-1" },
+      })
+      const agentExecutionId = await createTestAgentExecution(sixb.storage, {
+        projectId: sixb.id,
+        agentId: "device-resolver",
+        runId: nodeRunId,
+        sourceExecutionId: workflowExecutionId,
+      })
+      await runs.agentNodes.create({
+        projectId: sixb.id,
+        nodeRunId,
+        executionId: agentExecutionId,
+        agentId: "device-resolver",
+        prompt: "Resolve fan-1.",
+      })
+      await runs.nodes.wait({ projectId: sixb.id, id: nodeRunId })
+      await runs.wait({ projectId: sixb.id, id: runId })
+      await runs.agentNodes.start({
+        projectId: sixb.id,
+        nodeRunId,
+        modelId: "test-model",
+        execution: {
+          token: "failed-trace-token",
+          queueLeaseExpiresAt: new Date(Date.now() + 60_000),
+        },
+      })
+      await runs.agentNodes.finish({
+        projectId: sixb.id,
+        nodeRunId,
+        executionToken: "failed-trace-token",
+        status: "failed",
+        modelId: "test-model",
+        trace: [
+          { type: "step-start" },
+          {
+            type: "tool-call",
+            toolCallId: "policy-call",
+            toolName: "lookup_policy",
+            state: "output-available",
+            input: { severity: "high" },
+            output: { responseWindowMinutes: 90 },
+          },
+          { type: "text", text: "Dispatch within 90 minutes." },
+        ],
+        error: {
+          code: "agent.execution_failed",
+          message: "Structured output did not match the workflow contract.",
+          retryable: false,
+          at: "2026-07-02T12:01:00.000Z",
+          details: { failurePhase: "structured-finalizer" },
+        },
+        completedAt: new Date("2026-07-02T12:01:00.000Z"),
+      })
+
+      const response = await fetch(
+        `${baseUrl}/api/workflow-runs/${runId}/nodes/resolveDevice/agent-execution`
+      )
+
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({
+        status: "failed",
+        failurePhase: "structured-finalizer",
+        trace: [
+          { type: "step-start" },
+          {
+            type: "tool-call",
+            toolName: "lookup_policy",
+            state: "output-available",
+            input: { severity: "high" },
+            output: { responseWindowMinutes: 90 },
+          },
+          { type: "text", text: "Dispatch within 90 minutes." },
+        ],
+      })
     })
   })
 
@@ -2345,9 +2558,22 @@ describe("SixbServer HTTP contract", () => {
       expect(latestTelemetryResponse.status).toBe(200)
       expect(await latestTelemetryResponse.json()).toMatchObject({ value: 900 })
 
-      const linksResponse = await fetch(`${baseUrl}/api/objects/space/system/links?linkId=contains`)
-      const links = (await linksResponse.json()) as Array<{ targetId: string }>
-      expect(links.some((linkRow) => linkRow.targetId === "fan-2")).toBe(true)
+      const linksResponse = await fetch(`${baseUrl}/api/objects/query/links`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          query: {
+            kind: "refs",
+            refs: [{ objectTypeId: "space", primaryId: "system" }],
+          },
+          direction: "outgoing",
+          linkId: "contains",
+        }),
+      })
+      const links = (await linksResponse.json()) as {
+        links: Array<{ target: { primaryId: string } }>
+      }
+      expect(links.links.some((linkRow) => linkRow.target.primaryId === "fan-2")).toBe(true)
 
       const actionEvents = await events.read({
         topics: ["actions"],
@@ -2400,15 +2626,34 @@ describe("SixbServer HTTP contract", () => {
       expect(requestSyncRunBody.jobId).toBeTruthy()
       expect(requestSyncRunBody.syncId).toBe("sync-github-events")
 
+      const durableSyncRun = await sixb.storage.syncRuns!.getById({
+        projectId: sixb.id,
+        id: requestSyncRunBody.runId,
+      })
+      const durableSyncExecution = await sixb.storage.executions.getById({
+        projectId: sixb.id,
+        id: durableSyncRun!.executionId,
+      })
+      expect(durableSyncRun).toMatchObject({ status: "queued", startedAt: undefined })
+      expect(durableSyncExecution).toMatchObject({
+        executor: { type: "primitive", kind: "sync", runId: requestSyncRunBody.runId },
+        source: { type: "execution", executionId: expect.any(String) },
+        authorizationRef: {
+          type: "trustedPrimitive",
+          primitive: {
+            kind: "sync",
+            id: "sync-github-events",
+            runId: requestSyncRunBody.runId,
+          },
+        },
+      })
+
       const [queuedSyncRun] = await sixb.queues.syncRuns.claim({
         projectId: sixb.id,
         workerId: "contract-test",
       })
       expect(queuedSyncRun?.job.payload).toEqual({
-        syncId: "sync-github-events",
         runId: requestSyncRunBody.runId,
-        expectedLatestVersionId: undefined,
-        commitMessage: "manual import",
       })
 
       const requestPipelineRunResponse = await fetch(
@@ -2425,12 +2670,33 @@ describe("SixbServer HTTP contract", () => {
       expect(requestPipelineRunBody.jobId).toBeTruthy()
       expect(requestPipelineRunBody.pipelineId).toBe("github-events-pipeline")
 
+      const durablePipelineRun = await sixb.storage.pipelineRuns!.getById({
+        projectId: sixb.id,
+        id: requestPipelineRunBody.runId,
+      })
+      const durablePipelineExecution = await sixb.storage.executions.getById({
+        projectId: sixb.id,
+        id: durablePipelineRun!.executionId,
+      })
+      expect(durablePipelineRun).toMatchObject({ status: "queued", startedAt: undefined })
+      expect(durablePipelineExecution).toMatchObject({
+        executor: { type: "primitive", kind: "pipeline", runId: requestPipelineRunBody.runId },
+        source: { type: "execution", executionId: expect.any(String) },
+        authorizationRef: {
+          type: "trustedPrimitive",
+          primitive: {
+            kind: "pipeline",
+            id: "github-events-pipeline",
+            runId: requestPipelineRunBody.runId,
+          },
+        },
+      })
+
       const [queuedPipelineRun] = await sixb.queues.pipelines.claim({
         projectId: sixb.id,
         workerId: "contract-test",
       })
       expect(queuedPipelineRun?.job.payload).toEqual({
-        pipelineId: "github-events-pipeline",
         runId: requestPipelineRunBody.runId,
       })
 

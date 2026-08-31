@@ -5,6 +5,7 @@ import { validateAgentGroupReferences, validateAgentToolsAtStartup } from "../ag
 import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets/types"
 import { assertDatasetDefinition } from "../datasets/validation"
+import { createModelCatalog, type ModelCatalog, type ModelCatalogInput, modelRef } from "../models"
 import { OntologyRegistry } from "../ontology"
 import type { PipelineDefinition } from "../pipelines/types"
 import { ProjectionRegistry } from "../projections"
@@ -40,6 +41,7 @@ interface DefinitionOptions {
   readonly rules?: readonly RuleDefinition[]
   readonly workflows?: readonly WorkflowDefinition[]
   readonly agents?: readonly AgentDefinition[]
+  readonly models?: ModelCatalogInput
   readonly groups?: readonly GroupDefinition[]
   readonly roles?: readonly RoleDefinition[]
   readonly membershipPolicies?: readonly MembershipPolicyDefinition[]
@@ -60,6 +62,8 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
 
   const agents = options.agents ?? []
   validateAgentToolsAtStartup(agents)
+  const models = options.models === undefined ? undefined : createModelCatalog(options.models)
+  validateAgentModelReferences(agents, models)
   const agentsById = indexUniqueDefinitions("agent", agents)
   const connectorsById = indexUniqueDefinitions("connector", options.connectors ?? [])
 
@@ -137,6 +141,7 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
     syncIds: new Set(syncsById.keys()),
     pipelineIds: new Set(pipelinesById.keys()),
     agentIds: new Set(agentsById.keys()),
+    connectorIds: new Set(connectorsById.keys()),
     getSubTypes: (objectTypeId) => ontology.listSubTypes(objectTypeId),
   })
   validateAgentGroupReferences(agents, security)
@@ -157,6 +162,7 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
     agents: createDefinitionCatalog(agentsById),
     connectors: createDefinitionCatalog(connectorsById),
     datasets: createDefinitionCatalog(datasetsById),
+    ...(models === undefined ? {} : { models }),
     pipelines: createDefinitionCatalog(pipelinesById),
     projections: projectionRegistry,
     rules: createDefinitionCatalog(rulesById),
@@ -231,6 +237,29 @@ function validateScheduleReferences(
     if (!schedulesById.has(reference.scheduleId)) {
       throw new RuntimeError(
         `${consumerKind} '${consumerId}' references unknown schedule '${reference.scheduleId}'. Add it to 'schedules' in createSixb() or export it from 'schedules/'.`
+      )
+    }
+  }
+}
+
+/**
+ * Keep every agent on a model the project actually allows.
+ *
+ * Only enforced once a project configures `models`; without a catalog an agent's model is its own
+ * declaration, which is the pre-catalog behavior.
+ */
+function validateAgentModelReferences(
+  agents: readonly AgentDefinition[],
+  models: ModelCatalog | undefined
+): void {
+  if (models === undefined) {
+    return
+  }
+  for (const agent of agents) {
+    const ref = modelRef(agent.model)
+    if (models.language.getById(ref) === null) {
+      throw new RuntimeError(
+        `[Sixb] Agent '${agent.id}' uses unknown language model '${ref}'. Add it to 'models.language' in createSixb().`
       )
     }
   }

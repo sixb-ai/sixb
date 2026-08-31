@@ -1,12 +1,6 @@
-import type {
-  BlobStorage,
-  ConnectorRuntime,
-  LakeStorage,
-  SixbDefinitions,
-  SixbFailure,
-  SyncMode,
-} from "@sixb/core"
+import type { BlobStorage, LakeStorage, SixbDefinitions, SixbFailure, SyncMode } from "@sixb/core"
 import type { LoggingService } from "@sixb/core/internal/logging"
+import type { SyncConnectorSourceResolver } from "@sixb/core/internal/syncs"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import type { SyncRunFailureCode, SyncRunRecord, SyncRunStorage } from "@sixb/core/storage"
 
@@ -19,19 +13,13 @@ export interface SyncWorkerContext {
 
   readonly datasets: Pick<SixbDefinitions["datasets"], "getById">
   readonly syncs: Pick<SixbDefinitions["syncs"], "getById">
-  readonly connector: ConnectorRuntime
-}
-
-export interface SyncJob {
-  readonly id: string
-  readonly syncId: string
-  readonly expectedLatestVersionId?: string
-  readonly commitMessage?: string
+  readonly connectorSources: SyncConnectorSourceResolver
 }
 
 export interface RunSyncJobInput {
   readonly runtime: SyncWorkerContext
-  readonly job: SyncJob
+  /** Durable run loaded before the execution scope is restored. */
+  readonly run: SyncRunRecord
   readonly signal?: AbortSignal
   readonly onRunStarted?: SyncRunStartedHandler
   readonly onRunFinished?: SyncRunFinishedHandler

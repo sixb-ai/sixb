@@ -15,7 +15,7 @@ import {
   TooltipTrigger,
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { Check, ChevronLeft, History, Info, Search, SquarePen } from "lucide-react"
+import { Check, ChevronLeft, History, Info, PanelLeft, Pencil, Search } from "lucide-react"
 import { useMemo, useState } from "react"
 import { groupThreadsByDate } from "../format"
 import type { LiveRunState } from "../liveRun"
@@ -49,8 +49,11 @@ export interface ConversationPanelProps {
   readonly waitingLonger?: boolean
   readonly failedBeforeResponse?: boolean
   readonly cancelledBeforeResponse?: boolean
+  readonly timeout?: { readonly hasProgress: boolean; readonly timeoutMs?: number }
   readonly onRetry?: () => void
+  readonly onContinue?: () => void
   readonly retrying?: boolean
+  readonly continuing?: boolean
   /** The active run's stream dropped and is re-subscribing. */
   readonly reconnecting: boolean
   /** A failed send to surface above the composer, or null. English, user-facing. */
@@ -67,6 +70,7 @@ export interface ConversationPanelProps {
     context: readonly AgentContextEntryInput[]
   ) => void
   readonly onBackHome: () => void
+  readonly onOpenWorkspaceNavigation?: () => void
   readonly onNewChat: () => void
   readonly onPickAgent: (agentId: string) => void
   readonly onSelectThread: (threadId: string) => void
@@ -85,6 +89,8 @@ export interface ConversationPanelProps {
   readonly composerDraftNonce?: number
   readonly ambientContext?: readonly AgentContextInput[]
   readonly compact?: boolean
+  /** Full-page mode uses the persistent thread rail for navigation and agent selection. */
+  readonly workspace?: boolean
 }
 
 export function ConversationPanel({
@@ -102,8 +108,11 @@ export function ConversationPanel({
   waitingLonger,
   failedBeforeResponse,
   cancelledBeforeResponse,
+  timeout,
   onRetry,
+  onContinue,
   retrying,
+  continuing,
   reconnecting,
   sendError,
   agents,
@@ -111,6 +120,7 @@ export function ConversationPanel({
   canGoHome,
   onSend,
   onBackHome,
+  onOpenWorkspaceNavigation,
   onNewChat,
   onPickAgent,
   onSelectThread,
@@ -126,6 +136,7 @@ export function ConversationPanel({
   composerDraftNonce,
   ambientContext = [],
   compact = false,
+  workspace = false,
 }: ConversationPanelProps) {
   const name = agent?.name ?? "Agent"
   // Optimistic activity (a just-sent message or a live run) takes over the pane immediately, so the
@@ -136,37 +147,76 @@ export function ConversationPanel({
     pendingUserContext.length > 0 ||
     live.parts.length > 0 ||
     awaitingResponse
-  const showWelcome =
-    !messagesLoading &&
-    !messagesError &&
-    !hasActivity &&
-    messages.length === 0 &&
-    live.parts.length === 0 &&
-    !pendingUserText &&
-    pendingUserAttachments.length === 0 &&
-    pendingUserContext.length === 0
+  const showWelcome = !messagesLoading && !messagesError && !hasActivity && messages.length === 0
+  const renderSendError = (className?: string) =>
+    sendError ? (
+      <div className={cn("mx-auto w-full max-w-3xl px-4 pb-1", className)}>
+        <RunErrorMarker message={sendError} />
+      </div>
+    ) : null
+  const renderComposer = (workspaceClassName?: string) => (
+    <Composer
+      onSend={onSend}
+      disabled={composerDisabled}
+      pending={composerPending}
+      running={composerRunning}
+      stopping={composerStopping}
+      onStop={onStop}
+      placeholder={composerPlaceholder}
+      className={compact ? "px-4 pt-2 pb-4" : workspaceClassName}
+      draft={composerDraft}
+      draftAttachments={composerDraftAttachments}
+      draftContext={composerDraftContext}
+      draftNonce={composerDraftNonce}
+      ambientContext={ambientContext}
+      compact={compact}
+    />
+  )
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
-      <header className="flex shrink-0 items-center gap-1 px-2.5 py-2.5">
-        {canGoHome ? (
-          <Button variant="ghost" size="icon-sm" onClick={onBackHome} aria-label="Back to agents">
+      <header
+        className={cn("flex shrink-0 items-center gap-1 px-2.5 py-2.5", workspace && "md:hidden")}
+      >
+        {workspace && onOpenWorkspaceNavigation ? (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onOpenWorkspaceNavigation}
+            aria-label="Open agent navigation"
+            className="md:hidden"
+          >
+            <PanelLeft />
+          </Button>
+        ) : canGoHome ? (
+          <Button variant="ghost" size="icon-sm" onClick={onBackHome} aria-label="Back to chats">
             <ChevronLeft />
           </Button>
         ) : null}
 
-        <AgentIdentity agent={agent} agents={agents} onPickAgent={onPickAgent} />
+        <AgentIdentity
+          agent={agent}
+          agents={agents}
+          onPickAgent={onPickAgent}
+          interactive={!workspace}
+        />
 
         <div className="ml-auto flex items-center gap-1">
-          {agentThreads.length > 0 ? (
+          {!workspace && agentThreads.length > 0 ? (
             <AgentThreadHistoryPopover
               agentName={name}
               threads={agentThreads}
               onSelectThread={onSelectThread}
             />
           ) : null}
-          <Button variant="ghost" size="icon-sm" onClick={onNewChat} aria-label="New chat">
-            <SquarePen />
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onNewChat}
+            aria-label="New chat with this agent"
+            className={cn(workspace && "md:hidden")}
+          >
+            <Pencil />
           </Button>
         </div>
       </header>
@@ -175,33 +225,13 @@ export function ConversationPanel({
         <div
           className={cn(
             "flex min-h-0 flex-1 flex-col",
-            !compact && "md:justify-center md:px-6 md:pb-[28vh] lg:pb-[30vh]"
+            !compact && "md:justify-center md:px-8 md:pb-[25vh] lg:pb-[27vh]"
           )}
         >
           <Welcome agent={agent} compact={compact} />
           <div className="shrink-0">
-            {sendError ? (
-              <div className="mx-auto w-full max-w-3xl px-4 pb-1 md:px-0">
-                <RunErrorMarker message={sendError} />
-              </div>
-            ) : null}
-
-            <Composer
-              onSend={onSend}
-              disabled={composerDisabled}
-              pending={composerPending}
-              running={composerRunning}
-              stopping={composerStopping}
-              onStop={onStop}
-              placeholder={composerPlaceholder}
-              className={compact ? "px-4 pt-2 pb-4" : "md:bg-transparent md:px-0 md:pt-0 md:pb-0"}
-              draft={composerDraft}
-              draftAttachments={composerDraftAttachments}
-              draftContext={composerDraftContext}
-              draftNonce={composerDraftNonce}
-              ambientContext={ambientContext}
-              compact={compact}
-            />
+            {renderSendError("md:px-0")}
+            {renderComposer("md:bg-transparent md:px-0 md:pt-0 md:pb-0")}
           </div>
         </div>
       ) : (
@@ -228,36 +258,19 @@ export function ConversationPanel({
                 waitingLonger={waitingLonger}
                 failedBeforeResponse={failedBeforeResponse}
                 cancelledBeforeResponse={cancelledBeforeResponse}
+                timeout={timeout}
                 onRetry={onRetry}
+                onContinue={onContinue}
                 retrying={retrying}
+                continuing={continuing}
                 reconnecting={reconnecting}
               />
             )}
           </div>
 
           <div className="shrink-0">
-            {sendError ? (
-              <div className="mx-auto w-full max-w-3xl px-4 pb-1">
-                <RunErrorMarker message={sendError} />
-              </div>
-            ) : null}
-
-            <Composer
-              onSend={onSend}
-              disabled={composerDisabled}
-              pending={composerPending}
-              running={composerRunning}
-              stopping={composerStopping}
-              onStop={onStop}
-              placeholder={composerPlaceholder}
-              className={compact ? "px-4 pt-2 pb-4" : undefined}
-              draft={composerDraft}
-              draftAttachments={composerDraftAttachments}
-              draftContext={composerDraftContext}
-              draftNonce={composerDraftNonce}
-              ambientContext={ambientContext}
-              compact={compact}
-            />
+            {renderSendError()}
+            {renderComposer()}
           </div>
         </>
       )}
@@ -358,12 +371,23 @@ function AgentIdentity({
   agent,
   agents,
   onPickAgent,
+  interactive,
 }: {
   agent: Agent | undefined
   agents: readonly Agent[]
   onPickAgent: (agentId: string) => void
+  interactive: boolean
 }) {
   const name = agent?.name ?? "Agent"
+
+  if (!interactive) {
+    return (
+      <div className="flex min-w-0 items-center gap-2.5 px-1.5 py-1">
+        <AgentAvatar name={name} />
+        <span className="truncate text-sm font-medium text-foreground">{name}</span>
+      </div>
+    )
+  }
 
   if (agents.length <= 1) return null
 
@@ -400,45 +424,56 @@ function Welcome({ agent, compact }: { agent: Agent | undefined; compact: boolea
   const name = agent?.name ?? "Agent"
   const description = agent?.description?.trim()
 
+  if (!compact) {
+    return (
+      <div className="flex min-h-0 flex-1 items-center justify-center px-4 text-center md:flex-none md:px-0 md:pb-8">
+        <div className="inline-flex max-w-full items-center justify-center gap-1.5 md:gap-3">
+          <AgentAvatar name={name} className="hidden size-10 text-sm md:flex" />
+          <p className="min-w-0 truncate text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
+            {name}
+          </p>
+          {description ? <AgentInfo name={name} description={description} /> : null}
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div
-      className={cn(
-        "flex justify-center px-4 text-center",
-        compact
-          ? "min-h-0 flex-1 -translate-y-3 items-center"
-          : "flex-1 items-start pt-[32vh] md:flex-none md:items-end md:px-0 md:pt-0 md:pb-8"
-      )}
-    >
+    <div className="flex min-h-0 flex-1 -translate-y-3 items-center justify-center px-4 text-center">
       <div className="inline-flex max-w-full items-center justify-center gap-3">
         <AgentAvatar name={name} className="size-9 text-sm md:size-10" />
         <p
           className={cn(
             "min-w-0 truncate font-semibold tracking-tight text-foreground",
-            compact ? "text-xl md:text-2xl" : "text-2xl md:text-3xl"
+            "text-xl md:text-2xl"
           )}
         >
           {name}
         </p>
-        {description ? (
-          <TooltipProvider delayDuration={150}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  aria-label={`About ${name}`}
-                  className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <Info className="size-4" aria-hidden="true" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top" sideOffset={8} className="max-w-72 leading-5">
-                {description}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        ) : null}
+        {description ? <AgentInfo name={name} description={description} /> : null}
       </div>
     </div>
+  )
+}
+
+function AgentInfo({ name, description }: { name: string; description: string }) {
+  return (
+    <TooltipProvider delayDuration={150}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label={`About ${name}`}
+            className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Info className="size-4" aria-hidden="true" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={8} className="max-w-72 leading-5">
+          {description}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   )
 }
 

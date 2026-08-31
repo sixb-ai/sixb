@@ -97,6 +97,11 @@ export interface Broker {
   /**
    * Subscribes to retained/live records. Defaults to `from: "latest"` unless
    * `afterCursor` is provided.
+   *
+   * Like `read`, providers must reject an `afterCursor` older than the retained
+   * range rather than silently advancing to the first retained record, so a
+   * resuming subscriber learns the gap exists instead of mistaking a truncated
+   * stream for a complete one.
    */
   subscribe(
     params: {

@@ -7,6 +7,7 @@ import {
   type ActionDefinition,
   type AgentDefinition,
   applications,
+  type ConnectorDefinition,
   can,
   col,
   createSixb,
@@ -456,6 +457,18 @@ describe("role definitions", () => {
     })
   })
 
+  test("can.manage supports connector definitions and scopes", () => {
+    expect(can.manage(sourceConnector)).toEqual({
+      kind: "grant",
+      capability: "manage",
+      selection: { all: false, ids: ["source"] },
+    })
+    expect(can.manage(every.connector().except([sourceConnector])).selection).toEqual({
+      all: true,
+      except: ["source"],
+    })
+  })
+
   test("can.edit and can.append build object-type write grants without a target field", () => {
     // No `target`, like `can.apply`: the capability names its one target family, so the builder
     // resolves against `["object"]` and discards the result rather than storing a redundant field.
@@ -706,8 +719,27 @@ describe("role definitions", () => {
     }
 
     expect(() => createRuntime({ groups: [commercial], roles: [role] })).toThrow(
-      "grant capability must be 'access', 'view', 'edit', 'append', 'apply', 'run', or 'observe'."
+      "grant capability must be 'access', 'view', 'edit', 'append', 'apply', 'run', 'observe', or 'manage'."
     )
+  })
+
+  test("runtime registration rejects manage grants on unknown connectors", () => {
+    const role: RoleDefinition = {
+      kind: "role",
+      id: "connector.manager",
+      grantedToGroupIds: ["commercial"],
+      grants: [
+        {
+          kind: "grant",
+          capability: "manage",
+          selection: { all: false, ids: ["missing"] },
+        },
+      ],
+    }
+
+    expect(() =>
+      createRuntime({ groups: [commercial], roles: [role], connectors: [sourceConnector] })
+    ).toThrow("unknown connector 'missing'")
   })
 
   test("runtime registration rejects apply grants on unknown actions", () => {
@@ -889,6 +921,7 @@ function createRuntime(
     syncs?: readonly SyncDefinition[]
     pipelines?: readonly PipelineDefinition[]
     agents?: readonly AgentDefinition[]
+    connectors?: readonly ConnectorDefinition[]
   } = {}
 ): SixbHost<readonly [typeof Account]> {
   return new SixbHost<readonly [typeof Account]>({

@@ -5,12 +5,17 @@ import {
   advanceProjectionTelemetry,
   assertGenericProgressDoesNotAdvanceTelemetry,
   assertProjectionMissingTarget,
-  assertProjectionRunExecution,
+  assertProjectionRunAttempt,
+  assertProjectionRunDurableExecution,
   assertProjectionRunListWindow,
   assertProjectionRunNonEmpty,
+  assertProjectionRunQueueInput,
   assertProjectionRunRunning,
   assertProjectionRunStartInput,
+  canRequeueProjectionRunAfterEnqueueFailure,
   createProjectionRunClaim,
+  createProjectionRunRecord,
+  failProjectionRunEnqueue,
   immutableDatasetVersionConflict,
   mergeProjectionRunProgress,
   type PersistedProjectionRunRecord,
@@ -18,7 +23,6 @@ import {
   planProjectionRunReclaim,
   projectionRunNotFound,
   publicProjectionRunRecord,
-  requireProjectionRunExecutionToken,
   requireTelemetryProjectionRun,
   restoreProjectionRun,
   type StoredProjectionRunRecord,
@@ -26,6 +30,8 @@ import {
 } from "@sixb/core/internal/projection-run-storage-provider"
 import type {
   AdvanceProjectionTelemetryCheckpointInput,
+  ExecutionStorage,
+  FailProjectionRunEnqueueInput,
   FinishProjectionRunInput,
   ListLatestProjectionRunsInput,
   ListLatestProjectionRunsResult,
@@ -37,6 +43,7 @@ import type {
   ProjectionRunRecord,
   ProjectionRunStatus,
   ProjectionRunStorage,
+  QueueProjectionRunInput,
   RecordProjectionMissingTargetInput,
   StartOrReclaimProjectionRunInput,
   TelemetryProjectionRunRecord,
@@ -48,10 +55,22 @@ import type { SQLClient, SqlParameter } from "./pg-client"
 import { lockAdvisoryKeys, type PgStoreClient, runPgTransaction } from "./transactions"
 
 export class PgProjectionRunStorage implements ProjectionRunStorage {
-  constructor(private readonly sql: PgStoreClient) {}
+  constructor(
+    private readonly sql: PgStoreClient,
+    private readonly executions: ExecutionStorage
+  ) {}
 
-  async startOrReclaim(input: StartOrReclaimProjectionRunInput): Promise<ProjectionRunClaim> {
-    assertProjectionRunStartInput(input)
+  async queue(input: QueueProjectionRunInput): Promise<ProjectionRunRecord> {
+    assertProjectionRunQueueInput(input)
+    await assertProjectionRunDurableExecution({
+      executions: this.executions,
+      projectId: input.projectId,
+      executionId: input.executionId,
+      runId: input.id,
+      projectionId: input.identity.projectionId,
+      datasetId: input.identity.datasetVersion.datasetId,
+      datasetVersionId: input.identity.datasetVersion.versionId,
+    })
 
     return runPgTransaction(this.sql, async (tx) => {
       await lockAdvisoryKeys(tx, [
@@ -62,98 +81,119 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
           input.identity.datasetVersion.versionId
         ),
       ])
-      const [metadataConflict] = await tx<{ readonly id: string }[]>`
-        SELECT id FROM projection_runs
-        WHERE project_id = ${input.projectId}
-          AND id <> ${input.id}
-          AND dataset_id = ${input.identity.datasetVersion.datasetId}
-          AND dataset_version_id = ${input.identity.datasetVersion.versionId}
-          AND dataset_version_created_at IS NOT NULL
-          AND dataset_version_created_at <> ${input.identity.datasetVersion.createdAt}
-        LIMIT 1
-      `
-      if (metadataConflict) {
-        throw immutableDatasetVersionConflict(input.identity)
-      }
-
+      await assertDatasetVersionIsImmutable(tx, input)
       const [existingRow] = await tx<DatabaseRow[]>`
         SELECT * FROM projection_runs
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         FOR UPDATE
       `
-
-      const existing = existingRow ? restoreProjectionRunRow(existingRow) : undefined
-      const executionToken = createFreshExecutionToken(existing?.executionToken)
-
-      if (existingRow && existing) {
-        const { attempt } = planProjectionRunReclaim(existing, input)
-        const previousExecutionToken = requireProjectionRunExecutionToken(existing)
-
-        const [updated] = await tx<DatabaseRow[]>`
+      if (existingRow) {
+        if (
+          !canRequeueProjectionRunAfterEnqueueFailure(rowToProjectionRunRecord(existingRow), input)
+        ) {
+          throw duplicateProjectionRun(input)
+        }
+        const [requeued] = await tx<DatabaseRow[]>`
           UPDATE projection_runs
-          SET attempt = ${attempt}, execution_token = ${executionToken}
-          WHERE project_id = ${input.projectId}
-            AND id = ${input.id}
-            AND status = ${"running"}
-            AND execution_token = ${previousExecutionToken}
+          SET status = ${"queued"}, queued_at = ${input.queuedAt ?? new Date()},
+            started_at = ${null}, finished_at = ${null}, attempt = ${0}, execution_token = ${null},
+            next_batch_ordinal = ${input.fixedBatchSize === undefined ? null : 0},
+            next_row_offset = ${input.fixedBatchSize === undefined ? null : 0},
+            input_exhausted = ${input.fixedBatchSize === undefined ? null : false},
+            missing_target_object_type_id = ${null}, missing_target_object_id = ${null},
+            missing_target_batch_ordinal = ${null}, missing_target_first_seen_at = ${null},
+            source_rows_read = ${0}, source_rows_skipped = ${0}, error = ${null}
+          WHERE project_id = ${input.projectId} AND id = ${input.id}
+            AND status = ${"failed"} AND error->>'code' = ${"queue.enqueue_failed"}
           RETURNING *
         `
-        if (!updated) throw staleProjectionRunExecution(input.id)
-        return projectionRunClaim(updated)
+        if (!requeued) throw duplicateProjectionRun(input)
+        return rowToProjectionRunRecord(requeued)
       }
 
+      const record = createProjectionRunRecord(input)
+      const checkpoint = record.telemetryCheckpoint
       const [inserted] = await tx<DatabaseRow[]>`
         INSERT INTO projection_runs (
-          project_id,
-          id,
-          projection_id,
-          projection_kind,
-          dataset_id,
-          dataset_version_id,
-          object_type_id,
-          source_object_type_id,
-          target_object_type_id,
-          status,
-          started_at,
-          attempt,
-          execution_token,
-          materialization_protocol,
-          dataset_version_created_at,
-          ontology_revision,
-          projection_revision,
-          ownership_hash,
-          fixed_batch_size,
-          next_batch_ordinal,
-          next_row_offset,
-          input_exhausted
+          project_id, id, execution_id, projection_id, projection_kind,
+          materialization_protocol, dataset_id, dataset_version_id,
+          dataset_version_created_at, ontology_revision, projection_revision, ownership_hash,
+          object_type_id, source_object_type_id, target_object_type_id, status, queued_at,
+          started_at, finished_at, attempt, execution_token, fixed_batch_size,
+          next_batch_ordinal, next_row_offset, input_exhausted, source_rows_read,
+          source_rows_skipped
         ) VALUES (
-          ${input.projectId},
-          ${input.id},
-          ${input.identity.projectionId},
-          ${input.identity.projectionKind},
-          ${input.identity.datasetVersion.datasetId},
-          ${input.identity.datasetVersion.versionId},
-          ${"objectTypeId" in input.target ? input.target.objectTypeId : null},
-          ${"sourceObjectTypeId" in input.target ? input.target.sourceObjectTypeId : null},
-          ${"sourceObjectTypeId" in input.target ? input.target.targetObjectTypeId : null},
-          ${"running"},
-          ${input.startedAt ?? new Date()},
-          ${1},
-          ${executionToken},
-          ${input.identity.protocol},
-          ${input.identity.datasetVersion.createdAt},
-          ${input.identity.ontologyRevision},
-          ${input.identity.projectionRevision},
-          ${input.identity.ownershipHash},
-          ${input.fixedBatchSize ?? null},
-          ${input.fixedBatchSize === undefined ? null : 0},
-          ${input.fixedBatchSize === undefined ? null : 0},
-          ${input.fixedBatchSize === undefined ? null : false}
+          ${record.projectId}, ${record.id}, ${record.executionId},
+          ${record.identity.projectionId}, ${record.identity.projectionKind},
+          ${record.identity.protocol}, ${record.identity.datasetVersion.datasetId},
+          ${record.identity.datasetVersion.versionId}, ${record.identity.datasetVersion.createdAt},
+          ${record.identity.ontologyRevision}, ${record.identity.projectionRevision},
+          ${record.identity.ownershipHash},
+          ${"objectTypeId" in record.target ? record.target.objectTypeId : null},
+          ${"sourceObjectTypeId" in record.target ? record.target.sourceObjectTypeId : null},
+          ${"sourceObjectTypeId" in record.target ? record.target.targetObjectTypeId : null},
+          ${"queued"}, ${record.queuedAt}, ${null}, ${null}, ${0}, ${null},
+          ${checkpoint?.fixedBatchSize ?? null}, ${checkpoint?.nextBatchOrdinal ?? null},
+          ${checkpoint?.nextRowOffset ?? null}, ${checkpoint?.inputExhausted ?? null}, ${0}, ${0}
         )
         RETURNING *
       `
+      return rowToProjectionRunRecord(inserted)
+    })
+  }
 
-      return projectionRunClaim(inserted)
+  async startOrReclaim(input: StartOrReclaimProjectionRunInput): Promise<ProjectionRunClaim> {
+    assertProjectionRunStartInput(input)
+
+    return runPgTransaction(this.sql, async (tx) => {
+      await lockAdvisoryKeys(tx, [projectionRunLockKey(input.projectId, input.id)])
+      const [existingRow] = await tx<DatabaseRow[]>`
+        SELECT * FROM projection_runs
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+        FOR UPDATE
+      `
+      if (!existingRow) throw projectionRunNotFound(input.projectId, input.id)
+      const existing = restoreProjectionRunRow(existingRow)
+      const { attempt } = planProjectionRunReclaim(existing, input)
+      const executionToken = createFreshExecutionToken(existing.executionToken)
+      const [updated] = await tx<DatabaseRow[]>`
+        UPDATE projection_runs
+        SET status = ${"running"}, started_at = COALESCE(started_at, ${input.startedAt ?? new Date()}),
+          finished_at = ${null}, attempt = ${attempt}, execution_token = ${executionToken},
+          error = ${null}
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+          AND (
+            (status = ${"queued"} AND execution_token IS NULL)
+            OR (status = ${"running"} AND execution_token = ${existing.executionToken ?? null})
+          )
+        RETURNING *
+      `
+      if (!updated) throw staleProjectionRunExecution(input.id)
+      return projectionRunClaim(updated)
+    })
+  }
+
+  async failEnqueue(input: FailProjectionRunEnqueueInput): Promise<ProjectionRunRecord> {
+    return runPgTransaction(this.sql, async (tx) => {
+      const [existingRow] = await tx<DatabaseRow[]>`
+        SELECT * FROM projection_runs
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+        FOR UPDATE
+      `
+      if (!existingRow) throw projectionRunNotFound(input.projectId, input.id)
+      const failed = failProjectionRunEnqueue(restoreProjectionRunRow(existingRow), input)
+      if (!failed.error) {
+        throw new ProjectionRunError(`[SixbPg] Projection run '${input.id}' has no failure.`)
+      }
+      const [updated] = await tx<DatabaseRow[]>`
+        UPDATE projection_runs
+        SET status = ${"failed"}, finished_at = ${failed.finishedAt ?? new Date()},
+          error = ${serializeSixbFailure(failed.error, PROJECTION_RUN_FAILURE_CODES)}::text::jsonb
+        WHERE project_id = ${input.projectId} AND id = ${input.id} AND status = ${"queued"}
+        RETURNING *
+      `
+      if (!updated) throw duplicateProjectionRun(input)
+      return rowToProjectionRunRecord(updated)
     })
   }
 
@@ -330,11 +370,11 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
       params.push(...input.statuses)
     }
     if (input.startedAfter) {
-      whereClauses.push(`started_at >= $${index++}`)
+      whereClauses.push(`COALESCE(started_at, queued_at) >= $${index++}`)
       params.push(input.startedAfter)
     }
     if (input.startedBefore) {
-      whereClauses.push(`started_at <= $${index++}`)
+      whereClauses.push(`COALESCE(started_at, queued_at) <= $${index++}`)
       params.push(input.startedBefore)
     }
 
@@ -353,7 +393,7 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
     let query = `
       SELECT * FROM projection_runs
       ${where}
-      ORDER BY started_at ${order}, id ${order}
+      ORDER BY COALESCE(started_at, queued_at) ${order}, id ${order}
     `
     if (input.limit !== undefined) {
       query += ` LIMIT $${index++} OFFSET $${index++}`
@@ -390,7 +430,7 @@ async function requireMaterializationExecution(
   input: LockProjectionRunForMaterializationInput
 ): Promise<DatabaseRow> {
   const row = await requireRunning(sql, input.projectId, input.id)
-  assertProjectionRunExecution(restoreProjectionRunRow(row), input)
+  assertProjectionRunAttempt(restoreProjectionRunRow(row), input)
   return row
 }
 
@@ -406,6 +446,22 @@ async function requireRunning(sql: SQLClient, projectId: string, id: string): Pr
   if (!row) throw projectionRunNotFound(projectId, id)
   assertProjectionRunRunning(restoreProjectionRunRow(row))
   return row
+}
+
+async function assertDatasetVersionIsImmutable(
+  sql: SQLClient,
+  input: QueueProjectionRunInput
+): Promise<void> {
+  const [conflict] = await sql<{ readonly id: string }[]>`
+    SELECT id FROM projection_runs
+    WHERE project_id = ${input.projectId}
+      AND id <> ${input.id}
+      AND dataset_id = ${input.identity.datasetVersion.datasetId}
+      AND dataset_version_id = ${input.identity.datasetVersion.versionId}
+      AND dataset_version_created_at <> ${input.identity.datasetVersion.createdAt}
+    LIMIT 1
+  `
+  if (conflict) throw immutableDatasetVersionConflict(input.identity)
 }
 
 function createFreshExecutionToken(previous: string | undefined): string {
@@ -438,6 +494,7 @@ function restoreProjectionRunRow(row: DatabaseRow): StoredProjectionRunRecord {
   const persisted: PersistedProjectionRunRecord = {
     id: row.id,
     projectId: row.project_id,
+    executionId: row.execution_id,
     projectionId: row.projection_id,
     projectionKind: row.projection_kind,
     protocol: row.materialization_protocol ?? undefined,
@@ -451,7 +508,8 @@ function restoreProjectionRunRow(row: DatabaseRow): StoredProjectionRunRecord {
     sourceObjectTypeId: row.source_object_type_id ?? undefined,
     targetObjectTypeId: row.target_object_type_id ?? undefined,
     status: row.status,
-    startedAt: new Date(row.started_at),
+    queuedAt: new Date(row.queued_at),
+    startedAt: row.started_at ? new Date(row.started_at) : undefined,
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     attempt: databaseSafeInteger(row.attempt, "attempt"),
     executionToken: row.execution_token ?? undefined,
@@ -497,6 +555,7 @@ function databaseSafeInteger(value: number | string | null, fieldName: string): 
 interface DatabaseRow {
   project_id: string
   id: string
+  execution_id: string
   projection_id: string
   projection_kind: ProjectionKind
   dataset_id: string
@@ -505,7 +564,8 @@ interface DatabaseRow {
   source_object_type_id: string | null
   target_object_type_id: string | null
   status: ProjectionRunStatus
-  started_at: Date | string
+  queued_at: Date | string
+  started_at: Date | string | null
   finished_at: Date | string | null
   attempt: number | string
   execution_token: string | null
@@ -525,4 +585,10 @@ interface DatabaseRow {
   source_rows_read: number | string
   source_rows_skipped: number | string
   error: JsonValue | null
+}
+
+function duplicateProjectionRun(input: { readonly projectId: string; readonly id: string }) {
+  return new ProjectionRunError(
+    `[SixbPg] Projection run '${input.id}' already exists for project '${input.projectId}'.`
+  )
 }

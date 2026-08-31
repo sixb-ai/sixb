@@ -24,10 +24,16 @@ export async function confirmCallback(app: TestApp, link: URL): Promise<Response
   const body = new URLSearchParams()
   for (const name of ["magicLinkId", "token"]) {
     const match = html.match(new RegExp(`name="${name}" value="([^"]+)"`))
-    if (!match) {
+    const value = match?.[1] ?? link.searchParams.get(name)
+    if (!value) {
       throw new Error(`Confirmation form is missing the ${name} field`)
     }
-    body.set(name, match[1])
+    body.set(name, value)
+  }
+  const audience =
+    html.match(/name="audience" value="([^"]+)"/)?.[1] ?? link.searchParams.get("audience")
+  if (audience) {
+    body.set("audience", audience)
   }
   return app.fetch(
     new Request(new URL("/auth/callback", link).toString(), {

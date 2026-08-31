@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { chmod, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { loadAgentSkills, renderAgentSkillCatalog } from "../src/agent-skills"
+import { loadAgentSkills } from "../src/agent-skills"
 import { writeProjectSkill } from "./helpers"
 
 async function createProjectRoot(label: string): Promise<string> {
@@ -10,33 +10,14 @@ async function createProjectRoot(label: string): Promise<string> {
 }
 
 describe("Agent Skills", () => {
-  test("renders execution-mode-specific workflow boundaries", async () => {
-    const skills = await loadAgentSkills()
-
-    expect(renderAgentSkillCatalog(skills, "conversation")).toContain(
-      "Execution mode: conversation. You may start a declared workflow"
-    )
-    expect(renderAgentSkillCatalog(skills, "workflow-task")).toContain(
-      "Execution mode: workflow-task. This is a headless workflow node: never start another workflow"
-    )
-  })
-
-  test("discovers packaged built-ins and tolerates a missing project skills directory", async () => {
+  test("returns no skills when project skills are disabled or missing", async () => {
     const projectRoot = await createProjectRoot("missing")
     try {
-      const skills = await loadAgentSkills({ projectSkillsDir: join(projectRoot, "skills") })
-      expect(skills.map((skill) => skill.name)).toEqual([
-        "sixb-actions",
-        "sixb-files",
-        "sixb-query",
-        "sixb-telemetry",
-        "sixb-workflows",
-      ])
-      for (const skill of skills) {
-        const skillFile = skill.files.find((file) => file.relativePath === "SKILL.md")
-        expect(skillFile?.contents).toContain(`name: ${skill.name}`)
-        expect(skill.description.length).toBeGreaterThan(0)
-      }
+      await expect(loadAgentSkills()).resolves.toEqual([])
+      await expect(loadAgentSkills({ projectSkillsDir: false })).resolves.toEqual([])
+      await expect(
+        loadAgentSkills({ projectSkillsDir: join(projectRoot, "skills") })
+      ).resolves.toEqual([])
     } finally {
       await rm(projectRoot, { recursive: true, force: true })
     }
@@ -96,24 +77,9 @@ describe("Agent Skills", () => {
     }
   })
 
-  test("rejects built-in collisions and the reserved project prefix", async () => {
-    const collisionRoot = await createProjectRoot("collision")
+  test("rejects the reserved project prefix", async () => {
     const reservedRoot = await createProjectRoot("reserved")
     try {
-      await writeProjectSkill(
-        collisionRoot,
-        "sixb-query",
-        [
-          "---",
-          "name: sixb-query",
-          "description: Invalid attempt to replace a built-in skill.",
-          "---",
-        ].join("\n")
-      )
-      await expect(
-        loadAgentSkills({ projectSkillsDir: join(collisionRoot, "skills") })
-      ).rejects.toThrow("collides with a built-in agent skill")
-
       await writeProjectSkill(
         reservedRoot,
         "sixb-custom",
@@ -128,10 +94,7 @@ describe("Agent Skills", () => {
         loadAgentSkills({ projectSkillsDir: join(reservedRoot, "skills") })
       ).rejects.toThrow("uses the reserved 'sixb-' prefix")
     } finally {
-      await Promise.all([
-        rm(collisionRoot, { recursive: true, force: true }),
-        rm(reservedRoot, { recursive: true, force: true }),
-      ])
+      await rm(reservedRoot, { recursive: true, force: true })
     }
   })
 

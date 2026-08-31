@@ -30,7 +30,7 @@ const MOCK_DEFINITION = {
   },
 } as const
 
-function finish(finishReason: "stop" | "tool-calls" = "stop"): LanguageModelStreamEvent {
+function finish(finishReason: "stop" | "tool-calls" | "pause" = "stop"): LanguageModelStreamEvent {
   return { type: "finish", finishReason, usage: USAGE }
 }
 
@@ -206,6 +206,84 @@ describe("runModelLoop", () => {
     })
   })
 
+  test("continues a provider pause without inventing a local tool result", async () => {
+    const requests: unknown[] = []
+    const model = new MockLanguageModel({
+      stream: async (request) => {
+        requests.push(request)
+        return requests.length === 1
+          ? streamFromArray([
+              { type: "stream-start" },
+              { type: "text-start", id: "partial" },
+              { type: "text-delta", id: "partial", delta: "Working" },
+              { type: "text-end", id: "partial" },
+              finish("pause"),
+            ])
+          : streamFromArray([
+              { type: "stream-start" },
+              { type: "text-start", id: "answer" },
+              { type: "text-delta", id: "answer", delta: "Done" },
+              { type: "text-end", id: "answer" },
+              finish(),
+            ])
+      },
+    })
+
+    const result = await runModelLoop({
+      model,
+      messages: [{ role: "user", content: [{ type: "text", text: "Start" }] }],
+      maxSteps: 2,
+      signal: new AbortController().signal,
+    })
+
+    expect(result).toMatchObject({ status: "completed", output: "Done", finishReason: "stop" })
+    expect(result.steps).toHaveLength(2)
+    expect(requests[1]).toMatchObject({
+      messages: [
+        { role: "user" },
+        { role: "assistant", content: [{ type: "text", text: "Working" }] },
+      ],
+    })
+  })
+
+  test("records a final-step tool response without starting an unbounded continuation", async () => {
+    let offeredTools: readonly string[] = []
+    const model = new MockLanguageModel({
+      stream: async (request) => {
+        offeredTools = request.tools.map((tool) => tool.name)
+        return streamFromArray([
+          { type: "stream-start" },
+          {
+            type: "tool-call",
+            toolCallId: "too-late",
+            toolName: "echo",
+            input: '{"value":"late"}',
+          },
+          finish("tool-calls"),
+        ])
+      },
+    })
+
+    const result = await runModelLoop({
+      model,
+      messages: [],
+      tools: [echo],
+      maxSteps: 1,
+      finalStepInstruction: "Answer now without using tools.",
+      signal: new AbortController().signal,
+    })
+
+    expect(offeredTools).toEqual([])
+    expect(result).toMatchObject({
+      status: "completed",
+      output: "",
+      finishReason: "tool-calls",
+    })
+    expect(result.steps[0]?.content).toContainEqual(
+      expect.objectContaining({ type: "tool-call", toolCallId: "too-late" })
+    )
+  })
+
   test("executes parallel tools but preserves model call order", async () => {
     const releases = new Map<string, () => void>()
     const completion: string[] = []
@@ -355,9 +433,12 @@ describe("runModelLoop", () => {
 
   test("validates structured text output and offers the reserved submission tool", async () => {
     let toolNames: readonly string[] = []
+    let responseFormat: unknown
     const model = new MockLanguageModel({
+      capabilities: { ...MOCK_DEFINITION.capabilities, nativeStructuredOutput: false },
       stream: async (request) => {
         toolNames = request.tools.map((tool) => tool.name)
+        responseFormat = request.responseFormat
         return streamFromArray([
           { type: "stream-start" },
           { type: "text-start", id: "json" },
@@ -393,6 +474,44 @@ describe("runModelLoop", () => {
     })
 
     expect(toolNames).toContain("__sixb_submit_output")
+    expect(responseFormat).toBeUndefined()
+    expect(result).toMatchObject({ status: "completed", output: { answer: "yes" } })
+  })
+
+  test("uses provider-native structured output without the reserved submission tool", async () => {
+    let toolNames: readonly string[] = []
+    let responseFormat: unknown
+    const model = new MockLanguageModel({
+      stream: async (request) => {
+        toolNames = request.tools.map((tool) => tool.name)
+        responseFormat = request.responseFormat
+        return streamFromArray([
+          { type: "stream-start" },
+          { type: "text-start", id: "json" },
+          { type: "text-delta", id: "json", delta: '{"answer":"yes"}' },
+          { type: "text-end", id: "json" },
+          finish(),
+        ])
+      },
+    })
+    const result = await runModelLoop({
+      model,
+      messages: [],
+      output: {
+        name: "answer",
+        schema: { type: "object", properties: { answer: { type: "string" } } },
+        validate: (value) => value as { answer: string },
+      },
+      maxSteps: 1,
+      signal: new AbortController().signal,
+    })
+
+    expect(toolNames).not.toContain("__sixb_submit_output")
+    expect(responseFormat).toEqual({
+      type: "json",
+      name: "answer",
+      schema: { type: "object", properties: { answer: { type: "string" } } },
+    })
     expect(result).toMatchObject({ status: "completed", output: { answer: "yes" } })
   })
 

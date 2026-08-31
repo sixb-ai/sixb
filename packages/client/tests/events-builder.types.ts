@@ -291,8 +291,11 @@ events
       (event.type === "pipeline.run.finished" || event.type === "pipeline.run.step.finished") &&
       event.payload.error
     ) {
-      const code: "internal.unexpected" | "runtime.cancelled" | "pipeline.step_failed" =
-        event.payload.error.code
+      const code:
+        | "internal.unexpected"
+        | "runtime.cancelled"
+        | "queue.enqueue_failed"
+        | "pipeline.step_failed" = event.payload.error.code
       const message: string = event.payload.error.message
       // @ts-expect-error — pipeline lifecycle failures expose only their primitive's code union.
       const datasetCode: "dataset.not_found" = event.payload.error.code
@@ -305,8 +308,11 @@ events
   .run("run-1")
   .subscribe((event) => {
     if (event.type === "sync.run.finished" && event.payload.error) {
-      const code: "internal.unexpected" | "runtime.cancelled" | "sync.execution_failed" =
-        event.payload.error.code
+      const code:
+        | "internal.unexpected"
+        | "runtime.cancelled"
+        | "queue.enqueue_failed"
+        | "sync.execution_failed" = event.payload.error.code
       const message: string = event.payload.error.message
       // @ts-expect-error — sync lifecycle failures expose only their primitive's code union.
       const datasetCode: "dataset.not_found" = event.payload.error.code

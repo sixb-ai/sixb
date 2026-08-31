@@ -1,6 +1,5 @@
 import type { EditBatch } from "../edits"
 import { lowerEditBatch } from "../edits"
-import type { EventActor } from "../events/envelope"
 import type {
   EditCommitResult,
   EffectiveLinkChange,
@@ -30,7 +29,6 @@ export interface CommitActionEditsInput {
   readonly actionId: string
   readonly batch: EditBatch
   readonly dependencies?: ActionReadDependencies
-  readonly actor?: EventActor
 }
 
 /** The authoritative ontology commit an Action run produced. */
@@ -71,7 +69,6 @@ export async function commitActionEdits(
     expectedObjects: dependencies.objects,
     expectedLinks: dependencies.links,
     expectedLinkScopes: dependencies.linkScopes,
-    ...(input.actor !== undefined ? { actor: input.actor } : {}),
   })
   return toActionEditCommitResult(commit)
 }

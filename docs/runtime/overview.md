@@ -50,7 +50,9 @@ local for dev, hosted backends for production).
 
 Optional: `id` (project id), `auth` (a `SixbAuthConfig`, see
 [Authentication](../auth/authentication.md)), `sandboxes` (a `SandboxFactory`), `logger` (a
-`LoggerProvider` for process-level log output), `observability` (broker log-capture controls),
+`LoggerProvider` for process-level log output), `models` (the
+[project model catalog](../agents/defining-agents.md#the-project-model-catalog)),
+`observability` (broker log-capture controls),
 `onError` ([runtime failure notifications](error-handling.md)), `ontologyMaintenance` (recovery and
 retention intervals), and `projectRoot` (discovery root, defaults to `process.cwd()`). Logging options are covered in
 [Logging](../logging/overview.md).

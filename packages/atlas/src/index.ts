@@ -225,12 +225,59 @@ async function fileResponse(
   path: string,
   headers: Record<string, string> = {}
 ): Promise<Response> {
-  const file = Bun.file(path)
-  if (!(await file.exists())) {
+  const originalFile = Bun.file(path)
+  if (!(await originalFile.exists())) {
     return notFoundResponse()
   }
 
-  return new Response(request.method === "HEAD" ? null : file, { headers })
+  const responseHeaders = new Headers(headers)
+  let responseFile = originalFile
+  if (path.endsWith(".js") || path.endsWith(".css")) {
+    responseHeaders.append("vary", "Accept-Encoding")
+    if (!request.headers.has("range")) {
+      for (const encoding of acceptedPrecompressedEncodings(request)) {
+        const candidate = Bun.file(`${path}.${encoding === "br" ? "br" : "gz"}`)
+        if (!(await candidate.exists())) continue
+
+        responseFile = candidate
+        responseHeaders.set("content-encoding", encoding)
+        responseHeaders.set("content-type", originalFile.type)
+        break
+      }
+    }
+  }
+
+  return new Response(request.method === "HEAD" ? null : responseFile, {
+    headers: responseHeaders,
+  })
+}
+
+function acceptedPrecompressedEncodings(request: Request): ("br" | "gzip")[] {
+  const header = request.headers.get("accept-encoding")
+  if (!header) return []
+
+  const qualities = new Map<string, number>()
+  for (const item of header.split(",")) {
+    const [rawName, ...parameters] = item.trim().split(";")
+    const name = rawName.toLowerCase()
+    let quality = 1
+    for (const parameter of parameters) {
+      const match = parameter.trim().match(/^q=(0(?:\.\d+)?|1(?:\.0+)?)$/)
+      if (match) quality = Number(match[1])
+    }
+    qualities.set(name, quality)
+  }
+
+  const wildcard = qualities.get("*") ?? 0
+  return (["br", "gzip"] as const)
+    .map((encoding, preference) => ({
+      encoding,
+      preference,
+      quality: qualities.get(encoding) ?? wildcard,
+    }))
+    .filter((candidate) => candidate.quality > 0)
+    .sort((left, right) => right.quality - left.quality || left.preference - right.preference)
+    .map((candidate) => candidate.encoding)
 }
 
 function notFoundResponse(): Response {

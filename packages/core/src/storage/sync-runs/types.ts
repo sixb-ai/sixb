@@ -4,12 +4,12 @@ import type { DatasetVersionRef, DatasetWriteMode } from "../../lake-storage"
 
 export type SyncRunMode = DatasetWriteMode | "merge"
 
-export type SyncRunStatus = "running" | "succeeded" | "failed" | "cancelled"
-
+export type SyncRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled"
 /** Error codes a sync run can persist and expose through its public contract. */
 export const SYNC_RUN_FAILURE_CODES = [
   "internal.unexpected",
   "runtime.cancelled",
+  "queue.enqueue_failed",
   "sync.execution_failed",
 ] as const satisfies readonly [SixbErrorCode, ...SixbErrorCode[]]
 
@@ -18,11 +18,13 @@ export type SyncRunFailureCode = (typeof SYNC_RUN_FAILURE_CODES)[number]
 export interface SyncRunRecord {
   readonly id: string
   readonly projectId: string
+  readonly executionId: string
   readonly syncId: string
   readonly datasetId: string
   readonly mode: SyncRunMode
   readonly status: SyncRunStatus
-  readonly startedAt: Date
+  readonly queuedAt: Date
+  readonly startedAt?: Date
   readonly finishedAt?: Date
   /** Source items successfully consumed. Merge runs count both upserts and deletes. */
   readonly rowsRead?: number
@@ -33,15 +35,22 @@ export interface SyncRunRecord {
   readonly checkpoint?: JsonValue
 }
 
-export interface StartSyncRunInput {
+export interface QueueSyncRunInput {
   readonly id: string
   readonly projectId: string
+  readonly executionId: string
   readonly syncId: string
   readonly datasetId: string
   readonly mode: SyncRunMode
-  readonly startedAt?: Date
+  readonly queuedAt?: Date
   readonly expectedLatestVersionId?: string
   readonly commitMessage?: string
+}
+
+export interface StartSyncRunInput {
+  readonly id: string
+  readonly projectId: string
+  readonly startedAt?: Date
 }
 
 export type FinishSyncRunInput =
@@ -59,9 +68,18 @@ export type FinishSyncRunInput =
   | {
       readonly id: string
       readonly projectId: string
-      readonly status: "failed" | "cancelled"
+      readonly status: "failed"
       readonly finishedAt?: Date
       /** Source items successfully consumed before the failure or cancellation. */
+      readonly rowsRead?: number
+      readonly error: SixbFailure<SyncRunFailureCode>
+    }
+  | {
+      readonly id: string
+      readonly projectId: string
+      readonly status: "cancelled"
+      readonly finishedAt?: Date
+      /** Source items successfully consumed before cancellation. */
       readonly rowsRead?: number
       readonly error?: SixbFailure<SyncRunFailureCode>
     }
@@ -95,6 +113,7 @@ export interface ListLatestSyncRunsResult {
 }
 
 export interface SyncRunStorage {
+  queue(input: QueueSyncRunInput): Promise<SyncRunRecord>
   start(input: StartSyncRunInput): Promise<SyncRunRecord>
   finish(input: FinishSyncRunInput): Promise<SyncRunRecord>
   getById(params: { projectId: string; id: string }): Promise<SyncRunRecord | null>

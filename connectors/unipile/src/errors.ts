@@ -1,3 +1,5 @@
+import { parseRetryAfter } from "@sixb/connector-rest"
+
 export class UnipileApiError extends Error {
   readonly name = "UnipileApiError"
   readonly headers: Headers
@@ -49,20 +51,6 @@ function extractMessage(value: unknown): string | null {
   }
 
   return null
-}
-
-function parseRetryAfter(value: string | null): number | null {
-  if (!value) {
-    return null
-  }
-
-  const seconds = Number(value)
-  if (Number.isFinite(seconds)) {
-    return Math.max(seconds, 0) * 1000
-  }
-
-  const timestamp = Date.parse(value)
-  return Number.isNaN(timestamp) ? null : Math.max(timestamp - Date.now(), 0)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

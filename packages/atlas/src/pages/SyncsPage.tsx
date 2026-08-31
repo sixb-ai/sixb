@@ -53,19 +53,20 @@ import { getCollectionViewStyle, setCollectionViewStyle } from "../lib/userPrefe
 type SyncSummary = ListSyncsResponse[number] | GetSyncResponse
 type SyncRun = ListSyncRunsResponse["runs"][number]
 type SyncListViewStyle = "cards" | "table"
-type QueuedRun = {
+type OptimisticQueuedRun = {
   readonly id: string
   readonly queuedAt: string
+  readonly optimistic: true
 }
-type DisplayRun = SyncRun | QueuedRun
+type DisplayRun = SyncRun | OptimisticQueuedRun
 
 const syncListViewOptions = [
   { value: "cards", label: "Cards" },
   { value: "table", label: "Table" },
 ] as const
 
-function isQueuedRun(run: DisplayRun): run is QueuedRun {
-  return !("status" in run)
+function isOptimisticQueuedRun(run: DisplayRun): run is OptimisticQueuedRun {
+  return "optimistic" in run
 }
 
 function syncName(sync: Pick<SyncSummary, "id">): string {
@@ -86,6 +87,8 @@ function runStatusClasses(status: SyncRun["status"]): string {
       return "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-300"
     case "running":
       return "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-300"
+    case "queued":
+      return "border-slate-500/30 bg-slate-500/10 text-slate-600 dark:text-slate-300"
   }
 }
 
@@ -97,24 +100,14 @@ function RunStatusBadge({ status }: { status: SyncRun["status"] }) {
         ? XCircle
         : status === "cancelled"
           ? Ban
-          : LoaderCircle
+          : status === "running"
+            ? LoaderCircle
+            : Clock3
 
   return (
     <Badge variant="outline" className={cn("rounded-md", runStatusClasses(status))}>
       <Icon className={cn("h-3 w-3", status === "running" && "animate-spin")} />
       {runStatusLabel(status)}
-    </Badge>
-  )
-}
-
-function QueuedRunBadge() {
-  return (
-    <Badge
-      variant="outline"
-      className="rounded-md border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-300"
-    >
-      <Clock3 className="h-3 w-3" />
-      Queued
     </Badge>
   )
 }
@@ -132,10 +125,12 @@ function scheduleLabel(schedule: SyncSummary["triggers"][number]): string {
 }
 
 function runDuration(run: SyncRun): string {
+  if (run.status === "queued") return "Waiting"
   if (!run.finishedAt) {
     return run.status === "running" ? "Running" : "Pending"
   }
 
+  if (!run.startedAt) return "Not started"
   const durationMs = new Date(run.finishedAt).getTime() - new Date(run.startedAt).getTime()
   if (!Number.isFinite(durationMs) || durationMs < 0) {
     return "Unknown"
@@ -187,7 +182,7 @@ function SyncListItem({
         <div className="hidden shrink-0 flex-col items-end gap-1 sm:flex">
           <RunStatusBadge status={latestRun.status} />
           <span className="text-xs text-muted-foreground">
-            {formatRelativeTime(latestRun.startedAt)}
+            {formatRelativeTime(latestRun.startedAt ?? latestRun.queuedAt)}
           </span>
         </div>
       ) : (
@@ -239,7 +234,7 @@ function SyncTableView({
                   <div className="flex flex-col items-start gap-1">
                     <RunStatusBadge status={sync.latestRun.status} />
                     <span className="text-xs text-muted-foreground">
-                      {formatRelativeTime(sync.latestRun.startedAt)}
+                      {formatRelativeTime(sync.latestRun.startedAt ?? sync.latestRun.queuedAt)}
                     </span>
                   </div>
                 ) : (
@@ -339,14 +334,18 @@ function LatestRunSummary({ run }: { run: DisplayRun | null }) {
       <MetricTile
         label="Latest run"
         detail={
-          !isQueuedRun(run) && run.output ? (
+          !isOptimisticQueuedRun(run) && run.output ? (
             <span className="font-mono">{run.output.versionId}</span>
           ) : undefined
         }
       >
         <div className="flex min-w-0 items-center gap-2 overflow-hidden">
           <span className="shrink-0">
-            {isQueuedRun(run) ? <QueuedRunBadge /> : <RunStatusBadge status={run.status} />}
+            {isOptimisticQueuedRun(run) ? (
+              <RunStatusBadge status="queued" />
+            ) : (
+              <RunStatusBadge status={run.status} />
+            )}
           </span>
           <span className="hidden truncate font-mono text-xs text-muted-foreground sm:block">
             {run.id}
@@ -354,11 +353,25 @@ function LatestRunSummary({ run }: { run: DisplayRun | null }) {
         </div>
       </MetricTile>
       <MetricTile
-        label={isQueuedRun(run) ? "Queued" : "Started"}
-        value={formatRelativeTime(isQueuedRun(run) ? run.queuedAt : run.startedAt)}
+        label={
+          isOptimisticQueuedRun(run) || run.status === "queued"
+            ? "Queued"
+            : run.startedAt
+              ? "Started"
+              : "Requested"
+        }
+        value={formatRelativeTime(
+          isOptimisticQueuedRun(run) ? run.queuedAt : (run.startedAt ?? run.queuedAt)
+        )}
       />
-      <MetricTile label="Duration" value={isQueuedRun(run) ? "Waiting" : runDuration(run)} />
-      <MetricTile label="Rows" value={isQueuedRun(run) ? "-" : (run.rowsRead ?? 0)} />
+      <MetricTile
+        label="Duration"
+        value={isOptimisticQueuedRun(run) ? "Waiting" : runDuration(run)}
+      />
+      <MetricTile
+        label="Rows"
+        value={isOptimisticQueuedRun(run) || run.status === "queued" ? "-" : (run.rowsRead ?? 0)}
+      />
     </div>
   )
 }
@@ -403,11 +416,11 @@ function SchemaTable({ sync }: { sync: SyncSummary }) {
 }
 
 function SyncRunCard({ run }: { run: DisplayRun }) {
-  if (isQueuedRun(run)) {
+  if (isOptimisticQueuedRun(run)) {
     return (
       <div className="min-w-0 max-w-full overflow-hidden rounded-xl border border-border bg-background p-3">
         <div className="min-w-0 space-y-2">
-          <QueuedRunBadge />
+          <RunStatusBadge status="queued" />
           <div className="min-w-0">
             <p className="max-w-full truncate font-mono text-xs text-foreground">{run.id}</p>
             <p className="mt-1 max-w-full truncate text-xs text-muted-foreground">
@@ -435,8 +448,10 @@ function SyncRunCard({ run }: { run: DisplayRun }) {
       </div>
       <div className="mt-3 grid min-w-0 grid-cols-3 gap-2 text-xs">
         <div className="min-w-0">
-          <p className="text-muted-foreground">Started</p>
-          <p className="mt-0.5 truncate text-foreground">{formatRelativeTime(run.startedAt)}</p>
+          <p className="text-muted-foreground">{run.status === "queued" ? "Queued" : "Started"}</p>
+          <p className="mt-0.5 truncate text-foreground">
+            {formatRelativeTime(run.startedAt ?? run.queuedAt)}
+          </p>
         </div>
         <div className="min-w-0">
           <p className="text-muted-foreground">Duration</p>
@@ -444,7 +459,9 @@ function SyncRunCard({ run }: { run: DisplayRun }) {
         </div>
         <div className="min-w-0">
           <p className="text-muted-foreground">Rows</p>
-          <p className="mt-0.5 truncate text-foreground">{run.rowsRead ?? 0}</p>
+          <p className="mt-0.5 truncate text-foreground">
+            {run.status === "queued" ? "-" : (run.rowsRead ?? 0)}
+          </p>
         </div>
       </div>
       {run.error && <SixbFailureSummary failure={run.error} className="mt-3 text-xs" />}
@@ -452,7 +469,13 @@ function SyncRunCard({ run }: { run: DisplayRun }) {
   )
 }
 
-function SyncRunList({ runs, queuedRun }: { runs: SyncRun[]; queuedRun: QueuedRun | null }) {
+function SyncRunList({
+  runs,
+  queuedRun,
+}: {
+  runs: SyncRun[]
+  queuedRun: OptimisticQueuedRun | null
+}) {
   if (runs.length === 0 && !queuedRun) {
     return (
       <EmptyState
@@ -485,7 +508,7 @@ function SyncRunList({ runs, queuedRun }: { runs: SyncRun[]; queuedRun: QueuedRu
             <tr className="sticky top-0 border-b border-border bg-card text-xs text-muted-foreground">
               <th className="pb-2 pr-4 font-medium">Run</th>
               <th className="px-3 pb-2 font-medium">Status</th>
-              <th className="px-3 pb-2 font-medium">Started</th>
+              <th className="px-3 pb-2 font-medium">Queued / started</th>
               <th className="px-3 pb-2 font-medium">Duration</th>
               <th className="pb-2 pl-3 text-right font-medium">Rows</th>
             </tr>
@@ -498,7 +521,7 @@ function SyncRunList({ runs, queuedRun }: { runs: SyncRun[]; queuedRun: QueuedRu
                   <p className="mt-1 text-xs text-muted-foreground">Waiting for a worker</p>
                 </td>
                 <td className="px-3 py-3">
-                  <QueuedRunBadge />
+                  <RunStatusBadge status="queued" />
                 </td>
                 <td className="px-3 py-3 text-muted-foreground">
                   {formatRelativeTime(queuedRun.queuedAt)}
@@ -522,7 +545,7 @@ function SyncRunList({ runs, queuedRun }: { runs: SyncRun[]; queuedRun: QueuedRu
                   <RunStatusBadge status={run.status} />
                 </td>
                 <td className="px-3 py-3 text-muted-foreground">
-                  {formatRelativeTime(run.startedAt)}
+                  {formatRelativeTime(run.startedAt ?? run.queuedAt)}
                 </td>
                 <td className="px-3 py-3 text-muted-foreground">{runDuration(run)}</td>
                 <td className="py-3 pl-3 text-right text-foreground">{run.rowsRead ?? 0}</td>
@@ -653,7 +676,7 @@ export function SyncDetailPage() {
   const { syncId = "" } = useParams()
   const navigate = useNavigate()
   const decodedSyncId = decodeURIComponent(syncId)
-  const [queuedRun, setQueuedRun] = useState<QueuedRun | null>(null)
+  const [queuedRun, setQueuedRun] = useState<OptimisticQueuedRun | null>(null)
   useSyncLiveUpdates({ syncId: decodedSyncId, enabled: decodedSyncId.length > 0 })
 
   const syncQuery = useQuery({
@@ -697,7 +720,7 @@ export function SyncDetailPage() {
       },
       {
         onSuccess: (result) => {
-          setQueuedRun({ id: result.runId, queuedAt: result.queuedAt })
+          setQueuedRun({ id: result.runId, queuedAt: result.queuedAt, optimistic: true })
         },
       }
     )

@@ -44,6 +44,7 @@ export type {
   ObjectQueryPredicateIn,
   ObjectQueryPredicateNot,
   ObjectQueryProject,
+  ObjectQueryRefs,
   ObjectQueryResultShape,
   ObjectQuerySet,
   ObjectQuerySetOperation,
@@ -56,6 +57,11 @@ export type {
   ObjectQueryVector,
   QueryScalarKind,
 } from "./ir"
+export type {
+  ExecuteObjectQueryLinksInput,
+  ExecuteObjectQueryLinksResult,
+} from "./links"
+export { executeObjectQueryLinks } from "./links"
 export { normalizeObjectQuery, normalizeObjectQueryPredicate } from "./normalize"
 export type {
   ObjectQueryPlan,

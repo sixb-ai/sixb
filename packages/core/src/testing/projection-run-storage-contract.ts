@@ -1,19 +1,33 @@
 import { describe, expect, test } from "bun:test"
 import type { SixbFailure } from "../errors/types"
 import type { ProjectionMaterializationIdentity } from "../materialization/model"
+import type { ExecutionStorage } from "../storage/executions"
 import type {
   ProjectionRunClaim,
   ProjectionRunFailureCode,
   ProjectionRunStorage,
+  QueueProjectionRunInput,
+  StartOrReclaimProjectionRunInput,
 } from "../storage/projection-runs"
+
+export interface ProjectionRunStorageContractContext<
+  TStorage extends ProjectionRunStorage = ProjectionRunStorage,
+> {
+  readonly projectionRuns: TStorage
+  readonly executions: ExecutionStorage
+}
 
 export interface ProjectionRunStorageContractSuiteOptions<
   TStorage extends ProjectionRunStorage = ProjectionRunStorage,
 > {
-  /** Factory that returns an isolated projection-run store for each test. */
-  readonly createStorage: () => TStorage | Promise<TStorage>
-  readonly setup?: (storage: TStorage) => void | Promise<void>
-  readonly cleanup?: (storage: TStorage) => void | Promise<void>
+  /** Factory that returns one isolated execution + projection-run store for each test. */
+  readonly createStorage: () =>
+    | ProjectionRunStorageContractContext<TStorage>
+    | Promise<ProjectionRunStorageContractContext<TStorage>>
+  readonly setup?: (context: ProjectionRunStorageContractContext<TStorage>) => void | Promise<void>
+  readonly cleanup?: (
+    context: ProjectionRunStorageContractContext<TStorage>
+  ) => void | Promise<void>
 }
 
 const projectId = "contract-project"
@@ -60,20 +74,94 @@ export function runProjectionRunStorageContractSuite<TStorage extends Projection
   label: string,
   options: ProjectionRunStorageContractSuiteOptions<TStorage>
 ): void {
-  const withStorage = async (body: (storage: TStorage) => Promise<void>): Promise<void> => {
-    const storage = await options.createStorage()
+  const withStorage = async (
+    body: (context: ProjectionRunStorageContractContext<TStorage>) => Promise<void>
+  ): Promise<void> => {
+    const context = await options.createStorage()
     try {
-      await options.setup?.(storage)
-      await body(storage)
+      await options.setup?.(context)
+      await body(context)
     } finally {
-      await options.cleanup?.(storage)
+      await options.cleanup?.(context)
     }
   }
 
   describe(label, () => {
+    test("admits a queued run only after its durable execution exists", async () => {
+      await withStorage(async (context) => {
+        const input = replacementInput("queued-run")
+        await expect(
+          context.projectionRuns.queue({
+            ...input,
+            executionId: "missing-execution",
+          })
+        ).rejects.toThrow()
+
+        const wrongSourceExecutionId = "execution:wrong-source"
+        await context.executions.create({
+          id: wrongSourceExecutionId,
+          projectId: input.projectId,
+          executor: { type: "primitive", kind: "projection", runId: input.id },
+          source: { type: "event", eventId: "wrong-source" },
+          correlationId: input.id,
+          authorizationRef: {
+            type: "trustedPrimitive",
+            primitive: { kind: "projection", id: input.identity.projectionId, runId: input.id },
+          },
+        })
+        await expect(
+          context.projectionRuns.queue({
+            ...input,
+            executionId: wrongSourceExecutionId,
+          })
+        ).rejects.toThrow("does not authorize Projection run")
+
+        const admission = await admitProjectionRun(context, input)
+        await expect(
+          context.projectionRuns.getById({ projectId: input.projectId, id: input.id })
+        ).resolves.toMatchObject({
+          id: input.id,
+          executionId: admission.executionId,
+          status: "queued",
+          attempt: 0,
+        })
+      })
+    })
+
+    test("requeues the same admission after an enqueue failure", async () => {
+      await withStorage(async (context) => {
+        const input = replacementInput("enqueue-retry-run")
+        const admission = await admitProjectionRun(context, input)
+        await expect(
+          context.projectionRuns.failEnqueue({
+            id: input.id,
+            projectId: input.projectId,
+            error: {
+              code: "queue.enqueue_failed",
+              message: "queue unavailable",
+              retryable: true,
+              at: "2026-06-01T12:00:00.000Z",
+              details: { projectionId: input.identity.projectionId, runId: input.id },
+            },
+          })
+        ).resolves.toMatchObject({
+          status: "failed",
+          error: { code: "queue.enqueue_failed", message: "queue unavailable" },
+        })
+
+        await expect(context.projectionRuns.queue(admission)).resolves.toMatchObject({
+          executionId: admission.executionId,
+          status: "queued",
+          attempt: 0,
+        })
+      })
+    })
+
     test("keeps one run while reclaim rotates its execution", async () => {
-      await withStorage(async (storage) => {
+      await withStorage(async (context) => {
+        const storage = context.projectionRuns
         const input = replacementInput("replacement-run")
+        await admitProjectionRun(context, input)
         const first = await storage.startOrReclaim(input)
         const second = await storage.startOrReclaim(input)
 
@@ -90,8 +178,10 @@ export function runProjectionRunStorageContractSuite<TStorage extends Projection
     })
 
     test("fences every stale lock, progress, and terminal write", async () => {
-      await withStorage(async (storage) => {
+      await withStorage(async (context) => {
+        const storage = context.projectionRuns
         const input = replacementInput("fenced-run")
+        await admitProjectionRun(context, input)
         const stale = await storage.startOrReclaim(input)
         const current = await storage.startOrReclaim(input)
 
@@ -122,8 +212,10 @@ export function runProjectionRunStorageContractSuite<TStorage extends Projection
     })
 
     test("rejects immutable identity and target drift", async () => {
-      await withStorage(async (storage) => {
+      await withStorage(async (context) => {
+        const storage = context.projectionRuns
         const input = replacementInput("identity-run")
+        await admitProjectionRun(context, input)
         const claim = await storage.startOrReclaim(input)
         const changedIdentity = { ...replacementIdentity, ownershipHash: "different-ownership" }
 
@@ -143,7 +235,9 @@ export function runProjectionRunStorageContractSuite<TStorage extends Projection
     })
 
     test("keeps physical progress monotone and internally consistent", async () => {
-      await withStorage(async (storage) => {
+      await withStorage(async (context) => {
+        const storage = context.projectionRuns
+        await admitProjectionRun(context, replacementInput("progress-run"))
         const claim = await storage.startOrReclaim(replacementInput("progress-run"))
         const execution = executionInput(claim)
         await expect(
@@ -163,10 +257,10 @@ export function runProjectionRunStorageContractSuite<TStorage extends Projection
     })
 
     test("rejects immutable dataset-version metadata reuse", async () => {
-      await withStorage(async (storage) => {
-        await storage.startOrReclaim(replacementInput("dataset-metadata-first"))
+      await withStorage(async (context) => {
+        await admitProjectionRun(context, replacementInput("dataset-metadata-first"))
         await expect(
-          storage.startOrReclaim({
+          admitProjectionRun(context, {
             ...replacementInput("dataset-metadata-conflict"),
             identity: {
               ...replacementIdentity,
@@ -181,14 +275,17 @@ export function runProjectionRunStorageContractSuite<TStorage extends Projection
     })
 
     test("advances telemetry in contiguous fixed physical batches", async () => {
-      await withStorage(async (storage) => {
-        const claim = await storage.startOrReclaim({
+      await withStorage(async (context) => {
+        const storage = context.projectionRuns
+        const input = {
           id: "telemetry-run",
           projectId,
           identity: telemetryIdentity,
           target: objectTarget,
           fixedBatchSize: 3,
-        })
+        } as const
+        await admitProjectionRun(context, input)
+        const claim = await storage.startOrReclaim(input)
         const execution = executionInput(claim)
         expect(claim.run).toMatchObject({
           telemetryCheckpoint: {
@@ -243,14 +340,17 @@ export function runProjectionRunStorageContractSuite<TStorage extends Projection
     })
 
     test("keeps a missing target until the batch it blocks commits", async () => {
-      await withStorage(async (storage) => {
-        const claim = await storage.startOrReclaim({
+      await withStorage(async (context) => {
+        const storage = context.projectionRuns
+        const input = {
           id: "telemetry-missing-target-run",
           projectId,
           identity: telemetryIdentity,
           target: objectTarget,
           fixedBatchSize: 2,
-        })
+        } as const
+        await admitProjectionRun(context, input)
+        const claim = await storage.startOrReclaim(input)
         const execution = executionInput(claim)
         const firstSeenAt = new Date("2026-06-01T12:00:00.000Z")
         const missingTarget = {
@@ -320,14 +420,17 @@ export function runProjectionRunStorageContractSuite<TStorage extends Projection
     })
 
     test("requires and records explicit telemetry EOF with terminal success", async () => {
-      await withStorage(async (storage) => {
-        const claim = await storage.startOrReclaim({
+      await withStorage(async (context) => {
+        const storage = context.projectionRuns
+        const input = {
           id: "empty-telemetry-run",
           projectId,
           identity: telemetryIdentity,
           target: objectTarget,
           fixedBatchSize: 10,
-        })
+        } as const
+        await admitProjectionRun(context, input)
+        const claim = await storage.startOrReclaim(input)
 
         await expect(
           storage.finish({
@@ -359,7 +462,9 @@ export function runProjectionRunStorageContractSuite<TStorage extends Projection
     })
 
     test("validates, detaches, and persists scoped failures", async () => {
-      await withStorage(async (storage) => {
+      await withStorage(async (context) => {
+        const storage = context.projectionRuns
+        await admitProjectionRun(context, replacementInput("failed-run"))
         const claim = await storage.startOrReclaim(replacementInput("failed-run"))
         const finished = await storage.finish({
           ...executionInput(claim),
@@ -379,6 +484,7 @@ export function runProjectionRunStorageContractSuite<TStorage extends Projection
           error: failure,
         })
 
+        await admitProjectionRun(context, replacementInput("invalid-failure-run"))
         const invalid = await storage.startOrReclaim(replacementInput("invalid-failure-run"))
         await expect(
           storage.finish({
@@ -392,9 +498,14 @@ export function runProjectionRunStorageContractSuite<TStorage extends Projection
     })
 
     test("keeps equal run ids isolated by project", async () => {
-      await withStorage(async (storage) => {
-        await storage.startOrReclaim({ ...replacementInput("shared-id"), projectId: "project-a" })
-        await storage.startOrReclaim({ ...replacementInput("shared-id"), projectId: "project-b" })
+      await withStorage(async (context) => {
+        const storage = context.projectionRuns
+        const projectA = { ...replacementInput("shared-id"), projectId: "project-a" } as const
+        const projectB = { ...replacementInput("shared-id"), projectId: "project-b" } as const
+        await admitProjectionRun(context, projectA)
+        await admitProjectionRun(context, projectB)
+        await storage.startOrReclaim(projectA)
+        await storage.startOrReclaim(projectB)
 
         expect(await storage.getById({ projectId: "project-a", id: "shared-id" })).not.toBeNull()
         expect(await storage.getById({ projectId: "project-b", id: "shared-id" })).not.toBeNull()
@@ -402,6 +513,35 @@ export function runProjectionRunStorageContractSuite<TStorage extends Projection
       })
     })
   })
+}
+
+async function admitProjectionRun<TStorage extends ProjectionRunStorage>(
+  context: ProjectionRunStorageContractContext<TStorage>,
+  input: StartOrReclaimProjectionRunInput
+): Promise<QueueProjectionRunInput> {
+  const executionId = `execution:${input.projectId}:${input.id}`
+  await context.executions.create({
+    id: executionId,
+    projectId: input.projectId,
+    executor: { type: "primitive", kind: "projection", runId: input.id },
+    source: {
+      type: "datasetVersion",
+      datasetId: input.identity.datasetVersion.datasetId,
+      versionId: input.identity.datasetVersion.versionId,
+    },
+    correlationId: input.id,
+    authorizationRef: {
+      type: "trustedPrimitive",
+      primitive: { kind: "projection", id: input.identity.projectionId, runId: input.id },
+    },
+  })
+  const admission = {
+    ...input,
+    executionId,
+    queuedAt: new Date("2026-01-01T00:00:01.000Z"),
+  } satisfies QueueProjectionRunInput
+  await context.projectionRuns.queue(admission)
+  return admission
 }
 
 function replacementInput(id: string) {

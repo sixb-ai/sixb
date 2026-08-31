@@ -50,6 +50,17 @@ export function datasetChangedKeys(datasetId: string): InvalidationKey[] {
   ]
 }
 
+export function workflowChangedKeys(workflowId: string, runId: string): InvalidationKey[] {
+  return [
+    queryKey("listWorkflows"),
+    queryKey("listWorkflowRuns"),
+    queryKey("listWorkflowInterventions"),
+    queryKey("getWorkflowAgentNodeExecution"),
+    queryKeyWithPath("getWorkflow", { workflowId }),
+    queryKeyWithPath("getWorkflowRun", { runId }),
+  ]
+}
+
 export function sameObject(
   left: { readonly objectTypeId: string; readonly primaryId: string },
   right: { readonly objectTypeId: string; readonly primaryId: string }

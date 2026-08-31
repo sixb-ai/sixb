@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { PipelineRunError, type PipelineRunFailureCode, type SixbFailure } from "@sixb/core/storage"
+import { createTestPipelineExecution, startTestPipelineRun } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
 import { PgPipelineRunStorage } from "../src/pg-pipeline-run-storage"
 import { createTestStorage } from "./helpers"
@@ -31,7 +32,7 @@ describe("PgPipelineRunStorage", () => {
   })
 
   test("starts and finishes pipeline runs", async () => {
-    await storage.pipelineRuns.start({
+    await startTestPipelineRun(storage, {
       id: "run-1",
       projectId: "my-app",
       pipelineId: "customers",
@@ -59,12 +60,12 @@ describe("PgPipelineRunStorage", () => {
       datasetId: "insights.customers",
       versionId: "ver_final",
     })
-    expect(stored?.startedAt.toISOString()).toBe("2026-05-08T10:00:00.000Z")
+    expect(stored?.startedAt?.toISOString()).toBe("2026-05-08T10:00:00.000Z")
     expect(stored?.finishedAt?.toISOString()).toBe("2026-05-08T10:00:04.500Z")
   })
 
   test("stores failures and supports filtered pipeline run paging", async () => {
-    await storage.pipelineRuns.start({
+    await startTestPipelineRun(storage, {
       id: "run-1",
       projectId: "my-app",
       pipelineId: "customers",
@@ -77,7 +78,7 @@ describe("PgPipelineRunStorage", () => {
       error: { ...FAILURE, message: "No committed source version" },
     })
 
-    await storage.pipelineRuns.start({
+    await startTestPipelineRun(storage, {
       id: "run-2",
       projectId: "my-app",
       pipelineId: "customers",
@@ -93,7 +94,7 @@ describe("PgPipelineRunStorage", () => {
       },
     })
 
-    await storage.pipelineRuns.start({
+    await startTestPipelineRun(storage, {
       id: "run-3",
       projectId: "my-app",
       pipelineId: "orders",
@@ -143,25 +144,25 @@ describe("PgPipelineRunStorage", () => {
   })
 
   test("lists the latest run for multiple pipeline ids", async () => {
-    await storage.pipelineRuns.start({
+    await startTestPipelineRun(storage, {
       id: "run-customers-a",
       projectId: "my-app",
       pipelineId: "customers",
       startedAt: new Date("2026-05-08T11:00:00.000Z"),
     })
-    await storage.pipelineRuns.start({
+    await startTestPipelineRun(storage, {
       id: "run-customers-z",
       projectId: "my-app",
       pipelineId: "customers",
       startedAt: new Date("2026-05-08T11:00:00.000Z"),
     })
-    await storage.pipelineRuns.start({
+    await startTestPipelineRun(storage, {
       id: "run-orders",
       projectId: "my-app",
       pipelineId: "orders",
       startedAt: new Date("2026-05-08T10:00:00.000Z"),
     })
-    await storage.pipelineRuns.start({
+    await startTestPipelineRun(storage, {
       id: "run-other-project",
       projectId: "other-app",
       pipelineId: "customers",
@@ -177,7 +178,7 @@ describe("PgPipelineRunStorage", () => {
   })
 
   test("starts and finishes step runs with pinned inputs", async () => {
-    await storage.pipelineRuns.start({
+    await startTestPipelineRun(storage, {
       id: "piperun_1",
       projectId: "my-app",
       pipelineId: "customers",
@@ -238,7 +239,7 @@ describe("PgPipelineRunStorage", () => {
   })
 
   test("stores failed step runs and supports filtered paging", async () => {
-    await storage.pipelineRuns.start({
+    await startTestPipelineRun(storage, {
       id: "piperun_1",
       projectId: "my-app",
       pipelineId: "customers",
@@ -318,7 +319,7 @@ describe("PgPipelineRunStorage", () => {
   })
 
   test("rejects duplicates, missing records, terminal rewrites, and mismatched outputs", async () => {
-    await storage.pipelineRuns.start({
+    await startTestPipelineRun(storage, {
       id: "piperun_1",
       projectId: "my-app",
       pipelineId: "customers",
@@ -328,7 +329,6 @@ describe("PgPipelineRunStorage", () => {
       storage.pipelineRuns.start({
         id: "piperun_1",
         projectId: "my-app",
-        pipelineId: "customers",
       })
     ).rejects.toBeInstanceOf(PipelineRunError)
 
@@ -403,5 +403,22 @@ describe("PgPipelineRunStorage", () => {
 
   test("PostgresStorage includes pipeline run storage", () => {
     expect(storage.pipelineRuns).toBeInstanceOf(PgPipelineRunStorage)
+  })
+
+  test("rejects a run whose execution authorizes a different Pipeline", async () => {
+    const executionId = await createTestPipelineExecution(storage.executions, {
+      projectId: "my-app",
+      pipelineId: "pipeline-customers",
+      runId: "run-1",
+    })
+
+    await expect(
+      storage.pipelineRuns.queue({
+        id: "run-1",
+        projectId: "my-app",
+        executionId,
+        pipelineId: "pipeline-orders",
+      })
+    ).rejects.toBeInstanceOf(PipelineRunError)
   })
 })

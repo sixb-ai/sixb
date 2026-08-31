@@ -1,5 +1,7 @@
 import { createSixbError } from "@sixb/core/internal/errors"
+import { defineLanguageModel } from "@sixb/core/models"
 import type {
+  AgentAiUsageAccountingPayload,
   AgentAiUsageRecordPayload,
   AgentAiUsageRecordRequestedQueueJob,
   AgentQueueJob,
@@ -7,11 +9,16 @@ import type {
 } from "@sixb/core/queues"
 import type {
   AiModelCallUsageInput,
-  AiUsageStorage,
   RecordAiModelCallInput,
   RecordAiModelCallResult,
 } from "@sixb/core/storage"
-import { AiUsageStorageError, normalizeAiModelCallRecord } from "@sixb/core/storage"
+import {
+  AiCostStorageError,
+  AiUsageStorageError,
+  normalizeAiModelCallRecord,
+} from "@sixb/core/storage"
+import { recordAiModelCallAccounting } from "./ai-pricing/accounting"
+import type { AgentWorkerStorage, RecoverAiModelCallInput } from "./types"
 
 const AGENT_AI_USAGE_RECOVERY_JOB_PREFIX = "agt_usage_job_"
 
@@ -28,11 +35,14 @@ export function agentAiUsageRecoveryJobId(recordId: string): string {
   return `${AGENT_AI_USAGE_RECOVERY_JOB_PREFIX}${recordId}`
 }
 
-/** Hand one failed ledger append to the durable agent lane without serializing Date objects. */
+/** Hand one failed accounting transaction to the durable lane using only JSON-safe values. */
 export async function enqueueAiModelCallRecovery(
   queue: Pick<Queue<AgentQueueJob>, "enqueue">,
-  record: RecordAiModelCallInput
+  input: RecoverAiModelCallInput | RecordAiModelCallInput
 ): Promise<void> {
+  const recovery = isRecoveryInput(input) ? input : undefined
+  const record: RecordAiModelCallInput =
+    recovery === undefined ? (input as RecordAiModelCallInput) : recovery.usage
   normalizeAiModelCallRecord(record)
   const jobId = agentAiUsageRecoveryJobId(record.id)
   const [job] = await queue.enqueue({
@@ -41,7 +51,10 @@ export async function enqueueAiModelCallRecovery(
       {
         id: jobId,
         type: "agent.ai-usage.record.requested",
-        payload: { record: toQueuePayload(record) },
+        payload: {
+          record: toQueuePayload(record),
+          ...(recovery === undefined ? {} : { accounting: toAccountingPayload(recovery) }),
+        },
       },
     ],
   })
@@ -55,12 +68,16 @@ export async function enqueueAiModelCallRecovery(
   }
 }
 
-/** Replay one durable handoff through the idempotent model-call ledger boundary. */
+/** Replay one durable handoff through the idempotent atomic accounting boundary. */
 export async function recordRecoveredAiModelCall(
-  storage: AiUsageStorage,
+  storage: AgentWorkerStorage,
   job: AgentAiUsageRecordRequestedQueueJob
 ): Promise<RecordAiModelCallResult> {
-  return storage.recordModelCall(fromQueuePayload(job))
+  const usage = fromQueuePayload(job)
+  const accounting = accountingFromQueuePayload(job)
+  return accounting
+    ? recordAiModelCallAccounting({ storage, usage, ...accounting })
+    : storage.aiUsage.recordModelCall(usage)
 }
 
 /** Validation and referential-integrity failures cannot become valid through queue redelivery. */
@@ -69,7 +86,9 @@ export function isPermanentAiUsageRecoveryError(error: unknown): boolean {
     error instanceof InvalidAiUsageRecoveryJobError ||
     error instanceof TypeError ||
     (error instanceof AiUsageStorageError &&
-      (error.code === "duplicate_id" || error.code === "missing_execution"))
+      (error.code === "duplicate_id" || error.code === "missing_execution")) ||
+    (error instanceof AiCostStorageError &&
+      (error.code === "missing_usage" || error.code === "cost_mismatch"))
   )
 }
 
@@ -85,21 +104,17 @@ function toQueuePayload(record: RecordAiModelCallInput): AgentAiUsageRecordPaylo
     ...(record.responseModelId === undefined ? {} : { responseModelId: record.responseModelId }),
     responseId: record.responseId,
     usage: toQueueUsage(record.usage),
-    ...(record.modelDefinition === undefined
-      ? {}
-      : {
-          modelDefinition: structuredClone(
-            record.modelDefinition
-          ) as AgentAiUsageRecordPayload["modelDefinition"],
-        }),
-    ...(record.cost === undefined
-      ? {}
-      : { cost: structuredClone(record.cost) as AgentAiUsageRecordPayload["cost"] }),
-    ...(record.route === undefined
-      ? {}
-      : { route: structuredClone(record.route) as AgentAiUsageRecordPayload["route"] }),
     ...(record.rawUsage === undefined ? {} : { rawUsage: structuredClone(record.rawUsage) }),
     occurredAt: record.occurredAt.toISOString(),
+  }
+}
+
+function toAccountingPayload(input: RecoverAiModelCallInput): AgentAiUsageAccountingPayload {
+  return {
+    definition: structuredClone(input.definition),
+    cost: structuredClone(input.cost),
+    ...(input.route === undefined ? {} : { route: structuredClone(input.route) }),
+    ratedAt: input.ratedAt.toISOString(),
   }
 }
 
@@ -124,30 +139,35 @@ function toQueueUsage(usage: AiModelCallUsageInput): AgentAiUsageRecordPayload["
 }
 
 function fromQueuePayload(job: AgentAiUsageRecordRequestedQueueJob): RecordAiModelCallInput {
-  const occurredAt = new Date(job.payload.record.occurredAt)
-  if (!Number.isFinite(occurredAt.getTime())) {
+  const occurredAt = parseDate(job.payload.record.occurredAt, job.id, "occurredAt")
+  return { ...job.payload.record, projectId: job.projectId, occurredAt }
+}
+
+function accountingFromQueuePayload(
+  job: AgentAiUsageRecordRequestedQueueJob
+): Omit<RecoverAiModelCallInput, "usage"> | undefined {
+  const accounting = job.payload.accounting
+  if (!accounting) return undefined
+  return {
+    definition: defineLanguageModel(accounting.definition),
+    cost: structuredClone(accounting.cost),
+    ...(accounting.route === undefined ? {} : { route: structuredClone(accounting.route) }),
+    ratedAt: parseDate(accounting.ratedAt, job.id, "ratedAt"),
+  }
+}
+
+function parseDate(value: string, jobId: string, field: string): Date {
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) {
     throw new InvalidAiUsageRecoveryJobError(
-      `AI usage recovery job '${job.id}' has an invalid occurredAt timestamp.`
+      `AI usage recovery job '${jobId}' has an invalid ${field} timestamp.`
     )
   }
+  return date
+}
 
-  const { modelDefinition, cost, route, ...record } = job.payload.record
-  return {
-    ...record,
-    projectId: job.projectId,
-    ...(modelDefinition === undefined
-      ? {}
-      : {
-          modelDefinition: structuredClone(
-            modelDefinition
-          ) as RecordAiModelCallInput["modelDefinition"],
-        }),
-    ...(cost === undefined
-      ? {}
-      : { cost: structuredClone(cost) as RecordAiModelCallInput["cost"] }),
-    ...(route === undefined
-      ? {}
-      : { route: structuredClone(route) as RecordAiModelCallInput["route"] }),
-    occurredAt,
-  }
+function isRecoveryInput(
+  input: RecoverAiModelCallInput | RecordAiModelCallInput
+): input is RecoverAiModelCallInput {
+  return !("id" in input)
 }

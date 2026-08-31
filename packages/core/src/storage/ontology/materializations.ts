@@ -26,6 +26,8 @@ import type { StoredSourceLinkAssertion, StoredSourceObjectAssertion } from "./s
 export interface StoredObjectOverride {
   readonly ref: OntologyObjectRef
   readonly value: ObjectOverride
+  /** Per-property Action/runtime edit time. Legacy rows fall back to `updatedAt`. */
+  readonly editedAt?: Readonly<Record<string, string>>
   readonly lastCommitId: string
   readonly updatedAt: string
 }
@@ -75,17 +77,22 @@ export interface MaterializationLinkState {
   readonly effective: EffectiveLinkSnapshot | null
 }
 
-export interface MaterializationLinkScopeState {
+/** Revision of the complete effective `(source, linkId)` member set, for either cardinality. */
+export interface MaterializationLinkScopeRevision {
   readonly source: OntologyObjectRef
   readonly linkId: string
+  readonly effectiveCount: number
+  readonly fingerprint: string
+}
+
+/** Cardinality-one slot state used while resolving managed and projected authority. */
+export interface MaterializationLinkScopeState extends MaterializationLinkScopeRevision {
   /** Complete active source value for the link slot. */
   readonly sourceAssertion: StoredSourceLinkAssertion | null
   /** Managed slot authority; absence delegates to source authority. */
   readonly override: StoredLinkSlotOverride | null
   /** The single effective edge, if its endpoints are effective. */
   readonly effective: EffectiveLinkSnapshot | null
-  readonly effectiveCount: number
-  readonly fingerprint: string
 }
 
 export interface MaterializationStatePage {
@@ -160,6 +167,7 @@ export interface MaterializationPlanHeader {
 export interface ExactObjectOverrideWrite {
   readonly ref: OntologyObjectRef
   readonly value: ObjectOverride
+  readonly editedAt: Readonly<Record<string, string>>
   readonly expectedLastCommitId: string | null
   readonly lastCommitId: string
   readonly updatedAt: string

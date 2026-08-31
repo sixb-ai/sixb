@@ -13,6 +13,7 @@
 
 import type { ActionDefinition } from "../actions/types"
 import type { AgentDefinition } from "../agents/types"
+import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets"
 import type { ObjectType } from "../ontology"
 import type { PipelineDefinition } from "../pipelines"
@@ -31,6 +32,7 @@ export const BREADTH_TARGETS = [
   "pipeline",
   "agent",
   "application",
+  "connector",
 ] as const
 
 export type BreadthTarget = (typeof BREADTH_TARGETS)[number]
@@ -44,6 +46,7 @@ interface BreadthTargetInput {
   pipeline: PipelineDefinition
   agent: AgentDefinition
   application: ApplicationDefinition
+  connector: ConnectorDefinition
 }
 
 /**
@@ -105,4 +108,5 @@ export const every = {
   pipeline: (): BreadthSelector<"pipeline"> => all("pipeline"),
   agent: (): BreadthSelector<"agent"> => all("agent"),
   application: (): BreadthSelector<"application"> => all("application"),
+  connector: (): BreadthSelector<"connector"> => all("connector"),
 }

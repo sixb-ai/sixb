@@ -10,7 +10,8 @@ links on top of them. `defineProjection` selects the right builder from its onto
 
 | Target | Produces | One row becomes |
 | --- | --- | --- |
-| `ObjectType` | Objects (and FK links) | One complete object root |
+| `ObjectType` + `.properties(...)` | Objects (and FK links) | One complete object root |
+| `ObjectType` + `.points(...)` | Grouped telemetry points | Zero to N readings sharing one object and instant |
 | `ObjectType.l.<linkId>` | Many-to-many links | One complete link root |
 | `ObjectType.p.<telemetryId>` | Telemetry points | One reading on a series |
 
@@ -43,6 +44,39 @@ export const customerProjection = defineProjection("customer-proj", Customer)
 | `.properties({ prop: "column" })` | Maps object property ids to dataset column names |
 
 The object property `id` reads from column `customer_id`, `name` from `contact_name`, and so on.
+
+### Source and managed-edit conflict resolution
+
+By default, an Action or runtime edit to a projected property remains authoritative until
+application code resets that property. This `editsWin` policy is useful when Sixb owns the decision.
+
+When the source system remains authoritative, use `mostRecent` with a non-null timestamp column
+that contains the source system's own update time:
+
+```ts
+export const githubIssueProjection = defineProjection("github-issues", GitHubIssue)
+  .fromDataset(githubIssues)
+  .properties({
+    id: "id",
+    title: "title",
+    body: "body",
+    state: "state",
+  })
+  .resolveConflicts({
+    strategy: "mostRecent",
+    sourceTimestamp: "updated_at",
+  })
+```
+
+Resolution is per property. A source value wins when its timestamp is equal to or newer than that
+property's Action or runtime edit time; otherwise the managed edit wins. Editing one property does
+not refresh any other property's edit time. Unmapped properties remain edit-only.
+
+Use the source record's own update time—not dataset ingestion or commit time—because those times do
+not establish when the source value changed. The timestamp must carry a time zone, progress
+monotonically for each record, and have enough precision to order source updates against managed
+edits. Sixb canonicalizes it to UTC, then compares it with the Sixb commit clock, so the source and
+Sixb clocks must be reasonably synchronized.
 
 ## Links from foreign keys
 
@@ -126,8 +160,8 @@ Source and target fields must be string columns.
 
 ## Telemetry projection
 
-A telemetry projection records timestamped readings onto a telemetry-mode property. Use it when a
-dataset has one row per measurement: a value, the object it belongs to, and when it was recorded.
+A telemetry projection records timestamped readings onto telemetry-mode properties. When one row
+contains several readings for the same object and instant, map them together from the object type:
 
 First mark the property as telemetry in the ontology (see
 [Properties](../ontology/properties.md)):
@@ -136,7 +170,50 @@ First mark the property as telemetry in the ontology (see
 prop("progress", "integer", { mode: "telemetry" })
 ```
 
-Then map a dataset of readings onto it with `.points(...)`:
+Then map the dataset with `.points(...)`:
+
+```ts
+import { defineProjection } from "@sixb/core"
+import { googleAnalyticsActivity } from "../datasets/google-analytics"
+import { GoogleAnalyticsProperty } from "../ontology/google-analytics-property"
+
+export const activityProjection = defineProjection("ga-activity", GoogleAnalyticsProperty)
+  .fromDataset(googleAnalyticsActivity)
+  .points({
+    objectId: "account_id",
+    at: "day",
+    properties: {
+      activeUsers: "active_users",
+      newUsers: "new_users",
+      engagementDuration: "engagement_duration",
+      temperature: {
+        value: "temperature",
+        unit: "temperature_unit",
+      },
+    },
+  })
+```
+
+| Mapping key | Meaning |
+| --- | --- |
+| `objectId` | Dataset column holding the target object's primary id |
+| `at` | Timestamp column for the reading |
+| `properties.<id>` | Shorthand value column for a unitless telemetry property |
+| `properties.<id>.value` | Value column when the property also needs a unit |
+| `properties.<id>.unit` | Unit column; required for semantic types with units and forbidden otherwise |
+
+The shared `objectId` and `at` are parsed once. A blank value omits only that property's point; the
+row is counted as skipped only when it emits no points. A nonblank invalid value or unit rejects the
+whole physical batch atomically, so a row cannot be partially committed. The `at` column must be a
+string, date, or timestamp; values without a time zone (no trailing `Z` or numeric offset) are read
+as UTC.
+
+Group properties only when they share the same dataset, object id, timestamp, and projection
+lifecycle. The grouped projection owns every mapped `ObjectType + telemetry property` scope and
+processes the source rows once. Storage still keeps each telemetry series independent.
+
+For a dataset with one telemetry value per row, the property-token form remains concise sugar for a
+one-property `properties` mapping:
 
 ```ts
 import { defineProjection } from "@sixb/core"
@@ -154,17 +231,6 @@ export const projectProgressProjection = defineProjection(
     value: "progress_pct",
   })
 ```
-
-| Mapping key | Meaning |
-| --- | --- |
-| `objectId` | Dataset column holding the target object's primary id |
-| `at` | Timestamp column for the reading |
-| `value` | Column holding the reading |
-| `unit` | Optional column holding the reading's unit (required only for properties that carry a unit) |
-
-Each row appends one point to the `progress` series of the `Project` named by `project_id`. The `at`
-column must be a string, date, or timestamp; values without a time zone (no trailing `Z` or numeric
-offset) are read as UTC.
 
 How point identity works — and what re-projecting the same instant does — is covered in
 [Telemetry](../objects/telemetry.md).

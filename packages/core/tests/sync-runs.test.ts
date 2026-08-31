@@ -1,6 +1,36 @@
 import { describe, expect, test } from "bun:test"
-import type { SixbFailure, SyncRunFailureCode } from "../src/storage"
-import { InMemorySyncRunStorage, SyncRunError } from "../src/storage"
+import { InMemoryStorage } from "../src"
+import type { QueueSyncRunInput, SixbFailure, SyncRunFailureCode } from "../src/storage"
+import { SyncRunError } from "../src/storage"
+import { createTestSyncExecution } from "../src/testing"
+
+type TestStartSyncRunInput = Omit<QueueSyncRunInput, "executionId" | "queuedAt"> & {
+  readonly startedAt?: Date
+}
+
+async function startSyncRun(storage: InMemoryStorage, input: TestStartSyncRunInput) {
+  const executionId = `exec:${input.projectId}:${input.id}`
+  if (!(await storage.executions.getById({ projectId: input.projectId, id: executionId }))) {
+    await storage.executions.create({
+      id: executionId,
+      projectId: input.projectId,
+      executor: { type: "primitive", kind: "sync", runId: input.id },
+      source: { type: "schedule", eventId: `event:${input.id}` },
+      correlationId: `correlation:${input.id}`,
+      authorizationRef: {
+        type: "trustedPrimitive",
+        primitive: { kind: "sync", id: input.syncId, runId: input.id },
+      },
+    })
+  }
+  const { startedAt, ...run } = input
+  await storage.syncRuns.queue({
+    ...run,
+    executionId,
+    queuedAt: startedAt,
+  })
+  return storage.syncRuns.start({ id: input.id, projectId: input.projectId, startedAt })
+}
 
 const FAILURE: SixbFailure<SyncRunFailureCode> = {
   code: "internal.unexpected",
@@ -12,11 +42,11 @@ const FAILURE: SixbFailure<SyncRunFailureCode> = {
 
 describe("InMemorySyncRunStorage", () => {
   test("starts and finishes a successful run with a checkpoint", async () => {
-    const storage = new InMemorySyncRunStorage()
+    const storage = new InMemoryStorage()
     const startedAt = new Date("2026-04-06T15:00:00.000Z")
     const finishedAt = new Date("2026-04-06T15:00:01.280Z")
 
-    const started = await storage.start({
+    const started = await startSyncRun(storage, {
       id: "syncrun_1",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -35,7 +65,7 @@ describe("InMemorySyncRunStorage", () => {
         page: 2,
       },
     }
-    const finished = await storage.finish({
+    const finished = await storage.syncRuns.finish({
       id: "syncrun_1",
       projectId: "my-app",
       status: "succeeded",
@@ -49,7 +79,7 @@ describe("InMemorySyncRunStorage", () => {
     })
     checkpoint.nested.page = 999
 
-    const stored = await storage.getById({
+    const stored = await storage.syncRuns.getById({
       projectId: "my-app",
       id: "syncrun_1",
     })
@@ -66,7 +96,7 @@ describe("InMemorySyncRunStorage", () => {
         page: 2,
       },
     })
-    expect(stored?.startedAt.toISOString()).toBe(startedAt.toISOString())
+    expect(stored?.startedAt?.toISOString()).toBe(startedAt.toISOString())
     expect(stored?.finishedAt?.toISOString()).toBe(finishedAt.toISOString())
     expect(stored?.commitMessage).toBe("refresh orders")
     expect(stored?.expectedLatestVersionId).toBe("ver_prev")
@@ -79,8 +109,8 @@ describe("InMemorySyncRunStorage", () => {
   })
 
   test("stores a checkpoint for a successful empty append without an output version", async () => {
-    const storage = new InMemorySyncRunStorage()
-    await storage.start({
+    const storage = new InMemoryStorage()
+    await startSyncRun(storage, {
       id: "syncrun_empty",
       projectId: "my-app",
       syncId: "sync-events",
@@ -88,7 +118,7 @@ describe("InMemorySyncRunStorage", () => {
       mode: "append",
     })
 
-    const finished = await storage.finish({
+    const finished = await storage.syncRuns.finish({
       id: "syncrun_empty",
       projectId: "my-app",
       status: "succeeded",
@@ -105,8 +135,8 @@ describe("InMemorySyncRunStorage", () => {
   })
 
   test("stores an initial merge no-op with consumed changes and no output version", async () => {
-    const storage = new InMemorySyncRunStorage()
-    const started = await storage.start({
+    const storage = new InMemoryStorage()
+    const started = await startSyncRun(storage, {
       id: "syncrun_merge_noop",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -114,7 +144,7 @@ describe("InMemorySyncRunStorage", () => {
       mode: "merge",
     })
 
-    const finished = await storage.finish({
+    const finished = await storage.syncRuns.finish({
       id: started.id,
       projectId: started.projectId,
       status: "succeeded",
@@ -132,8 +162,8 @@ describe("InMemorySyncRunStorage", () => {
   })
 
   test("stores a successful empty snapshot without an output version", async () => {
-    const storage = new InMemorySyncRunStorage()
-    await storage.start({
+    const storage = new InMemoryStorage()
+    await startSyncRun(storage, {
       id: "syncrun_empty_snapshot",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -141,7 +171,7 @@ describe("InMemorySyncRunStorage", () => {
       mode: "snapshot",
     })
 
-    const finished = await storage.finish({
+    const finished = await storage.syncRuns.finish({
       id: "syncrun_empty_snapshot",
       projectId: "my-app",
       status: "succeeded",
@@ -153,9 +183,9 @@ describe("InMemorySyncRunStorage", () => {
   })
 
   test("rejects duplicate starts and missing finishes", async () => {
-    const storage = new InMemorySyncRunStorage()
+    const storage = new InMemoryStorage()
 
-    await storage.start({
+    await startSyncRun(storage, {
       id: "syncrun_1",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -164,7 +194,7 @@ describe("InMemorySyncRunStorage", () => {
     })
 
     await expect(
-      storage.start({
+      startSyncRun(storage, {
         id: "syncrun_1",
         projectId: "my-app",
         syncId: "sync-orders",
@@ -174,7 +204,7 @@ describe("InMemorySyncRunStorage", () => {
     ).rejects.toBeInstanceOf(SyncRunError)
 
     await expect(
-      storage.finish({
+      storage.syncRuns.finish({
         id: "missing",
         projectId: "my-app",
         status: "failed",
@@ -184,9 +214,9 @@ describe("InMemorySyncRunStorage", () => {
   })
 
   test("stores failed runs and lists with filters, ordering, and paging", async () => {
-    const storage = new InMemorySyncRunStorage()
+    const storage = new InMemoryStorage()
 
-    await storage.start({
+    await startSyncRun(storage, {
       id: "run-1",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -194,7 +224,7 @@ describe("InMemorySyncRunStorage", () => {
       mode: "snapshot",
       startedAt: new Date("2026-04-06T15:00:00.000Z"),
     })
-    await storage.finish({
+    await storage.syncRuns.finish({
       id: "run-1",
       projectId: "my-app",
       status: "failed",
@@ -203,7 +233,7 @@ describe("InMemorySyncRunStorage", () => {
       error: FAILURE,
     })
 
-    await storage.start({
+    await startSyncRun(storage, {
       id: "run-2",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -211,7 +241,7 @@ describe("InMemorySyncRunStorage", () => {
       mode: "snapshot",
       startedAt: new Date("2026-04-06T16:00:00.000Z"),
     })
-    await storage.finish({
+    await storage.syncRuns.finish({
       id: "run-2",
       projectId: "my-app",
       status: "succeeded",
@@ -223,7 +253,7 @@ describe("InMemorySyncRunStorage", () => {
       },
     })
 
-    await storage.start({
+    await startSyncRun(storage, {
       id: "run-3",
       projectId: "my-app",
       syncId: "sync-customers",
@@ -232,7 +262,7 @@ describe("InMemorySyncRunStorage", () => {
       startedAt: new Date("2026-04-06T17:00:00.000Z"),
     })
 
-    const page = await storage.list({
+    const page = await storage.syncRuns.list({
       projectId: "my-app",
       statuses: ["running", "succeeded"],
       startedAfter: new Date("2026-04-06T15:30:00.000Z"),
@@ -244,7 +274,7 @@ describe("InMemorySyncRunStorage", () => {
     expect(page.hasMore).toBe(false)
     expect(page.runs.map((run) => run.id)).toEqual(["run-2"])
 
-    const selectedSyncs = await storage.list({
+    const selectedSyncs = await storage.syncRuns.list({
       projectId: "my-app",
       syncIds: ["sync-customers"],
     })
@@ -253,10 +283,10 @@ describe("InMemorySyncRunStorage", () => {
     expect(selectedSyncs.total).toBe(1)
 
     // An empty allowlist must deny all — never fall through to an unfiltered list.
-    const noneAllowed = await storage.list({ projectId: "my-app", syncIds: [] })
+    const noneAllowed = await storage.syncRuns.list({ projectId: "my-app", syncIds: [] })
     expect(noneAllowed).toEqual({ runs: [], hasMore: false, total: 0 })
 
-    const failed = await storage.getById({
+    const failed = await storage.syncRuns.getById({
       projectId: "my-app",
       id: "run-1",
     })
@@ -267,9 +297,9 @@ describe("InMemorySyncRunStorage", () => {
   })
 
   test("lists the latest run for multiple sync ids", async () => {
-    const storage = new InMemorySyncRunStorage()
+    const storage = new InMemoryStorage()
 
-    await storage.start({
+    await startSyncRun(storage, {
       id: "run-orders-a",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -277,7 +307,7 @@ describe("InMemorySyncRunStorage", () => {
       mode: "snapshot",
       startedAt: new Date("2026-04-06T16:00:00.000Z"),
     })
-    await storage.start({
+    await startSyncRun(storage, {
       id: "run-orders-z",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -285,7 +315,7 @@ describe("InMemorySyncRunStorage", () => {
       mode: "snapshot",
       startedAt: new Date("2026-04-06T16:00:00.000Z"),
     })
-    await storage.start({
+    await startSyncRun(storage, {
       id: "run-customers",
       projectId: "my-app",
       syncId: "sync-customers",
@@ -293,7 +323,7 @@ describe("InMemorySyncRunStorage", () => {
       mode: "append",
       startedAt: new Date("2026-04-06T15:00:00.000Z"),
     })
-    await storage.start({
+    await startSyncRun(storage, {
       id: "run-other-project",
       projectId: "other-app",
       syncId: "sync-orders",
@@ -302,7 +332,7 @@ describe("InMemorySyncRunStorage", () => {
       startedAt: new Date("2026-04-06T17:00:00.000Z"),
     })
 
-    const latest = await storage.listLatestBySyncIds({
+    const latest = await storage.syncRuns.listLatestBySyncIds({
       projectId: "my-app",
       syncIds: ["sync-customers", "sync-missing", "sync-orders", "sync-orders"],
     })
@@ -311,9 +341,9 @@ describe("InMemorySyncRunStorage", () => {
   })
 
   test("rejects success outputs for a different dataset", async () => {
-    const storage = new InMemorySyncRunStorage()
+    const storage = new InMemoryStorage()
 
-    await storage.start({
+    await startSyncRun(storage, {
       id: "syncrun_1",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -322,7 +352,7 @@ describe("InMemorySyncRunStorage", () => {
     })
 
     await expect(
-      storage.finish({
+      storage.syncRuns.finish({
         id: "syncrun_1",
         projectId: "my-app",
         status: "succeeded",
@@ -331,6 +361,26 @@ describe("InMemorySyncRunStorage", () => {
           datasetId: "raw.erp.invoices",
           versionId: "ver_1",
         },
+      })
+    ).rejects.toBeInstanceOf(SyncRunError)
+  })
+
+  test("rejects a run whose execution authorizes a different Sync", async () => {
+    const storage = new InMemoryStorage()
+    const executionId = await createTestSyncExecution(storage.executions, {
+      projectId: "my-app",
+      syncId: "sync-customers",
+      runId: "run-1",
+    })
+
+    await expect(
+      storage.syncRuns.queue({
+        id: "run-1",
+        projectId: "my-app",
+        executionId,
+        syncId: "sync-orders",
+        datasetId: "raw.erp.orders",
+        mode: "snapshot",
       })
     ).rejects.toBeInstanceOf(SyncRunError)
   })

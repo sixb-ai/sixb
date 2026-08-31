@@ -7,8 +7,9 @@ import type {
   EffectiveObjectChange,
   OntologyOperationOutcome,
 } from "../../materializer"
-import type { ObjectType, ValueType } from "../../ontology"
-import type { LinkToken, ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
+import type { ObjectType, Property, ValueType } from "../../ontology"
+import type { InferPropertyUnit, InferPropertyValue } from "../../ontology/inference"
+import type { LinkToken, ObjectTypeWithPropertyTokens, PropertyToken } from "../../ontology/tokens"
 import type {
   ListResult,
   ObjectQueryBuilder,
@@ -103,7 +104,73 @@ export interface ActionReadObjectSet<
   byId(id: string): ActionReadObjectByIdHandle<TObjectType, TValueTypes>
 }
 
+/** A telemetry-mode ontology property accepted by Action history reads. */
+export type ActionTelemetryPropertyToken = PropertyToken<
+  string,
+  string,
+  Property & { readonly mode: "telemetry" }
+>
+
+export type ActionTelemetryHistorySeriesInput<
+  TProperty extends ActionTelemetryPropertyToken = ActionTelemetryPropertyToken,
+> = {
+  readonly objectId: string
+  readonly property: TProperty
+}
+
+export interface ActionTelemetryHistoryBatchInput<
+  TSeries extends
+    readonly ActionTelemetryHistorySeriesInput[] = readonly ActionTelemetryHistorySeriesInput[],
+> {
+  /** Series are returned in this exact order, including duplicate entries. */
+  readonly series: TSeries
+  readonly from?: Date
+  readonly to?: Date
+  /** Optional cap applied independently to every requested series. */
+  readonly limitPerSeries?: number
+  /** Points are oldest first by default. */
+  readonly order?: "asc" | "desc"
+}
+
+/**
+ * One batch result per requested series, preserving tuple positions and property-specific types.
+ */
+export type ActionTelemetryHistoryBatchResult<
+  TSeries extends
+    readonly ActionTelemetryHistorySeriesInput[] = readonly ActionTelemetryHistorySeriesInput[],
+  TValueTypes extends readonly ValueType[] = readonly ValueType[],
+> = {
+  readonly [TIndex in keyof TSeries]: TSeries[TIndex] extends ActionTelemetryHistorySeriesInput<
+    infer TProperty
+  >
+    ? {
+        readonly objectId: TSeries[TIndex]["objectId"]
+        readonly property: TProperty
+        readonly points: readonly {
+          readonly value: InferPropertyValue<TProperty["property"], TValueTypes>
+          readonly at: Date
+          readonly unit?: InferPropertyUnit<TProperty["property"], TValueTypes>
+        }[]
+      }
+    : never
+}
+
+export type ActionTelemetryReadFacade<
+  TValueTypes extends readonly ValueType[] = readonly ValueType[],
+> = {
+  /**
+   * Read several telemetry series in one provider call.
+   *
+   * This is a snapshot read for the call. It is intentionally not added to the Action edit
+   * dependency fence; use a fixed `to` cutoff to keep the report window stable across retries.
+   */
+  historyBatch<const TSeries extends readonly ActionTelemetryHistorySeriesInput[]>(
+    input: ActionTelemetryHistoryBatchInput<TSeries>
+  ): Promise<ActionTelemetryHistoryBatchResult<TSeries, TValueTypes>>
+}
+
 export interface ActionReadFacade<TValueTypes extends readonly ValueType[] = readonly ValueType[]> {
+  readonly telemetry: ActionTelemetryReadFacade<TValueTypes>
   objects<const TObjectType extends ObjectTypeWithPropertyTokens>(
     objectType: TObjectType
   ): ActionReadObjectSet<TObjectType, TValueTypes, ObjectTypeWithPropertyTokens>

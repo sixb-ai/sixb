@@ -138,4 +138,19 @@ describe("sixb worker-group (e2e)", () => {
     },
     WORKER_GROUP_TIMEOUT_MS
   )
+
+  test(
+    "applies an independent concurrency limit to each selected worker",
+    async () => {
+      const { ready, logEntries } = await startThenStop(
+        ["worker-group", "sync", "agent", "--concurrency", "sync=2", "--concurrency", "agent=6"],
+        "worker-group"
+      )
+
+      expect(ready).toBe(true)
+      expect(logEntries).toContainEqual({ type: "claim", workerType: "sync", limit: 2 })
+      expect(logEntries).toContainEqual({ type: "claim", workerType: "agent", limit: 6 })
+    },
+    WORKER_GROUP_TIMEOUT_MS
+  )
 })

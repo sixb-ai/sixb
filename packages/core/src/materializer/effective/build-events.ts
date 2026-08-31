@@ -22,6 +22,7 @@ export interface MaterializationEventDraftContext {
   readonly projectId: string
   readonly commitId: string
   readonly committedAt: string
+  readonly correlationId: string
   readonly origin: OntologyMaterializationOrigin
   readonly actor?: EventActor
 }
@@ -165,6 +166,7 @@ function eventDraftBase(context: MaterializationEventDraftContext) {
     schemaVersion: 1 as const,
     projectId: context.projectId,
     occurredAt: context.committedAt,
+    correlationId: context.correlationId,
     origin: context.origin,
     commitId: context.commitId,
   }

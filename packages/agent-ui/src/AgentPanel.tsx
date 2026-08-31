@@ -3,6 +3,7 @@ import { cn } from "@sixb/ui/lib/utils"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { AgentChat } from "./AgentChat"
 import { useRegisteredAgentContext } from "./AgentContextProvider"
+import type { AgentDocumentPreviewRenderer } from "./document-preview/types"
 
 export interface AgentPanelProps {
   readonly agentId: string
@@ -13,6 +14,8 @@ export interface AgentPanelProps {
   readonly defaultThreadId?: string | null
   readonly onThreadChange?: (threadId: string | null) => void
   readonly className?: string
+  /** Additional file viewers supplied by the host application. */
+  readonly documentPreviewRenderers?: readonly AgentDocumentPreviewRenderer[]
 }
 
 /** Embeddable chat that never reads or changes the host application's route. */
@@ -23,6 +26,7 @@ export function AgentPanel({
   defaultThreadId = null,
   onThreadChange,
   className,
+  documentPreviewRenderers,
 }: AgentPanelProps) {
   const registeredContext = useRegisteredAgentContext()
   const ambientContext = context === undefined ? registeredContext : context
@@ -60,6 +64,7 @@ export function AgentPanel({
       onNavigateHome={() => changeThread(null)}
       onNavigateDraft={() => changeThread(null)}
       onNavigateThread={changeThread}
+      documentPreviewRenderers={documentPreviewRenderers}
       className={cn("min-h-0 overflow-hidden bg-background", className)}
     />
   )

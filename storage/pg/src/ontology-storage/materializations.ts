@@ -121,9 +121,9 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
       for (const expected of input.expected.links) {
         this.assertLink(linkRevisions.get(linkRefKey(expected.ref)), expected)
       }
-      const linkScopes = await reader.linkScopes(input.expected.linkScopes)
+      const linkScopeRevisions = await reader.linkScopeRevisions(input.expected.linkScopes)
       for (const [index, expected] of input.expected.linkScopes.entries()) {
-        if (linkScopes[index]?.fingerprint !== expected.fingerprint) {
+        if (linkScopeRevisions[index]?.fingerprint !== expected.fingerprint) {
           throw new MaterializationConflictError(
             "effective-state",
             `Expected link scope changed for ${expected.source.objectTypeId}:${expected.source.primaryId}.${expected.linkId}.`
@@ -191,7 +191,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
         yield {
           objects: [],
           links: [],
-          linkScopes: await reader.linkScopes(scopes.slice(offset, offset + input.pageRows)),
+          linkScopes: await reader.linkSlotStates(scopes.slice(offset, offset + input.pageRows)),
           points: [],
         }
       }
@@ -837,12 +837,13 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
     const actor = commit.actor === undefined ? null : jsonParameter(this.sql, commit.actor)
     const rows = await this.sql<PgOntologyCommitRow[]>`
       INSERT INTO ontology_commits (
-        project_id, id, idempotency_key, request_hash,
+        project_id, id, idempotency_key, request_hash, execution_id,
         origin_kind, origin_run_id, origin_batch_ordinal, origin, actor,
         ontology_revision, projection_revision, ownership_hash,
         intent, result, committed_at
       ) VALUES (
         ${commit.projectId}, ${commit.id}, ${commit.idempotencyKey}, ${commit.requestHash},
+        ${commit.executionId},
         ${origin.kind}, ${origin.runId}, ${origin.batchOrdinal},
         ${jsonParameter(this.sql, commit.origin)}, ${actor}, ${commit.ontologyRevision},
         ${commit.projectionRevision ?? null}, ${commit.ownershipHash ?? null},

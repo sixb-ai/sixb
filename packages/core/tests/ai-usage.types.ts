@@ -44,6 +44,9 @@ const provider = {
     }
     return { record, created: true }
   },
+  async getLatestForExecution() {
+    return null
+  },
   async summarizeExecution() {
     return emptySummary
   },

@@ -48,9 +48,6 @@ export class PgAiUsageStorage implements AiUsageStorage {
           reasoning_output_tokens,
           reporting_status,
           raw_usage,
-          model_definition,
-          cost,
-          route,
           occurred_at,
           recorded_at
         ) VALUES (
@@ -73,9 +70,6 @@ export class PgAiUsageStorage implements AiUsageStorage {
           ${record.usage.reasoningOutputTokens ?? null},
           ${record.usage.reportingStatus},
           ${record.rawUsage === undefined ? null : JSON.stringify(record.rawUsage)}::text::jsonb,
-          ${record.modelDefinition === undefined ? null : JSON.stringify(record.modelDefinition)}::text::jsonb,
-          ${record.cost === undefined ? null : JSON.stringify(record.cost)}::text::jsonb,
-          ${record.route === undefined ? null : JSON.stringify(record.route)}::text::jsonb,
           ${record.occurredAt},
           ${record.recordedAt}
         )
@@ -163,9 +157,6 @@ export class PgAiUsageStorage implements AiUsageStorage {
       WHERE project_id = ${row.project_id} AND usage_record_id = ${row.id}
       ORDER BY group_id
     `
-    const modelDefinition = jsonMetadataFromRow(row.model_definition)
-    const cost = jsonMetadataFromRow(row.cost)
-    const route = jsonMetadataFromRow(row.route)
 
     return {
       id: row.id,
@@ -184,9 +175,6 @@ export class PgAiUsageStorage implements AiUsageStorage {
         reportingStatus: row.reporting_status,
       },
       ...(row.raw_usage === null ? {} : { rawUsage: rawUsageFromRow(row.raw_usage) }),
-      ...(modelDefinition === undefined ? {} : { modelDefinition }),
-      ...(cost === undefined ? {} : { cost }),
-      ...(route === undefined ? {} : { route }),
       occurredAt: new Date(row.occurred_at),
       recordedAt: new Date(row.recorded_at),
     }
@@ -247,9 +235,6 @@ interface AiUsageRow {
   readonly reasoning_output_tokens: number | string | null
   readonly reporting_status: AiModelCallUsageRecord["usage"]["reportingStatus"]
   readonly raw_usage: ReadonlyJsonObject | string | null
-  readonly model_definition: NonNullable<AiModelCallUsageRecord["modelDefinition"]> | string | null
-  readonly cost: NonNullable<AiModelCallUsageRecord["cost"]> | string | null
-  readonly route: NonNullable<AiModelCallUsageRecord["route"]> | string | null
   readonly occurred_at: Date | string
   readonly recorded_at: Date | string
 }
@@ -296,10 +281,6 @@ function usageFromRow(row: AiUsageRow): AiModelCallUsageInput {
 
 function rawUsageFromRow(value: Exclude<AiUsageRow["raw_usage"], null>): ReadonlyJsonObject {
   return typeof value === "string" ? (JSON.parse(value) as ReadonlyJsonObject) : value
-}
-
-function jsonMetadataFromRow<T>(value: T | string | null): T | undefined {
-  return value === null ? undefined : typeof value === "string" ? (JSON.parse(value) as T) : value
 }
 
 function assertNonBlankProjectId(projectId: string): void {

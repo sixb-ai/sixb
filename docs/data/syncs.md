@@ -46,6 +46,45 @@ The read handler receives the `client` returned by the connector's `connect()` a
 Snapshot and append handlers return rows; merge handlers return `change.upsert(...)` and
 `change.delete(...)` values. Each handler may return one value, an iterable, or an async iterable.
 
+## OAuth connector fan-out
+
+An OAuth connector may have several project connections. A Sync reads all currently connected
+accounts by default; its definition needs no selector:
+
+```ts
+export const syncSocialVideos = defineSync("sync-social-videos")
+  .from(socialConnector)
+  .read(async (social, { connection }) => {
+    const videos = await social.listVideos()
+    return videos.map((video) => ({
+      ...video,
+      sourceConnectionId: connection.id,
+      sourceAccountId: connection.account.id,
+    }))
+  })
+  .intoDataset(socialVideosDataset)
+```
+
+```text
+one Sync run
+  ├─ connection A → read
+  ├─ connection B → read
+  └─ one atomic dataset commit
+```
+
+Connections are read sequentially in stable order. If one source fails, the complete run fails and
+the previous dataset and checkpoints remain unchanged. Incremental checkpoints are isolated per
+connection and account; replacing an account starts that connection without the old cursor.
+
+The stored checkpoint is bound to the connector and its framework format. Changing the connector
+while keeping the same Sync id fails safely; use a new Sync id to start ingestion from scratch. The
+framework envelope is internal: `context.checkpoint` still contains only the value declared by the
+Sync.
+
+For merge datasets, include connection or account identity in the primary key whenever provider
+record ids are not globally unique. With no connected account, the handler is not called and the
+run follows the normal empty-result semantics for its mode.
+
 ## Schedules
 
 Every sync declares when it runs with `.when(...)`. Call it more than once to add schedules; they
@@ -194,9 +233,12 @@ never received a row, that run does not create a dataset version, so dataset-upd
 not fire. This lets incremental readers advance an initial cursor without inventing placeholder
 rows.
 
-A first snapshot that returns no rows behaves the same way: it succeeds without creating a dataset
-version. Once a previous version exists, an empty snapshot still commits a new empty version so
-projections can withdraw source-owned objects that disappeared upstream.
+A snapshot is the complete source state, including when that state is empty. A first snapshot that
+returns no rows therefore commits an addressable empty dataset version. Pipelines and projections
+can consume that version normally, and later empty snapshots reuse it until the visible contents
+change. The initial version emits the normal dataset-version event, so dataset-updated schedules can
+run against the known-empty state. An empty snapshot after a non-empty version still commits a new
+empty version so projections can withdraw source-owned objects that disappeared upstream.
 
 A merge run may also succeed and advance its checkpoint without creating a version. This happens
 when an initial run only deletes absent keys, or when every staged change leaves the current rows
@@ -212,6 +254,7 @@ The read handler signature is `(client, context)`.
 | `context.syncId` | This sync's id |
 | `context.signal` | `AbortSignal` for cooperative cancellation |
 | `context.blobs` | Blob facade (`put`, `open`, `stat`) for file ingestion |
+| `context.connection` | Connection, slot and account metadata for OAuth-backed Syncs |
 | `context.checkpoint` | Last checkpoint value (only with `.checkpoint<T>()`) |
 | `context.setCheckpoint(next)` | Records the next checkpoint (only with `.checkpoint<T>()`) |
 

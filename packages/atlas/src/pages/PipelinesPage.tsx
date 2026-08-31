@@ -126,6 +126,8 @@ function runStatusClasses(status: PipelineRunStatus): string {
       return "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-300"
     case "running":
       return "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-300"
+    case "queued":
+      return "border-slate-500/30 bg-slate-500/10 text-slate-600 dark:text-slate-300"
   }
 }
 
@@ -136,7 +138,9 @@ function runStatusIcon(status: PipelineRunStatus) {
       ? XCircle
       : status === "cancelled"
         ? Ban
-        : LoaderCircle
+        : status === "running"
+          ? LoaderCircle
+          : Clock3
 }
 
 function RunStatusBadge({ status }: { status: PipelineRunStatus }) {
@@ -168,9 +172,11 @@ function RunStatusIcon({ status }: { status: PipelineRunStatus }) {
 }
 
 function runDuration(run: PipelineRun): string {
+  if (run.status === "queued") return "Waiting"
   if (!run.finishedAt) {
     return run.status === "running" ? "Running" : "Pending"
   }
+  if (!run.startedAt) return "Not started"
   const ms = new Date(run.finishedAt).getTime() - new Date(run.startedAt).getTime()
   if (!Number.isFinite(ms) || ms < 0) return "Unknown"
   if (ms < 1000) return "<1s"
@@ -223,7 +229,7 @@ function PipelineListItem({
         <div className="hidden shrink-0 flex-col items-end gap-1 sm:flex">
           <RunStatusBadge status={latestRun.status} />
           <span className="text-xs text-muted-foreground">
-            {formatRelativeTime(latestRun.startedAt)}
+            {formatRelativeTime(latestRun.startedAt ?? latestRun.queuedAt)}
           </span>
         </div>
       ) : (
@@ -280,7 +286,9 @@ function PipelineTableView({
                   <div className="flex flex-col items-start gap-1">
                     <RunStatusBadge status={pipeline.latestRun.status} />
                     <span className="text-xs text-muted-foreground">
-                      {formatRelativeTime(pipeline.latestRun.startedAt)}
+                      {formatRelativeTime(
+                        pipeline.latestRun.startedAt ?? pipeline.latestRun.queuedAt
+                      )}
                     </span>
                   </div>
                 ) : (
@@ -937,7 +945,7 @@ function RunsListPanel({
                     Queued · starting...
                   </p>
                 </div>
-                <RunStatusBadge status="running" />
+                <RunStatusBadge status="queued" />
               </li>
             ) : null}
             {runs.map((run) => (
@@ -950,7 +958,7 @@ function RunsListPanel({
                   <div className="min-w-0">
                     <p className="truncate font-mono text-[11px] text-foreground">{run.id}</p>
                     <p className="mt-0.5 text-[11px] text-muted-foreground">
-                      {formatRelativeTime(run.startedAt)} · {runDuration(run)}
+                      {formatRelativeTime(run.startedAt ?? run.queuedAt)} · {runDuration(run)}
                     </p>
                     {run.error ? (
                       <SixbFailureSummary failure={run.error} className="mt-1 text-[11px]" />
@@ -1009,7 +1017,10 @@ function RunSummaryPanel({
           <>
             <div className="grid grid-cols-2 gap-2">
               <RunStat label="Duration" value={runDuration(run)} />
-              <RunStat label="Started" value={formatAbsoluteDate(run.startedAt)} />
+              <RunStat
+                label={run.startedAt ? "Started" : "Queued"}
+                value={formatAbsoluteDate(run.startedAt ?? run.queuedAt)}
+              />
               <RunStat label="Finished" value={formatAbsoluteDate(run.finishedAt)} />
               <RunStat label="Pipeline" value={pipelineId} mono />
             </div>

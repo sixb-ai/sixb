@@ -6,6 +6,7 @@ import type {
 } from "@sixb/core/internal/events"
 import { deriveRuleEventDependencies } from "@sixb/core/internal/rules"
 import type { ObjectLinkRow, RulesStorage } from "@sixb/core/storage"
+import { linkBatchKey } from "@sixb/core/storage"
 import { evaluateRulePredicate } from "./evaluate-predicate"
 import type {
   EvaluateRuleEventResult,
@@ -289,7 +290,7 @@ async function loadCurrentLinks(
   for (const linkId of linkIds) {
     links.set(
       linkId,
-      rows.get(`${input.subject.objectTypeId}:${input.subject.primaryId}:${linkId}`) ?? []
+      rows.get(linkBatchKey(input.subject.objectTypeId, input.subject.primaryId, linkId)) ?? []
     )
   }
 

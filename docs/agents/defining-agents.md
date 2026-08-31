@@ -62,6 +62,29 @@ model: vercelGateway("openai/gpt-5.5", {
 })
 ```
 
+## The project model catalog
+
+A project can declare the models Sixb is allowed to use. The catalog is optional; when it is
+present, every agent's `model` must be in it, and `createSixb()` fails at startup otherwise.
+
+```ts
+import { gateway } from "ai"
+
+export const sixb = createSixb({
+  // ...
+  models: {
+    language: [gateway("openai/gpt-5.5"), gateway("anthropic/claude-sonnet-4.6")],
+  },
+})
+```
+
+The first entry of each kind is the project default. Sixb identifies each entry by the model you
+configured — you never author an id or an alias. Configure the same model twice and startup fails.
+
+An entry is the binding, not the vendor's model: `gateway("openai/gpt-5.5")` and
+`openai("gpt-5.5")` are two entries, because they route and bill differently. An agent's `model`
+has to match one of them.
+
 ## Instructions vs Agent Skills
 
 Keep `instructions` short and always relevant: the agent role, hard behavioral rules, and domain
@@ -90,8 +113,8 @@ export const researcher = defineAgent("researcher", {
 })
 ```
 
-Omitting it gives the agent no selected worker tools. Sixb still supplies sandboxed `bash`. See
-[Tools and gateway](./tools-and-gateway.md) for custom tools and Exa web access.
+Omitting it gives the agent no selected worker tools. Sixb still supplies sandboxed `read` and
+`bash`. See [Tools and gateway](./tools-and-gateway.md) for custom tools and Exa web access.
 
 ## Loop
 
@@ -121,6 +144,7 @@ export const sixb = createSixb({
 ## Related
 
 - [Authorization](./authorization.md) — `groups` and what they gate.
-- [Tools and gateway](./tools-and-gateway.md) — selected worker tools and sandboxed `bash`.
+- [Tools and gateway](./tools-and-gateway.md) — selected worker tools plus sandboxed `read` and
+  `bash`.
 - [Running and streaming](./running-and-streaming.md) — drive a defined agent.
 - [Runtime](../runtime/overview.md) and [project structure](../fundamentals/project-structure.md).

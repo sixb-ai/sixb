@@ -196,6 +196,19 @@ export const ObjectQuerySchema: z.ZodType<unknown> = z.lazy(() =>
       .strict(),
     z
       .object({
+        kind: z.literal("refs"),
+        refs: z.array(
+          z
+            .object({
+              objectTypeId: z.string().min(1),
+              primaryId: z.string().min(1),
+            })
+            .strict()
+        ),
+      })
+      .strict(),
+    z
+      .object({
         kind: z.literal("filter"),
         input: ObjectQuerySchema,
         predicate: ObjectQueryPredicateSchema,
@@ -306,6 +319,17 @@ export const ObjectQueryFacetsRequestSchema = z
   })
   .strict()
 
+export const ObjectQueryLinksRequestSchema = z
+  .object({
+    query: ObjectQuerySchema,
+    direction: z.enum(["outgoing", "incoming", "both"]).default("both"),
+    linkId: z.string().min(1).optional(),
+    includeObjects: z.boolean().default(false),
+    pageSize: z.number().int().positive().max(1_000).default(100),
+    pageToken: z.string().min(1).optional(),
+  })
+  .strict()
+
 export const TwinObjectSchema = z.object({
   primaryId: z.string(),
   objectTypeId: z.string(),
@@ -326,6 +350,7 @@ const objectQueryRef = { $ref: "#/components/schemas/ObjectQuery" }
 const objectQueryPredicateRef = { $ref: "#/components/schemas/ObjectQueryPredicate" }
 const objectQuerySortFieldRef = { $ref: "#/components/schemas/ObjectQuerySortField" }
 const objectExpansionRef = { $ref: "#/components/schemas/ObjectExpansion" }
+const objectRefSchemaRef = { $ref: "#/components/schemas/ObjectRef" }
 
 /**
  * zod-to-json-schema currently drops recursive z.lazy schemas when the server's
@@ -476,6 +501,39 @@ export const ObjectQueryOpenApiSchemas = {
       plan: { $ref: "#/components/schemas/ObjectQueryPlanSummary" },
     },
   },
+  ObjectQueryLink: {
+    type: "object",
+    required: ["source", "linkId", "target", "createdAt", "updatedAt"],
+    additionalProperties: false,
+    properties: {
+      source: objectRefSchemaRef,
+      linkId: { type: "string" },
+      target: objectRefSchemaRef,
+      properties: { type: "object", additionalProperties: true },
+      createdAt: { type: "string" },
+      updatedAt: { type: "string" },
+    },
+  },
+  ObjectQueryLinksResponse: {
+    type: "object",
+    required: ["objects", "links", "hasMore"],
+    additionalProperties: false,
+    properties: {
+      objects: {
+        type: "array",
+        description:
+          "Selected objects followed by visible endpoint objects from this link page, de-duplicated. Empty unless includeObjects is true.",
+        items: { $ref: "#/components/schemas/ObjectQueryObject" },
+      },
+      links: {
+        type: "array",
+        description: "Visible physical links in deterministic identity order.",
+        items: { $ref: "#/components/schemas/ObjectQueryLink" },
+      },
+      hasMore: { type: "boolean" },
+      nextPageToken: { type: "string" },
+    },
+  },
   ObjectQueryErrorResponse: {
     type: "object",
     required: ["error"],
@@ -535,6 +593,37 @@ export const ObjectQueryOpenApiSchemas = {
       },
     },
   },
+  ObjectQueryLinksRequest: {
+    type: "object",
+    required: ["query"],
+    additionalProperties: false,
+    properties: {
+      query: objectQueryRef,
+      direction: { type: "string", enum: ["outgoing", "incoming", "both"], default: "both" },
+      linkId: { type: "string", minLength: 1 },
+      includeObjects: {
+        type: "boolean",
+        default: false,
+        description: "Include selected objects and visible endpoints from the current link page.",
+      },
+      pageSize: { type: "integer", minimum: 1, maximum: 1_000, default: 100 },
+      pageToken: {
+        type: "string",
+        minLength: 1,
+        description:
+          "Opaque token from the previous page. The project, normalized query, direction, and linkId must remain unchanged.",
+      },
+    },
+  },
+  ObjectRef: {
+    type: "object",
+    required: ["objectTypeId", "primaryId"],
+    additionalProperties: false,
+    properties: {
+      objectTypeId: { type: "string", minLength: 1 },
+      primaryId: { type: "string", minLength: 1 },
+    },
+  },
   ObjectQuery: {
     oneOf: [
       {
@@ -545,6 +634,21 @@ export const ObjectQueryOpenApiSchemas = {
           kind: { type: "string", enum: ["start"] },
           objectTypeId: { type: "string", minLength: 1 },
           includeSubtypes: { type: "boolean" },
+        },
+      },
+      {
+        type: "object",
+        required: ["kind", "refs"],
+        additionalProperties: false,
+        properties: {
+          kind: { type: "string", enum: ["refs"] },
+          refs: {
+            type: "array",
+            minItems: 1,
+            description:
+              "One to 1,000 unique identities after normalization; duplicate entries are accepted and removed.",
+            items: objectRefSchemaRef,
+          },
         },
       },
       {

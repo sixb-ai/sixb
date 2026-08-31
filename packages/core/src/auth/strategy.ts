@@ -38,6 +38,7 @@ export type {
   OidcCallbackResult,
   OidcStartSignInInput,
   OidcStartSignInResult,
+  RevealedInvitationLink,
 } from "./types"
 export {
   isInvitationDeliveryAuthStrategy,

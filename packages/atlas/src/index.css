@@ -8,12 +8,122 @@
 @source "./pages/**/*.{ts,tsx}";
 
 :root {
+  /* Atlas follows the Sixb website's paper, ink, ledger-line, and signal-blue palette. */
+  --background: #fafafa;
+  --foreground: #17181c;
+  --card: #ffffff;
+  --card-foreground: #17181c;
+  --popover: #ffffff;
+  --popover-foreground: #17181c;
+  --primary: #17181c;
+  --primary-foreground: #ffffff;
+  --secondary: #f3f3f3;
+  --secondary-foreground: #17181c;
+  --accent: #f3f3f3;
+  --accent-foreground: #17181c;
+  --muted: #f5f5f5;
+  --muted-foreground: #63666d;
+  --border: #e1e1e1;
+  --input: #d6d6d6;
+  --ring: #007aff;
+  --info: #007aff;
+  --chart-1: #007aff;
+  --chart-2: #17181c;
+  --chart-3: #5799df;
+  --chart-4: #9ec3ee;
+  --chart-5: #d4e6ff;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #63666d;
+  --sidebar-primary: #17181c;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f3f3f3;
+  --sidebar-accent-foreground: #17181c;
+  --sidebar-border: #e1e1e1;
+  --sidebar-ring: #007aff;
+  --font-sans: "ABC Diatype", "SF Pro Text", "SF Pro Display", "Segoe UI Variable Text",
+    "Segoe UI", system-ui, sans-serif;
+  --radius: 0.25rem;
+  --shadow-2xs: none;
+  --shadow-xs: none;
+  --shadow-sm: none;
+  --shadow: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-xl: none;
+  --shadow-2xl: none;
+  --atlas-blue: #007aff;
+  --atlas-blue-deep: #0061cc;
+  --atlas-blue-soft: #9ec3ee;
+  --atlas-blue-line: #d4e6ff;
+  --atlas-blue-fill: #eef4ff;
+  --atlas-rail: #ffffff;
+  --atlas-sidebar-active: #17181c;
+  --atlas-sidebar-active-foreground: #ffffff;
+  --atlas-sidebar-count: #f1f1f1;
+  --atlas-surface-hover: #fafafa;
+  --atlas-row-hover: #f7f7f7;
+  --atlas-border-hover: #c6c6c6;
+
   font-family: var(--font-sans);
   line-height: 1.5;
   font-weight: 400;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+}
+
+.dark {
+  --background: #0b0b0b;
+  --foreground: #f5f5f5;
+  --card: #101010;
+  --card-foreground: #f5f5f5;
+  --popover: #151515;
+  --popover-foreground: #f5f5f5;
+  --primary: #f5f5f5;
+  --primary-foreground: #0b0b0b;
+  --secondary: #1a1a1a;
+  --secondary-foreground: #f5f5f5;
+  --accent: #202020;
+  --accent-foreground: #f5f5f5;
+  --muted: #181818;
+  --muted-foreground: #a1a1a1;
+  --border: #2b2b2b;
+  --input: #363636;
+  --ring: #007aff;
+  --info: #007aff;
+  --chart-1: #007aff;
+  --chart-2: #f5f5f5;
+  --chart-3: #68aef8;
+  --chart-4: #3f7fbd;
+  --chart-5: #23527f;
+  --sidebar: #0f0f0f;
+  --sidebar-foreground: #a1a1a1;
+  --sidebar-primary: #f5f5f5;
+  --sidebar-primary-foreground: #0b0b0b;
+  --sidebar-accent: #202020;
+  --sidebar-accent-foreground: #f5f5f5;
+  --sidebar-border: #2b2b2b;
+  --sidebar-ring: #007aff;
+  --atlas-blue: #007aff;
+  --atlas-blue-deep: #68aef8;
+  --atlas-blue-soft: #3f7fbd;
+  --atlas-blue-line: #23527f;
+  --atlas-blue-fill: #151515;
+  --atlas-rail: #0f0f0f;
+  --atlas-sidebar-active: #f5f5f5;
+  --atlas-sidebar-active-foreground: #0b0b0b;
+  --atlas-sidebar-count: #1c1c1c;
+  --atlas-surface-hover: #171717;
+  --atlas-row-hover: #151515;
+  --atlas-border-hover: #484848;
+  --shadow-2xs: none;
+  --shadow-xs: none;
+  --shadow-sm: none;
+  --shadow: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-xl: none;
+  --shadow-2xl: none;
 }
 
 html,
@@ -28,6 +138,12 @@ body {
   margin: 0;
 }
 
+h1,
+h2,
+h3 {
+  letter-spacing: -0.02em;
+}
+
 #root {
   height: 100%;
 }
@@ -38,10 +154,116 @@ a {
     transform 0.15s ease;
 }
 
+button:not(:disabled),
+a[href],
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+
 button:focus-visible,
 a:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
+}
+
+/* The application shell uses the website's pure paper surface and crisp dividing rules. */
+.atlas-shell {
+  background: var(--background);
+}
+
+.atlas-mobile-header {
+  background: var(--background);
+}
+
+[data-slot="sidebar-inner"] {
+  background-color: var(--sidebar);
+  background-image: none;
+}
+
+[data-sidebar="menu-button"] {
+  position: relative;
+  border-radius: 2px;
+  font-weight: 500;
+}
+
+[data-sidebar="menu-button"][data-active="true"] {
+  background: var(--atlas-sidebar-active);
+  color: var(--atlas-sidebar-active-foreground);
+}
+
+[data-sidebar="menu-button"][data-active="true"]:hover {
+  background: var(--atlas-sidebar-active);
+  color: var(--atlas-sidebar-active-foreground);
+}
+
+[data-sidebar="menu-badge"] {
+  min-width: 1.25rem;
+  border-radius: 2px;
+  background: var(--atlas-sidebar-count);
+  font-size: 0.6875rem;
+}
+
+[data-sidebar="menu-button"][data-active="true"] + [data-sidebar="menu-badge"] {
+  background: rgb(255 255 255 / 14%);
+  color: var(--atlas-sidebar-active-foreground);
+}
+
+/* Shared primitives get a restrained product treatment without changing @sixb/ui globally. */
+[data-slot="card"] {
+  border-color: var(--border);
+  border-radius: var(--radius);
+  box-shadow: none;
+}
+
+[data-slot="card"][role="button"]:hover {
+  border-color: var(--atlas-border-hover);
+  background: var(--atlas-surface-hover);
+}
+
+[data-slot="badge"][data-variant="secondary"] {
+  border-color: var(--border);
+  background: var(--secondary);
+  color: var(--foreground);
+}
+
+[data-slot="tabs-list"][data-variant="line"] [data-slot="tabs-trigger"][data-state="active"]::after {
+  background: var(--foreground);
+}
+
+[data-slot="table-header"] {
+  background: var(--background);
+}
+
+[data-slot="table-row"]:hover {
+  background: var(--atlas-row-hover);
+}
+
+[data-slot="button"],
+[data-slot="input"],
+[data-slot="select-trigger"],
+[data-slot="toggle-group"],
+[data-slot="tabs-list"]:not([data-variant="line"]) {
+  box-shadow: none;
+}
+
+.atlas-page-header {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 1.25rem;
+}
+
+.atlas-eyebrow {
+  color: var(--muted-foreground);
+  letter-spacing: 0.12em;
+}
+
+.atlas-signal-dot {
+  display: inline-block;
+  width: 0.35rem;
+  height: 0.35rem;
+  margin-right: 0.45rem;
+  border-radius: 999px;
+  background: var(--atlas-blue);
+  vertical-align: 0.08rem;
 }
 
 .scrollbar-auto-hide::-webkit-scrollbar {
@@ -60,6 +282,14 @@ a:focus-visible {
 
 .scrollbar-auto-hide::-webkit-scrollbar-track {
   background: transparent;
+}
+
+.atlas-tabs-scroll {
+  scrollbar-width: none;
+}
+
+.atlas-tabs-scroll::-webkit-scrollbar {
+  display: none;
 }
 
 /* React Flow theming — wire xyflow CSS vars to our design tokens. */

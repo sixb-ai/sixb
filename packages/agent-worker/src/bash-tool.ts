@@ -16,7 +16,7 @@ export interface BashToolOutput extends CommandResult {
   readonly stderrTruncated: boolean
 }
 
-/** The sandbox plus its run-scoped env, resolved lazily on first bash use. */
+/** The sandbox plus its run-scoped env, resolved lazily on first sandbox tool use. */
 export interface BashSandboxHandle {
   readonly sandbox: Sandbox
   readonly env?: Readonly<Record<string, string>>
@@ -122,7 +122,8 @@ interface TruncateResult {
  *      data loss (compact JSON is also fewer tokens and no worse for model comprehension).
  *   3. Still oversized JSON array → keep the largest whole-element prefix that fits, as a bare array
  *      (same shape the caller expects, still valid JSON, just fewer rows).
- *   4. Anything else still oversized (a huge single object, or non-JSON) → middle-truncate the text.
+ *   4. Oversized JSON object → return a valid JSON preview that tells the agent to narrow the call.
+ *   5. Oversized non-JSON → middle-truncate the text.
  */
 export function compressStdout(text: string, maxChars: number): TruncateResult {
   if (text.length <= maxChars) return { text, truncated: false }
@@ -132,11 +133,43 @@ export function compressStdout(text: string, maxChars: number): TruncateResult {
     const compact = JSON.stringify(json)
     if (compact.length <= maxChars) return { text: compact, truncated: false }
     if (Array.isArray(json)) return { text: fitJsonArrayPrefix(json, maxChars), truncated: true }
-    // A single object too large even compacted: fall through to a text trim of the compact form.
+    if (typeof json === "object" && json !== null) {
+      return { text: fitJsonObjectPreview(json, compact, maxChars), truncated: true }
+    }
     return truncateText(compact, maxChars)
   }
 
   return truncateText(text, maxChars)
+}
+
+/** A parseable diagnostic plus as much leading source JSON as the budget allows. */
+function fitJsonObjectPreview(value: object, compact: string, maxChars: number): string {
+  const base = {
+    _sixbOutputTruncated: true,
+    message:
+      "Command output exceeded the tool limit; rerun with a smaller limit or narrower query.",
+    topLevelKeys: Object.keys(value).slice(0, 50),
+    preview: "",
+  }
+  if (JSON.stringify(base).length > maxChars) {
+    const minimal = JSON.stringify({ _sixbOutputTruncated: true })
+    return minimal.length <= maxChars ? minimal : "{}"
+  }
+
+  let low = 0
+  let high = compact.length
+  let best = ""
+  while (low <= high) {
+    const length = (low + high) >> 1
+    const candidate = JSON.stringify({ ...base, preview: compact.slice(0, length) })
+    if (candidate.length <= maxChars) {
+      best = candidate
+      low = length + 1
+    } else {
+      high = length - 1
+    }
+  }
+  return best || JSON.stringify(base)
 }
 
 /** The largest whole-element prefix of `items` whose compact JSON fits under `maxChars`. */

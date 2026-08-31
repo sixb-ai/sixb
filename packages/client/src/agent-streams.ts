@@ -1,7 +1,7 @@
-import type { AgentRunStreamEvent } from "@sixb/core/agents/streams"
+import type { AgentRunActivityEvent, AgentRunStreamEvent } from "@sixb/core/agents/streams"
 // Import the wire validator from the browser-safe streams subpath: the `@sixb/core` root pulls in
 // node-only runtime (e.g. `node:crypto`), which breaks the Atlas browser bundle.
-import { isAgentRunStreamEvent } from "@sixb/core/agents/streams"
+import { isAgentRunActivityEvent, isAgentRunStreamEvent } from "@sixb/core/agents/streams"
 import type { BrokerRecord } from "@sixb/core/broker"
 import type { GetAgentRunResponses } from "./generated/types.gen"
 import {
@@ -11,7 +11,11 @@ import {
   type ReconnectingSocketState,
 } from "./ws-socket"
 
-export type { AgentRunFailure, AgentRunStreamEvent } from "@sixb/core/agents/streams"
+export type {
+  AgentRunActivityEvent,
+  AgentRunFailure,
+  AgentRunStreamEvent,
+} from "@sixb/core/agents/streams"
 export type { ReconnectingSocket, ReconnectingSocketState } from "./ws-socket"
 
 export type AgentRunSnapshot = GetAgentRunResponses[200]
@@ -38,10 +42,15 @@ export interface AgentRunStreamUnsubscribeMessage {
   readonly runId?: string
 }
 
+export interface AgentActivityStreamSubscribeMessage {
+  readonly type: "subscribe.activity"
+}
+
 export type AgentRunStreamClientMessage =
   | AgentRunStreamSubscribeMessage
   | AgentRunStreamReplayMessage
   | AgentRunStreamUnsubscribeMessage
+  | AgentActivityStreamSubscribeMessage
 
 export type AgentRunStreamServerMessage =
   | { readonly type: "connected"; readonly channel?: string }
@@ -53,6 +62,9 @@ export type AgentRunStreamServerMessage =
       readonly count: number
     }
   | { readonly type: "unsubscribed"; readonly runId?: string | null }
+  | { readonly type: "subscribed.activity" }
+  | { readonly type: "unsubscribed.activity" }
+  | { readonly type: "activity"; readonly event: AgentRunActivityEvent }
   | { readonly type: "error"; readonly message: string }
   | { readonly type: "run.snapshot"; readonly run: AgentRunSnapshot }
   | { readonly type: "record"; readonly record: AgentRunStreamRecord }
@@ -70,6 +82,18 @@ export interface AgentRunSocketOptions {
   readonly baseUrl?: string
   readonly onEvent: (event: AgentRunStreamEvent, cursor: string) => void
   readonly onRunSnapshot?: (run: AgentRunSnapshot) => void
+  readonly onError?: (message: string) => void
+  readonly onStateChange?: (state: ReconnectingSocketState) => void
+}
+
+export interface AgentActivitySocketOptions {
+  readonly reconnect?: boolean
+  readonly reconnectDelayMs?: number
+  /** Override the API base url. Defaults to the global client config. */
+  readonly baseUrl?: string
+  readonly onActivity: (event: AgentRunActivityEvent) => void
+  /** Called after each initial or reconnect subscription, so durable state can be reconciled. */
+  readonly onSubscribed?: () => void
   readonly onError?: (message: string) => void
   readonly onStateChange?: (state: ReconnectingSocketState) => void
 }
@@ -117,6 +141,33 @@ export function createAgentRunSocket(options: AgentRunSocketOptions): Reconnecti
   })
 }
 
+/** Open one project-level lifecycle feed, independent of how many Agent threads are running. */
+export function createAgentActivitySocket(options: AgentActivitySocketOptions): ReconnectingSocket {
+  return createReconnectingSocket({
+    url: createSixbAgentsWebSocketUrl(options.baseUrl),
+    reconnect: options.reconnect,
+    reconnectDelayMs: options.reconnectDelayMs,
+    connectionErrorMessage: "Agent activity websocket connection failed.",
+    onError: options.onError,
+    onStateChange: options.onStateChange,
+    subscribeMessage: () =>
+      ({ type: "subscribe.activity" }) satisfies AgentActivityStreamSubscribeMessage,
+    onMessage: (data, sink) => {
+      const message = parseAgentRunStreamServerMessage(data)
+      if (!message) return
+      if (message.type === "activity") {
+        options.onActivity(message.event)
+        return
+      }
+      if (message.type === "subscribed.activity") {
+        options.onSubscribed?.()
+        return
+      }
+      if (message.type === "error") sink.reportError(message.message)
+    },
+  })
+}
+
 export function parseAgentRunStreamServerMessage(
   value: unknown
 ): AgentRunStreamServerMessage | null {
@@ -145,6 +196,14 @@ export function parseAgentRunStreamServerMessage(
 
   if (parsed.type === "error") {
     return { type: "error", message: String(parsed.message ?? "Agent stream error.") }
+  }
+
+  if (parsed.type === "activity" && isAgentRunActivityEvent(parsed.event)) {
+    return { type: "activity", event: parsed.event }
+  }
+
+  if (parsed.type === "subscribed.activity" || parsed.type === "unsubscribed.activity") {
+    return { type: parsed.type }
   }
 
   if (parsed.type === "connected") {

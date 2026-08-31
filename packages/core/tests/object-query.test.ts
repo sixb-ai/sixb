@@ -16,6 +16,7 @@ import {
   collectObjectQueryValidationIssues,
   countObjects,
   executeObjectQuery,
+  executeObjectQueryLinks,
   existsObjects,
   explainObjectQuery,
   facetObjects,
@@ -140,8 +141,37 @@ const Balance = defineObjectType({
   ],
 })
 
+const CollisionLeft = defineObjectType({
+  id: "A",
+  name: "Collision Left",
+  properties: [prop("id", "string", { required: true, primary: true }), prop("name", "string")],
+})
+
+const CollisionRight = defineObjectType({
+  id: "A:B",
+  name: "Collision Right",
+  properties: [prop("id", "string", { required: true, primary: true }), prop("name", "string")],
+})
+
+const CollisionSource = defineObjectType({
+  id: "CollisionSource",
+  name: "Collision Source",
+  properties: [prop("id", "string", { required: true, primary: true })],
+  links: [link.ref("related", [CollisionLeft.id, CollisionRight.id], { cardinality: "many" })],
+})
+
 const ontology = new OntologyRegistry({
-  sources: [Customer, Order, WildcardSource, SearchProfileCustomer, TextNoDefault, Balance],
+  sources: [
+    Customer,
+    Order,
+    WildcardSource,
+    SearchProfileCustomer,
+    TextNoDefault,
+    Balance,
+    CollisionLeft,
+    CollisionRight,
+    CollisionSource,
+  ],
 })
 
 interface QueryCallCounts {
@@ -208,6 +238,23 @@ function disableQueryObjects(storage: ObjectStorage): ObjectStorage {
     get(target, property) {
       if (property === "queryCapabilities") return () => ({ queryObjects: false })
       if (property === "queryObjects") return undefined
+      return Reflect.get(target, property, target)
+    },
+  })
+}
+
+function disableRefsPushdown(storage: ObjectStorage): ObjectStorage {
+  return new Proxy(storage, {
+    get(target, property) {
+      if (property === "queryCapabilities") {
+        return () => {
+          const capabilities = storage.queryCapabilities()
+          return {
+            ...capabilities,
+            nodes: { ...capabilities.nodes, refs: false },
+          }
+        }
+      }
       return Reflect.get(target, property, target)
     },
   })
@@ -321,6 +368,27 @@ const boundedCustomerQuery: ObjectQuery = {
 }
 
 describe("object query IR normalization", () => {
+  test("deduplicates explicit refs into canonical identity order", () => {
+    expect(
+      normalizeObjectQuery({
+        kind: "refs",
+        refs: [
+          { objectTypeId: "Order", primaryId: "order-1" },
+          { objectTypeId: "Customer", primaryId: "cust-2" },
+          { objectTypeId: "Customer", primaryId: "cust-1" },
+          { objectTypeId: "Customer", primaryId: "cust-2" },
+        ],
+      })
+    ).toEqual({
+      kind: "refs",
+      refs: [
+        { objectTypeId: "Customer", primaryId: "cust-1" },
+        { objectTypeId: "Customer", primaryId: "cust-2" },
+        { objectTypeId: "Order", primaryId: "order-1" },
+      ],
+    })
+  })
+
   test("merges adjacent filters and limits and deduplicates fields", () => {
     const query: ObjectQuery = {
       kind: "limit",
@@ -430,6 +498,52 @@ describe("object query IR normalization", () => {
 })
 
 describe("object query validation", () => {
+  test("validates heterogeneous refs as an intrinsically bounded source", () => {
+    const validated = validateObjectQuery(
+      {
+        kind: "refs",
+        refs: [
+          { objectTypeId: "Customer", primaryId: "cust-1" },
+          { objectTypeId: "Order", primaryId: "order-1" },
+        ],
+      },
+      { ontology }
+    )
+
+    expect(validated.result.objectTypeIds).toEqual(["Customer", "Order"])
+    expect(validated.touchedObjectTypeIds).toEqual(["Customer", "Order"])
+
+    const issues = collectObjectQueryValidationIssues(
+      {
+        kind: "refs",
+        refs: [{ objectTypeId: "Missing", primaryId: "" }],
+      },
+      { ontology }
+    )
+    expect(issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "$.refs[0].objectTypeId",
+          code: "unknown_object_type",
+        }),
+        expect.objectContaining({ path: "$.refs[0].primaryId", code: "missing_primary_id" }),
+      ])
+    )
+
+    expect(
+      collectObjectQueryValidationIssues(
+        {
+          kind: "refs",
+          refs: [
+            { objectTypeId: "Customer", primaryId: "cust-1" },
+            { objectTypeId: "Order", primaryId: "order-1" },
+          ],
+        },
+        { ontology, maxRefs: 1 }
+      )
+    ).toContainEqual(expect.objectContaining({ path: "$.refs", code: "too_many_refs" }))
+  })
+
   test("resolves and canonicalizes exact decimal predicate and sort semantics", () => {
     const validated = validateObjectQuery(
       {
@@ -800,9 +914,267 @@ describe("object query explain", () => {
     expect(formatted).toContain("Issues:")
     expect(formatted).toContain("[unknown_property]")
   })
+
+  test("uses the configured refs bound", () => {
+    const explanation = explainObjectQuery(
+      {
+        kind: "refs",
+        refs: [
+          { objectTypeId: "Customer", primaryId: "cust-1" },
+          { objectTypeId: "Order", primaryId: "order-1" },
+        ],
+      },
+      { ontology, maxRefs: 1 }
+    )
+
+    expect(explanation.valid).toBe(false)
+    expect(explanation.issues).toContainEqual(
+      expect.objectContaining({ path: "$.refs", code: "too_many_refs" })
+    )
+  })
 })
 
 describe("object query planner and executor", () => {
+  test("resolves explicit refs through the bounded core source", async () => {
+    const testStorage = createTestStorage()
+    const { storage, calls } = countQueryCalls(disableRefsPushdown(testStorage.objects))
+    await seedCustomerOrders(testStorage.fixture)
+
+    const result = await executeObjectQuery(
+      {
+        projectId: "p1",
+        query: {
+          kind: "refs",
+          refs: [
+            { objectTypeId: "Order", primaryId: "order-2" },
+            { objectTypeId: "Customer", primaryId: "missing" },
+            { objectTypeId: "Customer", primaryId: "cust-1" },
+          ],
+        },
+      },
+      { ontology, storage }
+    )
+
+    expect(result.plan.mode).toBe("fallback")
+    expect(calls.queryObjects).toBe(0)
+    expect(result.objects.map((row) => `${row.objectTypeId}:${row.primaryId}`)).toEqual([
+      "Customer:cust-1",
+      "Order:order-2",
+    ])
+    expect(result.total).toBe(2)
+  })
+
+  test("queries and paginates physical links incident to an object set", async () => {
+    const { objects: storage, fixture } = createTestStorage()
+    await seedCustomerOrders(fixture)
+    const query: ObjectQuery = {
+      kind: "refs",
+      refs: [
+        { objectTypeId: "Customer", primaryId: "cust-1" },
+        { objectTypeId: "Order", primaryId: "order-2" },
+      ],
+    }
+
+    const first = await executeObjectQueryLinks(
+      {
+        projectId: "p1",
+        query,
+        direction: "both",
+        includeObjects: true,
+        pageSize: 1,
+      },
+      { ontology, storage }
+    )
+    expect(first.links).toHaveLength(1)
+    expect(first.hasMore).toBe(true)
+    expect(first.nextPageToken).toBeDefined()
+    expect(first.objects.map((row) => `${row.objectTypeId}:${row.primaryId}`)).toEqual([
+      "Customer:cust-1",
+      "Order:order-2",
+      "Order:order-1",
+    ])
+
+    const second = await executeObjectQueryLinks(
+      {
+        projectId: "p1",
+        query,
+        direction: "both",
+        pageSize: 1,
+        pageToken: first.nextPageToken,
+      },
+      { ontology, storage }
+    )
+    expect(second.links).toHaveLength(1)
+    expect(second.links[0].targetId).toBe("order-2")
+    expect(second.hasMore).toBe(false)
+    expect(second.objects).toEqual([])
+
+    await expect(
+      executeObjectQueryLinks(
+        {
+          projectId: "p1",
+          query,
+          direction: "incoming",
+          pageSize: 1,
+          pageToken: first.nextPageToken,
+        },
+        { ontology, storage }
+      )
+    ).rejects.toMatchObject({ code: "invalid_link_page_token", path: "$.pageToken" })
+
+    await expect(
+      executeObjectQueryLinks(
+        {
+          projectId: "p1",
+          query: {
+            kind: "refs",
+            refs: [{ objectTypeId: "Customer", primaryId: "cust-2" }],
+          },
+          direction: "both",
+          pageSize: 1,
+          pageToken: first.nextPageToken,
+        },
+        { ontology, storage }
+      )
+    ).rejects.toMatchObject({ code: "invalid_link_page_token", path: "$.pageToken" })
+
+    const outgoing = await executeObjectQueryLinks(
+      { projectId: "p1", query, direction: "outgoing" },
+      { ontology, storage }
+    )
+    expect(outgoing.links.map((link) => link.targetId)).toEqual(["order-1"])
+
+    const overflowingStorage = new Proxy(storage, {
+      get(target, property) {
+        if (property === "queryObjects") {
+          return async () => ({
+            objects: Array.from({ length: 1_001 }, (_, index) => ({
+              projectId: "p1",
+              objectTypeId: "Customer",
+              primaryId: `overflow-${index}`,
+              properties: { id: `overflow-${index}` },
+              createdAt: new Date(0),
+              updatedAt: new Date(0),
+              version: 1,
+              lastCommitId: "overflow",
+            })),
+            hasMore: false,
+          })
+        }
+        return Reflect.get(target, property, target)
+      },
+    })
+    await expect(
+      executeObjectQueryLinks(
+        {
+          projectId: "p1",
+          query: { kind: "start", objectTypeId: "Customer" },
+        },
+        { ontology, storage: overflowingStorage }
+      )
+    ).rejects.toMatchObject({ code: "link_query_object_limit_exceeded", path: "$.query" })
+  })
+
+  test("rejects output shaping and non-root object pages in link selectors", async () => {
+    const { objects: storage } = createTestStorage()
+
+    await expect(
+      executeObjectQueryLinks(
+        {
+          projectId: "p1",
+          query: {
+            kind: "filter",
+            predicate: { op: "eq", propertyId: "status", value: "active" },
+            input: {
+              kind: "project",
+              properties: ["id"],
+              input: { kind: "start", objectTypeId: "Customer" },
+            },
+          },
+        },
+        { ontology, storage }
+      )
+    ).rejects.toMatchObject({
+      code: "link_selector_output_shape_not_supported",
+      path: "$.query.input",
+    })
+
+    await expect(
+      executeObjectQueryLinks(
+        {
+          projectId: "p1",
+          query: {
+            kind: "filter",
+            predicate: { op: "eq", propertyId: "status", value: "active" },
+            input: {
+              kind: "page",
+              pageSize: 1,
+              input: { kind: "start", objectTypeId: "Customer" },
+            },
+          },
+        },
+        { ontology, storage }
+      )
+    ).rejects.toMatchObject({
+      code: "link_selector_page_must_be_root",
+      path: "$.query.input",
+    })
+  })
+
+  test("hydrates delimiter-bearing endpoint identities without collisions", async () => {
+    const { objects: storage, fixture } = createTestStorage()
+    await fixture.seed({
+      objects: [
+        {
+          ref: { objectTypeId: CollisionSource.id, primaryId: "source" },
+          properties: { id: "source" },
+        },
+        {
+          ref: { objectTypeId: CollisionLeft.id, primaryId: "B:C" },
+          properties: { id: "B:C", name: "Left" },
+        },
+        {
+          ref: { objectTypeId: CollisionRight.id, primaryId: "C" },
+          properties: { id: "C", name: "Right" },
+        },
+      ],
+      links: [
+        {
+          ref: {
+            source: { objectTypeId: CollisionSource.id, primaryId: "source" },
+            linkId: "related",
+            target: { objectTypeId: CollisionLeft.id, primaryId: "B:C" },
+          },
+        },
+        {
+          ref: {
+            source: { objectTypeId: CollisionSource.id, primaryId: "source" },
+            linkId: "related",
+            target: { objectTypeId: CollisionRight.id, primaryId: "C" },
+          },
+        },
+      ],
+    })
+
+    const result = await executeObjectQueryLinks(
+      {
+        projectId: "p1",
+        query: {
+          kind: "refs",
+          refs: [{ objectTypeId: CollisionSource.id, primaryId: "source" }],
+        },
+        direction: "outgoing",
+        includeObjects: true,
+      },
+      { ontology, storage }
+    )
+
+    expect(result.objects.map((row) => row.properties.name).filter(Boolean)).toEqual([
+      "Left",
+      "Right",
+    ])
+  })
+
   test("filters and sorts decimals exactly beyond JS number precision", async () => {
     const { objects, fixture } = createTestStorage()
     await fixture.seed({

@@ -7,7 +7,8 @@
 
 import type { DatasetDefinition } from "../datasets"
 import type { OntologyDefinitionCatalog } from "../ontology"
-import type { ObjectType, Property } from "../ontology/types"
+import type { ObjectType, Property, ValueType } from "../ontology/types"
+import { resolveSemanticType } from "../ontology/validation"
 import { ProjectionValidationError } from "./errors"
 import {
   computeProjectionOwnership,
@@ -196,37 +197,29 @@ export function validateLinkProjectionTarget(linkToken: {
 
 /**
  * Validates a telemetry projection's field mapping against its dataset columns
- * and object type: the telemetry property exists and is telemetry-enabled, and
+ * and object type: every mapped property exists and is telemetry-enabled, and
  * every mapped field (objectId/at/value/unit) resolves to a real dataset column.
  *
  * Owned here so startup validation and the projection worker's pre-execution
  * check share one implementation and cannot drift; the worker layers
  * dataset-version column type compatibility on top of these rules. Returns the
- * resolved telemetry property for callers that need its schema.
+ * resolved telemetry properties for callers that need their schemas.
  */
 export function validateTelemetryProjectionFieldMapping(
   projection: TelemetryProjectionDefinition,
   objectType: { readonly id: string; readonly properties: readonly Property[] },
   datasetColumnNames: ReadonlySet<string>,
+  valueTypesById: ReadonlyMap<string, ValueType>,
   prefix: string
-): Property {
-  const property = objectType.properties.find((candidate) => candidate.id === projection.propertyId)
-  if (!property) {
-    throw new ProjectionValidationError(
-      `${prefix}: unknown property "${projection.propertyId}" on type "${projection.objectTypeId}"`
-    )
-  }
-  if (property.mode !== "telemetry") {
-    throw new ProjectionValidationError(
-      `${prefix}: property "${projection.propertyId}" on type "${projection.objectTypeId}" must be telemetry-enabled`
-    )
+): ReadonlyMap<string, Property> {
+  const mappedProperties = Object.entries(projection.properties)
+  if (mappedProperties.length === 0) {
+    throw new ProjectionValidationError(`${prefix}: must map at least one telemetry property`)
   }
 
   const mappedFields = [
     ["objectId", projection.objectIdField],
     ["at", projection.atField],
-    ["value", projection.valueField],
-    ...(projection.unitField !== undefined ? ([["unit", projection.unitField]] as const) : []),
   ] as const
   for (const [fieldRole, columnName] of mappedFields) {
     if (!datasetColumnNames.has(columnName)) {
@@ -237,7 +230,49 @@ export function validateTelemetryProjectionFieldMapping(
     }
   }
 
-  return property
+  const propertiesById = new Map(objectType.properties.map((property) => [property.id, property]))
+  const resolvedProperties = new Map<string, Property>()
+  for (const [propertyId, mapping] of mappedProperties) {
+    const property = propertiesById.get(propertyId)
+    if (!property) {
+      throw new ProjectionValidationError(
+        `${prefix}: unknown property "${propertyId}" on type "${projection.objectTypeId}"`
+      )
+    }
+    if (property.mode !== "telemetry") {
+      throw new ProjectionValidationError(
+        `${prefix}: property "${propertyId}" on type "${projection.objectTypeId}" must be telemetry-enabled`
+      )
+    }
+
+    for (const [fieldRole, columnName] of [
+      ["value", mapping.valueField],
+      ...(mapping.unitField !== undefined ? ([["unit", mapping.unitField]] as const) : []),
+    ] as const) {
+      if (!datasetColumnNames.has(columnName)) {
+        throw new ProjectionValidationError(
+          `${prefix}: property "${propertyId}" ${fieldRole} field "${columnName}" references ` +
+            `unknown dataset column on dataset "${projection.datasetId}"`
+        )
+      }
+    }
+
+    const semanticType = resolveSemanticType(property, valueTypesById)
+    if (semanticType !== undefined && mapping.unitField === undefined) {
+      throw new ProjectionValidationError(
+        `${prefix}: property "${propertyId}" requires a unit field because it uses semantic type "${semanticType}"`
+      )
+    }
+    if (semanticType === undefined && mapping.unitField !== undefined) {
+      throw new ProjectionValidationError(
+        `${prefix}: property "${propertyId}" cannot map a unit field because it has no semantic type`
+      )
+    }
+
+    resolvedProperties.set(propertyId, property)
+  }
+
+  return resolvedProperties
 }
 
 /**
@@ -262,8 +297,9 @@ export function validateTelemetryProjectionFieldMapping(
  * For telemetry projections:
  * 1. `datasetId` exists in the dataset registry.
  * 2. `objectTypeId` exists in the type registry.
- * 3. `propertyId` exists on the object type and is telemetry-enabled.
+ * 3. Every mapped property exists on the object type and is telemetry-enabled.
  * 4. Point mapping fields exist in the referenced dataset.
+ * 5. Unit mappings match each property's semantic type requirements.
  */
 export interface ValidatedProjectionRecord<TDefinition extends ProjectionDefinition>
   extends ProjectionOwnershipRecord<TDefinition> {
@@ -315,6 +351,30 @@ export function validateProjectionsAtStartup(
     }
 
     const datasetColumnNames = new Set(dataset.schema.columns.map((column) => column.name))
+    const conflictResolution = projection.conflictResolution ?? { strategy: "editsWin" }
+    if (conflictResolution.strategy === "mostRecent") {
+      const sourceTimestamp = dataset.schema.columns.find(
+        (column) => column.name === conflictResolution.sourceTimestamp
+      )
+      if (!sourceTimestamp) {
+        throw new ProjectionValidationError(
+          `${prefix}: source timestamp "${conflictResolution.sourceTimestamp}" references unknown ` +
+            `dataset column on dataset "${projection.datasetId}"`
+        )
+      }
+      if (sourceTimestamp.type !== "timestamp") {
+        throw new ProjectionValidationError(
+          `${prefix}: source timestamp "${conflictResolution.sourceTimestamp}" must reference a ` +
+            `timestamp dataset column`
+        )
+      }
+      if (sourceTimestamp.nullable === true) {
+        throw new ProjectionValidationError(
+          `${prefix}: source timestamp "${conflictResolution.sourceTimestamp}" must reference a ` +
+            `non-null timestamp dataset column`
+        )
+      }
+    }
     const propertyIds = new Set(objectType.properties.map((p) => p.id))
     for (const [propId, columnName] of Object.entries(projection.properties)) {
       if (!propertyIds.has(propId)) {
@@ -488,7 +548,13 @@ export function validateProjectionsAtStartup(
     }
 
     const datasetColumnNames = new Set(dataset.schema.columns.map((column) => column.name))
-    validateTelemetryProjectionFieldMapping(projection, objectType, datasetColumnNames, prefix)
+    validateTelemetryProjectionFieldMapping(
+      projection,
+      objectType,
+      datasetColumnNames,
+      ontology.getValueTypesById(),
+      prefix
+    )
     validatedTelemetryProjections.push({
       definition: projection,
       dataset,

@@ -1,4 +1,4 @@
-import { rest } from "@sixb/connector-rest"
+import { type RestRetryContext, type RestRetryPolicy, rest } from "@sixb/connector-rest"
 import {
   type ConnectorAdapter,
   resolveWebhookVerification,
@@ -6,10 +6,19 @@ import {
 } from "@sixb/core"
 import { createUnipileClient } from "./client"
 import { createUnipileHttp } from "./http"
-import type { UnipileAccessTokenResolver, UnipileClient, UnipileConnectorOptions } from "./types"
+import type {
+  UnipileAccessTokenResolver,
+  UnipileClient,
+  UnipileConnectorOptions,
+  UnipileRequestMethod,
+  UnipileRetryContext,
+  UnipileRetryPolicy,
+} from "./types"
 import { createUnipileEventsWebhook, UNIPILE_CONNECTOR_WEBHOOK } from "./webhooks"
 
 export type UnipileConnector = ConnectorAdapter<"unipile", UnipileClient>
+
+const DEFAULT_MAX_RETRIES = 2
 
 /** Unipile v1 connector for messaging and LinkedIn outreach. */
 export function unipile(options: UnipileConnectorOptions): UnipileConnector {
@@ -28,24 +37,64 @@ export function unipile(options: UnipileConnectorOptions): UnipileConnector {
       Accept: "application/json",
     }),
     timeoutMs: options.timeoutMs,
-    // Retry decisions and concurrent request pacing are handled in the Unipile HTTP layer.
-    retry: { maxRetries: 0 },
+    minDelayMs: options.minDelayMs,
+    retry: toRestRetryPolicy(options.retry),
   })
 
   return {
     type: "unipile",
     webhooks: collectWebhooks(options),
     async connect(context) {
+      assertRetryPolicy(options.retry)
       const restClient = await restAdapter.connect(context)
-      return createUnipileClient(
-        createUnipileHttp(restClient, {
-          minDelayMs: options.minDelayMs,
-          retry: options.retry,
-          signal: context.signal,
-        }),
-        { dsn, webhookSecret: options.webhookSecret }
-      )
+      return createUnipileClient(createUnipileHttp(restClient), {
+        dsn,
+        webhookSecret: options.webhookSecret,
+      })
     },
+  }
+}
+
+function toRestRetryPolicy(policy: UnipileRetryPolicy | undefined): RestRetryPolicy {
+  return {
+    maxRetries: policy?.maxRetries ?? DEFAULT_MAX_RETRIES,
+    shouldRetry(context) {
+      const unipileContext = toUnipileRetryContext(context)
+      return policy?.shouldRetry?.(unipileContext) ?? shouldRetryByDefault(unipileContext)
+    },
+    ...(policy?.delayMs
+      ? {
+          delayMs: (context: RestRetryContext) =>
+            policy.delayMs?.(toUnipileRetryContext(context)) ?? 0,
+        }
+      : {}),
+  }
+}
+
+function toUnipileRetryContext(context: RestRetryContext): UnipileRetryContext {
+  return {
+    attempt: context.attempt,
+    method: context.method as UnipileRequestMethod,
+    path: context.path.split("?", 1)[0] ?? context.path,
+    response: context.response,
+    error: context.error,
+  }
+}
+
+function shouldRetryByDefault(context: UnipileRetryContext): boolean {
+  if (context.error) {
+    // Native fetch reports transport failures as TypeError. Credential-resolver and caller errors
+    // keep their original diagnostics and are not replayed.
+    return context.error instanceof TypeError
+  }
+  const status = context.response?.status
+  return status === 429 || (status !== undefined && status >= 500)
+}
+
+function assertRetryPolicy(policy: UnipileRetryPolicy | undefined): void {
+  const maxRetries = policy?.maxRetries ?? DEFAULT_MAX_RETRIES
+  if (!Number.isInteger(maxRetries) || maxRetries < 0) {
+    throw new Error("[SixbUnipile] retry.maxRetries must be a non-negative integer.")
   }
 }
 

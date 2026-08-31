@@ -7,6 +7,7 @@
  */
 
 import type { SixbRuntimeContext } from "../../runtime/types"
+import { objectBatchKey } from "../../storage"
 import { ObjectNotFoundError } from "../../storage/errors"
 
 export interface LinkEndpointItem {
@@ -62,5 +63,5 @@ export function requireEndpoints(item: LinkEndpointItem, existing: EndpointExist
 }
 
 function endpointKey(objectTypeId: string, primaryId: string): string {
-  return `${objectTypeId}:${primaryId}`
+  return objectBatchKey(objectTypeId, primaryId)
 }

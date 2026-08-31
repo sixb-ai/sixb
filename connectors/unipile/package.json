@@ -1,6 +1,6 @@
 {
   "name": "@sixb/connector-unipile",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Unipile messaging and LinkedIn outreach connector for Sixb",
   "keywords": [
     "sixb",

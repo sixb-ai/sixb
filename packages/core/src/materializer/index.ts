@@ -77,7 +77,13 @@ export {
   computeProjectionRevision,
 } from "../projections/revision"
 export type { ProjectionOwnership, ResolvedProjection } from "../projections/types"
-export type { MaterializerStorage, OntologyMaterializerDependencies } from "./materializer"
+export type {
+  BoundOntologyMaterializer,
+  MaterializerCommand,
+  MaterializerStorage,
+  OntologyMaterializerContract,
+  OntologyMaterializerDependencies,
+} from "./materializer"
 export { createOntologyMaterializer, OntologyMaterializer } from "./materializer"
 export type {
   CommitIdentity,

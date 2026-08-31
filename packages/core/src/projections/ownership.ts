@@ -42,12 +42,12 @@ export function computeProjectionOwnership(
   return freezeOwnership({
     objects: [],
     links: [],
-    telemetry: [
-      {
+    telemetry: Object.keys(projection.properties)
+      .sort(compareStrings)
+      .map((propertyId) => ({
         objectTypeId: projection.objectTypeId,
-        propertyId: projection.propertyId,
-      },
-    ],
+        propertyId,
+      })),
   })
 }
 

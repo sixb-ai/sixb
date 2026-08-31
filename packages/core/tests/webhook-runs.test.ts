@@ -1,6 +1,6 @@
-import { InMemoryWebhookRunStorage } from "../src/storage"
+import { InMemoryStorage } from "@sixb/core"
 import { runWebhookRunStorageContractSuite } from "../src/testing"
 
-runWebhookRunStorageContractSuite("InMemoryWebhookRunStorage", {
-  createStorage: () => new InMemoryWebhookRunStorage(),
+runWebhookRunStorageContractSuite("InMemoryStorage Webhook runs", {
+  createStorage: () => new InMemoryStorage(),
 })

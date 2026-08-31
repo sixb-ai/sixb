@@ -13,6 +13,7 @@ interface OntologyMaterializationEventBase {
   readonly schemaVersion: 1
   readonly projectId: string
   readonly occurredAt: string
+  readonly correlationId: string
   readonly actor?: EventActor
   readonly origin: OntologyMaterializationOrigin
   readonly commitId: string

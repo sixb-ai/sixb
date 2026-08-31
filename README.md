@@ -222,7 +222,7 @@ independently against the same durable providers.
 
 ## Status
 
-Sixb core is currently `0.1.1`. Packages are versioned independently and publish only when they
+Sixb core is currently `0.1.3`. Packages are versioned independently and publish only when they
 change. APIs may change between minor releases, and database upgrades may require manual
 migration before 1.0. See the [changelog](CHANGELOG.md) for compatibility notes.
 

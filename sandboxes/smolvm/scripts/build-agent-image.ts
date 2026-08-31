@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Build the canonical sixb agent sandbox image archive.
+ * Build the managed SmolVM agent sandbox image archive.
  *
  *   bun run build-agent-image.ts                          # host arch -> shared cache
  *   bun run build-agent-image.ts --platform linux/amd64   # cross-build (e.g. for x86_64 droplets)

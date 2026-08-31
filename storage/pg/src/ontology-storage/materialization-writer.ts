@@ -25,6 +25,7 @@ export class PgMaterializationWriter {
       objectTypeId: item.ref.objectTypeId,
       primaryId: item.ref.primaryId,
       value: item.value,
+      editedAt: item.editedAt,
       lastCommitId: item.lastCommitId,
       updatedAt: item.updatedAt,
       expectedLastCommitId: item.expectedLastCommitId,
@@ -36,10 +37,10 @@ export class PgMaterializationWriter {
           SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, objectInserts)}::jsonb)
         )
         INSERT INTO ontology_object_overrides (
-          project_id, object_type_id, primary_id, value, last_commit_id, updated_at
+          project_id, object_type_id, primary_id, value, edited_at, last_commit_id, updated_at
         )
         SELECT ${projectId}, value->>'objectTypeId', value->>'primaryId', value->'value',
-          value->>'lastCommitId',
+          value->'editedAt', value->>'lastCommitId',
           (value->>'updatedAt')::timestamptz
         FROM staged
         ON CONFLICT DO NOTHING
@@ -55,7 +56,8 @@ export class PgMaterializationWriter {
           SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, objectUpdates)}::jsonb)
         )
         UPDATE ontology_object_overrides AS overrides
-        SET value = staged.value->'value', last_commit_id = staged.value->>'lastCommitId',
+        SET value = staged.value->'value', edited_at = staged.value->'editedAt',
+          last_commit_id = staged.value->>'lastCommitId',
           updated_at = (staged.value->>'updatedAt')::timestamptz
         FROM staged
         WHERE overrides.project_id = ${projectId}

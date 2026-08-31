@@ -15,12 +15,14 @@ export interface LiveRunState {
    * rendering — the view consumes `parts` directly.
    */
   readonly partKeys: readonly string[]
-  /** Model step currently being streamed. Used to keep reused part ids ordered. */
-  readonly stepIndex?: number
+  /** AI SDK model step currently being streamed. Used to keep reused part ids ordered. */
+  readonly stepIndex: number
   /** Set once the worker persists the assistant message; the hook reloads durable state on change. */
   readonly finalizedMessageId: string | null
   /** Terminal run status, or null while in-flight. */
   readonly finishStatus: AgentRunStatus | null
+  /** Stable reason the run ended, when the terminal event supplies one. */
+  readonly finishReason: string | null
   /** Exact durable failure from a failed or cancelled run. */
   readonly finishError: AgentRunFailure | null
   /** Error text surfaced by a stream `error` chunk (not necessarily fatal). */
@@ -41,6 +43,7 @@ export function createLiveRunState(runId: string | null = null): LiveRunState {
     stepIndex: 0,
     finalizedMessageId: null,
     finishStatus: null,
+    finishReason: null,
     finishError: null,
     streamError: null,
   }
@@ -83,6 +86,7 @@ function reduceEvent(state: LiveRunState, event: AgentRunStreamEvent): LiveRunSt
         ...state,
         active: false,
         finishStatus: event.status,
+        finishReason: event.finishReason ?? null,
         finishError: event.error ?? null,
       }
     default:
@@ -90,8 +94,8 @@ function reduceEvent(state: LiveRunState, event: AgentRunStreamEvent): LiveRunSt
   }
 }
 
-// Reduce a Sixb model-loop chunk (typed as opaque JSON on the wire). Unknown shapes are ignored so
-// the stream stays alive when the runtime adds chunk variants this UI does not model yet.
+// Reduce an AI SDK `UIMessageChunk` (typed as opaque JSON on the wire). Unknown shapes are ignored
+// so the stream stays alive even if the SDK emits chunk variants this UI does not model yet.
 function applyChunk(state: LiveRunState, chunk: unknown): LiveRunState {
   if (!isRecord(chunk) || typeof chunk.type !== "string") return state
 
@@ -105,7 +109,7 @@ function applyChunk(state: LiveRunState, chunk: unknown): LiveRunState {
     case "reasoning-end":
       return reduceReasoning(state, chunk)
     case "start-step":
-      return { ...state, stepIndex: liveStepIndex(state) + 1 }
+      return { ...state, stepIndex: state.stepIndex + 1 }
     case "tool-input-start":
     case "tool-input-delta":
     case "tool-input-available":
@@ -125,11 +129,19 @@ function applyChunk(state: LiveRunState, chunk: unknown): LiveRunState {
 function reduceText(state: LiveRunState, chunk: Record<string, unknown>): LiveRunState {
   const id = typeof chunk.id === "string" ? chunk.id : "text"
   const delta = typeof chunk.delta === "string" ? chunk.delta : ""
+  const key = spanKey("text", id, state.stepIndex)
+  const existingIndex = state.partKeys.indexOf(key)
+
+  // Start/end lifecycle chunks carry no content. Likewise, do not let leading whitespace create a
+  // placeholder row; once a real span exists, whitespace deltas remain significant between words.
+  if (!delta || (existingIndex === -1 && !delta.trim())) return state
+
   return upsertPart(
     state,
-    spanKey("text", id, liveStepIndex(state)),
+    key,
     () => ({ kind: "text", text: delta }),
-    (part) => (part.kind === "text" && delta ? { kind: "text", text: part.text + delta } : part)
+    (part) => (part.kind === "text" ? { kind: "text", text: part.text + delta } : part),
+    existingIndex
   )
 }
 
@@ -139,7 +151,7 @@ function reduceReasoning(state: LiveRunState, chunk: Record<string, unknown>): L
   const done = chunk.type === "reasoning-end"
   return upsertPart(
     state,
-    spanKey("reasoning", id, liveStepIndex(state)),
+    spanKey("reasoning", id, state.stepIndex),
     () => ({ kind: "reasoning", text: delta, streaming: !done }),
     (part) =>
       part.kind === "reasoning"
@@ -214,9 +226,9 @@ function upsertPart(
   state: LiveRunState,
   key: string,
   create: () => NormalizedPart,
-  update: (part: NormalizedPart) => NormalizedPart
+  update: (part: NormalizedPart) => NormalizedPart,
+  index = state.partKeys.indexOf(key)
 ): LiveRunState {
-  const index = state.partKeys.indexOf(key)
   if (index === -1) {
     return { ...state, parts: [...state.parts, create()], partKeys: [...state.partKeys, key] }
   }
@@ -232,8 +244,4 @@ function spanKey(kind: "text" | "reasoning", id: string, stepIndex: number): str
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
-}
-
-function liveStepIndex(state: LiveRunState): number {
-  return state.stepIndex ?? 0
 }

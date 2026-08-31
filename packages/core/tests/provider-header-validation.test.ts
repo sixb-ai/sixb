@@ -23,6 +23,7 @@ function projectionHeader(originProjectionId = "devices"): MaterializationPlanHe
       id: "projection-commit",
       idempotencyKey: "projection:run",
       requestHash: "projection-request",
+      executionId: "projection-execution",
       origin: {
         kind: "projection",
         projectionId: originProjectionId,
@@ -59,6 +60,7 @@ function telemetryHeader(input?: {
       id: "telemetry-commit",
       idempotencyKey: "projection:run:batch:0",
       requestHash: "telemetry-request",
+      executionId: "projection-execution",
       origin: {
         kind: "telemetry",
         source: {
@@ -97,6 +99,11 @@ describe("materialization header validation", () => {
   test("accepts correlated projection and telemetry headers", () => {
     expect(() => assertMaterializationHeader(projectionHeader())).not.toThrow()
     expect(() => assertMaterializationHeader(telemetryHeader())).not.toThrow()
+    expect(() =>
+      assertMaterializationHeader(
+        telemetryHeader({ sourceRowCount: 2, sourceRowsSkipped: 0, inputPointCount: 4 })
+      )
+    ).not.toThrow()
   })
 
   test("reports the exact projection correlation that failed", () => {
@@ -110,8 +117,6 @@ describe("materialization header validation", () => {
       assertMaterializationHeader(
         telemetryHeader({ sourceRowCount: 3, sourceRowsSkipped: 1, inputPointCount: 1 })
       )
-    ).toThrow(
-      "Projection telemetry source row count does not match input points plus skipped rows."
-    )
+    ).toThrow("Projection telemetry input points do not account for every non-skipped source row.")
   })
 })

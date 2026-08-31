@@ -76,6 +76,30 @@ export type ObjectQueryFacetsResponse = {
   plan: ObjectQueryPlanSummary
 }
 
+export type ObjectQueryLink = {
+  source: ObjectRef
+  linkId: string
+  target: ObjectRef
+  properties?: {
+    [key: string]: unknown
+  }
+  createdAt: string
+  updatedAt: string
+}
+
+export type ObjectQueryLinksResponse = {
+  /**
+   * Selected objects followed by visible endpoint objects from this link page, de-duplicated. Empty unless includeObjects is true.
+   */
+  objects: Array<ObjectQueryObject>
+  /**
+   * Visible physical links in deterministic identity order.
+   */
+  links: Array<ObjectQueryLink>
+  hasMore: boolean
+  nextPageToken?: string
+}
+
 export type ObjectQueryErrorResponse = {
   error: string
   issues?: Array<ObjectQueryIssue>
@@ -104,11 +128,38 @@ export type ObjectQueryFacetsRequest = {
   facets: Array<ObjectQueryFacetRequest>
 }
 
+export type ObjectQueryLinksRequest = {
+  query: ObjectQuery
+  direction?: "outgoing" | "incoming" | "both"
+  linkId?: string
+  /**
+   * Include selected objects and visible endpoints from the current link page.
+   */
+  includeObjects?: boolean
+  pageSize?: number
+  /**
+   * Opaque token from the previous page. The project, normalized query, direction, and linkId must remain unchanged.
+   */
+  pageToken?: string
+}
+
+export type ObjectRef = {
+  objectTypeId: string
+  primaryId: string
+}
+
 export type ObjectQuery =
   | {
       kind: "start"
       objectTypeId: string
       includeSubtypes?: boolean
+    }
+  | {
+      kind: "refs"
+      /**
+       * One to 1,000 unique identities after normalization; duplicate entries are accepted and removed.
+       */
+      refs: Array<ObjectRef>
     }
   | {
       kind: "filter"
@@ -1584,6 +1635,350 @@ export type ReactivateAuthMemberResponses = {
 export type ReactivateAuthMemberResponse =
   ReactivateAuthMemberResponses[keyof ReactivateAuthMemberResponses]
 
+export type GetAiAccountingOverviewData = {
+  body?: never
+  path?: never
+  query: {
+    from: string
+    to: string
+    providerId?: string
+    modelId?: string
+    bucket: "hour" | "day" | "week"
+  }
+  url: "/api/ai/accounting/overview"
+}
+
+export type GetAiAccountingOverviewErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type GetAiAccountingOverviewError =
+  GetAiAccountingOverviewErrors[keyof GetAiAccountingOverviewErrors]
+
+export type GetAiAccountingOverviewResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    range: {
+      from: string
+      to: string
+    }
+    bucket: "hour" | "day" | "week"
+    totals: {
+      modelCallCount: number
+      usage: {
+        inputTokens?: number
+        outputTokens?: number
+        totalTokens?: number
+        uncachedInputTokens?: number
+        cacheReadInputTokens?: number
+        cacheWriteInputTokens?: number
+        textOutputTokens?: number
+        reasoningOutputTokens?: number
+        reportingStatus: "complete" | "partial" | "unavailable"
+      }
+      costs: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
+      }
+    }
+    series: Array<{
+      modelCallCount: number
+      usage: {
+        inputTokens?: number
+        outputTokens?: number
+        totalTokens?: number
+        uncachedInputTokens?: number
+        cacheReadInputTokens?: number
+        cacheWriteInputTokens?: number
+        textOutputTokens?: number
+        reasoningOutputTokens?: number
+        reportingStatus: "complete" | "partial" | "unavailable"
+      }
+      costs: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
+      }
+      start: string
+      end: string
+    }>
+    models: Array<{
+      modelCallCount: number
+      usage: {
+        inputTokens?: number
+        outputTokens?: number
+        totalTokens?: number
+        uncachedInputTokens?: number
+        cacheReadInputTokens?: number
+        cacheWriteInputTokens?: number
+        textOutputTokens?: number
+        reasoningOutputTokens?: number
+        reportingStatus: "complete" | "partial" | "unavailable"
+      }
+      costs: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
+      }
+      providerId: string
+      modelId: string
+    }>
+    agents: Array<{
+      modelCallCount: number
+      usage: {
+        inputTokens?: number
+        outputTokens?: number
+        totalTokens?: number
+        uncachedInputTokens?: number
+        cacheReadInputTokens?: number
+        cacheWriteInputTokens?: number
+        textOutputTokens?: number
+        reasoningOutputTokens?: number
+        reportingStatus: "complete" | "partial" | "unavailable"
+      }
+      costs: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
+      }
+      agentId: string
+    }>
+    workflows: Array<{
+      modelCallCount: number
+      usage: {
+        inputTokens?: number
+        outputTokens?: number
+        totalTokens?: number
+        uncachedInputTokens?: number
+        cacheReadInputTokens?: number
+        cacheWriteInputTokens?: number
+        textOutputTokens?: number
+        reasoningOutputTokens?: number
+        reportingStatus: "complete" | "partial" | "unavailable"
+      }
+      costs: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
+      }
+      workflowId: string
+    }>
+  }
+}
+
+export type GetAiAccountingOverviewResponse =
+  GetAiAccountingOverviewResponses[keyof GetAiAccountingOverviewResponses]
+
+export type ListAiModelCallsData = {
+  body?: never
+  path?: never
+  query: {
+    from: string
+    to: string
+    providerId?: string
+    modelId?: string
+    executionId?: string
+    valuationStatus?: "rated" | "unpriceable" | "unvalued"
+    limit?: string
+    offset?: string
+  }
+  url: "/api/ai/model-calls"
+}
+
+export type ListAiModelCallsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type ListAiModelCallsError = ListAiModelCallsErrors[keyof ListAiModelCallsErrors]
+
+export type ListAiModelCallsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    items: Array<{
+      usage: {
+        id: string
+        executionId: string
+        attempt: number
+        callId: string
+        providerId: string
+        requestedModelId: string
+        responseModelId?: string
+        responseId: string
+        usage: {
+          inputTokens?: number
+          outputTokens?: number
+          totalTokens?: number
+          uncachedInputTokens?: number
+          cacheReadInputTokens?: number
+          cacheWriteInputTokens?: number
+          textOutputTokens?: number
+          reasoningOutputTokens?: number
+          reportingStatus: "complete" | "partial" | "unavailable"
+        }
+        occurredAt: string
+        recordedAt: string
+      }
+      attribution?:
+        | {
+            kind: "agent"
+            agentId: string
+            agentRunId: string
+            threadId: string
+          }
+        | {
+            kind: "workflowAgent"
+            agentId: string
+            nodeRunId: string
+            workflowId: string
+            workflowRunId: string
+          }
+      cost?:
+        | {
+            status: "rated"
+            billingIdentity: {
+              providerId: string
+              modelId: string
+            }
+            pricingContext: {
+              serviceTier?: string
+              batch?: boolean
+              region?: string
+              inferenceGeo?: string
+              routedProviderId?: string
+              routedModelId?: string
+              deploymentId?: string
+              inferenceProfileId?: string
+              cacheWriteTtlSeconds?: number
+              mode?: string
+            }
+            priceSource: {
+              sourceId: string
+              sourceEntryId: string
+              sourceVersion: string
+              sourceUrl: string
+              observedAt: string
+            }
+            money: {
+              currency: string
+              amountNanos: string
+            }
+            components: Array<{
+              meter:
+                | "tokens.input.total"
+                | "tokens.input.uncached"
+                | "tokens.input.cacheRead"
+                | "tokens.input.cacheWrite"
+                | "tokens.input.cacheWrite5m"
+                | "tokens.input.cacheWrite1h"
+                | "tokens.output.total"
+                | "tokens.output.text"
+                | "tokens.output.reasoning"
+              quantity: string
+              rateAmountNanosPerMillion: string
+              chargeAmountNanos: string
+            }>
+            ratedAt: string
+          }
+        | {
+            status: "unpriceable"
+            billingIdentity?: {
+              providerId: string
+              modelId: string
+            }
+            pricingContext: {
+              serviceTier?: string
+              batch?: boolean
+              region?: string
+              inferenceGeo?: string
+              routedProviderId?: string
+              routedModelId?: string
+              deploymentId?: string
+              inferenceProfileId?: string
+              cacheWriteTtlSeconds?: number
+              mode?: string
+            }
+            priceSource: {
+              sourceId: string
+              sourceEntryId: string
+              sourceVersion: string
+              sourceUrl: string
+              observedAt: string
+            }
+            reason:
+              | "missingBillingIdentity"
+              | "missingCatalogEntry"
+              | "missingUsageMeter"
+              | "unsupportedPricingDimension"
+              | "invalidUsageForFormula"
+            missingMeters?: Array<
+              | "tokens.input.total"
+              | "tokens.input.uncached"
+              | "tokens.input.cacheRead"
+              | "tokens.input.cacheWrite"
+              | "tokens.input.cacheWrite5m"
+              | "tokens.input.cacheWrite1h"
+              | "tokens.output.total"
+              | "tokens.output.text"
+              | "tokens.output.reasoning"
+            >
+            ratedAt: string
+          }
+      valuationStatus: "rated" | "unpriceable" | "unvalued"
+    }>
+    hasMore: boolean
+    total: number
+  }
+}
+
+export type ListAiModelCallsResponse = ListAiModelCallsResponses[keyof ListAiModelCallsResponses]
+
 export type GetProjectInfoData = {
   body?: never
   path?: never
@@ -1659,6 +2054,9 @@ export type ListConnectorsResponses = {
   200: Array<{
     id: string
     type: string
+    connection: {
+      authentication: "oauth2"
+    } | null
     syncIds: Array<string>
     webhooks: Array<{
       id: string
@@ -1700,6 +2098,9 @@ export type GetConnectorResponses = {
   200: {
     id: string
     type: string
+    connection: {
+      authentication: "oauth2"
+    } | null
     syncIds: Array<string>
     webhooks: Array<{
       id: string
@@ -1713,6 +2114,1115 @@ export type GetConnectorResponses = {
 }
 
 export type GetConnectorResponse = GetConnectorResponses[keyof GetConnectorResponses]
+
+export type ListConnectorConnectionsData = {
+  body?: never
+  path: {
+    connectorId: string
+  }
+  query?: never
+  url: "/api/connectors/{connectorId}/connections"
+}
+
+export type ListConnectorConnectionsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "connector.authorization_invalid" | "connector.configuration_invalid"
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "connector.not_found"
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "internal.unexpected"
+  }
+}
+
+export type ListConnectorConnectionsError =
+  ListConnectorConnectionsErrors[keyof ListConnectorConnectionsErrors]
+
+export type ListConnectorConnectionsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: Array<{
+    id: string
+    connectorId: string
+    owner: {
+      type: "project"
+    }
+    slot: string
+    account: {
+      id: string
+      label: string
+      description?: string
+      avatarUrl?: string
+    }
+    status: "connected" | "needs_reauthorization" | "disconnected"
+  }>
+}
+
+export type ListConnectorConnectionsResponse =
+  ListConnectorConnectionsResponses[keyof ListConnectorConnectionsResponses]
+
+export type DisconnectConnectorConnectionData = {
+  body?: never
+  path: {
+    connectorId: string
+    connectionId: string
+  }
+  query?: never
+  url: "/api/connectors/{connectorId}/connections/{connectionId}"
+}
+
+export type DisconnectConnectorConnectionErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "connector.authorization_invalid" | "connector.configuration_invalid"
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "connector.not_found"
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?:
+      | "connector.authorization_required"
+      | "connector.operation_conflict"
+      | "connector.operation_in_progress"
+      | "connector.replacement_required"
+      | "connector.revocation_pending"
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "internal.unexpected"
+  }
+}
+
+export type DisconnectConnectorConnectionError =
+  DisconnectConnectorConnectionErrors[keyof DisconnectConnectorConnectionErrors]
+
+export type DisconnectConnectorConnectionResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    success: boolean
+  }
+}
+
+export type DisconnectConnectorConnectionResponse =
+  DisconnectConnectorConnectionResponses[keyof DisconnectConnectorConnectionResponses]
+
+export type RevokeConnectorConnectionData = {
+  body?: never
+  path: {
+    connectorId: string
+    connectionId: string
+  }
+  query?: never
+  url: "/api/connectors/{connectorId}/connections/{connectionId}/revoke"
+}
+
+export type RevokeConnectorConnectionErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "connector.authorization_invalid" | "connector.configuration_invalid"
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "connector.not_found"
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?:
+      | "connector.authorization_required"
+      | "connector.operation_conflict"
+      | "connector.operation_in_progress"
+      | "connector.replacement_required"
+      | "connector.revocation_pending"
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "internal.unexpected"
+  }
+  /**
+   * Response for status 502
+   */
+  502: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "connector.adapter_invalid" | "connector.provider_failed"
+  }
+  /**
+   * Response for status 503
+   */
+  503: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "connector.credentials_unavailable" | "connector.provider_unavailable"
+  }
+}
+
+export type RevokeConnectorConnectionError =
+  RevokeConnectorConnectionErrors[keyof RevokeConnectorConnectionErrors]
+
+export type RevokeConnectorConnectionResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    affectedConnections: Array<{
+      id: string
+      connectorId: string
+      owner: {
+        type: "project"
+      }
+      slot: string
+      account: {
+        id: string
+        label: string
+        description?: string
+        avatarUrl?: string
+      }
+      status: "connected" | "needs_reauthorization" | "disconnected"
+    }>
+  }
+}
+
+export type RevokeConnectorConnectionResponse =
+  RevokeConnectorConnectionResponses[keyof RevokeConnectorConnectionResponses]
+
+export type StartConnectorConnectionRunData = {
+  body: {
+    slot: string
+    returnTo: string
+  }
+  path: {
+    connectorId: string
+  }
+  query?: never
+  url: "/api/connectors/{connectorId}/connection-runs"
+}
+
+export type StartConnectorConnectionRunErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "connector.authorization_invalid" | "connector.configuration_invalid"
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "connector.not_found"
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?:
+      | "connector.authorization_required"
+      | "connector.operation_conflict"
+      | "connector.operation_in_progress"
+      | "connector.replacement_required"
+      | "connector.revocation_pending"
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "internal.unexpected"
+  }
+  /**
+   * Response for status 502
+   */
+  502: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "connector.adapter_invalid" | "connector.provider_failed"
+  }
+  /**
+   * Response for status 503
+   */
+  503: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "connector.credentials_unavailable" | "connector.provider_unavailable"
+  }
+}
+
+export type StartConnectorConnectionRunError =
+  StartConnectorConnectionRunErrors[keyof StartConnectorConnectionRunErrors]
+
+export type StartConnectorConnectionRunResponses = {
+  /**
+   * Response for status 201
+   */
+  201: {
+    runId: string
+    authorizationUrl: string
+    affectedConnections: Array<{
+      id: string
+      connectorId: string
+      owner: {
+        type: "project"
+      }
+      slot: string
+      account: {
+        id: string
+        label: string
+        description?: string
+        avatarUrl?: string
+      }
+      status: "connected" | "needs_reauthorization" | "disconnected"
+    }>
+  }
+}
+
+export type StartConnectorConnectionRunResponse =
+  StartConnectorConnectionRunResponses[keyof StartConnectorConnectionRunResponses]
+
+export type GetConnectorConnectionRunData = {
+  body?: never
+  path: {
+    connectorId: string
+    runId: string
+  }
+  query?: never
+  url: "/api/connectors/{connectorId}/connection-runs/{runId}"
+}
+
+export type GetConnectorConnectionRunErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "connector.authorization_invalid" | "connector.configuration_invalid"
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "connector.not_found"
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "internal.unexpected"
+  }
+}
+
+export type GetConnectorConnectionRunError =
+  GetConnectorConnectionRunErrors[keyof GetConnectorConnectionRunErrors]
+
+export type GetConnectorConnectionRunResponses = {
+  /**
+   * Response for status 200
+   */
+  200:
+    | {
+        id: string
+        connectorId: string
+        kind: "connect" | "reauthorize"
+        owner: {
+          type: "project"
+        }
+        slot: string
+        createdAt: string
+        updatedAt: string
+        status: "waiting"
+        waitingFor: "provider_authorization"
+        expiresAt: string
+      }
+    | {
+        id: string
+        connectorId: string
+        kind: "connect" | "reauthorize"
+        owner: {
+          type: "project"
+        }
+        slot: string
+        createdAt: string
+        updatedAt: string
+        status: "running"
+      }
+    | {
+        id: string
+        connectorId: string
+        kind: "connect" | "reauthorize"
+        owner: {
+          type: "project"
+        }
+        slot: string
+        createdAt: string
+        updatedAt: string
+        status: "waiting"
+        waitingFor: "account_selection"
+        accounts: Array<{
+          id: string
+          label: string
+          description?: string
+          avatarUrl?: string
+        }>
+        expiresAt: string
+      }
+    | {
+        id: string
+        connectorId: string
+        kind: "connect" | "reauthorize"
+        owner: {
+          type: "project"
+        }
+        slot: string
+        createdAt: string
+        updatedAt: string
+        status: "succeeded"
+        connections: Array<{
+          id: string
+          connectorId: string
+          owner: {
+            type: "project"
+          }
+          slot: string
+          account: {
+            id: string
+            label: string
+            description?: string
+            avatarUrl?: string
+          }
+          status: "connected" | "needs_reauthorization" | "disconnected"
+        }>
+        finishedAt: string
+      }
+    | {
+        id: string
+        connectorId: string
+        kind: "connect" | "reauthorize"
+        owner: {
+          type: "project"
+        }
+        slot: string
+        createdAt: string
+        updatedAt: string
+        status: "failed"
+        error: {
+          code:
+            | "internal.unexpected"
+            | "connector.adapter_invalid"
+            | "connector.authorization_invalid"
+            | "connector.authorization_required"
+            | "connector.credentials_unavailable"
+            | "connector.not_found"
+            | "connector.operation_conflict"
+            | "connector.operation_in_progress"
+            | "connector.provider_failed"
+            | "connector.provider_unavailable"
+          message: string
+          retryable: boolean
+          at: string
+          /**
+           * Any JSON-compatible value.
+           */
+          details?:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+          truncated?: true
+        }
+        finishedAt: string
+      }
+    | {
+        id: string
+        connectorId: string
+        kind: "connect" | "reauthorize"
+        owner: {
+          type: "project"
+        }
+        slot: string
+        createdAt: string
+        updatedAt: string
+        status: "cancelled" | "expired"
+        finishedAt: string
+      }
+}
+
+export type GetConnectorConnectionRunResponse =
+  GetConnectorConnectionRunResponses[keyof GetConnectorConnectionRunResponses]
+
+export type AddConnectorConnectionData = {
+  body: {
+    slot: string
+  }
+  path: {
+    connectorId: string
+    connectionId: string
+  }
+  query?: never
+  url: "/api/connectors/{connectorId}/connections/{connectionId}/connection-runs"
+}
+
+export type AddConnectorConnectionErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "connector.authorization_invalid" | "connector.configuration_invalid"
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "connector.not_found"
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?:
+      | "connector.authorization_required"
+      | "connector.operation_conflict"
+      | "connector.operation_in_progress"
+      | "connector.replacement_required"
+      | "connector.revocation_pending"
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "internal.unexpected"
+  }
+}
+
+export type AddConnectorConnectionError =
+  AddConnectorConnectionErrors[keyof AddConnectorConnectionErrors]
+
+export type AddConnectorConnectionResponses = {
+  /**
+   * Response for status 201
+   */
+  201:
+    | {
+        id: string
+        connectorId: string
+        kind: "connect" | "reauthorize"
+        owner: {
+          type: "project"
+        }
+        slot: string
+        createdAt: string
+        updatedAt: string
+        status: "waiting"
+        waitingFor: "provider_authorization"
+        expiresAt: string
+      }
+    | {
+        id: string
+        connectorId: string
+        kind: "connect" | "reauthorize"
+        owner: {
+          type: "project"
+        }
+        slot: string
+        createdAt: string
+        updatedAt: string
+        status: "running"
+      }
+    | {
+        id: string
+        connectorId: string
+        kind: "connect" | "reauthorize"
+        owner: {
+          type: "project"
+        }
+        slot: string
+        createdAt: string
+        updatedAt: string
+        status: "waiting"
+        waitingFor: "account_selection"
+        accounts: Array<{
+          id: string
+          label: string
+          description?: string
+          avatarUrl?: string
+        }>
+        expiresAt: string
+      }
+    | {
+        id: string
+        connectorId: string
+        kind: "connect" | "reauthorize"
+        owner: {
+          type: "project"
+        }
+        slot: string
+        createdAt: string
+        updatedAt: string
+        status: "succeeded"
+        connections: Array<{
+          id: string
+          connectorId: string
+          owner: {
+            type: "project"
+          }
+          slot: string
+          account: {
+            id: string
+            label: string
+            description?: string
+            avatarUrl?: string
+          }
+          status: "connected" | "needs_reauthorization" | "disconnected"
+        }>
+        finishedAt: string
+      }
+    | {
+        id: string
+        connectorId: string
+        kind: "connect" | "reauthorize"
+        owner: {
+          type: "project"
+        }
+        slot: string
+        createdAt: string
+        updatedAt: string
+        status: "failed"
+        error: {
+          code:
+            | "internal.unexpected"
+            | "connector.adapter_invalid"
+            | "connector.authorization_invalid"
+            | "connector.authorization_required"
+            | "connector.credentials_unavailable"
+            | "connector.not_found"
+            | "connector.operation_conflict"
+            | "connector.operation_in_progress"
+            | "connector.provider_failed"
+            | "connector.provider_unavailable"
+          message: string
+          retryable: boolean
+          at: string
+          /**
+           * Any JSON-compatible value.
+           */
+          details?:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+          truncated?: true
+        }
+        finishedAt: string
+      }
+    | {
+        id: string
+        connectorId: string
+        kind: "connect" | "reauthorize"
+        owner: {
+          type: "project"
+        }
+        slot: string
+        createdAt: string
+        updatedAt: string
+        status: "cancelled" | "expired"
+        finishedAt: string
+      }
+}
+
+export type AddConnectorConnectionResponse =
+  AddConnectorConnectionResponses[keyof AddConnectorConnectionResponses]
+
+export type SelectConnectorConnectionRunAccountData = {
+  body: {
+    accountId: string
+    replace?: boolean
+  }
+  path: {
+    connectorId: string
+    runId: string
+  }
+  query?: never
+  url: "/api/connectors/{connectorId}/connection-runs/{runId}/selection"
+}
+
+export type SelectConnectorConnectionRunAccountErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "connector.authorization_invalid" | "connector.configuration_invalid"
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "connector.not_found"
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?:
+      | "connector.authorization_required"
+      | "connector.operation_conflict"
+      | "connector.operation_in_progress"
+      | "connector.replacement_required"
+      | "connector.revocation_pending"
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "internal.unexpected"
+  }
+}
+
+export type SelectConnectorConnectionRunAccountError =
+  SelectConnectorConnectionRunAccountErrors[keyof SelectConnectorConnectionRunAccountErrors]
+
+export type SelectConnectorConnectionRunAccountResponses = {
+  /**
+   * Response for status 200
+   */
+  200:
+    | {
+        id: string
+        connectorId: string
+        kind: "connect" | "reauthorize"
+        owner: {
+          type: "project"
+        }
+        slot: string
+        createdAt: string
+        updatedAt: string
+        status: "waiting"
+        waitingFor: "provider_authorization"
+        expiresAt: string
+      }
+    | {
+        id: string
+        connectorId: string
+        kind: "connect" | "reauthorize"
+        owner: {
+          type: "project"
+        }
+        slot: string
+        createdAt: string
+        updatedAt: string
+        status: "running"
+      }
+    | {
+        id: string
+        connectorId: string
+        kind: "connect" | "reauthorize"
+        owner: {
+          type: "project"
+        }
+        slot: string
+        createdAt: string
+        updatedAt: string
+        status: "waiting"
+        waitingFor: "account_selection"
+        accounts: Array<{
+          id: string
+          label: string
+          description?: string
+          avatarUrl?: string
+        }>
+        expiresAt: string
+      }
+    | {
+        id: string
+        connectorId: string
+        kind: "connect" | "reauthorize"
+        owner: {
+          type: "project"
+        }
+        slot: string
+        createdAt: string
+        updatedAt: string
+        status: "succeeded"
+        connections: Array<{
+          id: string
+          connectorId: string
+          owner: {
+            type: "project"
+          }
+          slot: string
+          account: {
+            id: string
+            label: string
+            description?: string
+            avatarUrl?: string
+          }
+          status: "connected" | "needs_reauthorization" | "disconnected"
+        }>
+        finishedAt: string
+      }
+    | {
+        id: string
+        connectorId: string
+        kind: "connect" | "reauthorize"
+        owner: {
+          type: "project"
+        }
+        slot: string
+        createdAt: string
+        updatedAt: string
+        status: "failed"
+        error: {
+          code:
+            | "internal.unexpected"
+            | "connector.adapter_invalid"
+            | "connector.authorization_invalid"
+            | "connector.authorization_required"
+            | "connector.credentials_unavailable"
+            | "connector.not_found"
+            | "connector.operation_conflict"
+            | "connector.operation_in_progress"
+            | "connector.provider_failed"
+            | "connector.provider_unavailable"
+          message: string
+          retryable: boolean
+          at: string
+          /**
+           * Any JSON-compatible value.
+           */
+          details?:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+          truncated?: true
+        }
+        finishedAt: string
+      }
+    | {
+        id: string
+        connectorId: string
+        kind: "connect" | "reauthorize"
+        owner: {
+          type: "project"
+        }
+        slot: string
+        createdAt: string
+        updatedAt: string
+        status: "cancelled" | "expired"
+        finishedAt: string
+      }
+}
+
+export type SelectConnectorConnectionRunAccountResponse =
+  SelectConnectorConnectionRunAccountResponses[keyof SelectConnectorConnectionRunAccountResponses]
+
+export type ReauthorizeConnectorConnectionData = {
+  body: {
+    returnTo: string
+  }
+  path: {
+    connectorId: string
+    connectionId: string
+  }
+  query?: never
+  url: "/api/connectors/{connectorId}/connections/{connectionId}/reauthorize"
+}
+
+export type ReauthorizeConnectorConnectionErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "connector.authorization_invalid" | "connector.configuration_invalid"
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "connector.not_found"
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?:
+      | "connector.authorization_required"
+      | "connector.operation_conflict"
+      | "connector.operation_in_progress"
+      | "connector.replacement_required"
+      | "connector.revocation_pending"
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "internal.unexpected"
+  }
+  /**
+   * Response for status 502
+   */
+  502: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "connector.adapter_invalid" | "connector.provider_failed"
+  }
+  /**
+   * Response for status 503
+   */
+  503: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code?: "connector.credentials_unavailable" | "connector.provider_unavailable"
+  }
+}
+
+export type ReauthorizeConnectorConnectionError =
+  ReauthorizeConnectorConnectionErrors[keyof ReauthorizeConnectorConnectionErrors]
+
+export type ReauthorizeConnectorConnectionResponses = {
+  /**
+   * Response for status 201
+   */
+  201: {
+    runId: string
+    authorizationUrl: string
+    affectedConnections: Array<{
+      id: string
+      connectorId: string
+      owner: {
+        type: "project"
+      }
+      slot: string
+      account: {
+        id: string
+        label: string
+        description?: string
+        avatarUrl?: string
+      }
+      status: "connected" | "needs_reauthorization" | "disconnected"
+    }>
+  }
+}
+
+export type ReauthorizeConnectorConnectionResponse =
+  ReauthorizeConnectorConnectionResponses[keyof ReauthorizeConnectorConnectionResponses]
 
 export type ListDatasetsData = {
   body?: never
@@ -2142,8 +3652,9 @@ export type ListSyncsResponses = {
       syncId: string
       datasetId: string
       mode: "snapshot" | "append" | "merge"
-      status: "running" | "succeeded" | "failed" | "cancelled"
-      startedAt: string
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      queuedAt: string
+      startedAt?: string
       finishedAt?: string
       rowsRead?: number
       output?: {
@@ -2153,7 +3664,11 @@ export type ListSyncsResponses = {
       expectedLatestVersionId?: string
       commitMessage?: string
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "sync.execution_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "queue.enqueue_failed"
+          | "sync.execution_failed"
         message: string
         retryable: boolean
         at: string
@@ -2243,8 +3758,9 @@ export type GetSyncResponses = {
       syncId: string
       datasetId: string
       mode: "snapshot" | "append" | "merge"
-      status: "running" | "succeeded" | "failed" | "cancelled"
-      startedAt: string
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      queuedAt: string
+      startedAt?: string
       finishedAt?: string
       rowsRead?: number
       output?: {
@@ -2254,7 +3770,11 @@ export type GetSyncResponses = {
       expectedLatestVersionId?: string
       commitMessage?: string
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "sync.execution_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "queue.enqueue_failed"
+          | "sync.execution_failed"
         message: string
         retryable: boolean
         at: string
@@ -2284,7 +3804,7 @@ export type ListSyncRunsData = {
   query?: {
     syncId?: string
     datasetId?: string
-    status?: "running" | "succeeded" | "failed" | "cancelled"
+    status?: "queued" | "running" | "succeeded" | "failed" | "cancelled"
     startedAfter?: string
     startedBefore?: string
     limit?: string
@@ -2322,8 +3842,9 @@ export type ListSyncRunsResponses = {
       syncId: string
       datasetId: string
       mode: "snapshot" | "append" | "merge"
-      status: "running" | "succeeded" | "failed" | "cancelled"
-      startedAt: string
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      queuedAt: string
+      startedAt?: string
       finishedAt?: string
       rowsRead?: number
       output?: {
@@ -2333,7 +3854,11 @@ export type ListSyncRunsResponses = {
       expectedLatestVersionId?: string
       commitMessage?: string
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "sync.execution_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "queue.enqueue_failed"
+          | "sync.execution_failed"
         message: string
         retryable: boolean
         at: string
@@ -2494,15 +4019,20 @@ export type ListPipelinesResponses = {
       id: string
       projectId: string
       pipelineId: string
-      status: "running" | "succeeded" | "failed" | "cancelled"
-      startedAt: string
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      queuedAt: string
+      startedAt?: string
       finishedAt?: string
       output?: {
         datasetId: string
         versionId: string
       }
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "pipeline.step_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "queue.enqueue_failed"
+          | "pipeline.step_failed"
         message: string
         retryable: boolean
         at: string
@@ -2625,15 +4155,20 @@ export type GetPipelineResponses = {
       id: string
       projectId: string
       pipelineId: string
-      status: "running" | "succeeded" | "failed" | "cancelled"
-      startedAt: string
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      queuedAt: string
+      startedAt?: string
       finishedAt?: string
       output?: {
         datasetId: string
         versionId: string
       }
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "pipeline.step_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "queue.enqueue_failed"
+          | "pipeline.step_failed"
         message: string
         retryable: boolean
         at: string
@@ -2662,7 +4197,7 @@ export type ListPipelineRunsData = {
   path?: never
   query?: {
     pipelineId?: string
-    status?: "running" | "succeeded" | "failed" | "cancelled"
+    status?: "queued" | "running" | "succeeded" | "failed" | "cancelled"
     startedAfter?: string
     startedBefore?: string
     limit?: string
@@ -2698,15 +4233,20 @@ export type ListPipelineRunsResponses = {
       id: string
       projectId: string
       pipelineId: string
-      status: "running" | "succeeded" | "failed" | "cancelled"
-      startedAt: string
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      queuedAt: string
+      startedAt?: string
       finishedAt?: string
       output?: {
         datasetId: string
         versionId: string
       }
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "pipeline.step_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "queue.enqueue_failed"
+          | "pipeline.step_failed"
         message: string
         retryable: boolean
         at: string
@@ -2773,15 +4313,20 @@ export type GetPipelineRunResponses = {
       id: string
       projectId: string
       pipelineId: string
-      status: "running" | "succeeded" | "failed" | "cancelled"
-      startedAt: string
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      queuedAt: string
+      startedAt?: string
       finishedAt?: string
       output?: {
         datasetId: string
         versionId: string
       }
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "pipeline.step_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "queue.enqueue_failed"
+          | "pipeline.step_failed"
         message: string
         retryable: boolean
         at: string
@@ -2821,7 +4366,11 @@ export type GetPipelineRunResponses = {
       }
       rowsWritten?: number
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "pipeline.step_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "queue.enqueue_failed"
+          | "pipeline.step_failed"
         message: string
         retryable: boolean
         at: string
@@ -3904,6 +5453,15 @@ export type GetWorkflowRunResponses = {
           reasoningOutputTokens?: number
           reportingStatus: "complete" | "partial" | "unavailable"
         }
+        cost?: {
+          amounts: Array<{
+            currency: string
+            amountNanos: string
+          }>
+          ratedCallCount: number
+          unpriceableCallCount: number
+          unvaluedCallCount: number
+        }
         startedAt?: string
         completedAt?: string
       }
@@ -3968,12 +5526,213 @@ export type GetWorkflowAgentNodeExecutionResponses = {
       reasoningOutputTokens?: number
       reportingStatus: "complete" | "partial" | "unavailable"
     }
+    cost?: {
+      amounts: Array<{
+        currency: string
+        amountNanos: string
+      }>
+      ratedCallCount: number
+      unpriceableCallCount: number
+      unvaluedCallCount: number
+    }
     startedAt?: string
     completedAt?: string
     nodeRunId: string
     prompt: string
-    trace?: Array<unknown>
-    diagnostics?: Array<unknown>
+    trace?: Array<
+      | {
+          type: "text"
+          text: string
+          /**
+           * Any JSON-compatible value.
+           */
+          providerMetadata?:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+        }
+      | {
+          type: "reasoning"
+          text: string
+          /**
+           * Any JSON-compatible value.
+           */
+          providerMetadata?:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+        }
+      | {
+          type: "step-start"
+        }
+      | {
+          type: "file"
+          fileRef: {
+            blobId: string
+            digest: string
+            sizeBytes: number
+            fileName?: string
+            mediaType?: string
+            logicalPath?: string
+          }
+          /**
+           * Any JSON-compatible value.
+           */
+          providerMetadata?:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+        }
+      | {
+          type: "provider-state"
+          providerId: string
+          /**
+           * Any JSON-compatible value.
+           */
+          data:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+        }
+      | {
+          context:
+            | {
+                kind: "object"
+                ref: {
+                  objectTypeId: string
+                  primaryId: string
+                }
+              }
+            | {
+                kind: "app-state"
+                id: string
+                label: string
+                description: string
+                /**
+                 * Any JSON-compatible value.
+                 */
+                value:
+                  | string
+                  | number
+                  | boolean
+                  | Array<unknown>
+                  | {
+                      [key: string]: unknown
+                    }
+                  | null
+              }
+          origin: "ambient" | "explicit"
+          type: "context"
+        }
+      | {
+          type: "tool-call"
+          toolCallId: string
+          toolName: string
+          dynamic?: boolean
+          providerExecuted?: boolean
+          /**
+           * Any JSON-compatible value.
+           */
+          input:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+          /**
+           * Any JSON-compatible value.
+           */
+          providerMetadata?:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+          state: "output-available"
+          /**
+           * Any JSON-compatible value.
+           */
+          output:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+        }
+      | {
+          type: "tool-call"
+          toolCallId: string
+          toolName: string
+          dynamic?: boolean
+          providerExecuted?: boolean
+          /**
+           * Any JSON-compatible value.
+           */
+          input:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+          /**
+           * Any JSON-compatible value.
+           */
+          providerMetadata?:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+          state: "output-error"
+          errorText: string
+        }
+    >
+    diagnostics?: Array<
+      | string
+      | number
+      | boolean
+      | Array<unknown>
+      | {
+          [key: string]: unknown
+        }
+      | null
+    >
+    failurePhase?: "agent-loop" | "structured-finalizer"
     error?: {
       code: "internal.unexpected" | "runtime.cancelled" | "agent.execution_failed"
       message: string
@@ -4162,6 +5921,15 @@ export type CancelWorkflowRunResponses = {
           textOutputTokens?: number
           reasoningOutputTokens?: number
           reportingStatus: "complete" | "partial" | "unavailable"
+        }
+        cost?: {
+          amounts: Array<{
+            currency: string
+            amountNanos: string
+          }>
+          ratedCallCount: number
+          unpriceableCallCount: number
+          unvaluedCallCount: number
         }
         startedAt?: string
         completedAt?: string
@@ -5083,6 +6851,39 @@ export type QueryObjectsResponses = {
 }
 
 export type QueryObjectsResponse = QueryObjectsResponses[keyof QueryObjectsResponses]
+
+export type QueryObjectLinksData = {
+  body: ObjectQueryLinksRequest
+  path?: never
+  query?: never
+  url: "/api/objects/query/links"
+}
+
+export type QueryObjectLinksErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ObjectQueryErrorResponse
+  /**
+   * Response for status 403
+   */
+  403: ErrorResponse
+  /**
+   * Response for status 500
+   */
+  500: ErrorResponse
+}
+
+export type QueryObjectLinksError = QueryObjectLinksErrors[keyof QueryObjectLinksErrors]
+
+export type QueryObjectLinksResponses = {
+  /**
+   * Response for status 200
+   */
+  200: ObjectQueryLinksResponse
+}
+
+export type QueryObjectLinksResponse = QueryObjectLinksResponses[keyof QueryObjectLinksResponses]
 
 export type CountObjectsData = {
   body: ObjectQueryCountRequest
@@ -6798,6 +8599,7 @@ export type PostAgentThreadMessageResponses = {
         | "length"
         | "content-filter"
         | "tool-calls"
+        | "timeout"
         | "error"
         | "other"
         | "unknown"
@@ -6811,6 +8613,15 @@ export type PostAgentThreadMessageResponses = {
         textOutputTokens?: number
         reasoningOutputTokens?: number
         reportingStatus: "complete" | "partial" | "unavailable"
+      }
+      cost?: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
       }
       diagnostics?: Array<{
         code:
@@ -7013,6 +8824,7 @@ export type CancelAgentRunResponses = {
         | "length"
         | "content-filter"
         | "tool-calls"
+        | "timeout"
         | "error"
         | "other"
         | "unknown"
@@ -7026,6 +8838,15 @@ export type CancelAgentRunResponses = {
         textOutputTokens?: number
         reasoningOutputTokens?: number
         reportingStatus: "complete" | "partial" | "unavailable"
+      }
+      cost?: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
       }
       diagnostics?: Array<{
         code:
@@ -7131,6 +8952,7 @@ export type RetryAgentRunResponses = {
         | "length"
         | "content-filter"
         | "tool-calls"
+        | "timeout"
         | "error"
         | "other"
         | "unknown"
@@ -7144,6 +8966,15 @@ export type RetryAgentRunResponses = {
         textOutputTokens?: number
         reasoningOutputTokens?: number
         reportingStatus: "complete" | "partial" | "unavailable"
+      }
+      cost?: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
       }
       diagnostics?: Array<{
         code:
@@ -7247,6 +9078,7 @@ export type ListAgentThreadRunsResponses = {
         | "length"
         | "content-filter"
         | "tool-calls"
+        | "timeout"
         | "error"
         | "other"
         | "unknown"
@@ -7260,6 +9092,15 @@ export type ListAgentThreadRunsResponses = {
         textOutputTokens?: number
         reasoningOutputTokens?: number
         reportingStatus: "complete" | "partial" | "unavailable"
+      }
+      cost?: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
       }
       diagnostics?: Array<{
         code:
@@ -7360,6 +9201,7 @@ export type GetAgentRunResponses = {
       | "length"
       | "content-filter"
       | "tool-calls"
+      | "timeout"
       | "error"
       | "other"
       | "unknown"
@@ -7373,6 +9215,15 @@ export type GetAgentRunResponses = {
       textOutputTokens?: number
       reasoningOutputTokens?: number
       reportingStatus: "complete" | "partial" | "unavailable"
+    }
+    cost?: {
+      amounts: Array<{
+        currency: string
+        amountNanos: string
+      }>
+      ratedCallCount: number
+      unpriceableCallCount: number
+      unvaluedCallCount: number
     }
     diagnostics?: Array<{
       code:
@@ -7415,57 +9266,6 @@ export type GetAgentRunResponses = {
 }
 
 export type GetAgentRunResponse = GetAgentRunResponses[keyof GetAgentRunResponses]
-
-export type ListObjectLinksData = {
-  body?: never
-  path: {
-    objectTypeId: string
-    objectId: string
-  }
-  query?: {
-    linkId?: string
-    direction?: "outgoing" | "incoming" | "both"
-  }
-  url: "/api/objects/{objectTypeId}/{objectId}/links"
-}
-
-export type ListObjectLinksErrors = {
-  /**
-   * Response for status 400
-   */
-  400: {
-    error: string
-  }
-  /**
-   * Response for status 404
-   */
-  404: {
-    error: string
-  }
-}
-
-export type ListObjectLinksError = ListObjectLinksErrors[keyof ListObjectLinksErrors]
-
-export type ListObjectLinksResponses = {
-  /**
-   * Response for status 200
-   */
-  200: Array<{
-    projectId: string
-    sourceTypeId: string
-    sourceId: string
-    linkId: string
-    targetTypeId: string
-    targetId: string
-    properties?: {
-      [key: string]: unknown
-    }
-    createdAt: string
-    updatedAt: string
-  }>
-}
-
-export type ListObjectLinksResponse = ListObjectLinksResponses[keyof ListObjectLinksResponses]
 
 export type RemoveObjectLinkData = {
   body?: never
@@ -8849,20 +10649,34 @@ export type ListProjectionsResponses = {
           targetObjectTypeId: string
         }
       }
+      conflictResolution:
+        | {
+            strategy: "editsWin"
+          }
+        | {
+            strategy: "mostRecent"
+            sourceTimestamp: string
+          }
       latestRun:
         | {
             id: string
             projectId: string
-            status: "running" | "succeeded" | "failed" | "cancelled"
+            executionId: string
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
             attempt: number
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
             }
-            startedAt: string
+            queuedAt: string
+            startedAt?: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              code:
+                | "internal.unexpected"
+                | "runtime.cancelled"
+                | "queue.enqueue_failed"
+                | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -8900,16 +10714,22 @@ export type ListProjectionsResponses = {
         | {
             id: string
             projectId: string
-            status: "running" | "succeeded" | "failed" | "cancelled"
+            executionId: string
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
             attempt: number
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
             }
-            startedAt: string
+            queuedAt: string
+            startedAt?: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              code:
+                | "internal.unexpected"
+                | "runtime.cancelled"
+                | "queue.enqueue_failed"
+                | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -8948,16 +10768,22 @@ export type ListProjectionsResponses = {
         | {
             id: string
             projectId: string
-            status: "running" | "succeeded" | "failed" | "cancelled"
+            executionId: string
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
             attempt: number
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
             }
-            startedAt: string
+            queuedAt: string
+            startedAt?: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              code:
+                | "internal.unexpected"
+                | "runtime.cancelled"
+                | "queue.enqueue_failed"
+                | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -9007,16 +10833,22 @@ export type ListProjectionsResponses = {
         | {
             id: string
             projectId: string
-            status: "running" | "succeeded" | "failed" | "cancelled"
+            executionId: string
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
             attempt: number
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
             }
-            startedAt: string
+            queuedAt: string
+            startedAt?: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              code:
+                | "internal.unexpected"
+                | "runtime.cancelled"
+                | "queue.enqueue_failed"
+                | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -9054,16 +10886,22 @@ export type ListProjectionsResponses = {
         | {
             id: string
             projectId: string
-            status: "running" | "succeeded" | "failed" | "cancelled"
+            executionId: string
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
             attempt: number
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
             }
-            startedAt: string
+            queuedAt: string
+            startedAt?: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              code:
+                | "internal.unexpected"
+                | "runtime.cancelled"
+                | "queue.enqueue_failed"
+                | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -9102,16 +10940,22 @@ export type ListProjectionsResponses = {
         | {
             id: string
             projectId: string
-            status: "running" | "succeeded" | "failed" | "cancelled"
+            executionId: string
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
             attempt: number
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
             }
-            startedAt: string
+            queuedAt: string
+            startedAt?: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              code:
+                | "internal.unexpected"
+                | "runtime.cancelled"
+                | "queue.enqueue_failed"
+                | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -9152,26 +10996,35 @@ export type ListProjectionsResponses = {
       _tag: "TelemetryProjectionDefinition"
       id: string
       objectTypeId: string
-      propertyId: string
       datasetId: string
       objectIdField: string
       atField: string
-      valueField: string
-      unitField?: string
+      properties: {
+        [key: string]: {
+          valueField: string
+          unitField?: string
+        }
+      }
       latestRun:
         | {
             id: string
             projectId: string
-            status: "running" | "succeeded" | "failed" | "cancelled"
+            executionId: string
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
             attempt: number
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
             }
-            startedAt: string
+            queuedAt: string
+            startedAt?: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              code:
+                | "internal.unexpected"
+                | "runtime.cancelled"
+                | "queue.enqueue_failed"
+                | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -9209,16 +11062,22 @@ export type ListProjectionsResponses = {
         | {
             id: string
             projectId: string
-            status: "running" | "succeeded" | "failed" | "cancelled"
+            executionId: string
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
             attempt: number
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
             }
-            startedAt: string
+            queuedAt: string
+            startedAt?: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              code:
+                | "internal.unexpected"
+                | "runtime.cancelled"
+                | "queue.enqueue_failed"
+                | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -9257,16 +11116,22 @@ export type ListProjectionsResponses = {
         | {
             id: string
             projectId: string
-            status: "running" | "succeeded" | "failed" | "cancelled"
+            executionId: string
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
             attempt: number
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
             }
-            startedAt: string
+            queuedAt: string
+            startedAt?: string
             finishedAt?: string
             error?: {
-              code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+              code:
+                | "internal.unexpected"
+                | "runtime.cancelled"
+                | "queue.enqueue_failed"
+                | "projection.execution_failed"
               message: string
               retryable: boolean
               at: string
@@ -9349,20 +11214,34 @@ export type GetProjectionResponses = {
             targetObjectTypeId: string
           }
         }
+        conflictResolution:
+          | {
+              strategy: "editsWin"
+            }
+          | {
+              strategy: "mostRecent"
+              sourceTimestamp: string
+            }
         latestRun:
           | {
               id: string
               projectId: string
-              status: "running" | "succeeded" | "failed" | "cancelled"
+              executionId: string
+              status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
               attempt: number
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
               }
-              startedAt: string
+              queuedAt: string
+              startedAt?: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                code:
+                  | "internal.unexpected"
+                  | "runtime.cancelled"
+                  | "queue.enqueue_failed"
+                  | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9400,16 +11279,22 @@ export type GetProjectionResponses = {
           | {
               id: string
               projectId: string
-              status: "running" | "succeeded" | "failed" | "cancelled"
+              executionId: string
+              status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
               attempt: number
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
               }
-              startedAt: string
+              queuedAt: string
+              startedAt?: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                code:
+                  | "internal.unexpected"
+                  | "runtime.cancelled"
+                  | "queue.enqueue_failed"
+                  | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9448,16 +11333,22 @@ export type GetProjectionResponses = {
           | {
               id: string
               projectId: string
-              status: "running" | "succeeded" | "failed" | "cancelled"
+              executionId: string
+              status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
               attempt: number
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
               }
-              startedAt: string
+              queuedAt: string
+              startedAt?: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                code:
+                  | "internal.unexpected"
+                  | "runtime.cancelled"
+                  | "queue.enqueue_failed"
+                  | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9507,16 +11398,22 @@ export type GetProjectionResponses = {
           | {
               id: string
               projectId: string
-              status: "running" | "succeeded" | "failed" | "cancelled"
+              executionId: string
+              status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
               attempt: number
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
               }
-              startedAt: string
+              queuedAt: string
+              startedAt?: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                code:
+                  | "internal.unexpected"
+                  | "runtime.cancelled"
+                  | "queue.enqueue_failed"
+                  | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9554,16 +11451,22 @@ export type GetProjectionResponses = {
           | {
               id: string
               projectId: string
-              status: "running" | "succeeded" | "failed" | "cancelled"
+              executionId: string
+              status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
               attempt: number
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
               }
-              startedAt: string
+              queuedAt: string
+              startedAt?: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                code:
+                  | "internal.unexpected"
+                  | "runtime.cancelled"
+                  | "queue.enqueue_failed"
+                  | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9602,16 +11505,22 @@ export type GetProjectionResponses = {
           | {
               id: string
               projectId: string
-              status: "running" | "succeeded" | "failed" | "cancelled"
+              executionId: string
+              status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
               attempt: number
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
               }
-              startedAt: string
+              queuedAt: string
+              startedAt?: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                code:
+                  | "internal.unexpected"
+                  | "runtime.cancelled"
+                  | "queue.enqueue_failed"
+                  | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9652,26 +11561,35 @@ export type GetProjectionResponses = {
         _tag: "TelemetryProjectionDefinition"
         id: string
         objectTypeId: string
-        propertyId: string
         datasetId: string
         objectIdField: string
         atField: string
-        valueField: string
-        unitField?: string
+        properties: {
+          [key: string]: {
+            valueField: string
+            unitField?: string
+          }
+        }
         latestRun:
           | {
               id: string
               projectId: string
-              status: "running" | "succeeded" | "failed" | "cancelled"
+              executionId: string
+              status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
               attempt: number
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
               }
-              startedAt: string
+              queuedAt: string
+              startedAt?: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                code:
+                  | "internal.unexpected"
+                  | "runtime.cancelled"
+                  | "queue.enqueue_failed"
+                  | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9709,16 +11627,22 @@ export type GetProjectionResponses = {
           | {
               id: string
               projectId: string
-              status: "running" | "succeeded" | "failed" | "cancelled"
+              executionId: string
+              status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
               attempt: number
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
               }
-              startedAt: string
+              queuedAt: string
+              startedAt?: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                code:
+                  | "internal.unexpected"
+                  | "runtime.cancelled"
+                  | "queue.enqueue_failed"
+                  | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9757,16 +11681,22 @@ export type GetProjectionResponses = {
           | {
               id: string
               projectId: string
-              status: "running" | "succeeded" | "failed" | "cancelled"
+              executionId: string
+              status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
               attempt: number
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
               }
-              startedAt: string
+              queuedAt: string
+              startedAt?: string
               finishedAt?: string
               error?: {
-                code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+                code:
+                  | "internal.unexpected"
+                  | "runtime.cancelled"
+                  | "queue.enqueue_failed"
+                  | "projection.execution_failed"
                 message: string
                 retryable: boolean
                 at: string
@@ -9815,7 +11745,7 @@ export type ListProjectionRunsData = {
     projectionKind?: "object" | "link" | "telemetry"
     datasetId?: string
     datasetVersionId?: string
-    status?: "running" | "succeeded" | "failed" | "cancelled"
+    status?: "queued" | "running" | "succeeded" | "failed" | "cancelled"
     startedAfter?: string
     startedBefore?: string
     limit?: string
@@ -9851,16 +11781,22 @@ export type ListProjectionRunsResponses = {
       | {
           id: string
           projectId: string
-          status: "running" | "succeeded" | "failed" | "cancelled"
+          executionId: string
+          status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
           attempt: number
           progress: {
             sourceRowsRead: number
             sourceRowsSkipped: number
           }
-          startedAt: string
+          queuedAt: string
+          startedAt?: string
           finishedAt?: string
           error?: {
-            code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+            code:
+              | "internal.unexpected"
+              | "runtime.cancelled"
+              | "queue.enqueue_failed"
+              | "projection.execution_failed"
             message: string
             retryable: boolean
             at: string
@@ -9898,16 +11834,22 @@ export type ListProjectionRunsResponses = {
       | {
           id: string
           projectId: string
-          status: "running" | "succeeded" | "failed" | "cancelled"
+          executionId: string
+          status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
           attempt: number
           progress: {
             sourceRowsRead: number
             sourceRowsSkipped: number
           }
-          startedAt: string
+          queuedAt: string
+          startedAt?: string
           finishedAt?: string
           error?: {
-            code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+            code:
+              | "internal.unexpected"
+              | "runtime.cancelled"
+              | "queue.enqueue_failed"
+              | "projection.execution_failed"
             message: string
             retryable: boolean
             at: string
@@ -9946,16 +11888,22 @@ export type ListProjectionRunsResponses = {
       | {
           id: string
           projectId: string
-          status: "running" | "succeeded" | "failed" | "cancelled"
+          executionId: string
+          status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
           attempt: number
           progress: {
             sourceRowsRead: number
             sourceRowsSkipped: number
           }
-          startedAt: string
+          queuedAt: string
+          startedAt?: string
           finishedAt?: string
           error?: {
-            code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+            code:
+              | "internal.unexpected"
+              | "runtime.cancelled"
+              | "queue.enqueue_failed"
+              | "projection.execution_failed"
             message: string
             retryable: boolean
             at: string
@@ -10039,16 +11987,22 @@ export type GetProjectionRunResponses = {
     | {
         id: string
         projectId: string
-        status: "running" | "succeeded" | "failed" | "cancelled"
+        executionId: string
+        status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
         attempt: number
         progress: {
           sourceRowsRead: number
           sourceRowsSkipped: number
         }
-        startedAt: string
+        queuedAt: string
+        startedAt?: string
         finishedAt?: string
         error?: {
-          code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+          code:
+            | "internal.unexpected"
+            | "runtime.cancelled"
+            | "queue.enqueue_failed"
+            | "projection.execution_failed"
           message: string
           retryable: boolean
           at: string
@@ -10086,16 +12040,22 @@ export type GetProjectionRunResponses = {
     | {
         id: string
         projectId: string
-        status: "running" | "succeeded" | "failed" | "cancelled"
+        executionId: string
+        status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
         attempt: number
         progress: {
           sourceRowsRead: number
           sourceRowsSkipped: number
         }
-        startedAt: string
+        queuedAt: string
+        startedAt?: string
         finishedAt?: string
         error?: {
-          code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+          code:
+            | "internal.unexpected"
+            | "runtime.cancelled"
+            | "queue.enqueue_failed"
+            | "projection.execution_failed"
           message: string
           retryable: boolean
           at: string
@@ -10134,16 +12094,22 @@ export type GetProjectionRunResponses = {
     | {
         id: string
         projectId: string
-        status: "running" | "succeeded" | "failed" | "cancelled"
+        executionId: string
+        status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
         attempt: number
         progress: {
           sourceRowsRead: number
           sourceRowsSkipped: number
         }
-        startedAt: string
+        queuedAt: string
+        startedAt?: string
         finishedAt?: string
         error?: {
-          code: "internal.unexpected" | "runtime.cancelled" | "projection.execution_failed"
+          code:
+            | "internal.unexpected"
+            | "runtime.cancelled"
+            | "queue.enqueue_failed"
+            | "projection.execution_failed"
           message: string
           retryable: boolean
           at: string
@@ -10188,7 +12154,7 @@ export type ListWebhookRunsData = {
   query?: {
     connectorId?: string
     webhookId?: string
-    status?: "running" | "succeeded" | "failed" | "skipped"
+    status?: "running" | "succeeded" | "failed"
     idempotencyKey?: string
     startedAfter?: string
     startedBefore?: string
@@ -10224,19 +12190,19 @@ export type ListWebhookRunsResponses = {
     runs: Array<{
       id: string
       projectId: string
+      executionId: string
       connectorId: string
       webhookId: string
-      status: "running" | "succeeded" | "failed" | "skipped"
+      status: "running" | "succeeded" | "failed"
       method: string
       route: string
       startedAt: string
       finishedAt?: string
-      requestBodyBytes?: number
+      requestBodyBytes: number
       responseStatus?: number
       idempotencyKey?: string
-      deliveryClaimResult?: "claimed" | "duplicate" | "in_progress"
       error?: {
-        code: "internal.unexpected" | "webhook.delivery_failed"
+        code: "internal.unexpected" | "webhook.delivery_failed" | "webhook.delivery_rejected"
         message: string
         retryable: boolean
         at: string

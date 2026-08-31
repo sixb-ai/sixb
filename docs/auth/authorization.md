@@ -11,7 +11,7 @@ may do. Sixb builds it from four small layers:
 | --- | --- |
 | **Groups** | Named buckets that principals belong to |
 | **Roles** | Bundles of grants attached to groups |
-| **Grants** | The capabilities a role gives — access, view, apply, run |
+| **Grants** | The capabilities granted by a role |
 | **Membership policies** | Who can administer membership for which groups |
 
 At request time these resolve into one set of grants per principal, and the `Sixb` SDK enforces
@@ -81,9 +81,9 @@ are the union of every role whose `grantedTo` group it belongs to.
 
 ## Grants
 
-A grant pairs a capability with the definitions it covers. Seven capability builders —
-`can.access`, `can.view`, `can.edit`, `can.append`, `can.apply`, `can.run`, and `can.observe` —
-resolve to **eleven grant kinds**, one per protected target family.
+A grant pairs a capability with the definitions it covers. Eight capability builders —
+`can.access`, `can.view`, `can.edit`, `can.append`, `can.apply`, `can.run`, `can.manage`, and
+`can.observe` — resolve to **twelve grant kinds**, one per protected target family.
 
 | Grant kind | Builder | Allows | Targets |
 | --- | --- | --- | --- |
@@ -97,14 +97,15 @@ resolve to **eleven grant kinds**, one per protected target family.
 | `run:sync` | `can.run(...)` | Run syncs | [Syncs](../data/syncs.md) |
 | `run:pipeline` | `can.run(...)` | Run pipelines | [Pipelines](../data/pipelines.md) |
 | `run:agent` | `can.run(...)` | Run agents and read their threads | [Agents](../agents/overview.md) |
+| `manage:connector` | `can.manage(...)` | Authorize, select, disconnect, and revoke OAuth connector accounts | [Connectors](../data/connectors.md) |
 | `observe:logs` | `can.observe("logs")` | Read captured run logs | [Logging](../logging/overview.md) |
 
 `can.access` accepts the built-in `applications.atlas` and `applications.app` definitions.
 `can.view` resolves to `view:object` or `view:dataset` from the definition you pass; `can.run`
 picks between `run:workflow`, `run:sync`, `run:pipeline`, and `run:agent` the same way. Each is
-type-checked, so mixing target families in one call does not compile. `can.observe` takes the
-`"logs"` target literal and grants `observe:logs`, which gates reading captured
-[logs](../logging/overview.md).
+type-checked, so mixing target families in one call does not compile. `can.manage` accepts connector
+definitions. `can.observe` takes the `"logs"` target literal and grants `observe:logs`, which gates
+reading captured [logs](../logging/overview.md).
 
 > **Only `can.view(Type)` reaches subtypes.** `can.edit` and `can.append` cover exactly the types
 > you name, so adding a type under one you granted never makes it writable on its own.
@@ -129,6 +130,7 @@ Each builder takes one definition, a list, or a breadth selector.
 | Every sync | `can.run(every.sync())` |
 | Every pipeline | `can.run(every.pipeline())` |
 | Every agent | `can.run(every.agent())` |
+| Every connector | `can.manage(every.connector())` |
 | Every application | `can.access(every.application())` |
 | Everything but a few | `can.view(every.object().except([Customer]))` |
 
@@ -172,9 +174,9 @@ Application grants control whether a signed-in principal may open Atlas or the c
 > deny-by-default. While **no** role mentions an application, every authenticated principal may open
 > it. The allowlist switches on only once some role grants that application — after which principals
 > without the grant get an access-denied page before any application data loads. `view`, `apply`,
-> `run`, and `observe` all deny unless granted, so this is the single asymmetry in the model. If you
-> want Atlas closed, grant it explicitly to the groups that should reach it; the grant is what turns
-> enforcement on.
+> `run`, `manage`, and `observe` all deny unless granted, so this is the single asymmetry in the
+> model. If you want Atlas closed, grant it explicitly to the groups that should reach it; the grant
+> is what turns enforcement on.
 
 ```ts
 import { applications, can, defineRole } from "@sixb/core"

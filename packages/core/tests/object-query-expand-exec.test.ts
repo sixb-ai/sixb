@@ -9,7 +9,12 @@ import {
   prop,
 } from "../src"
 import { countObjects, executeObjectQuery } from "../src/objects/query"
-import type { ExpandedLinkValue, ExpandedObjectRow, ObjectStorage } from "../src/storage"
+import {
+  type ExpandedLinkValue,
+  type ExpandedObjectRow,
+  linkBatchKey,
+  type ObjectStorage,
+} from "../src/storage"
 import { createMaterializerTestFixture } from "../src/testing"
 
 // Execution-side tests for `.expand()`: the planner routes expand through the
@@ -417,7 +422,8 @@ describe("object query expand — execution", () => {
         if (property !== "listLinksBatch") return Reflect.get(target, property, target)
         return async (params: Parameters<ObjectStorage["listLinksBatch"]>[0]) => {
           const result = await listLinksBatch(params)
-          result.set("Project:proj-3:opportunity", [
+          const withDeletedTarget = new Map(result)
+          withDeletedTarget.set(linkBatchKey("Project", "proj-3", "opportunity"), [
             {
               projectId: PROJECT,
               sourceTypeId: "Project",
@@ -430,7 +436,7 @@ describe("object query expand — execution", () => {
               lastCommitId: "concurrent-delete",
             },
           ])
-          return result
+          return withDeletedTarget
         }
       },
     })

@@ -1,17 +1,23 @@
 import { watch } from "node:fs"
-import { access, cp, mkdir, readFile, writeFile } from "node:fs/promises"
+import { access, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import type { AuthSessionAudience } from "@sixb/core"
 import {
   type BuildAppResult,
   buildApp,
+  buildAuthExperience,
   prepareAppHtmlBundleEntry,
   restoreAppStaticUrls,
 } from "./build"
-import { type BuiltInRouteManifestEntry, generateAppEntry, generateRouteManifest } from "./codegen"
+import {
+  type BuiltInRouteManifestEntry,
+  generateAppEntry,
+  generateAuthExperienceEntry,
+  generateRouteManifest,
+} from "./codegen"
 import { renderCustomAppRuntimeScript } from "./runtime"
-import { type PageRoute, scanPages } from "./scanner"
+import { type PageRoute, routePatternKey, scanAppRoutes } from "./scanner"
 import { type CustomAppStylesheet, resolveCustomAppStylesheet } from "./styles"
 import { createTailwindCssCompiler, type TailwindCssCompiler } from "./tailwind"
 
@@ -35,6 +41,14 @@ export interface CustomAppBuildOptions {
   outdir?: string
 }
 
+export interface CustomAuthExperienceBuildOptions {
+  outdir?: string
+}
+
+export interface CustomAuthExperienceBuildResult {
+  readonly outdir: string
+}
+
 export interface CustomAppStartOptions {
   host?: string
   port?: number
@@ -54,6 +68,9 @@ export interface CustomAppDevServer {
 export interface CustomAppInstance {
   scanRoutes(): Promise<PageRoute[]>
   hasRoutes(): Promise<boolean>
+  prepareAuthExperience(
+    options?: CustomAuthExperienceBuildOptions
+  ): Promise<CustomAuthExperienceBuildResult | null>
   dev(options?: CustomAppDevOptions): Promise<CustomAppDevServer>
   build(options?: CustomAppBuildOptions): Promise<BuildAppResult>
   start(options?: CustomAppStartOptions): Promise<CustomAppDevServer>
@@ -81,15 +98,12 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
   const agentRoutesEnabled = options.agentRoutes ?? true
 
   async function scanRoutes(): Promise<PageRoute[]> {
-    if (!(await pathExists(appDir))) {
-      return []
-    }
-
-    return await scanPages(appDir)
+    return [...(await scanAppRoutes(appDir)).pages]
   }
 
   let tailwindCompiler: TailwindCssCompiler | null = null
   let tailwindCompilerKey: string | null = null
+  let authTailwindCompiler: TailwindCssCompiler | null = null
   let builtInAgentCssCompiler: TailwindCssCompiler | null = null
 
   // `app/globals.css` is source. When it uses Tailwind, compile it to
@@ -214,18 +228,23 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
 
   async function prepareGeneratedApp(): Promise<{
     htmlPath: string
+    mainPath: string
     manifestPath: string
     routes: PageRoute[]
   }> {
-    const routes = await scanRoutes()
+    const discovery = await scanAppRoutes(appDir)
+    const routes = [...discovery.pages]
     if (routes.length === 0) {
       throw new Error(`[SixbCustomApp] No app routes found in ${appDir}`)
     }
 
     const builtInRoutes = agentRoutesEnabled ? builtInAgentRoutesFor(routes) : []
     const stylesheets = await prepareStylesheets(builtInRoutes)
-    await generateRouteManifest(routes, generatedDir, { builtInRoutes })
-    const { htmlPath, manifestPath } = await generateAppEntry(rootDir, generatedDir, {
+    await generateRouteManifest(routes, generatedDir, {
+      builtInRoutes,
+      layouts: discovery.layouts,
+    })
+    const { htmlPath, mainPath, manifestPath } = await generateAppEntry(rootDir, generatedDir, {
       apiBaseUrl,
       audience,
       authEnabled,
@@ -234,7 +253,59 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
       frameworkStylesheetPaths: stylesheets.frameworkStylesheetPaths,
       stylesheetPath: stylesheets.stylesheetPath,
     })
-    return { htmlPath, manifestPath, routes }
+    return { htmlPath, mainPath, manifestPath, routes }
+  }
+
+  async function prepareAuthExperience(
+    authOptions: CustomAuthExperienceBuildOptions = {}
+  ): Promise<CustomAuthExperienceBuildResult | null> {
+    const outdir = authOptions.outdir
+      ? resolve(rootDir, authOptions.outdir)
+      : join(generatedDir, "auth")
+    if (!(await pathExists(join(appDir, "auth.tsx")))) {
+      await rm(outdir, { recursive: true, force: true })
+      return null
+    }
+
+    const stylesheet = await resolveCustomAppStylesheet({ appDir, generatedDir, rootDir })
+    let stylesheetPath: string | null
+    if (stylesheet.kind === "none") {
+      stylesheetPath = null
+    } else if (stylesheet.kind === "static") {
+      stylesheetPath = stylesheet.path
+    } else {
+      const outputPath = join(generatedDir, "auth.css")
+      authTailwindCompiler ??= createTailwindCssCompiler({
+        inputPath: stylesheet.sourcePath,
+        outputPath,
+        cwd: appDir,
+        resolveFrom: rootDir,
+        label: "[SixbCustomApp]",
+      })
+      await authTailwindCompiler.compile()
+      stylesheetPath = outputPath
+    }
+
+    const entry = await generateAuthExperienceEntry(rootDir, generatedDir, {
+      appDir,
+      publicDir,
+      stylesheetPath,
+    })
+    if (!entry) {
+      return null
+    }
+
+    const result = await buildAuthExperience({
+      entryPath: entry.htmlPath,
+      scriptEntryPath: entry.mainPath,
+      outdir,
+    })
+    if (!result.success) {
+      throw new Error(
+        `[SixbCustomApp] Failed to build the auth experience: ${(result.logs ?? []).join("\n")}`
+      )
+    }
+    return { outdir: result.outdir }
   }
 
   return {
@@ -247,10 +318,15 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
       return routes.length > 0
     },
 
+    async prepareAuthExperience(options) {
+      return await prepareAuthExperience(options)
+    },
+
     async dev(devOptions: CustomAppDevOptions = {}) {
       const host = devOptions.host ?? "0.0.0.0"
       const port = devOptions.port ?? 3001
       const { htmlPath, manifestPath } = await prepareGeneratedApp()
+      await prepareAuthExperience()
       let htmlImportVersion = 0
       let htmlBundle = await importHtmlBundle(htmlPath, htmlImportVersion)
       const publicRoutes = (await pathExists(publicDir)) ? await createPublicRoutes(publicDir) : {}
@@ -281,6 +357,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
         rebuildChain = rebuildChain
           .then(async () => {
             const { htmlPath: nextHtmlPath } = await prepareGeneratedApp()
+            await prepareAuthExperience()
             htmlImportVersion++
             htmlBundle = await importHtmlBundle(nextHtmlPath, htmlImportVersion)
             server.reload(serveOptions(htmlBundle))
@@ -330,6 +407,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
           watcher.close()
           await rebuildChain
           await tailwindCompiler?.stop()
+          await authTailwindCompiler?.stop()
           await builtInAgentCssCompiler?.stop()
           server.stop(true)
         },
@@ -338,18 +416,29 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
 
     async build(buildOptions: CustomAppBuildOptions = {}) {
       const outdir = resolve(rootDir, buildOptions.outdir ?? join(".sixb", "dist", "app"))
-      const { htmlPath, manifestPath } = await prepareGeneratedApp()
+      const { htmlPath, mainPath, manifestPath } = await prepareGeneratedApp()
       const result = await buildApp({
         entryPath: htmlPath,
+        scriptEntryPath: mainPath,
         manifestPath,
         outdir,
       })
+
+      if (result.success) {
+        await prepareAuthExperience({ outdir: join(outdir, "auth") })
+      }
 
       if (result.success && (await pathExists(publicDir))) {
         await cp(publicDir, outdir, {
           recursive: true,
           force: true,
-          filter: (source) => resolve(source) !== join(publicDir, "app.webmanifest"),
+          filter: (source) => {
+            const resolvedSource = resolve(source)
+            return (
+              resolvedSource !== join(publicDir, "app.webmanifest") &&
+              resolvedSource !== join(publicDir, "auth")
+            )
+          },
         })
       }
 
@@ -396,7 +485,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
 
           const directFile = Bun.file(resolvedPath)
           if (await directFile.exists()) {
-            return fileResponse(req, directFile, staticAssetHeaders(url.pathname))
+            return staticFileResponse(req, resolvedPath, staticAssetHeaders(url.pathname))
           }
 
           if (isAssetRequest(url.pathname)) {
@@ -441,10 +530,10 @@ async function pathExists(path: string): Promise<boolean> {
 }
 
 function builtInAgentRoutesFor(routes: readonly PageRoute[]): BuiltInRouteManifestEntry[] {
-  const projectRoutePaths = new Set(routes.map((route) => route.path))
+  const projectRoutePatterns = new Set(routes.map((route) => routePatternKey(route.path)))
 
   return builtInAgentRoutePaths
-    .filter((path) => !projectRoutePaths.has(path))
+    .filter((path) => !projectRoutePatterns.has(routePatternKey(path)))
     .map((path) => ({
       path,
       moduleSpecifier: builtInAgentRouteModule,
@@ -633,11 +722,11 @@ function htmlResponse(request: Request, html: string): Response {
   })
 }
 
-// Bun.build emits content-hashed bundles named `chunk-<hash>.<ext>` (see buildApp).
-// Their contents can never change under the same URL, so they are safe to cache
-// forever — matching how Atlas serves its hashed assets. Files copied
-// from `public/` keep their names across deploys and stay uncached.
-const IMMUTABLE_ASSET_PATTERN = /^chunk-[a-z0-9]+\.(js|css|js\.map|css\.map)$/
+// buildApp emits content-hashed entry, chunk, and asset names. Their contents can never change
+// under the same URL, so they are safe to cache forever. Files copied from `public/` keep their
+// names across deploys and stay uncached.
+const IMMUTABLE_ASSET_PATTERN =
+  /^(?:(?:app|chunk)-[a-z0-9]+|(?:chunk|asset)-.+-[a-z0-9]+)\.[a-z0-9]+(?:\.map)?$/
 
 function staticAssetHeaders(pathname: string): Record<string, string> {
   if (pathname === customAppManifestRoute) {
@@ -653,6 +742,67 @@ function staticAssetHeaders(pathname: string): Record<string, string> {
   }
 
   return { "cache-control": "public, max-age=31536000, immutable" }
+}
+
+async function staticFileResponse(
+  request: Request,
+  path: string,
+  headers: Record<string, string>
+): Promise<Response> {
+  const responseHeaders = new Headers(headers)
+  const originalFile = Bun.file(path)
+  let responseFile = originalFile
+
+  if (isPrecompressedAsset(path)) {
+    responseHeaders.append("vary", "Accept-Encoding")
+    if (!request.headers.has("range")) {
+      for (const encoding of acceptedPrecompressedEncodings(request)) {
+        const candidate = Bun.file(`${path}.${encoding === "br" ? "br" : "gz"}`)
+        if (!(await candidate.exists())) continue
+
+        responseFile = candidate
+        responseHeaders.set("content-encoding", encoding)
+        responseHeaders.set("content-type", originalFile.type)
+        break
+      }
+    }
+  }
+
+  return new Response(request.method === "HEAD" ? null : responseFile, {
+    headers: responseHeaders,
+  })
+}
+
+function isPrecompressedAsset(path: string): boolean {
+  return path.endsWith(".js") || path.endsWith(".css")
+}
+
+function acceptedPrecompressedEncodings(request: Request): ("br" | "gzip")[] {
+  const header = request.headers.get("accept-encoding")
+  if (!header) return []
+
+  const qualities = new Map<string, number>()
+  for (const item of header.split(",")) {
+    const [rawName, ...parameters] = item.trim().split(";")
+    const name = rawName.toLowerCase()
+    let quality = 1
+    for (const parameter of parameters) {
+      const match = parameter.trim().match(/^q=(0(?:\.\d+)?|1(?:\.0+)?)$/)
+      if (match) quality = Number(match[1])
+    }
+    qualities.set(name, quality)
+  }
+
+  const wildcard = qualities.get("*") ?? 0
+  return (["br", "gzip"] as const)
+    .map((encoding, preference) => ({
+      encoding,
+      preference,
+      quality: qualities.get(encoding) ?? wildcard,
+    }))
+    .filter((candidate) => candidate.quality > 0)
+    .sort((left, right) => right.quality - left.quality || left.preference - right.preference)
+    .map((candidate) => candidate.encoding)
 }
 
 function fileResponse(

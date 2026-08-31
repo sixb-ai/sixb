@@ -7,9 +7,14 @@ import {
   defineMigrations,
   ONTOLOGY_OUTBOX_FAILURE_CODES,
   SYNC_RUN_FAILURE_CODES,
-  WEBHOOK_DELIVERY_FAILURE_CODES,
 } from "@sixb/core/storage"
-import { createMaterializerTestFixture, createTestWorkflowExecution } from "@sixb/core/testing"
+import {
+  createMaterializerTestFixture,
+  createTestWorkflowExecution,
+  startTestProjectionRun,
+  startTestSyncRun,
+  startTestWebhookRun,
+} from "@sixb/core/testing"
 import { SQL } from "bun"
 import { PostgresStorage, type PostgresStorage as PostgresStorageType } from "../src"
 import {
@@ -18,6 +23,9 @@ import {
   postgresStorageMigrations,
   quoteIdent,
 } from "../src/migrations"
+
+const LEGACY_WEBHOOK_DELIVERY_FAILURE_CODES = ["webhook.delivery_failed"] as const
+
 import { jsonParameter } from "../src/ontology-storage/shared"
 import { createPgClient } from "../src/pg-client"
 import { createTestStorage } from "./helpers"
@@ -64,7 +72,14 @@ describe("Postgres storage migrations", () => {
             "018-ontology-outbox-failure-record",
             "019-webhook-delivery-failure-record",
             "020-drop-run-usage-projections",
-            "021-ai-model-call-details",
+            "021-sync-pipeline-executions",
+            "022-projection-executions",
+            "023-webhook-executions",
+            "024-ontology-commit-executions",
+            "025-connector-connections",
+            "026-ai-cost-accounting",
+            "027-agent-context-checkpoints",
+            "028-object-override-edit-times",
           ],
         },
       ])
@@ -212,9 +227,58 @@ describe("Postgres storage migrations", () => {
         {
           adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
           checksum_length: 64,
-          id: "021-ai-model-call-details",
+          id: "021-sync-pipeline-executions",
           status: "applied",
           version: 21,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "022-projection-executions",
+          status: "applied",
+          version: 22,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "023-webhook-executions",
+          status: "applied",
+          version: 23,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "024-ontology-commit-executions",
+          status: "applied",
+          version: 24,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "025-connector-connections",
+          status: "applied",
+          version: 25,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "026-ai-cost-accounting",
+          status: "applied",
+          version: 26,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "027-agent-context-checkpoints",
+          status: "applied",
+          version: 27,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "028-object-override-edit-times",
+          status: "applied",
+          version: 28,
         },
       ])
     })
@@ -228,7 +292,7 @@ describe("Postgres storage migrations", () => {
   })
 
   test("merge sync migration preserves existing runs and admits merge mode", async () => {
-    await withStorage(false, async (storage, schemaName) => {
+    await withStorage(false, async (_storage, schemaName) => {
       const migrationsBeforeMerge = postgresStorageMigrations.steps.slice(0, 2)
       if (migrationsBeforeMerge.length !== 2) {
         throw new Error("PostgreSQL migrations before merge sync support are missing.")
@@ -259,7 +323,17 @@ describe("Postgres storage migrations", () => {
           ["project-a", "run-append", "sync-orders", "raw.orders", "2026-08-07T12:00:00.000Z"]
         )
 
-        await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
+        // This fixture intentionally predates durable execution links. Exercise migration 003
+        // without crossing migration 020, which must reject legacy runs with unknown authority.
+        const throughMerge = defineMigrations({
+          adapterId: POSTGRES_STORAGE_ADAPTER_ID,
+          steps: postgresStorageMigrations.steps.slice(0, 3),
+        })
+        await createPostgresMigrator({
+          sql,
+          schemaName,
+          migrations: throughMerge,
+        }).migrate()
         await sql.unsafe(
           `
             INSERT INTO ${quoteIdent(schemaName)}.sync_runs (
@@ -388,7 +462,7 @@ describe("Postgres storage migrations", () => {
   })
 
   test("migrates failed run records from the version 10 main schema", async () => {
-    await withStorage(false, async (storage, schemaName) => {
+    await withStorage(false, async (_storage, schemaName) => {
       const connectionString = process.env.DATABASE_URL
       if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
 
@@ -430,7 +504,19 @@ describe("Postgres storage migrations", () => {
           );
         `)
 
-        await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
+        const executionMigrationIndex = postgresStorageMigrations.steps.findIndex(
+          (migration) => migration.id === "021-sync-pipeline-executions"
+        )
+        if (executionMigrationIndex < 0) {
+          throw new Error("PostgreSQL sync-pipeline-executions migration is missing.")
+        }
+        const failureMigrations = defineMigrations({
+          adapterId: POSTGRES_STORAGE_ADAPTER_ID,
+          steps: postgresStorageMigrations.steps.slice(0, executionMigrationIndex),
+        })
+        await expect(
+          createPostgresMigrator({ sql, schemaName, migrations: failureMigrations }).migrate()
+        ).resolves.toMatchObject({ status: "migrated" })
 
         const [sync] = await sql.unsafe<Array<{ readonly error: unknown }>>(
           `SELECT error FROM ${schema}.sync_runs WHERE id = 'sync-legacy'`
@@ -526,7 +612,7 @@ describe("Postgres storage migrations", () => {
   })
 
   test("webhook delivery failure migration replaces legacy diagnostics with a safe failure", async () => {
-    await withStorage(false, async (storage, schemaName) => {
+    await withStorage(false, async (_storage, schemaName) => {
       const failureMigrationIndex = postgresStorageMigrations.steps.findIndex(
         (migration) => migration.id === "019-webhook-delivery-failure-record"
       )
@@ -564,7 +650,18 @@ describe("Postgres storage migrations", () => {
             )
         `)
 
-        await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
+        // Stop at 019: later authority migrations deliberately reject these legacy deliveries.
+        const throughFailureRecord = defineMigrations({
+          adapterId: POSTGRES_STORAGE_ADAPTER_ID,
+          steps: postgresStorageMigrations.steps.slice(0, failureMigrationIndex + 1),
+        })
+        await expect(
+          createPostgresMigrator({
+            sql,
+            schemaName,
+            migrations: throughFailureRecord,
+          }).migrate()
+        ).resolves.toMatchObject({ status: "migrated" })
 
         const rows = await sql.unsafe<
           Array<{ readonly idempotency_key: string; readonly failure: unknown | null }>
@@ -574,7 +671,7 @@ describe("Postgres storage migrations", () => {
           ORDER BY idempotency_key
         `)
         expect(rows[0]?.idempotency_key).toBe("delivery-failed-at")
-        expect(parseSixbFailure(rows[0]?.failure, WEBHOOK_DELIVERY_FAILURE_CODES)).toEqual({
+        expect(parseSixbFailure(rows[0]?.failure, LEGACY_WEBHOOK_DELIVERY_FAILURE_CODES)).toEqual({
           code: "webhook.delivery_failed",
           message: "Webhook delivery failed.",
           retryable: true,
@@ -587,7 +684,7 @@ describe("Postgres storage migrations", () => {
             timestampSource: "failedAt",
           },
         })
-        expect(parseSixbFailure(rows[1]?.failure, WEBHOOK_DELIVERY_FAILURE_CODES)).toEqual({
+        expect(parseSixbFailure(rows[1]?.failure, LEGACY_WEBHOOK_DELIVERY_FAILURE_CODES)).toEqual({
           code: "webhook.delivery_failed",
           message: "Webhook delivery failed.",
           retryable: true,
@@ -642,6 +739,7 @@ describe("Postgres storage migrations", () => {
       expect(await readTableColumns(schemaName, "objects")).toContain("last_commit_id")
       expect(await readTableColumns(schemaName, "links")).toContain("last_commit_id")
       expect(await readTableColumns(schemaName, "timeseries")).toContain("last_commit_id")
+      expect(await readTableColumns(schemaName, "ontology_commits")).toContain("execution_id")
       expect(await readTableColumns(schemaName, "objects")).not.toContain("source_event_id")
       expect(await readTableColumns(schemaName, "links")).not.toContain("source_event_id")
       expect(await readTableColumns(schemaName, "timeseries")).not.toContain("source_event_id")
@@ -651,6 +749,9 @@ describe("Postgres storage migrations", () => {
       await expect(readColumnNullable(schemaName, "timeseries", "last_commit_id")).resolves.toBe(
         "NO"
       )
+      await expect(
+        readColumnNullable(schemaName, "ontology_commits", "execution_id")
+      ).resolves.toBe("NO")
       expect(await readTableColumns(schemaName, "timeseries_latest")).toEqual(
         expect.arrayContaining([
           "object_type_id",
@@ -663,7 +764,9 @@ describe("Postgres storage migrations", () => {
       expect(await readTableColumns(schemaName, "projection_runs")).toEqual(
         expect.arrayContaining([
           "attempt",
+          "execution_id",
           "execution_token",
+          "queued_at",
           "materialization_protocol",
           "dataset_version_created_at",
           "fixed_batch_size",
@@ -672,6 +775,15 @@ describe("Postgres storage migrations", () => {
           "input_exhausted",
           "error",
         ])
+      )
+      await expect(readColumnNullable(schemaName, "projection_runs", "execution_id")).resolves.toBe(
+        "NO"
+      )
+      await expect(readColumnNullable(schemaName, "projection_runs", "queued_at")).resolves.toBe(
+        "NO"
+      )
+      await expect(readColumnNullable(schemaName, "projection_runs", "started_at")).resolves.toBe(
+        "YES"
       )
       expect(await readTableColumns(schemaName, "workflow_runs")).toEqual(
         expect.arrayContaining(["execution_id"])
@@ -689,6 +801,30 @@ describe("Postgres storage migrations", () => {
       expect(await readTableColumns(schemaName, "action_runs")).toContain("execution_id")
       await expect(readColumnNullable(schemaName, "action_runs", "execution_id")).resolves.toBe(
         "NO"
+      )
+      for (const table of ["sync_runs", "pipeline_runs"] as const) {
+        await expect(readColumnNullable(schemaName, table, "execution_id")).resolves.toBe("NO")
+        await expect(readColumnNullable(schemaName, table, "queued_at")).resolves.toBe("NO")
+        await expect(readColumnNullable(schemaName, table, "started_at")).resolves.toBe("YES")
+      }
+      expect(await readTableNames(schemaName)).not.toContain("webhook_deliveries")
+      expect(await readTableColumns(schemaName, "webhook_runs")).not.toContain(
+        "delivery_claim_result"
+      )
+      await expect(readColumnNullable(schemaName, "webhook_runs", "execution_id")).resolves.toBe(
+        "NO"
+      )
+      await expect(
+        readColumnNullable(schemaName, "webhook_runs", "request_body_bytes")
+      ).resolves.toBe("NO")
+      await expect(
+        readColumnNullable(schemaName, "webhook_runs", "request_body_sha256")
+      ).resolves.toBe("NO")
+      expect(await readUniqueConstraints(schemaName, "webhook_runs")).toEqual(
+        expect.arrayContaining([
+          ["project_id", "execution_id"],
+          ["project_id", "connector_id", "webhook_id", "idempotency_key"],
+        ])
       )
     })
   })
@@ -850,6 +986,198 @@ describe("Postgres storage migrations", () => {
     })
   })
 
+  test("rejects legacy Sync and Pipeline runs instead of inventing execution authority", async () => {
+    for (const kind of ["sync", "pipeline"] as const) {
+      const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+      await withSql(async (sql) => {
+        const schema = quoteIdent(schemaName)
+        const context = { exec: (sqlText: string) => sql.unsafe(sqlText).then(() => undefined) }
+
+        try {
+          await sql.unsafe(`CREATE SCHEMA ${schema}`)
+          await sql.unsafe(`SET search_path TO ${schema}`)
+          const executionMigrationIndex = postgresStorageMigrations.steps.findIndex(
+            (migration) => migration.id === "021-sync-pipeline-executions"
+          )
+          const executionMigration = postgresStorageMigrations.steps[executionMigrationIndex]
+          if (!executionMigration) {
+            throw new Error("PostgreSQL sync-pipeline-executions migration is missing.")
+          }
+          for (const migration of postgresStorageMigrations.steps.slice(
+            0,
+            executionMigrationIndex
+          )) {
+            await migration.up(context)
+          }
+          if (kind === "sync") {
+            await sql.unsafe(`
+              INSERT INTO sync_runs (
+                project_id, id, sync_id, dataset_id, mode, status, started_at
+              ) VALUES (
+                'project-a', 'legacy-sync-run', 'sync-orders', 'raw.orders', 'snapshot',
+                'running', '2026-01-01T00:00:00.000Z'
+              )
+            `)
+          } else {
+            await sql.unsafe(`
+              INSERT INTO pipeline_runs (
+                project_id, id, pipeline_id, status, started_at
+              ) VALUES (
+                'project-a', 'legacy-pipeline-run', 'pipeline-orders', 'running',
+                '2026-01-01T00:00:00.000Z'
+              )
+            `)
+          }
+
+          await expect(executionMigration.up(context)).rejects.toThrow()
+          expect(await readTableColumns(schemaName, "sync_runs")).not.toContain("execution_id")
+          expect(await readTableColumns(schemaName, "pipeline_runs")).not.toContain("execution_id")
+        } finally {
+          await sql.unsafe("RESET search_path")
+          await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
+        }
+      })
+    }
+  })
+
+  test("rejects legacy Projection runs instead of inventing execution authority", async () => {
+    const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    await withSql(async (sql) => {
+      const schema = quoteIdent(schemaName)
+      const context = { exec: (sqlText: string) => sql.unsafe(sqlText).then(() => undefined) }
+
+      try {
+        await sql.unsafe(`CREATE SCHEMA ${schema}`)
+        await sql.unsafe(`SET search_path TO ${schema}`)
+        const executionMigrationIndex = postgresStorageMigrations.steps.findIndex(
+          (migration) => migration.id === "022-projection-executions"
+        )
+        const executionMigration = postgresStorageMigrations.steps[executionMigrationIndex]
+        if (!executionMigration) {
+          throw new Error("PostgreSQL projection-executions migration is missing.")
+        }
+        for (const migration of postgresStorageMigrations.steps.slice(0, executionMigrationIndex)) {
+          await migration.up(context)
+        }
+        await sql.unsafe(`
+          INSERT INTO projection_runs (
+            project_id, id, projection_id, projection_kind, materialization_protocol,
+            dataset_id, dataset_version_id, dataset_version_created_at, ontology_revision,
+            projection_revision, ownership_hash, object_type_id, status, started_at, attempt,
+            execution_token
+          ) VALUES (
+            'project-a', 'legacy-projection-run', 'project-devices', 'object', 'replacement',
+            'raw.devices', 'version-1', '2026-01-01T00:00:00.000Z', 'ontology-1',
+            'projection-1', 'ownership-1', 'Device', 'running',
+            '2026-01-01T00:00:00.000Z', 1, 'legacy-token'
+          )
+        `)
+
+        await expect(executionMigration.up(context)).rejects.toThrow()
+        expect(await readTableColumns(schemaName, "projection_runs")).not.toContain("execution_id")
+      } finally {
+        await sql.unsafe("RESET search_path")
+        await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
+      }
+    })
+  })
+
+  test("rejects legacy Webhook runs and deliveries instead of inventing authority", async () => {
+    for (const legacyRecord of ["run", "delivery"] as const) {
+      const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+      await withSql(async (sql) => {
+        const schema = quoteIdent(schemaName)
+        const context = { exec: (sqlText: string) => sql.unsafe(sqlText).then(() => undefined) }
+
+        try {
+          await sql.unsafe(`CREATE SCHEMA ${schema}`)
+          await sql.unsafe(`SET search_path TO ${schema}`)
+          const executionMigrationIndex = postgresStorageMigrations.steps.findIndex(
+            (migration) => migration.id === "023-webhook-executions"
+          )
+          const executionMigration = postgresStorageMigrations.steps[executionMigrationIndex]
+          if (!executionMigration) {
+            throw new Error("PostgreSQL webhook-executions migration is missing.")
+          }
+          for (const migration of postgresStorageMigrations.steps.slice(
+            0,
+            executionMigrationIndex
+          )) {
+            await migration.up(context)
+          }
+
+          if (legacyRecord === "run") {
+            await sql.unsafe(`
+              INSERT INTO webhook_runs (
+                project_id, id, connector_id, webhook_id, status, method, route, started_at
+              ) VALUES (
+                'project-a', 'legacy-webhook-run', 'github', 'events', 'running', 'POST',
+                '/api/webhooks/github/events', '2026-01-01T00:00:00.000Z'
+              )
+            `)
+          } else {
+            await sql.unsafe(`
+              INSERT INTO webhook_deliveries (
+                project_id, connector_id, webhook_id, idempotency_key, status, received_at
+              ) VALUES (
+                'project-a', 'github', 'events', 'delivery-1', 'in_progress',
+                '2026-01-01T00:00:00.000Z'
+              )
+            `)
+          }
+
+          await expect(executionMigration.up(context)).rejects.toThrow()
+          expect(await readTableColumns(schemaName, "webhook_runs")).not.toContain("execution_id")
+          expect(await readTableNames(schemaName)).toContain("webhook_deliveries")
+        } finally {
+          await sql.unsafe("RESET search_path")
+          await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
+        }
+      })
+    }
+  })
+
+  test("rejects legacy ontology commits instead of inventing execution authority", async () => {
+    const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    await withSql(async (sql) => {
+      const schema = quoteIdent(schemaName)
+      const context = { exec: (sqlText: string) => sql.unsafe(sqlText).then(() => undefined) }
+
+      try {
+        await sql.unsafe(`CREATE SCHEMA ${schema}`)
+        await sql.unsafe(`SET search_path TO ${schema}`)
+        const migrationIndex = postgresStorageMigrations.steps.findIndex(
+          (migration) => migration.id === "024-ontology-commit-executions"
+        )
+        const migration = postgresStorageMigrations.steps[migrationIndex]
+        if (!migration) {
+          throw new Error("PostgreSQL ontology-commit execution migration is missing.")
+        }
+        for (const previous of postgresStorageMigrations.steps.slice(0, migrationIndex)) {
+          await previous.up(context)
+        }
+        await sql.unsafe(`
+          INSERT INTO ontology_commits (
+            project_id, id, idempotency_key, request_hash, origin_kind, origin,
+            ontology_revision, intent, result, committed_at
+          ) VALUES (
+            'project-a', 'legacy-commit', 'runtime:legacy-commit', 'legacy-hash', 'runtime',
+            '{"kind":"runtime","requestId":"legacy-request"}', 'ontology-1',
+            '{"kind":"edit","mode":"atomic","operationCount":0}',
+            '{"kind":"edit","commitId":"legacy-commit","created":true,"eventCount":0,"committedAt":"2026-01-01T00:00:00.000Z","outcomes":[],"changes":{"objects":[],"links":[]}}',
+            '2026-01-01T00:00:00.000Z'
+          )
+        `)
+
+        await expect(migration.up(context)).rejects.toThrow()
+        expect(await readTableColumns(schemaName, "ontology_commits")).not.toContain("execution_id")
+      } finally {
+        await sql.unsafe("RESET search_path")
+        await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
+      }
+    })
+  })
+
   test("untracked existing schema collides and rolls back without conversion", async () => {
     await withStorage(false, async (storage, schemaName) => {
       await migrateStorage(storage)
@@ -934,12 +1262,10 @@ describe("Postgres storage migrations", () => {
           "agent_messages",
           "ai_model_call_usage",
           "ai_model_call_usage_groups",
+          "ai_model_call_valuations",
         ])
       )
       expect(await readTableColumns(schemaName, "ai_model_call_usage")).toContain("execution_id")
-      expect(await readTableColumns(schemaName, "ai_model_call_usage")).toEqual(
-        expect.arrayContaining(["model_definition", "cost", "route"])
-      )
       expect(await readTableColumns(schemaName, "ai_model_call_usage")).not.toContain(
         "execution_kind"
       )
@@ -965,6 +1291,97 @@ describe("Postgres storage migrations", () => {
       expect(agentRunColumns).not.toContain("usage_cached_input_tokens")
       expect(workflowAgentNodeColumns).not.toContain("usage")
       expect(await readTableColumns(schemaName, "workflow_runs")).toContain("requester_group_ids")
+    })
+  })
+
+  test("stores a headless connector attempt as the run's single protocol child", async () => {
+    await withStorage(false, async (storage, schemaName) => {
+      await migrateStorage(storage)
+
+      expect(await readTableColumns(schemaName, "connector_connection_runs")).not.toContain(
+        "authorization_attempt_id"
+      )
+      expect(await readTableColumns(schemaName, "connector_authorization_attempts")).not.toContain(
+        "owner_type"
+      )
+      expect(await readTableColumns(schemaName, "connector_connections")).not.toContain(
+        "owner_type"
+      )
+      expect(
+        await readUniqueConstraints(schemaName, "connector_authorization_attempts")
+      ).toContainEqual(["project_id", "connector_id", "connection_run_id"])
+      expect(
+        await readTableForeignKeys(schemaName, "connector_authorization_attempts")
+      ).toContainEqual({
+        column_name: "connection_run_id",
+        delete_action: "r",
+        foreign_column_name: "id",
+        foreign_table_name: "connector_connection_runs",
+      })
+      expect(await readUniqueConstraints(schemaName, "connector_connections")).toContainEqual([
+        "project_id",
+        "connector_id",
+        "slot",
+      ])
+    })
+  })
+
+  test("AI cost accounting migration preserves existing Phase 1 usage rows", async () => {
+    const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    await withSql(async (sql) => {
+      const schema = quoteIdent(schemaName)
+      const context = { exec: (sqlText: string) => sql.unsafe(sqlText).then(() => undefined) }
+      const costIndex = postgresStorageMigrations.steps.findIndex(
+        (migration) => migration.id === "026-ai-cost-accounting"
+      )
+      const costMigration = postgresStorageMigrations.steps[costIndex]
+      if (!costMigration) throw new Error("PostgreSQL AI cost accounting migration is missing.")
+
+      try {
+        await sql.unsafe(`CREATE SCHEMA ${schema}`)
+        await sql.unsafe(`SET search_path TO ${schema}`)
+        for (const migration of postgresStorageMigrations.steps.slice(0, costIndex)) {
+          await migration.up(context)
+        }
+        await sql.unsafe(`
+          INSERT INTO executions (
+            project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
+            authority_kind, authority_primitive_kind, authority_primitive_id, created_at
+          ) VALUES (
+            'project-a', 'execution-1', 'workflow', 'workflow-1', 'event', 'event-1',
+            'correlation-1', 'trustedPrimitive', 'workflow', 'workflow-1',
+            '2026-08-01T11:59:00.000Z'
+          );
+
+          INSERT INTO ai_model_call_usage (
+            project_id, id, execution_id, attempt, call_id, provider_id, requested_model_id,
+            response_id, input_tokens, output_tokens, total_tokens, reporting_status, raw_usage,
+            occurred_at, recorded_at
+          ) VALUES (
+            'project-a', 'usage-1', 'execution-1', 1, 'call-1', 'gateway', 'openai/gpt-5',
+            'response-1', 12, 8, 20, 'complete', '{"inputTokens":12,"outputTokens":8}',
+            '2026-08-01T12:00:00.000Z', '2026-08-01T12:00:01.000Z'
+          );
+        `)
+        const before = await sql.unsafe("SELECT * FROM ai_model_call_usage")
+
+        await costMigration.up(context)
+
+        expect(await sql.unsafe("SELECT * FROM ai_model_call_usage")).toEqual(before)
+        expect(await readTableColumns(schemaName, "ai_model_call_valuations")).toEqual(
+          expect.arrayContaining([
+            "usage_record_id",
+            "status",
+            "details",
+            "amount_nanos",
+            "rated_at",
+          ])
+        )
+        expect(await readTableColumns(schemaName, "ai_price_schedules")).toEqual([])
+      } finally {
+        await sql.unsafe("RESET search_path")
+        await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
+      }
     })
   })
 
@@ -1289,9 +1706,58 @@ describe("Postgres storage migrations", () => {
         {
           adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
           checksum_length: 64,
-          id: "021-ai-model-call-details",
+          id: "021-sync-pipeline-executions",
           status: "applied",
           version: 21,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "022-projection-executions",
+          status: "applied",
+          version: 22,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "023-webhook-executions",
+          status: "applied",
+          version: 23,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "024-ontology-commit-executions",
+          status: "applied",
+          version: 24,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "025-connector-connections",
+          status: "applied",
+          version: 25,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "026-ai-cost-accounting",
+          status: "applied",
+          version: 26,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "027-agent-context-checkpoints",
+          status: "applied",
+          version: 27,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "028-object-override-edit-times",
+          status: "applied",
+          version: 28,
         },
       ])
     } finally {
@@ -1334,7 +1800,7 @@ async function seedExistingStoreRows(storage: PostgresStorage): Promise<void> {
       },
     ],
   })
-  await storage.syncRuns.start({
+  await startTestSyncRun(storage, {
     id: "run-1",
     projectId: "project-a",
     syncId: "sync-orders",
@@ -1354,7 +1820,7 @@ async function seedExistingStoreRows(storage: PostgresStorage): Promise<void> {
     },
     checkpoint: { cursor: "legacy" },
   })
-  const projectionRun = await storage.projectionRuns.startOrReclaim({
+  const projectionRun = await startTestProjectionRun(storage, {
     id: "proj-run-1",
     projectId: "project-a",
     identity: {
@@ -1411,27 +1877,16 @@ async function seedExistingStoreRows(storage: PostgresStorage): Promise<void> {
     output: { transactionId: "txn-1" },
     finishedAt: new Date("2026-04-19T12:00:01.000Z"),
   })
-  await storage.webhookDeliveries.claim({
-    projectId: "project-a",
-    connectorId: "github",
-    webhookId: "events",
-    idempotencyKey: "delivery-1",
-    receivedAt: "2026-04-19T12:00:00.000Z",
-  })
-  await storage.webhookDeliveries.complete({
-    projectId: "project-a",
-    connectorId: "github",
-    webhookId: "events",
-    idempotencyKey: "delivery-1",
-    completedAt: "2026-04-19T12:00:02.000Z",
-  })
-  await storage.webhookRuns.start({
+  await startTestWebhookRun(storage, {
     id: "webhook-run-1",
     projectId: "project-a",
     connectorId: "github",
     webhookId: "events",
     method: "POST",
     route: "/api/webhooks/github/events",
+    requestBodyBytes: 12,
+    requestBodySha256: "0".repeat(64),
+    idempotencyKey: "delivery-1",
     startedAt: new Date("2026-04-19T12:00:00.000Z"),
   })
   await storage.webhookRuns.finish({
@@ -1440,9 +1895,6 @@ async function seedExistingStoreRows(storage: PostgresStorage): Promise<void> {
     status: "succeeded",
     finishedAt: new Date("2026-04-19T12:00:02.000Z"),
     responseStatus: 202,
-    requestBodyBytes: 12,
-    idempotencyKey: "delivery-1",
-    deliveryClaimResult: "claimed",
   })
 }
 
@@ -1574,6 +2026,36 @@ async function readColumnNullable(
     )) as Array<{ is_nullable: "YES" | "NO" }>
     if (!row) throw new Error(`Column ${tableName}.${columnName} was not found.`)
     return row.is_nullable
+  })
+}
+
+async function readUniqueConstraints(
+  schemaName: string,
+  tableName: string
+): Promise<readonly (readonly string[])[]> {
+  return withSql(async (sql) => {
+    const rows = (await sql.unsafe(
+      `
+        SELECT tc.constraint_name, kcu.column_name
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON kcu.constraint_schema = tc.constraint_schema
+          AND kcu.constraint_name = tc.constraint_name
+        WHERE tc.table_schema = $1
+          AND tc.table_name = $2
+          AND tc.constraint_type = 'UNIQUE'
+        ORDER BY tc.constraint_name, kcu.ordinal_position
+      `,
+      [schemaName, tableName]
+    )) as Array<{ readonly constraint_name: string; readonly column_name: string }>
+
+    const constraints = new Map<string, string[]>()
+    for (const row of rows) {
+      const columns = constraints.get(row.constraint_name) ?? []
+      columns.push(row.column_name)
+      constraints.set(row.constraint_name, columns)
+    }
+    return [...constraints.values()]
   })
 }
 

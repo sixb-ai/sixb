@@ -19,11 +19,16 @@ import {
   type AgentRunStreamEvent,
   agentRunStreamDefinition,
   agentRunStreamId,
+  publishAgentRunActivity,
 } from "@sixb/core/agents/streams"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import type { AgentStorage } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
-import { canAccessAgentRunStream, parseAgentStreamMessage } from "../src/routes/ws/agents"
+import {
+  canAccessAgentRunStream,
+  canAccessAgentThreadActivity,
+  parseAgentStreamMessage,
+} from "../src/routes/ws/agents"
 import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -46,6 +51,10 @@ describe("parseAgentStreamMessage", () => {
       ok: true,
       data: { type: "unsubscribe", runId },
     })
+    expect(parseAgentStreamMessage({ type: "subscribe.activity" })).toEqual({
+      ok: true,
+      data: { type: "subscribe.activity" },
+    })
   })
 
   test("rejects non-object and invalid messages", () => {
@@ -59,6 +68,35 @@ describe("parseAgentStreamMessage", () => {
 })
 
 describe("/ws/agents", () => {
+  test("streams project activity through one durable, visibility-filtered subscription", async () => {
+    await withAgentWsServer(async ({ baseUrl, sixb }) => {
+      await advanceDurableRun(sixb, { type: "agent.run.started", runId })
+      const ws = new WebSocket(`${baseUrl.replace("http://", "ws://")}/ws/agents`)
+
+      try {
+        expect(await nextWsMessage(ws)).toEqual({ type: "connected", channel: "agents" })
+        ws.send(JSON.stringify({ type: "subscribe.activity" }))
+        expect(await nextWsMessage(ws)).toEqual({ type: "subscribed.activity" })
+
+        const run = await agentStorage(sixb).runs.getById({ projectId, id: runId })
+        if (!run) throw new Error("expected durable run")
+        await publishAgentRunActivity(sixb.broker, run)
+
+        expect(await nextWsMessage(ws)).toMatchObject({
+          type: "activity",
+          event: {
+            type: "agent.run.activity",
+            runId,
+            threadId,
+            status: "running",
+          },
+        })
+      } finally {
+        ws.close()
+      }
+    })
+  })
+
   test("replays retained records, streams live records, and unsubscribes", async () => {
     await withAgentWsServer(async ({ baseUrl, sixb }) => {
       const [started] = await appendAgentStreamRecord(sixb, {
@@ -310,6 +348,55 @@ describe("canAccessAgentRunStream", () => {
     await expect(
       canAccessAgentRunStream(requestSdk(sixb, authz(owner, [agentId])), "agt_run_missing")
     ).resolves.toEqual({ ok: false, message: "Agent run not found." })
+  })
+})
+
+describe("canAccessAgentThreadActivity", () => {
+  test("filters project activity to visible, agent-matching threads", async () => {
+    const sixb = createSixbInstance<readonly OntologySource[]>({
+      id: projectId,
+      ontology: [],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage: new InMemoryLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+      auth: { id: "test", kind: "dev" },
+    })
+    const owner: Principal = { type: "user", id: "usr_owner" }
+    await agentStorage(sixb).threads.create({
+      id: threadId,
+      projectId,
+      agentId,
+      ownerPrincipal: owner,
+    })
+    const event = {
+      schemaVersion: 1 as const,
+      type: "agent.run.activity" as const,
+      projectId,
+      runId,
+      threadId,
+      agentId,
+      status: "running" as const,
+      attempt: 1,
+      occurredAt: "2026-01-01T00:00:00.000Z",
+    }
+
+    await expect(
+      canAccessAgentThreadActivity(requestSdk(sixb, authz(owner, [agentId])), event)
+    ).resolves.toBe(true)
+    await expect(
+      canAccessAgentThreadActivity(
+        requestSdk(sixb, authz({ type: "user", id: "usr_other" }, [agentId])),
+        event
+      )
+    ).resolves.toBe(false)
+    await expect(
+      canAccessAgentThreadActivity(requestSdk(sixb, authz(owner, [agentId])), {
+        ...event,
+        agentId: "other-agent",
+      })
+    ).resolves.toBe(false)
   })
 })
 

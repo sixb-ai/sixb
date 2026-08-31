@@ -15,13 +15,14 @@ import {
   applyDatasetRowsFromRelation,
   assertDatasetWriteMode,
 } from "./dataset-row-commit"
+import { findDatasetColumnTypeForDuckDbSql } from "./duckdb-column-types"
 import { getString } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
 import type { DuckLakeDatasetCatalog } from "./ducklake-dataset-catalog"
 import type { DuckLakeSnapshotReader } from "./ducklake-snapshot-reader"
 import type { DuckLakeWriteCoordinator } from "./ducklake-write-coordinator"
-import { duckDbTypeToDatasetColumnType } from "./schema"
+import { datasetColumnTypeToDuckDbSql } from "./schema"
 import { quoteIdentifier } from "./sql"
 import {
   type DuckLakeSqlTransformSourceRelation,
@@ -42,7 +43,18 @@ interface ApplySqlTransformInput {
   readonly target: DatasetDefinition
   readonly mode: DatasetWriteMode
   readonly sql: string
+  readonly checkedCasts: readonly SqlTransformCheckedCast[]
   readonly previousRowCount?: number
+}
+
+interface SqlTransformResultColumn {
+  readonly name: string
+  readonly typeSql: string
+}
+
+interface SqlTransformCheckedCast {
+  readonly columnName: string
+  readonly targetTypeSql: string
 }
 
 /**
@@ -95,7 +107,7 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
         sql: input.sql,
       })
 
-      await this.assertResultSchemaMatchesTarget(runtime, target, sql)
+      const checkedCasts = await this.assertResultSchemaMatchesTarget(runtime, target, sql)
 
       return this.writes.commitDatasetVersionOnExclusiveRuntime(runtime, {
         dataset: target,
@@ -110,6 +122,7 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
             target,
             mode: input.mode,
             sql,
+            checkedCasts,
             previousRowCount: context.previousRowCount,
           }),
       })
@@ -199,12 +212,13 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
     runtime: DuckDbQueryRuntime,
     target: DatasetDefinition,
     sql: string
-  ): Promise<void> {
+  ): Promise<readonly SqlTransformCheckedCast[]> {
     const rows = await runtime.query(
       `DESCRIBE SELECT * FROM (${sql}) AS sixb_sql_transform_result_schema`
     )
     const actualColumns = rows.map((row) => resultColumnFromDescribeRow(row))
     const expectedColumns = target.schema.columns
+    const checkedCasts: SqlTransformCheckedCast[] = []
 
     if (actualColumns.length !== expectedColumns.length) {
       throwResultSchemaMismatch(
@@ -224,13 +238,26 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
         )
       }
 
-      if (actual.type !== expected.type) {
-        throwResultSchemaMismatch(
-          target.id,
-          `column '${expected.name}' should have type '${expected.type}', got '${actual.type}'`
-        )
+      const actualDatasetType = findDatasetColumnTypeForDuckDbSql(actual.typeSql)
+      if (actualDatasetType === expected.type) {
+        continue
       }
+
+      if (isCheckedInt64Cast(actual.typeSql, expected.type)) {
+        checkedCasts.push({
+          columnName: expected.name,
+          targetTypeSql: datasetColumnTypeToDuckDbSql(expected.type),
+        })
+        continue
+      }
+
+      throwResultSchemaMismatch(
+        target.id,
+        `column '${expected.name}' should have type '${expected.type}', got '${actualDatasetType ?? actual.typeSql}'`
+      )
     }
+
+    return checkedCasts
   }
 
   private async applySqlTransform(input: ApplySqlTransformInput): Promise<ApplyDatasetRowsResult> {
@@ -243,6 +270,14 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
 
     let result: ApplyDatasetRowsResult
     try {
+      for (const checkedCast of input.checkedCasts) {
+        await input.runtime.run(
+          `ALTER TABLE ${tempTable} ALTER COLUMN ${quoteIdentifier(
+            checkedCast.columnName
+          )} SET DATA TYPE ${checkedCast.targetTypeSql}`
+        )
+      }
+
       result = await applyDatasetRowsFromRelation({
         options: this.options,
         runtime: input.runtime,
@@ -280,11 +315,19 @@ function buildPreviewSql(sql: string, limit: number): string {
 
 function resultColumnFromDescribeRow(
   row: Readonly<Record<string, unknown>>
-): DatasetColumnDefinition {
+): SqlTransformResultColumn {
   const name = getString(row, "column_name")
-  const type = duckDbTypeToDatasetColumnType(getString(row, "column_type"))
+  const typeSql = getString(row, "column_type")
 
-  return { name, type }
+  return { name, typeSql }
+}
+
+function isCheckedInt64Cast(
+  actualTypeSql: string,
+  expectedType: DatasetColumnDefinition["type"]
+): boolean {
+  const normalizedType = actualTypeSql.trim().toUpperCase()
+  return expectedType === "int64" && (normalizedType === "HUGEINT" || normalizedType === "INT128")
 }
 
 function normalizePreviewRow(row: Readonly<Record<string, unknown>>): DatasetRow {

@@ -2,10 +2,12 @@ import { dirname, resolve } from "node:path"
 import { type CustomAppDevServer, createCustomApp } from "@sixb/app"
 import { type AtlasAppServer, createAtlasApp } from "@sixb/atlas"
 import { createSixbServer, type SixbServer } from "@sixb/server"
+import { resolveAgentTurnTimeoutMs } from "../lib/agent-turn-timeout"
 import { apiDocsUrl, apiEventsUrl, apiUrl, resolveBrowserTopology } from "../lib/browser-topology"
 import { type LoadedSixbHost, loadSixbFromEntry } from "../lib/loadSixb"
 import { runUntilSignal, startSixbRuntime, stopQuietly } from "../lib/runtime"
 import { generateProjectTypes } from "../lib/typegen"
+import { resolveWorkerConcurrency } from "../lib/worker-concurrency"
 import { DevView, LoadingView, renderCliError, renderPersistent } from "../ui"
 
 export interface DevOptions {
@@ -17,11 +19,15 @@ export interface DevOptions {
   apiPublicOrigin?: string
   atlasPublicOrigin?: string
   appPublicOrigin?: string
+  agentTurnTimeout?: string
+  concurrency?: readonly string[]
 }
 
 export async function runDev(options: DevOptions = {}) {
   process.env.NODE_ENV = "development"
 
+  const agentTurnTimeoutMs = resolveAgentTurnTimeoutMs(options.agentTurnTimeout)
+  const workerConcurrency = resolveWorkerConcurrency(options.concurrency)
   const entry = resolve(options.entry ?? "sixb.config.ts")
 
   const app = renderPersistent(
@@ -53,10 +59,23 @@ export async function runDev(options: DevOptions = {}) {
       appPublicOrigin: options.appPublicOrigin,
       hasCustomApp,
     })
+    const customApp = await createCustomApp({
+      rootDir: projectRoot,
+      apiBaseUrl: topology.apiPublicOrigin,
+      audience: "app",
+      authEnabled: host.auth.isEnabled(),
+    })
+    const authExperience = hasCustomApp
+      ? ((await customApp.prepareAuthExperience()) ?? {
+          outdir: resolve(projectRoot, ".sixb", "generated", "auth"),
+        })
+      : null
 
     runtime = await startSixbRuntime(host, {
       cohostWorkers: true,
       agentApiBaseUrl: topology.apiPublicOrigin,
+      agentTurnTimeoutMs,
+      workerConcurrency,
     })
     const authEnabled = host.auth.isEnabled()
 
@@ -71,6 +90,7 @@ export async function runDev(options: DevOptions = {}) {
         publicOrigin: topology.apiPublicOrigin,
         allowedOrigins: topology.allowedBrowserOrigins,
       },
+      ...(authExperience ? { authExperience } : {}),
     })
     await server.start()
 
@@ -83,13 +103,6 @@ export async function runDev(options: DevOptions = {}) {
       host: topology.host,
       port: topology.atlasPort,
       development: true,
-    })
-
-    const customApp = await createCustomApp({
-      rootDir: projectRoot,
-      apiBaseUrl: topology.apiPublicOrigin,
-      audience: "app",
-      authEnabled,
     })
 
     let appUrl: string | null = null
@@ -113,6 +126,16 @@ export async function runDev(options: DevOptions = {}) {
         wsUrl={apiEventsUrl(topology)}
         uiUrl={topology.atlasPublicOrigin}
         appUrl={appUrl}
+        workers={[
+          { type: "action", worker: runtime.actionWorker },
+          { type: "agent", worker: runtime.agentWorker },
+          { type: "projection", worker: runtime.projectionWorker },
+          { type: "pipeline", worker: runtime.pipelineWorker },
+          { type: "workflow", worker: runtime.workflowWorker },
+          { type: "sync", worker: runtime.syncWorker },
+        ].flatMap(({ type, worker }) =>
+          worker ? [{ type, concurrency: worker.concurrency }] : []
+        )}
         warnings={runtime.warnings}
       />
     )

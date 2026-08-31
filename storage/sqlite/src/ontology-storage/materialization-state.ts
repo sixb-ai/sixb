@@ -22,6 +22,7 @@ import {
   startScopeAccumulator,
 } from "@sixb/core/internal/ontology-storage-provider"
 import type {
+  MaterializationLinkScopeRevision,
   MaterializationLinkScopeState,
   MaterializationLinkState,
   MaterializationObjectState,
@@ -83,9 +84,23 @@ interface LinkScopeRow extends EffectiveLinkRow {
   readonly scope_sort_key: string
 }
 
+function linkScopeRequestJson(
+  scopes: readonly { readonly source: OntologyObjectRef; readonly linkId: string }[]
+): string {
+  return canonicalJson(
+    scopes.map(({ source, linkId }) => ({
+      scopeSortKey: linkScopeSortKey(source, linkId),
+      sourceTypeId: source.objectTypeId,
+      sourceId: source.primaryId,
+      linkId,
+    }))
+  )
+}
+
 interface ObjectOverrideRow extends SqliteStoredOverrideRow {
   readonly object_type_id: string
   readonly primary_id: string
+  readonly edited_at: string
 }
 
 interface LinkOverrideRow extends SqliteStoredOverrideRow {
@@ -425,23 +440,18 @@ export class SqliteMaterializationStateReader {
     })
   }
 
-  linkScopes(
+  linkScopeRevisions(
+    scopes: readonly { readonly source: OntologyObjectRef; readonly linkId: string }[]
+  ): readonly MaterializationLinkScopeRevision[] {
+    if (scopes.length === 0) return []
+    return this.readEffectiveLinkScopes(scopes, linkScopeRequestJson(scopes)).revisions
+  }
+
+  linkSlotStates(
     scopes: readonly { readonly source: OntologyObjectRef; readonly linkId: string }[]
   ): readonly MaterializationLinkScopeState[] {
     if (scopes.length === 0) return []
-    const requested = scopes.map(({ source, linkId }) => ({
-      scopeSortKey: linkScopeSortKey(source, linkId),
-      sourceTypeId: source.objectTypeId,
-      sourceId: source.primaryId,
-      linkId,
-    }))
-    const accumulators = new Map(
-      scopes.map(({ source, linkId }) => {
-        const key = linkScopeSortKey(source, linkId)
-        return [key, startScopeAccumulator(source, linkId)] as const
-      })
-    )
-    const requestedJson = canonicalJson(requested)
+    const requestedJson = linkScopeRequestJson(scopes)
     const sourceRows = this.db
       .query(
         `WITH requested AS (
@@ -490,6 +500,31 @@ export class SqliteMaterializationStateReader {
         return [linkScopeSortKey(stored.ref.source, stored.ref.linkId), stored] as const
       })
     )
+    const { revisions, effective } = this.readEffectiveLinkScopes(scopes, requestedJson)
+    return scopes.map(({ source, linkId }, index) => {
+      const key = linkScopeSortKey(source, linkId)
+      return {
+        ...revisions[index]!,
+        sourceAssertion: sources.get(key) ?? null,
+        override: overrides.get(key) ?? null,
+        effective: effective.get(key) ?? null,
+      }
+    })
+  }
+
+  private readEffectiveLinkScopes(
+    scopes: readonly { readonly source: OntologyObjectRef; readonly linkId: string }[],
+    requestedJson: string
+  ): {
+    readonly revisions: readonly MaterializationLinkScopeRevision[]
+    readonly effective: ReadonlyMap<string, EffectiveLinkSnapshot | null>
+  } {
+    const accumulators = new Map(
+      scopes.map(({ source, linkId }) => {
+        const key = linkScopeSortKey(source, linkId)
+        return [key, startScopeAccumulator(source, linkId)] as const
+      })
+    )
     const effective = new Map<string, EffectiveLinkSnapshot | null>()
     const rows = this.db
       .query(
@@ -525,26 +560,12 @@ export class SqliteMaterializationStateReader {
       appendScopeSnapshot(accumulator, snapshot)
       effective.set(row.scope_sort_key, accumulator.effectiveCount === 1 ? snapshot : null)
     }
-    return scopes.map(({ source, linkId }) => {
-      const key = linkScopeSortKey(source, linkId)
-      return {
-        ...finishScopeAccumulator(accumulators.get(key)!),
-        sourceAssertion: sources.get(key) ?? null,
-        override: overrides.get(key) ?? null,
-        effective: effective.get(key) ?? null,
-      }
-    })
-  }
-
-  linkScope(source: OntologyObjectRef, linkId: string): MaterializationLinkScopeState {
-    const [scope] = this.linkScopes([{ source, linkId }])
-    if (!scope) {
-      throw new MaterializationConflictError(
-        "effective-state",
-        "Link scope lookup returned no row."
-      )
+    return {
+      revisions: scopes.map(({ source, linkId }) =>
+        finishScopeAccumulator(accumulators.get(linkScopeSortKey(source, linkId))!)
+      ),
+      effective,
     }
-    return scope
   }
 
   *incidentLinks(
@@ -1028,6 +1049,7 @@ function storedObjectOverride(row: ObjectOverrideRow): StoredObjectOverride {
   return {
     ref,
     value: parseJson<StoredObjectOverride["value"]>(row.value),
+    editedAt: parseJson<Readonly<Record<string, string>>>(row.edited_at),
     lastCommitId: row.last_commit_id,
     updatedAt: row.updated_at,
   }

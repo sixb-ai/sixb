@@ -1,7 +1,8 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { SixbApiError } from "@sixb/client"
 import { agentDocumentKind } from "../src/document-preview/classify"
 import {
+  customPreviewTooLarge,
   documentLoadError,
   MAX_MARKDOWN_PREVIEW_BYTES,
   markdownPreviewTooLarge,
@@ -13,15 +14,22 @@ import {
   parseDelimitedText,
 } from "../src/document-preview/delimited"
 import { buildSafeHtmlPreviewDocument, HTML_PREVIEW_SANDBOX } from "../src/document-preview/html"
+import { parseDocumentPreviewState } from "../src/document-preview/persistence"
 import { documentPreviewPresentation } from "../src/document-preview/presentation"
-import { agentDocumentPreviewRenderer } from "../src/document-preview/rendering"
+import {
+  agentDocumentPreviewRenderer,
+  resolveAgentDocumentPreview,
+} from "../src/document-preview/rendering"
 import { createAgentDocumentSource } from "../src/document-preview/source"
 import {
   documentPreviewReducer,
   documentTabIdAfterKey,
   EMPTY_DOCUMENT_PREVIEW_STATE,
 } from "../src/document-preview/state"
-import type { AgentDocumentSource } from "../src/document-preview/types"
+import type {
+  AgentDocumentPreviewRenderer,
+  AgentDocumentSource,
+} from "../src/document-preview/types"
 import type { AgentFileRef } from "../src/types"
 
 const MARKDOWN_FILE: AgentFileRef = {
@@ -39,12 +47,15 @@ describe("agent document classification", () => {
     expect(agentDocumentKind("text/csv", "rows.bin")).toBe("csv")
     expect(agentDocumentKind("text/tab-separated-values", "rows.bin")).toBe("tsv")
     expect(agentDocumentKind("application/pdf", "report.bin")).toBe("pdf")
+    expect(agentDocumentKind("image/png", "generated.bin")).toBe("image")
+    expect(agentDocumentKind("image/jpeg; charset=binary", "photo.bin")).toBe("image")
   })
 
   test("uses extensions only for missing or generic media metadata", () => {
     expect(agentDocumentKind(undefined, "REPORT.MD")).toBe("markdown")
     expect(agentDocumentKind("application/octet-stream", "report.pdf")).toBe("pdf")
-    expect(agentDocumentKind("image/png", "not-really.md")).toBeNull()
+    expect(agentDocumentKind("application/octet-stream", "generated.WEBP")).toBe("image")
+    expect(agentDocumentKind("image/svg+xml", "not-really.png")).toBeNull()
     expect(agentDocumentKind(undefined, "workbook.xlsx")).toBeNull()
   })
 })
@@ -88,7 +99,77 @@ describe("document preview rendering", () => {
     expect(agentDocumentPreviewRenderer("html")).toBe("html-static")
     expect(agentDocumentPreviewRenderer("csv")).toBe("delimited-text")
     expect(agentDocumentPreviewRenderer("tsv")).toBe("delimited-text")
+    expect(agentDocumentPreviewRenderer("image")).toBe("image-native")
     expect(agentDocumentPreviewRenderer(null)).toBeNull()
+  })
+
+  test("resolves the first matching host renderer before built-in viewers", () => {
+    const spreadsheet = {
+      ...document("workbook", "forecast.xlsx"),
+      kind: null,
+    } satisfies AgentDocumentSource
+    const renderer: AgentDocumentPreviewRenderer = {
+      id: "test-spreadsheet",
+      maxFileSizeBytes: 10 * 1024 * 1024,
+      supports: (file) => file.fileName?.endsWith(".xlsx") === true,
+      component: () => null,
+    }
+
+    expect(resolveAgentDocumentPreview(spreadsheet, [renderer])).toEqual({
+      type: "custom",
+      renderer,
+    })
+    expect(resolveAgentDocumentPreview(document("markdown", "report.md"), [renderer])).toEqual({
+      type: "built-in",
+      renderer: "markdown",
+    })
+    expect(
+      resolveAgentDocumentPreview(document("markdown", "report.md"), [
+        { ...renderer, supports: () => true },
+      ])
+    ).toMatchObject({ type: "custom" })
+    expect(
+      resolveAgentDocumentPreview(
+        { ...spreadsheet, fileRef: { ...spreadsheet.fileRef, fileName: "archive.zip" } },
+        [renderer]
+      )
+    ).toBeNull()
+  })
+
+  test("isolates a failed capability check and tries the next renderer", () => {
+    const spreadsheet = {
+      ...document("workbook", "forecast.xlsx"),
+      kind: null,
+    } satisfies AgentDocumentSource
+    const failure = new Error("broken capability check")
+    const consoleError = spyOn(console, "error").mockImplementation(() => undefined)
+    const fallback: AgentDocumentPreviewRenderer = {
+      id: "fallback",
+      maxFileSizeBytes: 1024,
+      supports: () => true,
+      component: () => null,
+    }
+
+    try {
+      expect(
+        resolveAgentDocumentPreview(spreadsheet, [
+          {
+            ...fallback,
+            id: "broken",
+            supports: () => {
+              throw failure
+            },
+          },
+          fallback,
+        ])
+      ).toEqual({ type: "custom", renderer: fallback })
+      expect(consoleError).toHaveBeenCalledWith(
+        "[SixbAgentUI] Document preview renderer 'broken' failed its capability check.",
+        failure
+      )
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 })
 
@@ -265,6 +346,47 @@ describe("document preview tabs", () => {
 
     expect(state.activeId).toBe("second")
   })
+
+  test("keeps the thread's panel width after its document tabs are closed", () => {
+    let state = documentPreviewReducer(EMPTY_DOCUMENT_PREVIEW_STATE, {
+      type: "set-panel-width",
+      width: 640,
+    })
+    state = documentPreviewReducer(state, { type: "open", document: document("first", "first.md") })
+    state = documentPreviewReducer(state, { type: "close-all" })
+
+    expect(state).toEqual({ documents: [], activeId: null, panelWidth: 640 })
+    expect(parseDocumentPreviewState(JSON.stringify(state), "thread-1")).toEqual(state)
+  })
+
+  test("restores only valid, unique documents from the current thread", () => {
+    const first = document("first", "first.md")
+    const second = document("second", "second.md")
+    const state = parseDocumentPreviewState(
+      JSON.stringify({
+        documents: [first, first, { ...second, threadId: "another-thread" }, second],
+        activeId: "second",
+        panelWidth: 640,
+      }),
+      "thread-1"
+    )
+
+    expect(state.documents.map((item) => item.id)).toEqual(["first", "second"])
+    expect(state.activeId).toBe("second")
+    expect(state.panelWidth).toBe(640)
+  })
+
+  test("falls back safely when persisted preview state is stale or malformed", () => {
+    const first = document("first", "first.md")
+
+    expect(
+      parseDocumentPreviewState(
+        JSON.stringify({ documents: [first], activeId: "missing" }),
+        "thread-1"
+      )
+    ).toEqual({ documents: [first], activeId: "first", panelWidth: null })
+    expect(parseDocumentPreviewState("not-json", "thread-1")).toBe(EMPTY_DOCUMENT_PREVIEW_STATE)
+  })
 })
 
 describe("Markdown document loading policy", () => {
@@ -275,6 +397,19 @@ describe("Markdown document loading policy", () => {
         ...document("large", "large.md"),
         fileRef: { ...MARKDOWN_FILE, sizeBytes: MAX_MARKDOWN_PREVIEW_BYTES + 1 },
       })
+    ).toBe(true)
+  })
+
+  test("applies a host renderer's limit before loading binary content", () => {
+    const source = document("binary", "workbook.xlsx")
+    expect(customPreviewTooLarge(source, source.fileRef.sizeBytes)).toBe(false)
+    expect(customPreviewTooLarge(source, source.fileRef.sizeBytes - 1)).toBe(true)
+    expect(customPreviewTooLarge(source, Number.NaN)).toBe(true)
+    expect(
+      customPreviewTooLarge(
+        { ...source, fileRef: { ...source.fileRef, sizeBytes: Number.POSITIVE_INFINITY } },
+        1024
+      )
     ).toBe(true)
   })
 

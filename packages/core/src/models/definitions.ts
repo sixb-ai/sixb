@@ -37,6 +37,8 @@ export interface LanguageModelPricing {
   readonly output: ModelTokenPrice
   readonly cacheReadInput?: ModelTokenPrice
   readonly cacheWriteInput?: ModelTokenPrice
+  readonly cacheWriteInput5m?: ModelTokenPrice
+  readonly cacheWriteInput1h?: ModelTokenPrice
 }
 
 /** Serializable facts about one concrete model offering from one provider. */
@@ -128,6 +130,12 @@ function freezePricing(pricing: LanguageModelPricing): LanguageModelPricing {
     ...(pricing.cacheWriteInput === undefined
       ? {}
       : { cacheWriteInput: freezeTokenPrice(pricing.cacheWriteInput) }),
+    ...(pricing.cacheWriteInput5m === undefined
+      ? {}
+      : { cacheWriteInput5m: freezeTokenPrice(pricing.cacheWriteInput5m) }),
+    ...(pricing.cacheWriteInput1h === undefined
+      ? {}
+      : { cacheWriteInput1h: freezeTokenPrice(pricing.cacheWriteInput1h) }),
   })
 }
 

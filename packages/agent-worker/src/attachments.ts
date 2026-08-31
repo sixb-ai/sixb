@@ -1,13 +1,10 @@
 import { posix } from "node:path"
-import type {
-  AgentFileDataProjection,
-  AgentMessagePart,
-  BlobInfo,
-  BlobStorage,
-  FileRef,
-} from "@sixb/core"
+import type { AgentFileDataProjection, BlobInfo, BlobStorage, FileRef } from "@sixb/core"
+import { isAgentToolResult } from "@sixb/core/internal/agents"
 import { type LanguageModel, resolveModelCapabilities } from "@sixb/core/models"
 import type { AgentMessageRecord } from "@sixb/core/storage"
+import { NEVER_ABORTED_SIGNAL, waitForAbort } from "./abort"
+import { fileContentKey } from "./file-ref"
 import { type AgentAttachmentLimits, processAgentImageAttachment } from "./image-attachments"
 
 const DEFAULT_AGENT_ATTACHMENT_LIMITS: AgentAttachmentLimits = {
@@ -51,12 +48,23 @@ export interface PreparedSandboxAttachmentFile {
   readonly key: string
   readonly path: string
   readonly bytes: Uint8Array
+  readonly fileRef: FileRef
+}
+
+export interface PreparedAgentToolFileProjection {
+  readonly promptText: string
+  readonly modelFileData?: AgentFileDataProjection
 }
 
 interface AttachmentWorkItem {
   readonly message: AgentMessageRecord
-  readonly part: Extract<AgentMessagePart, { type: "file" }>
+  readonly fileRef: FileRef
   readonly partIndex: number
+  readonly key: string
+  readonly contentPath: string
+  readonly sandboxName: string
+  readonly inlineContent: boolean
+  readonly origin: "message-file" | "tool-result-file"
 }
 
 export async function prepareAgentAttachments(input: {
@@ -66,6 +74,7 @@ export async function prepareAgentAttachments(input: {
   readonly blobStorage: BlobStorage
   readonly apiBaseUrl: string
   readonly inlineImages: boolean
+  readonly signal?: AbortSignal
 }): Promise<PreparedAgentAttachmentContext> {
   const promptTextByPartKey = new Map<string, string>()
   const modelFileDataByPartKey = new Map<string, AgentFileDataProjection>()
@@ -75,6 +84,7 @@ export async function prepareAgentAttachments(input: {
   let textInlineBytes = 0
 
   for (const item of fileWorkItems(input.messages)) {
+    input.signal?.throwIfAborted()
     const prepared = await prepareOneAttachment({
       ...input,
       item,
@@ -110,26 +120,172 @@ export async function prepareAgentAttachments(input: {
   }
 }
 
+/** Build the bounded, ephemeral projection of a tool-created file for the next model step. */
+export async function prepareAgentToolFileProjection(input: {
+  readonly fileRef: FileRef
+  readonly blobStorage: BlobStorage
+  readonly inlineImages: boolean
+  readonly signal?: AbortSignal
+  readonly sandboxPath?: string
+  readonly imageOmissionNote?: string
+}): Promise<PreparedAgentToolFileProjection> {
+  const { fileRef } = input
+  const signal = input.signal ?? NEVER_ABORTED_SIGNAL
+  signal.throwIfAborted()
+  const fileName = fileNameFor(fileRef)
+  const mediaType = normalizedMediaType(fileRef.mediaType) ?? "application/octet-stream"
+  const notes: string[] = []
+  let textExcerpt: string | undefined
+  let modelFileData: AgentFileDataProjection | undefined
+
+  const stat = await safeBlobStat(input.blobStorage, fileRef, notes, signal)
+  if (!stat) {
+    notes.push("[File omitted: blob content is not available or no longer matches this FileRef.]")
+  } else {
+    const shouldReadForText = shouldAttemptTextInline(mediaType, fileName, stat.sizeBytes)
+    const shouldReadForImage = input.inlineImages && shouldAttemptImageInline(mediaType, fileName)
+    const readLimit = shouldReadForText
+      ? DEFAULT_AGENT_ATTACHMENT_LIMITS.textInlineMaxBytes + 4
+      : shouldReadForImage
+        ? DEFAULT_AGENT_ATTACHMENT_LIMITS.sandboxFileMaxBytes
+        : 0
+
+    if (readLimit > 0) {
+      const read = await readBlobBytes(input.blobStorage, fileRef.blobId, readLimit, signal, {
+        allowPrefix: shouldReadForText,
+      })
+      if (read.ok) {
+        const text = shouldReadForText
+          ? maybeTextExcerpt(read.bytes, mediaType, fileName, stat.sizeBytes, readLimit - 4)
+          : undefined
+        if (text) {
+          textExcerpt = text.text
+          if (text.truncated) {
+            notes.push("[Text file truncated for model input.]")
+          }
+        } else if (shouldReadForImage) {
+          const image = await maybeImageData({
+            bytes: read.bytes,
+            mediaType,
+            fileName,
+            inlineImages: true,
+            hasImageHint: true,
+            signal,
+          })
+          if (image?.ok) {
+            notes.push(...image.notes)
+            modelFileData = {
+              data: image.dataUrl,
+              mediaType: image.mediaType,
+              filename: fileName,
+            }
+          } else if (image) {
+            notes.push(...image.notes)
+          }
+        }
+      } else if (read.reason === "too_large") {
+        notes.push("[File not projected inline: file exceeds the attachment read limit.]")
+      } else {
+        notes.push(`[File not projected inline: ${read.reason}.]`)
+      }
+    }
+
+    if (!input.inlineImages && hasImageHint(mediaType, fileName)) {
+      notes.push(
+        input.imageOmissionNote ??
+          "[Image not inlined: the selected model does not advertise image input support.]"
+      )
+    }
+    if (!textExcerpt && !modelFileData && notes.length === 0) {
+      notes.push("[File contents are available through its sandbox path.]")
+    }
+  }
+
+  const body = [
+    ...notes,
+    ...(textExcerpt === undefined ? [] : ["<content>", textExcerpt, "</content>"]),
+  ].join("\n")
+  const sandboxPathAttribute =
+    input.sandboxPath === undefined ? "" : ` sandboxPath="${escapeXmlAttribute(input.sandboxPath)}"`
+  const promptText = `<tool_file name="${escapeXmlAttribute(fileName)}" mediaType="${escapeXmlAttribute(
+    mediaType
+  )}" sizeBytes="${fileRef.sizeBytes}"${sandboxPathAttribute}>\n${body}\n</tool_file>`
+  return {
+    promptText,
+    ...(modelFileData === undefined ? {} : { modelFileData }),
+  }
+}
+
 function fileWorkItems(messages: readonly AgentMessageRecord[]): AttachmentWorkItem[] {
   const items: AttachmentWorkItem[] = []
+  const currentUserMessageId = latestUserMessageId(messages)
   for (const message of messages) {
     message.parts.forEach((part, partIndex) => {
       if (part.type === "file") {
-        items.push({ message, part, partIndex })
+        items.push({
+          message,
+          fileRef: part.fileRef,
+          partIndex,
+          key: attachmentKey(message.id, partIndex),
+          contentPath: `/parts/${partIndex}/fileRef`,
+          sandboxName: String(partIndex),
+          inlineContent: message.role === "user" && message.id === currentUserMessageId,
+          origin: "message-file",
+        })
+      } else if (
+        part.type === "tool-call" &&
+        part.state === "output-available" &&
+        isAgentToolResult(part.output)
+      ) {
+        part.output.content.forEach((contentPart, contentIndex) => {
+          if (contentPart.type !== "file") return
+          items.push({
+            message,
+            fileRef: contentPart.fileRef,
+            partIndex,
+            key: toolResultAttachmentKey(message.id, partIndex, contentIndex),
+            contentPath: `/parts/${partIndex}/output/content/${contentIndex}/fileRef`,
+            sandboxName: `tool-${partIndex}-${contentIndex}`,
+            inlineContent: false,
+            origin: "tool-result-file",
+          })
+        })
       }
     })
   }
-  const retainedAssistantKeys = new Set(
+
+  const toolFilesByMessage = new Set(
     items
+      .filter((item) => item.origin === "tool-result-file")
+      .map((item) => messageFileIdentity(item.message.id, item.fileRef))
+  )
+  const deduplicated = items.filter(
+    (item) =>
+      item.origin === "tool-result-file" ||
+      item.message.role !== "assistant" ||
+      !toolFilesByMessage.has(messageFileIdentity(item.message.id, item.fileRef))
+  )
+  const retainedAssistantKeys = new Set(
+    deduplicated
       .filter((item) => item.message.role === "assistant")
       .slice(-MAX_ASSISTANT_ATTACHMENTS)
-      .map((item) => attachmentKey(item.message.id, item.partIndex))
+      .map((item) => item.key)
   )
-  return items.filter(
-    (item) =>
-      item.message.role !== "assistant" ||
-      retainedAssistantKeys.has(attachmentKey(item.message.id, item.partIndex))
+  return deduplicated.filter(
+    (item) => item.message.role !== "assistant" || retainedAssistantKeys.has(item.key)
   )
+}
+
+function latestUserMessageId(messages: readonly AgentMessageRecord[]): string | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message?.role === "user") return message.id
+  }
+  return undefined
+}
+
+function messageFileIdentity(messageId: string, fileRef: FileRef): string {
+  return JSON.stringify([messageId, fileContentKey(fileRef)])
 }
 
 async function prepareOneAttachment(input: {
@@ -141,6 +297,7 @@ async function prepareOneAttachment(input: {
   readonly inlineImages: boolean
   readonly sandboxBytes: number
   readonly textInlineBytes: number
+  readonly signal?: AbortSignal
 }): Promise<{
   readonly entry: PreparedAgentAttachment
   readonly promptText: string
@@ -150,11 +307,13 @@ async function prepareOneAttachment(input: {
   readonly textInlineBytesAdded: number
 }> {
   const { item } = input
-  const key = attachmentKey(item.message.id, item.partIndex)
-  const fileRef = item.part.fileRef
+  const signal = input.signal ?? NEVER_ABORTED_SIGNAL
+  signal.throwIfAborted()
+  const key = item.key
+  const fileRef = item.fileRef
   const fileName = fileNameFor(fileRef)
   const mediaType = normalizedMediaType(fileRef.mediaType) ?? "application/octet-stream"
-  const contentPath = `/parts/${item.partIndex}/fileRef`
+  const contentPath = item.contentPath
   const contentUrl = attachmentContentUrl({
     apiBaseUrl: input.apiBaseUrl,
     threadId: input.threadId,
@@ -171,7 +330,7 @@ async function prepareOneAttachment(input: {
   let textInlineBytesAdded = 0
   let modelFileData: AgentFileDataProjection | undefined
 
-  const stat = await safeBlobStat(input.blobStorage, fileRef, notes)
+  const stat = await safeBlobStat(input.blobStorage, fileRef, notes, signal)
   if (!stat) {
     inlineDisposition = "omitted"
     notes.push("[File omitted: blob content is not available or no longer matches this FileRef.]")
@@ -179,7 +338,7 @@ async function prepareOneAttachment(input: {
     const canMaterializeFile = stat.sizeBytes <= DEFAULT_AGENT_ATTACHMENT_LIMITS.sandboxFileMaxBytes
     const canMaterializeTotal =
       input.sandboxBytes + stat.sizeBytes <= DEFAULT_AGENT_ATTACHMENT_LIMITS.sandboxTotalMaxBytes
-    const mayInlineContent = item.message.role !== "assistant"
+    const mayInlineContent = item.inlineContent
     const remainingTextBytes = Math.max(0, TEXT_INLINE_TOTAL_MAX_BYTES - input.textInlineBytes)
     const shouldReadForText =
       mayInlineContent &&
@@ -197,7 +356,9 @@ async function prepareOneAttachment(input: {
           : 0
 
     if (needsFullBytes || readLimit > 0) {
-      const read = await readBlobBytes(input.blobStorage, fileRef.blobId, readLimit)
+      const read = await readBlobBytes(input.blobStorage, fileRef.blobId, readLimit, signal, {
+        allowPrefix: shouldReadForText && !needsFullBytes,
+      })
       if (read.ok) {
         bytes = read.bytes
       } else if (read.reason === "too_large") {
@@ -208,8 +369,8 @@ async function prepareOneAttachment(input: {
     }
 
     if (bytes && needsFullBytes && bytes.byteLength === stat.sizeBytes) {
-      sandboxPath = sandboxAttachmentPath(item.message.id, item.partIndex, fileName)
-      sandboxFile = { key, path: sandboxPath, bytes }
+      sandboxPath = sandboxAttachmentPath(item.message.id, item.sandboxName, fileName)
+      sandboxFile = { key, path: sandboxPath, bytes, fileRef }
       sandboxBytesAdded = stat.sizeBytes
     } else if (!canMaterializeFile) {
       notes.push("[File not materialized in sandbox: file exceeds the per-file sandbox limit.]")
@@ -242,6 +403,7 @@ async function prepareOneAttachment(input: {
           fileName,
           inlineImages: mayInlineContent && input.inlineImages,
           hasImageHint: hasImageHint(mediaType, fileName),
+          signal,
         })
         if (image) {
           if (image.ok) {
@@ -267,8 +429,8 @@ async function prepareOneAttachment(input: {
 
     if (inlineDisposition === "metadata-only" && notes.length === 0) {
       notes.push(
-        item.message.role === "assistant"
-          ? "[Generated file kept as metadata: use the sandbox path or content URL when its contents are needed.]"
+        !item.inlineContent
+          ? "[Historical file kept as metadata: use view_file with the sandbox path when its contents are needed.]"
           : remainingTextBytes === 0 && shouldAttemptTextInline(mediaType, fileName, stat.sizeBytes)
             ? "[File not inlined: the attachment text budget is exhausted; use the sandbox path or content URL.]"
             : "[File not inlined: available through the sandbox path or content URL.]"
@@ -304,12 +466,15 @@ async function prepareOneAttachment(input: {
 async function safeBlobStat(
   blobStorage: BlobStorage,
   fileRef: FileRef,
-  notes: string[]
+  notes: string[],
+  signal: AbortSignal
 ): Promise<BlobInfo | null> {
+  signal.throwIfAborted()
   let stat: BlobInfo | null
   try {
-    stat = await blobStorage.stat(fileRef.blobId)
+    stat = await waitForAbort(blobStorage.stat(fileRef.blobId), signal)
   } catch (error) {
+    signal.throwIfAborted()
     console.error("[SixbAgentWorker] Failed to inspect an attachment blob.", error)
     notes.push("[File omitted: blob storage metadata is unavailable.]")
     return null
@@ -331,15 +496,19 @@ function blobMatchesFileRef(stat: BlobInfo, fileRef: FileRef): boolean {
 async function readBlobBytes(
   blobStorage: BlobStorage,
   blobId: string,
-  maxBytes: number
+  maxBytes: number,
+  signal: AbortSignal,
+  options: { readonly allowPrefix?: boolean } = {}
 ): Promise<
   | { readonly ok: true; readonly bytes: Uint8Array }
   | { readonly ok: false; readonly reason: string }
 > {
+  signal.throwIfAborted()
   let stream: ReadableStream<Uint8Array>
   try {
-    stream = await blobStorage.open(blobId)
+    stream = await waitForAbort(blobStorage.open(blobId), signal)
   } catch (error) {
+    signal.throwIfAborted()
     console.error("[SixbAgentWorker] Failed to open an attachment blob.", error)
     return { ok: false, reason: "blob content is unavailable" }
   }
@@ -347,18 +516,31 @@ async function readBlobBytes(
   const reader = stream.getReader()
   const chunks: Uint8Array[] = []
   let total = 0
+  const cancelOnAbort = () => {
+    void reader.cancel(signal.reason)
+  }
+  signal.addEventListener("abort", cancelOnAbort, { once: true })
   try {
     for (;;) {
       const { done, value } = await reader.read()
+      signal.throwIfAborted()
       if (done) break
-      total += value.byteLength
-      if (total > maxBytes) {
+      const remaining = maxBytes - total
+      if (value.byteLength > remaining) {
+        if (options.allowPrefix) {
+          if (remaining > 0) chunks.push(value.subarray(0, remaining))
+          total = maxBytes
+          await reader.cancel().catch(() => {})
+          break
+        }
         await reader.cancel().catch(() => {})
         return { ok: false, reason: "too_large" }
       }
+      total += value.byteLength
       chunks.push(value)
     }
   } finally {
+    signal.removeEventListener("abort", cancelOnAbort)
     reader.releaseLock()
   }
 
@@ -467,6 +649,7 @@ async function maybeImageData(input: {
   readonly fileName: string
   readonly inlineImages: boolean
   readonly hasImageHint: boolean
+  readonly signal: AbortSignal
 }): Promise<
   | {
       readonly ok: true
@@ -481,12 +664,15 @@ async function maybeImageData(input: {
     return undefined
   }
 
+  input.signal.throwIfAborted()
   const image = await processAgentImageAttachment({
     bytes: input.bytes,
     declaredMediaType: input.mediaType,
     fileName: input.fileName,
     limits: DEFAULT_AGENT_ATTACHMENT_LIMITS,
+    signal: input.signal,
   })
+  input.signal.throwIfAborted()
   if (!image.ok) {
     return input.hasImageHint ? { ok: false, notes: image.notes } : undefined
   }
@@ -498,27 +684,35 @@ async function maybeImageData(input: {
   }
 }
 
-export async function modelSupportsInlineImages(model: LanguageModel): Promise<boolean> {
+export async function modelSupportsInlineImages(
+  model: LanguageModel,
+  signal: AbortSignal = NEVER_ABORTED_SIGNAL
+): Promise<boolean> {
+  signal.throwIfAborted()
   try {
-    const mediaTypes = (await resolveModelCapabilities(model)).inputMediaTypes
-    return mediaTypes === "any" || mediaTypes?.some(mediaPatternMatchesImages) === true
+    const capabilities = await waitForAbort(resolveModelCapabilities(model), signal)
+    return (
+      capabilities.inputMediaTypes === "any" ||
+      capabilities.inputMediaTypes?.some((mediaType) =>
+        mediaType.toLowerCase().startsWith("image/")
+      ) === true
+    )
   } catch {
+    signal.throwIfAborted()
     return false
   }
 }
 
-function mediaPatternMatchesImages(pattern: string): boolean {
-  const normalized = pattern.toLowerCase()
-  return (
-    normalized === "*/*" ||
-    normalized === "image" ||
-    normalized === "image/*" ||
-    normalized.startsWith("image/")
-  )
-}
-
 export function attachmentKey(messageId: string, partIndex: number): string {
   return `${messageId}:${partIndex}`
+}
+
+export function toolResultAttachmentKey(
+  messageId: string,
+  partIndex: number,
+  contentIndex: number
+): string {
+  return `${messageId}:${partIndex}:tool-result:${contentIndex}`
 }
 
 function attachmentPromptText(
@@ -572,13 +766,13 @@ function attachmentContentUrl(input: {
   )}`
 }
 
-function sandboxAttachmentPath(messageId: string, partIndex: number, fileName: string): string {
+function sandboxAttachmentPath(messageId: string, sandboxName: string, fileName: string): string {
   return posix.join(
     ".sixb",
     "agent",
     "attachments",
     safePathSegment(messageId),
-    `${partIndex}-${safeFileName(fileName)}`
+    `${safePathSegment(sandboxName)}-${safeFileName(fileName)}`
   )
 }
 

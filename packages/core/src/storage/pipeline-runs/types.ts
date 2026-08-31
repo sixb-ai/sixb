@@ -1,12 +1,13 @@
 import type { SixbErrorCode, SixbFailure } from "../../errors/types"
 import type { DatasetVersionRef, DatasetWriteMode } from "../../lake-storage"
 
-export type PipelineRunStatus = "running" | "succeeded" | "failed" | "cancelled"
-
+export type PipelineRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled"
+export type PipelineStepRunStatus = Exclude<PipelineRunStatus, "queued">
 /** Error codes a pipeline or pipeline-step run can persist and expose. */
 export const PIPELINE_RUN_FAILURE_CODES = [
   "internal.unexpected",
   "runtime.cancelled",
+  "queue.enqueue_failed",
   "pipeline.step_failed",
 ] as const satisfies readonly [SixbErrorCode, ...SixbErrorCode[]]
 
@@ -15,9 +16,11 @@ export type PipelineRunFailureCode = (typeof PIPELINE_RUN_FAILURE_CODES)[number]
 export interface PipelineRunRecord {
   readonly id: string
   readonly projectId: string
+  readonly executionId: string
   readonly pipelineId: string
   readonly status: PipelineRunStatus
-  readonly startedAt: Date
+  readonly queuedAt: Date
+  readonly startedAt?: Date
   readonly finishedAt?: Date
   /** Final step output in sequential V1. */
   readonly output?: DatasetVersionRef
@@ -32,7 +35,7 @@ export interface PipelineStepRunRecord {
   readonly stepId: string
   readonly datasetId: string
   readonly mode: DatasetWriteMode
-  readonly status: PipelineRunStatus
+  readonly status: PipelineStepRunStatus
   readonly startedAt: Date
   readonly finishedAt?: Date
   readonly inputs: readonly DatasetVersionRef[]
@@ -41,10 +44,17 @@ export interface PipelineStepRunRecord {
   readonly error?: SixbFailure<PipelineRunFailureCode>
 }
 
+export interface QueuePipelineRunInput {
+  readonly id: string
+  readonly projectId: string
+  readonly executionId: string
+  readonly pipelineId: string
+  readonly queuedAt?: Date
+}
+
 export interface StartPipelineRunInput {
   readonly id: string
   readonly projectId: string
-  readonly pipelineId: string
   readonly startedAt?: Date
 }
 
@@ -59,7 +69,14 @@ export type FinishPipelineRunInput =
   | {
       readonly id: string
       readonly projectId: string
-      readonly status: "failed" | "cancelled"
+      readonly status: "failed"
+      readonly finishedAt?: Date
+      readonly error: SixbFailure<PipelineRunFailureCode>
+    }
+  | {
+      readonly id: string
+      readonly projectId: string
+      readonly status: "cancelled"
       readonly finishedAt?: Date
       readonly error?: SixbFailure<PipelineRunFailureCode>
     }
@@ -127,7 +144,7 @@ export interface ListPipelineStepRunsInput {
   readonly pipelineId?: string
   readonly stepId?: string
   readonly datasetId?: string
-  readonly statuses?: readonly PipelineRunStatus[]
+  readonly statuses?: readonly PipelineStepRunStatus[]
   readonly startedAfter?: Date
   readonly startedBefore?: Date
   readonly limit?: number
@@ -142,6 +159,7 @@ export interface ListPipelineStepRunsResult {
 }
 
 export interface PipelineRunStorage {
+  queue(input: QueuePipelineRunInput): Promise<PipelineRunRecord>
   start(input: StartPipelineRunInput): Promise<PipelineRunRecord>
   finish(input: FinishPipelineRunInput): Promise<PipelineRunRecord>
   startStep(input: StartPipelineStepRunInput): Promise<PipelineStepRunRecord>

@@ -15,8 +15,8 @@ import { SmolvmSandbox } from "./smolvm-sandbox"
 export interface SmolvmSandboxFactoryOptions {
   /**
    * Image the VM boots from. Defaults to the managed agent archive built by
-   * `bun run agent:image` (offline, fast, strict egress); a cross-built
-   * `sixb-agent-<arch>.tar` in the cache is picked up automatically. Set a
+   * `bunx -p @sixb/sandboxes-smolvm sixb-agent-image` (offline, fast, strict egress); a cross-built
+   * `sixb-agent-runtime-v1-<arch>.tar` in the cache is picked up automatically. Set a
    * different local `.tar` path, or a registry reference (e.g. `node:22`) to pull
    * at boot. Pass `null` for a bare machine (built-in busybox rootfs, fully
    * offline, no image).
@@ -97,7 +97,7 @@ export class SmolvmSandboxFactory implements SandboxFactory {
     const image = cli.image
     if (image !== undefined && isLocalImageArchive(image) && !existsSync(image)) {
       throw new SandboxIsolationUnavailableError(
-        `[Sandbox] agent image not found at ${image}. Build it once with \`bun run agent:image\` (requires Docker or Podman), or set \`image\` to a prebuilt .tar or a registry reference.`
+        `[Sandbox] agent image not found at ${image}. Build it once with \`bunx -p @sixb/sandboxes-smolvm sixb-agent-image\` (requires Docker or Podman), or set \`image\` to a prebuilt .tar or a registry reference.`
       )
     }
   }
@@ -105,8 +105,9 @@ export class SmolvmSandboxFactory implements SandboxFactory {
 
 /**
  * Resolve the configured image option into a CLI image:
- * - `undefined` -> the managed agent archive (prefers an existing `sixb-agent.tar`,
- *   else a cross-built `sixb-agent-<arch>.tar`; falls back to the canonical path).
+ * - `undefined` -> the managed agent archive (prefers an existing
+ *   `sixb-agent-runtime-v1.tar`, else a cross-built `sixb-agent-runtime-v1-<arch>.tar`; falls back
+ *   to the managed path).
  * - `null`      -> bare machine (no image; built-in busybox rootfs, fully offline).
  * - string      -> used as-is (a local `.tar` path or a registry reference).
  */

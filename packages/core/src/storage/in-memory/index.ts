@@ -1,8 +1,13 @@
 import { AsyncLocalStorage } from "node:async_hooks"
 import { InMemoryActionRunStorage } from "../action-runs"
 import { type AgentStorage, InMemoryAgentStorage } from "../agents"
+import { type AiAccountingAttribution, type AiCostStorage, InMemoryAiCostStorage } from "../ai-cost"
 import { type AiUsageStorage, InMemoryAiUsageStorage } from "../ai-usage"
 import { type AuthStorage, InMemoryAuthStorage } from "../auth"
+import {
+  type ConnectorConnectionStorage,
+  InMemoryConnectorConnectionStorage,
+} from "../connector-connections"
 import { StorageTransactionError } from "../errors"
 import { InMemoryExecutionStorage } from "../executions/in-memory"
 import type { ExecutionStorage } from "../executions/types"
@@ -28,7 +33,6 @@ import type { TimeseriesStorage } from "../timeseries"
 import { InMemoryTimeseriesStorage } from "../timeseries/store"
 import { createTransactionStorageProxy, throwNestedStorageTransaction } from "../transaction"
 import type { Storage, StorageTransactionOptions } from "../types"
-import { InMemoryWebhookDeliveryStorage, type WebhookDeliveryStorage } from "../webhook-deliveries"
 import { InMemoryWebhookRunStorage, type WebhookRunStorage } from "../webhook-runs"
 import {
   InMemoryWorkflowInterventionStorage,
@@ -46,6 +50,13 @@ import { registerInMemoryStorageTestingAdapter } from "./testing"
  * root capability. Transaction calls reuse the already-active scope and therefore never reacquire
  * its non-reentrant lock.
  */
+export interface InMemoryStorageOptions {
+  readonly connectorConnections?: {
+    /** Storage-authoritative clock override for deterministic development and tests. */
+    readonly now?: () => Date
+  }
+}
+
 export class InMemoryStorage implements Storage {
   readonly objects: ObjectStorage
   readonly timeseries: TimeseriesStorage
@@ -57,32 +68,41 @@ export class InMemoryStorage implements Storage {
   private readonly executionStorage = new InMemoryExecutionStorage(this.authStorage)
   private readonly agentStorage = new InMemoryAgentStorage(this.executionStorage)
   private readonly aiUsageStorage = new InMemoryAiUsageStorage(this.executionStorage)
+  private readonly aiCostStorage = new InMemoryAiCostStorage(this.aiUsageStorage, {
+    resolve: (input) => this.resolveAiAccountingAttribution(input),
+  })
   private readonly actionRunStorage = new InMemoryActionRunStorage(this.executionStorage)
-  private readonly syncRunStorage = new InMemorySyncRunStorage()
-  private readonly pipelineRunStorage = new InMemoryPipelineRunStorage()
-  private readonly projectionRunStorage = new InMemoryProjectionRunStorage()
+  private readonly syncRunStorage = new InMemorySyncRunStorage(this.executionStorage)
+  private readonly pipelineRunStorage = new InMemoryPipelineRunStorage(this.executionStorage)
+  private readonly projectionRunStorage = new InMemoryProjectionRunStorage({
+    executions: this.executionStorage,
+  })
   private readonly workflowRunStorage = new InMemoryWorkflowRunStorage(this.executionStorage)
   private readonly workflowInterventionStorage = new InMemoryWorkflowInterventionStorage()
-  private readonly webhookDeliveryStorage = new InMemoryWebhookDeliveryStorage()
-  private readonly webhookRunStorage = new InMemoryWebhookRunStorage()
+  private readonly webhookRunStorage = new InMemoryWebhookRunStorage(this.executionStorage)
   private readonly rulesStorage = new InMemoryRulesStorage()
   private readonly fileUploadSessionStorage = new InMemoryFileUploadSessions()
+  private readonly connectorConnectionStorage: InMemoryConnectorConnectionStorage
   readonly auth: AuthStorage
   readonly executions: ExecutionStorage
   readonly agents: AgentStorage
   readonly aiUsage: AiUsageStorage
+  readonly aiCosts: AiCostStorage
   readonly actionRuns: InMemoryActionRunStorage
   readonly syncRuns: SyncRunStorage
   readonly pipelineRuns: PipelineRunStorage
   readonly projectionRuns: InMemoryProjectionRunStorage
   readonly workflowRuns: WorkflowRunStorage
   readonly workflowInterventions: WorkflowInterventionStorage
-  readonly webhookDeliveries: WebhookDeliveryStorage
   readonly webhookRuns: WebhookRunStorage
   readonly rules: RulesStorage
   readonly fileUploadSessions: FileUploadSessionStore
+  readonly connectorConnections: ConnectorConnectionStorage
 
-  constructor() {
+  constructor(options: InMemoryStorageOptions = {}) {
+    this.connectorConnectionStorage = new InMemoryConnectorConnectionStorage(
+      options.connectorConnections
+    )
     const scope = createStorageOperationScope(
       (run) => this.withStorageOperation(run),
       () => this.assertRootOperationAvailable()
@@ -93,6 +113,7 @@ export class InMemoryStorage implements Storage {
     this.executions = createOperationScopedFacade(this.executionStorage, scope)
     this.agents = createAgentOperationScope(this.agentStorage, scope)
     this.aiUsage = createOperationScopedFacade(this.aiUsageStorage, scope)
+    this.aiCosts = createOperationScopedFacade(this.aiCostStorage, scope)
     this.actionRuns = createOperationScopedFacade(this.actionRunStorage, scope)
     this.syncRuns = createOperationScopedFacade(this.syncRunStorage, scope)
     this.pipelineRuns = createOperationScopedFacade(this.pipelineRunStorage, scope)
@@ -102,20 +123,62 @@ export class InMemoryStorage implements Storage {
       this.workflowInterventionStorage,
       scope
     )
-    this.webhookDeliveries = createOperationScopedFacade(this.webhookDeliveryStorage, scope)
     this.webhookRuns = createOperationScopedFacade(this.webhookRunStorage, scope)
     this.rules = createOperationScopedFacade(this.rulesStorage, scope)
     this.fileUploadSessions = createOperationScopedFacade(this.fileUploadSessionStorage, scope)
+    this.connectorConnections = createOperationScopedFacade(this.connectorConnectionStorage, scope)
     this.ontologyStorage = new InMemoryOntologyStorage(this.objectStorage, this.timeseriesStorage, {
       runRootOperation: async (run) => run(),
       getTransactionToken: () => this.getActiveTransactionToken(),
       getMaterializationLifecycle: () => this.getActiveMaterializationLifecycle(),
       assertSourceMaterializationExecution: (input) =>
         this.projectionRunStorage.assertSourceMaterializationExecutionUnlocked(input),
+      executionExists: async (projectId, executionId) =>
+        (await this.executionStorage.getById({ projectId, id: executionId })) !== null,
     })
     this.ontology = createOntologyOperationScope(this.ontologyStorage, scope)
     this.ontologyStorage.registerTestingAlias(this.ontology)
     registerInMemoryStorageTestingAdapter(this, { snapshot: () => this.snapshot() })
+  }
+
+  private async resolveAiAccountingAttribution(input: {
+    readonly projectId: string
+    readonly executionId: string
+  }): Promise<AiAccountingAttribution | undefined> {
+    const execution = await this.executionStorage.getById({
+      projectId: input.projectId,
+      id: input.executionId,
+    })
+    if (!execution || execution.executor.type !== "agent") return undefined
+    const directRun = await this.agentStorage.runs.getById({
+      projectId: input.projectId,
+      id: execution.executor.runId,
+    })
+    if (directRun) {
+      return {
+        kind: "agent",
+        agentId: directRun.agentId,
+        agentRunId: directRun.id,
+        threadId: directRun.threadId,
+      }
+    }
+    const agentRun = await this.workflowRunStorage.agentNodes.getByNodeRunId({
+      projectId: input.projectId,
+      nodeRunId: execution.executor.runId,
+    })
+    if (!agentRun) return undefined
+    const node = await this.workflowRunStorage.nodes.getById({
+      projectId: input.projectId,
+      id: agentRun.nodeRunId,
+    })
+    if (!node) return undefined
+    return {
+      kind: "workflowAgent",
+      agentId: agentRun.agentId,
+      nodeRunId: agentRun.nodeRunId,
+      workflowId: node.workflowId,
+      workflowRunId: node.workflowRunId,
+    }
   }
 
   private readonly transactionScope = new AsyncLocalStorage<object>()
@@ -233,16 +296,17 @@ export class InMemoryStorage implements Storage {
       executions: this.executionStorage,
       agents: this.agentStorage,
       aiUsage: this.aiUsageStorage,
+      aiCosts: this.aiCostStorage,
       actionRuns: this.actionRunStorage,
       syncRuns: this.syncRunStorage,
       pipelineRuns: this.pipelineRunStorage,
       projectionRuns: this.projectionRunStorage,
       workflowRuns: this.workflowRunStorage,
       workflowInterventions: this.workflowInterventionStorage,
-      webhookDeliveries: this.webhookDeliveryStorage,
       webhookRuns: this.webhookRunStorage,
       rules: this.rulesStorage,
       fileUploadSessions: this.fileUploadSessionStorage,
+      connectorConnections: this.connectorConnectionStorage,
       ping: async () => undefined,
       transaction: async <T>(): Promise<T> => {
         throwNestedStorageTransaction()
@@ -259,16 +323,17 @@ export class InMemoryStorage implements Storage {
       executions: this.executionStorage.snapshot(),
       agents: this.agentStorage.snapshot(),
       aiUsage: this.aiUsageStorage.snapshot(),
+      aiCosts: this.aiCostStorage.snapshot(),
       actionRuns: this.actionRunStorage.snapshot(),
       syncRuns: this.syncRunStorage.snapshot(),
       pipelineRuns: this.pipelineRunStorage.snapshot(),
       projectionRuns: this.projectionRunStorage.snapshot(),
       workflowRuns: this.workflowRunStorage.snapshot(),
       workflowInterventions: this.workflowInterventionStorage.snapshot(),
-      webhookDeliveries: this.webhookDeliveryStorage.snapshot(),
       webhookRuns: this.webhookRunStorage.snapshot(),
       rules: this.rulesStorage.snapshot(),
       fileUploadSessions: this.fileUploadSessionStorage.snapshot(),
+      connectorConnections: this.connectorConnectionStorage.snapshot(),
     }
   }
 
@@ -280,16 +345,17 @@ export class InMemoryStorage implements Storage {
     this.executionStorage.restore(snapshot.executions)
     this.agentStorage.restore(snapshot.agents)
     this.aiUsageStorage.restore(snapshot.aiUsage)
+    this.aiCostStorage.restore(snapshot.aiCosts)
     this.actionRunStorage.restore(snapshot.actionRuns)
     this.syncRunStorage.restore(snapshot.syncRuns)
     this.pipelineRunStorage.restore(snapshot.pipelineRuns)
     this.projectionRunStorage.restore(snapshot.projectionRuns)
     this.workflowRunStorage.restore(snapshot.workflowRuns)
     this.workflowInterventionStorage.restore(snapshot.workflowInterventions)
-    this.webhookDeliveryStorage.restore(snapshot.webhookDeliveries)
     this.webhookRunStorage.restore(snapshot.webhookRuns)
     this.rulesStorage.restore(snapshot.rules)
     this.fileUploadSessionStorage.restore(snapshot.fileUploadSessions)
+    this.connectorConnectionStorage.restore(snapshot.connectorConnections)
   }
 }
 
@@ -301,14 +367,15 @@ export interface InMemoryStorageSnapshot {
   readonly executions: ReturnType<InMemoryExecutionStorage["snapshot"]>
   readonly agents: ReturnType<InMemoryAgentStorage["snapshot"]>
   readonly aiUsage: ReturnType<InMemoryAiUsageStorage["snapshot"]>
+  readonly aiCosts: ReturnType<InMemoryAiCostStorage["snapshot"]>
   readonly actionRuns: ReturnType<InMemoryActionRunStorage["snapshot"]>
   readonly syncRuns: ReturnType<InMemorySyncRunStorage["snapshot"]>
   readonly pipelineRuns: ReturnType<InMemoryPipelineRunStorage["snapshot"]>
   readonly projectionRuns: ReturnType<InMemoryProjectionRunStorage["snapshot"]>
   readonly workflowRuns: ReturnType<InMemoryWorkflowRunStorage["snapshot"]>
   readonly workflowInterventions: ReturnType<InMemoryWorkflowInterventionStorage["snapshot"]>
-  readonly webhookDeliveries: ReturnType<InMemoryWebhookDeliveryStorage["snapshot"]>
   readonly webhookRuns: ReturnType<InMemoryWebhookRunStorage["snapshot"]>
   readonly rules: ReturnType<InMemoryRulesStorage["snapshot"]>
   readonly fileUploadSessions: ReturnType<InMemoryFileUploadSessions["snapshot"]>
+  readonly connectorConnections: ReturnType<InMemoryConnectorConnectionStorage["snapshot"]>
 }

@@ -438,6 +438,62 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
         })
       })
 
+      test("creates an initial empty snapshot version", async () => {
+        await withStorage(async (storage) => {
+          await storage.createDataset(writeDataset)
+
+          const write = await storage.beginWrite({ dataset: writeDataset, mode: "snapshot" })
+          const version = await write.commit()
+
+          expect(version).toMatchObject({
+            datasetId: writeDataset.id,
+            mode: "snapshot",
+            outcome: "created",
+            rowCount: 0,
+          })
+          expect(await storage.getLatestVersion(writeDataset.id)).toMatchObject({
+            versionId: version.versionId,
+          })
+          expect(await storage.listVersions(writeDataset.id)).toHaveLength(1)
+
+          const repeatedWrite = await storage.beginWrite({
+            dataset: writeDataset,
+            mode: "snapshot",
+          })
+          const repeatedVersion = await repeatedWrite.commit()
+          expect(repeatedVersion.outcome).toBe("unchanged")
+          expect(repeatedVersion.versionId).toBe(version.versionId)
+          expect(await storage.listVersions(writeDataset.id)).toHaveLength(1)
+
+          await expect(
+            collectRows(storage.readRows({ datasetId: writeDataset.id }))
+          ).resolves.toEqual([])
+        })
+      })
+
+      test("creates an initial empty append version", async () => {
+        await withStorage(async (storage) => {
+          await storage.createDataset(writeDataset)
+
+          const write = await storage.beginWrite({ dataset: writeDataset, mode: "append" })
+          const version = await write.commit()
+
+          expect(version).toMatchObject({
+            datasetId: writeDataset.id,
+            mode: "append",
+            outcome: "created",
+          })
+          expect(version.parentVersionId).toBeUndefined()
+          expect(await storage.getLatestVersion(writeDataset.id)).toMatchObject({
+            versionId: version.versionId,
+          })
+          expect(await storage.listVersions(writeDataset.id)).toHaveLength(1)
+          await expect(
+            collectRows(storage.readRows({ datasetId: writeDataset.id }))
+          ).resolves.toEqual([])
+        })
+      })
+
       test("snapshot writes replace the visible latest rows", async () => {
         await withStorage(async (storage) => {
           await storage.createDataset(writeDataset)

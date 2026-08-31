@@ -30,7 +30,7 @@ import {
   type WorkflowDefinition,
 } from "../src"
 import { agentServiceAccountId, ensureAgentExecutionIdentity } from "../src/agents/authority"
-import { createAgentScope } from "../src/execution/scopes"
+import { restoreAgentExecutionScope } from "../src/execution/agent"
 import type { AuthStorage } from "../src/storage"
 import { createTestSixb, type TestExecutionHost } from "../src/testing"
 import { createTestRuntimeDeps, waitFor } from "./test-runtime-deps"
@@ -300,6 +300,19 @@ async function seedRequesterMemberships(
       source: "manual",
     })
   }
+}
+
+async function seedServiceAccount(
+  host: TestExecutionHost & { readonly storage: Pick<Storage, "auth"> },
+  id: string
+): Promise<void> {
+  const auth = host.storage.auth
+  if (!auth) throw new Error("Test runtime requires auth storage.")
+  await auth.serviceAccounts.create({
+    projectId: host.id,
+    id,
+    name: "Test service account",
+  })
 }
 
 describe("bound Sixb object reads", () => {
@@ -625,6 +638,7 @@ describe("bound Sixb operational access", () => {
 
   test("a listable sync or pipeline can actually be started, and only with can.run", async () => {
     const host = createRuntime()
+    await seedPrincipal(host)
     const _sixb = createTestSixb(host)
     const runner = bindPrincipal(host, contextFor(host, ["operations"]))
 
@@ -802,6 +816,7 @@ describe("bound Sixb object writes", () => {
 
   test("view plus edit writes, and the write is readable back", async () => {
     const host = createRuntime()
+    await seedPrincipal(host)
     const _sixb = createTestSixb(host)
     const scoped = bindPrincipal(host, contextFor(host, ["editors"]))
 
@@ -821,6 +836,7 @@ describe("bound Sixb object writes", () => {
 
   test("delete and restore ride on the same edit grant", async () => {
     const host = createRuntime()
+    await seedPrincipal(host)
     const sixb = createTestSixb(host)
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
 
@@ -857,6 +873,7 @@ describe("bound Sixb object writes", () => {
 describe("bound Sixb link writes", () => {
   test("edit on the source and view on the target links", async () => {
     const host = createRuntime()
+    await seedPrincipal(host)
     const sixb = createTestSixb(host)
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
     await sixb.objects(Invoice).upsert({ properties: { id: "i1" } })
@@ -935,6 +952,7 @@ describe("bound Sixb telemetry appends", () => {
 
   test("append works without view — the write-only ingest principal", async () => {
     const host = createRuntime()
+    await seedPrincipal(host)
     const sixb = createTestSixb(host)
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
     const scoped = bindPrincipal(host, contextFor(host, ["ingest"]))
@@ -995,6 +1013,7 @@ describe("direct writes are attributable", () => {
 
   test("a principal write names its actor, an auth-disabled one names nobody", async () => {
     const host = createRuntime()
+    await seedPrincipal(host)
     const sixb = createTestSixb(host)
 
     // Auth-disabled execution: no authorization context, so no actor. The absence is the signal —
@@ -1015,6 +1034,7 @@ describe("direct writes are attributable", () => {
 
   test("a service account is recorded as a service actor", async () => {
     const host = createRuntime()
+    await seedServiceAccount(host, "svc_ingest")
     const sixb = createTestSixb(host)
     const serviceContext = resolveAuthorizationContext({
       principal: { type: "serviceAccount", id: "svc_ingest" },
@@ -1067,17 +1087,28 @@ describe("bound Sixb fails closed on ungranted surfaces", () => {
 
   test("agent provider access is bound to the exact registered run", async () => {
     const host = createRuntime()
+    const principal = {
+      type: "serviceAccount" as const,
+      id: agentServiceAccountId("contract-agent"),
+    }
     const authorization = resolveAuthorizationContext({
-      principal: { type: "serviceAccount", id: "agent-service-account" },
+      principal,
       groupIds: [],
       roles: host.definitions.security.listResolvedRoles(),
     })
-    const scope = createAgentScope({
-      projectId: host.id,
+    const scope = restoreAgentExecutionScope({
       agentId: "contract-agent",
       runId: "agent-run-1",
-      context: authorization,
-      source: { type: "queue", queue: "agents", jobId: "job-1" },
+      authorization,
+      execution: {
+        id: "agent-execution-1",
+        projectId: host.id,
+        executor: { type: "agent", runId: "agent-run-1" },
+        source: { type: "execution", executionId: "request-execution-1" },
+        correlationId: "agent-correlation-1",
+        authorizationRef: { type: "principal", principal },
+        createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      },
     })
     const agentSixb = host.withScope(scope)
 
@@ -1085,21 +1116,22 @@ describe("bound Sixb fails closed on ungranted surfaces", () => {
     expect(await agentSixb.blobs.stat(file.blobId)).not.toBeNull()
     expect(await agentSixb.connector(sourceConnector)).toEqual({})
 
-    const mismatchedRun = host.withScope({
-      authorization: scope.authorization,
-      execution: {
-        ...scope.execution,
-        executor: { type: "agent", agentId: "contract-agent", runId: "agent-run-2" },
-      },
-    })
-    expect(() => mismatchedRun.blobs.stat(file.blobId)).toThrow(AuthorizationError)
-    expect(() => mismatchedRun.connector(sourceConnector)).toThrow(AuthorizationError)
+    expect(() =>
+      host.withScope({
+        authorization: scope.authorization,
+        execution: {
+          ...scope.execution,
+          executor: { type: "agent", agentId: "contract-agent", runId: "agent-run-2" },
+        },
+      })
+    ).toThrow("agent authority does not match its execution binding")
 
-    const forgedProvenance = host.withScope({
-      authorization: scope.authorization,
-      execution: { ...scope.execution, id: "exec_forged" },
-    })
-    expect(() => forgedProvenance.blobs.stat(file.blobId)).toThrow(AuthorizationError)
+    expect(() =>
+      host.withScope({
+        authorization: scope.authorization,
+        execution: { ...scope.execution, id: "exec_forged" },
+      })
+    ).toThrow("agent authority does not match its execution binding")
   })
 })
 
@@ -1148,6 +1180,7 @@ describe("bound Sixb surface", () => {
         "listLinks",
         "listSubTypes",
         "listTypes",
+        "queryLinks",
         "removeLink",
         "resolveType",
         "upsert",

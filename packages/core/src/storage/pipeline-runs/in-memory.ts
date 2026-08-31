@@ -1,5 +1,6 @@
 import { parseSixbFailure } from "../../errors/internal"
 import type { SixbFailure } from "../../errors/types"
+import type { ExecutionStorage } from "../executions"
 import {
   cloneRecord,
   compareStartedAt,
@@ -11,6 +12,8 @@ import {
   toStatusSet,
 } from "../run-listing"
 import { PipelineRunError } from "./errors"
+import { canRequeuePipelineRunAfterEnqueueFailure } from "./idempotency"
+import { assertPipelineRunExecution } from "./provider"
 import type {
   FinishPipelineRunInput,
   FinishPipelineStepRunInput,
@@ -24,6 +27,7 @@ import type {
   PipelineRunRecord,
   PipelineRunStorage,
   PipelineStepRunRecord,
+  QueuePipelineRunInput,
   StartPipelineRunInput,
   StartPipelineStepRunInput,
 } from "./types"
@@ -45,6 +49,8 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
   private readonly runs = new Map<string, PipelineRunRecord>()
   private readonly steps = new Map<string, PipelineStepRunRecord>()
 
+  constructor(private readonly executions: ExecutionStorage) {}
+
   snapshot(): InMemoryPipelineRunStorageSnapshot {
     return {
       runs: structuredClone(this.runs),
@@ -64,28 +70,97 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
     }
   }
 
-  async start(input: StartPipelineRunInput): Promise<PipelineRunRecord> {
+  async queue(input: QueuePipelineRunInput): Promise<PipelineRunRecord> {
     const key = storageKey(input.projectId, input.id)
-    if (this.runs.has(key)) {
+    const existing = this.runs.get(key)
+    if (existing && !canRequeuePipelineRunAfterEnqueueFailure(existing, input)) {
       throw new PipelineRunError(
         `[Sixb] Pipeline run '${input.id}' already exists for project '${input.projectId}'.`
       )
+    }
+    if (
+      [...this.runs.values()].some(
+        (run) =>
+          run.projectId === input.projectId &&
+          run.id !== input.id &&
+          run.executionId === input.executionId
+      )
+    ) {
+      throw new PipelineRunError(
+        `[Sixb] Execution '${input.executionId}' already belongs to another Pipeline run.`
+      )
+    }
+    await assertPipelineRunExecution({
+      executions: this.executions,
+      projectId: input.projectId,
+      executionId: input.executionId,
+      runId: input.id,
+      pipelineId: input.pipelineId,
+    })
+
+    const queuedAt = new Date(input.queuedAt ?? new Date())
+    if (existing) {
+      const next: PipelineRunRecord = {
+        ...existing,
+        status: "queued",
+        queuedAt,
+        startedAt: undefined,
+        finishedAt: undefined,
+        output: undefined,
+        error: undefined,
+      }
+      this.runs.set(key, cloneRecord(next))
+      return cloneRecord(next)
     }
 
     const record: PipelineRunRecord = {
       id: input.id,
       projectId: input.projectId,
+      executionId: input.executionId,
       pipelineId: input.pipelineId,
-      status: "running",
-      startedAt: new Date(input.startedAt ?? new Date()),
+      status: "queued",
+      queuedAt,
     }
 
     this.runs.set(key, cloneRecord(record))
     return cloneRecord(record)
   }
 
+  async start(input: StartPipelineRunInput): Promise<PipelineRunRecord> {
+    const key = storageKey(input.projectId, input.id)
+    const existing = this.runs.get(key)
+    if (!existing) {
+      throw new PipelineRunError(
+        `[Sixb] Pipeline run '${input.id}' not found for project '${input.projectId}'.`
+      )
+    }
+    if (existing.status !== "queued") {
+      throw new PipelineRunError(
+        `[Sixb] Pipeline run '${input.id}' cannot start from status '${existing.status}'.`
+      )
+    }
+
+    const next: PipelineRunRecord = {
+      ...existing,
+      status: "running",
+      startedAt: new Date(input.startedAt ?? new Date()),
+      error: undefined,
+    }
+    this.runs.set(key, cloneRecord(next))
+    return cloneRecord(next)
+  }
+
   async finish(input: FinishPipelineRunInput): Promise<PipelineRunRecord> {
-    const existing = this.requireRunningPipelineRun(input.projectId, input.id)
+    const existing = this.requireExistingPipelineRun(input.projectId, input.id)
+    const enqueueFailure = input.status === "failed" && input.error.code === "queue.enqueue_failed"
+    if (
+      (enqueueFailure && existing.status !== "queued") ||
+      (!enqueueFailure && existing.status !== "running")
+    ) {
+      throw new PipelineRunError(
+        `[Sixb] Pipeline run '${input.id}' cannot finish from status '${existing.status}'.`
+      )
+    }
     const base: PipelineRunRecord = {
       ...existing,
       status: input.status,

@@ -1,4 +1,4 @@
-import type { ConnectorDefinition } from "../connectors/types"
+import type { StaticConnectorDefinition } from "../connectors/types"
 import type { Logger } from "../logging"
 import type { OntologySource, Sixb } from "../runtime"
 
@@ -47,21 +47,24 @@ export interface WebhookMetadata {
   readonly bodyFormat: WebhookBodyFormat
 }
 
+/** Pre-admission input. It intentionally has no execution SDK or run-scoped logger. */
 export interface WebhookVerifyContext {
-  readonly sixb: Sixb<readonly OntologySource[]>
-  readonly logger: Logger
-  readonly connector: ConnectorDefinition
+  readonly connector: StaticConnectorDefinition
   readonly webhook: WebhookMetadata
   readonly request: Request
   readonly rawBody: Uint8Array
 }
 
+/** Handler input bound to the durable Webhook run admitted for this delivery. */
 export interface WebhookHandlerContext<TBody, TClient> extends WebhookVerifyContext {
+  readonly sixb: Sixb<readonly OntologySource[]>
+  readonly logger: Logger
   readonly body: TBody
   /** Lazily resolve the connector client only when the handler needs it. */
   client(): Promise<TClient>
 }
 
+/** Pre-admission delivery identity input. It cannot perform protected domain work. */
 export interface WebhookIdempotencyContext<TBody> extends WebhookVerifyContext {
   readonly body: TBody
 }
@@ -90,7 +93,7 @@ export type WebhookHandlerResult = WebhookResponse | void
 export interface RegisteredWebhook<
   TBody = unknown,
   TClient = unknown,
-  TConnector extends ConnectorDefinition = ConnectorDefinition,
+  TConnector extends StaticConnectorDefinition = StaticConnectorDefinition,
 > {
   readonly connector: TConnector
   readonly webhook: WebhookDefinition<TBody, TClient>

@@ -12,7 +12,6 @@ import {
 } from "@sixb/core/testing"
 import { SqliteStorage } from "../src"
 import { sqliteStoragePath } from "../src/migrations"
-import { SqliteProjectionRunStorage } from "../src/projection-run-storage"
 
 runOntologyStorageContractSuite("SQLite ontology storage contract", {
   createStorage: () => new SqliteStorage(),
@@ -28,6 +27,14 @@ test("SQLite work staging rolls back a partial batch after a later record confli
   const pending = classificationWork("pending")
   try {
     await storage.transaction(async (tx) => {
+      await tx.executions.create({
+        id: header.commit.executionId,
+        projectId: header.commit.projectId,
+        executor: { type: "request", requestId: "atomic-work-stage" },
+        source: { type: "http", requestId: "atomic-work-stage" },
+        correlationId: "contract-correlation:atomic-work-stage",
+        authorizationRef: { type: "disabled" },
+      })
       const materializations = tx.ontology.materializations
       const session = await materializations.begin(header)
       await materializations.stageWork({ session, records: [first] })
@@ -61,11 +68,17 @@ test("SQLite work staging rolls back a partial batch after a later record confli
 })
 
 runProjectionRunStorageContractSuite("SQLite projection-run storage contract", {
-  createStorage: () => new SqliteProjectionRunStorage(),
-  cleanup(storage) {
-    storage.close()
+  createStorage: () => {
+    const storage = new SqliteStorage()
+    projectionRunContractOwners.set(storage.projectionRuns, storage)
+    return { projectionRuns: storage.projectionRuns, executions: storage.executions }
+  },
+  cleanup(context) {
+    projectionRunContractOwners.get(context.projectionRuns)?.close()
   },
 })
+
+const projectionRunContractOwners = new WeakMap<SqliteStorage["projectionRuns"], SqliteStorage>()
 
 interface FailureStorage extends SqliteStorage {
   readonly testDirectory: string
@@ -127,6 +140,7 @@ function atomicStageHeader(): MaterializationPlanHeader {
       id: "atomic-work-stage",
       idempotencyKey: "runtime:atomic-work-stage",
       requestHash: "hash:atomic-work-stage",
+      executionId: "contract-execution:atomic-work-stage",
       origin: { kind: "runtime", requestId: "atomic-work-stage" },
       ontologyRevision: "ontology-contract-revision",
       intent: { kind: "edit", mode: "atomic", operationCount: 0 },

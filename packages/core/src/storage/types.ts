@@ -1,7 +1,9 @@
 import type { ActionRunStorage } from "./action-runs"
 import type { AgentStorage } from "./agents"
+import type { AiCostStorage } from "./ai-cost"
 import type { AiUsageStorage } from "./ai-usage"
 import type { AuthStorage } from "./auth"
+import type { ConnectorConnectionStorage } from "./connector-connections"
 import type { ExecutionStorage } from "./executions"
 import type { FileUploadSessionStore } from "./file-upload-sessions"
 import type { ObjectStorage } from "./objects/types"
@@ -11,7 +13,6 @@ import type { ProjectionRunStorage } from "./projection-runs"
 import type { RulesStorage } from "./rules"
 import type { SyncRunStorage } from "./sync-runs"
 import type { TimeseriesStorage } from "./timeseries/types"
-import type { WebhookDeliveryStorage } from "./webhook-deliveries"
 import type { WebhookRunStorage } from "./webhook-runs"
 import type { WorkflowInterventionStorage } from "./workflow-interventions"
 import type { WorkflowRunStorage } from "./workflow-runs"
@@ -158,6 +159,8 @@ export type {
   PipelineRunStatus,
   PipelineRunStorage,
   PipelineStepRunRecord,
+  PipelineStepRunStatus,
+  QueuePipelineRunInput,
   StartPipelineRunInput,
   StartPipelineStepRunInput,
 } from "./pipeline-runs"
@@ -196,6 +199,7 @@ export type {
   FinishSyncRunInput,
   ListSyncRunsInput,
   ListSyncRunsResult,
+  QueueSyncRunInput,
   StartSyncRunInput,
   SyncRunFailureCode,
   SyncRunMode,
@@ -212,20 +216,12 @@ export type {
   TimeseriesStorage,
 } from "./timeseries/types"
 export type {
-  WebhookDeliveryClaimRecord,
-  WebhookDeliveryClaimResult,
-  WebhookDeliveryFailure,
-  WebhookDeliveryFailureCode,
-  WebhookDeliveryKey,
-  WebhookDeliveryRecord,
-  WebhookDeliveryStatus,
-  WebhookDeliveryStorage,
-} from "./webhook-deliveries"
-export type {
   FinishWebhookRunInput,
   FinishWebhookRunStatus,
+  GetWebhookRunByDeliveryInput,
   ListWebhookRunsInput,
   ListWebhookRunsResult,
+  RestartWebhookRunInput,
   StartWebhookRunInput,
   WebhookRunFailureCode,
   WebhookRunRecord,
@@ -298,16 +294,17 @@ export interface Storage {
   auth?: AuthStorage
   agents?: AgentStorage
   aiUsage?: AiUsageStorage
+  aiCosts?: AiCostStorage
   actionRuns?: ActionRunStorage
   syncRuns?: SyncRunStorage
   pipelineRuns?: PipelineRunStorage
   projectionRuns?: ProjectionRunStorage
   workflowRuns?: WorkflowRunStorage
   workflowInterventions?: WorkflowInterventionStorage
-  webhookDeliveries?: WebhookDeliveryStorage
   webhookRuns?: WebhookRunStorage
   rules?: RulesStorage
   fileUploadSessions?: FileUploadSessionStore
+  connectorConnections?: ConnectorConnectionStorage
 
   /** Lightweight reachability probe. It must not open a write transaction or run migrations. */
   ping(): Promise<void>

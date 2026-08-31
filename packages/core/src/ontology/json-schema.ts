@@ -4,20 +4,42 @@ import type { Schema, ValueType } from "./types"
 
 export type SchemaJsonSchema = Readonly<Record<string, unknown>>
 
+export interface SchemaJsonField {
+  readonly schema: SchemaOrRef
+  readonly required?: boolean
+  readonly nullable?: boolean
+}
+
 /** Convert a record of Sixb schemas into the strict JSON object schema used by model outputs. */
 export function schemaRecordToJsonSchema(input: {
   readonly shape: Readonly<Record<string, SchemaOrRef>>
   readonly valueTypesById: ReadonlyMap<string, ValueType>
 }): SchemaJsonSchema {
+  return schemaFieldsToJsonSchema({
+    fields: Object.fromEntries(
+      Object.entries(input.shape).map(([field, schema]) => [field, { schema, required: true }])
+    ),
+    valueTypesById: input.valueTypesById,
+  })
+}
+
+/** Convert configured fields into the strict JSON object schema accepted at runtime. */
+export function schemaFieldsToJsonSchema(input: {
+  readonly fields: Readonly<Record<string, SchemaJsonField>>
+  readonly valueTypesById: ReadonlyMap<string, ValueType>
+}): SchemaJsonSchema {
+  const required = Object.entries(input.fields)
+    .filter(([, field]) => field.required === true)
+    .map(([field]) => field)
   return {
     type: "object",
     properties: Object.fromEntries(
-      Object.entries(input.shape).map(([field, schema]) => [
-        field,
-        schemaOrRefJsonSchema(schema, input.valueTypesById, new Set()),
-      ])
+      Object.entries(input.fields).map(([fieldId, field]) => {
+        const fieldSchema = schemaOrRefJsonSchema(field.schema, input.valueTypesById, new Set())
+        return [fieldId, field.nullable ? { anyOf: [fieldSchema, { type: "null" }] } : fieldSchema]
+      })
     ),
-    required: Object.keys(input.shape),
+    ...(required.length > 0 ? { required } : {}),
     additionalProperties: false,
   }
 }

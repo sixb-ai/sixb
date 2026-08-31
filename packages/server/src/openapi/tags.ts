@@ -7,13 +7,25 @@ export const OPENAPI_TAGS = {
     name: "Status",
     description: "Runtime status",
   },
+  aiAccounting: {
+    name: "AI Accounting",
+    description: "Project AI token usage, cost analytics, and model-call accounting",
+  },
   ontology: {
     name: "Ontology",
     description: "Object type definitions",
   },
   connectors: {
     name: "Connectors",
-    description: "Connector metadata and webhook routes",
+    description: "Connector metadata",
+  },
+  connectorConnections: {
+    name: "Connector Connections",
+    description: "Connected external accounts",
+  },
+  connectorConnectionRuns: {
+    name: "Connector Connection Runs",
+    description: "Interactive OAuth connection runs",
   },
   webhooks: {
     name: "Webhooks",
@@ -94,6 +106,10 @@ export const OPENAPI_TAGS = {
   agents: {
     name: "Agents",
     description: "Agent catalog",
+  },
+  models: {
+    name: "Models",
+    description: "Project model catalog",
   },
   agentThreads: {
     name: "Agent Threads",

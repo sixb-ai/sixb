@@ -137,7 +137,7 @@ describe("webhooks", () => {
     )
   })
 
-  test("requires delivery storage when a webhook uses idempotency", () => {
+  test("requires durable run storage when a webhook is registered", () => {
     const connector = defineConnector("github", {
       type: "test",
       webhooks: [
@@ -153,15 +153,15 @@ describe("webhooks", () => {
     })
 
     const storage = new InMemoryStorage()
-    const storageWithoutDeliveries: Storage = {
+    const storageWithoutRuns: Storage = {
       ...storage,
       ping: storage.ping.bind(storage),
       transaction: storage.transaction.bind(storage),
-      webhookDeliveries: undefined,
+      webhookRuns: undefined,
     }
 
-    expect(() => createRuntime([connector], storageWithoutDeliveries)).toThrow(
-      "[Sixb] Webhook idempotency requires storage.webhookDeliveries"
+    expect(() => createRuntime([connector], storageWithoutRuns)).toThrow(
+      "[Sixb] Webhooks require storage.webhookRuns"
     )
   })
 

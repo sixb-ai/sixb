@@ -1,0 +1,26 @@
+#!/usr/bin/env sh
+
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+artifact="$script_dir/../lib/sixb.mjs"
+if [ ! -f "$artifact" ]; then
+  artifact="$script_dir/../generated/sixb.mjs"
+fi
+if [ ! -f "$artifact" ]; then
+  printf '%s\n' '{"error":{"code":"runtime_unavailable","message":"The Sixb CLI artifact is missing."}}' >&2
+  exit 2
+fi
+
+bun_path=$(command -v bun || true)
+if [ -n "$bun_path" ]; then
+  exec "$bun_path" "$artifact" "$@"
+fi
+
+node_path=$(command -v node || true)
+if [ -n "$node_path" ]; then
+  exec "$node_path" "$artifact" "$@"
+fi
+
+printf '%s\n' '{"error":{"code":"runtime_unavailable","message":"The Sixb CLI requires Bun or Node.js."}}' >&2
+exit 2

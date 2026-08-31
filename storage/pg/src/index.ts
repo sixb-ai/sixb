@@ -19,6 +19,7 @@ import {
   createWorkflowRunOperationScope,
 } from "@sixb/core/internal/storage-operation-scope"
 import {
+  type AiCostStorage,
   type AiUsageStorage,
   createTransactionStorageProxy,
   type ObjectStorage,
@@ -27,9 +28,11 @@ import {
 } from "@sixb/core/storage"
 import { PgAgentStorage } from "./agents"
 import { PgAuthStorage } from "./auth-storage"
+import { PgConnectorConnectionStorage } from "./connector-connection-storage"
 import { createPostgresStorageMigrators, dropSchema } from "./migrations"
 import { PgOntologyStorage, type PgOntologyTransactionContext } from "./ontology-storage"
 import { PgActionRunStorage } from "./pg-action-run-storage"
+import { PgAiCostStorage } from "./pg-ai-cost-storage"
 import { PgAiUsageStorage } from "./pg-ai-usage-storage"
 import { createPgClient, type SQL, type SQLClient } from "./pg-client"
 import { PgExecutionStorage } from "./pg-execution-storage"
@@ -39,11 +42,11 @@ import { PgProjectionRunStorage } from "./pg-projection-run-storage"
 import { PgRulesStorage } from "./pg-rules-storage"
 import { PgSyncRunStorage } from "./pg-sync-run-storage"
 import { PgTimeseriesStorage } from "./pg-timeseries-storage"
-import { PgWebhookDeliveryStorage } from "./pg-webhook-delivery-storage"
 import { PgWebhookRunStorage } from "./pg-webhook-run-storage"
 import { PgWorkflowInterventionStorage } from "./pg-workflow-intervention-storage"
 import { PgWorkflowRunStorage } from "./pg-workflow-run-storage"
 import { isRetryableTransactionConflict } from "./storage-errors"
+import { registerPostgresStorageTestingAdapter } from "./testing"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 export interface PostgresStorageOptions {
@@ -109,7 +112,7 @@ export interface PostgresStorageOptions {
 /**
  * PostgreSQL storage provider for Sixb.
  *
- * Bundles Sixb storage adapters, including the AI usage ledger, behind a shared PostgreSQL
+ * Bundles Sixb storage adapters, including the AI accounting ledger, behind a shared PostgreSQL
  * connection pool (porsager `postgres`), which reliably reclaims connections under load.
  *
  * The storage exposes a core `StorageMigrator`. Sixb CLI startup and
@@ -134,6 +137,7 @@ export class PostgresStorage implements MigrationCapableStorage {
   readonly executions: PgExecutionStorage
   readonly agents: PgAgentStorage
   readonly aiUsage: AiUsageStorage
+  readonly aiCosts: AiCostStorage
   readonly actionRuns: PgActionRunStorage
   readonly pipelineRuns: PgPipelineRunStorage
   readonly workflowRuns: PgWorkflowRunStorage
@@ -141,9 +145,9 @@ export class PostgresStorage implements MigrationCapableStorage {
   readonly syncRuns: PgSyncRunStorage
   readonly projectionRuns: PgProjectionRunStorage
   readonly timeseries: Storage["timeseries"]
-  readonly webhookDeliveries: PgWebhookDeliveryStorage
   readonly webhookRuns: PgWebhookRunStorage
   readonly rules: PgRulesStorage
+  readonly connectorConnections: PgConnectorConnectionStorage
   readonly migrators: readonly StorageMigrator[]
 
   private readonly sql: SQL
@@ -207,6 +211,7 @@ export class PostgresStorage implements MigrationCapableStorage {
     this.executions = createOperationScopedFacade(stores.executions, scope)
     this.agents = createAgentOperationScope(stores.agents, scope)
     this.aiUsage = createOperationScopedFacade(stores.aiUsage, scope)
+    this.aiCosts = createOperationScopedFacade(stores.aiCosts, scope)
     this.actionRuns = createOperationScopedFacade(stores.actionRuns, scope)
     this.pipelineRuns = createOperationScopedFacade(stores.pipelineRuns, scope)
     this.workflowRuns = createWorkflowRunOperationScope(stores.workflowRuns, scope)
@@ -214,9 +219,12 @@ export class PostgresStorage implements MigrationCapableStorage {
     this.syncRuns = createOperationScopedFacade(stores.syncRuns, scope)
     this.projectionRuns = createOperationScopedFacade(stores.projectionRuns, scope)
     this.timeseries = createOperationScopedFacade(stores.timeseries, scope)
-    this.webhookDeliveries = createOperationScopedFacade(stores.webhookDeliveries, scope)
     this.webhookRuns = createOperationScopedFacade(stores.webhookRuns, scope)
     this.rules = createOperationScopedFacade(stores.rules, scope)
+    this.connectorConnections = createOperationScopedFacade(stores.connectorConnections, scope)
+    registerPostgresStorageTestingAdapter(this, (durationMs) =>
+      stores.connectorConnections.advanceTimeForTesting(durationMs)
+    )
   }
 
   async ping(): Promise<void> {
@@ -333,16 +341,17 @@ function createPostgresStores(
     executions,
     agents: new PgAgentStorage({ sql, executions }),
     aiUsage: new PgAiUsageStorage(sql),
+    aiCosts: new PgAiCostStorage(sql),
     actionRuns: new PgActionRunStorage(sql, executions),
-    pipelineRuns: new PgPipelineRunStorage(sql),
+    pipelineRuns: new PgPipelineRunStorage(sql, executions),
     workflowRuns: new PgWorkflowRunStorage(sql, executions),
     workflowInterventions: new PgWorkflowInterventionStorage(sql),
-    syncRuns: new PgSyncRunStorage(sql),
-    projectionRuns: new PgProjectionRunStorage(sql),
+    syncRuns: new PgSyncRunStorage(sql, executions),
+    projectionRuns: new PgProjectionRunStorage(sql, executions),
     timeseries: new PgTimeseriesStorage(sql),
-    webhookDeliveries: new PgWebhookDeliveryStorage(sql),
-    webhookRuns: new PgWebhookRunStorage(sql),
+    webhookRuns: new PgWebhookRunStorage(sql, executions),
     rules: new PgRulesStorage(sql),
+    connectorConnections: new PgConnectorConnectionStorage(sql),
   }
 }
 
@@ -353,6 +362,7 @@ interface PostgresStoreSet {
   readonly executions: PgExecutionStorage
   readonly agents: PgAgentStorage
   readonly aiUsage: PgAiUsageStorage
+  readonly aiCosts: PgAiCostStorage
   readonly actionRuns: PgActionRunStorage
   readonly pipelineRuns: PgPipelineRunStorage
   readonly workflowRuns: PgWorkflowRunStorage
@@ -360,9 +370,9 @@ interface PostgresStoreSet {
   readonly syncRuns: PgSyncRunStorage
   readonly projectionRuns: PgProjectionRunStorage
   readonly timeseries: PgTimeseriesStorage
-  readonly webhookDeliveries: PgWebhookDeliveryStorage
   readonly webhookRuns: PgWebhookRunStorage
   readonly rules: PgRulesStorage
+  readonly connectorConnections: PgConnectorConnectionStorage
 }
 
 function resolveTimeoutMillis(value: number | undefined, label: string): number | undefined {

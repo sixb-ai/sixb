@@ -12,6 +12,7 @@ import type {
   RequestActionResult,
 } from "../actions"
 import type { AuthorizationContext } from "../authorization"
+import type { Broker } from "../broker"
 import type { DomainEventLog } from "../events"
 import type { RuntimeAuthorization } from "../execution"
 import type {
@@ -48,6 +49,7 @@ import type { ActionRunRecord, ObjectLinkRow, Storage } from "../storage"
  */
 export interface SixbHostContext {
   readonly projectId: string
+  readonly broker: Broker
   readonly ontology: OntologyRegistry
   readonly actionRegistry: ActionDefinitionCatalog
   readonly events: DomainEventLog

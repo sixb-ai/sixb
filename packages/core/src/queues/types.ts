@@ -1,6 +1,6 @@
 import type { SixbErrorCode, SixbFailure } from "../errors/types"
 import type { JsonValue } from "../json"
-import type { ProjectionMaterializationIdentity } from "../materialization/model"
+import type { LanguageModelDefinition, ModelCallCost, ModelRoute } from "../models"
 import type { ProjectionRunFailureCode } from "../projections/types"
 import type { ProviderScope } from "../provider-scope"
 import type { ActionRunFailureCode } from "../storage/action-runs/types"
@@ -130,10 +130,7 @@ export interface SyncRunRequestedQueueJob
   extends QueueJob<
     "sync.run.requested",
     {
-      readonly syncId: string
-      readonly runId?: string
-      readonly expectedLatestVersionId?: string
-      readonly commitMessage?: string
+      readonly runId: string
     }
   > {}
 
@@ -141,13 +138,17 @@ export interface PipelineRunRequestedQueueJob
   extends QueueJob<
     "pipeline.run.requested",
     {
-      readonly pipelineId: string
-      readonly runId?: string
+      readonly runId: string
     }
   > {}
 
 export interface ProjectionRunRequestedQueueJob
-  extends QueueJob<"projection.run.requested", ProjectionMaterializationIdentity> {}
+  extends QueueJob<
+    "projection.run.requested",
+    {
+      readonly runId: string
+    }
+  > {}
 
 export interface WorkflowRunRequestedQueueJob
   extends QueueJob<
@@ -157,22 +158,13 @@ export interface WorkflowRunRequestedQueueJob
     }
   > {}
 
-export type WorkflowRunResumeCause =
-  | {
-      readonly kind: "intervention"
-      readonly interventionId: string
-    }
-  | {
-      readonly kind: "agentNode"
-      readonly nodeRunId: string
-    }
-
+/** Wake a durable wait edge; the worker resolves its type and current state from storage. */
 export interface WorkflowRunResumeRequestedQueueJob
   extends QueueJob<
     "workflow.run.resume.requested",
     {
       readonly runId: string
-      readonly resume: WorkflowRunResumeCause
+      readonly nodeRunId: string
     }
   > {}
 
@@ -208,25 +200,21 @@ export interface AgentWorkflowNodeRequestedQueueJob
   > {}
 
 /** JSON-safe representation of one model-call ledger append awaiting durable recovery. */
-type QueueJson<T> = T extends string | number | boolean | null
-  ? T
-  : T extends readonly (infer TItem)[]
-    ? readonly QueueJson<TItem>[]
-    : T extends object
-      ? { readonly [Key in keyof T]: QueueJson<T[Key]> }
-      : never
-
 export type AgentAiUsageRecordPayload = Omit<
   RecordAiModelCallInput,
-  "projectId" | "usage" | "modelDefinition" | "cost" | "route" | "occurredAt" | "recordedAt"
+  "projectId" | "usage" | "occurredAt" | "recordedAt"
 > & {
   readonly usage: {
     readonly [Field in keyof RecordAiModelCallInput["usage"]]: RecordAiModelCallInput["usage"][Field]
   }
-  readonly modelDefinition?: QueueJson<NonNullable<RecordAiModelCallInput["modelDefinition"]>>
-  readonly cost?: QueueJson<NonNullable<RecordAiModelCallInput["cost"]>>
-  readonly route?: QueueJson<NonNullable<RecordAiModelCallInput["route"]>>
   readonly occurredAt: string
+}
+
+export interface AgentAiUsageAccountingPayload {
+  readonly definition: LanguageModelDefinition
+  readonly cost: ModelCallCost
+  readonly route?: ModelRoute
+  readonly ratedAt: string
 }
 
 export interface AgentAiUsageRecordRequestedQueueJob
@@ -234,6 +222,8 @@ export interface AgentAiUsageRecordRequestedQueueJob
     "agent.ai-usage.record.requested",
     {
       readonly record: AgentAiUsageRecordPayload
+      /** Absent only on legacy jobs that predate atomic valuation recovery. */
+      readonly accounting?: AgentAiUsageAccountingPayload
     }
   > {}
 

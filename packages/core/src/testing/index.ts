@@ -8,6 +8,11 @@ export {
   runAgentStorageContractSuite,
 } from "./agent-storage-contract"
 export {
+  type AiStorageContractSuiteOptions,
+  runAiCostStorageContractSuite,
+  seedAiCostStorageContractUsage,
+} from "./ai-cost-storage-contract"
+export {
   type AiUsageStorageContractSuiteOptions,
   runAiUsageStorageContractSuite,
   seedAiUsageStorageContractExecutions,
@@ -24,6 +29,11 @@ export {
   type BrokerContractSuiteOptions,
   runBrokerContractSuite,
 } from "./broker-contract"
+export {
+  type ConnectorConnectionStorageContractStorage,
+  type ConnectorConnectionStorageContractSuiteOptions,
+  runConnectorConnectionStorageContractSuite,
+} from "./connector-connection-storage-contract"
 export {
   type EffectiveStorageContractSuiteOptions,
   runEffectiveStorageContractSuite,
@@ -76,6 +86,17 @@ export {
   runOntologyStorageContractSuite,
 } from "./ontology-storage-contract"
 export {
+  createTestPipelineExecution,
+  queueTestPipelineRun,
+  startTestPipelineRun,
+} from "./pipeline-execution"
+export {
+  claimTestProjectionRun,
+  createTestProjectionExecution,
+  queueTestProjectionRun,
+  startTestProjectionRun,
+} from "./projection-execution"
+export {
   type ProjectionRunStorageContractSuiteOptions,
   runProjectionRunStorageContractSuite,
 } from "./projection-run-storage-contract"
@@ -89,11 +110,14 @@ export {
   type SandboxesContractSuiteOptions,
 } from "./sandboxes-contract"
 export {
-  runWebhookDeliveryStorageContractSuite,
-  type WebhookDeliveryStorageContractSuiteOptions,
-} from "./webhook-delivery-storage-contract"
+  createTestSyncExecution,
+  queueTestSyncRun,
+  startTestSyncRun,
+} from "./sync-execution"
+export { createTestWebhookExecution, startTestWebhookRun } from "./webhook-execution"
 export {
   runWebhookRunStorageContractSuite,
+  type WebhookRunStorageContractStorage,
   type WebhookRunStorageContractSuiteOptions,
 } from "./webhook-run-storage-contract"
 export {

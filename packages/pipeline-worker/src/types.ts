@@ -44,7 +44,8 @@ export interface PipelineJob {
 
 export interface RunPipelineJobInput {
   readonly runtime: PipelineWorkerContext
-  readonly job: PipelineJob
+  /** Durable run loaded before the execution scope is restored. */
+  readonly run: PipelineRunRecord
   readonly signal?: AbortSignal
   readonly onRunStarted?: PipelineRunStartedHandler
   readonly onRunFinished?: PipelineRunFinishedHandler

@@ -19,7 +19,14 @@ export const PipelineRunParamsSchema = z.object({
   runId: z.string().min(1),
 })
 
-export const PipelineRunStatusSchema = z.enum(["running", "succeeded", "failed", "cancelled"])
+export const PipelineRunStatusSchema = z.enum([
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+  "cancelled",
+])
+const PipelineStepRunStatusSchema = z.enum(["running", "succeeded", "failed", "cancelled"])
 
 export const PipelineRunsQuerySchema = z.object({
   pipelineId: z.string().optional(),
@@ -56,7 +63,8 @@ export const PipelineRunSchema = z.object({
   projectId: z.string(),
   pipelineId: z.string(),
   status: PipelineRunStatusSchema,
-  startedAt: z.string(),
+  queuedAt: z.string(),
+  startedAt: z.string().optional(),
   finishedAt: z.string().optional(),
   output: DatasetVersionRefSchema.optional(),
   error: PipelineRunFailureSchema.optional(),
@@ -70,7 +78,7 @@ export const PipelineStepRunSchema = z.object({
   stepId: z.string(),
   datasetId: z.string(),
   mode: z.enum(["snapshot", "append"]),
-  status: PipelineRunStatusSchema,
+  status: PipelineStepRunStatusSchema,
   startedAt: z.string(),
   finishedAt: z.string().optional(),
   inputs: z.array(DatasetVersionRefSchema),

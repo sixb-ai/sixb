@@ -18,6 +18,11 @@ export function createAgentMessageId(): string {
   return `agt_msg_${randomUUID()}`
 }
 
+/** One deterministic context-checkpoint identity per conversational run. */
+export function agentContextCheckpointId(runId: string): string {
+  return `agt_ctx_${runId}`
+}
+
 /** A queue delivery's fencing token for writes to an `agent_runs` record. */
 export function createAgentRunExecutionToken(): string {
   return `agt_exec_${randomUUID()}`

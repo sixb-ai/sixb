@@ -41,14 +41,16 @@ export class SqliteMaterializationWriter {
           this.db
             .query(
               `INSERT INTO ontology_object_overrides (
-                 project_id, object_type_id, primary_id, value, last_commit_id, updated_at
-               ) VALUES (?, ?, ?, json(?), ?, ?)`
+                 project_id, object_type_id, primary_id, value, edited_at,
+                 last_commit_id, updated_at
+               ) VALUES (?, ?, ?, json(?), json(?), ?, ?)`
             )
             .run(
               projectId,
               item.ref.objectTypeId,
               item.ref.primaryId,
               canonicalJson(item.value),
+              canonicalJson(item.editedAt),
               item.lastCommitId,
               item.updatedAt
             )
@@ -64,12 +66,13 @@ export class SqliteMaterializationWriter {
         this.db
           .query(
             `UPDATE ontology_object_overrides
-             SET value = json(?), last_commit_id = ?, updated_at = ?
+             SET value = json(?), edited_at = json(?), last_commit_id = ?, updated_at = ?
              WHERE project_id = ? AND object_type_id = ? AND primary_id = ?
                AND last_commit_id = ?`
           )
           .run(
             canonicalJson(item.value),
+            canonicalJson(item.editedAt),
             item.lastCommitId,
             item.updatedAt,
             projectId,

@@ -2,8 +2,11 @@ import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 
+export const SMOLVM_AGENT_RUNTIME_IMAGE_VERSION = "v1"
+const AGENT_IMAGE_BASENAME = `sixb-agent-runtime-${SMOLVM_AGENT_RUNTIME_IMAGE_VERSION}`
+
 /**
- * Building and locating the canonical agent image archive.
+ * Building and locating the managed SmolVM agent image archive.
  *
  * The sandbox boots from a local OCI archive (offline, fast, strict egress). The
  * archive is built once from the Dockerfile shipped with this package and cached
@@ -18,15 +21,15 @@ function agentImageCacheDir(): string {
   return join(base, "sixb", "smolvm")
 }
 
-/** Canonical agent image archive path (the host-arch build target). */
+/** Managed agent image archive path (the host-arch build target). */
 export function defaultAgentImagePath(): string {
-  return join(agentImageCacheDir(), "sixb-agent.tar")
+  return join(agentImageCacheDir(), `${AGENT_IMAGE_BASENAME}.tar`)
 }
 
-/** Filename for an explicitly-targeted build, e.g. `sixb-agent-amd64.tar`. */
+/** Filename for an explicitly-targeted build, e.g. `sixb-agent-runtime-v1-amd64.tar`. */
 export function agentImageName(platform: string): string {
   const arch = platform.includes("/") ? platform.split("/").pop() : platform
-  return `sixb-agent-${arch}.tar`
+  return `${AGENT_IMAGE_BASENAME}-${arch}.tar`
 }
 
 /** Map the host's Node arch onto the OCI/Docker arch used in cross-build filenames. */
@@ -42,16 +45,16 @@ function hostImageArch(): string {
 }
 
 /**
- * Cached agent image archives to look for, in preference order: the canonical
- * host build (`sixb-agent.tar`), then the arch-suffixed archive a cross-build
- * writes (`sixb-agent-<arch>.tar`). The latter lets a cross-built archive copied
+ * Cached agent image archives to look for, in preference order: the managed
+ * host build (`sixb-agent-runtime-v1.tar`), then the arch-suffixed archive a cross-build
+ * writes (`sixb-agent-runtime-v1-<arch>.tar`). The latter lets a cross-built archive copied
  * to its target host be found by a default-configured factory without extra config.
  */
 export function defaultAgentImageCandidates(): string[] {
   return [defaultAgentImagePath(), join(agentImageCacheDir(), agentImageName(hostImageArch()))]
 }
 
-/** Absolute path to the canonical agent Dockerfile shipped with this package. */
+/** Absolute path to the managed agent Dockerfile shipped with this package. */
 export function agentDockerfilePath(): string {
   return resolve(import.meta.dir, "..", "agent-image", "Dockerfile")
 }
@@ -62,7 +65,7 @@ export interface BuildAgentImageOptions {
   /**
    * Target platform, e.g. "linux/amd64". Omit to build for the host. Set this to
    * cross-build for a different host (e.g. an x86_64 droplet from an arm64 Mac);
-   * the default `output` then becomes `sixb-agent-<arch>.tar` to avoid clobbering
+   * the default `output` then becomes `sixb-agent-runtime-v1-<arch>.tar` to avoid clobbering
    * the host-arch build.
    */
   readonly platform?: string
@@ -124,7 +127,7 @@ export async function buildAgentImage(options: BuildAgentImageOptions = {}): Pro
       ? join(dirname(defaultAgentImagePath()), agentImageName(options.platform))
       : defaultAgentImagePath())
   const builder = options.builder ?? detectBuilder()
-  const tag = options.tag ?? "sixb-agent"
+  const tag = options.tag ?? AGENT_IMAGE_BASENAME
 
   if (!builder) {
     throw new Error(

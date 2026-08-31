@@ -8,6 +8,7 @@ import {
 import { agentRunStreamId } from "@sixb/core/agents/streams"
 import { publishAgentRunCancel, publishAgentRunFinished } from "@sixb/core/internal/agents"
 import {
+  type AgentContextCheckpointRecord,
   type AgentMessageRecord,
   type AgentRunDiagnostic,
   type AgentRunRecord,
@@ -96,7 +97,8 @@ function serializeThread(thread: AgentThreadRecord): ReturnType<typeof AgentThre
 
 function serializeMessage(
   message: AgentMessageRecord,
-  annotations: readonly AgentRunDiagnostic[] = []
+  annotations: readonly AgentRunDiagnostic[] = [],
+  checkpoint?: AgentContextCheckpointRecord
 ): ReturnType<typeof AgentMessageSchema.parse> {
   return AgentMessageSchema.parse({
     id: message.id,
@@ -108,6 +110,13 @@ function serializeMessage(
     seq: message.seq,
     parts: message.parts,
     annotations,
+    compaction: checkpoint
+      ? {
+          checkpointId: checkpoint.id,
+          summary: checkpoint.summary,
+          createdAt: toIsoString(checkpoint.createdAt),
+        }
+      : undefined,
     metadata: message.metadata,
     contentVersion: message.contentVersion,
     createdAt: toIsoString(message.createdAt),
@@ -127,6 +136,7 @@ export function serializeAgentRun(run: AgentRunView): ReturnType<typeof AgentRun
     modelId: run.modelId,
     finishReason: run.finishReason,
     usage: run.usage,
+    cost: run.cost,
     diagnostics: run.diagnostics,
     error: run.error,
     attempt: run.attempt,
@@ -472,18 +482,27 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           const runIds = result.messages.flatMap((message) =>
             message.runId === null ? [] : [message.runId]
           )
-          const runs = await storage.runs.getByIds({ projectId: host.id, ids: runIds })
+          const [runs, checkpoints] = await Promise.all([
+            storage.runs.getByIds({ projectId: host.id, ids: runIds }),
+            storage.checkpoints.getByRunIds({ projectId: host.id, runIds }),
+          ])
           const diagnosticsByRunId = new Map(
             runs
               .filter((run) => run.threadId === thread.id)
               .map((run) => [run.id, run.diagnostics ?? []] as const)
+          )
+          const checkpointsByRunId = new Map(
+            checkpoints
+              .filter((checkpoint) => checkpoint.threadId === thread.id)
+              .map((checkpoint) => [checkpoint.createdByRunId, checkpoint] as const)
           )
 
           return AgentMessageListResponseSchema.parse({
             messages: result.messages.map((message) =>
               serializeMessage(
                 message,
-                message.runId === null ? [] : (diagnosticsByRunId.get(message.runId) ?? [])
+                message.runId === null ? [] : (diagnosticsByRunId.get(message.runId) ?? []),
+                message.runId === null ? undefined : checkpointsByRunId.get(message.runId)
               )
             ),
             hasMore: result.hasMore,

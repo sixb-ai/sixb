@@ -81,6 +81,8 @@ export function PageFrame({
   eyebrow,
   title,
   description,
+  headerVariant = "standard",
+  headerDivider = true,
   backTo,
   backLabel,
   actions,
@@ -90,15 +92,25 @@ export function PageFrame({
   eyebrow?: string
   title: ReactNode
   description?: ReactNode
+  headerVariant?: "standard" | "collection"
+  headerDivider?: boolean
   backTo?: string
   backLabel?: string
   actions?: ReactNode
   contentClassName?: string
   children: ReactNode
 }) {
+  const collectionHeader = headerVariant === "collection"
+
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col p-3 sm:p-4 lg:p-6">
-      <div className={cn("mx-auto flex w-full max-w-5xl flex-col gap-4", contentClassName)}>
+      <div
+        className={cn(
+          "mx-auto flex w-full max-w-5xl flex-col",
+          collectionHeader ? "gap-2" : "gap-4",
+          contentClassName
+        )}
+      >
         {backTo && backLabel ? (
           <Button
             variant="ghost"
@@ -109,21 +121,38 @@ export function PageFrame({
             <Link to={backTo}>{backLabel}</Link>
           </Button>
         ) : null}
-        <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0 space-y-1">
+        <header
+          className={cn(
+            "flex gap-3 sm:flex-row sm:justify-between",
+            collectionHeader
+              ? "items-center"
+              : cn("flex-col sm:items-start", headerDivider && "atlas-page-header")
+          )}
+        >
+          <div className={cn("min-w-0", !collectionHeader && "space-y-1")}>
             {eyebrow ? (
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <p className="atlas-eyebrow text-[11px] font-semibold uppercase">
+                <span aria-hidden="true" className="atlas-signal-dot" />
                 {eyebrow}
               </p>
             ) : null}
-            <h1 className="break-words text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+            <h1
+              className={cn(
+                "break-words",
+                collectionHeader
+                  ? "text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+                  : "text-2xl font-medium tracking-[-0.025em] text-foreground sm:text-3xl"
+              )}
+            >
               {title}
             </h1>
             {description ? (
               <div className="max-w-3xl text-sm text-muted-foreground">{description}</div>
             ) : null}
           </div>
-          {actions ? <div className="shrink-0 sm:pt-1">{actions}</div> : null}
+          {actions ? (
+            <div className={cn("shrink-0", !collectionHeader && "sm:pt-1")}>{actions}</div>
+          ) : null}
         </header>
         {children}
       </div>

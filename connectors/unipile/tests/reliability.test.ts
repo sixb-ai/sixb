@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, setSystemTime, test } from "bun:test"
 import { UnipileApiError, unipile } from "../src"
 import {
   CONTEXT,
@@ -13,6 +13,7 @@ import {
 
 afterEach(() => {
   globalThis.fetch = originalFetch
+  setSystemTime()
 })
 
 test("safe synchronized reads retry transient failures", async () => {
@@ -85,6 +86,25 @@ test("paces concurrently initiated requests", async () => {
   expect(startedAt).toHaveLength(3)
   expect((startedAt[1] ?? 0) - (startedAt[0] ?? 0)).toBeGreaterThanOrEqual(15)
   expect((startedAt[2] ?? 0) - (startedAt[1] ?? 0)).toBeGreaterThanOrEqual(15)
+})
+
+test("paces requests by elapsed time when the wall clock moves forward", async () => {
+  const startedAt: number[] = []
+  mockFetch(() => {
+    startedAt.push(performance.now())
+    return Promise.resolve(json({ object: "AccountList", items: [], cursor: null }))
+  })
+
+  setSystemTime(new Date("2026-08-22T12:00:00.000Z"))
+  const client = await createTestClient({ minDelayMs: 20 })
+  await client.accounts.list()
+
+  setSystemTime(new Date("2026-08-22T13:00:00.000Z"))
+  await client.accounts.list()
+
+  // Regression: changing the scheduler back to Date.now() makes the clock jump collapse this gap.
+  expect(startedAt).toHaveLength(2)
+  expect((startedAt[1] ?? 0) - (startedAt[0] ?? 0)).toBeGreaterThanOrEqual(15)
 })
 
 test("UnipileApiError preserves 422 details and request metadata", async () => {

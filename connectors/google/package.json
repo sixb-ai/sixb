@@ -1,13 +1,16 @@
 {
   "name": "@sixb/connector-google",
-  "version": "0.1.2",
-  "description": "Typed Google connector for Sixb (Drive, Calendar, Gmail, and Analytics)",
+  "version": "0.1.4",
+  "description": "Typed Google connectors for Sixb (Workspace, Sheets, Meet, Analytics, and Google Ads)",
   "keywords": [
     "sixb",
     "bun",
     "connector",
     "integration",
-    "google"
+    "google",
+    "google-meet",
+    "google-sheets",
+    "google-ads"
   ],
   "homepage": "https://sixb.ai",
   "bugs": {

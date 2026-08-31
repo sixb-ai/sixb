@@ -1,4 +1,11 @@
-import { defineObjectType, defineOntology, link, prop } from "../src"
+import {
+  defineObjectType,
+  defineOntology,
+  link,
+  type ObjectQueryLinksInput,
+  type ObjectQueryLinksResult,
+  prop,
+} from "../src"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -100,6 +107,17 @@ async function contract(): Promise<void> {
 
   const roomExists: boolean = await sixb.objects(Room).query().exists()
   void roomExists
+
+  const linkQuery: ObjectQueryLinksInput = {
+    query: {
+      kind: "refs",
+      refs: [{ objectTypeId: Room.id, primaryId: "room:101" }],
+    },
+    direction: "both",
+    includeObjects: true,
+  }
+  const linkQueryResult: ObjectQueryLinksResult = await sixb.objects.queryLinks(linkQuery)
+  void linkQueryResult
 
   const roomFacets = await sixb
     .objects(Room)

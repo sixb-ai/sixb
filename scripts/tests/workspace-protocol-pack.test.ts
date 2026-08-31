@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { assertWorkspaceLockfileVersions } from "../workspace-lockfile-policy"
 
 test("Bun packs exact and compatible workspace protocols to registry ranges", async () => {
   const root = await mkdtemp(join(tmpdir(), "sixb-workspace-protocols-"))
@@ -42,6 +43,42 @@ test("Bun packs exact and compatible workspace protocols to registry ranges", as
     })
     expect((await packManifest(root, "exact")).peerDependencies).toEqual({
       "@sixb-fixture/core": "0.1.7",
+    })
+
+    // Bun 1.3.14 reproduces this with a version-only bump followed by a frozen install:
+    // the manifest advances but packed workspace ranges still use the old lockfile version.
+    // Remove the version comparison in assertWorkspaceLockfileVersions and the rejection below
+    // fails, proving the release gate catches the stale artifact before publication.
+    const core = { name: "@sixb-fixture/core", version: "0.1.8" }
+    await writePackage(root, "core", core)
+    const packages = [{ dir: "packages/core", packageJson: core }]
+    const frozen = Bun.spawnSync([process.execPath, "install", "--frozen-lockfile"], {
+      cwd: root,
+      stdout: "pipe",
+      stderr: "pipe",
+      timeout: 10_000,
+    })
+    expect(frozen.exitCode).toBe(0)
+    expect((await packManifest(root, "exact")).peerDependencies).toEqual({
+      "@sixb-fixture/core": "0.1.7",
+    })
+    await expect(assertWorkspaceLockfileVersions(root, packages)).rejects.toThrow(
+      "manifest 0.1.8, lockfile 0.1.7"
+    )
+
+    const refreshed = Bun.spawnSync([process.execPath, "install", "--lockfile-only"], {
+      cwd: root,
+      stdout: "pipe",
+      stderr: "pipe",
+      timeout: 10_000,
+    })
+    expect(refreshed.exitCode).toBe(0)
+    await assertWorkspaceLockfileVersions(root, packages)
+    expect((await packManifest(root, "exact")).peerDependencies).toEqual({
+      "@sixb-fixture/core": "0.1.8",
+    })
+    expect((await packManifest(root, "compatible")).dependencies).toEqual({
+      "@sixb-fixture/core": "^0.1.8",
     })
   } finally {
     await rm(root, { recursive: true, force: true })

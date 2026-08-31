@@ -5,6 +5,7 @@ import {
   openSqliteStoreConnection,
   type SqliteStoreConnection,
 } from "../transactions"
+import { SqliteAgentContextCheckpointStore } from "./checkpoints"
 import { SqliteAgentMessageStore } from "./messages"
 import { SqliteAgentRunStore } from "./runs"
 import { SqliteAgentThreadStore } from "./threads"
@@ -19,14 +20,15 @@ export interface SqliteAgentStorageOptions {
 }
 
 /**
- * SQLite-backed agent persistence: thread / run / message sub-stores sharing one connection. The
- * cross-table writes (reserve + finish touch the thread anchor, append bumps thread stats) run in
- * SQLite transactions; the bundled {@link SqliteStorage} serializes all of them on one connection.
+ * SQLite-backed agent persistence: thread, run, message, and context-checkpoint sub-stores sharing
+ * one connection. Cross-table writes run in SQLite transactions; the bundled {@link SqliteStorage}
+ * serializes them for single-flight and checkpoint compare-and-swap safety.
  */
 export class SqliteAgentStorage implements AgentStorage {
   readonly threads: SqliteAgentThreadStore
   readonly runs: SqliteAgentRunStore
   readonly messages: SqliteAgentMessageStore
+  readonly checkpoints: SqliteAgentContextCheckpointStore
 
   private readonly connection: SqliteStoreConnection
 
@@ -40,6 +42,7 @@ export class SqliteAgentStorage implements AgentStorage {
     this.threads = new SqliteAgentThreadStore(this.connection.db)
     this.runs = new SqliteAgentRunStore(this.connection.db, options.executions)
     this.messages = new SqliteAgentMessageStore(this.connection.db)
+    this.checkpoints = new SqliteAgentContextCheckpointStore(this.connection.db)
   }
 
   close(): void {

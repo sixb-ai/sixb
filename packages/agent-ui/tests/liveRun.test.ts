@@ -67,6 +67,33 @@ describe("liveRunReducer", () => {
     ).toEqual(["text:Before tool.", "tool:bash", "text:After tool."])
   })
 
+  test("does not materialize empty text lifecycle chunks or whitespace-only spans", () => {
+    let state = createLiveRunState("run")
+    for (const chunk of [
+      { type: "text-start", id: "empty" },
+      { type: "text-delta", id: "empty", delta: " \n" },
+      { type: "text-end", id: "empty" },
+    ]) {
+      state = liveRunReducer(state, {
+        type: "event",
+        event: uiChunk(chunk),
+      })
+    }
+
+    expect(state.parts).toEqual([])
+    expect(state.partKeys).toEqual([])
+  })
+
+  test("keeps whitespace deltas after visible text has started", () => {
+    const state = reduceChunks([
+      { type: "text-delta", id: "text", delta: "Hello" },
+      { type: "text-delta", id: "text", delta: " " },
+      { type: "text-delta", id: "text", delta: "world" },
+    ])
+
+    expect(state.parts).toEqual([{ kind: "text", text: "Hello world" }])
+  })
+
   test("marks the run active on start", () => {
     const state = liveRunReducer(createLiveRunState(null), {
       type: "event",
@@ -74,6 +101,41 @@ describe("liveRunReducer", () => {
     })
     expect(state.runId).toBe("run")
     expect(state.active).toBe(true)
+  })
+
+  test("tracks compaction until it completes or fails", () => {
+    const compacting = liveRunReducer(createLiveRunState("run"), {
+      type: "event",
+      event: event({
+        type: "agent.compaction.started",
+        reason: "threshold",
+        estimatedInputTokensBefore: 95_000,
+      }),
+    })
+    expect(compacting.active).toBe(true)
+    expect(compacting.compacting).toBe(true)
+
+    const completed = liveRunReducer(compacting, {
+      type: "event",
+      event: event({
+        type: "agent.compaction.completed",
+        reason: "threshold",
+        checkpointId: "agt_ctx_run",
+        estimatedInputTokensBefore: 95_000,
+        estimatedInputTokensAfter: 30_000,
+      }),
+    })
+    expect(completed.compacting).toBe(false)
+
+    const failed = liveRunReducer(compacting, {
+      type: "event",
+      event: event({
+        type: "agent.compaction.failed",
+        reason: "threshold",
+        errorCode: "summary_failed",
+      }),
+    })
+    expect(failed.compacting).toBe(false)
   })
 
   test("reasoning streams until it ends", () => {
@@ -145,10 +207,16 @@ describe("liveRunReducer", () => {
     }
     const state = liveRunReducer(createLiveRunState("run"), {
       type: "event",
-      event: event({ type: "agent.run.finished", status: "failed", error: failure }),
+      event: event({
+        type: "agent.run.finished",
+        status: "failed",
+        finishReason: "timeout",
+        error: failure,
+      }),
     })
     expect(state.active).toBe(false)
     expect(state.finishStatus).toBe("failed")
+    expect(state.finishReason).toBe("timeout")
     expect(state.finishError).toEqual(failure)
   })
 

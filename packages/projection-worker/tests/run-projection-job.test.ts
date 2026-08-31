@@ -29,11 +29,13 @@ import {
 } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
 import type { DomainEventService } from "@sixb/core/internal/events"
-import { bindPrimitiveExecution } from "@sixb/core/internal/primitive-execution"
+import { bindDurablePrimitiveExecution } from "@sixb/core/internal/primitive-execution"
 import {
   createProjectionRunId,
   getProjectionRegistry,
+  PROJECTION_TELEMETRY_BATCH_SIZE,
   type ProjectionDispatchDescriptor,
+  projectionTargetOf,
   shareProjectionRegistry,
 } from "@sixb/core/internal/projections"
 import { registerOntologyMutationRuntime } from "@sixb/core/internal/runtime"
@@ -46,10 +48,11 @@ import type {
 import type {
   AbandonSourceMaterializationCandidateInput,
   OntologySourceRecord,
+  ProjectionRunRecord,
   ProjectionRunStorage,
   ReclaimSourceMaterializationInput,
 } from "@sixb/core/storage"
-import { createTestSixb } from "@sixb/core/testing"
+import { createTestSixb, queueTestProjectionRun } from "@sixb/core/testing"
 import { MISSING_TARGET_GRACE_MS } from "../src/retry-backoff"
 import {
   isPermanentProjectionFailure,
@@ -83,6 +86,7 @@ const Room = defineObjectType({
     prop("name", "string"),
     prop("buildingRef", "string"),
     prop("temperature", "double", { mode: "telemetry" }),
+    prop("humidity", "double", { mode: "telemetry" }),
     prop("targetTemperature", "double", { mode: "telemetry", semanticType: "Temperature" }),
   ],
   links: [
@@ -166,6 +170,29 @@ const roomSensorProjection = defineProjection("room-sensor-proj", Room.l.hasSens
 const roomTemperatureProjection = defineProjection("room-temperature-proj", Room.p.temperature)
   .fromDataset(roomReadingsDataset)
   .points({ objectId: "room_id", at: "observed_at", value: "temperature" })
+
+const groupedRoomReadingsDataset = defineDataset("canonical.grouped-room-readings", {
+  schema: [
+    col("room_id", "string"),
+    col("observed_at", "timestamp"),
+    col("temperature", "float64", { nullable: true }),
+    col("humidity", "float64", { nullable: true }),
+    col("target", "float64", { nullable: true }),
+    col("target_unit", "string", { nullable: true }),
+  ],
+})
+
+const groupedRoomReadingsProjection = defineProjection("grouped-room-readings-proj", Room)
+  .fromDataset(groupedRoomReadingsDataset)
+  .points({
+    objectId: "room_id",
+    at: "observed_at",
+    properties: {
+      temperature: "temperature",
+      humidity: "humidity",
+      targetTemperature: { value: "target", unit: "target_unit" },
+    },
+  })
 
 const roomTargetsDataset = defineDataset("canonical.room-targets", {
   schema: [
@@ -296,10 +323,6 @@ interface TestProjectionWorkerContext extends ProjectionWorkerContext {
 
 function createRuntime(
   host: ProjectionWorkerHost,
-  primitive: { readonly id: string; readonly runId: string } = {
-    id: host.definitions.projections.list()[0]?.id ?? "direct-projection-test",
-    runId: "direct-projection-job-test",
-  },
   catalogs: Partial<Pick<ProjectionWorkerContext, "datasets" | "projections">> = {}
 ): TestProjectionWorkerContext {
   const runtime = {
@@ -311,13 +334,34 @@ function createRuntime(
     datasets: catalogs.datasets ?? host.definitions.datasets,
     projections: catalogs.projections ?? host.definitions.projections,
   } satisfies TestProjectionWorkerContext
-  const execution = bindPrimitiveExecution(host, {
-    primitive: { kind: "projection", ...primitive },
-    source: { type: "queue", queue: "projections", jobId: primitive.runId },
-  })
-  registerOntologyMutationRuntime(runtime, execution.ontologyMutations)
   shareProjectionRegistry(host, runtime)
   return runtime
+}
+
+async function bindRuntimeToRun(
+  runtime: TestProjectionWorkerContext,
+  run: ProjectionRunRecord
+): Promise<TestProjectionWorkerContext> {
+  const durableExecution = await runtime.host.storage.executions.getById({
+    projectId: runtime.projectId,
+    id: run.executionId,
+  })
+  if (!durableExecution) {
+    throw new Error(`Projection run '${run.id}' references missing execution '${run.executionId}'.`)
+  }
+  const trustedPrimitive = {
+    kind: "projection" as const,
+    id: run.identity.projectionId,
+    runId: run.id,
+  }
+  const execution = bindDurablePrimitiveExecution(runtime.host, {
+    execution: durableExecution,
+    primitive: trustedPrimitive,
+  })
+  const bound = { ...runtime }
+  registerOntologyMutationRuntime(bound, execution.ontologyMutations)
+  shareProjectionRegistry(runtime.host, bound)
+  return bound
 }
 
 interface LegacyTestProjectionJob {
@@ -337,17 +381,7 @@ async function runProjectionJob(
     readonly batchSize?: number
   }
 ): Promise<ProjectionJobResult> {
-  const runtime = createRuntime(
-    input.runtime.host,
-    {
-      id: input.job.projectionId,
-      runId: input.job.id,
-    },
-    {
-      datasets: input.runtime.datasets,
-      projections: input.runtime.projections,
-    }
-  )
+  const runtime = input.runtime
   const registry = getProjectionRegistry(runtime)
   const version = await runtime.lakeStorage.getVersion(input.job.datasetId, input.job.versionId)
   let descriptor: ProjectionDispatchDescriptor
@@ -368,9 +402,44 @@ async function runProjectionJob(
   const id = createProjectionRunId(runtime.projectId, identity)
   canonicalRunIds.set(input.job.id, id)
   const { batchSize, runtime: _inputRuntime, ...canonicalInput } = input
+  const existing = await runtime.projectionRunsStorage.getById({
+    projectId: runtime.projectId,
+    id,
+  })
+  if (!existing) {
+    const projection = runtime.projections.getById(input.job.projectionId)
+    const target = projection
+      ? projectionTargetOf(projection)
+      : input.job.projectionKind === "link"
+        ? { sourceObjectTypeId: "Unknown", targetObjectTypeId: "Unknown" }
+        : { objectTypeId: "Unknown" }
+    const common = {
+      id,
+      projectId: runtime.projectId,
+      identity,
+      target,
+    }
+    if (identity.projectionKind === "telemetry") {
+      if (!("objectTypeId" in target)) throw new Error("Expected a telemetry object target.")
+      await queueTestProjectionRun(runtime.host.storage, {
+        ...common,
+        identity,
+        target,
+        fixedBatchSize: batchSize ?? PROJECTION_TELEMETRY_BATCH_SIZE,
+      })
+    } else if (identity.projectionKind === "link") {
+      if (!("sourceObjectTypeId" in target)) throw new Error("Expected a link target.")
+      await queueTestProjectionRun(runtime.host.storage, { ...common, identity, target })
+    } else {
+      if (!("objectTypeId" in target)) throw new Error("Expected an object target.")
+      await queueTestProjectionRun(runtime.host.storage, { ...common, identity, target })
+    }
+  }
+  const run = await runtime.projectionRunsStorage.getById({ projectId: runtime.projectId, id })
+  if (!run) throw new Error(`Projection run '${id}' was not queued.`)
   return runCanonicalProjectionJob({
     ...canonicalInput,
-    runtime,
+    runtime: await bindRuntimeToRun(runtime, run),
     job: { id, ...identity },
     ...(batchSize === undefined ? {} : { telemetryBatchSize: batchSize }),
   })
@@ -425,6 +494,7 @@ async function commitDatasetVersion(
   rows: readonly DatasetRow[]
 ) {
   await lakeStorage.createDataset(dataset)
+  await waitForNextDatasetWatermark(lakeStorage, dataset.id)
   const write = await lakeStorage.beginWrite({
     dataset,
     mode: "snapshot",
@@ -440,11 +510,23 @@ async function commitDatasetMerge(
   changes: readonly MergeChange<DatasetRow, DatasetRow>[]
 ) {
   await lakeStorage.createDataset(dataset)
+  await waitForNextDatasetWatermark(lakeStorage, dataset.id)
   const merge = await lakeStorage.beginMerge({ dataset })
   await merge.writeChanges(changes)
   const result = await merge.commit({ commitMessage: "test merged projection input" })
   if (!result.version) throw new Error("Expected merge changes to produce a dataset version.")
   return result.version
+}
+
+async function waitForNextDatasetWatermark(
+  lakeStorage: LakeStorage,
+  datasetId: string
+): Promise<void> {
+  const previous = await lakeStorage.getLatestVersion(datasetId)
+  if (!previous) return
+  // Replacement ordering deliberately rejects distinct versions with the same millisecond
+  // watermark. Keep this fixture deterministic when in-memory commits happen back-to-back.
+  await Bun.sleep(Math.max(0, previous.createdAt.getTime() + 1 - Date.now()))
 }
 
 describe("runProjectionJob", () => {
@@ -745,6 +827,130 @@ describe("runProjectionJob", () => {
     expect(lakeStorage.readInputs[0]?.columns).toEqual(["room_id", "observed_at", "temperature"])
   })
 
+  test("materializes grouped telemetry in one read while omitting only blank properties", async () => {
+    const deps = createDeps()
+    const lakeStorage = new RecordingLakeStorage(deps.lakeStorage)
+    const sixb = createSixb(
+      {
+        datasets: [groupedRoomReadingsDataset],
+        projections: [groupedRoomReadingsProjection],
+      },
+      { ...deps, lakeStorage }
+    )
+    await createTestSixb(sixb)
+      .objects(Room)
+      .upsert({ properties: { id: "r1", name: "Kitchen" } })
+    const version = await commitDatasetVersion(lakeStorage, groupedRoomReadingsDataset, [
+      {
+        room_id: "r1",
+        observed_at: "2026-06-01T12:00:00.000Z",
+        temperature: 20,
+        humidity: 40,
+        target: 21,
+        target_unit: "degreeCelsius",
+      },
+      {
+        room_id: "r1",
+        observed_at: "2026-06-02T12:00:00.000Z",
+        temperature: 22,
+        humidity: null,
+        target: null,
+        target_unit: null,
+      },
+      {
+        room_id: "r1",
+        observed_at: "2026-06-03T12:00:00.000Z",
+        temperature: null,
+        humidity: null,
+        target: null,
+        target_unit: "ignored-without-a-value",
+      },
+    ])
+
+    const result = await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-grouped-telemetry",
+        projectionId: groupedRoomReadingsProjection.id,
+        projectionKind: "telemetry",
+        datasetId: groupedRoomReadingsDataset.id,
+        versionId: version.versionId,
+      },
+    })
+
+    expect(result.run).toMatchObject({
+      status: "succeeded",
+      progress: { sourceRowsRead: 3, sourceRowsSkipped: 1 },
+    })
+    expect(lakeStorage.readInputs).toHaveLength(1)
+    expect(lakeStorage.readInputs[0]?.columns).toEqual([
+      "room_id",
+      "observed_at",
+      "temperature",
+      "humidity",
+      "target",
+      "target_unit",
+    ])
+    const history = (propertyId: string) =>
+      deps.storage.timeseries.getHistory({
+        projectId: sixb.id,
+        objectTypeId: "Room",
+        objectId: "r1",
+        propertyId,
+      })
+    expect((await history("temperature")).map((point) => point.value)).toEqual([20, 22])
+    expect((await history("humidity")).map((point) => point.value)).toEqual([40])
+    expect(await history("targetTemperature")).toMatchObject([{ value: 21, unit: "degreeCelsius" }])
+  })
+
+  test("rolls back every property when one grouped telemetry value is invalid", async () => {
+    const deps = createDeps()
+    const sixb = createSixb(
+      {
+        datasets: [groupedRoomReadingsDataset],
+        projections: [groupedRoomReadingsProjection],
+      },
+      deps
+    )
+    await createTestSixb(sixb)
+      .objects(Room)
+      .upsert({ properties: { id: "r1", name: "Kitchen" } })
+    const version = await commitDatasetVersion(deps.lakeStorage, groupedRoomReadingsDataset, [
+      {
+        room_id: "r1",
+        observed_at: "2026-06-01T12:00:00.000Z",
+        temperature: 20,
+        humidity: 40,
+        target: 21,
+        target_unit: "bananas",
+      },
+    ])
+
+    await expect(
+      runProjectionJob({
+        runtime: createRuntime(sixb),
+        job: {
+          id: "projrun-invalid-grouped-telemetry",
+          projectionId: groupedRoomReadingsProjection.id,
+          projectionKind: "telemetry",
+          datasetId: groupedRoomReadingsDataset.id,
+          versionId: version.versionId,
+        },
+      })
+    ).rejects.toBeInstanceOf(MaterializationValidationError)
+
+    for (const propertyId of ["temperature", "humidity", "targetTemperature"]) {
+      expect(
+        await deps.storage.timeseries.getHistory({
+          projectId: sixb.id,
+          objectTypeId: "Room",
+          objectId: "r1",
+          propertyId,
+        })
+      ).toEqual([])
+    }
+  })
+
   test("telemetry projections materialize object latest by telemetry timestamp", async () => {
     const deps = createDeps()
     const sixb = createSixb(
@@ -888,14 +1094,26 @@ describe("runProjectionJob", () => {
       ...identity,
     }
     const runtime = createRuntime(sixb)
-    await runCanonicalProjectionJob({ runtime, job })
+    await queueTestProjectionRun(sixb.storage, {
+      id: job.id,
+      projectId: sixb.id,
+      identity,
+      target: { objectTypeId: Room.id },
+    })
+    const run = await runtime.projectionRunsStorage.getById({
+      projectId: runtime.projectId,
+      id: job.id,
+    })
+    if (!run) throw new Error(`Projection run '${job.id}' was not queued.`)
+    const boundRuntime = await bindRuntimeToRun(runtime, run)
+    await runCanonicalProjectionJob({ runtime: boundRuntime, job })
 
     const unavailable = () => {
       throw new Error("terminal replay accessed current configuration or lake state")
     }
     const replayRuntime: ProjectionWorkerContext = {
-      ...runtime,
-      lakeStorage: new Proxy(runtime.lakeStorage, { get: unavailable }),
+      ...boundRuntime,
+      lakeStorage: new Proxy(boundRuntime.lakeStorage, { get: unavailable }),
       datasets: { getById: unavailable },
       projections: { getById: unavailable },
     }
@@ -981,6 +1199,12 @@ describe("runProjectionJob", () => {
       ownershipHash: descriptor.ownershipHash,
     }
     const runId = createProjectionRunId(sixb.id, identity)
+    await queueTestProjectionRun(deps.storage, {
+      id: runId,
+      projectId: sixb.id,
+      identity,
+      target: { objectTypeId: Room.id },
+    })
     const error = await runCanonicalProjectionJob({
       runtime: createRuntime(sixb),
       job: { id: runId, ...identity },
@@ -2737,7 +2961,7 @@ describe("runProjectionJob", () => {
     expect(document?.properties.attachment).toEqual(attachment)
   })
 
-  test("rejects a committed schema mismatch before claiming a run", async () => {
+  test("records a committed schema mismatch on the claimed durable run", async () => {
     const deps = createDeps()
     const mismatchedRoomsDataset = defineDataset("canonical.rooms", {
       schema: [col("room_id", "string"), col("name", "string"), col("building_ref", "string")],
@@ -2782,10 +3006,18 @@ describe("runProjectionJob", () => {
       projectId: sixb.id,
       id: canonicalRunId("projrun-schema-mismatch"),
     })
-    expect(run).toBeNull()
+    expect(run).toMatchObject({
+      status: "failed",
+      attempt: 1,
+      error: {
+        code: "projection.execution_failed",
+        message: "Projection execution failed.",
+        retryable: false,
+      },
+    })
   })
 
-  test("rejects an unknown projection before claiming a run", async () => {
+  test("fails a claimed run when its Projection is no longer registered", async () => {
     const deps = createDeps()
     const sixb = createSixb(
       {
@@ -2824,7 +3056,15 @@ describe("runProjectionJob", () => {
       projectId: sixb.id,
       id: canonicalRunId("projrun-unknown"),
     })
-    expect(run).toBeNull()
+    expect(run).toMatchObject({
+      status: "failed",
+      attempt: 1,
+      error: {
+        code: "projection.execution_failed",
+        message: "Projection execution failed.",
+        retryable: false,
+      },
+    })
   })
 
   test("rejects a runtime-missing dataset with the shared dataset code", async () => {
@@ -2839,7 +3079,7 @@ describe("runProjectionJob", () => {
     const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
       { room_id: "r1", room_name: "Kitchen", building_ref: null },
     ])
-    const runtime = createRuntime(sixb, undefined, {
+    const runtime = createRuntime(sixb, {
       datasets: {
         getById: () => null,
       },
@@ -2872,7 +3112,15 @@ describe("runProjectionJob", () => {
         projectId: sixb.id,
         id: canonicalRunId("projrun-unknown-dataset"),
       })
-    ).toBeNull()
+    ).toMatchObject({
+      status: "failed",
+      attempt: 1,
+      error: {
+        code: "projection.execution_failed",
+        message: "Projection execution failed.",
+        retryable: false,
+      },
+    })
   })
 
   test("rejects a missing pinned version with the shared version code", async () => {
@@ -2912,7 +3160,15 @@ describe("runProjectionJob", () => {
         projectId: sixb.id,
         id: canonicalRunId("projrun-unknown-version"),
       })
-    ).toBeNull()
+    ).toMatchObject({
+      status: "failed",
+      attempt: 1,
+      error: {
+        code: "projection.execution_failed",
+        message: "Projection execution failed.",
+        retryable: false,
+      },
+    })
   })
 
   test("rejects an incompatible object FK target at startup before reading rows", () => {
@@ -3257,17 +3513,16 @@ describe("runProjectionJob", () => {
     expect(history).toEqual([])
   })
 
-  test("rejects an incompatible telemetry timestamp mapping before claiming a run", async () => {
+  test("records an incompatible telemetry timestamp mapping on the durable run", async () => {
     const deps = createDeps()
     const invalidAtProjection = {
       _tag: "TelemetryProjectionDefinition",
       id: "room-invalid-at-proj",
       objectTypeId: "Room",
-      propertyId: "temperature",
       datasetId: roomReadingsDataset.id,
       objectIdField: "room_id",
       atField: "temperature", // float64 column, not date-like
-      valueField: "temperature",
+      properties: { temperature: { valueField: "temperature" } },
     } satisfies ProjectionDefinition
     const sixb = createSixb(
       {
@@ -3315,6 +3570,14 @@ describe("runProjectionJob", () => {
       projectId: sixb.id,
       id: canonicalRunId("projrun-invalid-at"),
     })
-    expect(run).toBeNull()
+    expect(run).toMatchObject({
+      status: "failed",
+      attempt: 1,
+      error: {
+        code: "projection.execution_failed",
+        message: "Projection execution failed.",
+        retryable: false,
+      },
+    })
   })
 })

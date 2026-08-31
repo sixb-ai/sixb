@@ -92,7 +92,6 @@ describe("sixb.workflows.request", () => {
     expect(execution).toMatchObject({
       executor: { type: "primitive", kind: "workflow", runId: result.runId },
       source: { type: "execution", executionId: sixb.execution.id },
-      parentExecutionId: sixb.execution.id,
       authorizationRef: {
         type: "trustedPrimitive",
         primitive: { kind: "workflow", id: "draft-invoice", runId: result.runId },
@@ -394,7 +393,6 @@ describe("automatic workflow dispatch", () => {
         primitive: { kind: "workflow", id: draftInvoice.id, runId: result.runId },
       },
     })
-    expect(execution?.parentExecutionId).toBeUndefined()
     expect(execution?.requestedBy).toBeUndefined()
 
     const [claimed] = await claimAll(host)

@@ -15,11 +15,18 @@ webhookConnector({
     defineWebhook("typed")
       .post()
       .json(schema)
-      .verify(({ logger }) => {
-        logger.debug("verify")
+      .verify((context) => {
+        // @ts-expect-error verification runs before trusted Webhook authority is admitted
+        context.sixb
+        // @ts-expect-error verification is not attached to a durable run yet
+        context.logger
       })
-      .idempotencyKey(({ body, logger }) => {
-        logger.debug("idempotency")
+      .idempotencyKey((context) => {
+        const { body } = context
+        // @ts-expect-error idempotency resolution also runs before admission
+        context.sixb
+        // @ts-expect-error idempotency resolution is not attached to a durable run yet
+        context.logger
         return body.name
       })
       .handle(async ({ body, client, logger }) => {

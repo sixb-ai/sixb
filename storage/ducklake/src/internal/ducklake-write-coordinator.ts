@@ -27,7 +27,14 @@ import type { DuckLakeDatasetCatalog } from "./ducklake-dataset-catalog"
 import { createDuckLakeMergeSession, type DuckLakeCommitMergeInput } from "./ducklake-merge-session"
 import type { DuckLakeSnapshotReader, DuckLakeVersionSummary } from "./ducklake-snapshot-reader"
 import { createDuckLakeWriteSession, type DuckLakeCommitWriteInput } from "./ducklake-write-session"
-import { duckLakeAlias, duckLakeMetadataTableName, quoteIdentifier, quoteSqlString } from "./sql"
+import { encodeDatasetTableName } from "./names"
+import {
+  duckLakeAlias,
+  duckLakeMetadataTableName,
+  qualifiedTableName,
+  quoteIdentifier,
+  quoteSqlString,
+} from "./sql"
 import { parseCommitMetadata, type SixbCommitMetadata } from "./versions"
 
 export interface DuckLakeCommitDatasetVersionInput {
@@ -325,6 +332,7 @@ export class DuckLakeWriteCoordinator {
         previousRowCount: latestVersion?.rowCount,
         validatedPrimaryKeyColumns: latestVersion?.validatedPrimaryKeyColumns,
       })
+      await this.ensureInitialNoOpHasSnapshot(input, changeResult, latestVersion)
       const commitId = randomUUID()
       await this.setCommitMetadata(
         input,
@@ -477,6 +485,32 @@ export class DuckLakeWriteCoordinator {
         JSON.stringify({ sixb: metadata })
       )})`
     )
+  }
+
+  private async ensureInitialNoOpHasSnapshot(
+    input: DuckLakeCommitVersionOutcomeRuntimeInput,
+    changeResult: ApplyDatasetRowsResult,
+    knownLatestVersion: DuckLakeVersionSummary | null
+  ): Promise<void> {
+    if (changeResult.dataChangeExpected || input.allowInitialNoOp) {
+      return
+    }
+
+    const latestVersion =
+      knownLatestVersion ??
+      (await this.snapshots.getLatestVersionSummaryForDefinition(input.runtime, input.dataset))
+    if (latestVersion) {
+      return
+    }
+
+    // DuckLake 1.5.2 does not create a snapshot for a transaction whose data and metadata are
+    // unchanged, and set_commit_message alone cannot force one. Reapplying the current table
+    // comment is an idempotent metadata write: it leaves the visible DatasetDefinition unchanged
+    // while giving the first empty write a real DuckLake snapshot for time travel and lineage.
+    const table = qualifiedTableName(this.options, encodeDatasetTableName(input.dataset.id))
+    const descriptionSql =
+      input.dataset.description === undefined ? "NULL" : quoteSqlString(input.dataset.description)
+    await input.runtime.run(`COMMENT ON TABLE ${table} IS ${descriptionSql}`)
   }
 
   private async versionForNoOpCommit(

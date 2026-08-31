@@ -1,3 +1,14 @@
+export { getConnectorConnectionsRuntime } from "../connectors/connections/capability"
+export type {
+  CompleteConnectorAuthorizationInput,
+  CompleteConnectorAuthorizationResult,
+  ConnectorConnectionView,
+  RevokeConnectorAuthorizationResult,
+  SelectConnectorAccountInput,
+  StartConnectorAuthorizationInput,
+  StartConnectorAuthorizationResult,
+} from "../connectors/connections/contracts"
+export type { ConnectorConnectionsRuntime } from "../connectors/connections/execution"
 export type { OntologyMutationRuntime } from "./ontology-mutations"
 export {
   createOntologyMutationRuntime,

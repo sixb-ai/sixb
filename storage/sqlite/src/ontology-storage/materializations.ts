@@ -88,10 +88,9 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
         this.assertSource(expected, input.commit.projectId)
       for (const expected of input.expected.objects) this.assertObject(reader, expected)
       for (const expected of input.expected.links) this.assertLink(reader, expected)
-      for (const expected of input.expected.linkScopes) {
-        if (
-          reader.linkScope(expected.source, expected.linkId).fingerprint !== expected.fingerprint
-        ) {
+      const linkScopeRevisions = reader.linkScopeRevisions(input.expected.linkScopes)
+      for (const [index, expected] of input.expected.linkScopes.entries()) {
+        if (linkScopeRevisions[index]?.fingerprint !== expected.fingerprint) {
           throw new MaterializationConflictError(
             "effective-state",
             `Expected link scope changed for ${expected.source.objectTypeId}:${expected.source.primaryId}.${expected.linkId}.`
@@ -151,7 +150,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
         yield {
           objects: [],
           links: [],
-          linkScopes: reader.linkScopes(scopes.slice(offset, offset + input.pageRows)),
+          linkScopes: reader.linkSlotStates(scopes.slice(offset, offset + input.pageRows)),
           points: [],
         }
       }
@@ -700,11 +699,11 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
         .query(
           `
             INSERT INTO ontology_commits (
-              project_id, id, idempotency_key, request_hash,
+              project_id, id, idempotency_key, request_hash, execution_id,
               origin_kind, origin_run_id, origin_batch_ordinal, origin, actor,
               ontology_revision, projection_revision, ownership_hash,
               intent, result, committed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, json(?), json(?), ?, ?, ?, json(?), json(?), ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, json(?), json(?), ?, ?, ?, json(?), json(?), ?)
           `
         )
         .run(
@@ -712,6 +711,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
           commit.id,
           commit.idempotencyKey,
           commit.requestHash,
+          commit.executionId,
           origin.kind,
           origin.runId,
           origin.batchOrdinal,

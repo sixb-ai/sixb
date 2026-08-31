@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { type SixbFailure, SyncRunError, type SyncRunFailureCode } from "@sixb/core/storage"
-import { SqliteSyncRunStorage } from "../src/sync-run-storage"
+import {
+  type SixbFailure,
+  SyncRunError,
+  type SyncRunFailureCode,
+  type SyncRunStorage,
+} from "@sixb/core/storage"
+import { createTestSyncExecution, startTestSyncRun } from "@sixb/core/testing"
+import { SqliteStorage } from "../src"
 
 const FAILURE: SixbFailure<SyncRunFailureCode> = {
   code: "internal.unexpected",
@@ -11,18 +17,20 @@ const FAILURE: SixbFailure<SyncRunFailureCode> = {
 }
 
 describe("SqliteSyncRunStorage", () => {
-  let storage: SqliteSyncRunStorage
+  let database: SqliteStorage
+  let storage: SyncRunStorage
 
   beforeEach(() => {
-    storage = new SqliteSyncRunStorage()
+    database = new SqliteStorage()
+    storage = database.syncRuns
   })
 
   afterEach(() => {
-    storage.close()
+    database.close()
   })
 
   test("starts and finishes runs with checkpoints", async () => {
-    await storage.start({
+    await startTestSyncRun(database, {
       id: "run-1",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -57,7 +65,7 @@ describe("SqliteSyncRunStorage", () => {
       seenIds: ["evt-1", "evt-2"],
     })
 
-    await storage.start({
+    await startTestSyncRun(database, {
       id: "run-null",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -79,7 +87,7 @@ describe("SqliteSyncRunStorage", () => {
     expect(nullFinished.checkpoint).toBeNull()
     expect(storedNull?.checkpoint).toBeNull()
 
-    await storage.start({
+    await startTestSyncRun(database, {
       id: "run-empty",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -96,7 +104,7 @@ describe("SqliteSyncRunStorage", () => {
     expect(emptyFinished.output).toBeUndefined()
     expect(emptyFinished.checkpoint).toEqual({ cursor: "cursor-empty" })
 
-    await storage.start({
+    await startTestSyncRun(database, {
       id: "run-empty-snapshot",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -111,7 +119,7 @@ describe("SqliteSyncRunStorage", () => {
     })
     expect(emptySnapshotFinished.output).toBeUndefined()
 
-    const mergeStarted = await storage.start({
+    const mergeStarted = await startTestSyncRun(database, {
       id: "run-merge-noop",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -134,7 +142,7 @@ describe("SqliteSyncRunStorage", () => {
   })
 
   test("stores failures and supports filtered paging", async () => {
-    await storage.start({
+    await startTestSyncRun(database, {
       id: "run-1",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -150,7 +158,7 @@ describe("SqliteSyncRunStorage", () => {
       error: FAILURE,
     })
 
-    await storage.start({
+    await startTestSyncRun(database, {
       id: "run-2",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -159,7 +167,7 @@ describe("SqliteSyncRunStorage", () => {
       startedAt: new Date("2026-04-06T16:00:00.000Z"),
     })
 
-    await storage.start({
+    await startTestSyncRun(database, {
       id: "run-3",
       projectId: "my-app",
       syncId: "sync-customers",
@@ -200,7 +208,7 @@ describe("SqliteSyncRunStorage", () => {
   })
 
   test("lists the latest run for multiple sync ids", async () => {
-    await storage.start({
+    await startTestSyncRun(database, {
       id: "run-orders-a",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -208,7 +216,7 @@ describe("SqliteSyncRunStorage", () => {
       mode: "snapshot",
       startedAt: new Date("2026-04-06T16:00:00.000Z"),
     })
-    await storage.start({
+    await startTestSyncRun(database, {
       id: "run-orders-z",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -216,7 +224,7 @@ describe("SqliteSyncRunStorage", () => {
       mode: "snapshot",
       startedAt: new Date("2026-04-06T16:00:00.000Z"),
     })
-    await storage.start({
+    await startTestSyncRun(database, {
       id: "run-customers",
       projectId: "my-app",
       syncId: "sync-customers",
@@ -224,7 +232,7 @@ describe("SqliteSyncRunStorage", () => {
       mode: "append",
       startedAt: new Date("2026-04-06T15:00:00.000Z"),
     })
-    await storage.start({
+    await startTestSyncRun(database, {
       id: "run-other-project",
       projectId: "other-app",
       syncId: "sync-orders",
@@ -242,7 +250,7 @@ describe("SqliteSyncRunStorage", () => {
   })
 
   test("rejects duplicates, missing runs, and mismatched success outputs", async () => {
-    await storage.start({
+    await startTestSyncRun(database, {
       id: "run-1",
       projectId: "my-app",
       syncId: "sync-orders",
@@ -254,9 +262,6 @@ describe("SqliteSyncRunStorage", () => {
       storage.start({
         id: "run-1",
         projectId: "my-app",
-        syncId: "sync-orders",
-        datasetId: "raw.erp.orders",
-        mode: "snapshot",
       })
     ).rejects.toBeInstanceOf(SyncRunError)
 
@@ -279,6 +284,25 @@ describe("SqliteSyncRunStorage", () => {
           datasetId: "raw.erp.invoices",
           versionId: "ver_1",
         },
+      })
+    ).rejects.toBeInstanceOf(SyncRunError)
+  })
+
+  test("rejects a run whose execution authorizes a different Sync", async () => {
+    const executionId = await createTestSyncExecution(database.executions, {
+      projectId: "my-app",
+      syncId: "sync-customers",
+      runId: "run-1",
+    })
+
+    await expect(
+      storage.queue({
+        id: "run-1",
+        projectId: "my-app",
+        executionId,
+        syncId: "sync-orders",
+        datasetId: "raw.erp.orders",
+        mode: "snapshot",
       })
     ).rejects.toBeInstanceOf(SyncRunError)
   })

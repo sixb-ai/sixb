@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { SandboxNotRunningError } from "@sixb/core"
 import { AppleContainerSandbox } from "../src/apple-container-sandbox"
+import { DEFAULT_APPLE_CONTAINER_IMAGE } from "../src/apple-container-sandbox-factory"
 import type { AppleContainerCliConfig } from "../src/cli"
 
 let dir: string
@@ -19,6 +20,10 @@ afterEach(async () => {
 })
 
 describe("AppleContainerSandbox lifecycle", () => {
+  test("pins the production Node image to an immutable OCI index", () => {
+    expect(DEFAULT_APPLE_CONTAINER_IMAGE).toMatch(/^node:22-bookworm@sha256:[a-f0-9]{64}$/)
+  })
+
   test("create starts a long-lived container on an internal network", async () => {
     const cli = await fakeCli()
     const sandbox = await AppleContainerSandbox.create({

@@ -118,7 +118,29 @@ function validateObjectAssertion(
       `Projection '${resolved.projectionId}' asserted unowned property '${assertion.ref.objectTypeId}.${propertyId}'.`
     )
   }
-  return { ...assertion, properties }
+  const conflictResolution = resolved.definition.conflictResolution ?? { strategy: "editsWin" }
+  if (conflictResolution.strategy !== "mostRecent") {
+    return { kind: "object", ref: assertion.ref, properties }
+  }
+  if (assertion.sourceUpdatedAt === undefined) {
+    throw new MaterializationValidationError(
+      `Projection '${resolved.projectionId}' requires source update timestamp ` +
+        `'${conflictResolution.sourceTimestamp}' on every object assertion.`
+    )
+  }
+  const primaryPropertyId = ontology.getPrimaryPropertyId(assertion.ref.objectTypeId)
+  const absentSourcePropertyIds = [...owned]
+    .filter(
+      (propertyId) => propertyId !== primaryPropertyId && !Object.hasOwn(properties, propertyId)
+    )
+    .sort()
+  return {
+    kind: "object",
+    ref: assertion.ref,
+    properties,
+    sourceUpdatedAt: assertion.sourceUpdatedAt,
+    ...(absentSourcePropertyIds.length === 0 ? {} : { absentSourcePropertyIds }),
+  }
 }
 
 function validateLinkAssertion(

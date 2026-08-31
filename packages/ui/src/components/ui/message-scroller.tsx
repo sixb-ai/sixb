@@ -41,7 +41,10 @@ function MessageScrollerViewport({
     <MessageScrollerPrimitive.Viewport
       data-slot="message-scroller-viewport"
       className={cn(
-        "size-full min-h-0 min-w-0 scroll-fade-b scrollbar-thin scrollbar-gutter-stable overflow-y-auto overscroll-contain contain-content data-autoscrolling:scrollbar-none",
+        // Keep the scrollbar gutter present while the primitive is autoscrolling. Toggling the
+        // scrollbar changes the viewport width, which can rewrap a long transcript and feed its
+        // ResizeObserver another size change indefinitely until the user interrupts following.
+        "size-full min-h-0 min-w-0 scroll-fade-b scrollbar-thin scrollbar-gutter-stable overflow-y-auto overscroll-contain contain-content",
         className
       )}
       {...props}
@@ -71,10 +74,7 @@ function MessageScrollerItem({
     <MessageScrollerPrimitive.Item
       data-slot="message-scroller-item"
       scrollAnchor={scrollAnchor}
-      className={cn(
-        "min-w-0 shrink-0 [contain-intrinsic-size:auto_10rem] [content-visibility:auto]",
-        className
-      )}
+      className={cn("min-w-0 shrink-0", className)}
       {...props}
     />
   )

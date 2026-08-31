@@ -30,7 +30,13 @@ import {
   type WorkflowDefinition,
 } from "@sixb/core"
 import { createSessionCredential } from "@sixb/core/internal/auth"
-import { createTestSixb, createTestWorkflowExecution, queueTestActionRun } from "@sixb/core/testing"
+import {
+  createTestSixb,
+  createTestWorkflowExecution,
+  queueTestActionRun,
+  startTestPipelineRun,
+  startTestSyncRun,
+} from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -513,6 +519,74 @@ describe("authorized object routes", () => {
     expect(allowed.status).toBe(200)
     const body = (await allowed.json()) as { objects: { primaryId: string }[] }
     expect(body.objects.map((row) => row.primaryId)).toEqual(["c1"])
+
+    const deniedRefs = await app.fetch(
+      new Request("http://localhost/api/objects/query", {
+        method: "POST",
+        headers: session.csrfHeaders,
+        body: JSON.stringify({
+          query: {
+            kind: "refs",
+            refs: [
+              { objectTypeId: "contract", primaryId: "c1" },
+              { objectTypeId: "invoice", primaryId: "i1" },
+            ],
+          },
+        }),
+      })
+    )
+    expect(deniedRefs.status).toBe(403)
+
+    const filteredLinks = await app.fetch(
+      new Request("http://localhost/api/objects/query/links", {
+        method: "POST",
+        headers: session.csrfHeaders,
+        body: JSON.stringify({
+          query: {
+            kind: "refs",
+            refs: [{ objectTypeId: "contract", primaryId: "c1" }],
+          },
+          direction: "outgoing",
+          includeObjects: true,
+        }),
+      })
+    )
+    expect(filteredLinks.status).toBe(200)
+    expect(await filteredLinks.json()).toMatchObject({
+      objects: [{ objectTypeId: "contract", primaryId: "c1" }],
+      links: [],
+      hasMore: false,
+    })
+
+    const writer = await seedSession(storage, ["writers"], "usr_writer_links")
+    const visibleLinks = await app.fetch(
+      new Request("http://localhost/api/objects/query/links", {
+        method: "POST",
+        headers: writer.csrfHeaders,
+        body: JSON.stringify({
+          query: {
+            kind: "refs",
+            refs: [{ objectTypeId: "contract", primaryId: "c1" }],
+          },
+          direction: "outgoing",
+          includeObjects: true,
+        }),
+      })
+    )
+    expect(visibleLinks.status).toBe(200)
+    expect(await visibleLinks.json()).toMatchObject({
+      objects: [
+        { objectTypeId: "contract", primaryId: "c1" },
+        { objectTypeId: "invoice", primaryId: "i1" },
+      ],
+      links: [
+        {
+          source: { objectTypeId: "contract", primaryId: "c1" },
+          linkId: "invoice",
+          target: { objectTypeId: "invoice", primaryId: "i1" },
+        },
+      ],
+    })
   })
 
   test("disabled auth keeps object routes privileged", async () => {
@@ -815,37 +889,6 @@ describe("authorized object routes", () => {
 })
 
 describe("authorized adjacent read routes", () => {
-  test("link reads inherit source and target object visibility", async () => {
-    const { app, storage } = await createApp()
-    const operator = await seedSession(storage, ["commercial"], "usr_op")
-    const runner = await seedSession(storage, ["operations"], "usr_run")
-    const admin = await seedSession(storage, ["admins"], "usr_admin")
-
-    const operatorLinks = await app.fetch(
-      new Request("http://localhost/api/objects/contract/c1/links", {
-        headers: operator.headers,
-      })
-    )
-    expect(operatorLinks.status).toBe(200)
-    expect(await operatorLinks.json()).toEqual([])
-
-    const hiddenSource = await app.fetch(
-      new Request("http://localhost/api/objects/contract/c1/links", {
-        headers: runner.headers,
-      })
-    )
-    expect(hiddenSource.status).toBe(404)
-
-    const adminLinks = await app.fetch(
-      new Request("http://localhost/api/objects/contract/c1/links", {
-        headers: admin.headers,
-      })
-    )
-    expect(
-      ((await adminLinks.json()) as { targetTypeId: string }[]).map((link) => link.targetTypeId)
-    ).toEqual(["invoice"])
-  })
-
   test("telemetry reads inherit object visibility", async () => {
     const { app, storage } = await createApp()
     const operator = await seedSession(storage, ["commercial"], "usr_op")
@@ -1140,7 +1183,7 @@ describe("authorized sync routes", () => {
     const operator = await seedSession(storage, ["commercial"], "usr_op")
     const admin = await seedSession(storage, ["admins"], "usr_admin")
 
-    await storage.syncRuns!.start({
+    await startTestSyncRun(storage, {
       id: "run-orders",
       projectId: "test-project",
       syncId: "sync-orders",
@@ -1148,7 +1191,7 @@ describe("authorized sync routes", () => {
       mode: "snapshot",
       startedAt: new Date("2026-05-16T12:00:00.000Z"),
     })
-    await storage.syncRuns!.start({
+    await startTestSyncRun(storage, {
       id: "run-customers",
       projectId: "test-project",
       syncId: "sync-customers",
@@ -1248,13 +1291,13 @@ describe("authorized pipeline routes", () => {
     const operator = await seedSession(storage, ["commercial"], "usr_op")
     const admin = await seedSession(storage, ["admins"], "usr_admin")
 
-    await storage.pipelineRuns!.start({
+    await startTestPipelineRun(storage, {
       id: "run-orders",
       projectId: "test-project",
       pipelineId: "pipeline-orders",
       startedAt: new Date("2026-05-16T12:00:00.000Z"),
     })
-    await storage.pipelineRuns!.start({
+    await startTestPipelineRun(storage, {
       id: "run-customers",
       projectId: "test-project",
       pipelineId: "pipeline-customers",

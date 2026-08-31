@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test"
+import { emptyGrantIndex } from "../src"
+import { createTestingScope } from "../src/execution/scopes"
 import { createEventId, MaterializationConflictError } from "../src/materializer"
 import { InMemoryStorage, type Storage, type StoredLinkSlotOverride } from "../src/storage"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
@@ -9,12 +11,88 @@ import {
   createMaterializerFixture,
   replacement,
   sourceEntry,
+  sourceEntryAt,
   sourceEntryWithParent,
 } from "./materializer-fixture"
 
 const ref = (primaryId: string) => ({ objectTypeId: "Device", primaryId })
 
 describe("ontology materializer edits", () => {
+  test("derives durable provenance and event actor from the bound principal scope", async () => {
+    const storage = new InMemoryStorage()
+    await storage.auth.users.create({
+      projectId: "project",
+      id: "user-1",
+      email: "user-1@example.com",
+    })
+    const scope = createTestingScope({
+      projectId: "project",
+      executionId: "principal-execution",
+      requestId: "principal-request",
+      correlationId: "principal-correlation",
+      context: {
+        principal: { type: "user", id: "user-1" },
+        groupIds: [],
+        roleIds: [],
+        grants: emptyGrantIndex(),
+      },
+    })
+    const { materializer } = createMaterializerFixture({ storage, scope })
+
+    const result = await materializer.edits.commit(
+      atomic("principal-write", [
+        {
+          id: "create",
+          kind: "object.create",
+          ref: ref("principal-object"),
+          properties: { name: "Principal object" },
+        },
+      ])
+    )
+    await expect(
+      storage.executions.getById({ projectId: "project", id: scope.execution.id })
+    ).resolves.toMatchObject({
+      requestedBy: { type: "user", id: "user-1" },
+      authorizationRef: { type: "principal", principal: { type: "user", id: "user-1" } },
+    })
+    await expect(
+      storage.ontology.commits.getById({ projectId: "project", id: result.commitId })
+    ).resolves.toMatchObject({
+      executionId: "principal-execution",
+      actor: { type: "user", id: "user-1" },
+    })
+    const [event] = await storage.ontology.outbox.claim({
+      projectId: "project",
+      now: "2027-01-01T00:00:00.000Z",
+      limit: 10,
+      leaseId: "principal-events",
+      leaseExpiresAt: "2027-01-01T01:00:00.000Z",
+    })
+    expect(event.envelope).toMatchObject({
+      correlationId: "principal-correlation",
+      actor: { type: "user", id: "user-1" },
+    })
+  })
+
+  test("rejects replaying one request id from a different execution", async () => {
+    const storage = new InMemoryStorage()
+    const materializerFor = (executionId: string) =>
+      createMaterializerFixture({
+        storage,
+        scope: createTestingScope({
+          projectId: "project",
+          executionId,
+          requestId: "shared-request",
+          correlationId: `correlation:${executionId}`,
+        }),
+      }).materializer
+
+    await materializerFor("execution-1").edits.commit(atomic("shared-request", []))
+    await expect(
+      materializerFor("execution-2").edits.commit(atomic("shared-request", []))
+    ).rejects.toThrow("belongs to execution 'execution-1', not 'execution-2'")
+  })
+
   test("rejects an Action commit before mutation when strict run capabilities are absent", async () => {
     class StorageWithoutActionFence extends InMemoryStorage {
       private readonly missingActionRuns: Storage["actionRuns"] = undefined
@@ -46,7 +124,12 @@ describe("ontology materializer edits", () => {
   test("rejects invalid Action runs before ontology reads, staging, or mutation", async () => {
     const scenarios = [
       { kind: "absent", storedActionId: null, start: false, error: "not found" },
-      { kind: "wrong-action", storedActionId: "other", start: true, error: "does not belong" },
+      {
+        kind: "wrong-action",
+        storedActionId: "other",
+        start: true,
+        error: "does not authorize",
+      },
       { kind: "not-running", storedActionId: "approve", start: false, error: "status 'queued'" },
     ] as const
 
@@ -502,6 +585,169 @@ describe("ontology materializer edits", () => {
         })
       )?.properties.name
     ).toBe("source")
+  })
+
+  test("resolves most-recent source and edit candidates independently per property", async () => {
+    let now = new Date("2026-01-01T10:00:00.000Z")
+    const { materializer, storage } = createMaterializerFixture({
+      conflictResolution: "mostRecent",
+      dependencies: { clock: () => now },
+    })
+    const object = async () =>
+      storage.objects.getByPrimaryId({
+        projectId: "project",
+        objectTypeId: "Device",
+        primaryId: "one",
+      })
+
+    await materializer.projections.replace(
+      replacement("recent-v1", "2026-01-01T00:00:00Z", [
+        sourceEntryAt("one", "A", "2026-01-01T10:00:00Z", "source-note-1"),
+      ])
+    )
+
+    now = new Date("2026-01-01T11:00:00.000Z")
+    const nameEdit = await materializer.edits.commit(
+      atomic("recent-edit-name", [
+        {
+          id: "name",
+          kind: "object.patch",
+          ref: ref("one"),
+          set: { name: "B" },
+          unset: [],
+          reset: [],
+        },
+      ])
+    )
+    const nameEditOutcome = nameEdit.outcomes[0]
+    expect(nameEditOutcome?.ok).toBe(true)
+    if (!nameEditOutcome?.ok) throw new Error("Expected the name edit to succeed.")
+    expect(nameEditOutcome.object).not.toHaveProperty("propertyConflicts")
+
+    await materializer.projections.replace(
+      replacement("recent-v2", "2026-01-02T00:00:00Z", [
+        sourceEntryAt("one", "source-still-old", "2026-01-01T10:00:00Z", "source-note-2"),
+      ])
+    )
+    expect((await object())?.properties).toMatchObject({ name: "B", note: "source-note-2" })
+
+    now = new Date("2026-01-01T13:00:00.000Z")
+    await materializer.edits.commit(
+      atomic("recent-edit-note", [
+        {
+          id: "note",
+          kind: "object.patch",
+          ref: ref("one"),
+          set: { note: "local-note" },
+          unset: [],
+          reset: [],
+        },
+      ])
+    )
+    const [storedOverride] = [
+      ...getInMemoryOntologyStorageTestingAdapter(storage.ontology)
+        .snapshot()
+        .objectOverrides.values(),
+    ]
+    expect(storedOverride?.editedAt).toEqual({
+      name: "2026-01-01T11:00:00.000Z",
+      note: "2026-01-01T13:00:00.000Z",
+    })
+
+    await materializer.projections.replace(
+      replacement("recent-v3", "2026-01-03T00:00:00Z", [
+        sourceEntryAt("one", "C", "2026-01-01T12:00:00Z", "source-note-3"),
+      ])
+    )
+    expect((await object())?.properties).toMatchObject({ name: "C", note: "local-note" })
+
+    const tied = await materializer.projections.replace(
+      replacement("recent-v4", "2026-01-04T00:00:00Z", [
+        sourceEntryAt("one", "D", "2026-01-01T13:00:00Z", "source-note-4"),
+      ])
+    )
+    expect((await object())?.properties).toMatchObject({ name: "D", note: "source-note-4" })
+    expect(tied.counts.objectsUpdated).toBe(1)
+
+    await materializer.projections.replace(
+      replacement("recent-v5", "2026-01-05T00:00:00Z", [
+        sourceEntryAt("one", "E", "2026-01-01T14:00:00Z"),
+      ])
+    )
+    const withoutSourceNote = await object()
+    expect(withoutSourceNote?.properties.name).toBe("E")
+    expect(withoutSourceNote?.properties).not.toHaveProperty("note")
+
+    const activeSource = [
+      ...getInMemoryOntologyStorageTestingAdapter(storage.ontology)
+        .snapshot()
+        .sourceMaterializations.values(),
+    ].find((source) => source.status === "active")
+    const activeObjectAssertion = [...(activeSource?.rowsByEntity.values() ?? [])].find(
+      (row) => row.assertion.kind === "object"
+    )?.assertion
+    expect(activeObjectAssertion).toEqual({
+      kind: "object",
+      ref: ref("one"),
+      properties: { name: "E" },
+      sourceUpdatedAt: "2026-01-01T14:00:00.000Z",
+      absentSourcePropertyIds: ["note"],
+    })
+  })
+
+  test("preserves a dormant edit timestamp when deleting an absent object", async () => {
+    let now = new Date("2026-01-01T10:00:00.000Z")
+    const { materializer, storage } = createMaterializerFixture({
+      conflictResolution: "mostRecent",
+      dependencies: { clock: () => now },
+    })
+
+    await materializer.projections.replace(
+      replacement("dormant-time-v1", "2026-01-01T00:00:00Z", [
+        sourceEntryAt("one", "source", "2026-01-01T10:00:00Z"),
+      ])
+    )
+    now = new Date("2026-01-01T11:00:00.000Z")
+    await materializer.edits.commit(
+      atomic("dormant-time-edit", [
+        {
+          id: "name",
+          kind: "object.patch",
+          ref: ref("one"),
+          set: { name: "edited" },
+          unset: [],
+          reset: [],
+        },
+      ])
+    )
+    await materializer.projections.replace(
+      replacement("dormant-time-v2", "2026-01-02T00:00:00Z", [])
+    )
+
+    now = new Date("2026-01-01T20:00:00.000Z")
+    await materializer.edits.commit(
+      atomic("dormant-time-delete", [{ id: "delete", kind: "object.delete", ref: ref("one") }])
+    )
+
+    const [storedOverride] = [
+      ...getInMemoryOntologyStorageTestingAdapter(storage.ontology)
+        .snapshot()
+        .objectOverrides.values(),
+    ]
+    expect(storedOverride?.editedAt).toEqual({ name: "2026-01-01T11:00:00.000Z" })
+
+    await materializer.projections.replace(
+      replacement("dormant-time-v3", "2026-01-03T00:00:00Z", [
+        sourceEntryAt("one", "newer source", "2026-01-01T12:00:00Z"),
+      ])
+    )
+    await expect(
+      storage.objects.getByPrimaryId({
+        projectId: "project",
+        objectTypeId: "Device",
+        primaryId: "one",
+      })
+    ).resolves.toMatchObject({ properties: { name: "newer source" } })
   })
 
   test("supports create-to-patch, tombstone, dormant patch, and restore semantics", async () => {

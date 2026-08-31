@@ -144,6 +144,77 @@ describe("defineAgentTool", () => {
     })
   })
 
+  test("snapshots file-aware results and rejects malformed file references", async () => {
+    const digest = `sha256:${"a".repeat(64)}` as const
+    const handlerResult = {
+      kind: "agentToolResult",
+      content: [
+        { type: "text", text: "Created an image." },
+        {
+          type: "file",
+          fileRef: {
+            blobId: `blob_${"a".repeat(64)}`,
+            digest,
+            sizeBytes: 8,
+            fileName: "image.png",
+            mediaType: "image/png",
+          },
+        },
+      ],
+    } as const
+    const createImage = defineAgentTool("create_image")
+      .description("Create an image.")
+      .input({})
+      .run(() => handlerResult)
+
+    const result = await createImage.handler({ input: {} } as never)
+    expect(result).toEqual(JSON.parse(JSON.stringify(handlerResult)))
+    expect(result).not.toBe(handlerResult)
+
+    const malformed = defineAgentTool("malformed_image")
+      .description("Return a malformed image result.")
+      .input({})
+      .run((() => ({
+        kind: "agentToolResult",
+        content: [
+          {
+            type: "file",
+            fileRef: {
+              blobId: "blob_wrong",
+              digest,
+              sizeBytes: 8,
+            },
+          },
+        ],
+      })) as never)
+
+    await expect(malformed.handler({ input: {} } as never)).rejects.toMatchObject({
+      toolName: "malformed_image",
+      reason: "result.content[0].fileRef must be a valid FileRef",
+    })
+
+    const unsupportedField = defineAgentTool("unsupported_rich_field")
+      .description("Return an unsupported rich result field.")
+      .input({})
+      .run((() => ({ ...handlerResult, structuredContent: { stale: true } })) as never)
+    await expect(unsupportedField.handler({ input: {} } as never)).rejects.toMatchObject({
+      toolName: "unsupported_rich_field",
+      reason: "result.structuredContent is not supported",
+    })
+
+    const unsupportedContentField = defineAgentTool("unsupported_content_field")
+      .description("Return an unsupported rich content field.")
+      .input({})
+      .run((() => ({
+        kind: "agentToolResult",
+        content: [{ type: "text", text: "Created.", ignored: true }],
+      })) as never)
+    await expect(unsupportedContentField.handler({ input: {} } as never)).rejects.toMatchObject({
+      toolName: "unsupported_content_field",
+      reason: "result.content[0].ignored is not supported",
+    })
+  })
+
   test("deeply snapshots and freezes nested input schemas", () => {
     const values = ["quick", "deep"]
     const input = {
@@ -168,7 +239,9 @@ describe("defineAgentTool", () => {
     for (const name of ["", "1search", "search knowledge", "a".repeat(65)]) {
       expect(() => validateName(name)).toThrow(AgentDefinitionError)
     }
-    expect(() => validateName("bash")).toThrow("reserved by the framework")
+    for (const name of ["bash", "read", "view_file"]) {
+      expect(() => validateName(name)).toThrow("reserved by the framework")
+    }
   })
 
   test("rejects empty descriptions, invalid schemas, and missing handlers", () => {

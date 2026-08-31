@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { PipelineRunError, type PipelineRunFailureCode, type SixbFailure } from "@sixb/core/storage"
+import {
+  PipelineRunError,
+  type PipelineRunFailureCode,
+  type PipelineRunStorage,
+  type SixbFailure,
+} from "@sixb/core/storage"
+import { createTestPipelineExecution, startTestPipelineRun } from "@sixb/core/testing"
 import { SqliteStorage } from "../src"
 import { SqlitePipelineRunStorage } from "../src/pipeline-run-storage"
 
@@ -18,18 +24,20 @@ const CANCELLED_FAILURE: SixbFailure<PipelineRunFailureCode> = {
 }
 
 describe("SqlitePipelineRunStorage", () => {
-  let storage: SqlitePipelineRunStorage
+  let database: SqliteStorage
+  let storage: PipelineRunStorage
 
   beforeEach(() => {
-    storage = new SqlitePipelineRunStorage()
+    database = new SqliteStorage()
+    storage = database.pipelineRuns
   })
 
   afterEach(() => {
-    storage.close()
+    database.close()
   })
 
   test("starts and finishes pipeline runs", async () => {
-    await storage.start({
+    await startTestPipelineRun(database, {
       id: "run-1",
       projectId: "my-app",
       pipelineId: "customers",
@@ -57,12 +65,12 @@ describe("SqlitePipelineRunStorage", () => {
       datasetId: "insights.customers",
       versionId: "ver_final",
     })
-    expect(stored?.startedAt.toISOString()).toBe("2026-05-08T10:00:00.000Z")
+    expect(stored?.startedAt?.toISOString()).toBe("2026-05-08T10:00:00.000Z")
     expect(stored?.finishedAt?.toISOString()).toBe("2026-05-08T10:00:04.500Z")
   })
 
   test("stores failures and supports filtered pipeline run paging", async () => {
-    await storage.start({
+    await startTestPipelineRun(database, {
       id: "run-1",
       projectId: "my-app",
       pipelineId: "customers",
@@ -75,7 +83,7 @@ describe("SqlitePipelineRunStorage", () => {
       error: { ...FAILURE, message: "No committed source version" },
     })
 
-    await storage.start({
+    await startTestPipelineRun(database, {
       id: "run-2",
       projectId: "my-app",
       pipelineId: "customers",
@@ -91,7 +99,7 @@ describe("SqlitePipelineRunStorage", () => {
       },
     })
 
-    await storage.start({
+    await startTestPipelineRun(database, {
       id: "run-3",
       projectId: "my-app",
       pipelineId: "orders",
@@ -141,25 +149,25 @@ describe("SqlitePipelineRunStorage", () => {
   })
 
   test("lists the latest run for multiple pipeline ids", async () => {
-    await storage.start({
+    await startTestPipelineRun(database, {
       id: "run-customers-a",
       projectId: "my-app",
       pipelineId: "customers",
       startedAt: new Date("2026-05-08T11:00:00.000Z"),
     })
-    await storage.start({
+    await startTestPipelineRun(database, {
       id: "run-customers-z",
       projectId: "my-app",
       pipelineId: "customers",
       startedAt: new Date("2026-05-08T11:00:00.000Z"),
     })
-    await storage.start({
+    await startTestPipelineRun(database, {
       id: "run-orders",
       projectId: "my-app",
       pipelineId: "orders",
       startedAt: new Date("2026-05-08T10:00:00.000Z"),
     })
-    await storage.start({
+    await startTestPipelineRun(database, {
       id: "run-other-project",
       projectId: "other-app",
       pipelineId: "customers",
@@ -175,7 +183,7 @@ describe("SqlitePipelineRunStorage", () => {
   })
 
   test("starts and finishes step runs with pinned inputs", async () => {
-    await storage.start({
+    await startTestPipelineRun(database, {
       id: "piperun_1",
       projectId: "my-app",
       pipelineId: "customers",
@@ -236,7 +244,7 @@ describe("SqlitePipelineRunStorage", () => {
   })
 
   test("stores failed step runs and supports filtered paging", async () => {
-    await storage.start({
+    await startTestPipelineRun(database, {
       id: "piperun_1",
       projectId: "my-app",
       pipelineId: "customers",
@@ -316,7 +324,7 @@ describe("SqlitePipelineRunStorage", () => {
   })
 
   test("rejects duplicates, missing records, terminal rewrites, and mismatched outputs", async () => {
-    await storage.start({
+    await startTestPipelineRun(database, {
       id: "piperun_1",
       projectId: "my-app",
       pipelineId: "customers",
@@ -326,7 +334,6 @@ describe("SqlitePipelineRunStorage", () => {
       storage.start({
         id: "piperun_1",
         projectId: "my-app",
-        pipelineId: "customers",
       })
     ).rejects.toBeInstanceOf(PipelineRunError)
 
@@ -407,5 +414,22 @@ describe("SqlitePipelineRunStorage", () => {
     } finally {
       bundled.close()
     }
+  })
+
+  test("rejects a run whose execution authorizes a different Pipeline", async () => {
+    const executionId = await createTestPipelineExecution(database.executions, {
+      projectId: "my-app",
+      pipelineId: "pipeline-customers",
+      runId: "run-1",
+    })
+
+    await expect(
+      storage.queue({
+        id: "run-1",
+        projectId: "my-app",
+        executionId,
+        pipelineId: "pipeline-orders",
+      })
+    ).rejects.toBeInstanceOf(PipelineRunError)
   })
 })

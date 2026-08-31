@@ -1,3 +1,9 @@
+export type { LinkBatchKey, ObjectBatchKey } from "./keys"
+export {
+  linkBatchKey,
+  objectBatchKey,
+  objectLinkCursor,
+} from "./keys"
 export type {
   CountObjectsInput,
   CountObjectsResult,
@@ -11,6 +17,7 @@ export type {
   ObjectFacetBucket,
   ObjectFacetRequest,
   ObjectFacetResult,
+  ObjectLinkCursor,
   ObjectLinkRow,
   ObjectQueryCapabilities,
   ObjectQueryCapabilityMap,
@@ -19,6 +26,8 @@ export type {
   ObjectRow,
   ObjectRowLinks,
   ObjectStorage,
+  QueryObjectLinksInput,
+  QueryObjectLinksResult,
   QueryObjectsInput,
   QueryObjectsResult,
 } from "./types"

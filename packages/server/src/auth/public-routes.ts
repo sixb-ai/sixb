@@ -1,6 +1,8 @@
 import { AGENT_API_GATEWAY_PREFIX } from "@sixb/core/internal/agents"
 import { isCsrfExemptMethod } from "@sixb/core/internal/auth"
 
+const CONNECTOR_OAUTH_CALLBACK_PATH = "/auth/connectors/callback"
+
 export type RouteAccessKind = "public" | "api" | "html" | "websocket"
 
 export interface RouteAccess {
@@ -70,6 +72,13 @@ export function isPublicRoute(pathname: string, method: string): boolean {
     return true
   }
 
+  if (
+    pathname.startsWith("/auth/assets/") &&
+    (normalizedMethod === "GET" || normalizedMethod === "HEAD")
+  ) {
+    return true
+  }
+
   if (pathname === "/auth/sign-in" && (normalizedMethod === "GET" || normalizedMethod === "POST")) {
     return true
   }
@@ -79,6 +88,17 @@ export function isPublicRoute(pathname: string, method: string): boolean {
   if (
     pathname === "/auth/callback" &&
     (normalizedMethod === "GET" || normalizedMethod === "POST")
+  ) {
+    return true
+  }
+
+  // The callback proves one-use OAuth state plus a dedicated HttpOnly browser binding. PKCE then
+  // binds the code exchange to the attempt created by the authorized initiating request. Elysia
+  // routes both trailing-slash variants; some providers require the slash in the registered URI.
+  if (
+    (pathname === CONNECTOR_OAUTH_CALLBACK_PATH ||
+      pathname === `${CONNECTOR_OAUTH_CALLBACK_PATH}/`) &&
+    normalizedMethod === "GET"
   ) {
     return true
   }

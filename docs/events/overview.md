@@ -55,7 +55,7 @@ event's `type`, `topic`, `partitionKey`, `payload`, and a broker `cursor`.
 | `schemaVersion` | `1` | Envelope schema version |
 | `projectId` | `string` | Owning project |
 | `occurredAt` | `string` | ISO timestamp |
-| `correlationId` | `string?` | Groups related events |
+| `correlationId` | `string?` | Groups related events. Required on ontology facts and copied from their execution |
 | `causationId` | `string?` | The event that caused this one |
 | `idempotencyKey` | `string?` | De-duplicates appends |
 | `actor` | `{ type, id }?` | Who made the write: `user`, `serviceAccount`, or `system`. Absent for trusted internal or explicitly auth-disabled executions |
@@ -73,7 +73,7 @@ consumer that may see an event twice can de-duplicate on it.
 
 | `origin.kind` | `actor` | The write was |
 | --- | --- | --- |
-| `action` | the requester | governed — validated, and recorded as a run |
+| `action` | absent | governed by a trusted Action execution; the original requester remains on that execution |
 | `runtime` | the principal | a direct write through `edit:object` or `append:telemetry` |
 | `runtime` | absent | system code: a worker, a sync, startup |
 | `projection` | absent | derived from a dataset |
@@ -246,8 +246,8 @@ steps:
 | `.idempotencyKey(ctx)` | Optional; returns a stable delivery id, or `null`/`undefined` to skip de-duplication |
 | `.handle(ctx)` | Required; runs the side effect, may return a `WebhookResponse` |
 
-The handler context carries the parsed `body`, the `request`, connector metadata, and a lazy
-`client()` that connects the outbound connector only if the handler needs it.
+Verification and idempotency resolution happen before a delivery is admitted. Those contexts have the request and payload, but no execution SDK or run logger. The handler context adds the parsed `body`, an execution-bound `sixb`, a run-scoped `logger`, and a lazy `client()` that connects the
+outbound connector only if the handler needs it.
 
 ### Dispatch lifecycle
 
@@ -255,16 +255,13 @@ For each delivery the server runs these steps in order:
 
 1. **Verify** — call `verify` with raw bytes. Failure returns `401`.
 2. **Parse** — decode by body format and run the parser. Failure returns `400`.
-3. **Claim** — resolve the idempotency key and claim the delivery. A `duplicate` or
-   `in_progress` claim short-circuits to `202 Accepted` without re-running the handler.
-4. **Handle** — run `handle`. A throw marks the delivery failed (so the provider's next retry
-   can re-attempt) and returns `500`.
-5. **Complete** — mark the delivery complete only after the handler succeeds.
+3. **Admit** — resolve the idempotency key, then atomically create one durable execution and Webhook run. A completed or concurrent delivery short-circuits to `202 Accepted`.
+4. **Handle** — bind the stored execution and run `handle`. A throw marks the run failed (so the provider's next retry can re-attempt with the same execution) and returns `500`.
+5. **Complete** — mark the run complete only after the handler succeeds.
 
 When the handler returns nothing, dispatch responds `202 Accepted`; otherwise it applies the
-returned `status`, `headers`, and `body`. Every delivery is recorded as a webhook run for
-observability (visible in the UI under the connector). Claiming and completion require
-webhook delivery storage to be configured.
+returned `status`, `headers`, and `body`. Only verified, parsed deliveries are admitted as Webhook runs; rejected methods, invalid signatures, and malformed payloads are not executions. Runs are visible in the UI under the connector and require Webhook run storage. With an idempotency key,
+provider retries reuse the same run and execution; without one, each accepted request is a new delivery.
 
 ## Related
 

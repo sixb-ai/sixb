@@ -3,6 +3,7 @@ import type { AgentMessagePart, Principal } from "@sixb/core"
 import { parseSixbFailure } from "@sixb/core/internal/errors"
 import {
   AGENT_RUN_FAILURE_CODES,
+  type AgentContextCheckpointRecord,
   type AgentMessageRecord,
   type AgentRunDiagnostic,
   type AgentRunRecord,
@@ -63,6 +64,23 @@ export interface AgentMessageRow {
   content_version: number
   created_at: string
   completed_at: string | null
+}
+
+export interface AgentContextCheckpointRow {
+  project_id: string
+  id: string
+  thread_id: string
+  created_by_run_id: string
+  previous_checkpoint_id: string | null
+  reason: AgentContextCheckpointRecord["reason"]
+  summary: string
+  summary_format_version: number
+  summarized_through_seq: number
+  observed_head_seq: number
+  estimated_input_tokens_before: number
+  estimated_input_tokens_after: number
+  summary_model_id: string
+  created_at: string
 }
 
 // ── row → record mappers ────────────────────────────────────────────────────────────────────────
@@ -128,6 +146,32 @@ export function rowToMessageRecord(row: AgentMessageRow): AgentMessageRecord {
     contentVersion: row.content_version,
     createdAt: new Date(row.created_at),
     completedAt: row.completed_at ? new Date(row.completed_at) : undefined,
+  }
+}
+
+export function rowToContextCheckpointRecord(
+  row: AgentContextCheckpointRow
+): AgentContextCheckpointRecord {
+  if (row.summary_format_version !== 1) {
+    throw new Error(
+      `[SixbSqlite] Unsupported agent context checkpoint summary format version '${row.summary_format_version}'.`
+    )
+  }
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    threadId: row.thread_id,
+    createdByRunId: row.created_by_run_id,
+    previousCheckpointId: row.previous_checkpoint_id ?? undefined,
+    reason: row.reason,
+    summary: row.summary,
+    summaryFormatVersion: 1,
+    summarizedThroughSeq: row.summarized_through_seq,
+    observedHeadSeq: row.observed_head_seq,
+    estimatedInputTokensBefore: row.estimated_input_tokens_before,
+    estimatedInputTokensAfter: row.estimated_input_tokens_after,
+    summaryModelId: row.summary_model_id,
+    createdAt: new Date(row.created_at),
   }
 }
 

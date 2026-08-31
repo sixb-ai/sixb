@@ -310,6 +310,15 @@ export class NatsBroker implements Broker {
 
     let stopped = false
     const streamName = await this.requireStreamName(params.projectId, params.streamId)
+
+    // A cursor JetStream has already discarded would silently start the consumer at the oldest
+    // retained message, so a resuming subscriber would skip the gap without noticing. `read` and
+    // `tail` both reject it; this keeps `subscribe` consistent with them.
+    if (params.afterCursor !== undefined) {
+      const streamInfo = await this.fetchStreamInfo(streamName)
+      this.assertCursorInRetainedRange(streamInfo, params.streamId, params.afterCursor)
+    }
+
     const js = await this.getJetStream()
     const consumerOptions = this.consumerOptions({
       projectId: params.projectId,

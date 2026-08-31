@@ -492,7 +492,7 @@ export class SqliteWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunSt
       executionId: input.executionId,
       nodeRunId: input.nodeRunId,
       agentId: input.agentId,
-      parentExecutionId: parent.execution_id,
+      workflowExecutionId: parent.execution_id,
     })
 
     try {

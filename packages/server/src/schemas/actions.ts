@@ -53,6 +53,11 @@ export const ActionCatalogItemSchema = z.object({
   }),
 })
 
+export const ActionDetailSchema = ActionCatalogItemSchema.extend({
+  /** Strict JSON Schema for the params object accepted by an Action request. */
+  inputSchema: z.record(z.unknown()),
+})
+
 export const ActionRunStatusSchema = z.enum([
   "queued",
   "running",

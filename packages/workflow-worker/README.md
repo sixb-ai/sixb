@@ -8,7 +8,9 @@ normal Sixb action path, and waits for terminal action events through `requestAc
 
 Workflows can pause at **intervention** nodes for human-in-the-loop decisions: the worker records a
 pending intervention, moves the run to `waiting`, and stops. When an app submits a response, a
-`workflow.run.resume.requested` job is enqueued and the worker resumes the run from where it paused.
+`workflow.run.resume.requested` job is enqueued with the durable run and node-run ids. The worker
+loads that wait edge from storage, validates that it belongs to the run, and derives whether it is
+resuming an intervention or an agent node before continuing from where the workflow paused.
 Each run ends with a final `workflow.run.finished` event. Workers that register intervention nodes
 require `storage.workflowInterventions`.
 

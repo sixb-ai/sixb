@@ -139,9 +139,10 @@ export class InMemoryTimeseriesStorage implements TimeseriesStorage {
       points: readonly TimeseriesPoint[]
     }[]
   > {
-    const results = []
-    for (const series of input.series) {
-      results.push({
+    // Start every read before yielding so one batch observes one in-memory snapshot. The SQL
+    // providers get the same guarantee from their single query.
+    return Promise.all(
+      input.series.map(async (series) => ({
         ...series,
         points: await this.getHistory({
           projectId: input.projectId,
@@ -153,9 +154,8 @@ export class InMemoryTimeseriesStorage implements TimeseriesStorage {
           limit: input.limitPerSeries,
           order: input.order,
         }),
-      })
-    }
-    return results
+      }))
+    )
   }
 
   async getLatest(params: {

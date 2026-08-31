@@ -11,6 +11,7 @@ export type {
   AgentModelToolCallPart,
   AgentModelToolOutput,
   AgentModelToolResultPart,
+  AgentToolResultFileResolverInput,
   AgentUiMessage,
   AgentUiMessagePart,
   AgentUiToolPart,
@@ -93,13 +94,21 @@ export {
   type AgentToolCallPart,
   type AgentToolCallState,
 } from "./message"
-export type { ModelLoopResult, RunModelLoopInput } from "./model-loop"
+export type {
+  ModelLoopResult,
+  PrepareModelStepInput,
+  PrepareModelStepResult,
+  RunModelLoopInput,
+} from "./model-loop"
 export { runModelLoop } from "./model-loop"
 export {
   type BuildAgentSystemPromptInput,
+  type BuildWorkflowOutputFinalizerPromptInput,
   buildAgentSystemPrompt,
+  buildWorkflowOutputFinalizerPrompt,
   DEFAULT_AGENT_SYSTEM_CONTEXT,
-  DEFAULT_AGENT_TASK_SYSTEM_CONTEXT,
+  DEFAULT_AGENT_WORKFLOW_SYSTEM_CONTEXT,
+  DEFAULT_WORKFLOW_OUTPUT_FINALIZER_SYSTEM_CONTEXT,
 } from "./prompt"
 export {
   type RequestAgentRunInput,
@@ -130,18 +139,31 @@ export {
   subscribeAgentRunCancel,
 } from "./streams"
 export type {
+  AgentThreadModelContextMessage,
+  ProjectAgentThreadModelContextInput,
+} from "./thread-context-projection"
+export { projectAgentThreadModelContext } from "./thread-context-projection"
+export { isAgentToolResult } from "./tool-result"
+export type {
   AgentDefinition,
   AgentLoopConfig,
   AgentReasoningLevel,
+  AgentToolArtifact,
+  AgentToolArtifactPutInput,
+  AgentToolArtifacts,
+  AgentToolContent,
   AgentToolDefinition,
   AgentToolDescriptionBuilder,
+  AgentToolFileContent,
   AgentToolHandler,
   AgentToolHandlerResult,
   AgentToolInputBuilder,
   AgentToolInputSchema,
+  AgentToolResult,
   AgentToolRunBuilder,
   AgentToolRunContext,
   AgentToolRunInfo,
+  AgentToolTextContent,
   DefineAgentConfig,
   InferAgentToolInput,
   InferAgentToolInputSchema,

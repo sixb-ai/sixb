@@ -12,6 +12,7 @@ import type { CommitIdentity } from "../shared/identity"
 export async function replayCommitRecord(
   context: Pick<MaterializerContext, "projectId" | "storage">,
   identity: CommitIdentity,
+  executionId: string,
   storage: MaterializerStorage = context.storage
 ): Promise<OntologyCommitRecord | null> {
   const existing = await storage.ontology.commits.getByIdempotencyKey({
@@ -25,6 +26,12 @@ export async function replayCommitRecord(
       `Idempotency key '${identity.idempotencyKey}' was reused with different intent.`
     )
   }
+  if (existing.executionId !== executionId) {
+    throw new MaterializationConflictError(
+      "idempotency",
+      `Idempotency key '${identity.idempotencyKey}' belongs to execution '${existing.executionId}', not '${executionId}'.`
+    )
+  }
   return existing
 }
 
@@ -33,9 +40,10 @@ export async function replayCommit<
 >(
   context: Pick<MaterializerContext, "projectId" | "storage">,
   identity: CommitIdentity,
+  executionId: string,
   storage: MaterializerStorage = context.storage
 ): Promise<TResult | null> {
-  const existing = await replayCommitRecord(context, identity, storage)
+  const existing = await replayCommitRecord(context, identity, executionId, storage)
   if (!existing) return null
   return { ...structuredClone(existing.result), created: false } as TResult
 }

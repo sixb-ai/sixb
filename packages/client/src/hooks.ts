@@ -2,10 +2,10 @@ import { type InfiniteData, infiniteQueryOptions, queryOptions } from "@tanstack
 import {
   getObject,
   getTelemetryHistory,
-  listObjectLinks,
   listObjects,
   listObjectTypes,
   type Options,
+  queryObjectLinks,
 } from "./generated/sdk.gen"
 import type { GetObjectData, GetTelemetryHistoryData, ListObjectsData } from "./generated/types.gen"
 import {
@@ -19,12 +19,18 @@ import {
 } from "./models"
 
 export * from "./agent-streams"
+export * from "./connectors"
 export * from "./events"
 export * from "./events-hooks"
 export * from "./events-provider"
 export * from "./generated/@tanstack/react-query.gen"
 export * from "./logs-hooks"
 export * from "./query-hooks"
+export {
+  type UseAgentActivityStreamOptions,
+  type UseAgentActivityStreamResult,
+  useAgentActivityStream,
+} from "./useAgentActivityStream"
 export {
   type UseAgentRunStreamOptions,
   type UseAgentRunStreamResult,
@@ -136,25 +142,46 @@ export const listRelationshipsQueryKey = (options?: ListRelationshipsOptions): Q
 export const listRelationshipsOptions = (options?: ListRelationshipsOptions) => {
   return queryOptions({
     queryKey: listRelationshipsQueryKey(options),
-    queryFn: async (): Promise<RelationshipEdge[]> => {
+    queryFn: async ({ signal }): Promise<RelationshipEdge[]> => {
       const objectId = options?.query?.objectId
       const requestedObject = objectId ? decodeObjectId(objectId) : null
       if (!requestedObject) return []
 
-      const { data = [] } = await listObjectLinks({
-        path: {
-          objectTypeId: requestedObject.objectTypeId,
-          objectId: requestedObject.primaryId,
-        },
-        query: {
-          direction: "both",
-        },
-        throwOnError: true,
-      })
+      const links = []
+      const seenPageTokens = new Set<string>()
+      let pageToken: string | undefined
+      do {
+        const { data } = await queryObjectLinks({
+          body: {
+            query: {
+              kind: "refs",
+              refs: [requestedObject],
+            },
+            direction: "both",
+            pageSize: 1_000,
+            ...(pageToken ? { pageToken } : {}),
+          },
+          signal,
+          throwOnError: true,
+        })
+        links.push(...data.links)
+        pageToken = data.nextPageToken
+        if (data.hasMore !== Boolean(pageToken)) {
+          throw new Error(
+            "[SixbClient] Link page has inconsistent hasMore and nextPageToken values."
+          )
+        }
+        if (pageToken) {
+          if (seenPageTokens.has(pageToken)) {
+            throw new Error("[SixbClient] Link pagination returned a repeated nextPageToken.")
+          }
+          seenPageTokens.add(pageToken)
+        }
+      } while (pageToken)
 
-      return data.map((link) => ({
-        source: encodeObjectId(link.sourceTypeId, link.sourceId),
-        target: encodeObjectId(link.targetTypeId, link.targetId),
+      return links.map((link) => ({
+        source: encodeObjectId(link.source.objectTypeId, link.source.primaryId),
+        target: encodeObjectId(link.target.objectTypeId, link.target.primaryId),
         type: link.linkId,
         properties: link.properties,
       }))

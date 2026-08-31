@@ -77,6 +77,40 @@ function createSixbForPipeline(options: {
   })
 }
 
+async function enqueuePipelineRun(
+  sixb: Pick<SixbHost, "id" | "storage" | "queues">,
+  input: { readonly pipelineId: string; readonly runId: string }
+) {
+  const executionId = `exec:${input.runId}`
+  await sixb.storage.executions.create({
+    id: executionId,
+    projectId: sixb.id,
+    executor: { type: "primitive", kind: "pipeline", runId: input.runId },
+    source: { type: "schedule", eventId: `event:${input.runId}` },
+    correlationId: `correlation:${input.runId}`,
+    authorizationRef: {
+      type: "trustedPrimitive",
+      primitive: { kind: "pipeline", id: input.pipelineId, runId: input.runId },
+    },
+  })
+  await sixb.storage.pipelineRuns!.queue({
+    id: input.runId,
+    projectId: sixb.id,
+    executionId,
+    pipelineId: input.pipelineId,
+  })
+  return sixb.queues.pipelines.enqueue({
+    projectId: sixb.id,
+    jobs: [
+      {
+        id: input.runId,
+        type: "pipeline.run.requested",
+        payload: { runId: input.runId },
+      },
+    ],
+  })
+}
+
 class ReusingVersionLakeStorage extends InMemoryLakeStorage {
   private reuseNext = false
 
@@ -114,6 +148,20 @@ async function seedDatasetVersion(
 }
 
 describe("PipelineWorker", () => {
+  test("defaults to one concurrent job and accepts an explicit limit", () => {
+    const cleanStep = definePipelineStep("concurrency-options")
+      .inputs({ rawCustomers: rawCustomersDataset })
+      .output(customersDataset)
+      .run(async () => {})
+    const sixb = createSixbForPipeline({
+      pipeline: definePipeline("concurrency-options").then(cleanStep),
+      datasets: [rawCustomersDataset, customersDataset],
+    })
+
+    expect(new PipelineWorker(sixb).concurrency).toBe(1)
+    expect(new PipelineWorker(sixb, { concurrency: 3 }).concurrency).toBe(3)
+  })
+
   test("requires registered pipelines and pipeline run storage", () => {
     const emptySixb = new SixbHost({
       id: "pipeline-worker-tests",
@@ -142,7 +190,6 @@ describe("PipelineWorker", () => {
         return property === "storage" ? storage : Reflect.get(target, property, receiver)
       },
     })
-
     expect(() => new PipelineWorker(withoutPipelineRuns)).toThrow("storage.pipelineRuns")
   })
 
@@ -164,12 +211,7 @@ describe("PipelineWorker", () => {
     ])
 
     const worker = new PipelineWorker(sixb)
-    await sixb.queues.pipelines.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        { type: "pipeline.run.requested", payload: { pipelineId: "customers", runId: "run-log" } },
-      ],
-    })
+    await enqueuePipelineRun(sixb, { pipelineId: "customers", runId: "run-log" })
 
     await worker.start()
     try {
@@ -219,18 +261,7 @@ describe("PipelineWorker", () => {
     ])
 
     const worker = new PipelineWorker(sixb)
-    await sixb.queues.pipelines.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          type: "pipeline.run.requested",
-          payload: {
-            pipelineId: "customers",
-            runId: "run-queued",
-          },
-        },
-      ],
-    })
+    await enqueuePipelineRun(sixb, { pipelineId: "customers", runId: "run-queued" })
 
     await worker.start()
 
@@ -342,15 +373,7 @@ describe("PipelineWorker", () => {
       lakeStorage,
     })
     const worker = new PipelineWorker(sixb)
-    await sixb.queues.pipelines.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          type: "pipeline.run.requested",
-          payload: { pipelineId: pipeline.id, runId: "run-no-op" },
-        },
-      ],
-    })
+    await enqueuePipelineRun(sixb, { pipelineId: pipeline.id, runId: "run-no-op" })
 
     await worker.start()
     await waitFor(
@@ -398,23 +421,18 @@ describe("PipelineWorker", () => {
         reports.push({ error, context })
       },
     })
+    let settledFailure: unknown
+    const fail = sixb.queues.pipelines.fail.bind(sixb.queues.pipelines)
+    sixb.queues.pipelines.fail = async (input) => {
+      settledFailure = input.failure
+      await fail(input)
+    }
     await seedDatasetVersion(sixb.lakeStorage as InMemoryLakeStorage, rawCustomersDataset, [
       { id: "cust_1", name: "Ada" },
     ])
 
     const worker = new PipelineWorker(sixb)
-    await sixb.queues.pipelines.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          type: "pipeline.run.requested",
-          payload: {
-            pipelineId: "customers",
-            runId: "run-fails-late",
-          },
-        },
-      ],
-    })
+    await enqueuePipelineRun(sixb, { pipelineId: "customers", runId: "run-fails-late" })
 
     await worker.start()
 
@@ -426,6 +444,10 @@ describe("PipelineWorker", () => {
       await waitFor(
         async () => reports.length,
         (count) => count === 1
+      )
+      await waitFor(
+        async () => settledFailure,
+        (failure) => failure !== undefined
       )
       expect(reports).toHaveLength(1)
       expect(reports[0]?.error).toBe(originalError)
@@ -442,6 +464,7 @@ describe("PipelineWorker", () => {
         },
         failure: run!.error!,
       })
+      expect(settledFailure).toEqual(run!.error)
 
       const claimed = await sixb.queues.pipelines.claim({
         projectId: sixb.id,
@@ -557,18 +580,7 @@ describe("PipelineWorker", () => {
     ])
 
     const worker = new PipelineWorker(sixb)
-    await sixb.queues.pipelines.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          type: "pipeline.run.requested",
-          payload: {
-            pipelineId: "customers",
-            runId: "run-aborts-late",
-          },
-        },
-      ],
-    })
+    await enqueuePipelineRun(sixb, { pipelineId: "customers", runId: "run-aborts-late" })
 
     await worker.start()
 

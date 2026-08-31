@@ -177,6 +177,8 @@ function compileObjectQueryInternal(
   switch (query.kind) {
     case "start":
       return compileStart(projectId, query)
+    case "refs":
+      return compileRefs(projectId, query)
     case "filter":
       return compileFilter(projectId, query.input, query.predicate)
     case "sort":
@@ -236,6 +238,54 @@ function compileStart(
     totalSql:
       "SELECT COUNT(*)::bigint AS total FROM objects WHERE project_id = ? AND object_type_id = ?",
     totalArgs: [projectId, query.objectTypeId],
+    order,
+    hasMore: () => false,
+    trimRows: identityRows,
+    nextPageToken: () => undefined,
+  }
+}
+
+function compileRefs(
+  projectId: string,
+  query: Extract<ObjectQuery, { kind: "refs" }>
+): CompiledPgObjectQuery {
+  if (query.refs.length === 0) {
+    throw new Error("[SixbPg] PostgreSQL object storage requires at least one ref")
+  }
+
+  const order = compileOrder(identityOrderFields())
+  const selectedOrder = compileOrder(identityOrderFields(), "selected")
+  const refsJson = JSON.stringify(query.refs)
+  const requested = `
+    SELECT DISTINCT
+      ref.value ->> 'objectTypeId' AS object_type_id,
+      ref.value ->> 'primaryId' AS primary_id
+    FROM jsonb_array_elements(?::text::jsonb) AS ref(value)
+  `
+  const sql = `
+    WITH requested AS (${requested})
+    SELECT selected.*, selected.properties AS _cursor_properties
+    FROM requested
+    JOIN objects AS selected
+      ON selected.project_id = ?
+     AND selected.object_type_id = requested.object_type_id
+     AND selected.primary_id = requested.primary_id
+    ORDER BY ${selectedOrder.sql}
+  `
+
+  return {
+    sql,
+    args: [refsJson, projectId, ...selectedOrder.args],
+    totalSql: `
+      WITH requested AS (${requested})
+      SELECT COUNT(*)::bigint AS total
+      FROM requested
+      JOIN objects AS selected
+        ON selected.project_id = ?
+       AND selected.object_type_id = requested.object_type_id
+       AND selected.primary_id = requested.primary_id
+    `,
+    totalArgs: [refsJson, projectId],
     order,
     hasMore: () => false,
     trimRows: identityRows,
@@ -753,6 +803,8 @@ function compileAggregateSource(projectId: string, query: ObjectQuery): Compiled
   switch (query.kind) {
     case "start":
       return compileAggregateStart(projectId, query)
+    case "refs":
+      return compileAggregateRefs(projectId, query)
     case "filter":
       return compileAggregateWhere(projectId, query.input, compilePredicate(query.predicate))
     case "text": {
@@ -781,7 +833,9 @@ function compileAggregateSource(projectId: string, query: ObjectQuery): Compiled
     case "page":
       return compileRowQueryAggregateSource(projectId, query)
     case "vector":
-      throw new Error(`[SixbPg] PostgreSQL object storage does not support query node 'vector'`)
+      throw new Error(
+        `[SixbPg] PostgreSQL object storage does not support query node '${query.kind}'`
+      )
   }
 }
 
@@ -800,6 +854,32 @@ function compileAggregateStart(
       WHERE project_id = ? AND object_type_id = ?
     `,
     args: [projectId, query.objectTypeId],
+  }
+}
+
+function compileAggregateRefs(
+  projectId: string,
+  query: Extract<ObjectQuery, { kind: "refs" }>
+): CompiledAggregateSource {
+  if (query.refs.length === 0) {
+    throw new Error("[SixbPg] PostgreSQL object storage requires at least one ref")
+  }
+
+  return {
+    sql: `
+      SELECT selected.project_id, selected.object_type_id, selected.primary_id, selected.properties
+      FROM (
+        SELECT DISTINCT
+          ref.value ->> 'objectTypeId' AS object_type_id,
+          ref.value ->> 'primaryId' AS primary_id
+        FROM jsonb_array_elements(?::text::jsonb) AS ref(value)
+      ) AS requested
+      JOIN objects AS selected
+        ON selected.project_id = ?
+       AND selected.object_type_id = requested.object_type_id
+       AND selected.primary_id = requested.primary_id
+    `,
+    args: [JSON.stringify(query.refs), projectId],
   }
 }
 

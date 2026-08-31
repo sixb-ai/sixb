@@ -7,9 +7,7 @@ import { sixbFailureSchema } from "./common"
 const WebhookRunFailureSchema: z.ZodType<SixbFailure<WebhookRunFailureCode>> =
   sixbFailureSchema(WEBHOOK_RUN_FAILURE_CODES)
 
-export const WebhookRunStatusSchema = z.enum(["running", "succeeded", "failed", "skipped"])
-
-export const WebhookDeliveryClaimResultSchema = z.enum(["claimed", "duplicate", "in_progress"])
+export const WebhookRunStatusSchema = z.enum(["running", "succeeded", "failed"])
 
 export const WebhookRunsQuerySchema = z.object({
   connectorId: z.string().optional(),
@@ -26,6 +24,7 @@ export const WebhookRunsQuerySchema = z.object({
 export const WebhookRunSchema = z.object({
   id: z.string(),
   projectId: z.string(),
+  executionId: z.string(),
   connectorId: z.string(),
   webhookId: z.string(),
   status: WebhookRunStatusSchema,
@@ -33,10 +32,9 @@ export const WebhookRunSchema = z.object({
   route: z.string(),
   startedAt: z.string(),
   finishedAt: z.string().optional(),
-  requestBodyBytes: z.number().optional(),
+  requestBodyBytes: z.number(),
   responseStatus: z.number().optional(),
   idempotencyKey: z.string().optional(),
-  deliveryClaimResult: WebhookDeliveryClaimResultSchema.optional(),
   error: WebhookRunFailureSchema.optional(),
 })
 

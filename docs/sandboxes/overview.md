@@ -1,13 +1,13 @@
 # Sandboxes
 
-A sandbox is an isolated environment where an agent runs bash commands. Reach for one whenever an
-[agent](../agents/overview.md) needs a shell: file work, scripts, `curl` against the sixb API
-gateway. The sandbox keeps that work off your host — its filesystem, network, and processes are
-walled off from the machine the runtime runs on.
+A sandbox is an isolated environment where an agent reads files and runs Bash commands. Reach for
+one whenever an [agent](../agents/overview.md) needs file work, scripts, or the `sixb` CLI. The
+sandbox keeps that work off your host — its filesystem, network, and processes are walled off from
+the machine the runtime runs on.
 
 You pick a provider once and wire it into `createSixb`. Everything above the sandbox — the agent,
-its bash tool, its run lifecycle — is written against one provider-agnostic contract, so swapping
-providers never touches agent code.
+its sandbox tools, its run lifecycle — is written against one provider-agnostic contract, so
+swapping providers never touches agent code.
 
 ## The contract
 
@@ -39,8 +39,8 @@ interface Sandbox {
 }
 ```
 
-The worker calls `factory.create()` once per agent run, `writeFiles(...)` to install the run's
-skills and context, and `runCommand(...)` per command, then `destroy()` on teardown.
+The worker calls `factory.create()` once per agent run, `writeFiles(...)` to install the CLI, skill,
+and run context, and `runCommand(...)` per command. It calls `destroy()` on teardown.
 
 ### File materialization
 
@@ -73,6 +73,28 @@ command is data, not an exception:
 
 `CreateSandboxOptions` sets the per-run defaults at `create()` time: `workingDirectory`, `env`,
 `timeout`, and `network`.
+
+### Agent runtime profile
+
+The generic `Sandbox` contract remains command-agnostic. The agent worker separately validates the
+concrete provisioned environment against `sixb-agent-runtime/v1` before any model-issued sandbox
+command can run. The profile requires behavior, not an `agentReady` provider flag:
+
+- Bash must load the worker's `BASH_ENV` bootstrap.
+- Standard file utilities must support bounded reads and output collection, including `realpath`,
+  `tail`, `head`, `base64`, `find`, `wc`, and `tr`.
+- Bun 1.3+ or Node 22+ must execute the portable `sixb` CLI.
+- CA certificates must allow the CLI to reach an HTTPS API gateway.
+- The installed CLI, file modes, `PATH`, and run environment must be correct.
+- The CLI must reach and identify the run-scoped API gateway.
+
+`curl` and `jq` are not runtime-profile dependencies because the production CLI uses the JavaScript
+runtime's native fetch and JSON support. The worker performs one network-free behavioral probe
+after materializing its files, then runs `sixb doctor` to verify the installed CLI contract and
+project identity through the gateway. An incompatible environment cannot execute a sandbox
+command. Its failure records the provider, profile, failed check, and safe failure classification
+without recording raw command output or the gateway capability URL. Bake shared dependencies into
+versioned images or snapshots; never install packages during an individual run.
 
 ## Wiring
 
@@ -141,9 +163,10 @@ You rarely call `runCommand` yourself. The agent worker does it:
 1. When a run starts, the worker calls `factory.create(...)` with a **restricted** network policy
    whose only allowed origin is the sixb API gateway. The agent can reach the gateway and nothing
    else.
-2. Sandbox boot overlaps the model's first response — it is provisioned concurrently and the bash
-   tool awaits it lazily on the first command, so boot latency does not block the turn.
-3. Each `bash` tool call becomes `runCommand("bash", ["-lc", script], ...)`.
+2. Sandbox boot overlaps the model's first response — it is provisioned concurrently and each
+   sandbox tool awaits it lazily on first use, so boot latency does not block the turn.
+3. Each `read` call runs a fixed, bounded script with model input passed as command arguments. Each
+   `bash` call becomes `runCommand("bash", ["-lc", script], ...)`.
 4. On run teardown the worker calls `destroy()`.
 
 Because egress is locked to the gateway, the agent's only way to read or write app data is through
@@ -171,4 +194,5 @@ Vercel gives you remote managed microVMs, but the Sixb API gateway must be reach
 - [Apple Container sandbox](./apple-container.md) — local Apple Container-backed sandboxes
 - [smolvm sandbox](./smolvm.md) — hardware-isolated microVMs
 - [Vercel sandbox](./vercel.md) — managed Vercel-hosted microVMs
-- [Agent tools and the gateway](../agents/tools-and-gateway.md) — what the bash tool can reach
+- [Agent tools and the gateway](../agents/tools-and-gateway.md) — how sandbox tools reach files
+  and the API gateway

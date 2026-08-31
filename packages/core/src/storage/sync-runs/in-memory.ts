@@ -1,6 +1,7 @@
 import { parseSixbFailure } from "../../errors/internal"
 import type { SixbFailure } from "../../errors/types"
 import { cloneJsonValue, type JsonValue } from "../../json"
+import type { ExecutionStorage } from "../executions"
 import {
   compareStartedAt,
   hasEmptyStatuses,
@@ -10,12 +11,15 @@ import {
   toStatusSet,
 } from "../run-listing"
 import { SyncRunError } from "./errors"
+import { canRequeueSyncRunAfterEnqueueFailure } from "./idempotency"
+import { assertSyncRunExecution } from "./provider"
 import type {
   FinishSyncRunInput,
   ListLatestSyncRunsInput,
   ListLatestSyncRunsResult,
   ListSyncRunsInput,
   ListSyncRunsResult,
+  QueueSyncRunInput,
   StartSyncRunInput,
   SyncRunFailureCode,
   SyncRunRecord,
@@ -44,6 +48,8 @@ function normalizeError(
 export class InMemorySyncRunStorage implements SyncRunStorage {
   private readonly rows = new Map<string, SyncRunRecord>()
 
+  constructor(private readonly executions: ExecutionStorage) {}
+
   snapshot(): InMemorySyncRunStorageSnapshot {
     return structuredClone(this.rows)
   }
@@ -55,28 +61,90 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
     }
   }
 
-  async start(input: StartSyncRunInput): Promise<SyncRunRecord> {
+  async queue(input: QueueSyncRunInput): Promise<SyncRunRecord> {
     const key = syncRunKey(input.projectId, input.id)
-    if (this.rows.has(key)) {
+    const existing = this.rows.get(key)
+    if (existing && !canRequeueSyncRunAfterEnqueueFailure(existing, input)) {
       throw new SyncRunError(
         `[Sixb] Sync run '${input.id}' already exists for project '${input.projectId}'.`
       )
+    }
+    if (
+      [...this.rows.values()].some(
+        (run) =>
+          run.projectId === input.projectId &&
+          run.id !== input.id &&
+          run.executionId === input.executionId
+      )
+    ) {
+      throw new SyncRunError(
+        `[Sixb] Execution '${input.executionId}' already belongs to another Sync run.`
+      )
+    }
+    await assertSyncRunExecution({
+      executions: this.executions,
+      projectId: input.projectId,
+      executionId: input.executionId,
+      runId: input.id,
+      syncId: input.syncId,
+    })
+
+    const queuedAt = new Date(input.queuedAt ?? new Date())
+    if (existing) {
+      const next: SyncRunRecord = {
+        ...existing,
+        status: "queued",
+        queuedAt,
+        startedAt: undefined,
+        finishedAt: undefined,
+        rowsRead: undefined,
+        output: undefined,
+        error: undefined,
+        checkpoint: undefined,
+      }
+      this.rows.set(key, structuredClone(next))
+      return cloneSyncRunRecord(next)
     }
 
     const record: SyncRunRecord = {
       id: input.id,
       projectId: input.projectId,
+      executionId: input.executionId,
       syncId: input.syncId,
       datasetId: input.datasetId,
       mode: input.mode,
-      status: "running",
-      startedAt: new Date(input.startedAt ?? new Date()),
+      status: "queued",
+      queuedAt,
       expectedLatestVersionId: input.expectedLatestVersionId,
       commitMessage: input.commitMessage,
     }
 
     this.rows.set(key, structuredClone(record))
     return cloneSyncRunRecord(record)
+  }
+
+  async start(input: StartSyncRunInput): Promise<SyncRunRecord> {
+    const key = syncRunKey(input.projectId, input.id)
+    const existing = this.rows.get(key)
+    if (!existing) {
+      throw new SyncRunError(
+        `[Sixb] Sync run '${input.id}' not found for project '${input.projectId}'.`
+      )
+    }
+    if (existing.status !== "queued") {
+      throw new SyncRunError(
+        `[Sixb] Sync run '${input.id}' cannot start from status '${existing.status}'.`
+      )
+    }
+
+    const next: SyncRunRecord = {
+      ...existing,
+      status: "running",
+      startedAt: new Date(input.startedAt ?? new Date()),
+      error: undefined,
+    }
+    this.rows.set(key, structuredClone(next))
+    return cloneSyncRunRecord(next)
   }
 
   async finish(input: FinishSyncRunInput): Promise<SyncRunRecord> {
@@ -86,6 +154,16 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
     if (!existing) {
       throw new SyncRunError(
         `[Sixb] Sync run '${input.id}' not found for project '${input.projectId}'.`
+      )
+    }
+
+    const enqueueFailure = input.status === "failed" && input.error.code === "queue.enqueue_failed"
+    if (
+      (enqueueFailure && existing.status !== "queued") ||
+      (!enqueueFailure && existing.status !== "running")
+    ) {
+      throw new SyncRunError(
+        `[Sixb] Sync run '${input.id}' cannot finish from status '${existing.status}'.`
       )
     }
 

@@ -1,6 +1,6 @@
 # Apple Container sandbox
 
-`@sixb/sandboxes-apple-container` runs each agent's bash inside a local
+`@sixb/sandboxes-apple-container` runs each agent's sandbox tools inside a local
 [Apple Container](https://github.com/apple/container) container. Use it for local Mac testing when
 you want container isolation without building a smolvm image.
 
@@ -22,8 +22,11 @@ Install Apple Container on an Apple silicon Mac running macOS 26 or newer, then 
 container system start
 ```
 
-The default image is `node:22-bookworm`. Custom images should include `bash`, `/bin/sh`, and `curl`
-for the built-in agent tools.
+The default is the official multi-platform `node:22-bookworm` image pinned to an immutable OCI
+digest. For agent use, custom images need `/bin/sh`, Bash, standard file utilities, CA certificates,
+and Bun 1.3+ or Node 22+. The provider's file materialization also uses `mkdir`, `dirname`, `cat`,
+and optionally `chmod`. Debian `coreutils` or BusyBox supplies these utilities. `curl` and `jq` are
+not required.
 
 ## Network policy
 
@@ -51,7 +54,7 @@ Pass these to `new AppleContainerSandboxFactory({ ... })`:
 
 | Option | What it does |
 | --- | --- |
-| `image` | OCI image for each sandbox. Defaults to `node:22-bookworm`. |
+| `image` | OCI image for each sandbox. Defaults to Sixb's digest-pinned `node:22-bookworm` reference. |
 | `bin` | Apple Container CLI binary. Defaults to `container`. |
 | `timeout` | Default per-command timeout in milliseconds. |
 | `dns` | DNS servers passed with `container create --dns`. |

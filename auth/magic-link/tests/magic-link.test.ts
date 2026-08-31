@@ -333,6 +333,46 @@ describe("magicLink", () => {
     expect(messages).toHaveLength(1)
   })
 
+  test("reveals invitation links without exposing public sign-in links", async () => {
+    const storage = new InMemoryAuthStorage()
+    const { messages, sendMagicLink } = createSender()
+    const strategy = magicLink({
+      allowedDomains: ["acme.com"],
+      sendMagicLink,
+    })
+    const invitation = await storage.invitations.createOrUpdateActive({
+      id: "inv_1",
+      projectId,
+      email: "invited@acme.com",
+      createdAt: at("2026-05-16T09:00:00.000Z"),
+      expiresAt: at("2026-05-23T09:00:00.000Z"),
+    })
+
+    const delivery = await strategy.deliverInvitation({
+      projectId,
+      authStorage: storage,
+      invitation,
+      audience: "atlas",
+      returnTo: "/dashboard",
+      requestOrigin,
+      revealLink: true,
+      now: at("2026-05-16T10:00:00.000Z"),
+    })
+
+    expect(delivery.status).toBe("sent")
+    expect(delivery.link?.url).toBe(messages[0]?.url)
+    expect(delivery.link?.expiresAt).toEqual(at("2026-05-16T10:15:00.000Z"))
+
+    const publicRequest = await requestMagicLink({
+      storage,
+      strategy,
+      email: "invited@acme.com",
+      now: at("2026-05-16T10:01:00.000Z"),
+    })
+    expect(publicRequest).toEqual({ status: "sent" })
+    expect("link" in publicRequest).toBe(false)
+  })
+
   test("allows bootstrap requests even after active users exist", async () => {
     const storage = new InMemoryAuthStorage()
     const { messages, sendMagicLink } = createSender()

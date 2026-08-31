@@ -61,7 +61,7 @@ async function readPackageVersion(): Promise<string> {
 
 function getFlag(name: string): string | undefined {
   const direct = args.find((arg) => arg.startsWith(`--${name}=`))
-  if (direct) return direct.split("=")[1]
+  if (direct) return direct.slice(name.length + 3)
 
   const idx = args.indexOf(`--${name}`)
   if (idx >= 0) return args[idx + 1]
@@ -69,7 +69,7 @@ function getFlag(name: string): string | undefined {
   return undefined
 }
 
-function getFlags(name: string): string[] {
+function getFlags(name: string, options: { readonly includeMissing?: boolean } = {}): string[] {
   const values: string[] = []
 
   for (let index = 0; index < args.length; index++) {
@@ -79,6 +79,8 @@ function getFlags(name: string): string[] {
       if (value && !value.startsWith("--")) {
         values.push(value)
         index++
+      } else if (options.includeMissing) {
+        values.push("")
       }
     } else if (arg?.startsWith(`--${name}=`)) {
       values.push(arg.slice(name.length + 3))
@@ -86,6 +88,11 @@ function getFlags(name: string): string[] {
   }
 
   return values
+}
+
+function getFlagRequiringValue(name: string): string | undefined {
+  const value = getFlag(name)
+  return value ?? (hasFlagValue(name) ? "" : undefined)
 }
 
 function hasFlag(name: string): boolean {
@@ -103,6 +110,8 @@ const flagsWithValues = new Set([
   "api-port",
   "api-host",
   "api-public-origin",
+  "agent-turn-timeout",
+  "concurrency",
   "atlas-public-origin",
   "app-public-origin",
   "outdir",
@@ -128,7 +137,8 @@ function getCommandPositionals(): string[] {
 
     if (arg.startsWith("--")) {
       const flagName = arg.slice(2).split("=")[0] ?? ""
-      if (!arg.includes("=") && flagsWithValues.has(flagName)) {
+      const next = args[index + 1]
+      if (!arg.includes("=") && flagsWithValues.has(flagName) && next && !next.startsWith("--")) {
         index++
       }
       continue
@@ -175,6 +185,8 @@ async function main(): Promise<void> {
         apiPublicOrigin: getFlag("api-public-origin"),
         atlasPublicOrigin: getFlag("atlas-public-origin"),
         appPublicOrigin: getFlag("app-public-origin"),
+        agentTurnTimeout: getFlag("agent-turn-timeout"),
+        concurrency: getFlags("concurrency", { includeMissing: true }),
       })
       break
     }
@@ -190,6 +202,8 @@ async function main(): Promise<void> {
         noMigrate: hasFlag("no-migrate"),
         workerType: getCommandPositionals()[0],
         apiPublicOrigin: getFlag("api-public-origin"),
+        agentTurnTimeout: getFlag("agent-turn-timeout"),
+        concurrency: getFlagRequiringValue("concurrency"),
       })
       break
     }
@@ -201,6 +215,8 @@ async function main(): Promise<void> {
         noMigrate: hasFlag("no-migrate"),
         workerTypes: getCommandPositionals(),
         apiPublicOrigin: getFlag("api-public-origin"),
+        agentTurnTimeout: getFlag("agent-turn-timeout"),
+        concurrency: getFlags("concurrency", { includeMissing: true }),
       })
       break
     }

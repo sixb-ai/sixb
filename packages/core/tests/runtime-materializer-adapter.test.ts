@@ -51,7 +51,12 @@ const ONTOLOGY = [Room, Sensor] as const
 function createRuntime() {
   const deps = createTestRuntimeDeps()
   const host = new SixbHost({ id: "runtime-adapter-tests", ontology: ONTOLOGY, ...deps })
-  return { deps, host, sixb: createTestSixb(host) }
+  const sixb = createTestSixb(host, {
+    executionId: "runtime-adapter-execution",
+    requestId: "runtime-adapter-request",
+    correlationId: "runtime-adapter-correlation",
+  })
+  return { deps, host, sixb }
 }
 
 type AdapterRuntime = ReturnType<typeof createRuntime>["sixb"]
@@ -72,6 +77,11 @@ async function listSensorLinks(host: AdapterHost, linkId: string) {
 }
 
 describe("runtime object writes", () => {
+  test("does not expose an unbound ontology mutation port on the host", () => {
+    const { host } = createRuntime()
+    expect(() => getOntologyMutationRuntime(host)).toThrow("not registered")
+  })
+
   test("typed and dynamic mutations all commit through the materializer as runtime origins", async () => {
     const { host, sixb } = createRuntime()
 
@@ -96,6 +106,23 @@ describe("runtime object writes", () => {
     })
 
     expect(await commitOrigins(host)).toEqual(new Array(6).fill("runtime"))
+    const { commits } = await host.storage.ontology.commits.list({ projectId: host.id })
+    expect(commits.every((commit) => commit.executionId === sixb.execution.id)).toBe(true)
+    await expect(
+      host.storage.executions.getById({ projectId: host.id, id: sixb.execution.id })
+    ).resolves.toMatchObject({
+      id: "runtime-adapter-execution",
+      correlationId: "runtime-adapter-correlation",
+      authorizationRef: { type: "disabled" },
+    })
+    await waitFor(() => sixb.events.read().then((events) => events.length > 0))
+    const events = await sixb.events.read()
+    expect(events.length).toBeGreaterThan(0)
+    expect(
+      events.every(
+        (event) => event.correlationId === sixb.execution.correlationId && event.actor === undefined
+      )
+    ).toBe(true)
   })
 
   test("upserts an absent identity as a create and an existing one as a patch", async () => {
@@ -321,16 +348,24 @@ describe("runtime object batches", () => {
   })
 
   test("propagates a commit failure instead of turning it into item errors", async () => {
-    const { deps, host, sixb } = createRuntime()
-    getOntologyMutationRuntime(host).commitEdits = () =>
-      Promise.reject(new Error("provider exploded"))
+    const { deps, sixb } = createRuntime()
+    const adapter = getInMemoryOntologyStorageTestingAdapter(deps.storage.ontology)
+    adapter.setTestHooks({
+      beforeWrite() {
+        throw new Error("provider exploded")
+      },
+    })
 
-    await expect(
-      sixb.objects.upsertBatch("room", [
-        { properties: { id: "r1", name: "Kitchen" } },
-        { properties: { id: "r2", name: "Bedroom" } },
-      ])
-    ).rejects.toThrow("provider exploded")
+    try {
+      await expect(
+        sixb.objects.upsertBatch("room", [
+          { properties: { id: "r1", name: "Kitchen" } },
+          { properties: { id: "r2", name: "Bedroom" } },
+        ])
+      ).rejects.toThrow("provider exploded")
+    } finally {
+      adapter.setTestHooks({})
+    }
 
     const rows = await deps.storage.objects.list({
       projectId: sixb.execution.projectId,

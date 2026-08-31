@@ -38,6 +38,20 @@ assistant turns are unavailable. To customize the assistant, edit
 `vercelGateway()` and the `instructions` prompt. Agent commands run through the local sandbox provider by
 default.
 
+To exercise an agent inside a workflow, open **Workflows → Agent service assessment** in Atlas and
+request a run with these values:
+
+```text
+caseNumber: SC-1042
+alarmSeverity: high
+contractTier: priority-24-7
+summary: RTU-7 supply fan VFD failed while the building is occupied.
+```
+
+The single agent node calls `lookup_response_policy` and then produces a structured service
+assessment, making the prompt, tool call, tool result, agent response, and final workflow output
+available from one run.
+
 ### Hosted sandbox
 
 Use the smolvm provider when hosting Northline so every agent run executes in a hardware-isolated

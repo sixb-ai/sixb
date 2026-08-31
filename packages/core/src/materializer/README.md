@@ -13,11 +13,7 @@ runtime object/link     -> edits.commit  (mode: "atomic" | "continue", origin: r
 runtime telemetry       -> telemetry.append (origin: telemetry/runtime)
 ```
 
-`Sixb` constructs one Materializer and threads it through its internal runtime context, so the typed
-`objects(...)` SDK, the dynamic `Sixb` methods, and the Action worker all commit through the same
-engine. Runtime single calls are atomic; runtime batches use `continue` mode and map per-item
-outcomes back to caller positions. No ingress appends domain events or writes object, link, or
-timeseries providers directly.
+`SixbHost` owns one unbound Materializer. `withScope(...)` closes its mutation port over one validated execution before the typed `objects(...)` SDK or a trusted worker can use it. The host never exposes a raw mutation port. Runtime single calls are atomic; runtime batches use `continue` mode and map per-item outcomes back to caller positions. No ingress appends domain events or writes object, link, or timeseries providers directly.
 
 Committed facts are published from the transactional outbox after the commit resolves.
 `OntologyOutboxDispatcher` owns that protocol: ingresses call `notify()` for prompt, non-blocking
@@ -29,7 +25,9 @@ best effort — delivery may lag, but a committed fact is never lost.
 ```text
 normalize + validate intent
   -> derive deterministic identity
-  -> verify execution when run-backed and check replay
+  -> validate the execution/authority binding
+  -> persist or verify the durable execution
+  -> verify run ownership when run-backed and check replay
   -> begin serializable materialization session
   -> resolve effective state
   -> diff against committed state
@@ -51,9 +49,9 @@ ontology storage  -> sources, effective state, telemetry, commits, and outbox
 Materializer      -> semantic planning and cross-store transaction orchestration
 ```
 
-Ontology commit `origin` is the canonical correlation to an Action or projection run. Run records
-do not duplicate ontology commit ids or semantic commit history. Replacement projections need no
-resume checkpoint; projection telemetry stores only its next batch/row checkpoint on the run.
+Every ontology commit references its immutable execution through `executionId`. Storage providers enforce that reference. `origin` remains the semantic idempotency and run-correlation key: it says which runtime request, Action, projection replacement, or telemetry batch the commit represents; the execution says under which durable authority it ran. Neither field duplicates the other.
+
+Run records do not duplicate ontology commit ids or semantic commit history. Replacement projections need no resume checkpoint; projection telemetry stores only its next batch/row checkpoint on the run.
 
 Logical origins are unique in the ontology ledger: one commit per Action run, one per replacement
 run, and one per telemetry run/batch ordinal. Exact origin lookup is used for correctness; commit
@@ -94,9 +92,7 @@ its mutable overrides let operation N+1 observe operation N. In `continue` mode,
 operation rolls back only its working override; provider and infrastructure failures abort the
 whole transaction.
 
-Action-backed edits verify the matching running Action before work and again inside the commit
-transaction. Their semantic result lives only in the ontology commit, correlated by Action origin;
-the Action run is not a second commit ledger.
+Action-backed edits validate the trusted Action execution, the run's immutable `executionId`, and the running-state fence inside the commit transaction before new work. Exact replay remains valid after the run becomes terminal. Their semantic result lives only in the ontology commit, correlated by Action origin; the Action run is not a second commit ledger.
 
 ## Telemetry append
 

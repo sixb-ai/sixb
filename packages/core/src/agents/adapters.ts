@@ -20,6 +20,8 @@ import {
 import { serializeAgentContextForModel } from "./context-model"
 import { AgentMessageAdapterError } from "./errors"
 import type { AgentMessage, AgentMessagePart, AgentMessageRole } from "./message"
+import { isAgentToolResult } from "./tool-result"
+import type { AgentToolFileContent } from "./types"
 
 // ── Inbound (write) — deliberately WIDE ────────────────────────────────────────────────────────
 //
@@ -123,6 +125,14 @@ export interface AgentFileDataProjection {
   readonly filename?: string
 }
 
+export interface AgentToolResultFileResolverInput<TMessage extends AgentMessage = AgentMessage> {
+  readonly message: TMessage
+  readonly part: AgentToolCallPartResult
+  readonly partIndex: number
+  readonly contentPart: AgentToolFileContent
+  readonly contentIndex: number
+}
+
 export interface ToModelMessagesOptions<TMessage extends AgentMessage = AgentMessage> {
   /**
    * Convert a stored file reference into model-readable data. When omitted, file parts are skipped
@@ -137,6 +147,10 @@ export interface ToModelMessagesOptions<TMessage extends AgentMessage = AgentMes
    * models that cannot consume inline files.
    */
   readonly fileText?: (input: AgentFileDataResolverInput<TMessage>) => string | undefined
+  /** Add current metadata, sandbox paths, and projection notes for a tool-result file. */
+  readonly toolResultFileText?: (
+    input: AgentToolResultFileResolverInput<TMessage>
+  ) => string | undefined
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────────────────────
@@ -554,7 +568,7 @@ function appendAssistantModelMessages<TMessage extends AgentMessage>(
       } else if (part.type === "tool-call") {
         content.push(toolCallModelPart(part))
         if (part.providerExecuted === true) {
-          content.push(toolResultModelPart(part, "json"))
+          content.push(toolResultModelPart(message, part, partIndex, "json", options))
         }
       } else if (part.type === "provider-state") {
         content.push({
@@ -566,11 +580,11 @@ function appendAssistantModelMessages<TMessage extends AgentMessage>(
     }
     result.push({ role: "assistant", content })
 
-    const toolResults = current
-      .map(({ part }) => part)
-      .filter(isToolCallPart)
-      .filter((part) => part.providerExecuted !== true)
-      .map((part) => toolResultModelPart(part, "text"))
+    const toolResults = current.flatMap(({ part, partIndex }) =>
+      part.type === "tool-call" && part.providerExecuted !== true
+        ? [toolResultModelPart(message, part, partIndex, "text", options)]
+        : []
+    )
     if (toolResults.length > 0) {
       result.push({ role: "tool", content: toolResults })
     }
@@ -597,37 +611,67 @@ function toolCallModelPart(part: AgentToolCallPartResult): AgentModelToolCallPar
   }
 }
 
-function toolResultModelPart(
+function toolResultModelPart<TMessage extends AgentMessage>(
+  message: TMessage,
   part: AgentToolCallPartResult,
-  errorMode: "text" | "json"
+  partIndex: number,
+  errorMode: "text" | "json",
+  options: ToModelMessagesOptions<TMessage>
 ): AgentModelToolResultPart {
   return {
     type: "tool-result",
     toolCallId: part.toolCallId,
     toolName: part.toolName,
-    output: toolResultOutput(part, errorMode),
+    output: toolResultOutput(message, part, partIndex, errorMode, options),
     ...(part.providerMetadata === undefined ? {} : { providerData: part.providerMetadata }),
   }
 }
 
-function toolResultOutput(
+function toolResultOutput<TMessage extends AgentMessage>(
+  message: TMessage,
   part: AgentToolCallPartResult,
-  errorMode: "text" | "json"
+  partIndex: number,
+  errorMode: "text" | "json",
+  options: ToModelMessagesOptions<TMessage>
 ): AgentModelToolOutput {
   if (part.state === "output-error") {
     return errorMode === "json"
       ? { type: "error-json", value: part.errorText }
       : { type: "error-text", value: part.errorText }
   }
+  if (isAgentToolResult(part.output)) {
+    const value: string[] = []
+    part.output.content.forEach((contentPart, contentIndex) => {
+      if (contentPart.type === "text") {
+        value.push(contentPart.text)
+        return
+      }
+
+      const fileContext = options.toolResultFileText?.({
+        message,
+        part,
+        partIndex,
+        contentPart,
+        contentIndex,
+      })
+      value.push(fileContext ?? toolResultFileFallbackText(contentPart))
+    })
+    return { type: "text", value: value.join("\n") }
+  }
   return typeof part.output === "string"
     ? { type: "text", value: part.output }
     : { type: "json", value: part.output }
 }
 
-function isTextPart(part: AgentMessagePart): part is Extract<AgentMessagePart, { type: "text" }> {
-  return part.type === "text"
+function toolResultFileFallbackText(part: AgentToolFileContent): string {
+  const attributes = [
+    part.fileRef.fileName ? `name=${JSON.stringify(part.fileRef.fileName)}` : undefined,
+    part.fileRef.mediaType ? `mediaType=${JSON.stringify(part.fileRef.mediaType)}` : undefined,
+    `sizeBytes=${part.fileRef.sizeBytes}`,
+  ].filter((value): value is string => value !== undefined)
+  return `[Tool-created file: ${attributes.join(" ")}. Contents are not available inline.]`
 }
 
-function isToolCallPart(part: AgentMessagePart): part is AgentToolCallPartResult {
-  return part.type === "tool-call"
+function isTextPart(part: AgentMessagePart): part is Extract<AgentMessagePart, { type: "text" }> {
+  return part.type === "text"
 }

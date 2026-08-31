@@ -3,6 +3,13 @@ import { initializeDemoSources } from "../lib/sources/source-state"
 import { apiBaseUrl, apiRequest, isRecord, waitUntil } from "./api"
 import { synchronizeDemo } from "./sync-demo"
 
+const northlineProjectId = "northline"
+
+type NorthlineApiProbe =
+  | { readonly status: "ready" }
+  | { readonly status: "unavailable" }
+  | { readonly status: "wrong-project"; readonly projectId: string }
+
 export function createRuntimeCommand(args: readonly string[]): string[] {
   return [
     process.execPath,
@@ -10,6 +17,27 @@ export function createRuntimeCommand(args: readonly string[]): string[] {
     "dev",
     ...args,
   ]
+}
+
+export async function probeNorthlineApi(
+  baseUrl: string,
+  request: (url: string) => Promise<Response> = fetch
+): Promise<NorthlineApiProbe> {
+  try {
+    const response = await request(`${baseUrl}/project`)
+    if (!response.ok) return { status: "unavailable" }
+
+    const project: unknown = await response.json()
+    if (!isRecord(project) || typeof project.id !== "string") {
+      return { status: "unavailable" }
+    }
+    if (project.id !== northlineProjectId) {
+      return { status: "wrong-project", projectId: project.id }
+    }
+    return { status: "ready" }
+  } catch {
+    return { status: "unavailable" }
+  }
 }
 
 async function main(): Promise<void> {
@@ -28,16 +56,32 @@ async function main(): Promise<void> {
   process.once("SIGINT", stop)
   process.once("SIGTERM", stop)
 
+  let childExitCode: number | undefined
+  void child.exited.then((exitCode) => {
+    childExitCode = exitCode
+  })
+
   try {
+    const baseUrl = apiBaseUrl()
     await waitUntil(
-      "the Sixb API",
+      "the Northline Sixb API",
       async () => {
-        try {
-          const response = await fetch(`${apiBaseUrl()}/syncs`)
-          return response.ok
-        } catch {
-          return false
+        if (childExitCode !== undefined) {
+          throw new Error(
+            `[Northline] Sixb dev exited with code ${childExitCode} before its API became ready. ` +
+              "Review the startup error above; the configured ports may already be in use."
+          )
         }
+
+        const probe = await probeNorthlineApi(baseUrl)
+        if (probe.status === "wrong-project") {
+          throw new Error(
+            `[Northline] Expected project '${northlineProjectId}' at ${baseUrl}, but found ` +
+              `'${probe.projectId}'. Another Sixb dev server is using Northline's API port. ` +
+              "Stop it before starting Northline."
+          )
+        }
+        return probe.status === "ready"
       },
       90_000
     )

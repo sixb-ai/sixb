@@ -13,6 +13,7 @@ export type {
   AiUsageExecutionSummary,
   AiUsageReportingStatus,
   AiUsageStorage,
+  GetLatestAiModelCallForExecutionInput,
   RecordAiModelCallInput,
   RecordAiModelCallResult,
   SummarizeAiUsageExecutionInput,

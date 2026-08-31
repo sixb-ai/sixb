@@ -52,6 +52,10 @@ export async function runApi(options: ApiOptions = {}) {
     const hasBuiltCustomApp = await stat(resolve(appOutdir, "index.html"))
       .then(() => true)
       .catch(() => false)
+    const authExperienceOutdir = resolve(appOutdir, "auth")
+    const hasAuthExperience = await stat(resolve(authExperienceOutdir, "index.html"))
+      .then(() => true)
+      .catch(() => false)
     const topology = resolveBrowserTopology({
       role: "api",
       host: options.host,
@@ -73,6 +77,7 @@ export async function runApi(options: ApiOptions = {}) {
         publicOrigin: topology.apiPublicOrigin,
         allowedOrigins: topology.allowedBrowserOrigins,
       },
+      ...(hasAuthExperience ? { authExperience: { outdir: authExperienceOutdir } } : {}),
     })
     await server.start()
 

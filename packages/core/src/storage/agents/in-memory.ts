@@ -5,8 +5,17 @@ import { parseSixbFailure } from "../../errors/internal"
 import type { SixbFailure } from "../../errors/types"
 import type { ExecutionStorage } from "../executions"
 import { AgentStorageError } from "./errors"
-import { assertAgentRunExecution } from "./provider"
+import {
+  agentContextCheckpointMatchesCreateInput,
+  assertAgentContextCheckpointAnchors,
+  assertAgentContextCheckpointAuthority,
+  assertAgentContextCheckpointReplayState,
+  assertAgentRunExecution,
+  assertCreateAgentContextCheckpointInput,
+} from "./provider"
 import type {
+  AgentContextCheckpointRecord,
+  AgentContextCheckpointStore,
   AgentMessageRecord,
   AgentMessageStore,
   AgentRunFailureCode,
@@ -17,8 +26,10 @@ import type {
   AgentThreadStore,
   AppendAgentMessageInput,
   ConfirmAgentRunExecutionOwnershipInput,
+  CreateAgentContextCheckpointInput,
   CreateAgentRunInput,
   CreateAgentThreadInput,
+  DeleteAgentMessagesByRunInput,
   FinishAgentRunInput,
   FinishQueuedAgentRunInput,
   ListAgentMessagesInput,
@@ -77,21 +88,23 @@ function applyWindow<T>(rows: T[], offset = 0, limit?: number): Window<T> {
 }
 
 /**
- * Shared in-memory state behind the three sub-stores. They are tiered for ergonomics
+ * Shared in-memory state behind the four sub-stores. They are tiered for ergonomics
  * (`storage.runs.create(...)`), but several operations span tables — creating/finishing a run
- * updates the thread anchor, appending a message bumps thread stats — so they all read and write the
- * same maps through this object.
+ * updates the thread anchor, appending a message bumps thread stats, and checkpoint creation reads
+ * run/thread/message anchors — so they all read and write the same maps through this object.
  */
 interface AgentStoreState {
   readonly threads: Map<string, AgentThreadRecord>
   readonly runs: Map<string, AgentRunRecord>
   readonly messages: Map<string, AgentMessageRecord>
+  readonly checkpoints: Map<string, AgentContextCheckpointRecord>
 }
 
 export interface InMemoryAgentStorageSnapshot {
   readonly threads: Map<string, AgentThreadRecord>
   readonly runs: Map<string, AgentRunRecord>
   readonly messages: Map<string, AgentMessageRecord>
+  readonly checkpoints: Map<string, AgentContextCheckpointRecord>
 }
 
 // ── threads ───────────────────────────────────────────────────────────────────────────────────
@@ -466,6 +479,50 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
     return clone(message)
   }
 
+  async deleteByRunId(input: DeleteAgentMessagesByRunInput): Promise<number> {
+    const threadKey = key(input.projectId, input.threadId)
+    const thread = this.state.threads.get(threadKey)
+    if (!thread) {
+      throw new AgentStorageError(
+        "thread_not_found",
+        `[Sixb] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
+      )
+    }
+
+    const messages = [...this.state.messages.entries()].filter(
+      ([, message]) =>
+        message.projectId === input.projectId &&
+        message.threadId === input.threadId &&
+        message.runId === input.runId
+    )
+    if (messages.length === 0) {
+      return 0
+    }
+
+    for (const [messageKey] of messages) {
+      this.state.messages.delete(messageKey)
+    }
+
+    const remainingMessages = [...this.state.messages.values()]
+      .filter(
+        (message) => message.projectId === input.projectId && message.threadId === input.threadId
+      )
+      .sort((left, right) => right.seq - left.seq)
+    const latestMessage = remainingMessages[0]
+    const updatedAt = new Date()
+    this.state.threads.set(
+      threadKey,
+      clone({
+        ...thread,
+        messageCount: remainingMessages.length,
+        lastMessageAt: latestMessage?.createdAt,
+        updatedAt,
+      })
+    )
+
+    return messages.length
+  }
+
   async getById(params: { projectId: string; id: string }): Promise<AgentMessageRecord | null> {
     const record = this.state.messages.get(key(params.projectId, params.id))
     return record ? clone(record) : null
@@ -478,6 +535,7 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
     const filtered = [...this.state.messages.values()]
       .filter((message) => message.projectId === input.projectId)
       .filter((message) => message.threadId === input.threadId)
+      .filter((message) => (input.afterSeq === undefined ? true : message.seq > input.afterSeq))
       .filter((message) => (roles ? roles.has(message.role) : true))
       .sort((a, b) => (order === "asc" ? a.seq - b.seq : b.seq - a.seq))
 
@@ -496,21 +554,143 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
   }
 }
 
+// ── context checkpoints ──────────────────────────────────────────────────────────────────────
+
+class InMemoryAgentContextCheckpointStore implements AgentContextCheckpointStore {
+  constructor(private readonly state: AgentStoreState) {}
+
+  async create(input: CreateAgentContextCheckpointInput): Promise<AgentContextCheckpointRecord> {
+    assertCreateAgentContextCheckpointInput(input)
+
+    // No `await` between authority checks and append: this is one in-memory critical section.
+    const run = this.state.runs.get(key(input.projectId, input.createdByRunId)) ?? null
+    const thread = this.state.threads.get(key(input.projectId, input.threadId)) ?? null
+    assertAgentContextCheckpointAuthority({ create: input, run, thread })
+
+    const messages = [...this.state.messages.values()].filter(
+      (message) => message.projectId === input.projectId && message.threadId === input.threadId
+    )
+    const headSeq = messages.reduce((head, message) => Math.max(head, message.seq), 0)
+    const latest = this.findLatest(input.projectId, input.threadId)
+
+    const existingForRun = [...this.state.checkpoints.values()].find(
+      (checkpoint) =>
+        checkpoint.projectId === input.projectId &&
+        checkpoint.createdByRunId === input.createdByRunId
+    )
+    if (existingForRun) {
+      if (agentContextCheckpointMatchesCreateInput(existingForRun, input)) {
+        assertAgentContextCheckpointReplayState({
+          create: input,
+          existing: existingForRun,
+          latest,
+          headSeq,
+        })
+        return clone(existingForRun)
+      }
+      throw new AgentStorageError(
+        "invalid_state",
+        `[Sixb] Agent run '${input.createdByRunId}' already created a different context checkpoint.`
+      )
+    }
+
+    if (this.state.checkpoints.has(key(input.projectId, input.id))) {
+      throw new AgentStorageError(
+        "duplicate_id",
+        `[Sixb] Agent context checkpoint '${input.id}' already exists for project '${input.projectId}'.`
+      )
+    }
+
+    const firstRetained =
+      messages
+        .filter((message) => message.seq > input.summarizedThroughSeq)
+        .sort((left, right) => left.seq - right.seq)[0] ?? null
+    assertAgentContextCheckpointAnchors({
+      create: input,
+      latest,
+      headSeq,
+      firstRetained,
+    })
+
+    const record: AgentContextCheckpointRecord = {
+      id: input.id,
+      projectId: input.projectId,
+      threadId: input.threadId,
+      createdByRunId: input.createdByRunId,
+      ...(input.expectedPreviousCheckpointId === null
+        ? {}
+        : { previousCheckpointId: input.expectedPreviousCheckpointId }),
+      reason: input.reason,
+      summary: input.summary,
+      summaryFormatVersion: input.summaryFormatVersion,
+      summarizedThroughSeq: input.summarizedThroughSeq,
+      observedHeadSeq: input.observedHeadSeq,
+      estimatedInputTokensBefore: input.estimatedInputTokensBefore,
+      estimatedInputTokensAfter: input.estimatedInputTokensAfter,
+      summaryModelId: input.summaryModelId,
+      createdAt: new Date(input.createdAt ?? new Date()),
+    }
+    this.state.checkpoints.set(key(input.projectId, input.id), clone(record))
+    return clone(record)
+  }
+
+  async getLatest(input: {
+    readonly projectId: string
+    readonly threadId: string
+  }): Promise<AgentContextCheckpointRecord | null> {
+    const record = this.findLatest(input.projectId, input.threadId)
+    return record ? clone(record) : null
+  }
+
+  async getByRunIds(input: {
+    readonly projectId: string
+    readonly runIds: readonly string[]
+  }): Promise<readonly AgentContextCheckpointRecord[]> {
+    const byRunId = new Map(
+      [...this.state.checkpoints.values()]
+        .filter((checkpoint) => checkpoint.projectId === input.projectId)
+        .map((checkpoint) => [checkpoint.createdByRunId, checkpoint] as const)
+    )
+    return [...new Set(input.runIds)].flatMap((runId) => {
+      const checkpoint = byRunId.get(runId)
+      return checkpoint ? [clone(checkpoint)] : []
+    })
+  }
+
+  private findLatest(projectId: string, threadId: string): AgentContextCheckpointRecord | null {
+    return (
+      [...this.state.checkpoints.values()]
+        .filter(
+          (checkpoint) => checkpoint.projectId === projectId && checkpoint.threadId === threadId
+        )
+        .sort(
+          (left, right) =>
+            right.summarizedThroughSeq - left.summarizedThroughSeq ||
+            right.createdAt.getTime() - left.createdAt.getTime() ||
+            right.id.localeCompare(left.id)
+        )[0] ?? null
+    )
+  }
+}
+
 export class InMemoryAgentStorage implements AgentStorage {
   private readonly state: AgentStoreState = {
     threads: new Map(),
     runs: new Map(),
     messages: new Map(),
+    checkpoints: new Map(),
   }
 
   readonly threads: InMemoryAgentThreadStore
   readonly runs: InMemoryAgentRunStore
   readonly messages: InMemoryAgentMessageStore
+  readonly checkpoints: InMemoryAgentContextCheckpointStore
 
   constructor(executions: ExecutionStorage) {
     this.threads = new InMemoryAgentThreadStore(this.state)
     this.runs = new InMemoryAgentRunStore(this.state, executions)
     this.messages = new InMemoryAgentMessageStore(this.state)
+    this.checkpoints = new InMemoryAgentContextCheckpointStore(this.state)
   }
 
   snapshot(): InMemoryAgentStorageSnapshot {
@@ -518,6 +698,7 @@ export class InMemoryAgentStorage implements AgentStorage {
       threads: structuredClone(this.state.threads),
       runs: structuredClone(this.state.runs),
       messages: structuredClone(this.state.messages),
+      checkpoints: structuredClone(this.state.checkpoints),
     }
   }
 
@@ -525,6 +706,7 @@ export class InMemoryAgentStorage implements AgentStorage {
     replace(this.state.threads, snapshot.threads)
     replace(this.state.runs, snapshot.runs)
     replace(this.state.messages, snapshot.messages)
+    replace(this.state.checkpoints, snapshot.checkpoints)
   }
 }
 

@@ -3,6 +3,7 @@ import type { AgentDocumentSource } from "./types"
 export interface DocumentPreviewState {
   readonly documents: readonly AgentDocumentSource[]
   readonly activeId: string | null
+  readonly panelWidth: number | null
 }
 
 export type DocumentPreviewAction =
@@ -10,12 +11,15 @@ export type DocumentPreviewAction =
   | { readonly type: "select"; readonly id: string }
   | { readonly type: "close"; readonly id: string }
   | { readonly type: "close-all" }
+  | { readonly type: "restore"; readonly state: DocumentPreviewState }
+  | { readonly type: "set-panel-width"; readonly width: number }
 
 export type DocumentTabNavigationKey = "ArrowLeft" | "ArrowRight" | "Home" | "End"
 
 export const EMPTY_DOCUMENT_PREVIEW_STATE: DocumentPreviewState = {
   documents: [],
   activeId: null,
+  panelWidth: null,
 }
 
 export function documentPreviewReducer(
@@ -26,6 +30,7 @@ export function documentPreviewReducer(
     case "open": {
       const existing = state.documents.some((document) => document.id === action.document.id)
       return {
+        ...state,
         documents: existing ? state.documents : [...state.documents, action.document],
         activeId: action.document.id,
       }
@@ -37,7 +42,11 @@ export function documentPreviewReducer(
     case "close":
       return closeDocument(state, action.id)
     case "close-all":
-      return EMPTY_DOCUMENT_PREVIEW_STATE
+      return { ...state, documents: [], activeId: null }
+    case "restore":
+      return action.state
+    case "set-panel-width":
+      return state.panelWidth === action.width ? state : { ...state, panelWidth: action.width }
     default:
       action satisfies never
       return state
@@ -64,8 +73,8 @@ function closeDocument(state: DocumentPreviewState, id: string): DocumentPreview
   if (closedIndex === -1) return state
 
   const documents = state.documents.filter((document) => document.id !== id)
-  if (state.activeId !== id) return { documents, activeId: state.activeId }
+  if (state.activeId !== id) return { ...state, documents, activeId: state.activeId }
 
   const nextActive = documents[closedIndex] ?? documents[closedIndex - 1]
-  return { documents, activeId: nextActive?.id ?? null }
+  return { ...state, documents, activeId: nextActive?.id ?? null }
 }

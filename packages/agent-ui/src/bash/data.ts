@@ -1,5 +1,5 @@
 // Pure data shaping for the bash renderers: pull the rows, columns, series, and labels a native
-// view needs out of a decoded API response. No React here — these are exercised directly by unit
+// view needs out of decoded CLI output. No React here — these are exercised directly by unit
 // tests and re-used by `renderers.tsx`, which owns the JSX.
 
 import { formatRelativeTime } from "../format"
@@ -24,7 +24,7 @@ export interface SeriesPoint {
   readonly timestamp: string
 }
 
-/** Objects across both the list (`[...]`) and query (`{ objects: [...] }`) response envelopes. */
+/** Objects across both the list (`[...]`) and query (`{ objects: [...] }`) CLI output shapes. */
 export function extractObjects(json: unknown): ObjectRecord[] | null {
   if (Array.isArray(json)) return json.filter(isRecord) as ObjectRecord[]
   if (isRecord(json) && Array.isArray(json.objects)) {

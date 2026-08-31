@@ -510,6 +510,7 @@ function telemetryEnvelope(
     schemaVersion: 1,
     projectId,
     occurredAt: at,
+    correlationId: `correlation-${objectId}-${at}`,
     origin: { kind: "runtime", requestId: `seed-${objectId}-${at}` },
     commitId: `commit-${objectId}-${at}`,
     commitOrdinal: 0,

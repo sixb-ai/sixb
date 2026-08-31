@@ -1,4 +1,4 @@
-import type { ConnectorDefinition } from "../connectors/types"
+import { type ConnectorDefinition, isStaticConnectorDefinition } from "../connectors/types"
 import { WebhookValidationError } from "./errors"
 import type { RegisteredWebhook, WebhookDefinition } from "./types"
 
@@ -21,6 +21,7 @@ export class WebhookRegistry implements WebhookCatalog {
     const registered: RegisteredWebhook[] = []
 
     for (const connector of options.connectors) {
+      if (!isStaticConnectorDefinition(connector)) continue
       const webhooks = connector.adapter.webhooks ?? []
       if (!Array.isArray(webhooks)) {
         throw new WebhookValidationError(

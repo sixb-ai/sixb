@@ -1,10 +1,14 @@
-import type { ActionReadObjectSetSource, JsonValue } from "@sixb/core"
+import type { JsonValue } from "@sixb/core"
 import { assertJsonValue, cloneJsonValue, isObjectActionDefinition } from "@sixb/core"
 import type { ActionReadRecorder } from "@sixb/core/internal/actions"
-import { createActionReadFacade } from "@sixb/core/internal/actions"
 import type { ActionRunRecord } from "@sixb/core/storage"
 import { toActionRunFailure, translateActionPhaseError } from "../normalize"
-import { type BasePhaseContext, requireObjectTarget, toActionRuntimeFacade } from "./context"
+import {
+  type BasePhaseContext,
+  requireObjectTarget,
+  toActionReadFacade,
+  toActionRuntimeFacade,
+} from "./context"
 import type {
   LoadedObjectTarget,
   PhaseExecutionBase,
@@ -39,20 +43,11 @@ export async function runWritebackPhase(
 
   let result: JsonValue
   try {
-    // Reads are side-effect-free, so the writeback phase can safely enrich its
-    // external payload from related objects (links, traversals) before the edit
-    // batch exists. They share the edits phase's recorder, so a decision made here
-    // against state that changed before the commit is caught by the same CAS.
-    const read = createActionReadFacade(
-      (objectType) => input.runtime.sixb.objects(objectType) as ActionReadObjectSetSource,
-      {
-        recorder: input.reads,
-        resolveLinkIds: (objectTypeId) =>
-          input.runtime.sixb.objects
-            .resolveType(objectTypeId)
-            .links.map((definition) => definition.id),
-      }
-    )
+    // Reads are side-effect-free, so the writeback phase can safely enrich its external payload
+    // before the edit batch exists. Exact object and link-scope reads share the edits phase's
+    // recorder and are fenced by the same CAS. Query/list results and telemetry history remain
+    // call-level snapshots by design.
+    const read = toActionReadFacade(input.runtime, input.reads)
     const rawResult = isObjectActionDefinition(input.action)
       ? await handler({
           ...input.baseContext,

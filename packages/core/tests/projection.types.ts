@@ -6,6 +6,9 @@ import {
   defineValueType,
   fromForeignKey,
   link,
+  type ObjectProjectionBuilder,
+  type ObjectProjectionConflictResolution,
+  type ProjectionForeignKeyInput,
   prop,
   stringEnum,
   valueTypeRef,
@@ -45,6 +48,7 @@ const _Room = defineObjectType({
     prop("openedOn", "date"),
     prop("lastSeenAt", "timestamp"),
     prop("currentTemperature", "double", { mode: "telemetry" }),
+    prop("currentHumidity", "double", { mode: "telemetry" }),
     prop("mode", stringEnum(["occupied", "vacant"])),
     prop("metadata", {
       type: "object",
@@ -70,8 +74,10 @@ const roomDataset = defineDataset("canonical.rooms", {
     col("col_area", "float64"),
     col("col_exact_amount", "decimal"),
     col("col_temperature", "float64"),
+    col("col_humidity", "float64"),
     col("col_opened_on", "date"),
     col("col_last_seen_at", "timestamp"),
+    col("col_nullable_updated_at", "timestamp", { nullable: true }),
     col("col_mode", "string"),
     col("col_metadata", "json"),
     col("col_reading", "decimal"),
@@ -98,6 +104,28 @@ const projection = defineProjection("test", _Room).fromDataset(roomDataset).prop
   reading: "col_reading",
 })
 type _projTag = Expect<Equal<typeof projection._tag, "ObjectProjectionDefinition">>
+type _projectionBuilder = Expect<
+  Equal<typeof projection, ObjectProjectionBuilder<typeof _Room, typeof roomDataset>>
+>
+type _projectionResolution = ObjectProjectionConflictResolution<typeof roomDataset>
+type _projectionForeignKey = ProjectionForeignKeyInput<
+  typeof _Room,
+  typeof roomDataset,
+  "inBuilding"
+>
+
+projection.resolveConflicts({ strategy: "editsWin" })
+projection.resolveConflicts({ strategy: "mostRecent", sourceTimestamp: "col_last_seen_at" })
+projection.resolveConflicts({
+  strategy: "mostRecent",
+  // @ts-expect-error — mostRecent requires a timestamp dataset column
+  sourceTimestamp: "col_name",
+})
+projection.resolveConflicts({
+  strategy: "mostRecent",
+  // @ts-expect-error — mostRecent requires a non-null timestamp dataset column
+  sourceTimestamp: "col_nullable_updated_at",
+})
 
 // 2. .fromDataset() accepts dataset definitions, not string ids
 // @ts-expect-error — string dataset ids are no longer accepted
@@ -278,3 +306,78 @@ defineProjection("test", _Room.p.currentTemperature).fromDataset(roomDataset).po
   // @ts-expect-error — point mappings only accept objectId, at, value, and unit
   extra: "col_id",
 })
+
+// 15. object targets group telemetry properties that share objectId and at
+const groupedTelemetryProjection = defineProjection("grouped", _Room)
+  .fromDataset(roomDataset)
+  .points({
+    objectId: "col_id",
+    at: "col_last_seen_at",
+    properties: {
+      currentTemperature: { value: "col_temperature", unit: "col_unit" },
+      currentHumidity: "col_humidity",
+    },
+  })
+type _groupedTelemetryProjTag = Expect<
+  Equal<typeof groupedTelemetryProjection._tag, "TelemetryProjectionDefinition">
+>
+
+defineProjection("grouped", _Room)
+  .fromDataset(roomDataset)
+  // @ts-expect-error — grouped telemetry projections require at least one property
+  .points({ objectId: "col_id", at: "col_last_seen_at", properties: {} })
+
+defineProjection("grouped", _Room)
+  .fromDataset(roomDataset)
+  // @ts-expect-error — static properties cannot be mapped as telemetry
+  .points({ objectId: "col_id", at: "col_last_seen_at", properties: { name: "col_name" } })
+
+defineProjection("grouped", _Room)
+  .fromDataset(roomDataset)
+  .points({
+    objectId: "col_id",
+    at: "col_last_seen_at",
+    properties: { currentTemperature: "col_temperature" },
+    // @ts-expect-error — grouped point mappings only accept objectId, at, and properties
+    extra: "col_id",
+  })
+
+defineProjection("grouped", _Room)
+  .fromDataset(roomDataset)
+  .points({
+    objectId: "col_id",
+    at: "col_last_seen_at",
+    properties: {
+      // @ts-expect-error — value columns remain schema-compatible per property
+      currentTemperature: "col_name",
+    },
+  })
+
+defineProjection("grouped", _Room)
+  .fromDataset(roomDataset)
+  .points({
+    objectId: "col_id",
+    at: "col_last_seen_at",
+    properties: {
+      currentTemperature: {
+        value: "col_temperature",
+        // @ts-expect-error — unit must be a string dataset column
+        unit: "col_room_number",
+      },
+    },
+  })
+
+defineProjection("grouped", _Room)
+  .fromDataset(roomDataset)
+  .points({
+    objectId: "col_id",
+    at: "col_last_seen_at",
+    properties: {
+      currentTemperature: {
+        value: "col_temperature",
+        unit: "col_unit",
+        // @ts-expect-error — property descriptors only accept value and unit
+        extra: "col_id",
+      },
+    },
+  })

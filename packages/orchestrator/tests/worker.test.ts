@@ -6,7 +6,6 @@ import {
   defineObjectType,
   definePipeline,
   definePipelineStep,
-  defineProjection,
   defineSchedule,
   defineSync,
   defineWorkflow,
@@ -22,17 +21,17 @@ import {
   type EventDraft,
   type StableEventEnvelope,
 } from "@sixb/core/internal/events"
-import {
-  createProjectionRunId,
-  type ProjectionDispatchDescriptor,
-} from "@sixb/core/internal/projections"
+import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projections"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
-import { InMemoryProjectionRunStorage } from "@sixb/core/storage"
 import { compileRoutes } from "../src/compile-routes"
 import { reconcileProjectionDispatch } from "../src/projection-dispatch-reconciler"
 import type {
   OrchestratorRoutes,
-  OrchestratorRuntimeOptions,
+  PipelineDispatcherPort,
+  ProjectionDispatcherPort,
+  ProjectionDispatchInput,
+  ProjectionReconciliationPorts,
+  SyncDispatcherPort,
   WorkflowDispatcherPort,
   WorkflowDispatchInput,
 } from "../src/types"
@@ -106,6 +105,7 @@ function makeInvoiceUpdatedEvent(
     schemaVersion: 1,
     projectId,
     occurredAt: "2026-04-18T02:00:00.000Z",
+    correlationId: `correlation-${amountBefore}-${amountAfter}`,
     origin: { kind: "runtime", requestId: `request-${amountBefore}-${amountAfter}` },
     commitId: `commit-${amountBefore}-${amountAfter}`,
     commitOrdinal: 0,
@@ -174,7 +174,10 @@ async function startWorker(
   queues: InMemoryQueues,
   routes: OrchestratorRoutes,
   projectId = PROJECT_ID,
-  projectionDispatch?: OrchestratorRuntimeOptions["projectionDispatch"],
+  projections?: {
+    readonly dispatcher: ProjectionDispatcherPort
+    readonly reconciliation: ProjectionReconciliationPorts
+  },
   workflowDispatcher = createTestWorkflowRunDispatcher(queues, undefined, projectId)
 ): Promise<OrchestratorWorker> {
   const worker = new OrchestratorWorker({
@@ -182,12 +185,73 @@ async function startWorker(
     events: eventRuntime,
     queues,
     routes,
-    dispatchers: { workflows: workflowDispatcher },
-    ...(projectionDispatch === undefined ? {} : { projectionDispatch }),
+    dispatchers: {
+      syncs: createTestSyncRunDispatcher(queues, projectId),
+      pipelines: createTestPipelineRunDispatcher(queues, projectId),
+      workflows: workflowDispatcher,
+      ...(projections === undefined ? {} : { projections: projections.dispatcher }),
+    },
+    ...(projections === undefined ? {} : { projectionReconciliation: projections.reconciliation }),
   })
   workers.push(worker)
   await worker.start()
   return worker
+}
+
+function createTestSyncRunDispatcher(
+  queues: InMemoryQueues,
+  projectId = PROJECT_ID
+): SyncDispatcherPort {
+  return {
+    async dispatch(input) {
+      const [job] = await queues.syncRuns.enqueue({
+        projectId,
+        jobs: [
+          {
+            id: input.runId,
+            type: "sync.run.requested",
+            payload: { runId: input.runId },
+            metadata: input.metadata,
+          },
+        ],
+      })
+      return {
+        syncId: input.syncId,
+        runId: input.runId,
+        queuedAt: job!.createdAt,
+        jobId: job!.id,
+        created: true,
+      }
+    },
+  }
+}
+
+function createTestPipelineRunDispatcher(
+  queues: InMemoryQueues,
+  projectId = PROJECT_ID
+): PipelineDispatcherPort {
+  return {
+    async dispatch(input) {
+      const [job] = await queues.pipelines.enqueue({
+        projectId,
+        jobs: [
+          {
+            id: input.runId,
+            type: "pipeline.run.requested",
+            payload: { runId: input.runId },
+            metadata: input.metadata,
+          },
+        ],
+      })
+      return {
+        pipelineId: input.pipelineId,
+        runId: input.runId,
+        queuedAt: job!.createdAt,
+        jobId: job!.id,
+        created: true,
+      }
+    },
+  }
 }
 
 function createTestWorkflowRunDispatcher(
@@ -214,6 +278,24 @@ function createTestWorkflowRunDispatcher(
         runId: input.runId,
         queuedAt: job!.createdAt,
         jobId: job!.id,
+        created: true,
+      }
+    },
+  }
+}
+
+function createTestProjectionDispatcher(
+  calls: ProjectionDispatchInput[],
+  dispatch?: (input: ProjectionDispatchInput) => Promise<void>
+): ProjectionDispatcherPort {
+  return {
+    async dispatch(input) {
+      await dispatch?.(input)
+      calls.push(structuredClone(input))
+      return {
+        projectionId: input.projectionId,
+        runId: `projection:${input.projectionId}:${input.datasetVersion.versionId}`,
+        queuedAt: input.datasetVersion.createdAt,
         created: true,
       }
     },
@@ -277,31 +359,28 @@ describe("OrchestratorWorker", () => {
       events: [makeScheduleTriggeredEvent(daily.id)],
     })
 
-    await waitFor(async () => {
-      const syncJobs = await queues.syncRuns.claim({ projectId: PROJECT_ID, workerId: "sync" })
-      const workflowJobs = await queues.workflows.claim({
-        projectId: PROJECT_ID,
-        workerId: "workflow",
-      })
-      if (syncJobs.length === 0 || workflowJobs.length === 0) return false
-
-      expect(syncJobs[0]!.job.payload.runId).toBe(
-        `sync:${sync.id}:schedule:${daily.id}:event:${sourceEvent!.id}`
-      )
-      expect(workflowJobs[0]!.job.payload).toEqual({
-        runId: `workflow:${workflow.id}:schedule:${daily.id}:event:${sourceEvent!.id}`,
-      })
-      expect(dispatches).toEqual([
-        expect.objectContaining({
-          workflowId: workflow.id,
-          input: {},
-          scheduleId: daily.id,
-          source: { type: "schedule", eventId: sourceEvent!.id },
-          correlationId: sourceEvent!.id,
-        }),
-      ])
-      return true
+    await waitFor(() => dispatches.length === 1)
+    const syncJobs = await queues.syncRuns.claim({ projectId: PROJECT_ID, workerId: "sync" })
+    const workflowJobs = await queues.workflows.claim({
+      projectId: PROJECT_ID,
+      workerId: "workflow",
     })
+
+    expect(syncJobs[0]!.job.payload.runId).toBe(
+      `sync:${sync.id}:schedule:${daily.id}:event:${sourceEvent!.id}`
+    )
+    expect(workflowJobs[0]!.job.payload).toEqual({
+      runId: `workflow:${workflow.id}:schedule:${daily.id}:event:${sourceEvent!.id}`,
+    })
+    expect(dispatches).toEqual([
+      expect.objectContaining({
+        workflowId: workflow.id,
+        input: {},
+        scheduleId: daily.id,
+        source: { type: "schedule", eventId: sourceEvent!.id },
+        correlationId: sourceEvent!.correlationId ?? sourceEvent!.id,
+      }),
+    ])
   })
 
   test("event schedule fires only on a false-to-true transition and maps { event }", async () => {
@@ -337,7 +416,7 @@ describe("OrchestratorWorker", () => {
           input: { invoiceId: "inv-1", amount: 700 },
           scheduleId: highValueInvoice.id,
           source: { type: "event", eventId: sourceEvent!.id },
-          correlationId: sourceEvent!.id,
+          correlationId: sourceEvent!.correlationId ?? sourceEvent!.id,
         }),
       ])
       return true
@@ -500,11 +579,8 @@ describe("OrchestratorWorker", () => {
     expect(dispatches[0]?.correlationId).toBe("upstream-correlation")
   })
 
-  test("dataset commits inject the version into direct projection jobs", async () => {
-    const projection = defineProjection("invoice-projection", Invoice)
-      .fromDataset(rawInvoices)
-      .properties({ id: "id" })
-    const descriptor = invoiceProjectionDescriptor({ projectionId: projection.id })
+  test("dataset commits pass the immutable version to the Projection dispatcher", async () => {
+    const descriptor = invoiceProjectionDescriptor()
     const routes = compileRoutes({
       schedules: [],
       syncs: [],
@@ -513,40 +589,27 @@ describe("OrchestratorWorker", () => {
     })
     const eventRuntime = createEvents()
     const queues = new InMemoryQueues()
+    const dispatches: ProjectionDispatchInput[] = []
     await startWorker(eventRuntime, queues, routes, PROJECT_ID, {
-      lakeStorage: new InMemoryLakeStorage(),
-      projectionRuns: new InMemoryProjectionRunStorage(),
+      dispatcher: createTestProjectionDispatcher(dispatches),
+      reconciliation: { lakeStorage: new InMemoryLakeStorage() },
     })
 
     const [sourceEvent] = await eventRuntime.append({
       events: [makeDatasetVersionCommittedEvent("version-42")],
     })
-    await waitFor(async () => {
-      const claimed = await queues.projections.claim({
-        projectId: PROJECT_ID,
-        workerId: "observer",
-      })
-      if (claimed.length === 0) return false
-      const expectedPayload = {
-        projectionId: projection.id,
-        projectionKind: "object" as const,
-        protocol: "replacement" as const,
-        datasetVersion: {
-          datasetId: rawInvoices.id,
-          versionId: "version-42",
-          createdAt: "2026-04-18T02:00:00.000Z",
-        },
-        ontologyRevision: "ontology-1",
-        projectionRevision: "projection-1",
-        ownershipHash: "ownership-1",
-      }
-      expect(claimed[0]!.job.payload).toEqual(expectedPayload)
-      expect(claimed[0]!.job.id).toBe(createProjectionRunId(PROJECT_ID, expectedPayload))
-      expect(claimed[0]!.job.metadata).toMatchObject({
+    await waitFor(() => dispatches.length === 1)
+    expect(dispatches[0]).toMatchObject({
+      projectionId: descriptor.projectionId,
+      datasetVersion: {
+        datasetId: rawInvoices.id,
+        versionId: "version-42",
+        createdAt: "2026-04-18T02:00:00.000Z",
+      },
+      metadata: {
         sourceEventId: sourceEvent!.id,
         sourceEventType: "dataset.version.committed",
-      })
-      return true
+      },
     })
   })
 
@@ -560,51 +623,40 @@ describe("OrchestratorWorker", () => {
     })
     const lakeStorage = new InMemoryLakeStorage()
     const version = await commitInvoiceDatasetVersion(lakeStorage)
-    const projectionRuns = new InMemoryProjectionRunStorage()
     const queues = new InMemoryQueues()
+    const dispatches: ProjectionDispatchInput[] = []
 
     await startWorker(createEvents(), queues, routes, PROJECT_ID, {
-      lakeStorage,
-      projectionRuns,
+      dispatcher: createTestProjectionDispatcher(dispatches),
+      reconciliation: { lakeStorage },
     })
 
-    await waitFor(async () => {
-      const claimed = await queues.projections.claim({
-        projectId: PROJECT_ID,
-        workerId: "observer",
-      })
-      if (claimed.length === 0) return false
-      expect(claimed[0]!.job.payload.datasetVersion).toEqual({
+    await waitFor(() => dispatches.length === 1)
+    expect(dispatches[0]).toMatchObject({
+      datasetVersion: {
         datasetId: rawInvoices.id,
         versionId: version.versionId,
         createdAt: version.createdAt.toISOString(),
-      })
-      expect(claimed[0]!.job.metadata).toMatchObject({
-        dispatchSource: "lake-reconciliation",
-      })
-      return true
+      },
+      metadata: { dispatchSource: "lake-reconciliation" },
     })
   })
 
-  test("retries reconciliation and deduplicates the deterministic projection job", async () => {
+  test("keeps reconciliation retryable when the dispatcher fails", async () => {
     const descriptor = invoiceProjectionDescriptor()
     const lakeStorage = new InMemoryLakeStorage()
     await commitInvoiceDatasetVersion(lakeStorage)
-    const projectionRuns = new InMemoryProjectionRunStorage()
-    const queues = new InMemoryQueues()
-    const enqueue = queues.projections.enqueue.bind(queues.projections)
+    const dispatches: ProjectionDispatchInput[] = []
     let attempts = 0
-    queues.projections.enqueue = async (input) => {
+    const dispatcher = createTestProjectionDispatcher(dispatches, async () => {
       attempts += 1
       if (attempts === 1) throw new Error("queue unavailable")
-      return enqueue(input)
-    }
+    })
     const input = {
       projectId: PROJECT_ID,
-      queue: queues.projections,
+      dispatcher,
       descriptors: [descriptor],
       lakeStorage,
-      projectionRuns,
     }
 
     const originalError = console.error
@@ -618,9 +670,7 @@ describe("OrchestratorWorker", () => {
     }
 
     expect(attempts).toBe(3)
-    expect(
-      await queues.projections.claim({ projectId: PROJECT_ID, workerId: "observer" })
-    ).toHaveLength(1)
+    expect(dispatches).toHaveLength(2)
   })
 
   test("reconciles the latest data version behind schema-only versions", async () => {
@@ -639,11 +689,11 @@ describe("OrchestratorWorker", () => {
       createdAt: new Date("2026-04-19T02:00:00.000Z"),
       schema: rawInvoices.schema,
     }
-    const queues = new InMemoryQueues()
+    const dispatches: ProjectionDispatchInput[] = []
 
     await reconcileProjectionDispatch({
       projectId: PROJECT_ID,
-      queue: queues.projections,
+      dispatcher: createTestProjectionDispatcher(dispatches),
       descriptors: [invoiceProjectionDescriptor()],
       lakeStorage: {
         async listVersions() {
@@ -656,14 +706,9 @@ describe("OrchestratorWorker", () => {
           return versionId === dataVersion.versionId ? dataVersion : null
         },
       },
-      projectionRuns: new InMemoryProjectionRunStorage(),
     })
 
-    const [claimed] = await queues.projections.claim({
-      projectId: PROJECT_ID,
-      workerId: "observer",
-    })
-    expect(claimed?.job.payload.datasetVersion.versionId).toBe(dataVersion.versionId)
+    expect(dispatches[0]?.datasetVersion.versionId).toBe(dataVersion.versionId)
   })
 
   test("reports malformed projection version ancestry structurally", async () => {
@@ -685,7 +730,7 @@ describe("OrchestratorWorker", () => {
     try {
       await reconcileProjectionDispatch({
         projectId: PROJECT_ID,
-        queue: new InMemoryQueues().projections,
+        dispatcher: createTestProjectionDispatcher([]),
         descriptors: [descriptor],
         lakeStorage: {
           async listVersions() {
@@ -698,7 +743,6 @@ describe("OrchestratorWorker", () => {
             return schemaVersion
           },
         },
-        projectionRuns: new InMemoryProjectionRunStorage(),
       })
     } finally {
       console.error = originalError
@@ -717,60 +761,6 @@ describe("OrchestratorWorker", () => {
         versionId: schemaVersion.versionId,
       },
     })
-  })
-
-  test("skips an existing run and redispatches after a semantic revision change", async () => {
-    const descriptor = invoiceProjectionDescriptor()
-    const lakeStorage = new InMemoryLakeStorage()
-    const version = await commitInvoiceDatasetVersion(lakeStorage)
-    const projectionRuns = new InMemoryProjectionRunStorage()
-    const queues = new InMemoryQueues()
-    const identity = {
-      projectionId: descriptor.projectionId,
-      projectionKind: "object" as const,
-      protocol: "replacement" as const,
-      datasetVersion: {
-        datasetId: version.datasetId,
-        versionId: version.versionId,
-        createdAt: version.createdAt.toISOString(),
-      },
-      ontologyRevision: descriptor.ontologyRevision,
-      projectionRevision: descriptor.projectionRevision,
-      ownershipHash: descriptor.ownershipHash,
-    }
-    const id = createProjectionRunId(PROJECT_ID, identity)
-    await projectionRuns.startOrReclaim({
-      id,
-      projectId: PROJECT_ID,
-      identity,
-      target: { objectTypeId: Invoice.id },
-    })
-
-    await reconcileProjectionDispatch({
-      projectId: PROJECT_ID,
-      queue: queues.projections,
-      descriptors: [descriptor],
-      lakeStorage,
-      projectionRuns,
-    })
-
-    expect(
-      await queues.projections.claim({ projectId: PROJECT_ID, workerId: "observer" })
-    ).toHaveLength(0)
-
-    await reconcileProjectionDispatch({
-      projectId: PROJECT_ID,
-      queue: queues.projections,
-      descriptors: [invoiceProjectionDescriptor({ projectionRevision: "projection-2" })],
-      lakeStorage,
-      projectionRuns,
-    })
-    const [revised] = await queues.projections.claim({
-      projectId: PROJECT_ID,
-      workerId: "revised-observer",
-    })
-    expect(revised?.job.payload.projectionRevision).toBe("projection-2")
-    expect(revised?.job.id).not.toBe(id)
   })
 
   test("a direct enqueue failure does not drop fan-out siblings", async () => {
@@ -894,7 +884,7 @@ describe("OrchestratorWorker", () => {
       code: "internal.unexpected",
       retryable: false,
       message:
-        "[SixbOrchestrator] Projection routes require lake and projection-run storage for durable dispatch.",
+        "[SixbOrchestrator] Projection routes require lake storage for durable reconciliation.",
       details: {
         projectId: PROJECT_ID,
         projectionIds: [descriptor.projectionId],

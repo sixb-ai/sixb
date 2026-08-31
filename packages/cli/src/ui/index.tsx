@@ -392,6 +392,14 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
           { label: "--api-port <port>", value: "API port (default: Atlas port + 2)" },
           { label: "--api-host <host>", value: "API bind host (default: --host)" },
           { label: "--api-public-origin <origin>", value: "Public API origin" },
+          {
+            label: "--agent-turn-timeout <duration>",
+            value: "Agent turn wall-clock budget (default: 10m)",
+          },
+          {
+            label: "--concurrency <value>",
+            value: "Concurrent jobs: count for worker; repeat type=count for dev/worker-group",
+          },
           { label: "--atlas-public-origin <origin>", value: "Public Atlas origin" },
           { label: "--app-public-origin <origin>", value: "Public custom app origin" },
           { label: "--api-url <url>", value: "API origin for auth/token commands" },
@@ -429,8 +437,8 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
           "sixb orchestrator",
           "sixb rules",
           "sixb worker pipeline",
-          "sixb worker workflow",
-          "sixb worker-group sync pipeline projection",
+          "sixb worker agent --concurrency 8",
+          "sixb worker-group sync agent --concurrency sync=2 --concurrency agent=8",
           "sixb dev --entry examples/mac-os/sixb.config.ts --port 8080",
           "sixb check",
           "sixb typegen",
@@ -494,6 +502,7 @@ export function DevView({
   wsUrl,
   uiUrl,
   appUrl,
+  workers = [],
   warnings = [],
 }: {
   name: string
@@ -502,6 +511,7 @@ export function DevView({
   wsUrl: string
   uiUrl: string | null
   appUrl?: string | null
+  workers?: readonly { readonly type: string; readonly concurrency: number }[]
   warnings?: readonly string[]
 }) {
   const serverItems: KeyValueItem[] = [
@@ -525,6 +535,18 @@ export function DevView({
           <ServicePanel name="Custom app" items={[{ label: "URL", value: appUrl }]} />
         </>
       ) : null}
+      {workers.length > 0 ? (
+        <>
+          <Spacer />
+          <ServicePanel
+            name="Workers"
+            items={workers.map((worker) => ({
+              label: worker.type,
+              value: `running · concurrency ${worker.concurrency}`,
+            }))}
+          />
+        </>
+      ) : null}
       {warnings.length > 0 ? (
         <>
           <Spacer />
@@ -543,11 +565,13 @@ export function DevView({
 export function WorkerView({
   name,
   workerId,
+  concurrency,
   storage,
   warnings = [],
 }: {
   name: string
   workerId: string
+  concurrency: number
   storage?: string | null
   warnings?: readonly string[]
 }) {
@@ -558,7 +582,13 @@ export function WorkerView({
       </Text>
       <Text dimColor>{name}</Text>
       <Spacer />
-      <ServicePanel name="Worker" items={[{ label: "ID", value: workerId }]} />
+      <ServicePanel
+        name="Worker"
+        items={[
+          { label: "ID", value: workerId },
+          { label: "Concurrency", value: String(concurrency) },
+        ]}
+      />
       <StoragePanel summary={storage} />
       {warnings.length > 0 ? (
         <>
@@ -575,12 +605,12 @@ export function WorkerView({
 
 export function WorkerGroupView({
   name,
-  workerTypes,
+  workers,
   storage,
   warnings = [],
 }: {
   name: string
-  workerTypes: readonly string[]
+  workers: readonly { readonly type: string; readonly concurrency: number }[]
   storage?: string | null
   warnings?: readonly string[]
 }) {
@@ -593,7 +623,10 @@ export function WorkerGroupView({
       <Spacer />
       <ServicePanel
         name="Workers"
-        items={workerTypes.map((workerType) => ({ label: workerType, value: "running" }))}
+        items={workers.map((worker) => ({
+          label: worker.type,
+          value: `running · concurrency ${worker.concurrency}`,
+        }))}
       />
       <StoragePanel summary={storage} />
       {warnings.length > 0 ? (

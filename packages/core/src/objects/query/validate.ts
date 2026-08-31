@@ -1,4 +1,11 @@
-import type { ObjectType, OntologyRegistry, Property, Schema, ValueType } from "../../ontology"
+import type {
+  ObjectRef,
+  ObjectType,
+  OntologyRegistry,
+  Property,
+  Schema,
+  ValueType,
+} from "../../ontology"
 import { normalizeDecimalValue } from "../../ontology"
 import { formatUnknownObjectTypeMessage } from "../../ontology/errors"
 import { validatePropertyValue, validateSchemaValue } from "../../ontology/validation"
@@ -30,11 +37,12 @@ export interface ObjectQueryValidationOptions {
   ontology: OntologyRegistry
   maxLimit?: number
   maxPageSize?: number
+  maxRefs?: number
   normalize?: boolean
 }
 
 type QueryValidationContext = Required<
-  Pick<ObjectQueryValidationOptions, "maxLimit" | "maxPageSize">
+  Pick<ObjectQueryValidationOptions, "maxLimit" | "maxPageSize" | "maxRefs">
 > & {
   ontology: OntologyRegistry
   valueTypesById: ReadonlyMap<string, ValueType>
@@ -53,6 +61,7 @@ interface TextFieldResolution {
 
 const DEFAULT_MAX_LIMIT = 1_000
 const DEFAULT_MAX_PAGE_SIZE = 1_000
+const DEFAULT_MAX_REFS = 1_000
 
 export function validateObjectQuery(
   query: ObjectQuery,
@@ -96,6 +105,7 @@ function createValidationContext(options: ObjectQueryValidationOptions): QueryVa
     valueTypesById: options.ontology.getValueTypesById(),
     maxLimit: options.maxLimit ?? DEFAULT_MAX_LIMIT,
     maxPageSize: options.maxPageSize ?? DEFAULT_MAX_PAGE_SIZE,
+    maxRefs: options.maxRefs ?? DEFAULT_MAX_REFS,
     issues: [],
     touchedObjectTypeIds: new Set<string>(),
   }
@@ -125,6 +135,8 @@ function dispatchQueryNode(
   switch (query.kind) {
     case "start":
       return validateStart(query.objectTypeId, query.includeSubtypes, path, ctx)
+    case "refs":
+      return validateRefs(query.refs, path, ctx)
     case "filter": {
       const input = validateQueryNode(query.input, `${path}.input`, ctx)
       const predicate = validatePredicate(query.predicate, input.result, `${path}.predicate`, ctx)
@@ -196,6 +208,50 @@ function dispatchQueryNode(
       )
       return { result: input.result, query: { ...query, input: input.query, expansions } }
     }
+  }
+}
+
+function validateRefs(
+  refs: readonly ObjectRef[],
+  path: string,
+  ctx: QueryValidationContext
+): QueryValidationResult {
+  if (refs.length === 0) {
+    addIssue(ctx, `${path}.refs`, "empty_refs", "refs must include at least one object reference")
+  }
+  if (refs.length > ctx.maxRefs) {
+    addIssue(
+      ctx,
+      `${path}.refs`,
+      "too_many_refs",
+      `refs must include at most ${ctx.maxRefs} object references`
+    )
+  }
+
+  const objectTypeIds = new Set<string>()
+  refs.forEach((ref, index) => {
+    const refPath = `${path}.refs[${index}]`
+    if (!ref.objectTypeId) {
+      addIssue(ctx, `${refPath}.objectTypeId`, "missing_object_type", "objectTypeId is required")
+    } else if (!ctx.ontology.getObjectTypeById(ref.objectTypeId)) {
+      addIssue(
+        ctx,
+        `${refPath}.objectTypeId`,
+        "unknown_object_type",
+        formatUnknownObjectTypeMessage(ref.objectTypeId)
+      )
+    } else {
+      objectTypeIds.add(ref.objectTypeId)
+    }
+
+    if (!ref.primaryId) {
+      addIssue(ctx, `${refPath}.primaryId`, "missing_primary_id", "primaryId is required")
+    }
+  })
+
+  return {
+    result: { objectTypeIds: [...objectTypeIds] },
+    query: { kind: "refs", refs: refs.map((ref) => ({ ...ref })) },
   }
 }
 

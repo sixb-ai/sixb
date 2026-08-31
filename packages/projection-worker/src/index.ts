@@ -1,2 +1,2 @@
-export type { ProjectionWorkerHost } from "./worker"
+export type { ProjectionWorkerHost, ProjectionWorkerOptions } from "./worker"
 export { ProjectionWorker } from "./worker"

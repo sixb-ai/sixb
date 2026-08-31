@@ -9,6 +9,7 @@
 
 import type { ActionDefinition } from "../actions/types"
 import type { AgentDefinition } from "../agents/types"
+import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets"
 import type { ObjectType } from "../ontology"
 import type { PipelineDefinition } from "../pipelines"
@@ -27,6 +28,7 @@ import type {
   ApplicationDefinition,
   ApplyGrant,
   EditGrant,
+  ManageGrant,
   ObserveGrant,
   RunGrant,
   Selection,
@@ -42,7 +44,7 @@ const VIEW_TARGETS = ["object", "dataset"] as const
 const RUN_TARGETS = ["workflow", "sync", "pipeline", "agent"] as const
 
 /**
- * Six of the eight targets carry a `kind` discriminant naming themselves. The other two — an
+ * Seven of the nine targets carry a `kind` discriminant naming themselves. The other two — an
  * `ObjectType` and an `ActionDefinition` — carry none, and each appears in exactly one builder that
  * allows no other undiscriminated target, so the allowed set names them unambiguously.
  */
@@ -53,6 +55,7 @@ const TARGET_BY_DEFINITION_KIND: Readonly<Partial<Record<string, BreadthTarget>>
   agent: "agent",
   workflow: "workflow",
   application: "application",
+  connector: "connector",
 }
 
 const UNDISCRIMINATED_TARGETS: readonly BreadthTarget[] = ["object", "action"]
@@ -204,6 +207,14 @@ function observe(target: "logs"): ObserveGrant {
   }
 }
 
+function manage(input: GrantInput<ConnectorDefinition, "connector">): ManageGrant {
+  return {
+    kind: "grant",
+    capability: "manage",
+    selection: resolveGrant(input, "can.manage", ["connector"]).selection,
+  }
+}
+
 export const can = {
   access,
   view,
@@ -212,4 +223,5 @@ export const can = {
   apply,
   run,
   observe,
+  manage,
 }

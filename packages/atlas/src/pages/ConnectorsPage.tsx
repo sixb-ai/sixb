@@ -85,8 +85,6 @@ function webhookRunStatusClasses(status: WebhookRun["status"]): string {
       return "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"
     case "failed":
       return "border-destructive/30 bg-destructive/10 text-destructive"
-    case "skipped":
-      return "border-border bg-muted text-muted-foreground"
     case "running":
       return "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-300"
   }
@@ -119,11 +117,6 @@ function webhookRunDuration(run: WebhookRun): string {
   const minutes = Math.floor(ms / 60_000)
   const seconds = Math.round((ms % 60_000) / 1000)
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`
-}
-
-function formatClaimResult(value: WebhookRun["deliveryClaimResult"]): string {
-  if (!value) return "Claimed"
-  return value.replace("_", " ").replace(/^./, (first) => first.toUpperCase())
 }
 
 function ConnectorListItem({
@@ -300,14 +293,7 @@ function WebhookRunIdempotency({ run }: { run: WebhookRun }) {
     return <span className="text-muted-foreground">-</span>
   }
 
-  return (
-    <div className="min-w-0">
-      <p className="truncate font-mono text-xs text-foreground">{run.idempotencyKey}</p>
-      <p className="mt-1 text-xs capitalize text-muted-foreground">
-        {formatClaimResult(run.deliveryClaimResult)}
-      </p>
-    </div>
-  )
+  return <p className="truncate font-mono text-xs text-foreground">{run.idempotencyKey}</p>
 }
 
 function WebhookRunCard({ run }: { run: WebhookRun }) {
@@ -342,7 +328,7 @@ function WebhookRunCard({ run }: { run: WebhookRun }) {
       </div>
       {run.idempotencyKey && (
         <p className="mt-3 truncate font-mono text-xs text-muted-foreground">
-          {formatClaimResult(run.deliveryClaimResult)} · {run.idempotencyKey}
+          {run.idempotencyKey}
         </p>
       )}
       {run.error && <SixbFailureSummary failure={run.error} className="mt-3 text-xs" />}

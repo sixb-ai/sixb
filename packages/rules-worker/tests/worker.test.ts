@@ -594,6 +594,7 @@ function objectUpdatedEvent(
     schemaVersion: 1,
     projectId,
     occurredAt: "2026-05-07T10:00:00.000Z",
+    correlationId: `correlation-${primaryId}-${status}`,
     origin: { kind: "runtime", requestId: `request-${primaryId}-${status}` },
     commitId: `commit-${primaryId}-${status}`,
     commitOrdinal: 0,

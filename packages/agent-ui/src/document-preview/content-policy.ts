@@ -16,6 +16,15 @@ export function markdownPreviewTooLarge(source: AgentDocumentSource): boolean {
   return textPreviewTooLarge(source)
 }
 
+export function customPreviewTooLarge(
+  source: AgentDocumentSource,
+  maxFileSizeBytes: number
+): boolean {
+  if (!Number.isFinite(maxFileSizeBytes) || maxFileSizeBytes <= 0) return true
+  if (!Number.isFinite(source.fileRef.sizeBytes) || source.fileRef.sizeBytes < 0) return true
+  return source.fileRef.sizeBytes > maxFileSizeBytes
+}
+
 export function documentLoadError(error: unknown): string {
   if (isSixbApiError(error)) {
     if (error.status === 404) return "This document is no longer available."

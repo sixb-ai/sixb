@@ -267,6 +267,73 @@ describe("DuckLake SQL transforms", () => {
     ])
   })
 
+  test("normalizes promoted BIGINT sums to the target int64 type", async () => {
+    const totalsDataset = defineDataset("analytics.order_totals", {
+      schema: [col("customerId", "string"), col("total", "int64")],
+    })
+    await storage.createDataset(totalsDataset)
+    await commitRows(storage, ordersDataset, [
+      { orderId: "ord_1", customerId: "cust_1", amount: 10 },
+      { orderId: "ord_2", customerId: "cust_2", amount: 20 },
+    ])
+
+    const first = await storage.sql.execute({
+      sources: { orders: { dataset: ordersDataset } },
+      target: totalsDataset,
+      mode: "snapshot",
+      sql: ({ orders }) => `
+        SELECT customerId, sum(amount) AS total
+        FROM ${orders}
+        GROUP BY customerId
+        ORDER BY customerId DESC
+      `,
+    })
+
+    expect(first.outcome).toBe("created")
+    expect(first.rowCount).toBe(2)
+    await expect(collectRows(storage.readRows({ datasetId: totalsDataset.id }))).resolves.toEqual([
+      { customerId: "cust_2", total: "20" },
+      { customerId: "cust_1", total: "10" },
+    ])
+
+    const repeated = await storage.sql.execute({
+      sources: { orders: { dataset: ordersDataset } },
+      target: totalsDataset,
+      mode: "snapshot",
+      sql: ({ orders }) => `
+        SELECT customerId, sum(amount) AS total
+        FROM ${orders}
+        GROUP BY customerId
+        ORDER BY customerId DESC
+      `,
+    })
+
+    expect(repeated.outcome).toBe("unchanged")
+    expect(repeated.versionId).toBe(first.versionId)
+
+    await commitRows(storage, ordersDataset, [
+      { orderId: "ord_max_1", customerId: "cust_1", amount: "9223372036854775807" },
+      { orderId: "ord_max_2", customerId: "cust_1", amount: "9223372036854775807" },
+    ])
+
+    await expect(
+      storage.sql.execute({
+        sources: { orders: { dataset: ordersDataset } },
+        target: totalsDataset,
+        mode: "snapshot",
+        sql: ({ orders }) => `
+          SELECT customerId, sum(amount) AS total
+          FROM ${orders}
+          GROUP BY customerId
+        `,
+      })
+    ).rejects.toThrow("out of range")
+    expect(await storage.getLatestVersion(totalsDataset.id)).toMatchObject({
+      versionId: first.versionId,
+    })
+    expect(await storage.listVersions(totalsDataset.id)).toHaveLength(1)
+  })
+
   test("pins SQL execute sources before committing the target snapshot", async () => {
     const ordersVersion = await commitRows(storage, ordersDataset, [
       { orderId: "ord_1", customerId: "cust_1", amount: 10 },
@@ -549,20 +616,24 @@ describe("DuckLake SQL transforms", () => {
   })
 
   test("keeps explicit empty-result commit semantics for SQL execute", async () => {
+    const initialEmptyVersion = await storage.sql.execute({
+      sources: {},
+      target: customerInsightsDataset,
+      mode: "snapshot",
+      sql: () => `
+        SELECT
+          'cust_none' AS customerId,
+          0::BIGINT AS orders,
+          0::BIGINT AS revenue
+        WHERE false
+      `,
+    })
+
+    expect(initialEmptyVersion.outcome).toBe("created")
+    expect(initialEmptyVersion.rowCount).toBe(0)
     await expect(
-      storage.sql.execute({
-        sources: {},
-        target: customerInsightsDataset,
-        mode: "snapshot",
-        sql: () => `
-          SELECT
-            'cust_none' AS customerId,
-            0::BIGINT AS orders,
-            0::BIGINT AS revenue
-          WHERE false
-        `,
-      })
-    ).rejects.toThrow("No DuckLake changes were committed")
+      collectRows(storage.readRows({ datasetId: customerInsightsDataset.id }))
+    ).resolves.toEqual([])
 
     const seedVersion = await storage.sql.execute({
       sources: {},
@@ -611,21 +682,53 @@ describe("DuckLake SQL transforms", () => {
     ).resolves.toEqual([])
   })
 
-  test("throws a clear no-op error for empty first SQL append", async () => {
+  test("consumes an initial empty source version and commits an empty target version", async () => {
+    const sourceWrite = await storage.beginWrite({ dataset: ordersDataset, mode: "snapshot" })
+    const sourceVersion = await sourceWrite.commit()
+
+    const targetVersion = await storage.sql.execute({
+      sources: { orders: { dataset: ordersDataset, versionId: sourceVersion.versionId } },
+      target: customerInsightsDataset,
+      mode: "snapshot",
+      sql: ({ orders }) => `
+        SELECT
+          customerId,
+          0::BIGINT AS orders,
+          amount AS revenue
+        FROM ${orders}
+      `,
+    })
+
+    expect(targetVersion).toMatchObject({
+      outcome: "created",
+      mode: "snapshot",
+      rowCount: 0,
+      inputs: [{ datasetId: ordersDataset.id, versionId: sourceVersion.versionId }],
+    })
     await expect(
-      storage.sql.execute({
-        sources: {},
-        target: customerInsightsDataset,
-        mode: "append",
-        sql: () => `
-          SELECT
-            'cust_none' AS customerId,
-            0::BIGINT AS orders,
-            0::BIGINT AS revenue
-          WHERE false
-        `,
-      })
-    ).rejects.toThrow("No DuckLake changes were committed")
+      collectRows(storage.readRows({ datasetId: customerInsightsDataset.id }))
+    ).resolves.toEqual([])
+  })
+
+  test("creates a first version for an empty SQL append", async () => {
+    const version = await storage.sql.execute({
+      sources: {},
+      target: customerInsightsDataset,
+      mode: "append",
+      sql: () => `
+        SELECT
+          'cust_none' AS customerId,
+          0::BIGINT AS orders,
+          0::BIGINT AS revenue
+        WHERE false
+      `,
+    })
+
+    expect(version.outcome).toBe("created")
+    expect(version.mode).toBe("append")
+    await expect(
+      collectRows(storage.readRows({ datasetId: customerInsightsDataset.id }))
+    ).resolves.toEqual([])
   })
 })
 

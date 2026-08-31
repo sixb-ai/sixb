@@ -29,6 +29,7 @@ const GRANT_CAPABILITIES = Object.keys({
   apply: true,
   run: true,
   observe: true,
+  manage: true,
 } satisfies Record<GrantCapability, true>) as readonly GrantCapability[]
 
 /** "'a', 'b', or 'c'" — the shape the security errors already use. */
@@ -223,6 +224,10 @@ export function assertGrantDefinition(
     throw createError(`[Sixb] ${field} observe grant target must be 'logs'.`)
   }
 
+  if (value.capability === "manage" && value.target !== undefined) {
+    throw createError(`[Sixb] ${field} manage grant must not declare a target.`)
+  }
+
   assertSelection(value.selection, field, createError)
 }
 
@@ -302,6 +307,8 @@ export function validateSecurityDefinitionsAtStartup(input: {
   readonly agentIds?: ReadonlySet<string>
   /** Registered observability surfaces. */
   readonly observableIds?: ReadonlySet<string>
+  /** Registered connector ids — when provided, manage grants must reference them. */
+  readonly connectorIds?: ReadonlySet<string>
 }): RegisteredSecurityDefinitions {
   const groupsById = new Map<string, GroupDefinition>()
   const rolesById = new Map<string, RoleDefinition>()

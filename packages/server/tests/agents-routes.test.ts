@@ -768,12 +768,39 @@ describe("agent routes", () => {
     await expect(
       storage.executions.getById({ projectId: sixb.id, id: originalRun?.executionId ?? "" })
     ).resolves.toMatchObject({ requestedBy: { type: "user", id: "usr_retry" } })
-    await storage.agents.runs.finishQueued({
+    const execution = testExecution()
+    await storage.agents.runs.start({
       id: request.run.id,
       projectId: sixb.id,
-      status: "failed",
-      error: FAILURE,
-      completedAt: new Date(FAILURE.at),
+      execution,
+    })
+    await storage.transaction(async (tx) => {
+      await tx.agents?.messages.append({
+        id: "msg_retry_partial",
+        projectId: sixb.id,
+        threadId: request.run.threadId,
+        runId: request.run.id,
+        role: "assistant",
+        parts: [
+          { type: "text", text: "Partial answer" },
+          {
+            type: "tool-call",
+            toolCallId: "call_retry_partial",
+            toolName: "search",
+            input: { query: "try this" },
+            state: "output-available",
+            output: { matches: 1 },
+          },
+        ],
+      })
+      await tx.agents?.runs.finish({
+        id: request.run.id,
+        projectId: sixb.id,
+        executionToken: execution.token,
+        status: "failed",
+        error: FAILURE,
+        completedAt: new Date(FAILURE.at),
+      })
     })
 
     const failedResponse = await app.fetch(
@@ -827,7 +854,58 @@ describe("agent routes", () => {
     })
     await expect(
       storage.agents.threads.getById({ projectId: sixb.id, id: request.run.threadId })
-    ).resolves.toMatchObject({ activeRunId: body.run.id })
+    ).resolves.toMatchObject({ activeRunId: body.run.id, messageCount: 1 })
+  })
+
+  test("rolls back partial-message deletion when retry admission fails", async () => {
+    const { app, storage, sixb } = createApp()
+    const first = await createTestSixb(sixb).agents.runs.request({
+      agentId: "assistant",
+      text: "first attempt",
+    })
+    const execution = testExecution()
+    await storage.agents.runs.start({
+      id: first.run.id,
+      projectId: sixb.id,
+      execution,
+    })
+    await storage.transaction(async (tx) => {
+      await tx.agents?.messages.append({
+        id: "msg_retry_rollback_partial",
+        projectId: sixb.id,
+        threadId: first.run.threadId,
+        runId: first.run.id,
+        role: "assistant",
+        parts: [{ type: "text", text: "Keep me if retry cannot start" }],
+      })
+      await tx.agents?.runs.finish({
+        id: first.run.id,
+        projectId: sixb.id,
+        executionToken: execution.token,
+        status: "failed",
+        error: FAILURE,
+      })
+    })
+
+    const second = await createTestSixb(sixb).agents.runs.request({
+      agentId: "assistant",
+      threadId: first.run.threadId,
+      text: "another turn",
+    })
+    const response = await app.fetch(
+      jsonRequest(`/api/agent-threads/${first.run.threadId}/runs/${first.run.id}/retry`, "POST", {})
+    )
+
+    expect(response.status).toBe(409)
+    await expect(response.json()).resolves.toEqual({
+      error: "This conversation already has a response in progress",
+    })
+    await expect(
+      storage.agents.messages.getById({ projectId: sixb.id, id: "msg_retry_rollback_partial" })
+    ).resolves.toMatchObject({ runId: first.run.id })
+    await expect(
+      storage.agents.threads.getById({ projectId: sixb.id, id: first.run.threadId })
+    ).resolves.toMatchObject({ activeRunId: second.run.id, messageCount: 3 })
   })
 
   test("reads agent runs without exposing execution tokens", async () => {
@@ -890,9 +968,27 @@ describe("agent routes", () => {
         reasoningOutputTokens: 2,
         reportingStatus: "complete",
       },
+      cost: {
+        amounts: [],
+        ratedCallCount: 0,
+        unpriceableCallCount: 0,
+        unvaluedCallCount: 1,
+      },
       startedAt: "2026-06-27T10:00:01.000Z",
     })
     expect("execution" in body).toBe(false)
+
+    Object.defineProperty(storage, "aiCosts", { value: undefined })
+    const unavailableResponse = await app.fetch(
+      new Request(`http://localhost/api/agent-runs/${run.id}`)
+    )
+    expect(unavailableResponse.status).toBe(200)
+    const unavailableBody = (await unavailableResponse.json()) as Record<string, unknown>
+    expect(unavailableBody).toMatchObject({
+      id: run.id,
+      usage: { inputTokens: 12, outputTokens: 8, reportingStatus: "complete" },
+    })
+    expect("cost" in unavailableBody).toBe(false)
   })
 
   test("batches ledger summaries when listing a thread's run history", async () => {

@@ -6,6 +6,13 @@ export type {
   RequestPipelineRunInput,
 } from "./request"
 export { requestPipelineRun } from "./request"
+export {
+  type AutomaticPipelineExecutionSource,
+  type AutomaticPipelineRunDispatchInput,
+  PipelineRunDispatcher,
+  type PipelineRunDispatcherDependencies,
+  type PipelineRunDispatchPort,
+} from "./run-dispatch"
 export type {
   PipelineBuilder,
   PipelineDefinition,

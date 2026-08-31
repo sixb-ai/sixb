@@ -1,6 +1,7 @@
 import { principalsEqual, SYSTEM_PRINCIPAL } from "../auth"
 import { assertAuthorized, isAllowed } from "../authorization"
 import type { AuthorizablePrincipal, ExecutionContext } from "../execution"
+import { resolveExecutionCosts } from "../runtime/ai-cost"
 import { resolveExecutionUsage } from "../runtime/ai-usage"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { SecurityDefinitionCatalog } from "../security"
@@ -12,6 +13,7 @@ import type {
   ListAgentThreadsInput,
   ListAgentThreadsResult,
 } from "../storage/agents"
+import type { AiCostSummary } from "../storage/ai-cost"
 import type { AiModelCallUsage } from "../storage/ai-usage"
 import { AgentRequestError } from "./errors"
 import { createAgentThreadId } from "./ids"
@@ -56,6 +58,8 @@ export interface AgentRunView extends AgentRunRecord {
   readonly requestedBy?: AuthorizablePrincipal
   /** Derived from the model-call ledger; never persisted on the Agent run row. */
   readonly usage?: AiModelCallUsage
+  /** Preferred valuation; omitted when there are no calls or cost storage is unavailable. */
+  readonly cost?: AiCostSummary
 }
 
 export interface AgentRunListResult extends Omit<ListAgentRunsResult, "runs"> {
@@ -219,7 +223,8 @@ async function attachRunViews(
   runtime: SixbRuntimeContext,
   runs: readonly AgentRunRecord[]
 ): Promise<readonly AgentRunView[]> {
-  const [executions, usages] = await Promise.all([
+  const executionIds = runs.map((run) => run.executionId)
+  const [executions, usages, costs] = await Promise.all([
     Promise.all(
       runs.map((run) =>
         runtime.storage.executions.getById({
@@ -231,7 +236,12 @@ async function attachRunViews(
     resolveExecutionUsage({
       storage: runtime.storage.aiUsage,
       projectId: runtime.projectId,
-      executionIds: runs.map((run) => run.executionId),
+      executionIds,
+    }),
+    resolveExecutionCosts({
+      storage: runtime.storage.aiCosts,
+      projectId: runtime.projectId,
+      executionIds,
     }),
   ])
 
@@ -243,12 +253,14 @@ async function attachRunViews(
       )
     }
     const usage = usages[index]
+    const cost = usage === undefined ? undefined : costs[index]
     return {
       ...run,
       ...(execution.requestedBy === undefined
         ? {}
         : { requestedBy: structuredClone(execution.requestedBy) }),
       ...(usage === undefined ? {} : { usage }),
+      ...(cost === undefined ? {} : { cost }),
     }
   })
 }

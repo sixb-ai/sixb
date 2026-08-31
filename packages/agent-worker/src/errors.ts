@@ -49,8 +49,8 @@ export class AgentFinalizationError extends Error {
 /**
  * A turn exceeded its wall-clock budget. Unlike a shutdown abort, this is a run-level failure: the
  * run is recorded `failed` and the thread released (a slow-but-alive model must not hold a thread
- * forever). The name is intentionally **not** `AbortError`, so it routes through the normal failure
- * path rather than the worker's shutdown-abort path.
+ * forever). It is persisted as the run failure while coherent partial work is retained as the
+ * assistant message.
  */
 export class AgentTurnTimeoutError extends Error {
   readonly name = "AgentTurnTimeoutError"
@@ -74,7 +74,7 @@ export class AgentToolExecutionError extends Error {
   }
 }
 
-/** A selected agent tool returned a value that cannot cross the durable JSON message boundary. */
+/** A selected agent tool returned a value that cannot cross the durable message boundary. */
 export class AgentToolOutputError extends AgentToolPublicError {
   override readonly name = "AgentToolOutputError"
   constructor(
@@ -83,7 +83,7 @@ export class AgentToolOutputError extends AgentToolPublicError {
     options?: ErrorOptions
   ) {
     super(
-      `[SixbAgentWorker] Agent tool '${toolName}' returned a non-JSON result; ${reason}.`,
+      `[SixbAgentWorker] Agent tool '${toolName}' returned an invalid result; ${reason}.`,
       options
     )
   }

@@ -28,6 +28,7 @@ export type {
   GrantDefinition,
   GroupDefinition,
   GroupReference,
+  ManageGrant,
   MembershipOperation,
   MembershipPolicyDefinition,
   ObserveGrant,

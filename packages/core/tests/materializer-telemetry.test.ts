@@ -3,6 +3,7 @@ import { InMemoryStorage } from "../src"
 import type { Storage, StorageTransactionOptions } from "../src/storage"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
+import { startTestProjectionRun } from "../src/testing"
 import {
   claimProjectionExecution,
   createMaterializerFixture,
@@ -15,8 +16,95 @@ const series = {
   object: { objectTypeId: "Device", primaryId: "one" },
   propertyId: "temperature",
 }
+const humiditySeries = { ...series, propertyId: "humidity" }
 
 describe("ontology materializer telemetry", () => {
+  test("accepts partial and complete rows from a grouped telemetry projection", async () => {
+    const { materializer, storage } = createMaterializerFixture()
+    await materializer.projections.replace(
+      replacement("grouped-telemetry", "2026-01-01T00:00:00Z", [sourceEntry("one", "one")])
+    )
+
+    await expect(
+      materializer.telemetry.append({
+        source: {
+          kind: "projection",
+          projection: { projectionId: "temperatures" },
+          datasetVersion: {
+            datasetId: "readings",
+            versionId: "grouped-v1",
+            createdAt: "2026-01-01T00:00:00Z",
+          },
+          execution: pendingProjectionExecution("grouped-telemetry-run"),
+          batchOrdinal: 0,
+          sourceRowCount: 2,
+          sourceRowsSkipped: 0,
+          inputExhausted: true,
+        },
+        points: [
+          { series, value: 20, at: "2026-01-01T01:00:00Z" },
+          { series: humiditySeries, value: 45, at: "2026-01-01T01:00:00Z" },
+          { series, value: 21, at: "2026-01-01T02:00:00Z" },
+        ],
+      })
+    ).resolves.toMatchObject({ pointsCreated: 3 })
+
+    expect(
+      await storage.timeseries.getHistory({
+        projectId: "project",
+        objectTypeId: "Device",
+        objectId: "one",
+        propertyId: "temperature",
+      })
+    ).toHaveLength(2)
+    expect(
+      await storage.timeseries.getHistory({
+        projectId: "project",
+        objectTypeId: "Device",
+        objectId: "one",
+        propertyId: "humidity",
+      })
+    ).toHaveLength(1)
+  })
+
+  test("rejects grouped projection batches outside their row/property bounds", async () => {
+    const { materializer } = createMaterializerFixture()
+    await materializer.projections.replace(
+      replacement("grouped-bounds", "2026-01-01T00:00:00Z", [sourceEntry("one", "one")])
+    )
+    const append = (points: Parameters<typeof materializer.telemetry.append>[0]["points"]) =>
+      materializer.telemetry.append({
+        source: {
+          kind: "projection",
+          projection: { projectionId: "temperatures" },
+          datasetVersion: {
+            datasetId: "readings",
+            versionId: "grouped-bounds-v1",
+            createdAt: "2026-01-01T00:00:00Z",
+          },
+          execution: pendingProjectionExecution("grouped-bounds-run"),
+          batchOrdinal: 0,
+          sourceRowCount: 2,
+          sourceRowsSkipped: 0,
+          inputExhausted: true,
+        },
+        points,
+      })
+
+    await expect(append([{ series, value: 20, at: "2026-01-01T01:00:00Z" }])).rejects.toThrow(
+      "must emit between 2 and 4 points"
+    )
+    await expect(
+      append([
+        { series, value: 20, at: "2026-01-01T01:00:00Z" },
+        { series, value: 21, at: "2026-01-01T02:00:00Z" },
+        { series, value: 22, at: "2026-01-01T03:00:00Z" },
+        { series, value: 23, at: "2026-01-01T04:00:00Z" },
+        { series, value: 24, at: "2026-01-01T05:00:00Z" },
+      ])
+    ).rejects.toThrow("must emit between 2 and 4 points")
+  })
+
   test("correlates durable targets for telemetry batches and terminal decisions", async () => {
     const { materializer, storage, projections } = createMaterializerFixture()
     const resolved = projections.resolveTelemetry("temperatures")
@@ -25,7 +113,7 @@ describe("ontology materializer telemetry", () => {
       versionId: "wrong-telemetry-target",
       createdAt: "2026-01-01T00:00:00.000Z",
     }
-    const run = await storage.projectionRuns.startOrReclaim({
+    const run = await startTestProjectionRun(storage, {
       id: "wrong-telemetry-target-run",
       projectId: "project",
       identity: {
@@ -462,7 +550,7 @@ describe("ontology materializer telemetry", () => {
     ).toHaveLength(2)
   })
 
-  test("uses one fenced transaction per projection batch and keeps runtime replay cheap", async () => {
+  test("uses one fenced transaction for projection batches and durable runtime replay", async () => {
     class TransactionCountingStorage extends InMemoryStorage {
       transactions: (StorageTransactionOptions | undefined)[] = []
 
@@ -532,7 +620,7 @@ describe("ontology materializer telemetry", () => {
     await expect(materializer.telemetry.append(runtimeAppend)).resolves.toMatchObject({
       created: false,
     })
-    expect(storage.transactions).toEqual([])
+    expect(storage.transactions).toEqual([{ isolation: "serializable" }])
   })
 
   test("uses physical input size for telemetry batch continuation after equal deduplication", async () => {

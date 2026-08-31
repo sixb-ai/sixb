@@ -1,9 +1,7 @@
 import { runWebhookRunStorageContractSuite } from "@sixb/core/testing"
-import { SqliteWebhookRunStorage } from "../src/webhook-run-storage"
+import { SqliteStorage } from "../src"
 
-runWebhookRunStorageContractSuite("SqliteWebhookRunStorage", {
-  createStorage: () => new SqliteWebhookRunStorage(),
-  cleanup(storage) {
-    storage.close()
-  },
+runWebhookRunStorageContractSuite("SqliteStorage Webhook runs", {
+  createStorage: () => new SqliteStorage(),
+  cleanup: (storage) => storage.close(),
 })

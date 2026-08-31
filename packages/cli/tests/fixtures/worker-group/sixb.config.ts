@@ -107,7 +107,8 @@ function claimLoggingQueue<T extends object>(queue: T, workerType: string): T {
         return (...args: unknown[]) => {
           if (!logged) {
             logged = true
-            logFixtureEvent({ type: "claim", workerType })
+            const params = args[0] as { readonly limit?: unknown } | undefined
+            logFixtureEvent({ type: "claim", workerType, limit: params?.limit })
           }
           return (value as (...a: unknown[]) => unknown).apply(target, args)
         }

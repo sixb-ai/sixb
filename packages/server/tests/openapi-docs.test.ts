@@ -118,6 +118,12 @@ describe("OpenAPI docs", () => {
       "Workflow Interventions",
     ])
     expect(spec.paths?.["/api/agent-threads"]?.get?.tags).toEqual(["Agent Threads"])
+    expect(spec.paths?.["/api/connectors/{connectorId}/connections"]?.get?.tags).toEqual([
+      "Connector Connections",
+    ])
+    expect(spec.paths?.["/api/connectors/{connectorId}/connection-runs"]?.post?.tags).toEqual([
+      "Connector Connection Runs",
+    ])
 
     const csrfOnlyRoutes = [
       ["post", "/api/auth/sign-out"],
@@ -137,6 +143,11 @@ describe("OpenAPI docs", () => {
       ["post", "/api/workflow-interventions/{interventionId}/cancel"],
       ["post", "/api/agent-threads"],
       ["post", "/api/agent-threads/{threadId}/messages"],
+      ["post", "/api/connectors/{connectorId}/connection-runs"],
+      ["post", "/api/connectors/{connectorId}/connection-runs/{runId}/selection"],
+      ["post", "/api/connectors/{connectorId}/connections/{connectionId}/reauthorize"],
+      ["delete", "/api/connectors/{connectorId}/connections/{connectionId}"],
+      ["post", "/api/connectors/{connectorId}/connections/{connectionId}/revoke"],
       // The simple file upload and object, link, and telemetry writes are CSRF-*or*-bearer now.
       // The derived ACCESS_TOKEN_ROUTES loop below covers them.
     ] as const

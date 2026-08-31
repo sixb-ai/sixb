@@ -44,6 +44,8 @@ export interface ModelToolResultPart extends ModelPartBase {
   readonly toolCallId: string
   readonly toolName: string
   readonly output: ModelToolOutput
+  /** Original durable tool output when the model-facing output is a projection. */
+  readonly originalOutput?: JsonValue
   readonly providerExecuted?: boolean
   readonly dynamic?: boolean
 }

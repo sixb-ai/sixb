@@ -30,11 +30,10 @@ const telemetryProjection: TelemetryProjectionDefinition = {
   _tag: "TelemetryProjectionDefinition",
   id: "room-temps",
   objectTypeId: "room",
-  propertyId: "temperature",
   datasetId: "ds",
   objectIdField: "room_id",
   atField: "at",
-  valueField: "value",
+  properties: { temperature: { valueField: "value" } },
 }
 
 const linkProjection: LinkProjectionDefinition = {

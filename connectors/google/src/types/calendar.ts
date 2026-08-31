@@ -39,7 +39,7 @@ export interface CalendarNotification {
 }
 
 export interface ConferenceProperties {
-  readonly allowedConferenceSolutionTypes?: readonly string[]
+  readonly allowedConferenceSolutionTypes?: readonly CalendarConferenceSolutionType[]
   readonly [key: string]: unknown
 }
 
@@ -101,11 +101,73 @@ export interface EventAttendee {
   readonly [key: string]: unknown
 }
 
+export type CalendarConferenceSolutionType =
+  | "eventHangout"
+  | "eventNamedHangout"
+  | "hangoutsMeet"
+  | "addOn"
+  | (string & {})
+
+export type CalendarConferenceRequestStatusCode = "pending" | "success" | "failure" | (string & {})
+
+export type CalendarConferenceEntryPointType = "video" | "phone" | "sip" | "more" | (string & {})
+
+export interface ConferenceSolutionKey {
+  readonly type?: CalendarConferenceSolutionType
+  readonly [key: string]: unknown
+}
+
+export interface ConferenceSolution {
+  readonly key?: ConferenceSolutionKey
+  readonly name?: string
+  readonly iconUri?: string
+  readonly [key: string]: unknown
+}
+
+export interface ConferenceRequestStatus {
+  readonly statusCode?: CalendarConferenceRequestStatusCode
+  readonly [key: string]: unknown
+}
+
+export interface CreateConferenceRequest {
+  /** Client-generated idempotency key; generate a new value for every new conference request. */
+  readonly requestId: string
+  readonly conferenceSolutionKey?: ConferenceSolutionKey
+  readonly status?: ConferenceRequestStatus
+  readonly [key: string]: unknown
+}
+
+export interface ConferenceEntryPoint {
+  readonly entryPointType?: CalendarConferenceEntryPointType
+  readonly uri?: string
+  readonly label?: string
+  readonly meetingCode?: string
+  readonly accessCode?: string
+  readonly passcode?: string
+  readonly password?: string
+  readonly pin?: string
+  readonly regionCode?: string
+  readonly entryPointFeatures?: readonly string[]
+  readonly [key: string]: unknown
+}
+
+export interface ConferenceParametersAddOnParameters {
+  readonly parameters?: Readonly<Record<string, string>>
+  readonly [key: string]: unknown
+}
+
+export interface ConferenceParameters {
+  readonly addOnParameters?: ConferenceParametersAddOnParameters
+  readonly [key: string]: unknown
+}
+
 export interface ConferenceData {
+  /** For Google Meet, this is the meeting code such as `abc-mnop-xyz`. */
   readonly conferenceId?: string
-  readonly conferenceSolution?: Readonly<Record<string, unknown>>
-  readonly createRequest?: Readonly<Record<string, unknown>>
-  readonly entryPoints?: readonly Readonly<Record<string, unknown>>[]
+  readonly conferenceSolution?: ConferenceSolution
+  readonly createRequest?: CreateConferenceRequest
+  readonly entryPoints?: readonly ConferenceEntryPoint[]
+  readonly parameters?: ConferenceParameters
   readonly notes?: string
   readonly signature?: string
   readonly [key: string]: unknown
@@ -215,7 +277,7 @@ export type EventGetOptions = QueryParams & {
 }
 
 export type EventWriteOptions = QueryParams & {
-  readonly conferenceDataVersion?: number
+  readonly conferenceDataVersion?: 0 | 1
   readonly maxAttendees?: number
   readonly supportsAttachments?: boolean
   /** `all`, `externalOnly`, or `none`. Prefer this over `sendNotifications`. */
@@ -229,7 +291,7 @@ export type EventDeleteOptions = QueryParams & {
 }
 
 export type EventImportOptions = QueryParams & {
-  readonly conferenceDataVersion?: number
+  readonly conferenceDataVersion?: 0 | 1
   readonly supportsAttachments?: boolean
 }
 

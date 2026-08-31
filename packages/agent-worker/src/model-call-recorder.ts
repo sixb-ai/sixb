@@ -1,17 +1,17 @@
 import { randomUUID } from "node:crypto"
-import { omitUndefinedObjectProperties } from "@sixb/core/internal/agents"
-import type { ModelCallEndEvent } from "@sixb/core/models"
-import type { AiUsageStorage, ReadonlyJsonObject, RecordAiModelCallInput } from "@sixb/core/storage"
+import type { ModelCallEndEvent, ModelUsage } from "@sixb/core/models"
+import type { ReadonlyJsonObject, RecordAiModelCallInput } from "@sixb/core/storage"
 import { normalizeAiModelCallRecord } from "@sixb/core/storage"
+import { recordAiModelCallAccounting } from "./ai-pricing/accounting"
 import { AgentUsageRecordingError } from "./errors"
 import { aiModelCallUsageFromModel } from "./model-adapters"
 import { isPermanentAiUsageRecoveryError } from "./model-call-recovery"
-import type { RecoverAiModelCall } from "./types"
+import type { AgentWorkerStorage, RecoverAiModelCall, RecoverAiModelCallInput } from "./types"
 
 const STORAGE_RETRY_DELAYS_MS = [50, 200, 600] as const
 
 export interface AiModelCallRecorderInput {
-  readonly storage: AiUsageStorage
+  readonly storage: AgentWorkerStorage
   readonly projectId: string
   readonly executionId: string
   readonly attempt: number
@@ -26,17 +26,16 @@ interface AiModelCallRecorderInternals {
   readonly now?: () => Date
   readonly retryDelaysMs?: readonly number[]
   readonly sleep?: (ms: number) => Promise<void>
+  readonly recordAccounting?: (input: RecoverAiModelCallInput) => Promise<void>
 }
 
-/**
- * Persist every completed provider call before the owned loop can begin another model step.
- * Callback failures propagate through the loop, so unaccounted spend fails closed immediately.
- */
+/** Persist every completed provider call before another billable loop step can start. */
 export class AiModelCallRecorder {
   private readonly generateId: () => string
   private readonly now: () => Date
   private readonly retryDelaysMs: readonly number[]
   private readonly sleep: (ms: number) => Promise<void>
+  private readonly recordAccounting: (input: RecoverAiModelCallInput) => Promise<void>
   private recordingError: AgentUsageRecordingError | undefined
 
   constructor(
@@ -47,16 +46,18 @@ export class AiModelCallRecorder {
     this.now = internals.now ?? (() => new Date())
     this.retryDelaysMs = internals.retryDelaysMs ?? STORAGE_RETRY_DELAYS_MS
     this.sleep = internals.sleep ?? sleep
+    this.recordAccounting =
+      internals.recordAccounting ??
+      (async (recovery) => {
+        await recordAiModelCallAccounting({ storage: this.input.storage, ...recovery })
+      })
   }
 
   readonly onModelCallEnd = async (event: ModelCallEndEvent): Promise<void> => {
     if (this.recordingError) throw this.recordingError
 
     try {
-      const rawUsage =
-        event.usage.raw === undefined
-          ? undefined
-          : (omitUndefinedObjectProperties(event.usage.raw) as ReadonlyJsonObject)
+      const occurredAt = this.now()
       const record: RecordAiModelCallInput = {
         id: this.generateId(),
         projectId: this.input.projectId,
@@ -69,19 +70,21 @@ export class AiModelCallRecorder {
         ...(event.responseModelId === undefined ? {} : { responseModelId: event.responseModelId }),
         responseId: event.responseId,
         usage: aiModelCallUsageFromModel(event.usage),
-        modelDefinition: event.definition,
+        ...(event.usage.raw === undefined ? {} : { rawUsage: rawUsage(event.usage) }),
+        occurredAt,
+      }
+      normalizeAiModelCallRecord(record)
+      const recoveryInput: RecoverAiModelCallInput = {
+        usage: record,
+        definition: event.definition,
         cost: event.cost,
         ...(event.route === undefined ? {} : { route: event.route }),
-        ...(rawUsage === undefined ? {} : { rawUsage }),
-        occurredAt: this.now(),
+        ratedAt: new Date(occurredAt),
       }
-      // Reject malformed provider data before retrying storage or handing a poison record to
-      // the durable queue. The storage boundary repeats this validation defensively.
-      normalizeAiModelCallRecord(record)
 
       try {
         await retryOperation(
-          () => this.input.storage.recordModelCall(record),
+          () => this.recordAccounting(recoveryInput),
           this.retryDelaysMs,
           this.sleep,
           (error) => !isPermanentAiUsageRecoveryError(error)
@@ -91,7 +94,7 @@ export class AiModelCallRecorder {
 
         try {
           await retryOperation(
-            () => this.input.recoverAiModelCall(record),
+            () => this.input.recoverAiModelCall(recoveryInput),
             this.retryDelaysMs,
             this.sleep,
             (error) => !isPermanentAiUsageRecoveryError(error)
@@ -99,7 +102,7 @@ export class AiModelCallRecorder {
         } catch (recoveryError) {
           throw new AggregateError(
             [storageError, recoveryError],
-            "Direct AI usage recording and durable recovery both failed."
+            "Direct AI accounting and durable recovery both failed."
           )
         }
         throw new AgentUsageRecordingError(this.input.errorRunId, event.callId, true, {
@@ -120,6 +123,10 @@ export class AiModelCallRecorder {
   assertHealthy(): void {
     if (this.recordingError) throw this.recordingError
   }
+}
+
+function rawUsage(usage: ModelUsage): ReadonlyJsonObject {
+  return structuredClone(usage.raw ?? {}) as ReadonlyJsonObject
 }
 
 async function retryOperation<TResult>(

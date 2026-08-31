@@ -19,16 +19,21 @@ import type {
 } from "../../storage/ontology"
 import type { MaterializerContext, MaterializerStorage } from "../context"
 import { validateTelemetryPoint } from "../effective/validate"
-import {
-  replayCommit,
-  replayCommitRecord,
-  withSerializationRetry,
-} from "../execution/commit-lifecycle"
+import { replayCommitRecord, withSerializationRetry } from "../execution/commit-lifecycle"
 import {
   type LockedProjectionExecution,
   lockProjectionRunForMaterialization,
 } from "../execution/run-correlation"
+import {
+  assertMaterializerRunExecution,
+  assertRuntimeMutationExecution,
+  assertTrustedPrimitiveMutationExecution,
+  ensureMaterializerExecution,
+  type MaterializerExecution,
+  prepareMaterializerExecution,
+} from "../execution/scope"
 import { drainStagedEvents, drainStagedWork } from "../execution/work-executor"
+import type { MaterializerCommand } from "../materializer"
 import {
   createProjectionTelemetryIdempotencyKey,
   createRuntimeTelemetryIdempotencyKey,
@@ -50,6 +55,7 @@ interface PreparedTelemetryBase {
   readonly inputPointCount: number
   readonly ontologyRevision: string
   readonly identity: TimedCommitIdentity
+  readonly execution: MaterializerExecution
 }
 
 interface PreparedRuntimeTelemetry extends PreparedTelemetryBase {
@@ -68,34 +74,35 @@ type PreparedTelemetryAppend = PreparedRuntimeTelemetry | PreparedProjectionTele
 
 export async function appendTelemetry(
   context: MaterializerContext,
-  raw: TelemetryAppend
+  raw: MaterializerCommand<TelemetryAppend>
 ): Promise<TelemetryCommitResult> {
   const command = prepareTelemetryAppend(context, raw)
-  if (command.kind === "runtime") {
-    const replay = await replayCommit<TelemetryCommitResult>(context, command.identity)
-    if (replay) return replay
-  }
-
   return executeTelemetryCommit(context, command)
 }
 
 function prepareTelemetryAppend(
   context: Pick<MaterializerContext, "projectId" | "ontology" | "projectionRegistry" | "clock">,
-  raw: TelemetryAppend
+  raw: MaterializerCommand<TelemetryAppend>
 ): PreparedTelemetryAppend {
-  const rawInputPointCount = raw.points.length
+  const rawInputPointCount = raw.input.points.length
   const input = normalizeTelemetryAppend({
-    ...raw,
-    points: raw.points.map((point) => validateTelemetryPoint(context.ontology, point)),
+    ...raw.input,
+    points: raw.input.points.map((point) => validateTelemetryPoint(context.ontology, point)),
   })
   const inputPointCount = telemetryInputPointCount(input, rawInputPointCount)
-  validateTelemetryBatch(input, inputPointCount)
 
   const ontologyRevision = context.projectionRegistry.ontologyRevision
+  const execution = prepareMaterializerExecution(context.projectId, raw.scope)
   if (input.source.kind === "runtime") {
-    return prepareRuntimeTelemetry(context, input, input.source, inputPointCount, ontologyRevision)
+    return {
+      ...prepareRuntimeTelemetry(context, input, input.source, inputPointCount, ontologyRevision),
+      execution,
+    }
   }
-  return prepareProjectionTelemetry(context, input, input.source, inputPointCount, ontologyRevision)
+  return {
+    ...prepareProjectionTelemetry(context, input, input.source, inputPointCount, ontologyRevision),
+    execution,
+  }
 }
 
 function telemetryInputPointCount(
@@ -106,28 +113,13 @@ function telemetryInputPointCount(
   return input.points.length
 }
 
-function validateTelemetryBatch(input: NormalizedTelemetryAppend, inputPointCount: number): void {
-  if (input.source.kind === "projection") {
-    if (input.source.sourceRowCount === 0) {
-      throw new MaterializationValidationError(
-        "Projection telemetry batches must consume at least one source row; an empty dataset produces no batch commit."
-      )
-    }
-    if (input.source.sourceRowCount !== inputPointCount + input.source.sourceRowsSkipped) {
-      throw new MaterializationValidationError(
-        "Projection telemetry sourceRowCount must equal input points plus skipped rows."
-      )
-    }
-  }
-}
-
 function prepareRuntimeTelemetry(
   context: Pick<MaterializerContext, "projectId" | "clock">,
   input: NormalizedTelemetryAppend,
   source: RuntimeTelemetrySource,
   inputPointCount: number,
   ontologyRevision: string
-): PreparedRuntimeTelemetry {
+): Omit<PreparedRuntimeTelemetry, "execution"> {
   const identity = createTimedCommitIdentity({
     projectId: context.projectId,
     idempotencyKey: createRuntimeTelemetryIdempotencyKey(source.requestId),
@@ -143,12 +135,13 @@ function prepareProjectionTelemetry(
   source: ProjectionTelemetrySource,
   inputPointCount: number,
   ontologyRevision: string
-): PreparedProjectionTelemetry {
+): Omit<PreparedProjectionTelemetry, "execution"> {
   const resolvedProjection = context.projectionRegistry.resolveTelemetry(
     source.projection.projectionId
   )
   validateTelemetryProjectionDataset(resolvedProjection, source)
   validateTelemetryOwnership(resolvedProjection, input)
+  validateTelemetryBatchCardinality(resolvedProjection, source, inputPointCount)
 
   const runIdentity = createProjectionRunMaterializationIdentity({
     resolved: resolvedProjection,
@@ -171,6 +164,38 @@ function prepareProjectionTelemetry(
     identity,
     resolvedProjection,
     runIdentity,
+  }
+}
+
+function validateTelemetryBatchCardinality(
+  resolved: ResolvedTelemetryProjection,
+  source: ProjectionTelemetrySource,
+  inputPointCount: number
+): void {
+  if (source.sourceRowCount === 0) {
+    throw new MaterializationValidationError(
+      "Projection telemetry batches must consume at least one source row; an empty dataset produces no batch commit."
+    )
+  }
+
+  const mappedPropertyCount = resolved.ownership.telemetry.length
+  if (mappedPropertyCount === 0) {
+    throw new MaterializationValidationError(
+      `Telemetry projection '${resolved.projectionId}' must own at least one telemetry property.`
+    )
+  }
+
+  const sourceRowsEmitted = source.sourceRowCount - source.sourceRowsSkipped
+  const maximumPointCount = sourceRowsEmitted * mappedPropertyCount
+  if (!Number.isSafeInteger(maximumPointCount)) {
+    throw new MaterializationValidationError(
+      `Telemetry projection '${resolved.projectionId}' batch point capacity exceeds the safe integer range.`
+    )
+  }
+  if (inputPointCount < sourceRowsEmitted || inputPointCount > maximumPointCount) {
+    throw new MaterializationValidationError(
+      `Telemetry projection '${resolved.projectionId}' must emit between ${sourceRowsEmitted} and ${maximumPointCount} points for ${source.sourceRowCount} source rows with ${source.sourceRowsSkipped} skipped.`
+    )
   }
 }
 
@@ -220,8 +245,7 @@ function projectionTelemetryCallerIntent(
     inputPointCount,
     points: input.points,
   }
-  if (input.actor === undefined) return intent
-  return { ...intent, actor: input.actor }
+  return intent
 }
 
 async function assertTelemetryExecution(
@@ -229,7 +253,15 @@ async function assertTelemetryExecution(
   projectId: string,
   command: PreparedTelemetryAppend
 ): Promise<LockedProjectionExecution | null> {
-  if (command.kind === "runtime") return null
+  if (command.kind === "runtime") {
+    assertRuntimeMutationExecution(command.execution)
+    return null
+  }
+  assertTrustedPrimitiveMutationExecution(command.execution, {
+    kind: "projection",
+    id: command.source.projection.projectionId,
+    runId: command.source.execution.projectionRunId,
+  })
   const execution = await lockProjectionRunForMaterialization(storage, {
     projectId,
     projectionRunId: command.source.execution.projectionRunId,
@@ -239,6 +271,11 @@ async function assertTelemetryExecution(
     capabilityErrorMessage:
       "Storage does not provide projection run capabilities required by telemetry projection.",
   })
+  assertMaterializerRunExecution(
+    command.execution,
+    execution.run.executionId,
+    `Projection run '${execution.run.id}'`
+  )
   assertTelemetryBatchPosition(
     execution.run,
     command.source.batchOrdinal,
@@ -327,8 +364,14 @@ async function executeTelemetryTransaction(
   storage: MaterializerStorage,
   command: PreparedTelemetryAppend
 ): Promise<TelemetryCommitResult> {
+  await ensureMaterializerExecution(storage.executions, command.execution)
   const execution = await assertTelemetryExecution(storage, context.projectId, command)
-  const replay = await replayCommitRecord(context, command.identity, storage)
+  const replay = await replayCommitRecord(
+    context,
+    command.identity,
+    command.execution.executionId,
+    storage
+  )
   if (replay) {
     if (command.kind === "projection" && execution) {
       assertTelemetryReplayCheckpoint(execution.run, command.source.batchOrdinal)
@@ -355,7 +398,11 @@ async function executeTelemetryTransaction(
     session,
     command.input,
     command.identity,
-    origin
+    origin,
+    {
+      correlationId: command.execution.correlationId,
+      ...(command.execution.actor === undefined ? {} : { actor: command.execution.actor }),
+    }
   )
   await drainStagedWork(context, storage.ontology.materializations, session)
   const eventCount = await drainStagedEvents(
@@ -426,6 +473,7 @@ function telemetryCommit(
     id: command.identity.commitId,
     idempotencyKey: command.identity.idempotencyKey,
     requestHash: command.identity.requestHash,
+    executionId: command.execution.executionId,
     origin,
     ontologyRevision: command.ontologyRevision,
     intent: telemetryCommitIntent(command),
@@ -444,8 +492,8 @@ function telemetryCommitActor(
   commit: OntologyCommitWrite,
   command: PreparedTelemetryAppend
 ): OntologyCommitWrite {
-  if (command.input.actor === undefined) return commit
-  return { ...commit, actor: command.input.actor }
+  if (command.execution.actor === undefined) return commit
+  return { ...commit, actor: command.execution.actor }
 }
 
 function telemetryCommitIntent(command: PreparedTelemetryAppend): TelemetryOntologyCommitIntent {

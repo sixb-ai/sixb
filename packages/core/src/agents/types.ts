@@ -1,3 +1,4 @@
+import type { BlobBody, FileRef } from "../blob-storage"
 import type { ConnectorRuntime } from "../connectors"
 import type { JsonPrimitive, JsonValue, ReadonlyJsonValue } from "../json"
 import type { Logger } from "../logging"
@@ -67,19 +68,64 @@ export interface AgentToolRunInfo {
   readonly threadId?: string
 }
 
+/** Input accepted by the run-scoped artifact publisher exposed to agent tools. */
+export interface AgentToolArtifactPutInput {
+  readonly body: BlobBody
+  readonly fileName: string
+  readonly mediaType?: string
+}
+
+/** A durable artifact and its path inside the current run sandbox. */
+export interface AgentToolArtifact {
+  readonly fileRef: FileRef
+  readonly sandboxPath: string
+}
+
+/** The narrow artifact-writing surface available to an agent tool call. */
+export interface AgentToolArtifacts {
+  put(input: AgentToolArtifactPutInput): Promise<AgentToolArtifact>
+}
+
+export type AgentToolTextContent = {
+  readonly type: "text"
+  readonly text: string
+}
+
+export type AgentToolFileContent = {
+  readonly type: "file"
+  readonly fileRef: FileRef
+}
+
+/** Durable model-facing content returned by a file-aware tool. */
+export type AgentToolContent = AgentToolTextContent | AgentToolFileContent
+
+/**
+ * A file-aware tool result. The tag distinguishes this envelope from an ordinary JSON result while
+ * keeping the whole value safe to persist in the durable tool-call trace.
+ */
+export type AgentToolResult = {
+  readonly kind: "agentToolResult"
+  readonly content: readonly AgentToolContent[]
+}
+
 /** The narrow, run-scoped surface passed to an agent tool handler. */
 export interface AgentToolRunContext<
   TInput extends Readonly<Record<string, unknown>> = Readonly<Record<string, unknown>>,
 > {
   readonly input: TInput
+  readonly toolCallId: string
   readonly signal: AbortSignal
   readonly run: AgentToolRunInfo
   readonly connector: ConnectorRuntime
   readonly logger: Logger
+  readonly artifacts: AgentToolArtifacts
 }
 
 /** Agent tool handlers may return only values safe to persist in agent messages. */
-export type AgentToolHandlerResult = ReadonlyJsonValue | Promise<ReadonlyJsonValue>
+export type AgentToolHandlerResult =
+  | ReadonlyJsonValue
+  | AgentToolResult
+  | Promise<ReadonlyJsonValue | AgentToolResult>
 
 export type AgentToolHandler<TInput extends Readonly<Record<string, unknown>>> = (
   context: AgentToolRunContext<TInput>

@@ -1,19 +1,28 @@
 import { randomUUID } from "node:crypto"
+import type { ExecutionStorage } from "../executions"
 import type { AssertSourceMaterializationExecutionInput } from "../ontology/sources"
-import { latestStartedAtByOwnerId } from "../run-listing"
+import {
+  compareStartedAt,
+  latestStartedAtByOwnerId,
+  matchesRunListDateFilters,
+} from "../run-listing"
 import { ProjectionRunError } from "./errors"
 import {
   advanceProjectionTelemetry,
   assertGenericProgressDoesNotAdvanceTelemetry,
   assertProjectionMissingTarget,
-  assertProjectionRunExecution,
+  assertProjectionRunAttempt,
+  assertProjectionRunDurableExecution,
   assertProjectionRunIdentityMatches,
   assertProjectionRunListWindow,
   assertProjectionRunNonEmpty,
+  assertProjectionRunQueueInput,
   assertProjectionRunRunning,
   assertProjectionRunStartInput,
+  canRequeueProjectionRunAfterEnqueueFailure,
   createProjectionRunClaim,
   createProjectionRunRecord,
+  failProjectionRunEnqueue,
   finishProjectionRunRecord,
   immutableDatasetVersionConflict,
   mergeProjectionRunProgress,
@@ -23,9 +32,10 @@ import {
   requireTelemetryProjectionRun,
   type StoredProjectionRunRecord,
   staleProjectionRunExecution,
-} from "./lifecycle"
+} from "./provider"
 import {
   type AdvanceProjectionTelemetryCheckpointInput,
+  type FailProjectionRunEnqueueInput,
   type FinishProjectionRunInput,
   type ListLatestProjectionRunsInput,
   type ListLatestProjectionRunsResult,
@@ -36,6 +46,7 @@ import {
   type ProjectionRunRecord,
   type ProjectionRunStorage,
   projectionRunObjectTypesVisible,
+  type QueueProjectionRunInput,
   type RecordProjectionMissingTargetInput,
   type StartOrReclaimProjectionRunInput,
   type TelemetryProjectionRunRecord,
@@ -50,10 +61,7 @@ function projectionRunKey(projectId: string, id: string): string {
 }
 
 function compareRuns(a: ProjectionRunRecord, b: ProjectionRunRecord, order: "asc" | "desc") {
-  const delta = a.startedAt.getTime() - b.startedAt.getTime()
-  if (delta !== 0) return order === "asc" ? delta : -delta
-  if (a.id === b.id) return 0
-  return order === "asc" ? a.id.localeCompare(b.id) : b.id.localeCompare(a.id)
+  return compareStartedAt(a, b, order)
 }
 
 export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
@@ -63,15 +71,17 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
   private readonly runRootOperation: RunRootOperation
   private readonly createExecutionToken: () => string
 
-  constructor(
-    input: {
-      readonly runRootOperation?: RunRootOperation
-      readonly executionToken?: () => string
-    } = {}
-  ) {
+  constructor(input: {
+    readonly executions: ExecutionStorage
+    readonly runRootOperation?: RunRootOperation
+    readonly executionToken?: () => string
+  }) {
+    this.executions = input.executions
     this.runRootOperation = input.runRootOperation ?? runDirectly
     this.createExecutionToken = input.executionToken ?? randomUUID
   }
+
+  private readonly executions: ExecutionStorage
 
   snapshot(): InMemoryProjectionRunStorageSnapshot {
     return structuredClone({
@@ -89,21 +99,75 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
     }
   }
 
+  async queue(input: QueueProjectionRunInput): Promise<ProjectionRunRecord> {
+    return this.runRootOperation(async () => {
+      assertProjectionRunQueueInput(input)
+      this.assertDatasetVersionIsImmutable(input)
+      const key = projectionRunKey(input.projectId, input.id)
+      const existing = this.rows.get(key)
+      if (existing && !canRequeueProjectionRunAfterEnqueueFailure(existing, input)) {
+        throw new ProjectionRunError(
+          `[Sixb] Projection run '${input.id}' already exists for project '${input.projectId}'.`
+        )
+      }
+      if (
+        [...this.rows.values()].some(
+          (run) =>
+            run.projectId === input.projectId &&
+            run.id !== input.id &&
+            run.executionId === input.executionId
+        )
+      ) {
+        throw new ProjectionRunError(
+          `[Sixb] Execution '${input.executionId}' already belongs to another Projection run.`
+        )
+      }
+      await assertProjectionRunDurableExecution({
+        executions: this.executions,
+        projectId: input.projectId,
+        executionId: input.executionId,
+        runId: input.id,
+        projectionId: input.identity.projectionId,
+        datasetId: input.identity.datasetVersion.datasetId,
+        datasetVersionId: input.identity.datasetVersion.versionId,
+      })
+      const record = createProjectionRunRecord(input)
+      this.rows.set(key, structuredClone(record))
+      return publicProjectionRunRecord(record)
+    })
+  }
+
   async startOrReclaim(input: StartOrReclaimProjectionRunInput): Promise<ProjectionRunClaim> {
     return this.runRootOperation(() => {
       assertProjectionRunStartInput(input)
-      this.assertDatasetVersionIsImmutable(input)
-
       const key = projectionRunKey(input.projectId, input.id)
       const existing = this.rows.get(key)
-      const attempt = existing ? planProjectionRunReclaim(existing, input).attempt : 1
-      const executionToken = this.issueExecutionToken(key, input.id, existing?.executionToken)
-      const record: StoredProjectionRunRecord = existing
-        ? { ...existing, attempt, executionToken }
-        : { ...createProjectionRunRecord(input), executionToken }
+      if (!existing) throw projectionRunNotFound(input.projectId, input.id)
+      const attempt = planProjectionRunReclaim(existing, input).attempt
+      const executionToken = this.issueExecutionToken(key, input.id, existing.executionToken)
+      const record: StoredProjectionRunRecord = {
+        ...existing,
+        status: "running",
+        attempt,
+        executionToken,
+        startedAt: existing.startedAt ?? new Date(input.startedAt ?? new Date()),
+        finishedAt: undefined,
+        error: undefined,
+      }
 
       this.rows.set(key, structuredClone(record))
       return createProjectionRunClaim(record)
+    })
+  }
+
+  async failEnqueue(input: FailProjectionRunEnqueueInput): Promise<ProjectionRunRecord> {
+    return this.runRootOperation(() => {
+      const key = projectionRunKey(input.projectId, input.id)
+      const existing = this.rows.get(key)
+      if (!existing) throw projectionRunNotFound(input.projectId, input.id)
+      const next = failProjectionRunEnqueue(existing, input)
+      this.rows.set(key, structuredClone(next))
+      return publicProjectionRunRecord(next)
     })
   }
 
@@ -232,8 +296,13 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
             : true
         )
         .filter((record) => (statuses ? statuses.has(record.status) : true))
-        .filter((record) => (input.startedAfter ? record.startedAt >= input.startedAfter : true))
-        .filter((record) => (input.startedBefore ? record.startedAt <= input.startedBefore : true))
+        .filter((record) =>
+          matchesRunListDateFilters(record, {
+            statuses,
+            startedAfter: input.startedAfter,
+            startedBefore: input.startedBefore,
+          })
+        )
         .sort((left, right) => compareRuns(left, right, order))
 
       const total = filtered.length
@@ -255,7 +324,7 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
     })
   }
 
-  private assertDatasetVersionIsImmutable(input: StartOrReclaimProjectionRunInput): void {
+  private assertDatasetVersionIsImmutable(input: QueueProjectionRunInput): void {
     for (const candidate of this.rows.values()) {
       if (
         candidate.projectId === input.projectId &&
@@ -292,7 +361,7 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
     input: LockProjectionRunForMaterializationInput
   ): StoredProjectionRunRecord & { readonly executionToken: string } {
     const record = this.requireRunning(input.projectId, input.id)
-    assertProjectionRunExecution(record, input)
+    assertProjectionRunAttempt(record, input)
     return record
   }
 

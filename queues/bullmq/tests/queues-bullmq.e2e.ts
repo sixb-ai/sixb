@@ -44,7 +44,7 @@ describe("BullMqQueues (Redis-specific)", () => {
       try {
         await providerA.syncRuns.enqueue({
           projectId: "shared-project",
-          jobs: [{ type: "sync.run.requested", payload: { syncId: "a-1" } }],
+          jobs: [{ type: "sync.run.requested", payload: { runId: "run-a-1" } }],
         })
 
         const claimedByB = await providerB.syncRuns.claim({
@@ -60,7 +60,7 @@ describe("BullMqQueues (Redis-specific)", () => {
 
         expect(claimedByB).toHaveLength(0)
         expect(claimedByA).toHaveLength(1)
-        expect(claimedByA[0]?.job.payload.syncId).toBe("a-1")
+        expect(claimedByA[0]?.job.payload.runId).toBe("run-a-1")
       } finally {
         await providerA.close()
         await providerB.close()
@@ -108,7 +108,7 @@ describe("BullMqQueues (Redis-specific)", () => {
       try {
         await provider.syncRuns.enqueue({
           projectId: "project-a",
-          jobs: [{ type: "sync.run.requested", payload: { syncId: "s-1" } }],
+          jobs: [{ type: "sync.run.requested", payload: { runId: "run-s-1" } }],
         })
 
         expect(duplicateSpy).not.toHaveBeenCalled()
@@ -125,7 +125,7 @@ describe("BullMqQueues (Redis-specific)", () => {
       try {
         await provider.syncRuns.enqueue({
           projectId: "project-a",
-          jobs: [{ type: "sync.run.requested", payload: { syncId: "s-1" } }],
+          jobs: [{ type: "sync.run.requested", payload: { runId: "run-s-1" } }],
         })
         await provider.close()
 
@@ -156,7 +156,7 @@ describe("BullMqQueues (Redis-specific)", () => {
 
       const [job] = await provider.syncRuns.enqueue({
         projectId: "project-a",
-        jobs: [{ type: "sync.run.requested", payload: { syncId: "s-1" } }],
+        jobs: [{ type: "sync.run.requested", payload: { runId: "run-s-1" } }],
       })
       const [firstClaim] = await provider.syncRuns.claim({
         projectId: "project-a",
@@ -189,7 +189,7 @@ describe("BullMqQueues (Redis-specific)", () => {
       try {
         const [job] = await provider.pipelines.enqueue({
           projectId,
-          jobs: [{ type: "pipeline.run.requested", payload: { pipelineId: "pipeline-a" } }],
+          jobs: [{ type: "pipeline.run.requested", payload: { runId: "pipeline-run-a" } }],
         })
         const [claimed] = await provider.pipelines.claim({ projectId, workerId: "worker-a" })
 
@@ -227,7 +227,7 @@ describe("BullMqQueues (Redis-specific)", () => {
       await expect(
         provider.syncRuns.enqueue({
           projectId: "project-a",
-          jobs: [{ type: "sync.run.requested", payload: { syncId: "s-1" } }],
+          jobs: [{ type: "sync.run.requested", payload: { runId: "run-s-1" } }],
         })
       ).rejects.toThrow(/closed/i)
     })

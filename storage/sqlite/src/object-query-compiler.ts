@@ -98,6 +98,8 @@ function compileObjectQueryInternal(
   switch (query.kind) {
     case "start":
       return compileStart(projectId, query)
+    case "refs":
+      return compileRefs(projectId, query)
     case "filter":
       return compileFilter(projectId, query.input, query.predicate)
     case "sort":
@@ -155,6 +157,54 @@ function compileStart(
     args,
     totalSql: "SELECT COUNT(*) as total FROM objects WHERE project_id = ? AND object_type_id = ?",
     totalArgs: [projectId, query.objectTypeId],
+    order,
+    hasMore: () => false,
+    trimRows: identityRows,
+    nextPageToken: () => undefined,
+  }
+}
+
+function compileRefs(
+  projectId: string,
+  query: Extract<ObjectQuery, { kind: "refs" }>
+): CompiledObjectQuery {
+  if (query.refs.length === 0) {
+    throw new Error("[Sixb] SQLite object storage requires at least one ref")
+  }
+
+  const order = compileOrder(identityOrderFields())
+  const selectedOrder = compileOrder(identityOrderFields(), "selected")
+  const refsJson = JSON.stringify(query.refs)
+  const requested = `
+    SELECT DISTINCT
+      json_extract(ref.value, '$.objectTypeId') AS object_type_id,
+      json_extract(ref.value, '$.primaryId') AS primary_id
+    FROM json_each(?) AS ref
+  `
+  const sql = `
+    WITH requested AS (${requested})
+    SELECT selected.*, selected.properties AS _cursor_properties
+    FROM requested
+    JOIN objects AS selected
+      ON selected.project_id = ?
+     AND selected.object_type_id = requested.object_type_id
+     AND selected.primary_id = requested.primary_id
+    ORDER BY ${selectedOrder.sql}
+  `
+
+  return {
+    sql,
+    args: [refsJson, projectId, ...selectedOrder.args],
+    totalSql: `
+      WITH requested AS (${requested})
+      SELECT COUNT(*) AS total
+      FROM requested
+      JOIN objects AS selected
+        ON selected.project_id = ?
+       AND selected.object_type_id = requested.object_type_id
+       AND selected.primary_id = requested.primary_id
+    `,
+    totalArgs: [refsJson, projectId],
     order,
     hasMore: () => false,
     trimRows: identityRows,

@@ -1,4 +1,5 @@
 import type { TrustedPrimitiveKind } from "../../execution/types"
+import { ExecutionStorageError } from "./errors"
 import type { CreateExecutionInput, ExecutionRecord } from "./types"
 import { normalizeExecutionRecord } from "./validation"
 
@@ -14,11 +15,12 @@ export interface ExecutionStorageRow {
   readonly id: string
   readonly executorKind: "agent" | "kernel" | "request" | TrustedPrimitiveKind
   readonly executorId: string
-  readonly sourceKind: "event" | "execution" | "http" | "schedule" | "webhook"
+  readonly sourceKind: "datasetVersion" | "event" | "execution" | "http" | "schedule" | "webhook"
   readonly sourceId: string
   readonly requestedByUserId: string | null
   readonly requestedByServiceAccountId: string | null
   readonly correlationId: string
+  /** SQL-only projection of an execution source, used to enforce the parent foreign key. */
   readonly parentExecutionId: string | null
   readonly authorityKind: "disabled" | "kernel" | "principal" | "trustedPrimitive"
   readonly authorityUserId: string | null
@@ -44,7 +46,7 @@ export function executionRecordToStorageRow(record: ExecutionRecord): ExecutionS
     requestedByServiceAccountId:
       record.requestedBy?.type === "serviceAccount" ? record.requestedBy.id : null,
     correlationId: record.correlationId,
-    parentExecutionId: record.parentExecutionId ?? null,
+    parentExecutionId: record.source.type === "execution" ? record.source.executionId : null,
     ...authority,
     createdAt: new Date(record.createdAt),
   }
@@ -53,6 +55,7 @@ export function executionRecordToStorageRow(record: ExecutionRecord): ExecutionS
 export function executionRecordFromStorageRow(row: ExecutionStorageRow): ExecutionRecord {
   const executor = inflateExecutor(row)
   const source = inflateSource(row)
+  assertStoredParent(row, source)
   const authorizationRef = inflateAuthority(row)
   const requestedBy = row.requestedByUserId
     ? ({ type: "user", id: row.requestedByUserId } as const)
@@ -68,11 +71,23 @@ export function executionRecordFromStorageRow(row: ExecutionStorageRow): Executi
       executor,
       source,
       correlationId: row.correlationId,
-      ...(row.parentExecutionId === null ? {} : { parentExecutionId: row.parentExecutionId }),
       authorizationRef,
     },
     row.createdAt
   )
+}
+
+function assertStoredParent(
+  row: ExecutionStorageRow,
+  source: CreateExecutionInput["source"]
+): void {
+  const expected = source.type === "execution" ? source.executionId : null
+  if (row.parentExecutionId !== expected) {
+    throw new ExecutionStorageError(
+      "invalid_parent_execution",
+      `[Sixb] Stored execution '${row.id}' has inconsistent parent execution provenance.`
+    )
+  }
 }
 
 function flattenExecutor(
@@ -101,6 +116,11 @@ function flattenSource(
     case "schedule":
     case "event":
       return { sourceKind: record.source.type, sourceId: record.source.eventId }
+    case "datasetVersion":
+      return {
+        sourceKind: "datasetVersion",
+        sourceId: JSON.stringify([record.source.datasetId, record.source.versionId]),
+      }
     case "execution":
       return { sourceKind: "execution", sourceId: record.source.executionId }
   }
@@ -197,9 +217,29 @@ function inflateSource(row: ExecutionStorageRow): CreateExecutionInput["source"]
     case "schedule":
     case "event":
       return { type: row.sourceKind, eventId: row.sourceId }
+    case "datasetVersion": {
+      const [datasetId, versionId] = parseDatasetVersionSourceId(row.sourceId)
+      return { type: "datasetVersion", datasetId, versionId }
+    }
     case "execution":
       return { type: "execution", executionId: row.sourceId }
   }
+}
+
+function parseDatasetVersionSourceId(sourceId: string): readonly [string, string] {
+  try {
+    const parsed: unknown = JSON.parse(sourceId)
+    if (
+      Array.isArray(parsed) &&
+      parsed.length === 2 &&
+      parsed.every((value) => typeof value === "string" && value.trim().length > 0)
+    ) {
+      return parsed as unknown as readonly [string, string]
+    }
+  } catch {
+    // Fall through to the provider-corruption error below.
+  }
+  throw new Error("[Sixb] Stored dataset-version execution source is malformed.")
 }
 
 function inflateAuthority(row: ExecutionStorageRow): CreateExecutionInput["authorizationRef"] {

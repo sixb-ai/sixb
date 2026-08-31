@@ -36,6 +36,7 @@ export function contractEditHeader(id: string): MaterializationPlanHeader {
       id,
       idempotencyKey: `runtime:${id}`,
       requestHash: `hash:${id}`,
+      executionId: `contract-execution:${id}`,
       origin: { kind: "runtime", requestId: id },
       ontologyRevision: "ontology-contract-revision",
       intent: { kind: "edit", mode: "atomic", operationCount: 0 },
@@ -67,7 +68,9 @@ export function contractEditResult(commitId: string, eventCount = 0) {
 
 export async function commitEmptyEdit(storage: OntologyContractStorage, id: string): Promise<void> {
   await storage.transaction(async (tx) => {
-    const session = await tx.ontology.materializations.begin(contractEditHeader(id))
+    const header = contractEditHeader(id)
+    await ensureContractExecution(tx, header)
+    const session = await tx.ontology.materializations.begin(header)
     await tx.ontology.materializations.finalize({
       session,
       finalization: { sourceActivations: [], result: contractEditResult(id) },
@@ -104,6 +107,7 @@ export async function commitExactObject(
     schemaVersion: 1 as const,
     projectId: header.commit.projectId,
     occurredAt: header.commit.committedAt,
+    correlationId: `contract-correlation:${id}`,
     origin: header.commit.origin,
     commitId: id,
     type: "object.created" as const,
@@ -140,6 +144,7 @@ export async function commitExactObject(
   ]
 
   await storage.transaction(async (tx) => {
+    await ensureContractExecution(tx, header)
     const materializations = tx.ontology.materializations
     const session = await materializations.begin(header)
     await materializations.stageWork({ session, records: work })
@@ -195,4 +200,26 @@ export async function commitExactObject(
   })
 
   return { eventId }
+}
+
+export async function ensureContractExecution(
+  storage: Pick<Storage, "executions">,
+  header: MaterializationPlanHeader
+): Promise<void> {
+  if (
+    await storage.executions.getById({
+      projectId: header.commit.projectId,
+      id: header.commit.executionId,
+    })
+  ) {
+    return
+  }
+  await storage.executions.create({
+    id: header.commit.executionId,
+    projectId: header.commit.projectId,
+    executor: { type: "request", requestId: `contract-request:${header.commit.id}` },
+    source: { type: "http", requestId: `contract-request:${header.commit.id}` },
+    correlationId: `contract-correlation:${header.commit.id}`,
+    authorizationRef: { type: "disabled" },
+  })
 }

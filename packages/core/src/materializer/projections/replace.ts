@@ -24,7 +24,15 @@ import type {
 import type { MaterializerContext, MaterializerStorage } from "../context"
 import { replayCommitRecord, withSerializationRetry } from "../execution/commit-lifecycle"
 import { lockProjectionRunForMaterialization } from "../execution/run-correlation"
+import {
+  assertMaterializerRunExecution,
+  assertTrustedPrimitiveMutationExecution,
+  ensureMaterializerExecution,
+  type MaterializerExecution,
+  prepareMaterializerExecution,
+} from "../execution/scope"
 import { drainStagedEvents, drainStagedWork } from "../execution/work-executor"
+import type { MaterializerCommand } from "../materializer"
 import { throwIfAborted } from "../shared/abort"
 import {
   type CommitIdentity,
@@ -58,6 +66,7 @@ interface PreparedProjectionReplacement {
   readonly projectionKind: "object" | "link"
   readonly runIdentity: ProjectionMaterializationIdentity
   readonly identity: CommitIdentity
+  readonly scopeExecution: MaterializerExecution
 }
 
 interface ProjectionCandidate {
@@ -77,15 +86,10 @@ interface ReadyProjectionReplacement extends ProjectionCandidate {
 
 export async function replaceProjection(
   context: MaterializerContext,
-  raw: ProjectionSourceReplacement
+  raw: MaterializerCommand<ProjectionSourceReplacement>
 ): Promise<ProjectionCommitResult> {
   const command = prepareProjectionReplacement(context, raw)
-  await assertProjectionExecution(context.storage, context.projectId, command, {
-    capabilityErrorMessage:
-      "Storage does not provide projection run capabilities required by source replacement.",
-  })
-
-  const replay = await replayProjectionCommit(context, command)
+  const replay = await admitProjectionExecution(context, command)
   if (replay) return replay
 
   const candidate = await prepareProjectionCandidate(context, command)
@@ -100,11 +104,11 @@ export async function replaceProjection(
 
 function prepareProjectionReplacement(
   context: Pick<MaterializerContext, "projectId" | "projectionRegistry">,
-  raw: ProjectionSourceReplacement
+  raw: MaterializerCommand<ProjectionSourceReplacement>
 ): PreparedProjectionReplacement {
-  const source = normalizeProjectionSourceRef(raw.source)
-  const datasetVersion = normalizePinnedDatasetVersion(raw.datasetVersion)
-  const execution = normalizeProjectionExecution(raw.execution)
+  const source = normalizeProjectionSourceRef(raw.input.source)
+  const datasetVersion = normalizePinnedDatasetVersion(raw.input.datasetVersion)
+  const execution = normalizeProjectionExecution(raw.input.execution)
   const resolved = context.projectionRegistry.resolveSource(source.projectionId)
   validateProjectionDataset(resolved, datasetVersion)
 
@@ -123,14 +127,15 @@ function prepareProjectionReplacement(
     source,
     datasetVersion,
     execution,
-    entries: raw.entries,
+    entries: raw.input.entries,
     resolved,
     projectionKind,
     runIdentity,
     identity,
+    scopeExecution: prepareMaterializerExecution(context.projectId, raw.scope),
   }
-  if (raw.signal === undefined) return command
-  return { ...command, signal: raw.signal }
+  if (raw.input.signal === undefined) return command
+  return { ...command, signal: raw.input.signal }
 }
 
 function validateProjectionDataset(
@@ -154,7 +159,12 @@ async function assertProjectionExecution(
   command: PreparedProjectionReplacement,
   options: { readonly capabilityErrorMessage?: string } = {}
 ): Promise<void> {
-  await lockProjectionRunForMaterialization(storage, {
+  assertTrustedPrimitiveMutationExecution(command.scopeExecution, {
+    kind: "projection",
+    id: command.source.projectionId,
+    runId: command.execution.projectionRunId,
+  })
+  const locked = await lockProjectionRunForMaterialization(storage, {
     projectId,
     projectionRunId: command.execution.projectionRunId,
     executionToken: command.execution.executionToken,
@@ -162,19 +172,31 @@ async function assertProjectionExecution(
     resolved: command.resolved,
     ...options,
   })
+  assertMaterializerRunExecution(
+    command.scopeExecution,
+    locked.run.executionId,
+    `Projection run '${locked.run.id}'`
+  )
 }
 
-async function replayProjectionCommit(
+async function admitProjectionExecution(
   context: MaterializerContext,
   command: PreparedProjectionReplacement
 ): Promise<ProjectionCommitResult | null> {
-  const existing = await replayCommitRecord(context, command.identity)
-  if (!existing) return null
   return withSerializationRetry(context, () =>
     context.storage.transaction(
       async (storage) => {
-        await assertProjectionExecution(storage, context.projectId, command)
-        const commit = await replayCommitRecord(context, command.identity, storage)
+        await ensureMaterializerExecution(storage.executions, command.scopeExecution)
+        await assertProjectionExecution(storage, context.projectId, command, {
+          capabilityErrorMessage:
+            "Storage does not provide projection run capabilities required by source replacement.",
+        })
+        const commit = await replayCommitRecord(
+          context,
+          command.identity,
+          command.scopeExecution.executionId,
+          storage
+        )
         return commit ? projectionReplayResult(commit, command) : null
       },
       { isolation: "serializable" }
@@ -280,8 +302,14 @@ async function executeProjectionTransaction(
   command: PreparedProjectionReplacement,
   ready: ReadyProjectionReplacement
 ): Promise<ProjectionCommitResult> {
+  await ensureMaterializerExecution(storage.executions, command.scopeExecution)
   await assertProjectionExecution(storage, context.projectId, command)
-  const replay = await replayCommitRecord(context, command.identity, storage)
+  const replay = await replayCommitRecord(
+    context,
+    command.identity,
+    command.scopeExecution.executionId,
+    storage
+  )
   if (replay) return projectionReplayResult(replay, command)
 
   const origin = projectionOrigin(command)
@@ -362,6 +390,7 @@ function projectionCommit(
     id: identity.commitId,
     idempotencyKey: identity.idempotencyKey,
     requestHash: identity.requestHash,
+    executionId: command.scopeExecution.executionId,
     origin,
     ontologyRevision: command.runIdentity.ontologyRevision,
     projectionRevision: command.runIdentity.projectionRevision,
@@ -385,6 +414,7 @@ async function planReadyProjection(
     projectionKind: command.projectionKind,
     identity: ready.identity,
     origin,
+    correlationId: command.scopeExecution.correlationId,
   }
   if (command.signal === undefined) {
     return planProjectionReplacement(context, storage, session, input)
@@ -435,7 +465,10 @@ async function abandonFailedCandidate(
 function shouldAbandonCandidate(error: unknown): boolean {
   if (error instanceof MaterializationValidationError) return true
   if (error instanceof MaterializationCancellationError) return true
-  return error instanceof MaterializationConflictError && error.kind === "run-correlation"
+  return (
+    error instanceof MaterializationConflictError &&
+    (error.kind === "run-correlation" || error.kind === "idempotency")
+  )
 }
 
 function validateProjectionWatermark(

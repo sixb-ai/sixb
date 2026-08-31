@@ -1,8 +1,12 @@
+import type { MetaBatchApi } from "./batch"
 import type { FacebookPageApi } from "./facebook"
 import type { InstagramMediaApi, InstagramUserApi } from "./instagram"
 import type { PagesApi } from "./pages"
 
 export interface MetaClient {
+  /** Read-only Graph API batch requests. */
+  readonly batch: MetaBatchApi
+
   /** `GET /me/accounts` — Facebook Pages and their linked Instagram accounts. */
   readonly pages: PagesApi
 

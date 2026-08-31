@@ -36,6 +36,9 @@ function projectionDatasetColumns(projection: ProjectionDefinition): ReadonlySet
       ...Object.values(projection.links).flatMap((link) =>
         link.sourceField === undefined ? [] : [link.sourceField]
       ),
+      ...(projection.conflictResolution?.strategy === "mostRecent"
+        ? [projection.conflictResolution.sourceTimestamp]
+        : []),
     ])
   }
   if (projection._tag === "LinkProjectionDefinition") {
@@ -44,8 +47,10 @@ function projectionDatasetColumns(projection: ProjectionDefinition): ReadonlySet
   return new Set([
     projection.objectIdField,
     projection.atField,
-    projection.valueField,
-    ...(projection.unitField === undefined ? [] : [projection.unitField]),
+    ...Object.values(projection.properties).flatMap((mapping) => [
+      mapping.valueField,
+      ...(mapping.unitField === undefined ? [] : [mapping.unitField]),
+    ]),
   ])
 }
 
@@ -145,6 +150,26 @@ export function assertProjectionCompatibleWithDataset(input: {
       }
     }
 
+    if (projection.conflictResolution?.strategy === "mostRecent") {
+      const column = requireColumn(
+        columnsByName,
+        projection.conflictResolution.sourceTimestamp,
+        context
+      )
+      if (column.type !== "timestamp") {
+        throw invalidProjectionDefinition(
+          `[SixbProjectionWorker] Projection '${projection.id}' source timestamp '${column.name}' must be a timestamp dataset column.`,
+          { ...context, columnName: column.name, columnType: column.type }
+        )
+      }
+      if (column.nullable === true) {
+        throw invalidProjectionDefinition(
+          `[SixbProjectionWorker] Projection '${projection.id}' source timestamp '${column.name}' must be a non-null timestamp dataset column.`,
+          { ...context, columnName: column.name, columnType: column.type, nullable: true }
+        )
+      }
+    }
+
     for (const [linkKey, descriptor] of Object.entries(projection.links)) {
       if (linkKey !== descriptor.linkId) {
         throw invalidProjectionDefinition(
@@ -227,10 +252,11 @@ export function assertProjectionCompatibleWithDataset(input: {
     // startup and worker checks share one implementation and cannot drift. The
     // worker then layers dataset-version column type compatibility on top.
     const datasetColumnNames = new Set(dataset.schema.columns.map((column) => column.name))
-    const property = validateTelemetryProjectionFieldMapping(
+    const properties = validateTelemetryProjectionFieldMapping(
       projection,
       objectType,
       datasetColumnNames,
+      ontology.getValueTypesById(),
       `[SixbProjectionWorker] Projection "${projection.id}"`
     )
 
@@ -260,44 +286,55 @@ export function assertProjectionCompatibleWithDataset(input: {
       )
     }
 
-    const valueColumn = requireColumn(columnsByName, projection.valueField, context)
-    if (
-      !isDatasetColumnCompatibleWithSchema(
-        valueColumn.type,
-        property.schema,
-        ontology.getValueTypesById(),
-        {
-          ...context,
-          objectTypeId: objectType.id,
-          propertyId: property.id,
-          columnName: valueColumn.name,
-        }
-      )
-    ) {
-      throw invalidProjectionDefinition(
-        `[SixbProjectionWorker] Telemetry projection '${projection.id}' maps dataset column '${valueColumn.name}' (${valueColumn.type}) to incompatible property '${projection.propertyId}'.`,
-        {
-          ...context,
-          objectTypeId: objectType.id,
-          propertyId: projection.propertyId,
-          columnName: valueColumn.name,
-          columnType: valueColumn.type,
-        }
-      )
-    }
-
-    if (projection.unitField !== undefined) {
-      const unitColumn = requireColumn(columnsByName, projection.unitField, context)
-      if (unitColumn.type !== "string") {
+    for (const [propertyId, mapping] of Object.entries(projection.properties)) {
+      const property = properties.get(propertyId)
+      if (!property) {
         throw invalidProjectionDefinition(
-          `[SixbProjectionWorker] Telemetry projection '${projection.id}' unit field '${projection.unitField}' must be a string dataset column.`,
+          `[SixbProjectionWorker] Telemetry projection '${projection.id}' property '${propertyId}' was not validated before execution.`,
+          { ...context, objectTypeId: objectType.id, propertyId }
+        )
+      }
+
+      const valueColumn = requireColumn(columnsByName, mapping.valueField, context)
+      if (
+        !isDatasetColumnCompatibleWithSchema(
+          valueColumn.type,
+          property.schema,
+          ontology.getValueTypesById(),
           {
             ...context,
             objectTypeId: objectType.id,
-            columnName: projection.unitField,
-            columnType: unitColumn.type,
+            propertyId,
+            columnName: valueColumn.name,
           }
         )
+      ) {
+        throw invalidProjectionDefinition(
+          `[SixbProjectionWorker] Telemetry projection '${projection.id}' maps dataset column '${valueColumn.name}' (${valueColumn.type}) to incompatible property '${propertyId}'.`,
+          {
+            ...context,
+            objectTypeId: objectType.id,
+            propertyId,
+            columnName: valueColumn.name,
+            columnType: valueColumn.type,
+          }
+        )
+      }
+
+      if (mapping.unitField !== undefined) {
+        const unitColumn = requireColumn(columnsByName, mapping.unitField, context)
+        if (unitColumn.type !== "string") {
+          throw invalidProjectionDefinition(
+            `[SixbProjectionWorker] Telemetry projection '${projection.id}' property '${propertyId}' unit field '${mapping.unitField}' must be a string dataset column.`,
+            {
+              ...context,
+              objectTypeId: objectType.id,
+              propertyId,
+              columnName: mapping.unitField,
+              columnType: unitColumn.type,
+            }
+          )
+        }
       }
     }
 

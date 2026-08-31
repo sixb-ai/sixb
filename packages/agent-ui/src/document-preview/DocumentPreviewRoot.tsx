@@ -14,22 +14,38 @@ import { useIsMobile } from "@sixb/ui/hooks"
 import { cn } from "@sixb/ui/lib/utils"
 import { Download, ExternalLink, FileWarning, X } from "lucide-react"
 import {
+  Component,
   createContext,
+  memo,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
 } from "react"
-import { useDelimitedTextDocument, useHtmlDocument, useMarkdownDocument } from "./content"
+import {
+  useCustomDocument,
+  useDelimitedTextDocument,
+  useHtmlDocument,
+  useMarkdownDocument,
+} from "./content"
 import { DelimitedTextParseError, type DelimitedTextPreview, parseDelimitedText } from "./delimited"
+import { formatFileSize } from "./file-size"
 import { buildSafeHtmlPreviewDocument, HTML_PREVIEW_SANDBOX } from "./html"
+import {
+  documentPreviewStorageKey,
+  parseDocumentPreviewState,
+  readDocumentPreviewState,
+  writeDocumentPreviewState,
+} from "./persistence"
 import { documentPreviewPresentation } from "./presentation"
-import { agentDocumentPreviewRenderer } from "./rendering"
+import { resolveAgentDocumentPreview } from "./rendering"
 import {
   type DocumentPreviewState,
   type DocumentTabNavigationKey,
@@ -37,9 +53,10 @@ import {
   documentTabIdAfterKey,
   EMPTY_DOCUMENT_PREVIEW_STATE,
 } from "./state"
-import type { AgentDocumentSource } from "./types"
+import type { AgentDocumentPreviewRenderer, AgentDocumentSource } from "./types"
 
 interface DocumentPreviewContextValue {
+  readonly canPreview: (document: AgentDocumentSource) => boolean
   readonly openDocument: (document: AgentDocumentSource) => void
 }
 
@@ -49,30 +66,80 @@ interface DocumentViewerProps {
   readonly onSelect: (id: string) => void
   readonly onClose: (id: string) => void
   readonly onCloseAll: () => void
+  readonly renderers: readonly AgentDocumentPreviewRenderer[]
 }
 
 interface PreviewPanelHandle {
   collapse(): void
   expand(): void
+  getSize(): { readonly asPercentage: number; readonly inPixels: number }
   isCollapsed(): boolean
   resize(size: number | string): void
 }
 
 const DocumentPreviewContext = createContext<DocumentPreviewContextValue | null>(null)
+const NO_CUSTOM_RENDERERS: readonly AgentDocumentPreviewRenderer[] = []
 
 export function DocumentPreviewRoot({
   children,
   compact = false,
+  scopeKey,
+  persistenceKey,
+  documentPreviewRenderers = NO_CUSTOM_RENDERERS,
 }: {
   readonly children: ReactNode
   readonly compact?: boolean
+  /** Selects the isolated preview state for the current conversation or draft. */
+  readonly scopeKey?: string | null
+  /** Persist open tabs, the active document, and panel width for a durable thread. */
+  readonly persistenceKey?: string | null
+  /** Viewers supplied by the host. The first match overrides the built-in viewer. */
+  readonly documentPreviewRenderers?: readonly AgentDocumentPreviewRenderer[]
 }) {
   const idPrefix = useId()
-  const [state, dispatch] = useReducer(documentPreviewReducer, EMPTY_DOCUMENT_PREVIEW_STATE)
+  const previewScopeKey = persistenceKey ? `thread:${persistenceKey}` : `scope:${scopeKey ?? ""}`
+  const restoredState = useMemo(
+    () =>
+      persistenceKey ? readDocumentPreviewState(persistenceKey) : EMPTY_DOCUMENT_PREVIEW_STATE,
+    [persistenceKey]
+  )
+  const [state, dispatch] = useReducer(documentPreviewReducer, restoredState)
   const [revealVersion, revealDocument] = useReducer((version: number) => version + 1, 0)
   const openerRef = useRef<HTMLElement | null>(null)
-  const activeDocument = state.documents.find((document) => document.id === state.activeId) ?? null
+  const revealScopeRef = useRef<string | null>(null)
+  const stateScopeRef = useRef(previewScopeKey)
+  const visibleState = stateScopeRef.current === previewScopeKey ? state : restoredState
+  const activeDocument =
+    visibleState.documents.find((document) => document.id === visibleState.activeId) ?? null
   const presentation = documentPreviewPresentation(compact, useIsMobile())
+
+  useLayoutEffect(() => {
+    stateScopeRef.current = previewScopeKey
+    dispatch({ type: "restore", state: restoredState })
+    openerRef.current = null
+  }, [previewScopeKey, restoredState])
+
+  useEffect(() => {
+    if (!persistenceKey || stateScopeRef.current !== previewScopeKey || state !== visibleState)
+      return
+    writeDocumentPreviewState(persistenceKey, state)
+  }, [persistenceKey, previewScopeKey, state, visibleState])
+
+  useEffect(() => {
+    if (!persistenceKey || typeof window === "undefined") return
+
+    const storageKey = documentPreviewStorageKey(persistenceKey)
+    const syncPreviewState = (event: StorageEvent) => {
+      if (event.storageArea !== window.localStorage || event.key !== storageKey) return
+      dispatch({
+        type: "restore",
+        state: parseDocumentPreviewState(event.newValue, persistenceKey),
+      })
+    }
+
+    window.addEventListener("storage", syncPreviewState)
+    return () => window.removeEventListener("storage", syncPreviewState)
+  }, [persistenceKey])
 
   const restoreOpenerFocus = useCallback(() => {
     const opener = openerRef.current
@@ -82,42 +149,73 @@ export function DocumentPreviewRoot({
   }, [])
   const openDocument = useCallback(
     (source: AgentDocumentSource) => {
-      if (state.documents.length === 0 && typeof window !== "undefined") {
+      if (visibleState.documents.length === 0 && typeof window !== "undefined") {
         const activeElement = window.document.activeElement
         openerRef.current = activeElement instanceof HTMLElement ? activeElement : null
       }
       dispatch({ type: "open", document: source })
+      revealScopeRef.current = previewScopeKey
       revealDocument()
     },
-    [state.documents.length]
+    [previewScopeKey, visibleState.documents.length]
   )
   const closeDocument = useCallback(
     (id: string) => {
-      const closesLastDocument = state.documents.length === 1 && state.documents[0]?.id === id
+      const closesLastDocument =
+        visibleState.documents.length === 1 && visibleState.documents[0]?.id === id
       dispatch({ type: "close", id })
       if (closesLastDocument) restoreOpenerFocus()
     },
-    [restoreOpenerFocus, state.documents]
+    [restoreOpenerFocus, visibleState.documents]
   )
   const closeAllDocuments = useCallback(() => {
     dispatch({ type: "close-all" })
     restoreOpenerFocus()
   }, [restoreOpenerFocus])
-  const context = useMemo<DocumentPreviewContextValue>(() => ({ openDocument }), [openDocument])
-  const viewerProps: DocumentViewerProps = {
-    idPrefix,
-    state,
-    onSelect: (id) => dispatch({ type: "select", id }),
-    onClose: closeDocument,
-    onCloseAll: closeAllDocuments,
-  }
+  const selectDocument = useCallback((id: string) => dispatch({ type: "select", id }), [])
+  const savePanelWidth = useCallback(
+    (width: number) => dispatch({ type: "set-panel-width", width }),
+    []
+  )
+  const canPreview = useCallback(
+    (document: AgentDocumentSource) =>
+      resolveAgentDocumentPreview(document, documentPreviewRenderers) !== null,
+    [documentPreviewRenderers]
+  )
+  const context = useMemo<DocumentPreviewContextValue>(
+    () => ({ canPreview, openDocument }),
+    [canPreview, openDocument]
+  )
+  const viewerProps = useMemo<DocumentViewerProps>(
+    () => ({
+      idPrefix,
+      state: visibleState,
+      onSelect: selectDocument,
+      onClose: closeDocument,
+      onCloseAll: closeAllDocuments,
+      renderers: documentPreviewRenderers,
+    }),
+    [
+      closeAllDocuments,
+      closeDocument,
+      documentPreviewRenderers,
+      idPrefix,
+      selectDocument,
+      visibleState,
+    ]
+  )
 
   return (
     <DocumentPreviewContext.Provider value={context}>
       {presentation === "panel" ? (
         <DocumentPreviewWorkspace
-          open={activeDocument !== null}
-          revealVersion={revealVersion}
+          revealKey={
+            activeDocument ? `${previewScopeKey}:${activeDocument.id}:${revealVersion}` : null
+          }
+          scopeKey={previewScopeKey}
+          panelWidth={visibleState.panelWidth}
+          onPanelResize={savePanelWidth}
+          focusActiveTab={revealVersion > 0 && revealScopeRef.current === previewScopeKey}
           viewerProps={viewerProps}
         >
           {children}
@@ -138,44 +236,79 @@ export function useDocumentPreview(): DocumentPreviewContextValue | null {
   return useContext(DocumentPreviewContext)
 }
 
+// Keep the conversation wrapper stable while the document panel opens, closes, or changes tabs.
+const ConversationPane = memo(function ConversationPane({ children }: { children: ReactNode }) {
+  return <div className="h-full min-h-0 min-w-0">{children}</div>
+})
+
 function DocumentPreviewWorkspace({
   children,
-  open,
-  revealVersion,
+  revealKey,
+  scopeKey,
+  panelWidth,
+  onPanelResize,
+  focusActiveTab,
   viewerProps,
 }: {
   children: ReactNode
-  open: boolean
-  revealVersion: number
+  revealKey: string | null
+  scopeKey: string
+  panelWidth: number | null
+  onPanelResize: (width: number) => void
+  focusActiveTab: boolean
   viewerProps: DocumentViewerProps
 }) {
+  const open = revealKey !== null
   const panelRef = useRef<PreviewPanelHandle | null>(null)
-  const openedOnceRef = useRef(false)
+  const scopeRef = useRef(scopeKey)
+  const appliedWidthRef = useRef<number | null>(null)
+  const needsWidthRef = useRef(true)
+
+  const persistPanelWidth = useCallback(() => {
+    const size = panelRef.current?.getSize()
+    if (!open || !size || size.inPixels <= 0) return
+
+    const width = Math.round(size.inPixels)
+    appliedWidthRef.current = width
+    onPanelResize(width)
+  }, [onPanelResize, open])
 
   useEffect(() => {
     const panel = panelRef.current
     if (!panel) return
 
-    if (!open) {
+    if (scopeRef.current !== scopeKey) {
+      scopeRef.current = scopeKey
+      appliedWidthRef.current = null
+      needsWidthRef.current = true
+    }
+
+    if (revealKey === null) {
       panel.collapse()
       return
     }
 
-    if (!openedOnceRef.current) {
-      openedOnceRef.current = true
-      panel.resize("50%")
+    if (needsWidthRef.current || (panelWidth !== null && panelWidth !== appliedWidthRef.current)) {
+      needsWidthRef.current = false
+      appliedWidthRef.current = panelWidth
+      panel.resize(panelWidth ?? "50%")
       return
     }
 
-    // A repeated click on an already-open document increments `revealVersion`; expand the pane
-    // again if the user previously collapsed it by dragging the separator.
-    if (panel.isCollapsed() || revealVersion > 0) panel.expand()
-  }, [open, revealVersion])
+    // Reopening or clicking an already-open document should restore a pane the user collapsed by
+    // dragging the separator. `revealKey` changes for a new scope, tab, or repeated file click.
+    if (panel.isCollapsed()) panel.expand()
+  }, [panelWidth, revealKey, scopeKey])
 
   return (
-    <ResizablePanelGroup id="agent-document-workspace" orientation="horizontal" className="min-h-0">
+    <ResizablePanelGroup
+      id="agent-document-workspace"
+      orientation="horizontal"
+      onLayoutChanged={persistPanelWidth}
+      className="min-h-0"
+    >
       <ResizablePanel id="agent-conversation" defaultSize="100%" minSize="30%">
-        <div className="h-full min-h-0 min-w-0">{children}</div>
+        <ConversationPane>{children}</ConversationPane>
       </ResizablePanel>
       <ResizableHandle
         className={cn(
@@ -186,8 +319,9 @@ function DocumentPreviewWorkspace({
       <ResizablePanel
         id="agent-document-preview"
         defaultSize="0%"
-        minSize="30%"
-        maxSize="70%"
+        minSize="20rem"
+        maxSize="65%"
+        groupResizeBehavior="preserve-pixel-size"
         collapsedSize="0%"
         collapsible
         panelRef={(panel) => {
@@ -196,7 +330,11 @@ function DocumentPreviewWorkspace({
       >
         <div className="flex h-full min-h-0 min-w-0 flex-col bg-background">
           {open ? (
-            <DocumentViewer {...viewerProps} showActionLabels={false} focusActiveTab />
+            <DocumentViewer
+              {...viewerProps}
+              showActionLabels={false}
+              focusActiveTab={focusActiveTab}
+            />
           ) : null}
         </div>
       </ResizablePanel>
@@ -244,6 +382,7 @@ function DocumentViewer({
   onSelect,
   onClose,
   onCloseAll,
+  renderers,
   showActionLabels,
   focusActiveTab,
 }: DocumentViewerProps & {
@@ -273,7 +412,7 @@ function DocumentViewer({
           aria-labelledby={documentTabDomId(idPrefix, activeDocument.id)}
           className="flex min-h-0 flex-1 flex-col"
         >
-          <DocumentContent document={activeDocument} />
+          <DocumentContent document={activeDocument} renderers={renderers} />
         </div>
       ) : null}
     </>
@@ -346,7 +485,7 @@ function DocumentTabs({
       <div
         role="tablist"
         aria-label="Open documents"
-        className="scrollbar-thin flex h-full min-w-0 flex-1 overflow-x-auto"
+        className="scrollbar-thin flex h-full min-w-0 flex-1 overflow-x-auto overflow-y-hidden"
       >
         {documents.map((document) => {
           const active = document.id === activeId
@@ -438,18 +577,110 @@ function DocumentTabs({
   )
 }
 
-function DocumentContent({ document }: { document: AgentDocumentSource }) {
-  const renderer = agentDocumentPreviewRenderer(document.kind)
-  if (renderer === "markdown") return <MarkdownDocument document={document} />
-  if (renderer === "html-static") return <HtmlDocument document={document} />
-  if (renderer === "delimited-text") return <DelimitedTextDocument document={document} />
-  if (renderer === "pdf-native") return <PdfDocument document={document} />
+function DocumentContent({
+  document,
+  renderers,
+}: {
+  readonly document: AgentDocumentSource
+  readonly renderers: readonly AgentDocumentPreviewRenderer[]
+}) {
+  const resolution = resolveAgentDocumentPreview(document, renderers)
+  if (resolution?.type === "custom") {
+    return <CustomDocument document={document} renderer={resolution.renderer} />
+  }
+  if (resolution?.renderer === "markdown") return <MarkdownDocument document={document} />
+  if (resolution?.renderer === "html-static") return <HtmlDocument document={document} />
+  if (resolution?.renderer === "delimited-text") {
+    return <DelimitedTextDocument document={document} />
+  }
+  if (resolution?.renderer === "pdf-native") return <PdfDocument document={document} />
+  if (resolution?.renderer === "image-native") return <ImageDocument document={document} />
 
   return (
     <DocumentNotice
       title="Preview unavailable"
       description="This file type is not available in the document viewer yet."
     />
+  )
+}
+
+function CustomDocument({
+  document,
+  renderer,
+}: {
+  readonly document: AgentDocumentSource
+  readonly renderer: AgentDocumentPreviewRenderer
+}) {
+  const preview = useCustomDocument(document, renderer.maxFileSizeBytes)
+
+  if (preview.tooLarge) {
+    return (
+      <DocumentNotice
+        title="Document is too large to preview"
+        description={`This viewer accepts files up to ${formatFileSize(renderer.maxFileSizeBytes)}. Download the file to view it elsewhere.`}
+      />
+    )
+  }
+  if (preview.loading) return <DocumentLoading />
+  if (preview.error || !preview.source) {
+    return (
+      <DocumentNotice
+        title="Could not preview document"
+        description={preview.error ?? "The document content was unavailable."}
+      />
+    )
+  }
+
+  const Renderer = renderer.component
+  return (
+    <DocumentRendererBoundary key={`${renderer.id}:${document.id}`} rendererId={renderer.id}>
+      <Suspense fallback={<DocumentLoading />}>
+        <Renderer file={document.fileRef} source={preview.source} />
+      </Suspense>
+    </DocumentRendererBoundary>
+  )
+}
+
+class DocumentRendererBoundary extends Component<
+  { readonly children: ReactNode; readonly rendererId: string },
+  { readonly failed: boolean }
+> {
+  state = { failed: false }
+
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error(
+      `[SixbAgentUI] Document preview renderer '${this.props.rendererId}' failed.`,
+      error
+    )
+  }
+
+  render() {
+    if (this.state.failed) {
+      return (
+        <DocumentNotice
+          title="Could not preview document"
+          description="The configured document viewer could not render this file."
+        />
+      )
+    }
+    return this.props.children
+  }
+}
+
+function ImageDocument({ document }: { document: AgentDocumentSource }) {
+  const name = documentName(document)
+  return (
+    <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-muted/20 p-4 sm:p-8">
+      <img
+        src={document.inlineUrl}
+        alt={name}
+        className="max-h-full max-w-full rounded-md object-contain shadow-sm"
+      />
+    </div>
   )
 }
 

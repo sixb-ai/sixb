@@ -1,7 +1,6 @@
 import { InMemoryStorage } from "../src"
 import { getInMemoryStorageTestingAdapter } from "../src/storage/in-memory/testing"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
-import { InMemoryProjectionRunStorage } from "../src/storage/projection-runs/in-memory"
 import {
   runMaterializationFailureContractSuite,
   runMaterializerStorageContractSuite,
@@ -19,8 +18,8 @@ runMaterializerStorageContractSuite("in-memory materializer storage contract", {
 
 runProjectionRunStorageContractSuite("in-memory projection-run storage contract", {
   createStorage: () => {
-    let ordinal = 0
-    return new InMemoryProjectionRunStorage({ executionToken: () => `contract-token-${++ordinal}` })
+    const storage = new InMemoryStorage()
+    return { projectionRuns: storage.projectionRuns, executions: storage.executions }
   },
 })
 

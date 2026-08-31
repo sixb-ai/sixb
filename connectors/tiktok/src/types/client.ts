@@ -1,0 +1,38 @@
+import type {
+  TiktokAdAccountApi,
+  TiktokAdGroupsApi,
+  TiktokAdsApi,
+  TiktokCampaignsApi,
+  TiktokReportsApi,
+} from "./ads"
+import type { TiktokConnectedAccount } from "./common"
+import type { TiktokDisplayProfileApi, TiktokDisplayVideosApi } from "./display"
+import type {
+  TiktokOrganicCommentsApi,
+  TiktokOrganicPostsApi,
+  TiktokOrganicProfileApi,
+} from "./organic"
+
+export interface TiktokOrganicClient {
+  readonly account: TiktokConnectedAccount<"tiktok-account">
+  readonly profile: TiktokOrganicProfileApi
+  readonly posts: TiktokOrganicPostsApi
+  readonly comments: TiktokOrganicCommentsApi
+}
+
+export interface TiktokDisplayClient {
+  readonly account: TiktokConnectedAccount<"tiktok-account">
+  readonly profile: TiktokDisplayProfileApi
+  readonly videos: TiktokDisplayVideosApi
+}
+
+export interface TiktokAdsClient {
+  readonly account: TiktokConnectedAccount<"ad-account">
+  readonly adAccount: TiktokAdAccountApi
+  readonly campaigns: TiktokCampaignsApi
+  readonly adGroups: TiktokAdGroupsApi
+  readonly ads: TiktokAdsApi
+  readonly reports: TiktokReportsApi
+}
+
+export type TiktokClient = TiktokDisplayClient | TiktokOrganicClient | TiktokAdsClient

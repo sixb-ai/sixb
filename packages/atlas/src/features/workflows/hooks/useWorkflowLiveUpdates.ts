@@ -1,5 +1,5 @@
 import { events, useInvalidateOnEvent } from "@sixb/client/hooks"
-import { type InvalidationKey, queryKey, queryKeyWithPath } from "../../../lib/liveUpdateKeys"
+import { workflowChangedKeys } from "../../../lib/liveUpdateKeys"
 
 const debounceMs = 100
 
@@ -13,15 +13,7 @@ export function useWorkflowLiveUpdates(
     (event) => {
       if (options.workflowId && event.payload.workflowId !== options.workflowId) return []
 
-      const keys: InvalidationKey[] = [
-        queryKey("listWorkflows"),
-        queryKey("listWorkflowRuns"),
-        queryKey("listWorkflowInterventions"),
-        queryKeyWithPath("getWorkflow", { workflowId: event.payload.workflowId }),
-        queryKeyWithPath("getWorkflowRun", { runId: event.payload.runId }),
-      ]
-
-      return keys
+      return workflowChangedKeys(event.payload.workflowId, event.payload.runId)
     },
     { enabled: options.enabled ?? true, debounceMs }
   )

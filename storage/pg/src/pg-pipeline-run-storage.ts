@@ -1,7 +1,9 @@
 import type { JsonValue } from "@sixb/core"
 import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/internal/errors"
+import { assertPipelineRunExecution } from "@sixb/core/internal/pipeline-run-storage-provider"
 import type { DatasetVersionRef } from "@sixb/core/lake-storage"
 import type {
+  ExecutionStorage,
   FinishPipelineRunInput,
   FinishPipelineStepRunInput,
   ListLatestPipelineRunsInput,
@@ -13,10 +15,15 @@ import type {
   PipelineRunRecord,
   PipelineRunStorage,
   PipelineStepRunRecord,
+  QueuePipelineRunInput,
   StartPipelineRunInput,
   StartPipelineStepRunInput,
 } from "@sixb/core/storage"
-import { PIPELINE_RUN_FAILURE_CODES, PipelineRunError } from "@sixb/core/storage"
+import {
+  canRequeuePipelineRunAfterEnqueueFailure,
+  PIPELINE_RUN_FAILURE_CODES,
+  PipelineRunError,
+} from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import type { SqlParameter } from "./pg-client"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"
@@ -24,23 +31,37 @@ import { isUniqueViolation } from "./storage-errors"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 export class PgPipelineRunStorage implements PipelineRunStorage {
-  constructor(private readonly sql: PgStoreClient) {}
+  constructor(
+    private readonly sql: PgStoreClient,
+    private readonly executions: ExecutionStorage
+  ) {}
 
-  async start(input: StartPipelineRunInput): Promise<PipelineRunRecord> {
+  async queue(input: QueuePipelineRunInput): Promise<PipelineRunRecord> {
+    await assertPipelineRunExecution({
+      executions: this.executions,
+      projectId: input.projectId,
+      executionId: input.executionId,
+      runId: input.id,
+      pipelineId: input.pipelineId,
+    })
     try {
       const [row] = await this.sql<PipelineRunDatabaseRow[]>`
         INSERT INTO pipeline_runs (
           project_id,
           id,
+          execution_id,
           pipeline_id,
           status,
+          queued_at,
           started_at
         ) VALUES (
           ${input.projectId},
           ${input.id},
+          ${input.executionId},
           ${input.pipelineId},
-          ${"running"},
-          ${input.startedAt ?? new Date()}
+          ${"queued"},
+          ${input.queuedAt ?? new Date()},
+          ${null}
         )
         RETURNING *
       `
@@ -48,13 +69,62 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
       return rowToPipelineRunRecord(row)
     } catch (error) {
       if (isUniqueViolation(error)) {
+        return this.requeueAfterEnqueueFailure(input)
+      }
+
+      throw error
+    }
+  }
+
+  private async requeueAfterEnqueueFailure(
+    input: QueuePipelineRunInput
+  ): Promise<PipelineRunRecord> {
+    return runPgTransaction(this.sql, async (tx) => {
+      const [existing] = await tx<PipelineRunDatabaseRow[]>`
+        SELECT * FROM pipeline_runs
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+        FOR UPDATE
+      `
+      if (
+        !existing ||
+        !canRequeuePipelineRunAfterEnqueueFailure(rowToPipelineRunRecord(existing), input)
+      ) {
         throw new PipelineRunError(
           `[SixbPg] Pipeline run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
 
-      throw error
+      const [updated] = await tx<PipelineRunDatabaseRow[]>`
+        UPDATE pipeline_runs
+        SET status = ${"queued"}, queued_at = ${input.queuedAt ?? new Date()},
+            started_at = ${null}, finished_at = ${null}, output_dataset_id = ${null},
+            output_version_id = ${null}, error = ${null}
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+        RETURNING *
+      `
+      return rowToPipelineRunRecord(updated)
+    })
+  }
+
+  async start(input: StartPipelineRunInput): Promise<PipelineRunRecord> {
+    const [updated] = await this.sql<PipelineRunDatabaseRow[]>`
+      UPDATE pipeline_runs
+      SET status = ${"running"}, started_at = ${input.startedAt ?? new Date()},
+          error = ${null}
+      WHERE project_id = ${input.projectId} AND id = ${input.id} AND status = ${"queued"}
+      RETURNING *
+    `
+    if (updated) return rowToPipelineRunRecord(updated)
+
+    const existing = await this.getById({ projectId: input.projectId, id: input.id })
+    if (!existing) {
+      throw new PipelineRunError(
+        `[SixbPg] Pipeline run '${input.id}' not found for project '${input.projectId}'.`
+      )
     }
+    throw new PipelineRunError(
+      `[SixbPg] Pipeline run '${input.id}' cannot start from status '${existing.status}'.`
+    )
   }
 
   async finish(input: FinishPipelineRunInput): Promise<PipelineRunRecord> {
@@ -70,9 +140,14 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
         )
       }
 
-      if (existing.status !== "running") {
+      const enqueueFailure =
+        input.status === "failed" && input.error.code === "queue.enqueue_failed"
+      if (
+        (enqueueFailure && existing.status !== "queued") ||
+        (!enqueueFailure && existing.status !== "running")
+      ) {
         throw new PipelineRunError(
-          `[SixbPg] Pipeline run '${input.id}' for project '${input.projectId}' is already terminal.`
+          `[SixbPg] Pipeline run '${input.id}' cannot finish from status '${existing.status}'.`
         )
       }
 
@@ -260,7 +335,13 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
       params.push(...input.pipelineIds)
     }
 
-    index = appendRunListFilters(whereClauses, params, index, input)
+    index = appendRunListFilters(
+      whereClauses,
+      params,
+      index,
+      input,
+      "COALESCE(started_at, queued_at)"
+    )
 
     const { rows, total, hasMore } = await queryRunList<PipelineRunDatabaseRow>({
       sql: this.sql,
@@ -357,9 +438,11 @@ function rowToPipelineRunRecord(row: PipelineRunDatabaseRow): PipelineRunRecord 
   return {
     id: row.id,
     projectId: row.project_id,
+    executionId: row.execution_id,
     pipelineId: row.pipeline_id,
     status: row.status,
-    startedAt: new Date(row.started_at),
+    queuedAt: new Date(row.queued_at),
+    startedAt: row.started_at ? new Date(row.started_at) : undefined,
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     output:
       row.output_dataset_id && row.output_version_id
@@ -411,9 +494,11 @@ function assertOptionalNonNegativeInteger(value: number | undefined, fieldName: 
 interface PipelineRunDatabaseRow {
   project_id: string
   id: string
+  execution_id: string
   pipeline_id: string
   status: PipelineRunRecord["status"]
-  started_at: Date | string
+  queued_at: Date | string
+  started_at: Date | string | null
   finished_at: Date | string | null
   output_dataset_id: string | null
   output_version_id: string | null

@@ -270,6 +270,7 @@ const envelope = {
   schemaVersion: 1 as const,
   projectId: "p1",
   occurredAt: "2026-01-01T00:00:00.000Z",
+  correlationId: "correlation-1",
   cursor: "c1",
   origin: { kind: "runtime" as const, requestId: "request-1" },
   commitId: "commit-1",

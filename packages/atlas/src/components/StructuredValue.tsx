@@ -13,7 +13,7 @@ import {
   Minus,
   Type,
 } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { type ReactNode, useEffect, useRef, useState } from "react"
 import { fileMediaLabel, formatFileSize } from "../lib/files"
 
 export interface FileContentLinks {
@@ -23,27 +23,37 @@ export interface FileContentLinks {
 
 export type FileLinkForPath = (path: readonly string[]) => FileContentLinks | null
 
+export type StructuredValueVariant = "default" | "debug"
+
 export function StructuredValue({
   value,
   emptyLabel = "No data",
   fileLinkForPath,
   path = [],
+  variant = "default",
 }: {
   value: unknown
   emptyLabel?: string
   fileLinkForPath?: FileLinkForPath
   path?: readonly string[]
+  variant?: StructuredValueVariant
 }) {
   if (value === null || value === undefined) {
     return <p className="text-sm text-muted-foreground">{emptyLabel}</p>
   }
 
   if (isObjectRef(value)) {
-    return <ObjectRefChip objectTypeId={value.objectTypeId} primaryId={value.primaryId} />
+    return variant === "debug" ? (
+      <DebugObjectRef objectTypeId={value.objectTypeId} primaryId={value.primaryId} />
+    ) : (
+      <ObjectRefChip objectTypeId={value.objectTypeId} primaryId={value.primaryId} />
+    )
   }
 
   if (isFileRef(value)) {
-    return <FileRefValue fileRef={value} links={fileLinkForPath?.(path) ?? null} />
+    return (
+      <FileRefValue fileRef={value} links={fileLinkForPath?.(path) ?? null} variant={variant} />
+    )
   }
 
   if (Array.isArray(value)) {
@@ -57,6 +67,7 @@ export function StructuredValue({
               label={`${index + 1}`}
               path={[...path, String(index)]}
               fileLinkForPath={fileLinkForPath}
+              variant={variant}
             />
           </li>
         ))}
@@ -76,6 +87,7 @@ export function StructuredValue({
               label={name}
               path={[...path, name]}
               fileLinkForPath={fileLinkForPath}
+              variant={variant}
             />
           </li>
         ))}
@@ -83,7 +95,7 @@ export function StructuredValue({
     )
   }
 
-  return <RunValue value={value} path={path} fileLinkForPath={fileLinkForPath} />
+  return <RunValue value={value} path={path} fileLinkForPath={fileLinkForPath} variant={variant} />
 }
 
 function RunValue({
@@ -91,13 +103,22 @@ function RunValue({
   value,
   path,
   fileLinkForPath,
+  variant,
 }: {
   label?: string
   value: unknown
   path: readonly string[]
   fileLinkForPath?: FileLinkForPath
+  variant: StructuredValueVariant
 }) {
   if (isObjectRef(value)) {
+    if (variant === "debug") {
+      return (
+        <DebugField label={label}>
+          <DebugObjectRef objectTypeId={value.objectTypeId} primaryId={value.primaryId} />
+        </DebugField>
+      )
+    }
     return (
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         {label ? <FieldLabel>{label}</FieldLabel> : null}
@@ -108,23 +129,33 @@ function RunValue({
 
   if (isFileRef(value)) {
     return (
-      <div className="space-y-2">
-        {label ? <FieldLabel>{label}</FieldLabel> : null}
-        <FileRefValue fileRef={value} links={fileLinkForPath?.(path) ?? null} />
-      </div>
+      <DebugField label={label} stacked={variant === "default"}>
+        <FileRefValue fileRef={value} links={fileLinkForPath?.(path) ?? null} variant={variant} />
+      </DebugField>
     )
   }
 
   if (Array.isArray(value)) {
     return (
       <div className="space-y-2">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          {label ? <FieldLabel>{label}</FieldLabel> : null}
-          <TypeChip icon="array" label="array" detail={`${value.length} items`} />
-        </div>
+        {variant === "debug" ? (
+          <DebugField label={label}>
+            <CollectionSummary type="array" count={value.length} />
+          </DebugField>
+        ) : (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            {label ? <FieldLabel>{label}</FieldLabel> : null}
+            <TypeChip icon="array" label="array" detail={`${value.length} items`} />
+          </div>
+        )}
         {value.length > 0 ? (
           <div className="border-l border-border pl-3">
-            <StructuredValue value={value} path={path} fileLinkForPath={fileLinkForPath} />
+            <StructuredValue
+              value={value}
+              path={path}
+              fileLinkForPath={fileLinkForPath}
+              variant={variant}
+            />
           </div>
         ) : null}
       </div>
@@ -135,25 +166,43 @@ function RunValue({
     const entries = Object.entries(value)
     return (
       <div className="space-y-2">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          {label ? <FieldLabel>{label}</FieldLabel> : null}
-          <TypeChip icon="object" label="object" detail={`${entries.length} fields`} />
-        </div>
+        {variant === "debug" ? (
+          <DebugField label={label}>
+            <CollectionSummary type="object" count={entries.length} />
+          </DebugField>
+        ) : (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            {label ? <FieldLabel>{label}</FieldLabel> : null}
+            <TypeChip icon="object" label="object" detail={`${entries.length} fields`} />
+          </div>
+        )}
         {entries.length > 0 ? (
           <div className="border-l border-border pl-3">
-            <StructuredValue value={value} path={path} fileLinkForPath={fileLinkForPath} />
+            <StructuredValue
+              value={value}
+              path={path}
+              fileLinkForPath={fileLinkForPath}
+              variant={variant}
+            />
           </div>
         ) : null}
       </div>
     )
   }
 
-  if (isLongString(value)) {
+  if (typeof value === "string" && (variant === "debug" || isLongString(value))) {
     return (
-      <div className="space-y-1.5">
-        {label ? <FieldLabel>{label}</FieldLabel> : null}
+      <DebugField label={label} stacked={variant === "default"}>
         <ExpandableText text={value} />
-      </div>
+      </DebugField>
+    )
+  }
+
+  if (variant === "debug") {
+    return (
+      <DebugField label={label}>
+        <DebugPrimitiveValue value={value} />
+      </DebugField>
     )
   }
 
@@ -166,7 +215,30 @@ function RunValue({
 }
 
 function FieldLabel({ children }: { children: string }) {
-  return <span className="min-w-0 font-medium text-foreground">{children}</span>
+  return <span className="min-w-0 break-words font-medium text-foreground">{children}</span>
+}
+
+function DebugField({
+  label,
+  children,
+  stacked = false,
+}: {
+  label?: string
+  children: ReactNode
+  stacked?: boolean
+}) {
+  if (!label) return <>{children}</>
+  return stacked ? (
+    <div className="space-y-1.5">
+      <FieldLabel>{label}</FieldLabel>
+      {children}
+    </div>
+  ) : (
+    <div className="grid min-w-0 grid-cols-[minmax(7rem,10rem)_minmax(0,1fr)] gap-3">
+      <FieldLabel>{label}</FieldLabel>
+      <div className="min-w-0">{children}</div>
+    </div>
+  )
 }
 
 function ObjectRefChip({ objectTypeId, primaryId }: { objectTypeId: string; primaryId: string }) {
@@ -182,18 +254,69 @@ function ObjectRefChip({ objectTypeId, primaryId }: { objectTypeId: string; prim
   )
 }
 
-function FileRefValue({ fileRef, links }: { fileRef: FileRef; links: FileContentLinks | null }) {
+function DebugObjectRef({ objectTypeId, primaryId }: { objectTypeId: string; primaryId: string }) {
+  return (
+    <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs">
+      <Box className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+      <span className="font-medium text-foreground">{objectTypeId}</span>
+      <span className="text-muted-foreground">object</span>
+      <span aria-hidden="true" className="text-muted-foreground/60">
+        ·
+      </span>
+      <span className="min-w-[8rem] flex-1 break-all font-mono text-muted-foreground">
+        {primaryId}
+      </span>
+    </span>
+  )
+}
+
+function CollectionSummary({ type, count }: { type: "array" | "object"; count: number }) {
+  const Icon = type === "array" ? Brackets : Braces
+  const unit =
+    type === "array" ? (count === 1 ? "item" : "items") : count === 1 ? "field" : "fields"
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+      <Icon className="size-3.5" />
+      {type} · {count} {unit}
+    </span>
+  )
+}
+
+function FileRefValue({
+  fileRef,
+  links,
+  variant,
+}: {
+  fileRef: FileRef
+  links: FileContentLinks | null
+  variant: StructuredValueVariant
+}) {
   const fileName = fileNameFor(fileRef)
   const mediaLabel = fileMediaLabel(fileRef.mediaType, fileName)
 
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-border bg-background px-3 py-2.5 text-xs">
+    <div
+      className={cn(
+        "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 rounded-md text-xs",
+        variant === "debug"
+          ? "bg-muted/20 px-2.5 py-2"
+          : "border border-border bg-background px-3 py-2.5"
+      )}
+    >
       <span className="inline-flex min-w-0 flex-1 items-center gap-2.5">
         <FileIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 truncate font-medium text-foreground" title={fileName}>
+        <span
+          className={cn(
+            "min-w-0 font-medium text-foreground",
+            variant === "debug" ? "break-all" : "truncate"
+          )}
+          title={fileName}
+        >
           {fileName}
         </span>
-        <span className="shrink-0 text-muted-foreground">
+        <span
+          className={cn("text-muted-foreground", variant === "debug" ? "break-words" : "shrink-0")}
+        >
           {mediaLabel} · {formatFileSize(fileRef.sizeBytes)}
         </span>
       </span>
@@ -219,6 +342,24 @@ function FileRefValue({ fileRef, links }: { fileRef: FileRef; links: FileContent
         </span>
       ) : null}
     </div>
+  )
+}
+
+function DebugPrimitiveValue({ value }: { value: unknown }) {
+  const { Icon, text } =
+    typeof value === "number"
+      ? { Icon: Hash, text: String(value) }
+      : typeof value === "boolean"
+        ? { Icon: Check, text: value ? "true" : "false" }
+        : value === null || value === undefined
+          ? { Icon: Minus, text: "null" }
+          : { Icon: Braces, text: String(value) }
+
+  return (
+    <span className="flex min-w-0 items-start gap-1.5 text-xs text-foreground">
+      <Icon className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
+      <span className="min-w-0 break-all font-mono">{text}</span>
+    </span>
   )
 }
 

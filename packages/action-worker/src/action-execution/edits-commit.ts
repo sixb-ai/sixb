@@ -1,11 +1,11 @@
-import type { ActionReadObjectSetSource, JsonValue } from "@sixb/core"
+import type { JsonValue } from "@sixb/core"
 import { isObjectActionDefinition } from "@sixb/core"
 import { recordEdits } from "@sixb/core/actions/worker"
 import type { ActionEditCommitResult, ActionReadRecorder } from "@sixb/core/internal/actions"
-import { commitActionEdits, createActionReadFacade } from "@sixb/core/internal/actions"
+import { commitActionEdits } from "@sixb/core/internal/actions"
 import type { ActionRunRecord } from "@sixb/core/storage"
 import { translateActionPhaseError } from "../normalize"
-import { type BasePhaseContext, requireObjectSubject } from "./context"
+import { type BasePhaseContext, requireObjectSubject, toActionReadFacade } from "./context"
 import type {
   LoadedObjectTarget,
   PhaseExecutionBase,
@@ -16,9 +16,10 @@ import type {
 /**
  * Records the run's edits and commits them through the ontology Materializer.
  *
- * Reads performed by the writeback and edits handlers are captured as exact expected revisions so a
- * commit fails when the state a decision was made against has changed. Domain events are durable
- * outbox facts written inside the commit, so this phase never appends events itself.
+ * Exact object and link-scope reads performed by the writeback and edits handlers are captured as
+ * expected revisions so a commit fails when that state changes. Query/list results and telemetry
+ * history stay call-level snapshots. Domain events are durable outbox facts written inside the
+ * commit, so this phase never appends events itself.
  */
 export async function runEditsAndCommitPhase(
   input: PhaseExecutionBase & {
@@ -70,16 +71,7 @@ export async function runEditsAndCommitPhase(
         const baseContext = {
           ...input.baseContext,
           objects,
-          read: createActionReadFacade(
-            (objectType) => input.runtime.sixb.objects(objectType) as ActionReadObjectSetSource,
-            {
-              recorder: reads,
-              resolveLinkIds: (objectTypeId) =>
-                input.runtime.sixb.objects
-                  .resolveType(objectTypeId)
-                  .links.map((definition) => definition.id),
-            }
-          ),
+          read: toActionReadFacade(input.runtime, reads),
           writeback: input.writeback,
         }
 

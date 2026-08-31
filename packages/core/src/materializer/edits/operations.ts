@@ -93,11 +93,13 @@ function applyObjectOperation(
     operation,
     sourceProperties: working.source?.assertion.properties ?? null,
     authority: working.override,
+    editedAt: working.editedAt,
+    committedAt: identity.committedAt,
     effectiveExists: currentEffective !== null,
     ...normalized,
   })
 
-  applyObjectTransition(context, state, working, transition.next, journal)
+  applyObjectTransition(context, state, working, transition.next, transition.editedAt, journal)
 
   return objectOperationOutcome(operation, working, transition.changed, context, identity)
 }
@@ -146,21 +148,26 @@ function applyObjectTransition(
   state: EditWorkingState,
   working: WorkingObject,
   next: WorkingObject["override"],
+  nextEditedAt: Readonly<Record<string, string>>,
   journal?: EditUndoJournal
 ): void {
   const previous = working.override
+  const previousEditedAt = working.editedAt
   working.override = next
+  working.editedAt = { ...nextEditedAt }
   try {
     const resolved = resolveObject(context.ontology, working)
     if (resolved) validateEffectiveObject(context.ontology, resolved.ref, resolved.properties)
     validateWorkingCardinality(state.links.slots)
   } catch (error) {
     working.override = previous
+    working.editedAt = previousEditedAt
     throw error
   }
   journal?.push({
     restore: () => {
       working.override = previous
+      working.editedAt = previousEditedAt
     },
   })
 }

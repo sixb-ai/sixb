@@ -25,11 +25,7 @@ export function WorkflowsPage() {
   }
 
   return (
-    <PageFrame
-      eyebrow="Atlas"
-      title="Workflows"
-      description="Browse workflow definitions, trigger runs, and inspect execution history."
-    >
+    <PageFrame title="Workflows" headerDivider={false}>
       <Tabs value={activeTab} onValueChange={handleTabChange} className="gap-4">
         <TabsList variant="line" className="border-b border-border">
           <TabsTrigger value="workflows">Workflows</TabsTrigger>

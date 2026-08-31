@@ -49,7 +49,7 @@ describe("create-sixb packed artifacts", () => {
     const cliManifest = await readPackageManifest(join(layoutRoot, "node_modules", "@sixb", "cli"))
 
     expect(createManifest.dependencies).toBeUndefined()
-    expect(cliManifest.dependencies?.["create-sixb"]).toBe("^0.1.1")
+    expect(cliManifest.dependencies?.["create-sixb"]).toBe("^0.1.2")
   })
 
   test("shows the bun create usage", () => {

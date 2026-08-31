@@ -8,6 +8,7 @@ import {
   type Schema,
 } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
+import { parseDatasetTimestamp } from "@sixb/core/internal/projections"
 import { resolveProjectionSchema } from "./projection-schema"
 import { normalizeProjectedValue } from "./projection-value-coercion"
 import { isPlainObject } from "./utils"
@@ -23,6 +24,7 @@ export interface ProjectedObjectRow {
   readonly properties: Record<string, unknown>
   readonly primaryValue: unknown
   readonly foreignKeyValues: Readonly<Record<string, unknown>>
+  readonly sourceUpdatedAt?: string
 }
 
 export type ProjectObjectRowResult =
@@ -81,7 +83,12 @@ export function projectObjectRow(plan: ObjectProjectionPlan, row: unknown): Proj
   const { projection, dataset, primaryPropertyId, propertyPlans } = plan
 
   const rowValidationError = getDatasetRowValidationError(row, dataset, {
-    columns: Object.values(projection.properties),
+    columns: [
+      ...Object.values(projection.properties),
+      ...(projection.conflictResolution?.strategy === "mostRecent"
+        ? [projection.conflictResolution.sourceTimestamp]
+        : []),
+    ],
   })
   if (rowValidationError) {
     return { ok: false, errorMessage: rowValidationError }
@@ -99,14 +106,43 @@ export function projectObjectRow(plan: ObjectProjectionPlan, row: unknown): Proj
     return collected
   }
 
+  const sourceUpdatedAt = projectSourceUpdatedAt(projection, row)
+  if (!sourceUpdatedAt.ok) return sourceUpdatedAt
+
   return {
     ok: true,
     row: {
       properties: collected.properties,
       primaryValue: collected.properties[primaryPropertyId],
       foreignKeyValues: collectForeignKeyValues(projection, row, collected.properties),
+      ...(sourceUpdatedAt.value === undefined ? {} : { sourceUpdatedAt: sourceUpdatedAt.value }),
     },
   }
+}
+
+function projectSourceUpdatedAt(
+  projection: ObjectProjectionDefinition,
+  row: DatasetRow
+):
+  | { readonly ok: true; readonly value?: string }
+  | { readonly ok: false; readonly errorMessage: string } {
+  const resolution = projection.conflictResolution ?? { strategy: "editsWin" }
+  if (resolution.strategy === "editsWin") return { ok: true }
+  const raw = row[resolution.sourceTimestamp]
+  if (raw === null || raw === undefined || raw === "") {
+    return {
+      ok: false,
+      errorMessage: `[SixbProjectionWorker] Projection '${projection.id}' source timestamp '${resolution.sourceTimestamp}' is required.`,
+    }
+  }
+  const parsed = parseDatasetTimestamp(raw)
+  if (!parsed) {
+    return {
+      ok: false,
+      errorMessage: `[SixbProjectionWorker] Projection '${projection.id}' source timestamp '${resolution.sourceTimestamp}' is invalid.`,
+    }
+  }
+  return { ok: true, value: parsed.toISOString() }
 }
 
 function buildProjectedPropertyPlans(input: {

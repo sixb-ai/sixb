@@ -1034,7 +1034,7 @@ async function queueWorkflowAgentNode(input: {
     projectId: PROJECT_ID,
     agentId: agent.id,
     runId: nodeRunId,
-    parentExecutionId: executionId,
+    sourceExecutionId: executionId,
   })
   await runs.agentNodes.create({
     projectId: PROJECT_ID,
@@ -1094,6 +1094,31 @@ function withStorage(sixb: TestSixb, storage: Storage): TestSixb {
   })
 }
 
+function withAiUsageRecordInterceptor(
+  storage: Storage,
+  intercept: (
+    input: RecordAiModelCallInput,
+    record: () => ReturnType<AiUsageStorage["recordModelCall"]>
+  ) => ReturnType<AiUsageStorage["recordModelCall"]>
+): Storage {
+  const wrap = (usage: AiUsageStorage): AiUsageStorage => ({
+    recordModelCall: (input) => intercept(input, () => usage.recordModelCall(input)),
+    summarizeExecution: (input) => usage.summarizeExecution(input),
+    summarizeExecutions: (input) => usage.summarizeExecutions(input),
+  })
+  return {
+    ...storage,
+    transaction: (run, options) =>
+      storage.transaction((tx) => {
+        const usage = tx.aiUsage
+        return run({
+          ...tx,
+          ...(usage ? { aiUsage: wrap(usage) } : {}),
+        })
+      }, options),
+  }
+}
+
 function aiUsageStorageOf(sixb: TestSixb): AiUsageStorage {
   const storage = sixb.storage.aiUsage
   if (!storage) {
@@ -1116,6 +1141,9 @@ function workerStorageOf(storage: Storage): AgentWorkerStorage {
   }
   if (!storage.aiUsage) {
     throw new Error("expected AI usage storage")
+  }
+  if (!storage.aiCosts) {
+    throw new Error("expected AI cost storage")
   }
   return storage as AgentWorkerStorage
 }
@@ -1229,6 +1257,7 @@ async function runBashTool(
   return bash.execute(input, {
     signal: new AbortController().signal,
     callId: "test-bash-call",
+    toolCallId: "test-bash-tool-call",
   }) as Promise<{ readonly stdout: string }>
 }
 
@@ -1280,6 +1309,7 @@ function withFlakyAgentFinishStorage(storage: Storage, failTimes: number): Stora
   const wrapAgents = (agents: AgentStorage): AgentStorage => ({
     threads: agents.threads,
     messages: agents.messages,
+    checkpoints: agents.checkpoints,
     runs: {
       create: (input) => agents.runs.create(input),
       start: (input) => agents.runs.start(input),
@@ -1320,6 +1350,7 @@ function withAlwaysFailingTransactionalFinish(storage: Storage): Storage {
   const wrapAgents = (agents: AgentStorage): AgentStorage => ({
     threads: agents.threads,
     messages: agents.messages,
+    checkpoints: agents.checkpoints,
     runs: {
       create: (input) => agents.runs.create(input),
       start: (input) => agents.runs.start(input),
@@ -1357,6 +1388,7 @@ function withObservedAgentMessageAppendStorage(
   const wrapAgents = (agents: AgentStorage): AgentStorage => ({
     threads: agents.threads,
     runs: agents.runs,
+    checkpoints: agents.checkpoints,
     messages: {
       getById: (params) => agents.messages.getById(params),
       list: (input) => agents.messages.list(input),
@@ -1364,6 +1396,7 @@ function withObservedAgentMessageAppendStorage(
         await onBeforeAppend(input)
         return agents.messages.append(input)
       },
+      deleteByRunId: (input) => agents.messages.deleteByRunId(input),
     },
   })
   return {
@@ -1465,7 +1498,7 @@ describe("AgentWorker", () => {
   test("executes a headless workflow agent node and publishes its resume", async () => {
     let capturedSystem: string | undefined
     const model = structuredToolThenAnswerModel((system) => {
-      capturedSystem = system
+      capturedSystem ??= system
     })
     let lookupCalls = 0
     const lookupProject = defineAgentTool("lookup_project")
@@ -1539,7 +1572,7 @@ describe("AgentWorker", () => {
       projectId: PROJECT_ID,
       agentId: agent.id,
       runId: nodeRunId,
-      parentExecutionId: executionId,
+      sourceExecutionId: executionId,
     })
     await runs.agentNodes.create({
       projectId: PROJECT_ID,
@@ -1562,13 +1595,15 @@ describe("AgentWorker", () => {
     })
     const recordedUsage: RecordAiModelCallInput[] = []
     const aiUsage = aiUsageStorageOf(sixb)
-    const recordModelCall = aiUsage.recordModelCall.bind(aiUsage)
-    aiUsage.recordModelCall = async (usage) => {
-      recordedUsage.push(structuredClone(usage))
-      return recordModelCall(usage)
-    }
+    const workerHost = withStorage(
+      sixb,
+      withAiUsageRecordInterceptor(sixb.storage, async (usage, record) => {
+        recordedUsage.push(structuredClone(usage))
+        return record()
+      })
+    )
 
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(workerHost, workerOptions({ skillsDir: false }))
     await worker.start()
     try {
       const execution = await waitFor(
@@ -1591,13 +1626,15 @@ describe("AgentWorker", () => {
       expect(execution.execution).toBeUndefined()
       expect(execution.trace).toBeArray()
       expect(lookupCalls).toBe(1)
-      expect(recordedUsage).toHaveLength(2)
+      expect(recordedUsage).toHaveLength(3)
       expect(recordedUsage.map((usage) => usage.executionId)).toEqual([
         agentExecutionId,
         agentExecutionId,
+        agentExecutionId,
       ])
-      expect(recordedUsage.map((usage) => usage.attempt)).toEqual([1, 1])
+      expect(recordedUsage.map((usage) => usage.attempt)).toEqual([1, 1, 1])
       expect(recordedUsage.map((usage) => usage.requesterGroupIds)).toEqual([
+        ["operations", "project-alpha"],
         ["operations", "project-alpha"],
         ["operations", "project-alpha"],
       ])
@@ -1605,9 +1642,18 @@ describe("AgentWorker", () => {
         sixb.storage.executions.getById({ projectId: PROJECT_ID, id: agentExecutionId })
       ).resolves.toMatchObject({
         requestedBy: REQUESTER,
-        parentExecutionId: executionId,
+        source: { type: "execution", executionId },
       })
       expect(recordedUsage.map((usage) => usage.usage)).toEqual([
+        {
+          inputTokens: 10,
+          outputTokens: 7,
+          uncachedInputTokens: 10,
+          cacheReadInputTokens: 0,
+          cacheWriteInputTokens: 0,
+          textOutputTokens: 7,
+          reasoningOutputTokens: 0,
+        },
         {
           inputTokens: 10,
           outputTokens: 7,
@@ -1630,24 +1676,26 @@ describe("AgentWorker", () => {
       expect(recordedUsage.map((usage) => usage.requestedModelId)).toEqual([
         "mock-model",
         "mock-model",
+        "mock-model",
       ])
       expect(recordedUsage.map((usage) => usage.rawUsage)).toEqual([
         { input_tokens: 10, output_tokens: 7, provider_meter: 1 },
         { input_tokens: 10, output_tokens: 7, provider_meter: 1 },
+        { input_tokens: 10, output_tokens: 7, provider_meter: 1 },
       ])
       expect(recordedUsage.every((usage) => usage.occurredAt instanceof Date)).toBe(true)
-      expect(new Set(recordedUsage.map((usage) => usage.responseId)).size).toBe(2)
+      expect(new Set(recordedUsage.map((usage) => usage.responseId)).size).toBe(3)
       await expect(
         aiUsage.summarizeExecution({
           projectId: PROJECT_ID,
           executionId: agentExecutionId,
         })
       ).resolves.toMatchObject({
-        modelCallCount: 2,
+        modelCallCount: 3,
         usage: {
-          inputTokens: 20,
-          outputTokens: 14,
-          totalTokens: 34,
+          inputTokens: 30,
+          outputTokens: 21,
+          totalTokens: 51,
           reportingStatus: "complete",
         },
       })
@@ -1676,10 +1724,7 @@ describe("AgentWorker", () => {
       })
       expect(resume?.job).toMatchObject({
         type: "workflow.run.resume.requested",
-        payload: {
-          runId,
-          resume: { kind: "agentNode", nodeRunId },
-        },
+        payload: { runId, nodeRunId },
       })
     } finally {
       await worker.stop()
@@ -1713,11 +1758,11 @@ describe("AgentWorker", () => {
           executionId: agentExecutionId,
         })
       ).resolves.toMatchObject({
-        modelCallCount: 1,
+        modelCallCount: 3,
         usage: {
-          inputTokens: 10,
-          outputTokens: 7,
-          totalTokens: 17,
+          inputTokens: 30,
+          outputTokens: 21,
+          totalTokens: 51,
           reportingStatus: "complete",
         },
       })
@@ -1786,17 +1831,19 @@ describe("AgentWorker", () => {
       runId: "workflow-accounting-failure",
     })
     const aiUsage = aiUsageStorageOf(sixb)
-    const recordModelCall = aiUsage.recordModelCall.bind(aiUsage)
     const queue = sixb.queues.agents
     const enqueue = queue.enqueue.bind(queue)
     let storageAvailable = false
     let appendAttempts = 0
     let recoveryJobs = 0
-    aiUsage.recordModelCall = async (input) => {
-      if (storageAvailable) return recordModelCall(input)
-      appendAttempts += 1
-      throw new Error("usage storage unavailable")
-    }
+    const workerHost = withStorage(
+      sixb,
+      withAiUsageRecordInterceptor(sixb.storage, async (_input, record) => {
+        if (storageAvailable) return record()
+        appendAttempts += 1
+        throw new Error("usage storage unavailable")
+      })
+    )
     queue.enqueue = async (params) => {
       const jobs = await enqueue(params)
       const handedOff = params.jobs.filter(
@@ -1808,7 +1855,7 @@ describe("AgentWorker", () => {
       }
       return jobs
     }
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(workerHost, workerOptions({ skillsDir: false }))
 
     await worker.start()
     try {
@@ -1887,15 +1934,17 @@ describe("AgentWorker", () => {
       model,
       runId: "workflow-final-callback-failure",
     })
-    const aiUsage = aiUsageStorageOf(sixb)
     const queue = sixb.queues.agents
     const enqueue = queue.enqueue.bind(queue)
     let appendAttempts = 0
     let recoveryAttempts = 0
-    aiUsage.recordModelCall = async () => {
-      appendAttempts += 1
-      throw new Error("usage storage unavailable")
-    }
+    const workerHost = withStorage(
+      sixb,
+      withAiUsageRecordInterceptor(sixb.storage, async () => {
+        appendAttempts += 1
+        throw new Error("usage storage unavailable")
+      })
+    )
     queue.enqueue = async (params) => {
       if (params.jobs.some((job) => job.type === "agent.ai-usage.record.requested")) {
         recoveryAttempts += 1
@@ -1903,7 +1952,7 @@ describe("AgentWorker", () => {
       }
       return enqueue(params)
     }
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(workerHost, workerOptions({ skillsDir: false }))
 
     await worker.start()
     try {
@@ -1980,8 +2029,8 @@ describe("AgentWorker", () => {
           executionId: agentExecutionId,
         })
       ).resolves.toMatchObject({
-        modelCallCount: 1,
-        usage: { inputTokens: 10, outputTokens: 7, totalTokens: 17 },
+        modelCallCount: 2,
+        usage: { inputTokens: 20, outputTokens: 14, totalTokens: 34 },
       })
     } finally {
       await worker.stop()
@@ -2163,7 +2212,7 @@ describe("AgentWorker", () => {
       projectId: PROJECT_ID,
       agentId: agent.id,
       runId: nodeRunId,
-      parentExecutionId: executionId,
+      sourceExecutionId: executionId,
     })
     await runs.agentNodes.create({
       projectId: PROJECT_ID,
@@ -2347,8 +2396,8 @@ describe("AgentWorker", () => {
       )
       const systemAddendum = firstEnvironment.turnContext.systemAddendum ?? ""
       expect(systemAddendum).toContain("Execution mode: conversation")
-      expect(systemAddendum).toContain("Use $SIXB_SKILLS_DIR and attachment/output env vars")
-      expect(systemAddendum).toContain("Path: $SIXB_SKILLS_DIR/sixb-query")
+      expect(systemAddendum).toContain("Agent Skills are installed under $SIXB_SKILLS_DIR")
+      expect(systemAddendum).toContain("Path: .sixb/agent/skills/sixb-query/SKILL.md")
       expect(systemAddendum).not.toContain("/tmp/sixb-recording-sandbox")
 
       await firstEnvironment.dispose()
@@ -2623,7 +2672,7 @@ describe("AgentWorker", () => {
     expect(prepared.entries).toHaveLength(50)
     expect(prepared.promptTextByPartKey.has("assistant-0:0")).toBe(false)
     expect(prepared.promptTextByPartKey.get("assistant-50:0")).toContain(
-      "Generated file kept as metadata"
+      "Historical file kept as metadata"
     )
     expect(JSON.stringify([...prepared.promptTextByPartKey.values()])).not.toContain(
       "sensitive generated contents"
@@ -3255,7 +3304,7 @@ describe("AgentWorker", () => {
       ).toMatchObject({
         state: "output-error",
         errorText:
-          "[SixbAgentWorker] Agent tool 'invalid_result' returned a non-JSON result; result.invalid is undefined.",
+          "[SixbAgentWorker] Agent tool 'invalid_result' returned an invalid result; result.invalid is undefined.",
       })
 
       const second = await requestAgent(sixb, {
@@ -3271,7 +3320,7 @@ describe("AgentWorker", () => {
         { label: "tool failure replay run terminal" }
       )
       expect(replayedPrompt).toContain("invalid_result")
-      expect(replayedPrompt).toContain("returned a non-JSON result")
+      expect(replayedPrompt).toContain("returned an invalid result")
     } finally {
       await worker.stop()
     }
@@ -3483,17 +3532,19 @@ describe("AgentWorker", () => {
     const sixb = buildSixbWithEchoTool(model)
     const storage = agentStorageOf(sixb)
     const aiUsage = aiUsageStorageOf(sixb)
-    const recordModelCall = aiUsage.recordModelCall.bind(aiUsage)
     const queue = sixb.queues.agents
     const enqueue = queue.enqueue.bind(queue)
     let storageAvailable = false
     let appendAttempts = 0
     let recoveryJobs = 0
-    aiUsage.recordModelCall = async (input) => {
-      if (storageAvailable) return recordModelCall(input)
-      appendAttempts += 1
-      throw new Error("usage storage unavailable")
-    }
+    const workerHost = withStorage(
+      sixb,
+      withAiUsageRecordInterceptor(sixb.storage, async (_input, record) => {
+        if (storageAvailable) return record()
+        appendAttempts += 1
+        throw new Error("usage storage unavailable")
+      })
+    )
     queue.enqueue = async (params) => {
       const jobs = await enqueue(params)
       const handedOff = params.jobs.filter(
@@ -3506,7 +3557,7 @@ describe("AgentWorker", () => {
       return jobs
     }
 
-    const worker = new AgentWorker(sixb, workerOptions())
+    const worker = new AgentWorker(workerHost, workerOptions())
     await worker.start()
     try {
       const request = await requestAgent(sixb, { agentId: "assistant", text: "echo hi" })
@@ -3635,15 +3686,17 @@ describe("AgentWorker", () => {
     })
     const sixb = buildSixbWithEchoTool(model)
     const storage = agentStorageOf(sixb)
-    const aiUsage = aiUsageStorageOf(sixb)
     const queue = sixb.queues.agents
     const enqueue = queue.enqueue.bind(queue)
     let appendAttempts = 0
     let recoveryAttempts = 0
-    aiUsage.recordModelCall = async () => {
-      appendAttempts += 1
-      throw new Error("usage storage unavailable")
-    }
+    const workerHost = withStorage(
+      sixb,
+      withAiUsageRecordInterceptor(sixb.storage, async () => {
+        appendAttempts += 1
+        throw new Error("usage storage unavailable")
+      })
+    )
     queue.enqueue = async (params) => {
       if (params.jobs.some((job) => job.type === "agent.ai-usage.record.requested")) {
         recoveryAttempts += 1
@@ -3652,7 +3705,7 @@ describe("AgentWorker", () => {
       return enqueue(params)
     }
 
-    const worker = new AgentWorker(sixb, workerOptions())
+    const worker = new AgentWorker(workerHost, workerOptions())
     await worker.start()
     try {
       const request = await requestAgent(sixb, { agentId: "assistant", text: "echo hi" })
@@ -4123,9 +4176,9 @@ describe("AgentWorker", () => {
           { label: "project skills run terminal" }
         )
         expect(run.status).toBe("succeeded")
-        expect(capturedSystem).toContain("Path: $SIXB_SKILLS_DIR/acme-style")
+        expect(capturedSystem).toContain("Path: .sixb/agent/skills/acme-style/SKILL.md")
         expect(capturedSystem).toContain("Use when drafting Acme customer-facing messages.")
-        expect(capturedSystem).toContain("Path: $SIXB_SKILLS_DIR/sixb-query")
+        expect(capturedSystem).toContain("Path: .sixb/agent/skills/sixb-query/SKILL.md")
 
         const command = sandboxes.sandboxes[0]?.commands[0]
         const skillsDir = command?.options.env?.SIXB_SKILLS_DIR
@@ -4813,14 +4866,15 @@ describe("AgentWorker", () => {
     // Regression guard: hard-code the recorder attempt to 1 instead of using the reclaimed durable
     // run and this captures [1, 1], even though the terminal run correctly reports attempt 2.
     const recordedAttempts: number[] = []
-    const aiUsage = aiUsageStorageOf(sixb)
-    const recordModelCall = aiUsage.recordModelCall.bind(aiUsage)
-    aiUsage.recordModelCall = async (input) => {
-      recordedAttempts.push(input.attempt)
-      return recordModelCall(input)
-    }
+    const workerHost = withStorage(
+      sixb,
+      withAiUsageRecordInterceptor(sixb.storage, async (input, record) => {
+        recordedAttempts.push(input.attempt)
+        return record()
+      })
+    )
 
-    const worker = new AgentWorker(sixb, workerOptions())
+    const worker = new AgentWorker(workerHost, workerOptions())
     await worker.start()
     try {
       const reclaimed = await waitFor(
@@ -4955,7 +5009,7 @@ describe("AgentWorker", () => {
 
     expect(capturedSystem).toContain("<sixb_core_rules>")
     expect(capturedSystem).toContain("You are operating as a Sixb agent")
-    expect(capturedSystem).toContain("sandboxed bash tool")
+    expect(capturedSystem).toContain("sandboxed read and bash tools")
     expect(capturedSystem).toContain("<sixb_runtime_context>")
     expect(capturedSystem).toContain("Extra sandbox context.")
     expect(capturedSystem).toContain("<agent_instructions>")

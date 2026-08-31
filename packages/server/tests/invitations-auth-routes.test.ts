@@ -210,6 +210,48 @@ describe("auth invitation routes", () => {
     expect(messages[0]?.email).toBe("ava@acme.com")
   })
 
+  test("reveals the delivered link once when explicitly requested", async () => {
+    const { app, messages, storage } = createRuntime()
+    const admin = await seedAdminSession(storage)
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/auth/invitations", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: admin.cookie,
+          ...admin.csrfHeader,
+        },
+        body: JSON.stringify({
+          email: "ava@acme.com",
+          groupIds: ["commercial"],
+          destinationId: "atlas",
+          revealLink: true,
+        }),
+      })
+    )
+    const body = (await response.json()) as {
+      readonly delivery: {
+        readonly link?: { readonly url: string; readonly expiresAt?: string }
+      }
+    }
+
+    expect(response.status).toBe(201)
+    expect(response.headers.get("cache-control")).toBe("no-store")
+    expect(body.delivery.link?.url).toBe(messages[0]?.url)
+    expect(body.delivery.link?.expiresAt).toBeString()
+
+    const list = await app.fetch(
+      new Request("http://localhost/api/auth/invitations", {
+        headers: { cookie: admin.cookie },
+      })
+    )
+    const listed = await list.text()
+
+    expect(listed).not.toContain(messages[0]?.url ?? "unreachable")
+    expect(listed).not.toContain("token")
+  })
+
   test("creates invitations on the browser origin audience", async () => {
     const { sixb, storage } = createRuntime()
     const app = createSixbApi(
@@ -465,6 +507,7 @@ describe("auth invitation routes", () => {
           email: "oidc-user@acme.com",
           groupIds: ["commercial"],
           destinationId: "app",
+          revealLink: true,
         }),
       })
     )
@@ -479,6 +522,9 @@ describe("auth invitation routes", () => {
       },
       delivery: {
         status: "sent",
+        link: {
+          url: messages[0]?.url,
+        },
       },
     })
     expect(messages).toHaveLength(1)

@@ -13,7 +13,6 @@ import {
   PIPELINE_RUN_FAILURE_CODES,
   PROJECTION_RUN_FAILURE_CODES,
   SYNC_RUN_FAILURE_CODES,
-  WEBHOOK_DELIVERY_FAILURE_CODES,
   WEBHOOK_RUN_FAILURE_CODES,
   WORKFLOW_RUN_FAILURE_CODES,
 } from "@sixb/core/storage"
@@ -27,6 +26,7 @@ import {
 import { SqliteMaterializationStateReader } from "../src/ontology-storage/materialization-state"
 
 const tempDirs: string[] = []
+const LEGACY_WEBHOOK_DELIVERY_FAILURE_CODES = ["webhook.delivery_failed"] as const
 const expectedStorageMigrationRows = [
   {
     adapter_id: SQLITE_STORAGE_ADAPTER_ID,
@@ -171,9 +171,58 @@ const expectedStorageMigrationRows = [
   {
     adapter_id: SQLITE_STORAGE_ADAPTER_ID,
     checksum_length: 64,
-    id: "021-ai-model-call-details",
+    id: "021-sync-pipeline-executions",
     status: "applied",
     version: 21,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "022-projection-executions",
+    status: "applied",
+    version: 22,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "023-webhook-executions",
+    status: "applied",
+    version: 23,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "024-ontology-commit-executions",
+    status: "applied",
+    version: 24,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "025-connector-connections",
+    status: "applied",
+    version: 25,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "026-ai-cost-accounting",
+    status: "applied",
+    version: 26,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "027-agent-context-checkpoints",
+    status: "applied",
+    version: 27,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "028-object-override-edit-times",
+    status: "applied",
+    version: 28,
   },
 ]
 
@@ -210,6 +259,35 @@ describe("SQLite storage migrations", () => {
       await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "current" })
     } finally {
       storage.close()
+    }
+  })
+
+  test("adds empty per-property edit times to legacy object overrides", () => {
+    const db = new Database(":memory:")
+    try {
+      for (const migration of sqliteStorageMigrations.steps.slice(0, 27)) migration.up(db)
+      db.query(`
+        INSERT INTO ontology_object_overrides (
+          project_id, object_type_id, primary_id, value, last_commit_id, updated_at
+        ) VALUES (?, ?, ?, json(?), ?, ?)
+      `).run(
+        "project",
+        "Issue",
+        "issue-1",
+        JSON.stringify({ kind: "patch", set: { title: "edited" }, unset: [] }),
+        "legacy-commit",
+        "2026-01-01T11:00:00.000Z"
+      )
+
+      sqliteStorageMigrations.steps[27]?.up(db)
+
+      expect(
+        db
+          .query("SELECT edited_at FROM ontology_object_overrides WHERE primary_id = ?")
+          .get("issue-1")
+      ).toEqual({ edited_at: "{}" })
+    } finally {
+      db.close()
     }
   })
 
@@ -394,7 +472,12 @@ describe("SQLite storage migrations", () => {
         );
       `)
 
-      for (const migration of sqliteStorageMigrations.steps.slice(10)) migration.up(db)
+      const executionMigrationIndex = sqliteStorageMigrations.steps.findIndex(
+        (migration) => migration.id === "021-sync-pipeline-executions"
+      )
+      for (const migration of sqliteStorageMigrations.steps.slice(10, executionMigrationIndex)) {
+        migration.up(db)
+      }
 
       const row = db
         .query("SELECT error FROM sync_runs WHERE project_id = ? AND id = ?")
@@ -935,7 +1018,7 @@ describe("SQLite storage migrations", () => {
         .query("SELECT idempotency_key, failure FROM webhook_deliveries ORDER BY idempotency_key")
         .all() as Array<{ readonly idempotency_key: string; readonly failure: string | null }>
       expect(rows[0]?.idempotency_key).toBe("delivery-failed-at")
-      expect(parseSixbFailure(rows[0]?.failure, WEBHOOK_DELIVERY_FAILURE_CODES)).toEqual({
+      expect(parseSixbFailure(rows[0]?.failure, LEGACY_WEBHOOK_DELIVERY_FAILURE_CODES)).toEqual({
         code: "webhook.delivery_failed",
         message: "Webhook delivery failed.",
         retryable: true,
@@ -948,7 +1031,7 @@ describe("SQLite storage migrations", () => {
           timestampSource: "failedAt",
         },
       })
-      expect(parseSixbFailure(rows[1]?.failure, WEBHOOK_DELIVERY_FAILURE_CODES)).toEqual({
+      expect(parseSixbFailure(rows[1]?.failure, LEGACY_WEBHOOK_DELIVERY_FAILURE_CODES)).toEqual({
         code: "webhook.delivery_failed",
         message: "Webhook delivery failed.",
         retryable: true,
@@ -1299,6 +1382,284 @@ describe("SQLite storage migrations", () => {
     }
   })
 
+  test("rejects legacy Sync and Pipeline runs instead of inventing execution authority", () => {
+    for (const kind of ["sync", "pipeline"] as const) {
+      const db = new Database(":memory:")
+      try {
+        const executionMigrationIndex = sqliteStorageMigrations.steps.findIndex(
+          (migration) => migration.id === "021-sync-pipeline-executions"
+        )
+        const executionMigration = sqliteStorageMigrations.steps[executionMigrationIndex]
+        if (!executionMigration) {
+          throw new Error("SQLite sync-pipeline-executions migration is missing.")
+        }
+        for (const migration of sqliteStorageMigrations.steps.slice(0, executionMigrationIndex)) {
+          migration.up(db)
+        }
+        if (kind === "sync") {
+          db.query(`
+            INSERT INTO sync_runs (
+              project_id, id, sync_id, dataset_id, mode, status, started_at
+            ) VALUES (?, ?, ?, ?, 'snapshot', 'running', ?)
+          `).run(
+            "project-a",
+            "legacy-sync-run",
+            "sync-orders",
+            "raw.orders",
+            "2026-01-01T00:00:00.000Z"
+          )
+        } else {
+          db.query(`
+            INSERT INTO pipeline_runs (
+              project_id, id, pipeline_id, status, started_at
+            ) VALUES (?, ?, ?, 'running', ?)
+          `).run("project-a", "legacy-pipeline-run", "pipeline-orders", "2026-01-01T00:00:00.000Z")
+        }
+
+        expect(() => db.transaction(() => executionMigration.up(db))()).toThrow()
+        expect(readMemoryTableColumns(db, "sync_runs")).not.toContain("execution_id")
+        expect(readMemoryTableColumns(db, "pipeline_runs")).not.toContain("execution_id")
+      } finally {
+        db.close()
+      }
+    }
+  })
+
+  test("makes Sync and Pipeline execution links required and unique", () => {
+    const db = new Database(":memory:")
+    try {
+      for (const migration of sqliteStorageMigrations.steps) migration.up(db)
+
+      for (const table of ["sync_runs", "pipeline_runs"] as const) {
+        expect(readMemoryColumn(db, table, "execution_id")?.notnull).toBe(1)
+        expect(readMemoryColumn(db, table, "queued_at")?.notnull).toBe(1)
+        expect(readMemoryColumn(db, table, "started_at")?.notnull).toBe(0)
+        expect(readMemoryUniqueIndexes(db, table)).toContainEqual(["project_id", "execution_id"])
+      }
+    } finally {
+      db.close()
+    }
+  })
+
+  test("rejects legacy Projection runs instead of inventing execution authority", () => {
+    const db = new Database(":memory:")
+    try {
+      const executionMigrationIndex = sqliteStorageMigrations.steps.findIndex(
+        (migration) => migration.id === "022-projection-executions"
+      )
+      const executionMigration = sqliteStorageMigrations.steps[executionMigrationIndex]
+      if (!executionMigration) {
+        throw new Error("SQLite projection-executions migration is missing.")
+      }
+      for (const migration of sqliteStorageMigrations.steps.slice(0, executionMigrationIndex)) {
+        migration.up(db)
+      }
+      db.query(`
+        INSERT INTO projection_runs (
+          project_id, id, projection_id, projection_kind, materialization_protocol,
+          dataset_id, dataset_version_id, dataset_version_created_at, ontology_revision,
+          projection_revision, ownership_hash, object_type_id, status, started_at, attempt,
+          execution_token
+        ) VALUES (
+          ?, ?, ?, 'object', 'replacement', ?, ?, ?, ?, ?, ?, ?, 'running', ?, 1, ?
+        )
+      `).run(
+        "project-a",
+        "legacy-projection-run",
+        "project-devices",
+        "raw.devices",
+        "version-1",
+        "2026-01-01T00:00:00.000Z",
+        "ontology-1",
+        "projection-1",
+        "ownership-1",
+        "Device",
+        "2026-01-01T00:00:00.000Z",
+        "legacy-token"
+      )
+
+      expect(() => db.transaction(() => executionMigration.up(db))()).toThrow()
+      expect(readMemoryTableColumns(db, "projection_runs")).not.toContain("execution_id")
+    } finally {
+      db.close()
+    }
+  })
+
+  test("makes the Projection execution link required and unique", () => {
+    const db = new Database(":memory:")
+    try {
+      for (const migration of sqliteStorageMigrations.steps) migration.up(db)
+
+      expect(readMemoryForeignKeyTables(db, "executions")).toContain("executions")
+      expect(readMemoryForeignKeyTables(db, "executions")).not.toContain("executions_v2")
+      expect(readMemoryColumn(db, "projection_runs", "execution_id")?.notnull).toBe(1)
+      expect(readMemoryColumn(db, "projection_runs", "queued_at")?.notnull).toBe(1)
+      expect(readMemoryColumn(db, "projection_runs", "started_at")?.notnull).toBe(0)
+      expect(readMemoryUniqueIndexes(db, "projection_runs")).toContainEqual([
+        "project_id",
+        "execution_id",
+      ])
+    } finally {
+      db.close()
+    }
+  })
+
+  test("rejects legacy Webhook runs and deliveries instead of inventing authority", () => {
+    for (const legacyRecord of ["run", "delivery"] as const) {
+      const db = new Database(":memory:")
+      try {
+        const executionMigrationIndex = sqliteStorageMigrations.steps.findIndex(
+          (migration) => migration.id === "023-webhook-executions"
+        )
+        const executionMigration = sqliteStorageMigrations.steps[executionMigrationIndex]
+        if (!executionMigration) {
+          throw new Error("SQLite webhook-executions migration is missing.")
+        }
+        for (const migration of sqliteStorageMigrations.steps.slice(0, executionMigrationIndex)) {
+          migration.up(db)
+        }
+
+        if (legacyRecord === "run") {
+          db.query(`
+            INSERT INTO webhook_runs (
+              project_id, id, connector_id, webhook_id, status, method, route, started_at
+            ) VALUES (?, ?, ?, ?, 'running', 'POST', ?, ?)
+          `).run(
+            "project-a",
+            "legacy-webhook-run",
+            "github",
+            "events",
+            "/api/webhooks/github/events",
+            "2026-01-01T00:00:00.000Z"
+          )
+        } else {
+          db.query(`
+            INSERT INTO webhook_deliveries (
+              project_id, connector_id, webhook_id, idempotency_key, status, received_at
+            ) VALUES (?, ?, ?, ?, 'in_progress', ?)
+          `).run("project-a", "github", "events", "delivery-1", "2026-01-01T00:00:00.000Z")
+        }
+
+        expect(() => db.transaction(() => executionMigration.up(db))()).toThrow()
+        expect(readMemoryTableColumns(db, "webhook_runs")).not.toContain("execution_id")
+        expect(readMemoryTableNames(db)).toContain("webhook_deliveries")
+      } finally {
+        db.close()
+      }
+    }
+  })
+
+  test("makes the Webhook delivery and execution links required and unique", () => {
+    const db = new Database(":memory:")
+    try {
+      for (const migration of sqliteStorageMigrations.steps) migration.up(db)
+
+      expect(readMemoryTableNames(db)).not.toContain("webhook_deliveries")
+      expect(readMemoryColumn(db, "webhook_runs", "execution_id")?.notnull).toBe(1)
+      expect(readMemoryColumn(db, "webhook_runs", "request_body_bytes")?.notnull).toBe(1)
+      expect(readMemoryColumn(db, "webhook_runs", "request_body_sha256")?.notnull).toBe(1)
+      expect(readMemoryTableColumns(db, "webhook_runs")).not.toContain("delivery_claim_result")
+      expect(readMemoryForeignKeyTables(db, "webhook_runs")).toContain("executions")
+      expect(readMemoryUniqueIndexes(db, "webhook_runs")).toEqual(
+        expect.arrayContaining([
+          ["project_id", "execution_id"],
+          ["project_id", "connector_id", "webhook_id", "idempotency_key"],
+        ])
+      )
+    } finally {
+      db.close()
+    }
+  })
+
+  test("rejects legacy ontology commits instead of inventing execution authority", () => {
+    const db = new Database(":memory:")
+    try {
+      const migrationIndex = sqliteStorageMigrations.steps.findIndex(
+        (migration) => migration.id === "024-ontology-commit-executions"
+      )
+      const migration = sqliteStorageMigrations.steps[migrationIndex]
+      if (!migration) throw new Error("SQLite ontology-commit execution migration is missing.")
+      for (const previous of sqliteStorageMigrations.steps.slice(0, migrationIndex)) {
+        previous.up(db)
+      }
+      db.query(`
+        INSERT INTO ontology_commits (
+          project_id, id, idempotency_key, request_hash, origin_kind, origin,
+          ontology_revision, intent, result, committed_at
+        ) VALUES (?, ?, ?, ?, 'runtime', json(?), ?, json(?), json(?), ?)
+      `).run(
+        "project-a",
+        "legacy-commit",
+        "runtime:legacy-commit",
+        "legacy-hash",
+        JSON.stringify({ kind: "runtime", requestId: "legacy-request" }),
+        "ontology-1",
+        JSON.stringify({ kind: "edit", mode: "atomic", operationCount: 0 }),
+        JSON.stringify({
+          kind: "edit",
+          commitId: "legacy-commit",
+          created: true,
+          eventCount: 0,
+          committedAt: "2026-01-01T00:00:00.000Z",
+          outcomes: [],
+          changes: { objects: [], links: [] },
+        }),
+        "2026-01-01T00:00:00.000Z"
+      )
+
+      expect(() => db.transaction(() => migration.up(db))()).toThrow("unknown authority")
+      expect(readMemoryTableColumns(db, "ontology_commits")).not.toContain("execution_id")
+    } finally {
+      db.close()
+    }
+  })
+
+  test("requires every ontology commit to reference a durable execution", () => {
+    const db = new Database(":memory:")
+    try {
+      for (const migration of sqliteStorageMigrations.steps) migration.up(db)
+
+      expect(readMemoryColumn(db, "ontology_commits", "execution_id")?.notnull).toBe(1)
+      expect(readMemoryForeignKeyTables(db, "ontology_commits")).toContain("executions")
+      expect(readMemoryIndexColumns(db, "idx_ontology_commits_execution")).toEqual([
+        "project_id",
+        "execution_id",
+      ])
+    } finally {
+      db.close()
+    }
+  })
+
+  test("stores a headless connector attempt as the run's single protocol child", () => {
+    const db = new Database(":memory:")
+    try {
+      for (const migration of sqliteStorageMigrations.steps) migration.up(db)
+
+      expect(readMemoryTableColumns(db, "connector_connection_runs")).not.toContain(
+        "authorization_attempt_id"
+      )
+      expect(readMemoryTableColumns(db, "connector_authorization_attempts")).not.toContain(
+        "owner_type"
+      )
+      expect(readMemoryTableColumns(db, "connector_connections")).not.toContain("owner_type")
+      expect(readMemoryUniqueIndexes(db, "connector_authorization_attempts")).toContainEqual([
+        "project_id",
+        "connector_id",
+        "connection_run_id",
+      ])
+      expect(readMemoryForeignKeyTables(db, "connector_authorization_attempts")).toContain(
+        "connector_connection_runs"
+      )
+      expect(readMemoryUniqueIndexes(db, "connector_connections")).toContainEqual([
+        "project_id",
+        "connector_id",
+        "slot",
+      ])
+    } finally {
+      db.close()
+    }
+  })
+
   test("migrations install auth storage tables", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-auth-migrations-"))
     tempDirs.push(tempDir)
@@ -1368,12 +1729,12 @@ describe("SQLite storage migrations", () => {
     expect(tables).toContain("agent_threads")
     expect(tables).toContain("agent_runs")
     expect(tables).toContain("agent_messages")
+    expect(tables).toContain("agent_context_checkpoints")
     expect(tables).toContain("ai_model_call_usage")
     expect(tables).toContain("ai_model_call_usage_groups")
+    expect(tables).toContain("ai_model_call_valuations")
+    expect(tables).not.toContain("ai_price_schedules")
     expect(readTableColumns(path, "ai_model_call_usage")).toContain("execution_id")
-    expect(readTableColumns(path, "ai_model_call_usage")).toEqual(
-      expect.arrayContaining(["model_definition", "cost", "route"])
-    )
     expect(readTableColumns(path, "ai_model_call_usage")).not.toContain("execution_kind")
     expect(readTableColumns(path, "ai_model_call_usage")).not.toContain("requester_principal_id")
     expect(readTableForeignKeys(path, "ai_model_call_usage")).toContainEqual({
@@ -1392,6 +1753,55 @@ describe("SQLite storage migrations", () => {
     expect(agentRunColumns).not.toContain("usage_cached_input_tokens")
     expect(workflowAgentNodeColumns).not.toContain("usage")
     expect(readTableColumns(path, "workflow_runs")).toContain("requester_group_ids")
+  })
+
+  test("AI cost accounting migration preserves existing Phase 1 usage rows", () => {
+    const db = new Database(":memory:")
+    try {
+      const costIndex = sqliteStorageMigrations.steps.findIndex(
+        (migration) => migration.id === "026-ai-cost-accounting"
+      )
+      const costMigration = sqliteStorageMigrations.steps[costIndex]
+      if (!costMigration) throw new Error("expected AI cost accounting migration")
+      for (const migration of sqliteStorageMigrations.steps.slice(0, costIndex)) {
+        const applied = migration.up(db)
+        if (applied instanceof Promise) throw new Error("expected synchronous SQLite migration")
+      }
+
+      db.run(`
+        INSERT INTO executions (
+          project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
+          authority_kind, authority_primitive_kind, authority_primitive_id, created_at
+        ) VALUES (
+          'project-a', 'execution-1', 'workflow', 'workflow-1', 'event', 'event-1',
+          'correlation-1', 'trustedPrimitive', 'workflow', 'workflow-1',
+          '2026-08-01T11:59:00.000Z'
+        )
+      `)
+      db.run(`
+        INSERT INTO ai_model_call_usage (
+          project_id, id, execution_id, attempt, call_id, provider_id, requested_model_id,
+          response_id, input_tokens, output_tokens, total_tokens, reporting_status, raw_usage,
+          occurred_at, recorded_at
+        ) VALUES (
+          'project-a', 'usage-1', 'execution-1', 1, 'call-1', 'gateway', 'openai/gpt-5',
+          'response-1', 12, 8, 20, 'complete', '{"inputTokens":12,"outputTokens":8}',
+          '2026-08-01T12:00:00.000Z', '2026-08-01T12:00:01.000Z'
+        )
+      `)
+      const before = db.query("SELECT * FROM ai_model_call_usage").get()
+
+      const applied = costMigration.up(db)
+      if (applied instanceof Promise) throw new Error("expected synchronous SQLite migration")
+
+      expect(db.query("SELECT * FROM ai_model_call_usage").get()).toEqual(before)
+      expect(tableColumns(db, "ai_model_call_valuations")).toEqual(
+        expect.arrayContaining(["usage_record_id", "status", "details", "amount_nanos", "rated_at"])
+      )
+      expect(tableColumns(db, "ai_price_schedules")).toEqual([])
+    } finally {
+      db.close()
+    }
   })
 
   test("drops only obsolete run usage projections from an existing schema", () => {
@@ -1657,6 +2067,12 @@ function readMemoryUniqueIndexes(db: Database, tableName: string): string[][] {
   return indexes
     .filter((index) => index.unique === 1)
     .map((index) => readMemoryIndexColumns(db, index.name))
+}
+
+function readMemoryForeignKeyTables(db: Database, tableName: string): string[] {
+  return (
+    db.query(`PRAGMA foreign_key_list(${tableName})`).all() as { readonly table: string }[]
+  ).map((foreignKey) => foreignKey.table)
 }
 
 function readMemoryColumn(

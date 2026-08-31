@@ -10,8 +10,12 @@ const SOURCE = "SixbPipelineWorker"
 
 export async function emitPipelineRunStarted(
   events: DomainEventLog | undefined,
-  run: Pick<PipelineRunRecord, "id" | "pipelineId" | "startedAt">
+  run: Pick<PipelineRunRecord, "id" | "pipelineId" | "startedAt">,
+  correlationId: string
 ): Promise<void> {
+  if (!run.startedAt) {
+    throw new Error(`[SixbPipelineWorker] Pipeline run '${run.id}' started without a timestamp.`)
+  }
   await events?.emit(
     {
       events: [
@@ -24,6 +28,7 @@ export async function emitPipelineRunStarted(
           },
         },
       ],
+      correlationId,
     },
     { source: SOURCE }
   )
@@ -35,7 +40,8 @@ export async function emitPipelineRunStepStarted(
     PipelineStepRunRecord,
     "id" | "pipelineRunId" | "pipelineId" | "stepId" | "datasetId" | "startedAt"
   >,
-  context: PipelineStepLifecycleContext
+  context: PipelineStepLifecycleContext,
+  correlationId: string
 ): Promise<void> {
   await events?.emit(
     {
@@ -54,6 +60,7 @@ export async function emitPipelineRunStepStarted(
           },
         },
       ],
+      correlationId,
     },
     { source: SOURCE }
   )
@@ -74,7 +81,8 @@ export async function emitPipelineRunStepFinished(
     | "rowsWritten"
     | "error"
   >,
-  context: PipelineStepLifecycleContext
+  context: PipelineStepLifecycleContext,
+  correlationId: string
 ): Promise<void> {
   await events?.emit(
     {
@@ -97,6 +105,7 @@ export async function emitPipelineRunStepFinished(
           },
         },
       ],
+      correlationId,
     },
     { source: SOURCE }
   )
@@ -105,7 +114,8 @@ export async function emitPipelineRunStepFinished(
 export async function emitDatasetVersionCommitted(
   events: DomainEventLog | undefined,
   job: PipelineJob,
-  step: PipelineStepRunResult
+  step: PipelineStepRunResult,
+  correlationId: string
 ): Promise<void> {
   if (!step.versionCreated) return
 
@@ -128,6 +138,7 @@ export async function emitDatasetVersionCommitted(
           },
         },
       ],
+      correlationId,
     },
     { source: SOURCE }
   )
@@ -135,10 +146,14 @@ export async function emitDatasetVersionCommitted(
 
 export async function emitPipelineRunFinished(
   events: DomainEventLog | undefined,
-  run: Pick<PipelineRunRecord, "id" | "pipelineId" | "status" | "output" | "error">
+  run: Pick<PipelineRunRecord, "id" | "pipelineId" | "status" | "output" | "error">,
+  correlationId: string
 ): Promise<void> {
   await events?.emit(
-    { events: [{ type: "pipeline.run.finished", payload: buildPipelineRunFinishedPayload(run) }] },
+    {
+      events: [{ type: "pipeline.run.finished", payload: buildPipelineRunFinishedPayload(run) }],
+      correlationId,
+    },
     { source: SOURCE }
   )
 }
@@ -171,8 +186,8 @@ function requireFinishedAt(stepRunId: string, finishedAt: Date | undefined): Dat
 function requireTerminalStatus(
   status: PipelineRunStatus,
   context: string
-): Exclude<PipelineRunStatus, "running"> {
-  if (status === "running") {
+): Exclude<PipelineRunStatus, "queued" | "running"> {
+  if (status === "queued" || status === "running") {
     throw new Error(`[SixbPipelineWorker] ${context} is still running.`)
   }
 

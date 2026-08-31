@@ -1,2 +1,2 @@
-export type { WorkflowWorkerHost } from "./worker"
+export type { WorkflowWorkerHost, WorkflowWorkerOptions } from "./worker"
 export { WorkflowWorker } from "./worker"

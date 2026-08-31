@@ -22,6 +22,30 @@ const erpDb = defineConnector("erpDb", {
   },
 })
 
+const social = defineConnector("social", {
+  type: "social-oauth",
+  authentication: {
+    type: "oauth2",
+    authorizationUrl() {
+      return "https://provider.test/oauth"
+    },
+    exchangeCode() {
+      return { accessToken: "access" }
+    },
+    refresh() {
+      return { accessToken: "refreshed" }
+    },
+  },
+  discoverAccounts() {
+    return [{ id: "account-a", label: "Account A" }]
+  },
+  connect(context) {
+    return {
+      accountId: context.account.id,
+    }
+  },
+})
+
 const rawOrdersDataset = defineDataset("raw.erp.orders", {
   schema: [col("id", "int64")],
 })
@@ -51,6 +75,7 @@ const syncOrders = defineSync("sync-orders")
     db.nonexistent()
 
     const _checkpoint: undefined = context.checkpoint
+    const _connection: undefined = context.connection
 
     // @ts-expect-error checkpoint setters are only exposed after .checkpoint<T>()
     context.setCheckpoint({ cursor: "next" })
@@ -79,6 +104,22 @@ const syncOrdersWithCheckpoint = defineSync("sync-orders-with-checkpoint")
     // @ts-expect-error checkpoint must match the type supplied to .checkpoint<T>()
     context.setCheckpoint({ page: 2 })
 
+    return [{ id: 1 }]
+  })
+  .intoDataset(rawOrdersDataset)
+
+const syncManagedAccounts = defineSync("sync-managed-accounts")
+  .checkpoint<{ cursor: string }>()
+  .from(social)
+  .read((client, context) => {
+    const _clientAccountId: string = client.accountId
+    const _connectionId: string = context.connection.id
+    const _connectorId: string = context.connection.connectorId
+    const _slot: string = context.connection.slot
+    const _accountId: string = context.connection.account.id
+    const _ownerType: "project" = context.connection.owner.type
+    const _checkpoint: { cursor: string } | undefined = context.checkpoint
+    context.setCheckpoint({ cursor: "next" })
     return [{ id: 1 }]
   })
   .intoDataset(rawOrdersDataset)
@@ -126,7 +167,12 @@ defineSync("invalid-merge-target", { mode: "merge" })
   // @ts-expect-error merge syncs require a dataset with a primary key
   .intoDataset(rawOrdersDataset)
 
-const _syncDefinitions: SyncDefinition[] = [syncOrders, syncOrdersWithCheckpoint, mergeOrders]
+const _syncDefinitions: SyncDefinition[] = [
+  syncOrders,
+  syncOrdersWithCheckpoint,
+  syncManagedAccounts,
+  mergeOrders,
+]
 const _connector = syncOrders.connector
 const _checkpointConnector = syncOrdersWithCheckpoint.connector
 

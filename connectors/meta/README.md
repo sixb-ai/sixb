@@ -7,6 +7,7 @@ Business/Creator accounts — one method per node/edge, nothing more.
 - **Pages** — list Facebook Pages and their linked Instagram accounts (`/me/accounts`)
 - **Instagram** — read the user profile, list media and stories, read account- and media-level insights
 - **Facebook** — read the Page profile, list published Page posts, read Page-level insights
+- **Batch** — combine up to 50 independent Graph reads, with an optional token per sub-request
 
 The connector stays metric-agnostic and returns Graph responses faithfully: it does
 not flatten attachments, coerce timestamps, reorder insights, or bake in a metric
@@ -33,7 +34,9 @@ export const metaConnector = defineConnector(
 | `accessToken`  | **Required.** Long-lived User or System-User access token.                        |
 | `graphVersion` | Graph API version segment. Defaults to `v23.0`.                                   |
 | `baseUrl`      | Full base URL override (takes precedence over `graphVersion`). Mainly for tests.  |
-| `maxRetries`   | Retries on 429/5xx responses. Defaults to `2`.                                    |
+| `retry`        | Retry policy for transient HTTP and Meta throttling errors. Defaults to 2 retries. |
+| `maxRetries`   | Deprecated shorthand for `retry.maxRetries`.                                      |
+| `onResponse`   | Observe response headers and parsed quota usage without wrapping returned objects. |
 | `timeoutMs`    | Per-request timeout in milliseconds.                                              |
 
 **Tokens.** The `accessToken` authorizes Page discovery (`/me/accounts`) and Instagram
@@ -60,6 +63,7 @@ The client mirrors the Graph API graph:
 | `meta.facebook(id, { accessToken }).get()`           | `GET /{page-id}`                     |
 | `meta.facebook(id, { accessToken }).posts.list()` / `.listAll()` | `GET /{page-id}/published_posts` |
 | `meta.facebook(id, { accessToken }).insights.get()`  | `GET /{page-id}/insights`            |
+| `meta.batch.get()` / `.execute()`                    | Graph API Batch endpoint              |
 
 > **Why `pages`, not `accounts`?** Meta's `/me/accounts` edge is a historical name —
 > it returns the Facebook **Pages** the token manages (`MetaFacebookPage`), each with
@@ -119,6 +123,39 @@ do {
 } while (after)
 ```
 
+Instagram's `/media` edge supports cursor pagination, not time-based pagination. Meta's
+[official Instagram API collection](https://www.postman.com/meta/instagram/documentation/6yqw8pt/instagram-api)
+documents the User Insights edge as the only Instagram edge with time-based pagination for
+Facebook Login. The connector therefore does not send undocumented `since` or `until` parameters
+to `/media`.
+
+### Batch reads
+
+The Graph Batch endpoint uses an outer `POST`, but this connector only constructs `GET`
+sub-requests. Each result is independent and keeps its status, raw body, headers, parsed body,
+quota usage, and structured Graph error when present:
+
+```ts
+type MediaEnvelope = { readonly data: readonly MetaInstagramMedia[] }
+
+const [page, media] = await meta.batch.execute([
+  meta.batch.get<MetaFacebookPageProfile>(`${pageId}?fields=id,name`, {
+    accessToken: pageAccessToken,
+  }),
+  meta.batch.get<MediaEnvelope>(`${igUserId}/media?fields=id,timestamp&limit=100`),
+] as const)
+
+if (media.ok) {
+  // media.body.data is typed; media.rawBody preserves Meta's original response body.
+} else {
+  // media.error is the structured Graph error for this sub-request only.
+}
+```
+
+Absolute URLs, empty batches, and batches above Meta's 50-request limit are rejected locally.
+Batching reduces network round trips, but every sub-request still counts separately toward Meta's
+usage limits. Throttled sub-requests are retried without replaying successful siblings.
+
 ## Insights & metric deprecations
 
 The connector is **metric-agnostic**: it passes `metrics`, `period`, `metricType`,
@@ -136,12 +173,38 @@ Meta's valid metric set changes frequently. Notable recent changes:
 
 Validate metric names against the live Graph API for your `graphVersion`.
 
+## Throttling and usage
+
+In addition to network failures, HTTP `429`, and `5xx`, the default policy retries Graph throttling
+codes `4`, `17`, `32`, and `613`, including when Meta returns them with HTTP `400`. Retries remain
+bounded by `retry.maxRetries`; customize `shouldRetry` or `delayMs` when a project needs a different
+backoff policy.
+
+`MetaApiError` exposes the parsed Graph error and body, `rawBody`, response headers, and parsed usage.
+Successful responses can be observed through `onResponse`, including `X-App-Usage` and
+`X-Business-Use-Case-Usage`:
+
+```ts
+meta({
+  accessToken,
+  onResponse({ path, usage }) {
+    console.log(path, usage.app, usage.businessUseCase)
+  },
+})
+```
+
+The connector reports quota signals but does not choose account pacing, persistence, or circuit
+breaker policy for the project.
+
 ## Notes
 
-- **Read-only.** This connector issues `GET` requests only.
+- **Read-only.** Every Graph operation is a read. Batch execution uses Meta's required outer
+  `POST`, but the connector only accepts `GET` sub-requests.
 - **Faithful responses.** Attachments are returned as a full array, timestamps as raw
   API strings, and insights in API order. Flatten or normalize in your project layer.
 - **No account orchestration.** Deduping Pages/accounts and filtering to a specific
   Page or Instagram account is project policy — build it on top of `pages.listAll()`.
+- **No media time window.** Meta does not officially support time-based pagination on the
+  Instagram `/media` edge; filter cursor-paginated results in the project layer.
 - **Webhooks** are out of scope (this is a sync/read use case). They can be added later
   via `defineWebhook` from `@sixb/core`.
