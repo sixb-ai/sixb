@@ -969,6 +969,10 @@
       "description": "Agent catalog"
     },
     {
+      "name": "Models",
+      "description": "Project model catalog"
+    },
+    {
       "name": "Agent Threads",
       "description": "Agent conversation threads and messages"
     },
@@ -26728,6 +26732,48 @@
                     }
                   },
                   "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models": {
+      "get": {
+        "summary": "List the project model catalog",
+        "tags": ["Models"],
+        "operationId": "listModels",
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "language": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string"
+                          },
+                          "modelId": {
+                            "type": "string"
+                          },
+                          "isDefault": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": ["provider", "modelId", "isDefault"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["language"],
                   "additionalProperties": false
                 }
               }
