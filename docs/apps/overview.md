@@ -121,8 +121,43 @@ its `href` matches a known route, so you get SPA navigation without React Router
 <a href={`/review/${encodeURIComponent(intervention.id)}`}>Open review</a>
 ```
 
-Links to `/api`, `/auth`, `/ws`, `/docs`, cross-origin URLs, `download` links, and
+Links to `/api`, `/auth`, `/ws`, `/docs`, `/shared`, cross-origin URLs, `download` links, and
 modified clicks (new tab, etc.) fall through to native navigation.
+
+## Shared access uses ordinary pages
+
+A Share points to an ordinary app destination such as `/proposals/proposal-1`. Its recipient opens
+the corresponding `/shared/:grantId/proposals/proposal-1#secret` URL, but the page author writes the
+same component either way:
+
+```tsx
+export default function ProposalPage() {
+  const proposal = useObjectQuery(/* the normal typed query */)
+  const approve = useActionRunMutation(/* the normal typed mutation */)
+  // ...
+}
+```
+
+Before loading the layout, route, application code, or styles, the shared shell removes the secret
+from the URL and establishes an isolated session. The regular client then sends queries and
+mutations under that session. There is no `app/shared` convention, resource facade, or
+`useSharedAccess()` hook; `app/shared` is a reserved route and is rejected at build time.
+
+The server enforces the Share grant on every request. Knowing another object's primary ID does not
+grant access: only the exact target and explicitly selected link paths are readable. Unsupported V1
+operations — WebSockets, uploads, direct object/link/telemetry writes, and action-run listing or
+files — fail closed.
+
+Treat a shared URL as a bearer credential. Render it as a native document link (`<a href={url}>`)
+instead of sending it through programmatic React Router navigation. Sixb intercepts normal links to
+`/shared` and forces a document load so the secret never enters the authenticated app's SPA state.
+
+V1 shared-link delivery is supported through `bun sixb dev`, `bun sixb app`, or
+`createCustomApp().start()`. A generic static host or SPA fallback is not sufficient: the built-in
+server routes `/shared/:grantId/**` to a separate shell and adds a fresh nonce-based CSP,
+`no-store`, `no-referrer`, and no-preload guards on every response. Keep using the built-in server
+until an external hosting adapter can reproduce that complete boundary. The app and API must also
+be same-site in V1 because shared-session cookies use `SameSite=Strict`.
 
 ## Layout and metadata
 

@@ -23,8 +23,8 @@ const ROLE_TIMEOUT_MS = 30_000
  * budget — which connections it opens and which it does not — and bundling Atlas to
  * measure that would add tens of seconds and put Bun's bundler on the path of a test
  * that has nothing to do with bundling. Atlas only requires the directory to exist with
- * exactly one `atlas-*.js` and one `atlas-*.css`; the custom app only requires an
- * `index.html`.
+ * exactly one `atlas-*.js` and one `atlas-*.css`; the custom app requires its ordinary and shared
+ * HTML shells.
  */
 const buildOutdir = resolve(dirname(fixtureEntry), ".sixb", "dist")
 
@@ -33,7 +33,10 @@ const PREBUILT_ATLAS = [
   join(buildOutdir, "atlas", "atlas-e2e.css"),
 ] as const
 
-const PREBUILT_APP = [join(buildOutdir, "app", "index.html")] as const
+const PREBUILT_APP = [
+  join(buildOutdir, "app", "index.html"),
+  join(buildOutdir, "app", "shared-index.html"),
+] as const
 
 /**
  * Each test writes only what its own role needs, and the output goes away afterwards.

@@ -28,11 +28,28 @@ app/
 Two functions generate the entry point files into `.sixb/generated/`:
 
 - **`generateRouteManifest(routes, generatedDir)`** -- writes `routes.ts` with a static import for each scanned page. Routes are eager on purpose: project apps bundle small, and a single bundle means no loading gap when navigating between pages.
-- **`generateAppEntry(projectRoot, generatedDir, options)`** -- writes `index.html` (HTML shell), `main.tsx` (React entry with BrowserRouter, TanStack Query, and the `@sixb/client` SDK), and `app.webmanifest`.
+- **`generateAppEntry(projectRoot, generatedDir, options)`** -- writes the ordinary and shared HTML bootstraps, their entry points, one common React route tree, and `app.webmanifest`.
 
-The generated entry also intercepts plain same-origin `<a href="/...">` clicks and routes them client-side, so internal links work like react-router's `<Link>` without authors having to remember it. The interceptor is conservative — modified clicks, `target`/`download`/`rel="external"` anchors, cross-origin URLs, reserved Sixb paths (`/api`, `/auth`, `/ws`, `/docs`), and destinations that don't match an app route all keep native browser navigation. `<Link>` remains the idiomatic choice in app code.
+The generated entry also intercepts plain same-origin `<a href="/...">` clicks and routes them client-side, so internal links work like react-router's `<Link>` without authors having to remember it. The interceptor is conservative — modified clicks, `target`/`download`/`rel="external"` anchors, cross-origin URLs, reserved Sixb paths (`/api`, `/auth`, `/ws`, `/docs`, `/shared`), and destinations that don't match an app route all keep native browser navigation. `<Link>` remains the idiomatic choice in app code.
 
 If `app/layout.tsx` exists, it is used as a root layout wrapper. It can also export a `metadata` object (`title`, `description`, `favicon`, `themeColor`, and `backgroundColor`). Metadata is loaded during generation and written into the static HTML and manifest, so it is available before auth and client startup. The layout module must therefore be import-safe in Bun: do not access `window` or `document` at module scope. An `app/globals.css` file is imported automatically when present.
+
+### Shared links
+
+A shared link opens the same layout, route, page, TanStack Query hooks, and action mutations as the
+ordinary app. The separate `/shared/:grantId/...` shell removes the bearer secret from the URL,
+establishes an isolated shared session, and only then imports app code and styles. No shared page
+directory, resource facade, or `useSharedAccess()` hook is required.
+
+`app/shared` is reserved and rejected during scanning. Shared pages can read only the exact object,
+links, and actions selected by the Share grant; ordinary unauthorized queries fail normally. V1 is
+HTTP-only: WebSockets, uploads, and direct object/link/telemetry writes fail closed. The shared shell
+is neither installable as a PWA nor indexable.
+
+In development the ordinary app keeps HMR. The shared shell is built lazily on its first request,
+invalidated when source changes, and rebuilt on the next request. It requires a browser reload
+because Bun's HTML dev loader injects application scripts before an inline secret-scrubbing
+bootstrap can run safely.
 
 Add an optional `app/auth.tsx` default export to customize the app audience's magic-link pages. It receives `AuthExperienceProps` from `@sixb/app/auth` with `signIn`, `checkEmail`, `confirm`, `invalidLink`, and `error` states plus framework-owned actions. Sixb builds it separately, includes `app/globals.css`, and serves it from the API's existing `/auth/*` routes. It is not wrapped by `app/layout.tsx`, and it never owns tokens, cookies, callbacks, audience validation, or return redirects. When the file is absent, the generic server login remains the fallback.
 
@@ -138,6 +155,12 @@ Tailwind's source detection is scoped to `app/`, and the CLI is resolved from th
 ### 4. Start
 
 `createCustomApp().start(options)` serves the built app from `.sixb/dist/app/` on a Bun server. When `apiBaseUrl` is provided, it is injected into the served HTML at runtime so the public custom app shell can call the Sixb API origin with credentials.
+
+Shared-link delivery requires this server in V1. A static SPA fallback must not serve the ordinary
+OIDC shell for `/shared/:grantId/**`: `start()` serves the isolated shell with a per-response CSP
+nonce, `no-store`, `no-referrer`, and no eager asset loading. External hosting adapters are not yet
+a supported replacement for that boundary. The app and API must be same-site because shared-session
+cookies use `SameSite=Strict`.
 
 ## Usage
 
