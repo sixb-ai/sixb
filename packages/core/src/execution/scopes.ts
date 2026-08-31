@@ -31,7 +31,7 @@ export function createPrincipalRequestScope(input: {
   return Object.freeze({
     execution,
     authorization: createPrincipalRuntimeAuthorization({
-      projectId: input.projectId,
+      execution,
       context: input.context,
       ...(input.credential === undefined ? {} : { credential: input.credential }),
     }),
@@ -43,9 +43,10 @@ export function createDisabledRequestScope(input: {
   readonly requestId: string
   readonly correlationId: string
 }): ExecutionScope {
+  const execution = createRequestExecution(input)
   return Object.freeze({
-    execution: createRequestExecution(input),
-    authorization: createDisabledRuntimeAuthorization(input.projectId),
+    execution,
+    authorization: createDisabledRuntimeAuthorization(execution),
   })
 }
 
@@ -64,7 +65,7 @@ export function createKernelScope(input: {
   })
   return Object.freeze({
     execution,
-    authorization: createKernelRuntimeAuthorization({ projectId: input.projectId, operation }),
+    authorization: createKernelRuntimeAuthorization({ execution, operation }),
   })
 }
 
@@ -110,8 +111,8 @@ export function createTestingScope(input: {
   return Object.freeze({
     execution,
     authorization: context
-      ? createPrincipalRuntimeAuthorization({ projectId: input.projectId, context })
-      : createDisabledRuntimeAuthorization(input.projectId),
+      ? createPrincipalRuntimeAuthorization({ execution, context })
+      : createDisabledRuntimeAuthorization(execution),
   })
 }
 
