@@ -1,4 +1,4 @@
-import type { AgentDefinition, AgentMessage, AgentMessagePart, Storage } from "@sixb/core"
+import type { AgentMessage, AgentMessagePart, Storage } from "@sixb/core"
 import { createAgentMessageId, runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { isAbortError, QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
@@ -17,6 +17,7 @@ import {
   toolResultAttachmentKey,
 } from "./attachments"
 import { AgentTurnTimeoutError } from "./errors"
+import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { type AgentRunFailure, toAgentExecutionFailure } from "./failure"
 import { appendMessageAndFinishRunOrThrow, finishRunOrThrow } from "./finalize"
 import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
@@ -31,7 +32,7 @@ export const DEFAULT_MAX_STEPS = 100
 export interface RunAgentTurnInput {
   /** The worker's stable execution context (storage, tools, stream sink, and turn limits). */
   readonly context: AgentTurnContext
-  readonly agent: AgentDefinition
+  readonly plan: ResolvedAgentExecutionPlan
   /** The run this delivery reserved or reclaimed with its execution token. */
   readonly run: AgentRunRecord
   /** The worker's shutdown signal. */
@@ -44,8 +45,8 @@ export interface RunAgentTurnInput {
 
 /** Drive one provider-neutral model/tool turn to completion and persist it. */
 export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRecord> {
-  const { context, agent, run, signal } = input
-  const { id: projectId, storage, tools, defaultMaxSteps, turnTimeoutMs } = context
+  const { context, plan, run, signal } = input
+  const { id: projectId, storage, tools, turnTimeoutMs } = context
   const runId = run.id
   const executionToken = run.execution?.token
   if (!executionToken) {
@@ -73,7 +74,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
           messages: threadContext.retainedMessages,
           blobStorage: context.blobStorage,
           apiBaseUrl: context.apiBaseUrl,
-          inlineImages: modelSupportsInlineImages(agent.model),
+          inlineImages: modelSupportsInlineImages(plan.model),
           signal,
         })
       : undefined)
@@ -94,7 +95,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         : undefined,
   })
 
-  const maxSteps = agent.loop?.stopWhen?.maxSteps ?? defaultMaxSteps
+  const maxSteps = plan.maxSteps
   const sandboxReadiness = monitorSandboxReadiness(context.sandboxReady)
   // Preflight and the answer share accounting and one deadline. Direct callers own their runtime.
   const ownsRuntime = input.runtime === undefined
@@ -137,7 +138,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         run,
         executionToken,
         projectId,
-        modelId: agent.model.modelId,
+        modelId: plan.model.modelId,
         status: "failed",
         finishReason: "timeout",
         error: toAgentExecutionFailure(new AgentTurnTimeoutError(runId, turnTimeoutMs), {
@@ -162,7 +163,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       run,
       executionToken,
       projectId,
-      modelId: agent.model.modelId,
+      modelId: plan.model.modelId,
       status: "cancelled",
       parts: interruptedParts,
     })
@@ -173,7 +174,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     let result: Awaited<ReturnType<typeof runModelLoop>>
     try {
       result = await runModelLoop({
-        model: usageRecorder.wrapModel(agent.model),
+        model: usageRecorder.wrapModel(plan.model),
         messages: [
           {
             role: "system",
@@ -182,8 +183,8 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
           ...modelMessages,
         ],
         tools,
-        ...(agent.reasoning === undefined ? {} : { reasoning: agent.reasoning }),
-        ...(agent.loop?.caching === undefined ? {} : { caching: agent.loop.caching }),
+        ...(plan.reasoning === undefined ? {} : { reasoning: plan.reasoning }),
+        ...(plan.caching === undefined ? {} : { caching: plan.caching }),
         maxSteps,
         finalStepInstruction: DEFAULT_AGENT_FINAL_STEP_INSTRUCTION,
         ...(context.prepareStep === undefined ? {} : { prepareStep: context.prepareStep }),
@@ -202,10 +203,10 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     interruptedParts =
       result.status === "aborted"
         ? agentTraceFromPartialModelLoop(result.steps, result.partialContent, {
-            agentId: agent.id,
+            agentId: run.agentId,
             runId,
           })
-        : agentTraceFromModelSteps(result.steps, { agentId: agent.id, runId })
+        : agentTraceFromModelSteps(result.steps, { agentId: run.agentId, runId })
 
     const interruptedAfterModel = await finalizeIfInterrupted()
     if (interruptedAfterModel) return interruptedAfterModel
@@ -217,7 +218,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         run,
         executionToken,
         projectId,
-        modelId: agent.model.modelId,
+        modelId: plan.model.modelId,
         status: "cancelled",
         parts: interruptedParts,
       })
@@ -268,7 +269,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         id: runId,
         executionToken,
         status: "succeeded",
-        modelId: agent.model.modelId,
+        modelId: plan.model.modelId,
         finishReason,
         ...(outputAttachments.diagnostics.length === 0
           ? {}

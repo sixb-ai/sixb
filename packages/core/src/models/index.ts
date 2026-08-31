@@ -4,11 +4,12 @@ export type {
   LanguageModelCatalog,
   LanguageModelDefinitionCatalog,
   LanguageModelEntry,
+  LanguageModelRef,
   ModelCatalog,
   ModelCatalogInput,
   ModelDefinitionCatalog,
 } from "./catalog"
-export { createModelCatalog, modelRef } from "./catalog"
+export { createModelCatalog } from "./catalog"
 export type {
   LanguageModelDefinition,
   ModelDefinition,

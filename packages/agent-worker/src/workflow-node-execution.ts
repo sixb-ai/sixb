@@ -40,6 +40,7 @@ import type {
 import { AGENT_RUN_FAILURE_CODES, WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { AgentUsageRecordingError } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
+import { resolveAgentExecutionPlan } from "./execution-plan"
 import { toAgentExecutionFailure } from "./failure"
 import { createAiModelCallLimitController } from "./model-call-limits"
 import { AiModelCallRecorder } from "./model-call-recorder"
@@ -98,6 +99,10 @@ export async function executeWorkflowAgentNode(
     durableExecution,
     valueTypesById,
   } = loaded
+  const plan = resolveAgentExecutionPlan({
+    agent,
+    defaultMaxSteps: context.defaultMaxSteps,
+  })
   const resolved = await resolveAgentExecutionAuthorization({
     auth: context.storage.auth,
     projectId: context.id,
@@ -118,7 +123,7 @@ export async function executeWorkflowAgentNode(
     runs,
     executionRecord,
     nodeRun,
-    agent,
+    modelId: plan.model.modelId,
     execution: freshWorkflowExecution(delivery.leaseExpiresAt),
   })
   const executionToken = reserved.execution?.token
@@ -168,7 +173,7 @@ export async function executeWorkflowAgentNode(
     })
     environment = await createWorkflowAgentNodeEnvironment({
       context: executionContext,
-      agent,
+      plan,
       run: reserved,
       nodeInput: nodeRun.input,
       signal: turnSignal,
@@ -176,7 +181,8 @@ export async function executeWorkflowAgentNode(
     })
     const result = await runWorkflowAgentNode({
       context: environment.turnContext,
-      agent,
+      agentId: agent.id,
+      plan,
       agentStep: node.agentStep,
       workflowId: workflow.id,
       workflowRunId: nodeRun.workflowRunId,
@@ -241,7 +247,8 @@ export async function executeWorkflowAgentNode(
     const failed = await finishWorkflowAgentNodeFailed({
       context,
       nodeRun,
-      agent,
+      agentId: agent.id,
+      modelId: plan.model.modelId,
       executionToken,
       status,
       error: executionError,
@@ -397,14 +404,14 @@ async function reserveWorkflowAgentNode(input: {
   readonly runs: WorkflowRunStorage
   readonly executionRecord: WorkflowAgentNodeRunRecord
   readonly nodeRun: WorkflowNodeRunRecord
-  readonly agent: AgentDefinition
+  readonly modelId: string
   readonly execution: WorkflowAgentNodeRunExecution
 }): Promise<WorkflowAgentNodeRunRecord> {
   if (input.executionRecord.status === "queued") {
     return input.runs.agentNodes.start({
       projectId: input.executionRecord.projectId,
       nodeRunId: input.nodeRun.id,
-      modelId: input.agent.model.modelId,
+      modelId: input.modelId,
       execution: input.execution,
     })
   }
@@ -482,7 +489,8 @@ async function finishWorkflowAgentNodeSucceeded(input: {
 async function finishWorkflowAgentNodeFailed(input: {
   readonly context: AgentWorkerContext
   readonly nodeRun: WorkflowNodeRunRecord
-  readonly agent: AgentDefinition
+  readonly agentId: string
+  readonly modelId: string
   readonly executionToken: string
   readonly status: "failed" | "cancelled"
   readonly error: unknown
@@ -496,7 +504,7 @@ async function finishWorkflowAgentNodeFailed(input: {
 }> {
   const at = new Date()
   const agentErrorDetails = {
-    ...workflowAgentErrorDetails(input.agent.id, input.nodeRun),
+    ...workflowAgentErrorDetails(input.agentId, input.nodeRun),
     ...(input.failurePhase === undefined ? {} : { failurePhase: input.failurePhase }),
   }
   const agentExecutionError =
@@ -512,7 +520,7 @@ async function finishWorkflowAgentNodeFailed(input: {
             workflowRunId: input.nodeRun.workflowRunId,
             nodeId: input.nodeRun.nodeId,
             nodeRunId: input.nodeRun.id,
-            child: { type: "agent", agentId: input.agent.id },
+            child: { type: "agent", agentId: input.agentId },
           })
       : createSixbError(
           "runtime.cancelled",
@@ -532,7 +540,7 @@ async function finishWorkflowAgentNodeFailed(input: {
       throw createSixbError(
         "internal.unexpected",
         "[SixbAgentWorker] Workflow storage disappeared during finalization.",
-        { details: workflowAgentErrorDetails(input.agent.id, input.nodeRun) }
+        { details: workflowAgentErrorDetails(input.agentId, input.nodeRun) }
       )
     }
     await runs.agentNodes.finish({
@@ -540,7 +548,7 @@ async function finishWorkflowAgentNodeFailed(input: {
       nodeRunId: input.nodeRun.id,
       executionToken: input.executionToken,
       status: input.status,
-      modelId: input.agent.model.modelId,
+      modelId: input.modelId,
       finishReason: input.finishReason,
       trace: input.trace,
       error: toAgentExecutionFailure(agentExecutionError, {

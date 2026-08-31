@@ -63,10 +63,12 @@ afterEach(async () => {
 })
 
 describe("createModelCatalog", () => {
-  test("derives an entry reference from provider and modelId", () => {
+  test("exposes the binding identity without creating another model id", () => {
     const catalog = createModelCatalog({ language: [gpt] })
 
-    expect(catalog.language.list().map((entry) => entry.ref)).toEqual(["gateway/openai/gpt-5.4"])
+    expect(catalog.language.list().map(({ provider, modelId }) => ({ provider, modelId }))).toEqual(
+      [{ provider: "gateway", modelId: "openai/gpt-5.4" }]
+    )
   })
 
   test("preserves the configured order", () => {
@@ -81,14 +83,16 @@ describe("createModelCatalog", () => {
   test("uses the first language model as the default", () => {
     const catalog = createModelCatalog({ language: [gpt, sonnet] })
 
-    expect(catalog.language.default.ref).toBe("gateway/openai/gpt-5.4")
+    expect(catalog.language.default.model).toBe(gpt)
   })
 
   test("resolves an entry by reference and returns null for an unknown one", () => {
     const catalog = createModelCatalog({ language: [gpt] })
 
-    expect(catalog.language.getById("gateway/openai/gpt-5.4")?.model).toBe(gpt)
-    expect(catalog.language.getById("gateway/openai/gpt-9")).toBeNull()
+    expect(
+      catalog.language.getByRef({ provider: "gateway", modelId: "openai/gpt-5.4" })?.model
+    ).toBe(gpt)
+    expect(catalog.language.getByRef({ provider: "gateway", modelId: "openai/gpt-9" })).toBeNull()
   })
 
   test("rejects two models that derive the same reference", () => {
@@ -104,10 +108,20 @@ describe("createModelCatalog", () => {
       language: [testModel("openai.chat", "gpt-5.4"), testModel("openai.responses", "gpt-5.4")],
     })
 
-    expect(catalog.language.list().map((entry) => entry.ref)).toEqual([
-      "openai.chat/gpt-5.4",
-      "openai.responses/gpt-5.4",
+    expect(catalog.language.list().map((entry) => entry.provider)).toEqual([
+      "openai.chat",
+      "openai.responses",
     ])
+  })
+
+  test("does not collide when delimiters appear in provider or modelId", () => {
+    // Proven by removal: a lookup keyed by `${provider}/${modelId}` makes these bindings collide.
+    const first = testModel("a/b", "c")
+    const second = testModel("a", "b/c")
+    const catalog = createModelCatalog({ language: [first, second] })
+
+    expect(catalog.language.getByRef({ provider: "a/b", modelId: "c" })?.model).toBe(first)
+    expect(catalog.language.getByRef({ provider: "a", modelId: "b/c" })?.model).toBe(second)
   })
 
   test("rejects an empty language catalog", () => {
@@ -116,6 +130,39 @@ describe("createModelCatalog", () => {
     expect(() => createModelCatalog({ language: [] })).toThrow(
       /'models.language' needs at least one model/
     )
+  })
+
+  test("rejects a malformed language catalog", () => {
+    expect(() =>
+      createModelCatalog({ language: null } as unknown as Parameters<typeof createModelCatalog>[0])
+    ).toThrow(/'models.language' must be an array/)
+  })
+
+  test.each([
+    ["stream", { stream: undefined }],
+    ["definition", { definition: undefined }],
+  ])("rejects an invalid %s field", (_field, override) => {
+    const invalid = { ...gpt, ...override } as unknown as LanguageModel
+    expect(() => createModelCatalog({ language: [invalid] })).toThrow(/Invalid language model/)
+  })
+
+  test.each([
+    ["providerId", ""],
+    ["providerId", " gateway"],
+    ["modelId", ""],
+    ["modelId", "openai/gpt-5.4 "],
+  ] as const)("rejects an invalid %s identity", (field, value) => {
+    const invalid = { ...gpt, [field]: value } as LanguageModel
+
+    expect(() => createModelCatalog({ language: [invalid] })).toThrow(/Invalid language model/)
+  })
+
+  test("does not freeze the provider-owned model", () => {
+    const model = testModel("gateway", "openai/gpt-5.4")
+
+    createModelCatalog({ language: [model] })
+
+    expect(Object.isFrozen(model)).toBe(false)
   })
 })
 
@@ -130,7 +177,7 @@ describe("createSixb models", () => {
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.definitions.models?.language.default.ref).toBe("gateway/openai/gpt-5.4")
+    expect(sixb.definitions.models?.language.default.model).toBe(gpt)
   })
 
   test("leaves the catalog absent when models are not configured", async () => {

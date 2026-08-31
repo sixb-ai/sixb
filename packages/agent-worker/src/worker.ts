@@ -26,6 +26,7 @@ import {
   AgentUsageRecordingError,
 } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
+import { resolveAgentExecutionPlan } from "./execution-plan"
 import { type AgentRunFailure, toAgentExecutionFailure, toAgentRunFailure } from "./failure"
 import { finishRunOrThrow } from "./finalize"
 import {
@@ -112,10 +113,21 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
   }
 
   override async start(): Promise<void> {
-    if (this.context) {
+    const context = this.context
+    if (context) {
+      // Resolve the project binding before pinning its metadata and output budget.
       const [prepared] = await Promise.all([
-        prepareAgentModels(this.agents),
-        this.context.agentSkills,
+        prepareAgentModels(
+          this.agents.map((agent) => ({
+            ...agent,
+            model: resolveAgentExecutionPlan({
+              agent,
+              models: this.host.definitions.models?.language,
+              defaultMaxSteps: context.defaultMaxSteps,
+            }).model,
+          }))
+        ),
+        context.agentSkills,
       ])
       this.contextBudgets = prepared.budgets
       this.models = prepared.models
@@ -237,6 +249,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       }
       throw error
     }
+    const plan = resolveAgentExecutionPlan({
+      agent,
+      defaultMaxSteps: context.defaultMaxSteps,
+    })
 
     const durableExecution = await context.storage.executions.getById({
       projectId: context.id,
@@ -274,7 +290,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
 
     const reservation = await this.startOrReclaim(context, {
       run: queuedRun,
-      agent,
+      modelId: plan.model.modelId,
       execution: freshExecution(delivery.leaseExpiresAt),
     })
     if (reservation.kind === "skip") {
@@ -335,7 +351,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       })
       environment = await createConversationAgentEnvironment({
         context: executionContext,
-        agent,
+        plan,
         run,
         signal: turnSignal,
         messages: prepared.threadContext.retainedMessages,
@@ -345,7 +361,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       runtime.assertCanContinue()
       await runAgentTurn({
         context: environment.turnContext,
-        agent,
+        plan,
         run,
         signal: turnSignal,
         runtime,
@@ -582,7 +598,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     context: AgentWorkerContext,
     input: {
       readonly run: AgentRunRecord
-      readonly agent: AgentDefinition
+      readonly modelId: string
       readonly execution: AgentRunExecution
     }
   ): Promise<Reservation> {
@@ -593,7 +609,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         run: await context.storage.agents.runs.start({
           projectId: context.id,
           id: run.id,
-          modelId: input.agent.model.modelId,
+          modelId: input.modelId,
           execution: input.execution,
         }),
       }
