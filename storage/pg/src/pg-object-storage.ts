@@ -13,6 +13,7 @@ import type {
   ObjectBatchKey,
   ObjectLinkRow,
   ObjectQueryCapabilities,
+  ObjectReadStorage,
   ObjectRow,
   ObjectRowLinks,
   ObjectStorage,
@@ -241,6 +242,18 @@ export class PgObjectStorage implements ObjectStorage {
     return row ? rowToObject(row) : null
   }
 
+  async selectsObjectProperties(
+    params: Parameters<ObjectReadStorage["selectsObjectProperties"]>[0]
+  ): Promise<readonly boolean[]> {
+    const objects = await this.getByPrimaryIdBatch({
+      projectId: params.projectId,
+      items: params.items,
+    })
+    return params.items.map((item) =>
+      objects.has(objectBatchKey(item.objectTypeId, item.primaryId))
+    )
+  }
+
   async listLinks(params: {
     projectId: string
     objectTypeId: string
@@ -289,26 +302,37 @@ export class PgObjectStorage implements ObjectStorage {
 
   async listLinksBatch(params: {
     projectId: string
+    direction?: LinkDirection
     items: readonly { objectTypeId: string; objectId: string; linkId: string }[]
   }): Promise<Map<LinkBatchKey, ObjectLinkRow[]>> {
-    const result = new Map<LinkBatchKey, ObjectLinkRow[]>()
-    if (params.items.length === 0) return result
-    const rows = await valuesJoin<LinkDatabaseRow>(
-      this.sql,
-      "SELECT l.* FROM links l",
-      ["source_type_id", "source_id", "link_id"],
-      params.items.map((i) => [i.objectTypeId, i.objectId, i.linkId]),
-      `WHERE l.project_id = $1`,
-      [params.projectId]
-    )
+    const result = new Map<LinkBatchKey, Map<string, ObjectLinkRow>>()
+    if (params.items.length === 0) return new Map()
 
-    for (const row of rows) {
-      const key = linkBatchKey(row.source_type_id, row.source_id, row.link_id)
-      const existing = result.get(key) ?? []
-      existing.push(rowToLink(row))
-      result.set(key, existing)
+    const readSide = async (side: "source" | "target"): Promise<void> => {
+      const rows = await valuesJoin<LinkDatabaseRow>(
+        this.sql,
+        "SELECT l.* FROM links l",
+        [`${side}_type_id`, `${side}_id`, "link_id"],
+        params.items.map((item) => [item.objectTypeId, item.objectId, item.linkId]),
+        `WHERE l.project_id = $1`,
+        [params.projectId]
+      )
+      for (const row of rows) {
+        const link = rowToLink(row)
+        const objectTypeId = side === "source" ? row.source_type_id : row.target_type_id
+        const objectId = side === "source" ? row.source_id : row.target_id
+        const key = linkBatchKey(objectTypeId, objectId, row.link_id)
+        const bucket = result.get(key) ?? new Map<string, ObjectLinkRow>()
+        bucket.set(linkIdentity(link), link)
+        result.set(key, bucket)
+      }
     }
-    return result
+
+    const direction = params.direction ?? "outgoing"
+    if (direction === "outgoing" || direction === "both") await readSide("source")
+    if (direction === "incoming" || direction === "both") await readSide("target")
+
+    return new Map([...result].map(([key, links]) => [key, [...links.values()]] as const))
   }
 
   async queryLinks(params: QueryObjectLinksInput): Promise<QueryObjectLinksResult> {

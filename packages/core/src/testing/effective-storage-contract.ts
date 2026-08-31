@@ -75,6 +75,17 @@ export function runEffectiveStorageContractSuite<TStorage extends Storage>(
           ],
         })
         expect([...batch.keys()]).toEqual([objectBatchKey(Device.id, "a")])
+
+        const selectedProperties = await storage.objects.selectsObjectProperties({
+          projectId,
+          items: [
+            { objectTypeId: Device.id, primaryId: "a", propertyId: "name" },
+            { objectTypeId: Device.id, primaryId: "a", propertyId: "not-materialized" },
+            { objectTypeId: Device.id, primaryId: "missing", propertyId: "name" },
+            { objectTypeId: Device.id, primaryId: "a", propertyId: "name" },
+          ],
+        })
+        expect(selectedProperties).toEqual([true, true, false, true])
       })
     })
 
@@ -100,6 +111,28 @@ export function runEffectiveStorageContractSuite<TStorage extends Storage>(
           items: [{ objectTypeId: Device.id, objectId: "a", linkId: "peers" }],
         })
         expect(linksByScope.get(linkBatchKey(Device.id, "a", "peers"))).toHaveLength(2)
+
+        const incomingByScope = await storage.objects.listLinksBatch({
+          projectId,
+          direction: "incoming",
+          items: [{ objectTypeId: Device.id, objectId: "b", linkId: "peers" }],
+        })
+        expect(incomingByScope.get(linkBatchKey(Device.id, "b", "peers"))).toMatchObject([
+          { sourceId: "a", targetId: "b" },
+        ])
+
+        const bothDirectionsByScope = await storage.objects.listLinksBatch({
+          projectId,
+          direction: "both",
+          items: [
+            { objectTypeId: Device.id, objectId: "a", linkId: "peers" },
+            { objectTypeId: Device.id, objectId: "b", linkId: "peers" },
+          ],
+        })
+        expect(bothDirectionsByScope.get(linkBatchKey(Device.id, "a", "peers"))).toHaveLength(2)
+        expect(bothDirectionsByScope.get(linkBatchKey(Device.id, "b", "peers"))).toMatchObject([
+          { sourceId: "a", targetId: "b" },
+        ])
       })
     })
 
@@ -222,6 +255,7 @@ export function runEffectiveStorageContractSuite<TStorage extends Storage>(
 
         const links = await storage.objects.listLinksBatch({
           projectId: opaqueProjectId,
+          direction: "both",
           items: [
             { objectTypeId: OpaqueA.id, objectId: "B:C", linkId: "D" },
             { objectTypeId: OpaqueAB.id, objectId: "C", linkId: "D" },
