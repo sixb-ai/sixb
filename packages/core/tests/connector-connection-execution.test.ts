@@ -32,17 +32,22 @@ describe("connector connection execution boundary", () => {
       source: { type: "execution", executionId: "request-a" },
       correlationId: "correlation-a",
     } as const
+    const authorizedExecution = {
+      ...execution,
+      id: "execution-b",
+      executor: { type: "primitive", kind: "action", id: "publish", runId: "run-b" },
+    } as const
     const runtime = {
       projectId: "project",
       runtimeAuthorization: createTrustedPrimitiveRuntimeAuthorization({
-        projectId: "project",
+        execution: authorizedExecution,
         primitive: { kind: "action", id: "publish", runId: "run-b" },
       }),
     } as SixbRuntimeContext
     const connector = createConnectorRuntime(runtime, execution, harness.service)
 
     expect(() => connector(harness.connector, { owner: projectOwner, slot: "social" })).toThrow(
-      "does not match its executor"
+      "bound to different execution provenance"
     )
   })
 
@@ -207,7 +212,7 @@ describe("connector connection execution boundary", () => {
     const runtime = {
       projectId: "project",
       runtimeAuthorization: createTrustedPrimitiveRuntimeAuthorization({
-        projectId: "project",
+        execution,
         primitive,
       }),
     } as SixbRuntimeContext

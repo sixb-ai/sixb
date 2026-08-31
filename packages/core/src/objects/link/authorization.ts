@@ -1,7 +1,8 @@
 /**
  * The authorization rule for writing a link, in one place because all three link leaves need it.
  */
-import { type AuthorizationContext, assertAuthorized, assertCanEdit } from "../../authorization"
+import { assertAuthorized, assertCanEdit } from "../../authorization"
+import type { SixbRuntimeContext } from "../../runtime/types"
 
 /**
  * Assert a principal may create or remove a link.
@@ -18,7 +19,7 @@ import { type AuthorizationContext, assertAuthorized, assertCanEdit } from "../.
  * Call this *before* any endpoint lookup, for that second reason.
  */
 export function assertCanWriteLink(
-  ctx: { readonly authorization?: AuthorizationContext },
+  ctx: Pick<SixbRuntimeContext, "projectId" | "runtimeAuthorization" | "authorization">,
   endpoints: { readonly sourceTypeId: string; readonly targetTypeId: string }
 ): void {
   assertCanEdit(ctx, endpoints.sourceTypeId)
