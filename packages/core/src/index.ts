@@ -855,6 +855,8 @@ export type {
 export type {
   ExecutionObjectByIdHandle,
   ExecutionObjectSet,
+  ObjectQueryLinksInput,
+  ObjectQueryLinksResult,
   ObjectsRuntime,
 } from "./objects/execution"
 export type { PipelineRunsRuntime, PipelinesRuntime } from "./pipelines/execution"
