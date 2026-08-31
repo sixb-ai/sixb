@@ -35,5 +35,17 @@ export function sponsoredCampaignUrn(id: LinkedinId): LinkedinSponsoredCampaignU
 }
 
 export function sponsoredCreativeUrn(id: LinkedinId): LinkedinSponsoredCreativeUrn {
-  return `urn:li:sponsoredCreative:${pathId(id, "creative id")}`
+  const value = String(id)
+  const prefix = "urn:li:sponsoredCreative:"
+
+  if (value.startsWith(prefix)) {
+    pathId(value.slice(prefix.length), "creative id")
+    return value as LinkedinSponsoredCreativeUrn
+  }
+  if (value.startsWith("urn:li:")) {
+    throw new Error(
+      "[SixbLinkedin] creative id must be a positive numeric ID or a sponsored creative URN."
+    )
+  }
+  return `${prefix}${pathId(value, "creative id")}`
 }

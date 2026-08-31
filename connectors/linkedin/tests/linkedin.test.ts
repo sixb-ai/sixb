@@ -77,6 +77,12 @@ describe("linkedin connector", () => {
     expect(sponsoredCampaignGroupUrn("456")).toBe("urn:li:sponsoredCampaignGroup:456")
     expect(sponsoredCampaignUrn(789)).toBe("urn:li:sponsoredCampaign:789")
     expect(sponsoredCreativeUrn(321)).toBe("urn:li:sponsoredCreative:321")
+    expect(sponsoredCreativeUrn("urn:li:sponsoredCreative:321")).toBe(
+      "urn:li:sponsoredCreative:321"
+    )
+    expect(() => sponsoredCreativeUrn("urn:li:sponsoredCampaign:321")).toThrow(
+      "positive numeric ID or a sponsored creative URN"
+    )
   })
 
   test("rejects an empty token returned by the managed token source", async () => {
