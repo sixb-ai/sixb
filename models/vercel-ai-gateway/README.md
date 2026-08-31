@@ -24,10 +24,11 @@ const model = gateway("anthropic/claude-sonnet-4.5", {
 const definitions = await gateway.catalog.list()
 ```
 
-The remote catalog is cached in memory and is discovery-only. Constructing or running a model never
-fetches it. Model instances use conservative synchronous capabilities unless configured explicitly.
-Gateway-reported cost is authoritative; route-dependent prices are never collapsed into a local
-estimate, and a missing report remains explicitly unpriceable.
+The remote catalog is cached in memory. Constructing a model and ordinary inference never fetch it.
+A structured-output call consults it when support is otherwise unknown, then uses the native strict
+response format or transparently falls back to one required, nonparallel JSON function. A catalog
+failure safely selects the fallback. Gateway-reported cost is authoritative; route-dependent prices
+are never collapsed into a local estimate, and a missing report remains explicitly unpriceable.
 
 Gateway reasoning uses named provider-neutral efforts, including `none` when the model can disable
 reasoning:

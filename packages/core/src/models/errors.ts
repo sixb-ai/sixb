@@ -1,3 +1,6 @@
+import type { ModelFinishReason, ModelUsage } from "./events"
+import type { ModelCallCost } from "./pricing"
+
 /** A provider or provider protocol rejected a model request. */
 export class ModelProviderError extends Error {
   readonly name = "ModelProviderError"
@@ -39,4 +42,37 @@ export class UnsupportedModelFeatureError extends Error {
 
 export class StructuredOutputError extends Error {
   readonly name = "StructuredOutputError"
+
+  constructor(
+    message: string,
+    options?: ErrorOptions & {
+      readonly text?: string
+      readonly providerId?: string
+      readonly modelId?: string
+      readonly responseId?: string
+      readonly responseModelId?: string
+      readonly finishReason?: ModelFinishReason
+      readonly usage?: ModelUsage
+      readonly cost?: ModelCallCost
+    }
+  ) {
+    super(message, options)
+    this.text = options?.text
+    this.providerId = options?.providerId
+    this.modelId = options?.modelId
+    this.responseId = options?.responseId
+    this.responseModelId = options?.responseModelId
+    this.finishReason = options?.finishReason
+    this.usage = options?.usage
+    this.cost = options?.cost
+  }
+
+  readonly text?: string
+  readonly providerId?: string
+  readonly modelId?: string
+  readonly responseId?: string
+  readonly responseModelId?: string
+  readonly finishReason?: ModelFinishReason
+  readonly usage?: ModelUsage
+  readonly cost?: ModelCallCost
 }

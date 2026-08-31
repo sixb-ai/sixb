@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import type { LanguageModelRequest, LanguageModelStreamEvent } from "@sixb/core/models"
+import { runModelLoop } from "@sixb/core/internal/agents"
+import type { LanguageModelRequest, LanguageModelStreamEvent, ModelOutput } from "@sixb/core/models"
 import { ModelProviderError } from "@sixb/core/models"
 import { createVercelGateway, vercelGateway } from "../src"
 import { decodeServerSentEvents } from "../src/sse"
+import { gatewayOutputSchema } from "../src/structured-output"
 
 function request(overrides: Partial<LanguageModelRequest> = {}): LanguageModelRequest {
   return {
@@ -42,6 +44,25 @@ async function collect(stream: AsyncIterable<LanguageModelStreamEvent>) {
 }
 
 describe("Vercel AI Gateway provider", () => {
+  test("keeps schemas outside the strict Responses subset on the tool fallback", () => {
+    expect(
+      gatewayOutputSchema({
+        type: "object",
+        properties: { answer: { type: "string" } },
+        required: [],
+        additionalProperties: false,
+      })
+    ).toBeUndefined()
+    expect(
+      gatewayOutputSchema({
+        type: "object",
+        properties: { values: { type: "object", additionalProperties: { type: "string" } } },
+        required: ["values"],
+        additionalProperties: false,
+      })
+    ).toBeUndefined()
+  })
+
   test("maps requests and normalizes fragmented text/usage streams", async () => {
     let capturedUrl = ""
     let capturedHeaders: Headers | undefined
@@ -118,6 +139,7 @@ describe("Vercel AI Gateway provider", () => {
     const model = provider("creator/model", {
       providerOptions: { gateway: { order: ["one", "two"] } },
       providerTools: [{ type: "web_search_preview" }],
+      capabilities: { nativeStructuredOutput: true },
     })
     const result = await model.stream(
       request({
@@ -132,7 +154,12 @@ describe("Vercel AI Gateway provider", () => {
         responseFormat: {
           type: "json",
           name: "answer",
-          schema: { type: "object", properties: { answer: { type: "string" } } },
+          schema: {
+            type: "object",
+            properties: { answer: { type: "string" } },
+            required: ["answer"],
+            additionalProperties: false,
+          },
         },
       })
     )
@@ -189,6 +216,174 @@ describe("Vercel AI Gateway provider", () => {
         route: { providerId: "openai", modelId: "resolved-model" },
       },
     ])
+  })
+
+  test("resolves native structured output through the callable provider path", async () => {
+    const requested: string[] = []
+    let responseBody: Record<string, unknown> | undefined
+    const gateway = createVercelGateway({
+      baseUrl: "https://models.example/v1",
+      apiKey: "secret-key",
+      fetch: async (input, init) => {
+        const url = String(input)
+        requested.push(url)
+        if (url.endsWith("/models")) {
+          return Response.json({
+            data: [
+              {
+                id: "creator/model",
+                type: "language",
+                supported_parameters: ["response_format"],
+              },
+            ],
+          })
+        }
+        responseBody = JSON.parse(String(init?.body))
+        return sseResponse([
+          {
+            type: "response.created",
+            response: { id: "resp-structured-native", model: "creator/model" },
+          },
+          {
+            type: "response.content_part.added",
+            item_id: "message-output",
+            output_index: 0,
+            content_index: 0,
+            part: { type: "output_text", text: "" },
+          },
+          {
+            type: "response.output_text.delta",
+            item_id: "message-output",
+            output_index: 0,
+            content_index: 0,
+            delta: '{"answer":"yes"}',
+          },
+          {
+            type: "response.output_text.done",
+            item_id: "message-output",
+            output_index: 0,
+            content_index: 0,
+            text: '{"answer":"yes"}',
+          },
+          {
+            type: "response.completed",
+            response: {
+              id: "resp-structured-native",
+              status: "completed",
+              usage: { input_tokens: 8, output_tokens: 5 },
+            },
+          },
+        ])
+      },
+    })
+
+    const result = await runModelLoop({
+      model: gateway("creator/model"),
+      messages: [{ role: "user", content: [{ type: "text", text: "Answer yes." }] }],
+      output: answerOutput(),
+      maxSteps: 1,
+      signal: new AbortController().signal,
+    })
+
+    expect(result).toMatchObject({ status: "completed", output: { answer: "yes" } })
+    expect(requested).toEqual([
+      "https://models.example/v1/models",
+      "https://models.example/v1/responses",
+    ])
+    expect(responseBody).toMatchObject({
+      text: {
+        format: {
+          type: "json_schema",
+          name: "answer",
+          schema: answerOutput().schema,
+          strict: true,
+        },
+      },
+    })
+    expect(responseBody?.tools).toBeUndefined()
+  })
+
+  test("hides a required nonparallel JSON tool when native output is unavailable", async () => {
+    let responseBody: Record<string, unknown> | undefined
+    const gateway = createVercelGateway({
+      baseUrl: "https://models.example/v1",
+      apiKey: "secret-key",
+      fetch: async (_input, init) => {
+        responseBody = JSON.parse(String(init?.body))
+        return sseResponse([
+          {
+            type: "response.created",
+            response: { id: "resp-structured-tool", model: "creator/legacy" },
+          },
+          {
+            type: "response.output_item.added",
+            output_index: 0,
+            item: {
+              type: "function_call",
+              id: "item-output",
+              call_id: "call-output",
+              name: "sixb_structured_output",
+              arguments: "",
+            },
+          },
+          {
+            type: "response.function_call_arguments.delta",
+            item_id: "item-output",
+            output_index: 0,
+            delta: '{"answer":',
+          },
+          {
+            type: "response.function_call_arguments.delta",
+            item_id: "item-output",
+            output_index: 0,
+            delta: '"yes"}',
+          },
+          {
+            type: "response.function_call_arguments.done",
+            item_id: "item-output",
+            output_index: 0,
+            arguments: '{"answer":"yes"}',
+          },
+          {
+            type: "response.completed",
+            response: {
+              id: "resp-structured-tool",
+              status: "completed",
+              usage: { input_tokens: 8, output_tokens: 5 },
+            },
+          },
+        ])
+      },
+    })
+
+    const result = await runModelLoop({
+      model: gateway("creator/legacy", {
+        capabilities: { nativeStructuredOutput: false },
+      }),
+      messages: [{ role: "user", content: [{ type: "text", text: "Answer yes." }] }],
+      output: answerOutput(),
+      maxSteps: 1,
+      signal: new AbortController().signal,
+    })
+
+    expect(result).toMatchObject({
+      status: "completed",
+      output: { answer: "yes" },
+      finishReason: "stop",
+      steps: [{ content: [{ type: "text", text: '{"answer":"yes"}' }] }],
+    })
+    expect(responseBody).toMatchObject({
+      tool_choice: "required",
+      parallel_tool_calls: false,
+      tools: [
+        {
+          type: "function",
+          name: "sixb_structured_output",
+          parameters: answerOutput().schema,
+        },
+      ],
+    })
+    expect(responseBody?.text).toBeUndefined()
   })
 
   test("rejects exact budgets that the Gateway Responses API cannot represent", async () => {
@@ -548,3 +743,25 @@ describe("Vercel AI Gateway provider", () => {
     expect(cancelled).toBe(true)
   })
 })
+
+function answerOutput(): ModelOutput<{ answer: string }> {
+  return {
+    name: "answer",
+    schema: {
+      type: "object",
+      properties: { answer: { type: "string" } },
+      required: ["answer"],
+      additionalProperties: false,
+    },
+    validate(value: unknown): { answer: string } {
+      if (
+        typeof value !== "object" ||
+        value === null ||
+        (value as { answer?: unknown }).answer !== "yes"
+      ) {
+        throw new TypeError("answer must be yes")
+      }
+      return { answer: "yes" }
+    },
+  }
+}

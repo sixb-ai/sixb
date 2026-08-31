@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import type { LanguageModelRequest, LanguageModelStreamEvent } from "@sixb/core/models"
+import { runModelLoop } from "@sixb/core/internal/agents"
+import type { LanguageModelRequest, LanguageModelStreamEvent, ModelOutput } from "@sixb/core/models"
 import { ModelProviderError } from "@sixb/core/models"
 import { anthropic, createAnthropic } from "../src"
 import { decodeServerSentEvents } from "../src/sse"
+import { anthropicOutputSchema } from "../src/structured-output"
 
 function request(overrides: Partial<LanguageModelRequest> = {}): LanguageModelRequest {
   return {
@@ -42,6 +44,21 @@ async function collect(stream: AsyncIterable<LanguageModelStreamEvent>) {
 }
 
 describe("Anthropic provider", () => {
+  test("does not narrow open object schemas for the native decoder", () => {
+    expect(
+      anthropicOutputSchema({
+        type: "object",
+        properties: { answer: { type: "string" } },
+      })
+    ).toBeUndefined()
+    expect(
+      anthropicOutputSchema({
+        type: "object",
+        additionalProperties: { type: "string" },
+      })
+    ).toBeUndefined()
+  })
+
   test("maps Messages API requests and normalizes text, thinking, and usage", async () => {
     let capturedUrl = ""
     let capturedHeaders: Headers | undefined
@@ -113,6 +130,7 @@ describe("Anthropic provider", () => {
       maxOutputTokens: 8_192,
       request: { temperature: 0.2, cache_control: { type: "ephemeral" } },
       providerTools: [{ type: "web_search_20260209", name: "web_search" }],
+      capabilities: { nativeStructuredOutput: true },
     })
     const result = await model.stream(
       request({
@@ -141,7 +159,12 @@ describe("Anthropic provider", () => {
         responseFormat: {
           type: "json",
           name: "answer",
-          schema: { type: "object", properties: { answer: { type: "string" } } },
+          schema: {
+            type: "object",
+            properties: { answer: { type: "string" } },
+            required: ["answer"],
+            additionalProperties: false,
+          },
         },
       })
     )
@@ -227,6 +250,162 @@ describe("Anthropic provider", () => {
         },
       },
     ])
+  })
+
+  test("resolves native structured output through the callable provider path", async () => {
+    const requested: string[] = []
+    let messageBody: Record<string, unknown> | undefined
+    const provider = createAnthropic({
+      baseUrl: "https://anthropic.example/v1",
+      apiKey: "secret-key",
+      fetch: async (input, init) => {
+        const url = String(input)
+        requested.push(url)
+        if (url.includes("/models")) {
+          return Response.json({
+            data: [
+              {
+                id: "claude-sonnet-5",
+                type: "model",
+                max_tokens: 128_000,
+                capabilities: { structured_outputs: { supported: true } },
+              },
+            ],
+            has_more: false,
+          })
+        }
+        messageBody = JSON.parse(String(init?.body))
+        return sseResponse([
+          {
+            type: "message_start",
+            message: {
+              id: "msg-structured-native",
+              model: "claude-sonnet-5",
+              usage: { input_tokens: 8, output_tokens: 1 },
+            },
+          },
+          {
+            type: "content_block_start",
+            index: 0,
+            content_block: { type: "text", text: "" },
+          },
+          {
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "text_delta", text: '{"answer":"yes"}' },
+          },
+          { type: "content_block_stop", index: 0 },
+          {
+            type: "message_delta",
+            delta: { stop_reason: "end_turn" },
+            usage: { output_tokens: 5 },
+          },
+          { type: "message_stop" },
+        ])
+      },
+    })
+
+    const result = await runModelLoop({
+      model: provider("claude-sonnet-5"),
+      messages: [{ role: "user", content: [{ type: "text", text: "Answer yes." }] }],
+      output: answerOutput(),
+      maxSteps: 1,
+      signal: new AbortController().signal,
+    })
+
+    expect(result).toMatchObject({ status: "completed", output: { answer: "yes" } })
+    expect(requested).toEqual([
+      "https://anthropic.example/v1/models?limit=1000",
+      "https://anthropic.example/v1/messages",
+    ])
+    expect(messageBody).toMatchObject({
+      output_config: {
+        format: {
+          type: "json_schema",
+          schema: {
+            type: "object",
+            properties: {
+              answer: { type: "string", description: "pattern: ^yes$." },
+            },
+            required: ["answer"],
+            additionalProperties: false,
+          },
+        },
+      },
+    })
+    expect(messageBody?.tools).toBeUndefined()
+  })
+
+  test("hides a required nonparallel JSON tool when native output is unavailable", async () => {
+    let messageBody: Record<string, unknown> | undefined
+    const provider = createAnthropic({
+      baseUrl: "https://anthropic.example/v1",
+      apiKey: "secret-key",
+      fetch: async (_input, init) => {
+        messageBody = JSON.parse(String(init?.body))
+        return sseResponse([
+          {
+            type: "message_start",
+            message: {
+              id: "msg-structured-tool",
+              model: "claude-legacy",
+              usage: { input_tokens: 8, output_tokens: 1 },
+            },
+          },
+          {
+            type: "content_block_start",
+            index: 0,
+            content_block: {
+              type: "tool_use",
+              id: "toolu-output",
+              name: "sixb_structured_output",
+              input: {},
+            },
+          },
+          {
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "input_json_delta", partial_json: '{"answer":"yes"}' },
+          },
+          { type: "content_block_stop", index: 0 },
+          {
+            type: "message_delta",
+            delta: { stop_reason: "tool_use" },
+            usage: { output_tokens: 5 },
+          },
+          { type: "message_stop" },
+        ])
+      },
+    })
+
+    const result = await runModelLoop({
+      model: provider("claude-legacy", {
+        maxOutputTokens: 4_096,
+        capabilities: { nativeStructuredOutput: false },
+      }),
+      messages: [{ role: "user", content: [{ type: "text", text: "Answer yes." }] }],
+      output: answerOutput(),
+      maxSteps: 1,
+      signal: new AbortController().signal,
+    })
+
+    expect(result).toMatchObject({
+      status: "completed",
+      output: { answer: "yes" },
+      finishReason: "stop",
+      steps: [{ content: [{ type: "text", text: '{"answer":"yes"}' }] }],
+    })
+    expect(messageBody).toMatchObject({
+      tool_choice: { type: "any" },
+      disable_parallel_tool_use: true,
+      tools: [
+        {
+          name: "sixb_structured_output",
+          input_schema: answerOutput().schema,
+        },
+      ],
+    })
+    expect(messageBody?.output_config).toBeUndefined()
   })
 
   test("uses provider-owned model output limits when no request ceiling is configured", async () => {
@@ -756,3 +935,25 @@ describe("Anthropic provider", () => {
     expect(cancelled).toBe(true)
   })
 })
+
+function answerOutput(): ModelOutput<{ answer: string }> {
+  return {
+    name: "answer",
+    schema: {
+      type: "object",
+      properties: { answer: { type: "string", pattern: "^yes$" } },
+      required: ["answer"],
+      additionalProperties: false,
+    },
+    validate(value: unknown): { answer: string } {
+      if (
+        typeof value !== "object" ||
+        value === null ||
+        (value as { answer?: unknown }).answer !== "yes"
+      ) {
+        throw new TypeError("answer must be yes")
+      }
+      return { answer: "yes" }
+    },
+  }
+}

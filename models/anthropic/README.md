@@ -36,6 +36,11 @@ adapter resolves an omitted value to the selected Claude model's provider-owned 
 64K, or the appropriate legacy limit). An explicit value lowers that ceiling. Unknown non-Claude
 models require an explicit value; inference never fetches the catalog to discover one.
 
+Structured output uses Anthropic's native `output_config.format` when the model catalog confirms
+support and the schema fits the native decoder. Otherwise the adapter transparently uses one
+required, nonparallel JSON tool. In both cases Sixb validates the completed value against the
+original application contract.
+
 Native server tools can be supplied beside Sixb's local tools:
 
 ```ts
@@ -57,9 +62,10 @@ efforts fail locally and are never silently rounded to another level. The live c
 Anthropic's effort and thinking-mode flags into `definition.capabilities.reasoning`.
 
 The model definition is built synchronously from provider defaults, configured definitions, and the
-local rate card. The cached, paginated catalog is discovery-only: constructing or running a model
-never fetches it. Server tools omit the local rate card when their additional charges would make a
-token-only total incomplete.
+local rate card. Constructing a model and ordinary inference never fetch the cached, paginated
+catalog. A structured-output call consults it only when native support is otherwise unknown; a
+catalog failure safely selects the JSON-tool fallback. Server tools omit the local rate card when
+their additional charges would make a token-only total incomplete.
 
 Retryable `429` and `5xx` responses are retried only before a stream begins. `maxRetries`,
 `maxRetryDelayMs`, and `catalogTtlMs` are configurable. Provider request IDs and retry hints are

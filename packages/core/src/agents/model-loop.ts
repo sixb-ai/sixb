@@ -24,10 +24,9 @@ import type {
   ModelToolResultPart,
   ProviderData,
 } from "../models/messages"
-import { type ModelReportedCost, rateModelCall } from "../models/pricing"
+import { type ModelCallCost, type ModelReportedCost, rateModelCall } from "../models/pricing"
 import type { ModelOutput, ModelTool } from "../models/tools"
 
-const OUTPUT_TOOL_NAME = "__sixb_submit_output"
 const MAX_PROVIDER_DATA_BYTES = 256 * 1024
 
 export interface RunModelLoopInput<TOutput = string> {
@@ -114,19 +113,6 @@ export async function runModelLoop<TOutput = string>(
   const messages: ModelMessage[] = [...input.messages]
   const steps: ModelStep[] = []
   const modelDefinition = input.model.definition
-  const nativeStructuredOutput =
-    input.output !== undefined && modelDefinition.capabilities.nativeStructuredOutput === true
-  const outputToolSpecification: ModelToolSpecification | undefined =
-    input.output === undefined || nativeStructuredOutput
-      ? undefined
-      : {
-          name: OUTPUT_TOOL_NAME,
-          description:
-            input.output.description ??
-            "Submit the final structured result after all required investigation is complete.",
-          inputSchema: input.output.schema,
-        }
-  if (outputToolSpecification) toolSpecifications.push(outputToolSpecification)
   const generateCallId = input.generateCallId ?? (() => `model_call_${randomUUID()}`)
   const callIds = new Set<string>()
 
@@ -149,7 +135,7 @@ export async function runModelLoop<TOutput = string>(
         ...requestMessages,
         { role: "user", content: [{ type: "text", text: input.finalStepInstruction }] },
       ]
-      requestTools = outputToolSpecification ? [outputToolSpecification] : []
+      requestTools = []
     }
 
     const callId = generateCallId()
@@ -165,7 +151,7 @@ export async function runModelLoop<TOutput = string>(
         messages: requestMessages,
         tools: requestTools,
         ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
-        ...(!nativeStructuredOutput
+        ...(input.output === undefined
           ? {}
           : {
               responseFormat: {
@@ -226,51 +212,6 @@ export async function runModelLoop<TOutput = string>(
       return { status: "aborted", steps, partialContent: response.content }
     }
 
-    const submissions = response.toolCalls.filter((call) => call.part.toolName === OUTPUT_TOOL_NAME)
-    const submitted = submissions[0]
-    if (submitted) {
-      if (!input.output) {
-        throw new ModelStreamError(
-          `[SixbModels] Model called reserved tool '${OUTPUT_TOOL_NAME}' without an output schema.`
-        )
-      }
-      if (submitted.inputError) {
-        throw new StructuredOutputError(
-          `[SixbModels] Structured output was not valid JSON: ${submitted.inputError.message}`,
-          { cause: submitted.inputError }
-        )
-      }
-      if (submissions.length !== 1) {
-        throw new StructuredOutputError(
-          `[SixbModels] Model submitted structured output ${submissions.length} times.`
-        )
-      }
-      if (
-        response.toolCalls.some(
-          (call) => call.part.toolName !== OUTPUT_TOOL_NAME && call.part.providerExecuted !== true
-        )
-      ) {
-        throw new StructuredOutputError(
-          "[SixbModels] Model mixed structured output with local tool calls in one response."
-        )
-      }
-      let output: TOutput
-      try {
-        output = input.output.validate(submitted.part.input)
-      } catch (error) {
-        throw new StructuredOutputError("[SixbModels] Structured output validation failed.", {
-          cause: error,
-        })
-      }
-      const content = response.content.filter(
-        (part) => part.type !== "tool-call" || part.toolName !== OUTPUT_TOOL_NAME
-      )
-      const step = modelStep(response, responseId, content, cost)
-      steps.push(step)
-      await input.onStepEnd?.(step)
-      return { status: "completed", output, steps, finishReason: response.finishReason }
-    }
-
     const localCalls = response.toolCalls.filter((call) => call.part.providerExecuted !== true)
     if (response.finishReason === "pause" && localCalls.length === 0) {
       const step = modelStep(response, responseId, response.content, cost)
@@ -299,6 +240,7 @@ export async function runModelLoop<TOutput = string>(
         } catch (error) {
           throw new StructuredOutputError("[SixbModels] Model did not produce valid JSON output.", {
             cause: error,
+            ...structuredOutputErrorContext(input, response, responseId, cost, text),
           })
         }
         try {
@@ -311,6 +253,7 @@ export async function runModelLoop<TOutput = string>(
         } catch (error) {
           throw new StructuredOutputError("[SixbModels] Structured output validation failed.", {
             cause: error,
+            ...structuredOutputErrorContext(input, response, responseId, cost, text),
           })
         }
       }
@@ -346,7 +289,8 @@ export async function runModelLoop<TOutput = string>(
     if (stepIndex + 1 === input.maxSteps) {
       if (input.output) {
         throw new StructuredOutputError(
-          "[SixbModels] Model reached the step limit without structured output."
+          "[SixbModels] Model reached the step limit without structured output.",
+          structuredOutputErrorContext(input, response, responseId, cost, responseText(response))
         )
       }
       const output = response.content
@@ -387,9 +331,6 @@ function indexTools(tools: readonly ModelTool[]): ReadonlyMap<string, ModelTool>
   const result = new Map<string, ModelTool>()
   for (const tool of tools) {
     if (!tool.name.trim()) throw new TypeError("[SixbModels] Tool names must not be empty.")
-    if (tool.name === OUTPUT_TOOL_NAME) {
-      throw new TypeError(`[SixbModels] Tool name '${OUTPUT_TOOL_NAME}' is reserved.`)
-    }
     if (result.has(tool.name)) {
       throw new TypeError(`[SixbModels] Duplicate tool name '${tool.name}'.`)
     }
@@ -397,6 +338,34 @@ function indexTools(tools: readonly ModelTool[]): ReadonlyMap<string, ModelTool>
     result.set(tool.name, tool)
   }
   return result
+}
+
+function responseText(response: CompletedResponse): string {
+  return response.content
+    .filter((part): part is ModelTextPart => part.type === "text")
+    .map((part) => part.text)
+    .join("")
+}
+
+function structuredOutputErrorContext(
+  input: RunModelLoopInput<unknown>,
+  response: CompletedResponse,
+  responseId: string,
+  cost: ModelCallCost,
+  text: string
+) {
+  return {
+    text,
+    providerId: input.model.providerId,
+    modelId: input.model.modelId,
+    responseId,
+    ...(response.responseModelId === undefined
+      ? {}
+      : { responseModelId: response.responseModelId }),
+    finishReason: response.finishReason,
+    usage: response.usage,
+    cost,
+  }
 }
 
 function modelStep(
