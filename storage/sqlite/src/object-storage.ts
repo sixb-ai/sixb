@@ -15,6 +15,7 @@ import type {
   ObjectFacetRequest,
   ObjectLinkRow,
   ObjectQueryCapabilities,
+  ObjectReadStorage,
   ObjectRow,
   ObjectRowLinks,
   ObjectStorage,
@@ -186,6 +187,18 @@ export class SqliteObjectStorage implements ObjectStorage {
     return row ? this.rowToObject(row) : null
   }
 
+  async selectsObjectProperties(
+    params: Parameters<ObjectReadStorage["selectsObjectProperties"]>[0]
+  ): Promise<readonly boolean[]> {
+    const objects = await this.getByPrimaryIdBatch({
+      projectId: params.projectId,
+      items: params.items,
+    })
+    return params.items.map((item) =>
+      objects.has(objectBatchKey(item.objectTypeId, item.primaryId))
+    )
+  }
+
   async listLinks(params: {
     projectId: string
     objectTypeId: string
@@ -249,26 +262,22 @@ export class SqliteObjectStorage implements ObjectStorage {
 
   async listLinksBatch(params: {
     projectId: string
+    direction?: LinkDirection
     items: readonly { objectTypeId: string; objectId: string; linkId: string }[]
   }): Promise<Map<LinkBatchKey, ObjectLinkRow[]>> {
     const result = new Map<LinkBatchKey, ObjectLinkRow[]>()
     if (params.items.length === 0) return result
 
-    const stmt = this.db.query(
-      "SELECT * FROM links WHERE project_id = ? AND source_type_id = ? AND source_id = ? AND link_id = ?"
-    )
     for (const item of params.items) {
-      const rows = stmt.all(
-        params.projectId,
-        item.objectTypeId,
-        item.objectId,
-        item.linkId
-      ) as LinkDatabaseRow[]
+      const rows = await this.listLinks({
+        projectId: params.projectId,
+        objectTypeId: item.objectTypeId,
+        objectId: item.objectId,
+        linkId: item.linkId,
+        ...(params.direction === undefined ? {} : { direction: params.direction }),
+      })
       if (rows.length > 0) {
-        result.set(
-          linkBatchKey(item.objectTypeId, item.objectId, item.linkId),
-          rows.map((r) => this.rowToLink(r))
-        )
+        result.set(linkBatchKey(item.objectTypeId, item.objectId, item.linkId), [...rows])
       }
     }
     return result
