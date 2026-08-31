@@ -6,6 +6,7 @@ import {
   MaterializationValidationError,
   type Schema,
   type TelemetryProjectionDefinition,
+  type TelemetryProjectionPropertyMapping,
 } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
 import type { TelemetryPointWrite } from "@sixb/core/internal/materialization"
@@ -20,13 +21,19 @@ import { isBlank, isPlainObject, throwIfAborted } from "./utils"
 interface TelemetryProjectionPlan {
   readonly projection: TelemetryProjectionDefinition
   readonly dataset: DatasetDefinition
-  readonly valueColumnType: DatasetColumnDefinition["type"]
-  readonly valueSchema: Schema
+  readonly properties: readonly TelemetryProjectionPropertyPlan[]
   readonly readColumns: readonly string[]
 }
 
+interface TelemetryProjectionPropertyPlan {
+  readonly propertyId: string
+  readonly mapping: TelemetryProjectionPropertyMapping
+  readonly valueColumnType: DatasetColumnDefinition["type"]
+  readonly valueSchema: Schema
+}
+
 type ProjectTelemetryRowResult =
-  | { readonly kind: "point"; readonly point: TelemetryPointWrite }
+  | { readonly kind: "points"; readonly points: readonly TelemetryPointWrite[] }
   | { readonly kind: "skip" }
   | { readonly kind: "invalid"; readonly message: string }
 
@@ -191,7 +198,7 @@ async function appendPhysicalBatch(input: {
       sourceRowsSkipped += 1
       continue
     }
-    points.push(projected.point)
+    points.push(...projected.points)
   }
 
   throwIfAborted(signal)
@@ -222,11 +229,7 @@ function buildTelemetryProjectionPlan(input: {
 }): TelemetryProjectionPlan {
   const { runtime, projection, dataset, errorDetails } = input
   const objectType = runtime.ontology.getObjectTypeById(projection.objectTypeId)
-  const property = objectType?.properties.find(
-    (candidate) => candidate.id === projection.propertyId
-  )
-  const valueColumn = dataset.schema.columns.find((column) => column.name === projection.valueField)
-  if (!objectType || !property || !valueColumn) {
+  if (!objectType) {
     throw createSixbError(
       "internal.unexpected",
       `[SixbProjectionWorker] Telemetry projection '${projection.id}' was not validated before execution.`,
@@ -234,25 +237,56 @@ function buildTelemetryProjectionPlan(input: {
         details: {
           ...errorDetails,
           objectTypeId: projection.objectTypeId,
-          propertyId: projection.propertyId,
-          columnName: projection.valueField,
         },
       }
     )
   }
 
+  const propertiesById = new Map(objectType.properties.map((property) => [property.id, property]))
+  const columnsByName = new Map(dataset.schema.columns.map((column) => [column.name, column]))
+  const properties = Object.entries(projection.properties)
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .map(([propertyId, mapping]): TelemetryProjectionPropertyPlan => {
+      const property = propertiesById.get(propertyId)
+      const valueColumn = columnsByName.get(mapping.valueField)
+      if (!property || !valueColumn) {
+        throw createSixbError(
+          "internal.unexpected",
+          `[SixbProjectionWorker] Telemetry projection '${projection.id}' was not validated before execution.`,
+          {
+            details: {
+              ...errorDetails,
+              objectTypeId: projection.objectTypeId,
+              propertyId,
+              columnName: mapping.valueField,
+            },
+          }
+        )
+      }
+
+      return {
+        propertyId,
+        mapping,
+        valueColumnType: valueColumn.type,
+        valueSchema: resolveProjectionSchema(
+          property.schema,
+          runtime.ontology.getValueTypesById(),
+          {
+            details: {
+              ...errorDetails,
+              objectTypeId: objectType.id,
+              propertyId,
+              columnName: valueColumn.name,
+            },
+          }
+        ),
+      }
+    })
+
   return {
     projection,
     dataset,
-    valueColumnType: valueColumn.type,
-    valueSchema: resolveProjectionSchema(property.schema, runtime.ontology.getValueTypesById(), {
-      details: {
-        ...errorDetails,
-        objectTypeId: objectType.id,
-        propertyId: property.id,
-        columnName: valueColumn.name,
-      },
-    }),
+    properties,
     readColumns: telemetryProjectionReadColumns(projection),
   }
 }
@@ -264,8 +298,10 @@ function telemetryProjectionReadColumns(
     ...new Set([
       projection.objectIdField,
       projection.atField,
-      projection.valueField,
-      ...(projection.unitField !== undefined ? [projection.unitField] : []),
+      ...Object.values(projection.properties).flatMap((mapping) => [
+        mapping.valueField,
+        ...(mapping.unitField !== undefined ? [mapping.unitField] : []),
+      ]),
     ]),
   ]
 }
@@ -285,8 +321,10 @@ function projectTelemetryRow(
 
   const objectId = row[projection.objectIdField]
   const at = row[projection.atField]
-  const value = row[projection.valueField]
-  if (isBlank(objectId) || isBlank(at) || isBlank(value)) return { kind: "skip" }
+  if (isBlank(objectId) || isBlank(at)) return { kind: "skip" }
+  if (plan.properties.every((property) => isBlank(row[property.mapping.valueField]))) {
+    return { kind: "skip" }
+  }
   if (typeof objectId !== "string") {
     return invalidIdentity(projection, projection.objectIdField)
   }
@@ -299,38 +337,44 @@ function projectTelemetryRow(
     }
   }
 
-  const normalized = normalizeProjectedValue({
-    columnType: plan.valueColumnType,
-    schema: plan.valueSchema,
-    value,
-  })
-  if (!normalized.ok || !isJsonValue(normalized.value)) {
-    return {
-      kind: "invalid",
-      message: `Telemetry projection '${projection.id}' value field '${projection.valueField}' is invalid${normalized.ok ? "" : `: ${normalized.errorMessage}`}.`,
-    }
-  }
+  const points: TelemetryPointWrite[] = []
+  for (const property of plan.properties) {
+    const value = row[property.mapping.valueField]
+    if (isBlank(value)) continue
 
-  const rawUnit = projection.unitField === undefined ? undefined : row[projection.unitField]
-  if (!isBlank(rawUnit) && typeof rawUnit !== "string") {
-    return {
-      kind: "invalid",
-      message: `Telemetry projection '${projection.id}' unit field '${projection.unitField}' must be a string.`,
+    const normalized = normalizeProjectedValue({
+      columnType: property.valueColumnType,
+      schema: property.valueSchema,
+      value,
+    })
+    if (!normalized.ok || !isJsonValue(normalized.value)) {
+      return {
+        kind: "invalid",
+        message: `Telemetry projection '${projection.id}' property '${property.propertyId}' value field '${property.mapping.valueField}' is invalid${normalized.ok ? "" : `: ${normalized.errorMessage}`}.`,
+      }
     }
-  }
 
-  return {
-    kind: "point",
-    point: {
+    const rawUnit =
+      property.mapping.unitField === undefined ? undefined : row[property.mapping.unitField]
+    if (!isBlank(rawUnit) && typeof rawUnit !== "string") {
+      return {
+        kind: "invalid",
+        message: `Telemetry projection '${projection.id}' property '${property.propertyId}' unit field '${property.mapping.unitField}' must be a string.`,
+      }
+    }
+
+    points.push({
       series: {
         object: { objectTypeId: projection.objectTypeId, primaryId: objectId },
-        propertyId: projection.propertyId,
+        propertyId: property.propertyId,
       },
       value: normalized.value,
       at: parsedAt.toISOString(),
       ...(typeof rawUnit === "string" && rawUnit.trim().length > 0 ? { unit: rawUnit } : {}),
-    },
+    })
   }
+
+  return points.length === 0 ? { kind: "skip" } : { kind: "points", points }
 }
 
 function invalidIdentity(

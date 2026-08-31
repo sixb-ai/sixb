@@ -160,14 +160,38 @@ function normalizeProjectionDefinition(projection: ProjectionDefinition): JsonVa
       targetField: projection.targetField,
     }
   }
+  const properties = Object.entries(projection.properties).sort(([left], [right]) =>
+    compareStrings(left, right)
+  )
+  if (properties.length === 1) {
+    const [propertyId, mapping] = properties[0]
+    // Preserve the pre-grouping semantic hash for one-property projections. The authoring form and
+    // lowered shape changed, but the source semantics did not; keeping the hash stable prevents a
+    // deployment from invalidating queued jobs or replaying completed dataset versions.
+    return {
+      kind: "telemetry",
+      objectTypeId: projection.objectTypeId,
+      propertyId,
+      objectIdField: projection.objectIdField,
+      atField: projection.atField,
+      valueField: mapping.valueField,
+      unitField: mapping.unitField ?? null,
+    }
+  }
   return {
     kind: "telemetry",
     objectTypeId: projection.objectTypeId,
-    propertyId: projection.propertyId,
     objectIdField: projection.objectIdField,
     atField: projection.atField,
-    valueField: projection.valueField,
-    unitField: projection.unitField ?? null,
+    properties: Object.fromEntries(
+      properties.map(([propertyId, mapping]) => [
+        propertyId,
+        {
+          valueField: mapping.valueField,
+          unitField: mapping.unitField ?? null,
+        },
+      ])
+    ),
   }
 }
 
@@ -189,8 +213,10 @@ function projectionColumns(projection: ProjectionDefinition): Set<string> {
   return new Set([
     projection.objectIdField,
     projection.atField,
-    projection.valueField,
-    ...(projection.unitField === undefined ? [] : [projection.unitField]),
+    ...Object.values(projection.properties).flatMap((mapping) => [
+      mapping.valueField,
+      ...(mapping.unitField === undefined ? [] : [mapping.unitField]),
+    ]),
   ])
 }
 

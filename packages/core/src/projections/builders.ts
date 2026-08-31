@@ -24,6 +24,7 @@ import type {
   ProjectionTarget,
   SourceEditConflictResolution,
   TelemetryProjectionDefinition,
+  TelemetryProjectionPropertyMapping,
 } from "./types"
 import {
   validateAndLowerLinkMapping,
@@ -186,6 +187,18 @@ type TelemetryPropertyToken<TObjectTypeId extends string = string> = PropertyTok
   Property & { readonly mode: "telemetry" }
 >
 
+type TelemetryPropertyOf<TObjectType extends ObjectType> = Extract<
+  TObjectType["properties"][number],
+  { readonly mode: "telemetry" }
+>
+
+type TelemetryPropertyIdOf<TObjectType extends ObjectType> = TelemetryPropertyOf<TObjectType>["id"]
+
+type TelemetryPropertyById<
+  TObjectType extends ObjectType,
+  TPropertyId extends TelemetryPropertyIdOf<TObjectType>,
+> = Extract<TelemetryPropertyOf<TObjectType>, { readonly id: TPropertyId }>
+
 type TelemetryProjectionPointMapping<
   TPropertyToken extends TelemetryPropertyToken,
   TDataset extends DatasetDefinition,
@@ -201,6 +214,58 @@ type TelemetryProjectionPointMapping<
 
 type ExactTelemetryProjectionPointMapping<TMapping> = TMapping & {
   readonly [TKey in Exclude<keyof TMapping, "objectId" | "at" | "value" | "unit">]: never
+}
+
+type TelemetryProjectionPropertyInput<
+  TProperty extends Property,
+  TDataset extends DatasetDefinition,
+> =
+  | DatasetColumnNameCompatibleWithSchema<TDataset, TProperty["schema"]>
+  | {
+      readonly value: DatasetColumnNameCompatibleWithSchema<TDataset, TProperty["schema"]>
+      readonly unit: StringDatasetColumnNameOf<TDataset>
+    }
+
+type TelemetryProjectionPropertiesMapping<
+  TObjectType extends ObjectType,
+  TDataset extends DatasetDefinition,
+> = {
+  readonly [TPropertyId in TelemetryPropertyIdOf<TObjectType>]?: TelemetryProjectionPropertyInput<
+    TelemetryPropertyById<TObjectType, TPropertyId>,
+    TDataset
+  >
+}
+
+type ExactTelemetryProjectionPropertiesMapping<
+  TObjectType extends ObjectType,
+  TMapping,
+> = TMapping & {
+  readonly [TKey in Exclude<keyof TMapping, TelemetryPropertyIdOf<TObjectType>>]: never
+}
+
+type ExactTelemetryProjectionPropertyInputs<TMapping> = {
+  readonly [TPropertyId in keyof TMapping]: TMapping[TPropertyId] extends object
+    ? TMapping[TPropertyId] & {
+        readonly [TKey in Exclude<keyof TMapping[TPropertyId], "value" | "unit">]: never
+      }
+    : TMapping[TPropertyId]
+}
+
+type NonEmptyTelemetryProjectionProperties<TMapping> = keyof TMapping extends never
+  ? never
+  : TMapping
+
+type TelemetryProjectionPropertiesPointMapping<
+  TObjectType extends ObjectType,
+  TDataset extends DatasetDefinition,
+  TProperties,
+> = {
+  readonly objectId: StringDatasetColumnNameOf<TDataset>
+  readonly at: DateLikeDatasetColumnNameOf<TDataset>
+  readonly properties: NonEmptyTelemetryProjectionProperties<
+    ExactTelemetryProjectionPropertiesMapping<TObjectType, TProperties> &
+      ExactTelemetryProjectionPropertyInputs<TProperties>
+  >
 }
 
 type ForeignKeyFromSourceProperty = Omit<
@@ -284,19 +349,22 @@ function isForeignKeyDescriptor(value: unknown): value is ForeignKeyDescriptor {
 
 // ── defineProjection ─────────────────────────────────────────
 
-interface ObjectProjectionSourceBuilder<TObjectType extends ObjectType> {
+interface ObjectTypeProjectionSourceBuilder<TObjectType extends ObjectType> {
   fromDataset<const TDataset extends DatasetDefinition>(
     dataset: TDataset
-  ): ObjectProjectionMappingBuilder<TObjectType, TDataset>
+  ): ObjectTypeProjectionDatasetBuilder<TObjectType, TDataset>
 }
 
-interface ObjectProjectionMappingBuilder<
+interface ObjectTypeProjectionDatasetBuilder<
   TObjectType extends ObjectType,
   TDataset extends DatasetDefinition,
 > {
   properties<const TMapping extends ProjectionMappingFor<TObjectType, TDataset>>(
     mapping: ExactProjectionMapping<TObjectType, TMapping>
   ): ObjectProjectionBuilder<TObjectType, TDataset>
+  points<const TProperties extends TelemetryProjectionPropertiesMapping<TObjectType, TDataset>>(
+    mapping: TelemetryProjectionPropertiesPointMapping<TObjectType, TDataset, TProperties>
+  ): TelemetryProjectionDefinition
 }
 
 export type ObjectProjectionConflictResolution<TDataset extends DatasetDefinition> =
@@ -338,7 +406,7 @@ export interface ObjectProjectionBuilder<
 export function defineProjection<const TObjectType extends ObjectType>(
   id: string,
   objectType: TObjectType
-): ObjectProjectionSourceBuilder<TObjectType>
+): ObjectTypeProjectionSourceBuilder<TObjectType>
 export function defineProjection<
   TObjectTypeId extends string,
   TLinkId extends string,
@@ -355,24 +423,24 @@ export function defineProjection(
   id: string,
   target: ObjectType | LinkToken<string, string, string> | TelemetryPropertyToken
 ):
-  | ObjectProjectionSourceBuilder<ObjectType>
+  | ObjectTypeProjectionSourceBuilder<ObjectType>
   | LinkProjectionSourceBuilder
   | TelemetryProjectionSourceBuilder<TelemetryPropertyToken> {
   if ("link" in target) return buildLinkProjection(id, target)
   if ("property" in target) return buildTelemetryProjection(id, target)
-  return buildObjectProjection(id, target)
+  return buildObjectTypeProjection(id, target)
 }
 
-function buildObjectProjection<const TObjectType extends ObjectType>(
+function buildObjectTypeProjection<const TObjectType extends ObjectType>(
   id: string,
   objectType: TObjectType
-): ObjectProjectionSourceBuilder<TObjectType> {
+): ObjectTypeProjectionSourceBuilder<TObjectType> {
   assertNonEmpty(id, "id")
 
   return {
     fromDataset<const TDataset extends DatasetDefinition>(
       dataset: TDataset
-    ): ObjectProjectionMappingBuilder<TObjectType, TDataset> {
+    ): ObjectTypeProjectionDatasetBuilder<TObjectType, TDataset> {
       assertProjectionDataset(dataset)
       const datasetId = dataset.id
 
@@ -391,6 +459,29 @@ function buildObjectProjection<const TObjectType extends ObjectType>(
             links: {},
             conflictResolution: { strategy: "editsWin" },
           })
+        },
+        points<
+          const TProperties extends TelemetryProjectionPropertiesMapping<TObjectType, TDataset>,
+        >(
+          mapping: TelemetryProjectionPropertiesPointMapping<TObjectType, TDataset, TProperties>
+        ): TelemetryProjectionDefinition {
+          const pointMapping = lowerTelemetryPropertiesPointMapping(
+            objectType,
+            mapping as {
+              readonly objectId?: string
+              readonly at?: string
+              readonly properties?: Readonly<Record<string, unknown>>
+            }
+          )
+          return {
+            _tag: "TelemetryProjectionDefinition",
+            id,
+            objectTypeId: objectType.id,
+            datasetId,
+            objectIdField: pointMapping.objectId,
+            atField: pointMapping.at,
+            properties: pointMapping.properties,
+          }
         },
       }
     },
@@ -505,12 +596,15 @@ function buildTelemetryProjection<const TPropertyToken extends TelemetryProperty
             _tag: "TelemetryProjectionDefinition",
             id,
             objectTypeId: propertyToken.objectTypeId,
-            propertyId: propertyToken.id,
             datasetId,
             objectIdField: pointMapping.objectId,
             atField: pointMapping.at,
-            valueField: pointMapping.value,
-            ...(pointMapping.unit !== undefined ? { unitField: pointMapping.unit } : {}),
+            properties: {
+              [propertyToken.id]: {
+                valueField: pointMapping.value,
+                ...(pointMapping.unit !== undefined ? { unitField: pointMapping.unit } : {}),
+              },
+            },
           }
         },
       }
@@ -569,6 +663,109 @@ function lowerTelemetryPointMapping(mapping: {
     value: mapping.value,
     ...(mapping.unit !== undefined ? { unit: mapping.unit } : {}),
   }
+}
+
+function lowerTelemetryPropertiesPointMapping(
+  objectType: ObjectType,
+  mapping: {
+    readonly objectId?: string
+    readonly at?: string
+    readonly properties?: Readonly<Record<string, unknown>>
+  }
+): {
+  readonly objectId: string
+  readonly at: string
+  readonly properties: Readonly<Record<string, TelemetryProjectionPropertyMapping>>
+} {
+  const allowedKeys = new Set(["objectId", "at", "properties"])
+  for (const key of Object.keys(mapping)) {
+    if (!allowedKeys.has(key)) {
+      throw new ProjectionValidationError(
+        `Telemetry projection point mapping contains unknown key '${key}'.`
+      )
+    }
+  }
+
+  if (mapping.objectId === undefined) {
+    throw new ProjectionValidationError("Telemetry projection point mapping requires objectId.")
+  }
+  if (mapping.at === undefined) {
+    throw new ProjectionValidationError("Telemetry projection point mapping requires at.")
+  }
+  if (mapping.properties === undefined) {
+    throw new ProjectionValidationError("Telemetry projection point mapping requires properties.")
+  }
+  if (!isRecord(mapping.properties)) {
+    throw new ProjectionValidationError(
+      "Telemetry projection point mapping properties must be an object."
+    )
+  }
+
+  assertNonEmpty(mapping.objectId, "objectId field")
+  assertNonEmpty(mapping.at, "at field")
+
+  const propertyEntries = Object.entries(mapping.properties)
+  if (propertyEntries.length === 0) {
+    throw new ProjectionValidationError(
+      "Telemetry projection point mapping requires at least one property."
+    )
+  }
+
+  const propertiesById = new Map(objectType.properties.map((property) => [property.id, property]))
+  const properties: Record<string, TelemetryProjectionPropertyMapping> = {}
+  for (const [propertyId, input] of propertyEntries) {
+    const property = propertiesById.get(propertyId)
+    if (!property) {
+      throw new ProjectionValidationError(
+        `Property '${propertyId}' does not exist on object type '${objectType.id}'.`
+      )
+    }
+    if (property.mode !== "telemetry") {
+      throw new ProjectionValidationError(
+        `Projection property '${objectType.id}.${propertyId}' must be telemetry-enabled.`
+      )
+    }
+    properties[propertyId] = lowerTelemetryPropertyMapping(propertyId, input)
+  }
+
+  return { objectId: mapping.objectId, at: mapping.at, properties }
+}
+
+function lowerTelemetryPropertyMapping(
+  propertyId: string,
+  input: unknown
+): TelemetryProjectionPropertyMapping {
+  if (typeof input === "string") {
+    assertNonEmpty(input, `property '${propertyId}' value field`)
+    return { valueField: input }
+  }
+  if (!isRecord(input)) {
+    throw new ProjectionValidationError(
+      `Telemetry projection property '${propertyId}' must map a value column or value/unit columns.`
+    )
+  }
+
+  const allowedKeys = new Set(["value", "unit"])
+  for (const key of Object.keys(input)) {
+    if (!allowedKeys.has(key)) {
+      throw new ProjectionValidationError(
+        `Telemetry projection property '${propertyId}' contains unknown key '${key}'.`
+      )
+    }
+  }
+  if (typeof input.value !== "string") {
+    throw new ProjectionValidationError(
+      `Telemetry projection property '${propertyId}' requires a value field.`
+    )
+  }
+  if (typeof input.unit !== "string") {
+    throw new ProjectionValidationError(
+      `Telemetry projection property '${propertyId}' requires a unit field.`
+    )
+  }
+  assertNonEmpty(input.value, `property '${propertyId}' value field`)
+  assertNonEmpty(input.unit, `property '${propertyId}' unit field`)
+  return { valueField: input.value, unitField: input.unit }
 }
 
 // ── fromForeignKey ───────────────────────────────────────────
@@ -765,12 +962,20 @@ export function isTelemetryProjectionDefinition(
     value._tag === "TelemetryProjectionDefinition" &&
     typeof value.id === "string" &&
     typeof value.objectTypeId === "string" &&
-    typeof value.propertyId === "string" &&
     typeof value.datasetId === "string" &&
     typeof value.objectIdField === "string" &&
     typeof value.atField === "string" &&
-    typeof value.valueField === "string" &&
-    (value.unitField === undefined || typeof value.unitField === "string")
+    isTelemetryProjectionProperties(value.properties)
+  )
+}
+
+function isTelemetryProjectionProperties(value: unknown): boolean {
+  if (!isRecord(value) || Object.keys(value).length === 0) return false
+  return Object.values(value).every(
+    (mapping) =>
+      isRecord(mapping) &&
+      typeof mapping.valueField === "string" &&
+      (mapping.unitField === undefined || typeof mapping.unitField === "string")
   )
 }
 

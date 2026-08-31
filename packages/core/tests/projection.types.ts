@@ -48,6 +48,7 @@ const _Room = defineObjectType({
     prop("openedOn", "date"),
     prop("lastSeenAt", "timestamp"),
     prop("currentTemperature", "double", { mode: "telemetry" }),
+    prop("currentHumidity", "double", { mode: "telemetry" }),
     prop("mode", stringEnum(["occupied", "vacant"])),
     prop("metadata", {
       type: "object",
@@ -73,6 +74,7 @@ const roomDataset = defineDataset("canonical.rooms", {
     col("col_area", "float64"),
     col("col_exact_amount", "decimal"),
     col("col_temperature", "float64"),
+    col("col_humidity", "float64"),
     col("col_opened_on", "date"),
     col("col_last_seen_at", "timestamp"),
     col("col_nullable_updated_at", "timestamp", { nullable: true }),
@@ -304,3 +306,78 @@ defineProjection("test", _Room.p.currentTemperature).fromDataset(roomDataset).po
   // @ts-expect-error — point mappings only accept objectId, at, value, and unit
   extra: "col_id",
 })
+
+// 15. object targets group telemetry properties that share objectId and at
+const groupedTelemetryProjection = defineProjection("grouped", _Room)
+  .fromDataset(roomDataset)
+  .points({
+    objectId: "col_id",
+    at: "col_last_seen_at",
+    properties: {
+      currentTemperature: { value: "col_temperature", unit: "col_unit" },
+      currentHumidity: "col_humidity",
+    },
+  })
+type _groupedTelemetryProjTag = Expect<
+  Equal<typeof groupedTelemetryProjection._tag, "TelemetryProjectionDefinition">
+>
+
+defineProjection("grouped", _Room)
+  .fromDataset(roomDataset)
+  // @ts-expect-error — grouped telemetry projections require at least one property
+  .points({ objectId: "col_id", at: "col_last_seen_at", properties: {} })
+
+defineProjection("grouped", _Room)
+  .fromDataset(roomDataset)
+  // @ts-expect-error — static properties cannot be mapped as telemetry
+  .points({ objectId: "col_id", at: "col_last_seen_at", properties: { name: "col_name" } })
+
+defineProjection("grouped", _Room)
+  .fromDataset(roomDataset)
+  .points({
+    objectId: "col_id",
+    at: "col_last_seen_at",
+    properties: { currentTemperature: "col_temperature" },
+    // @ts-expect-error — grouped point mappings only accept objectId, at, and properties
+    extra: "col_id",
+  })
+
+defineProjection("grouped", _Room)
+  .fromDataset(roomDataset)
+  .points({
+    objectId: "col_id",
+    at: "col_last_seen_at",
+    properties: {
+      // @ts-expect-error — value columns remain schema-compatible per property
+      currentTemperature: "col_name",
+    },
+  })
+
+defineProjection("grouped", _Room)
+  .fromDataset(roomDataset)
+  .points({
+    objectId: "col_id",
+    at: "col_last_seen_at",
+    properties: {
+      currentTemperature: {
+        value: "col_temperature",
+        // @ts-expect-error — unit must be a string dataset column
+        unit: "col_room_number",
+      },
+    },
+  })
+
+defineProjection("grouped", _Room)
+  .fromDataset(roomDataset)
+  .points({
+    objectId: "col_id",
+    at: "col_last_seen_at",
+    properties: {
+      currentTemperature: {
+        value: "col_temperature",
+        unit: "col_unit",
+        // @ts-expect-error — property descriptors only accept value and unit
+        extra: "col_id",
+      },
+    },
+  })

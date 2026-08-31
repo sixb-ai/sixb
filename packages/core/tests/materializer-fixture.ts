@@ -32,6 +32,7 @@ export const Device = defineObjectType({
     prop("name", "string", { required: true }),
     prop("note", "string", { nullable: true }),
     prop("temperature", "double", { mode: "telemetry" }),
+    prop("humidity", "double", { mode: "telemetry" }),
   ],
   links: [link.self("parent", { cardinality: "one" }), link.self("peers", { cardinality: "many" })],
 })
@@ -46,7 +47,12 @@ const devices = defineDataset("devices", {
   ],
 })
 const readings = defineDataset("readings", {
-  schema: [col("device_id", "string"), col("at", "timestamp"), col("value", "float64")],
+  schema: [
+    col("device_id", "string"),
+    col("at", "timestamp"),
+    col("value", "float64"),
+    col("humidity", "float64"),
+  ],
 })
 const deviceProjection = defineProjection("devices", Device)
   .fromDataset(devices)
@@ -69,9 +75,13 @@ const mostRecentDeviceProjection = defineProjection("devices", Device)
     },
   })
   .resolveConflicts({ strategy: "mostRecent", sourceTimestamp: "updated_at" })
-const temperatureProjection = defineProjection("temperatures", Device.p.temperature)
+const temperatureProjection = defineProjection("temperatures", Device)
   .fromDataset(readings)
-  .points({ objectId: "device_id", at: "at", value: "value" })
+  .points({
+    objectId: "device_id",
+    at: "at",
+    properties: { temperature: "value", humidity: "humidity" },
+  })
 
 export function createMaterializerFixture(
   input: {

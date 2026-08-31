@@ -13,6 +13,7 @@ import {
   valueTypeRef,
 } from "../src"
 import type { ProjectionMaterializationIdentity } from "../src/materialization"
+import { sha256Canonical } from "../src/materialization/identity"
 import {
   computeOntologyRevision,
   computeProjectionRevision,
@@ -37,6 +38,7 @@ const Room = defineObjectType({
     prop("name", "string"),
     prop("sensorId", "string"),
     prop("temperature", "double", { mode: "telemetry" }),
+    prop("humidity", "double", { mode: "telemetry" }),
   ],
   links: [link("hasSensor", Sensor, { cardinality: "one" })],
 })
@@ -52,7 +54,12 @@ const roomSensors = defineDataset("room-sensors", {
   schema: [col("sensor_id", "string"), col("room_id", "string")],
 })
 const readings = defineDataset("readings", {
-  schema: [col("value", "float64"), col("observed_at", "timestamp"), col("room_id", "string")],
+  schema: [
+    col("value", "float64"),
+    col("humidity", "float64"),
+    col("observed_at", "timestamp"),
+    col("room_id", "string"),
+  ],
 })
 
 function registry(): OntologyRegistry {
@@ -68,9 +75,13 @@ describe("projection registry", () => {
     const roomProjection = defineProjection("rooms", Room)
       .fromDataset(rooms)
       .properties({ id: "room_id", name: "room_name" })
-    const temperatureProjection = defineProjection("temperatures", Room.p.temperature)
+    const temperatureProjection = defineProjection("temperatures", Room)
       .fromDataset(readings)
-      .points({ objectId: "room_id", at: "observed_at", value: "value" })
+      .points({
+        objectId: "room_id",
+        at: "observed_at",
+        properties: { temperature: "value", humidity: "humidity" },
+      })
     const projectionRegistry = new ProjectionRegistry({
       projections: [roomProjection, temperatureProjection],
       ontology: registry(),
@@ -96,9 +107,14 @@ describe("projection registry", () => {
     expect(Object.isFrozen(resolved)).toBe(true)
     expect(Object.isFrozen(resolved.definition)).toBe(true)
     expect(Object.isFrozen(resolved.ownership.objects[0].propertyIds)).toBe(true)
-    expect(projectionRegistry.resolveTelemetry("temperatures").definition.propertyId).toBe(
-      "temperature"
-    )
+    expect(projectionRegistry.resolveTelemetry("temperatures").definition.properties).toEqual({
+      temperature: { valueField: "value" },
+      humidity: { valueField: "humidity" },
+    })
+    expect(projectionRegistry.resolveTelemetry("temperatures").ownership.telemetry).toEqual([
+      { objectTypeId: "Room", propertyId: "humidity" },
+      { objectTypeId: "Room", propertyId: "temperature" },
+    ])
     expect(() => projectionRegistry.resolveSource("temperatures")).toThrow("telemetry-only")
     expect(() => projectionRegistry.resolveTelemetry("rooms")).toThrow(
       "does not own a telemetry source"
@@ -194,6 +210,7 @@ describe("projection registry", () => {
       description: "Display-only description",
       properties: [
         prop("temperature", "double", { mode: "telemetry" }),
+        prop("humidity", "double", { mode: "telemetry" }),
         prop("sensorId", "string"),
         prop("name", "string"),
         prop("id", "string", { primary: true, required: true }),
@@ -259,6 +276,24 @@ describe("projection registry", () => {
         renamedReadings
       )
     )
+    expect(computeProjectionRevision(telemetryProjection, readings)).toBe(
+      sha256Canonical({
+        mapping: {
+          kind: "telemetry",
+          objectTypeId: "Room",
+          propertyId: "temperature",
+          objectIdField: "room_id",
+          atField: "observed_at",
+          valueField: "value",
+          unitField: null,
+        },
+        columns: [
+          { name: "observed_at", type: "timestamp", nullable: false },
+          { name: "room_id", type: "string", nullable: false },
+          { name: "value", type: "float64", nullable: false },
+        ],
+      })
+    )
 
     expect(
       computeProjectionRevision(
@@ -289,6 +324,40 @@ describe("projection registry", () => {
     expect(computeProjectionRevision(objectProjection, nullableRooms)).not.toBe(
       computeProjectionRevision(objectProjection, rooms)
     )
+  })
+
+  test("keeps grouped telemetry revisions order-independent and rejects partial ownership overlap", () => {
+    const first = defineProjection("room-readings", Room)
+      .fromDataset(readings)
+      .points({
+        objectId: "room_id",
+        at: "observed_at",
+        properties: { temperature: "value", humidity: "humidity" },
+      })
+    const reordered = defineProjection("renamed", Room)
+      .fromDataset(readings)
+      .points({
+        objectId: "room_id",
+        at: "observed_at",
+        properties: { humidity: "humidity", temperature: "value" },
+      })
+
+    expect(computeProjectionRevision(first, readings)).toBe(
+      computeProjectionRevision(reordered, readings)
+    )
+    expect(
+      () =>
+        new ProjectionRegistry({
+          projections: [
+            first,
+            defineProjection("humidity-only", Room.p.humidity)
+              .fromDataset(readings)
+              .points({ objectId: "room_id", at: "observed_at", value: "humidity" }),
+          ],
+          ontology: registry(),
+          datasetsById: datasets(readings),
+        })
+    ).toThrow("overlaps telemetry source 'Room.humidity'")
   })
 
   test("clones resolved definitions field by field", () => {

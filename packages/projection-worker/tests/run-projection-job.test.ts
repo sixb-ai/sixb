@@ -86,6 +86,7 @@ const Room = defineObjectType({
     prop("name", "string"),
     prop("buildingRef", "string"),
     prop("temperature", "double", { mode: "telemetry" }),
+    prop("humidity", "double", { mode: "telemetry" }),
     prop("targetTemperature", "double", { mode: "telemetry", semanticType: "Temperature" }),
   ],
   links: [
@@ -169,6 +170,29 @@ const roomSensorProjection = defineProjection("room-sensor-proj", Room.l.hasSens
 const roomTemperatureProjection = defineProjection("room-temperature-proj", Room.p.temperature)
   .fromDataset(roomReadingsDataset)
   .points({ objectId: "room_id", at: "observed_at", value: "temperature" })
+
+const groupedRoomReadingsDataset = defineDataset("canonical.grouped-room-readings", {
+  schema: [
+    col("room_id", "string"),
+    col("observed_at", "timestamp"),
+    col("temperature", "float64", { nullable: true }),
+    col("humidity", "float64", { nullable: true }),
+    col("target", "float64", { nullable: true }),
+    col("target_unit", "string", { nullable: true }),
+  ],
+})
+
+const groupedRoomReadingsProjection = defineProjection("grouped-room-readings-proj", Room)
+  .fromDataset(groupedRoomReadingsDataset)
+  .points({
+    objectId: "room_id",
+    at: "observed_at",
+    properties: {
+      temperature: "temperature",
+      humidity: "humidity",
+      targetTemperature: { value: "target", unit: "target_unit" },
+    },
+  })
 
 const roomTargetsDataset = defineDataset("canonical.room-targets", {
   schema: [
@@ -801,6 +825,130 @@ describe("runProjectionJob", () => {
 
     expect(lakeStorage.readInputs).toHaveLength(1)
     expect(lakeStorage.readInputs[0]?.columns).toEqual(["room_id", "observed_at", "temperature"])
+  })
+
+  test("materializes grouped telemetry in one read while omitting only blank properties", async () => {
+    const deps = createDeps()
+    const lakeStorage = new RecordingLakeStorage(deps.lakeStorage)
+    const sixb = createSixb(
+      {
+        datasets: [groupedRoomReadingsDataset],
+        projections: [groupedRoomReadingsProjection],
+      },
+      { ...deps, lakeStorage }
+    )
+    await createTestSixb(sixb)
+      .objects(Room)
+      .upsert({ properties: { id: "r1", name: "Kitchen" } })
+    const version = await commitDatasetVersion(lakeStorage, groupedRoomReadingsDataset, [
+      {
+        room_id: "r1",
+        observed_at: "2026-06-01T12:00:00.000Z",
+        temperature: 20,
+        humidity: 40,
+        target: 21,
+        target_unit: "degreeCelsius",
+      },
+      {
+        room_id: "r1",
+        observed_at: "2026-06-02T12:00:00.000Z",
+        temperature: 22,
+        humidity: null,
+        target: null,
+        target_unit: null,
+      },
+      {
+        room_id: "r1",
+        observed_at: "2026-06-03T12:00:00.000Z",
+        temperature: null,
+        humidity: null,
+        target: null,
+        target_unit: "ignored-without-a-value",
+      },
+    ])
+
+    const result = await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-grouped-telemetry",
+        projectionId: groupedRoomReadingsProjection.id,
+        projectionKind: "telemetry",
+        datasetId: groupedRoomReadingsDataset.id,
+        versionId: version.versionId,
+      },
+    })
+
+    expect(result.run).toMatchObject({
+      status: "succeeded",
+      progress: { sourceRowsRead: 3, sourceRowsSkipped: 1 },
+    })
+    expect(lakeStorage.readInputs).toHaveLength(1)
+    expect(lakeStorage.readInputs[0]?.columns).toEqual([
+      "room_id",
+      "observed_at",
+      "temperature",
+      "humidity",
+      "target",
+      "target_unit",
+    ])
+    const history = (propertyId: string) =>
+      deps.storage.timeseries.getHistory({
+        projectId: sixb.id,
+        objectTypeId: "Room",
+        objectId: "r1",
+        propertyId,
+      })
+    expect((await history("temperature")).map((point) => point.value)).toEqual([20, 22])
+    expect((await history("humidity")).map((point) => point.value)).toEqual([40])
+    expect(await history("targetTemperature")).toMatchObject([{ value: 21, unit: "degreeCelsius" }])
+  })
+
+  test("rolls back every property when one grouped telemetry value is invalid", async () => {
+    const deps = createDeps()
+    const sixb = createSixb(
+      {
+        datasets: [groupedRoomReadingsDataset],
+        projections: [groupedRoomReadingsProjection],
+      },
+      deps
+    )
+    await createTestSixb(sixb)
+      .objects(Room)
+      .upsert({ properties: { id: "r1", name: "Kitchen" } })
+    const version = await commitDatasetVersion(deps.lakeStorage, groupedRoomReadingsDataset, [
+      {
+        room_id: "r1",
+        observed_at: "2026-06-01T12:00:00.000Z",
+        temperature: 20,
+        humidity: 40,
+        target: 21,
+        target_unit: "bananas",
+      },
+    ])
+
+    await expect(
+      runProjectionJob({
+        runtime: createRuntime(sixb),
+        job: {
+          id: "projrun-invalid-grouped-telemetry",
+          projectionId: groupedRoomReadingsProjection.id,
+          projectionKind: "telemetry",
+          datasetId: groupedRoomReadingsDataset.id,
+          versionId: version.versionId,
+        },
+      })
+    ).rejects.toBeInstanceOf(MaterializationValidationError)
+
+    for (const propertyId of ["temperature", "humidity", "targetTemperature"]) {
+      expect(
+        await deps.storage.timeseries.getHistory({
+          projectId: sixb.id,
+          objectTypeId: "Room",
+          objectId: "r1",
+          propertyId,
+        })
+      ).toEqual([])
+    }
   })
 
   test("telemetry projections materialize object latest by telemetry timestamp", async () => {
@@ -3371,11 +3519,10 @@ describe("runProjectionJob", () => {
       _tag: "TelemetryProjectionDefinition",
       id: "room-invalid-at-proj",
       objectTypeId: "Room",
-      propertyId: "temperature",
       datasetId: roomReadingsDataset.id,
       objectIdField: "room_id",
       atField: "temperature", // float64 column, not date-like
-      valueField: "temperature",
+      properties: { temperature: { valueField: "temperature" } },
     } satisfies ProjectionDefinition
     const sixb = createSixb(
       {

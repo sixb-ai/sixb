@@ -99,6 +99,11 @@ describe("materialization header validation", () => {
   test("accepts correlated projection and telemetry headers", () => {
     expect(() => assertMaterializationHeader(projectionHeader())).not.toThrow()
     expect(() => assertMaterializationHeader(telemetryHeader())).not.toThrow()
+    expect(() =>
+      assertMaterializationHeader(
+        telemetryHeader({ sourceRowCount: 2, sourceRowsSkipped: 0, inputPointCount: 4 })
+      )
+    ).not.toThrow()
   })
 
   test("reports the exact projection correlation that failed", () => {
@@ -112,8 +117,6 @@ describe("materialization header validation", () => {
       assertMaterializationHeader(
         telemetryHeader({ sourceRowCount: 3, sourceRowsSkipped: 1, inputPointCount: 1 })
       )
-    ).toThrow(
-      "Projection telemetry source row count does not match input points plus skipped rows."
-    )
+    ).toThrow("Projection telemetry input points do not account for every non-skipped source row.")
   })
 })

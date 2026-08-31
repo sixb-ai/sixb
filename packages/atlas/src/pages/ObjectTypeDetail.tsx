@@ -446,12 +446,19 @@ export function ObjectTypeDetail({
                       <div className="space-y-1.5">
                         <SectionLabel>Point mapping</SectionLabel>
                         <dl className="grid grid-cols-[max-content_max-content_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1 font-mono text-xs">
-                          <TelemetryMappingRow label={proj.propertyId} column={proj.valueField} />
-                          <TelemetryMappingRow label="at" column={proj.atField} />
                           <TelemetryMappingRow label="object" column={proj.objectIdField} />
-                          {proj.unitField ? (
-                            <TelemetryMappingRow label="unit" column={proj.unitField} />
-                          ) : null}
+                          <TelemetryMappingRow label="at" column={proj.atField} />
+                          {Object.entries(proj.properties).map(([propertyId, mapping]) => (
+                            <Fragment key={propertyId}>
+                              <TelemetryMappingRow label={propertyId} column={mapping.valueField} />
+                              {mapping.unitField ? (
+                                <TelemetryMappingRow
+                                  label={`${propertyId} unit`}
+                                  column={mapping.unitField}
+                                />
+                              ) : null}
+                            </Fragment>
+                          ))}
                         </dl>
                       </div>
                     </Card>

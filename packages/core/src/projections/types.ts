@@ -84,28 +84,32 @@ export interface LinkProjectionDefinition {
   readonly targetField: string
 }
 
+/** Dataset columns that produce one telemetry property value. */
+export interface TelemetryProjectionPropertyMapping {
+  /** Dataset column holding the telemetry value. */
+  readonly valueField: string
+  /** Dataset column holding the telemetry unit, when the property requires one. */
+  readonly unitField?: string
+}
+
 /**
  * Lowered, serializable definition for projecting dataset rows into telemetry history.
  *
- * Each row in the dataset becomes one telemetry point for a single object type property.
- * The target object type and property are fixed by the telemetry property token used by
- * the builder; the point mapping selects the dataset columns for object id, timestamp,
- * value, and optional unit.
+ * Each row shares one target object id and observation timestamp, then contributes up to one
+ * telemetry point for every mapped property. A property-token projection is lowered to the same
+ * shape with one entry, so execution and ownership have one canonical contract.
  */
 export interface TelemetryProjectionDefinition {
   readonly _tag: "TelemetryProjectionDefinition"
   readonly id: string
   readonly objectTypeId: string
-  readonly propertyId: string
   readonly datasetId: string
   /** Dataset column holding the target object's primary id. */
   readonly objectIdField: string
   /** Dataset column holding the telemetry observation timestamp. */
   readonly atField: string
-  /** Dataset column holding the telemetry value. */
-  readonly valueField: string
-  /** Dataset column holding the telemetry unit, when the property requires one. */
-  readonly unitField?: string
+  /** Maps telemetry property id -> value and optional unit dataset columns. */
+  readonly properties: Readonly<Record<string, TelemetryProjectionPropertyMapping>>
 }
 
 /** Union of all projection definition types. */
