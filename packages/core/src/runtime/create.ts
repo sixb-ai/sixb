@@ -18,6 +18,7 @@ import type { RuleDefinition } from "../rules"
 import type { SandboxFactory } from "../sandboxes"
 import type { ScheduleDefinition } from "../schedules"
 import type { GroupDefinition, MembershipPolicyDefinition, RoleDefinition } from "../security"
+import type { ShareDefinition } from "../shares"
 import type { Storage } from "../storage"
 import type { SyncDefinition } from "../syncs"
 import type { WorkflowDefinition } from "../workflows"
@@ -59,6 +60,8 @@ export interface CreateSixbOptions {
   groups?: readonly GroupDefinition[]
   roles?: readonly RoleDefinition[]
   membershipPolicies?: readonly MembershipPolicyDefinition[]
+  /** Share definitions to register in addition to auto-discovered `shares/` exports. */
+  shares?: readonly ShareDefinition[]
   auth?: SixbAuthConfig
   projectRoot?: string
 }
@@ -68,7 +71,7 @@ export interface CreateSixbOptions {
  *
  * The host auto-discovers exported definitions from `ontology/`, `actions/`, `datasets/`,
  * `connectors/`, `syncs/`, `schedules/`, `pipelines/`, `projections/`,
- * `rules/`, `workflows/`, `agents/`, and `security/{groups,roles,policies}/`
+ * `rules/`, `workflows/`, `agents/`, `shares/`, and `security/{groups,roles,policies}/`
  * relative to `projectRoot`.
  */
 export async function createSixb(
@@ -118,6 +121,7 @@ export async function createSixb(
     roles: [...(options.roles ?? []), ...definitions.roles],
     membershipPolicies: [...(options.membershipPolicies ?? []), ...definitions.membershipPolicies],
     agents: [...(options.agents ?? []), ...definitions.agents],
+    shares: [...(options.shares ?? []), ...definitions.shares],
     auth: options.auth,
   })
 }

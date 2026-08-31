@@ -5,6 +5,7 @@
  * the interface cannot be implemented from outside the package.
  */
 export type { Principal } from "../auth"
+export type { RuntimeAccessPlan } from "../authorization/access-plan"
 export type { ConnectorAccountCandidate } from "../connectors"
 export type { SealedConnectorCredential } from "../connectors/credentials"
 export type { SixbFailure } from "../errors/types"
@@ -16,6 +17,7 @@ export type {
   ProjectionExecution,
   ProjectionMaterializationIdentity,
 } from "../materialization/model"
+export type { ObjectRef } from "../ontology"
 export type {
   ActionRunEffectsRecord,
   ActionRunFailure,
@@ -582,6 +584,19 @@ export type {
   RulesStorage,
 } from "./rules"
 export { InMemoryRulesStorage } from "./rules"
+export type {
+  CreateShareGrantInput,
+  GetShareGrantByIdInput,
+  ListShareGrantsInput,
+  ListShareGrantsResult,
+  RevokeShareGrantInput,
+  ShareAuthoritySnapshot,
+  ShareAuthoritySnapshotV1,
+  ShareGrantRecord,
+  ShareGrantStorage,
+  ShareGrantStorageErrorCode,
+} from "./share-grants"
+export { InMemoryShareGrantStorage, ShareGrantStorageError } from "./share-grants"
 export type {
   FinishSyncRunInput,
   ListLatestSyncRunsInput,

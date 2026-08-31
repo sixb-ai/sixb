@@ -27,6 +27,7 @@ const GRANT_CAPABILITIES = Object.keys({
   edit: true,
   append: true,
   apply: true,
+  share: true,
   run: true,
   observe: true,
   manage: true,
@@ -309,6 +310,8 @@ export function validateSecurityDefinitionsAtStartup(input: {
   readonly observableIds?: ReadonlySet<string>
   /** Registered connector ids — when provided, manage grants must reference them. */
   readonly connectorIds?: ReadonlySet<string>
+  /** Registered Share ids — when provided, share grants must reference them. */
+  readonly shareIds?: ReadonlySet<string>
 }): RegisteredSecurityDefinitions {
   const groupsById = new Map<string, GroupDefinition>()
   const rolesById = new Map<string, RoleDefinition>()

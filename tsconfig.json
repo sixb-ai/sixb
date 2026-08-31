@@ -93,6 +93,9 @@
       "@sixb/core/internal/projection-run-storage-provider": [
         "./packages/core/src/storage/projection-runs/provider.ts"
       ],
+      "@sixb/core/internal/share-grant-storage-provider": [
+        "./packages/core/src/storage/share-grants/provider.ts"
+      ],
       "@sixb/core/internal/sync-run-storage-provider": [
         "./packages/core/src/storage/sync-runs/provider.ts"
       ],

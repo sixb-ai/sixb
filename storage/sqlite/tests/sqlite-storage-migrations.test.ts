@@ -224,6 +224,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 28,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "029-share-grants",
+    status: "applied",
+    version: 29,
+  },
 ]
 
 afterEach(async () => {
@@ -259,6 +266,23 @@ describe("SQLite storage migrations", () => {
       await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "current" })
     } finally {
       storage.close()
+    }
+  })
+
+  test("indexes the primary Share grant listing order", () => {
+    const db = new Database(":memory:")
+    try {
+      const migration = sqliteStorageMigrations.steps[28]
+      if (!migration) throw new Error("Expected the Share grants migration.")
+      migration.up(db)
+
+      expect(readMemoryIndexColumns(db, "idx_share_grants_project_created")).toEqual([
+        "project_id",
+        "created_at",
+        "id",
+      ])
+    } finally {
+      db.close()
     }
   })
 

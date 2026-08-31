@@ -155,6 +155,10 @@ export const OPENAPI_TAGS = {
     name: "Auth Service Accounts",
     description: "Service accounts and service-account access tokens",
   },
+  sharedAccess: {
+    name: "Shared Access",
+    description: "Scoped shared-access grant lifecycle",
+  },
 } as const
 
 export const OPENAPI_TAG_METADATA = Object.values(OPENAPI_TAGS).map(({ name, description }) => ({
