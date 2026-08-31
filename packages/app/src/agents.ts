@@ -21,7 +21,7 @@ export type AgentWorkspaceProviderProps = PropsWithChildren<AgentWorkspaceChrome
 
 const AgentWorkspaceContext = createContext<AgentWorkspaceChrome>({})
 
-/** Configure the framework-owned Agents routes from a custom app's root layout. */
+/** Configure the framework-owned Agents routes, typically from `app/agents/layout.tsx`. */
 export function AgentWorkspaceProvider({
   sidebarHeader,
   sidebarFooter,

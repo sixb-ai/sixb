@@ -14,25 +14,41 @@ The build pipeline has three stages: **scan**, **codegen**, and **build**.
 
 ### 1. Scan
 
-`scanPages(appDir)` recursively walks `app/` looking for `page.tsx` (or `page.ts`) files and converts the file tree into React Router paths. Files and folders prefixed with `_` are ignored.
+The internal scanner recursively walks `app/` for `page.tsx` (or `page.ts`) files and descendant
+`layout.tsx` files. It converts the file tree into nested React Router routes. Files and folders
+prefixed with `_`, plus the static `app/public/` tree, are ignored.
 
 ```
 app/
   page.tsx                -> /
   about/page.tsx          -> /about
+  about/layout.tsx        -> wraps /about and its descendants
   remote/[id]/page.tsx    -> /remote/:id
+  remote/[id]/layout.tsx  -> wraps /remote/:id and its descendants
 ```
 
 ### 2. Codegen
 
 Two functions generate the entry point files into `.sixb/generated/`:
 
-- **`generateRouteManifest(routes, generatedDir)`** -- writes `routes.ts` with a static import for each scanned page. Routes are eager on purpose: project apps bundle small, and a single bundle means no loading gap when navigating between pages.
+- **`generateRouteManifest(routes, generatedDir)`** -- writes `routes.ts` with static page and
+  layout imports plus native nested `RouteObject` entries. Routes are eager on purpose: project
+  apps bundle small, and a single bundle means no loading gap when navigating between pages.
 - **`generateAppEntry(projectRoot, generatedDir, options)`** -- writes `index.html` (HTML shell), `main.tsx` (React entry with BrowserRouter, TanStack Query, and the `@sixb/client` SDK), and `app.webmanifest`.
 
 The generated entry also intercepts plain same-origin `<a href="/...">` clicks and routes them client-side, so internal links work like react-router's `<Link>` without authors having to remember it. The interceptor is conservative — modified clicks, `target`/`download`/`rel="external"` anchors, cross-origin URLs, reserved Sixb paths (`/api`, `/auth`, `/ws`, `/docs`), and destinations that don't match an app route all keep native browser navigation. `<Link>` remains the idiomatic choice in app code.
 
-If `app/layout.tsx` exists, it is used as a root layout wrapper. It can also export a `metadata` object (`title`, `description`, `favicon`, `themeColor`, and `backgroundColor`). Metadata is loaded during generation and written into the static HTML and manifest, so it is available before auth and client startup. The layout module must therefore be import-safe in Bun: do not access `window` or `document` at module scope. An `app/globals.css` file is imported automatically when present.
+If `app/layout.tsx` exists, it is the global wrapper outside the route tree. It can also export a
+`metadata` object (`title`, `description`, `favicon`, `themeColor`, and `backgroundColor`). Metadata
+is loaded during generation and written into the static HTML and manifest, so it is available
+before auth and client startup. The root layout module must therefore be import-safe in Bun: do
+not access `window` or `document` at module scope. An `app/globals.css` file is imported
+automatically when present.
+
+A descendant `app/**/layout.tsx` wraps only pages at its URL prefix. It receives `children`, can use
+React Router hooks such as `useParams`, and stays mounted while navigation remains inside its
+subtree. Descendant layout metadata is not read. A layout with no project or framework page below
+it creates no route and is not bundled.
 
 Add an optional `app/auth.tsx` default export to customize the app audience's magic-link pages. It receives `AuthExperienceProps` from `@sixb/app/auth` with `signIn`, `checkEmail`, `confirm`, `invalidLink`, and `error` states plus framework-owned actions. Sixb builds it separately, includes `app/globals.css`, and serves it from the API's existing `/auth/*` routes. It is not wrapped by `app/layout.tsx`, and it never owns tokens, cookies, callbacks, audience validation, or return redirects. When the file is absent, the generic server login remains the fallback.
 
@@ -50,19 +66,24 @@ These routes are generated only when the project has at least one `app/` page, s
 
 The default agent UI is imported through `@sixb/app/agents`, so app projects do not need to import `@sixb/agent-ui` directly. A framework-owned `agent-ui.css` bundle is generated before the app stylesheet and imports normal `@sixb/ui` styles, which means app-level token overrides in `app/globals.css` still apply in the usual way.
 
-Wrap the app layout with `AgentWorkspaceProvider` to make the built-in agent navigation match the
-custom app shell without replacing any routes:
+Add `app/agents/layout.tsx` with `AgentWorkspaceProvider` to make the built-in agent navigation
+match the custom app shell without making the provider global or replacing any routes:
 
 ```tsx
 import { AgentWorkspaceProvider } from "@sixb/app/agents"
+import type { PropsWithChildren } from "react"
 
-<AgentWorkspaceProvider
-  sidebarHeader={<AppSidebarHeader />}
-  sidebarFooter={<AppSidebarFooter />}
-  sidebarWidth="12.5rem"
->
-  <AppShell>{children}</AppShell>
-</AgentWorkspaceProvider>
+export default function AgentsLayout({ children }: PropsWithChildren) {
+  return (
+    <AgentWorkspaceProvider
+      sidebarHeader={<AppSidebarHeader />}
+      sidebarFooter={<AppSidebarFooter />}
+      sidebarWidth="12.5rem"
+    >
+      {children}
+    </AgentWorkspaceProvider>
+  )
+}
 ```
 
 Explicit props passed to a project-owned `AgentsPage` override provider defaults. The custom width
