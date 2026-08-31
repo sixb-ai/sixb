@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -1052,10 +1052,13 @@ async function waitForTemporaryDownload(directory: string, prefix: string): Prom
   const deadline = Date.now() + 2_000
   while (Date.now() < deadline) {
     const name = (await readdir(directory)).find((entry) => entry.startsWith(prefix))
-    if (name) return join(directory, name)
+    if (name) {
+      const path = join(directory, name)
+      if ((await stat(path)).size > 0) return path
+    }
     await Bun.sleep(10)
   }
-  throw new Error(`No streamed download temporary file appeared within 2000ms.`)
+  throw new Error(`No populated streamed download temporary file appeared within 2000ms.`)
 }
 
 function json(value: unknown, status = 200): Response {
