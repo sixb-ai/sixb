@@ -22,7 +22,11 @@ import {
   type ProviderData,
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
-import { anthropicRateCard, applyAnthropicRateCardModifiers } from "./model-details"
+import {
+  anthropicMaxOutputTokens,
+  anthropicRateCard,
+  applyAnthropicRateCardModifiers,
+} from "./model-details"
 import { decodeServerSentEvents } from "./sse"
 
 type ValueSource<T> = T | (() => T)
@@ -30,7 +34,6 @@ type ValueSource<T> = T | (() => T)
 const PROVIDER_ID = "anthropic"
 const DEFAULT_BASE_URL = "https://api.anthropic.com/v1"
 const DEFAULT_API_VERSION = "2023-06-01"
-const DEFAULT_MAX_OUTPUT_TOKENS = 4_096
 const CATALOG_TIMEOUT_MS = 5_000
 const DEFAULT_CATALOG_TTL_MS = 60 * 60 * 1_000
 const DEFAULT_MAX_RETRIES = 2
@@ -248,6 +251,7 @@ function catalogDefinition(value: unknown): LanguageModelDefinition | undefined 
 
 function fallbackDefinition(modelId: string): LanguageModelDefinition {
   const rateCard = anthropicRateCard(modelId, undefined)
+  const maxOutputTokens = anthropicMaxOutputTokens(modelId)
   return defineLanguageModel({
     kind: "language",
     providerId: PROVIDER_ID,
@@ -258,6 +262,7 @@ function fallbackDefinition(modelId: string): LanguageModelDefinition {
       localTools: true,
       parallelToolCalls: true,
     },
+    ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
     ...(rateCard === undefined ? {} : { rateCard }),
   })
 }
@@ -275,15 +280,27 @@ class AnthropicLanguageModel implements LanguageModel {
     configuredDefinition: LanguageModelDefinition | undefined
   ) {
     this.modelId = modelId
-    this.maxOutputTokens = options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS
-    if (!Number.isSafeInteger(this.maxOutputTokens) || this.maxOutputTokens <= 0) {
+    const base = configuredDefinition ?? fallbackDefinition(modelId)
+    const modelMaxOutputTokens = base.maxOutputTokens ?? anthropicMaxOutputTokens(modelId)
+    const maxOutputTokens = options.maxOutputTokens ?? modelMaxOutputTokens
+    if (maxOutputTokens === undefined) {
+      throw new TypeError(
+        `[SixbAnthropic] maxOutputTokens is required for unknown model '${modelId}'.`
+      )
+    }
+    if (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens <= 0) {
       throw new TypeError("[SixbAnthropic] maxOutputTokens must be a positive integer.")
     }
+    if (modelMaxOutputTokens !== undefined && maxOutputTokens > modelMaxOutputTokens) {
+      throw new TypeError(
+        `[SixbAnthropic] maxOutputTokens must not exceed model '${modelId}' maximum (${modelMaxOutputTokens}).`
+      )
+    }
+    this.maxOutputTokens = maxOutputTokens
     if (options.request !== undefined) assertJsonObject(options.request, "model request options")
     for (const [index, tool] of (options.providerTools ?? []).entries()) {
       assertJsonObject(tool, `providerTools[${index}]`)
     }
-    const base = configuredDefinition ?? fallbackDefinition(modelId)
     const { rateCard: baseRateCard, ...definition } = base
     // Server tools may add request- or duration-based charges that token rates cannot represent.
     const rateCard =

@@ -229,6 +229,56 @@ describe("Anthropic provider", () => {
     ])
   })
 
+  test("uses provider-owned model output limits when no request ceiling is configured", async () => {
+    const bodies: Record<string, unknown>[] = []
+    const transport = {
+      fetch: async (_input: string | URL | Request, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return sseResponse([])
+      },
+    }
+    const provider = createAnthropic(transport)
+    const expected = [
+      ["claude-sonnet-5", 128_000],
+      ["claude-sonnet-4-6", 128_000],
+      ["claude-haiku-4-5-20251001", 64_000],
+      ["claude-opus-4-1-20250805", 32_000],
+      ["claude-3-haiku-20240307", 4_096],
+      ["claude-future-6", 128_000],
+    ] as const
+
+    for (const [modelId, maxOutputTokens] of expected) {
+      const model = provider(modelId)
+      expect(model.definition.maxOutputTokens).toBe(maxOutputTokens)
+      await model.stream(request())
+    }
+    expect(bodies.map((body) => body.max_tokens)).toEqual(expected.map((entry) => entry[1]))
+
+    expect(() => provider("custom-compatible-model")).toThrow(
+      "maxOutputTokens is required for unknown model 'custom-compatible-model'"
+    )
+    const explicit = provider("custom-compatible-model", { maxOutputTokens: 12_000 })
+    expect(explicit.definition.maxOutputTokens).toBeUndefined()
+    await explicit.stream(request())
+    expect(bodies.at(-1)?.max_tokens).toBe(12_000)
+
+    const configured = createAnthropic({
+      ...transport,
+      models: [
+        {
+          kind: "language",
+          providerId: "anthropic",
+          modelId: "custom-compatible-model",
+          maxOutputTokens: 24_000,
+          capabilities: {},
+        },
+      ],
+    })("custom-compatible-model")
+    expect(configured.definition.maxOutputTokens).toBe(24_000)
+    await configured.stream(request())
+    expect(bodies.at(-1)?.max_tokens).toBe(24_000)
+  })
+
   test("maps exact reasoning budgets and rejects unsupported effort without approximation", async () => {
     let capturedBody: Record<string, unknown> | undefined
     let requests = 0
@@ -655,6 +705,9 @@ describe("Anthropic provider", () => {
     expect(() => provider("   ")).toThrow("Model id must not be empty")
     expect(() => provider("claude-opus-5", { maxOutputTokens: 0 })).toThrow(
       "maxOutputTokens must be a positive integer"
+    )
+    expect(() => provider("claude-haiku-4-5-20251001", { maxOutputTokens: 128_000 })).toThrow(
+      "must not exceed model 'claude-haiku-4-5-20251001' maximum (64000)"
     )
     const streamErrorProvider = createAnthropic({
       fetch: async () =>
