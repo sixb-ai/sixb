@@ -7545,6 +7545,10 @@ export type QueryObjectsErrors = {
    */
   403: ErrorResponse
   /**
+   * Response for status 413
+   */
+  413: ErrorResponse
+  /**
    * Response for status 500
    */
   500: ErrorResponse
@@ -7577,6 +7581,10 @@ export type QueryObjectLinksErrors = {
    * Response for status 403
    */
   403: ErrorResponse
+  /**
+   * Response for status 413
+   */
+  413: ErrorResponse
   /**
    * Response for status 500
    */
@@ -7611,6 +7619,10 @@ export type CountObjectsErrors = {
    */
   403: ErrorResponse
   /**
+   * Response for status 413
+   */
+  413: ErrorResponse
+  /**
    * Response for status 500
    */
   500: ErrorResponse
@@ -7644,6 +7656,10 @@ export type ExistsObjectsErrors = {
    */
   403: ErrorResponse
   /**
+   * Response for status 413
+   */
+  413: ErrorResponse
+  /**
    * Response for status 500
    */
   500: ErrorResponse
@@ -7676,6 +7692,10 @@ export type FacetObjectsErrors = {
    * Response for status 403
    */
   403: ErrorResponse
+  /**
+   * Response for status 413
+   */
+  413: ErrorResponse
   /**
    * Response for status 500
    */
