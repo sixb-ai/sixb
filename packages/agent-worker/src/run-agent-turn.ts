@@ -1,4 +1,4 @@
-import type { AgentDefinition, AgentInboundUiMessagePart, AgentMessage, Storage } from "@sixb/core"
+import type { AgentInboundUiMessagePart, AgentMessage, Storage } from "@sixb/core"
 import { createAgentMessageId, fromAiSdk, toModelMessages } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { isAbortError, QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
@@ -13,6 +13,7 @@ import {
   toolResultAttachmentKey,
 } from "./attachments"
 import { AgentTurnTimeoutError } from "./errors"
+import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { type AgentRunFailure, toAgentExecutionFailure } from "./failure"
 import { appendMessageAndFinishRunOrThrow, finishRunOrThrow } from "./finalize"
 import { collectAgentOutputAttachments } from "./output-attachments"
@@ -28,7 +29,7 @@ export const DEFAULT_MAX_STEPS = 25
 export interface RunAgentTurnInput {
   /** The worker's stable execution context (storage, tools, stream sink, and turn limits). */
   readonly context: AgentTurnContext
-  readonly agent: AgentDefinition
+  readonly plan: ResolvedAgentExecutionPlan
   /** The run this delivery reserved or reclaimed with its execution token. */
   readonly run: AgentRunRecord
   /** The worker's shutdown signal. */
@@ -52,8 +53,8 @@ export interface RunAgentTurnInput {
  * caller, which records the run's terminal fate.
  */
 export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRecord> {
-  const { context, agent, run, signal } = input
-  const { id: projectId, storage, tools, defaultMaxSteps, turnTimeoutMs } = context
+  const { context, plan, run, signal } = input
+  const { id: projectId, storage, tools, turnTimeoutMs } = context
   const runId = run.id
   const executionToken = run.execution?.token
   if (!executionToken) {
@@ -81,7 +82,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
           messages: threadContext.retainedMessages,
           blobStorage: context.blobStorage,
           apiBaseUrl: context.apiBaseUrl,
-          inlineImages: await modelSupportsInlineImages(agent.model, signal),
+          inlineImages: await modelSupportsInlineImages(plan.model, signal),
           signal,
         })
       : undefined)
@@ -106,8 +107,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         : undefined,
   }) as ModelMessage[]
 
-  const maxSteps = agent.loop?.stopWhen?.maxSteps ?? defaultMaxSteps
-
   // The sandbox provisions concurrently with this turn (see `createConversationAgentEnvironment`). If it
   // fails, the run must be recorded `failed` rather than finalizing as a success with a dead
   // sandbox — even when the model never invokes bash. Capture the cause and abort the stream so the
@@ -126,7 +125,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       context,
       run,
       signal,
-      providerOptions: agent.providerOptions,
+      providerOptions: plan.providerOptions,
     })
   const usageRecorder = runtime.usageRecorder
   const abortSignal = AbortSignal.any([runtime.signal, sandboxReadiness.signal])
@@ -140,11 +139,10 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   let uiStream: ReturnType<typeof toUIMessageStream>
   try {
     result = runAgentLoop({
-      agent,
+      plan,
       system: context.systemPrompt,
       messages: modelMessages,
       tools,
-      maxSteps,
       usageRecorder,
       prepareStep: context.prepareStep,
       abortSignal,
@@ -204,7 +202,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         run,
         executionToken,
         projectId,
-        modelId: agent.model.modelId,
+        modelId: plan.model.modelId,
         status: "failed",
         finishReason: "timeout",
         error: toAgentExecutionFailure(new AgentTurnTimeoutError(runId, turnTimeoutMs), {
@@ -231,7 +229,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       run,
       executionToken,
       projectId,
-      modelId: agent.model.modelId,
+      modelId: plan.model.modelId,
       status: "cancelled",
       partial: responseMessage,
     })
@@ -260,7 +258,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     const finishReason = await result.finishReason
     const assistant = ensureVisibleAssistantMessage(fromAiSdk(responseMessage), {
       finishReason,
-      maxSteps,
+      maxSteps: plan.maxSteps,
     })
     let outputAttachments: Awaited<ReturnType<typeof collectAgentOutputAttachments>>
     try {
@@ -317,7 +315,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         id: runId,
         executionToken,
         status: "succeeded",
-        modelId: agent.model.modelId,
+        modelId: plan.model.modelId,
         finishReason,
         ...(outputAttachments.diagnostics.length === 0
           ? {}

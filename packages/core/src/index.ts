@@ -1027,6 +1027,7 @@ export {
 export type {
   LanguageModelCatalog,
   LanguageModelEntry,
+  LanguageModelRef,
   ModelCatalog,
   ModelCatalogInput,
 } from "./models"

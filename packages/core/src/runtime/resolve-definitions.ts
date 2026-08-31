@@ -5,7 +5,7 @@ import { validateAgentGroupReferences, validateAgentToolsAtStartup } from "../ag
 import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets/types"
 import { assertDatasetDefinition } from "../datasets/validation"
-import { createModelCatalog, type ModelCatalog, type ModelCatalogInput, modelRef } from "../models"
+import { createModelCatalog, type ModelCatalog, type ModelCatalogInput } from "../models"
 import { OntologyRegistry } from "../ontology"
 import type { PipelineDefinition } from "../pipelines/types"
 import { ProjectionRegistry } from "../projections"
@@ -256,10 +256,10 @@ function validateAgentModelReferences(
     return
   }
   for (const agent of agents) {
-    const ref = modelRef(agent.model)
-    if (models.language.getById(ref) === null) {
+    const ref = { provider: agent.model.provider, modelId: agent.model.modelId }
+    if (models.language.getByRef(ref) === null) {
       throw new RuntimeError(
-        `[Sixb] Agent '${agent.id}' uses unknown language model '${ref}'. Add it to 'models.language' in createSixb().`
+        `[Sixb] Agent '${agent.id}' uses unknown language model '${ref.provider}/${ref.modelId}'. Add it to 'models.language' in createSixb().`
       )
     }
   }

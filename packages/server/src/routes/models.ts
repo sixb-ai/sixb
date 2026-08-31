@@ -3,8 +3,12 @@ import type { Elysia } from "elysia"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ModelCatalogSchema } from "../schemas/models"
 
-function serializeLanguageModel(entry: LanguageModelEntry, defaultRef: string) {
-  return { provider: entry.provider, modelId: entry.modelId, isDefault: entry.ref === defaultRef }
+function serializeLanguageModel(entry: LanguageModelEntry, defaultEntry: LanguageModelEntry) {
+  return {
+    provider: entry.provider,
+    modelId: entry.modelId,
+    isDefault: entry.provider === defaultEntry.provider && entry.modelId === defaultEntry.modelId,
+  }
 }
 
 export function registerModelRoutes(app: Elysia, host: SixbHostView) {
@@ -16,7 +20,7 @@ export function registerModelRoutes(app: Elysia, host: SixbHostView) {
         language:
           language === undefined
             ? []
-            : language.list().map((entry) => serializeLanguageModel(entry, language.default.ref)),
+            : language.list().map((entry) => serializeLanguageModel(entry, language.default)),
       })
     },
     {

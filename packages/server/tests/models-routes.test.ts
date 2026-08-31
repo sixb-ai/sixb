@@ -16,9 +16,19 @@ import { createTestBrowserPolicy } from "./helpers"
 
 type TestLanguageModel = ModelCatalogInput["language"][number]
 
-// The route only serializes catalog metadata, so a conforming stub is enough.
 function testModel(provider: string, modelId: string): TestLanguageModel {
-  return { specificationVersion: "v4", provider, modelId } as TestLanguageModel
+  return {
+    specificationVersion: "v4",
+    provider,
+    modelId,
+    supportedUrls: {},
+    async doGenerate() {
+      throw new Error("Not implemented by the test model.")
+    },
+    async doStream() {
+      throw new Error("Not implemented by the test model.")
+    },
+  } as TestLanguageModel
 }
 
 const Invoice = defineObjectType({

@@ -12,6 +12,7 @@ import { exa } from "@sixb/connector-exa"
 import { exaWebFetch, exaWebSearch } from "@sixb/connector-exa/agent-tools"
 import {
   type AgentContextConfig,
+  type AgentDefinition,
   type AgentReasoningLevel,
   AgentRequestError,
   type AgentsRuntime,
@@ -35,6 +36,7 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  type ModelCatalogInput,
   type RunCommandOptions,
   type Sandbox,
   type SandboxFactory,
@@ -78,6 +80,7 @@ import { loadAgentSkills } from "../src/agent-skills"
 import { normalizeApiBaseUrl } from "../src/api-url"
 import { prepareAgentAttachments, toolResultAttachmentKey } from "../src/attachments"
 import { AgentExecutionLostError, AgentFinalizationError } from "../src/errors"
+import { resolveAgentExecutionPlan } from "../src/execution-plan"
 import { finishRunOrThrow } from "../src/finalize"
 import { enqueueAiModelCallRecovery } from "../src/model-call-recovery"
 import { runAgentTurn } from "../src/run-agent-turn"
@@ -538,6 +541,36 @@ function structuredAnswerModel(): MockLanguageModelV4 {
       usage: USAGE,
       warnings: [],
     }),
+  })
+}
+
+function trackedStructuredAnswerModel(onCall: (phase: "research" | "finalize") => void) {
+  return new MockLanguageModelV4({
+    modelId: "catalog-workflow-model",
+    doStream: async () => {
+      onCall("research")
+      return stream([
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "workflow-answer" },
+        { type: "text-delta", id: "workflow-answer", delta: "Project Alpha is the best match." },
+        { type: "text-end", id: "workflow-answer" },
+        finish("stop"),
+      ])
+    },
+    doGenerate: async () => {
+      onCall("finalize")
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ answer: "Project Alpha", confidence: 0.96 }),
+          },
+        ],
+        finishReason: { unified: "stop", raw: "stop" },
+        usage: USAGE,
+        warnings: [],
+      }
+    },
   })
 }
 
@@ -1278,6 +1311,7 @@ function buildSixb(
     readonly agentTools?: readonly AgentToolDefinition[]
     readonly connectors?: readonly ConnectorDefinition[]
     readonly context?: AgentContextConfig
+    readonly models?: ModelCatalogInput
   } = {}
 ): TestSixb {
   const agent = defineAgent("assistant", {
@@ -1305,6 +1339,7 @@ function buildSixb(
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
     sandboxes,
+    ...(options.models === undefined ? {} : { models: options.models }),
     ...(options.projectRoot === undefined ? {} : { projectRoot: options.projectRoot }),
   })
 }
@@ -1375,6 +1410,7 @@ async function seedRequesterUser(storage: Storage, principal = REQUESTER): Promi
 
 async function queueWorkflowAgentNode(input: {
   readonly model: LanguageModelV4
+  readonly models?: ModelCatalogInput
   readonly tools?: readonly AgentToolDefinition[]
   readonly storage?: Storage
   readonly sandboxes?: SandboxFactory
@@ -1406,6 +1442,7 @@ async function queueWorkflowAgentNode(input: {
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
     sandboxes: input.sandboxes ?? new RecordingSandboxFactory(),
+    ...(input.models === undefined ? {} : { models: input.models }),
   })
   const runs = sixb.storage.workflowRuns
   if (!runs) throw new Error("expected workflow run storage")
@@ -1559,6 +1596,16 @@ function workerStorageOf(storage: Storage): AgentWorkerStorage {
     throw new Error("expected AI usage storage")
   }
   return storage as AgentWorkerStorage
+}
+
+function executionPlanFor(agent: AgentDefinition, defaultMaxSteps = 4) {
+  return resolveAgentExecutionPlan({ agent, defaultMaxSteps })
+}
+
+function requiredAgent(sixb: TestSixb, agentId = "assistant"): AgentDefinition {
+  const agent = sixb.definitions.agents.getById(agentId)
+  if (!agent) throw new Error(`Expected test agent '${agentId}'.`)
+  return agent
 }
 
 async function buildAgentWorkerContext(
@@ -2710,6 +2757,39 @@ describe("AgentWorker", () => {
     }
   })
 
+  test("executes workflow tasks with the authoritative model from the project catalog", async () => {
+    const declaredCalls: string[] = []
+    const catalogCalls: string[] = []
+    const declaredModel = trackedStructuredAnswerModel((phase) => declaredCalls.push(phase))
+    const catalogModel = trackedStructuredAnswerModel((phase) => catalogCalls.push(phase))
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: declaredModel,
+      models: { language: [catalogModel] },
+      runId: "workflow-catalog-model",
+    })
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+
+    await worker.start()
+    try {
+      const execution = await waitFor(
+        async () => {
+          const current = await runs.agentNodes.getByNodeRunId({
+            projectId: PROJECT_ID,
+            nodeRunId,
+          })
+          return current?.status === "succeeded" ? current : null
+        },
+        { label: "catalog-backed workflow agent node" }
+      )
+
+      expect(execution.modelId).toBe("catalog-workflow-model")
+      expect(declaredCalls).toEqual([])
+      expect(catalogCalls).toEqual(["research", "finalize"])
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("fails a workflow agent node when concurrent sandbox preflight fails", async () => {
     const sandboxes = new IncompatibleRuntimeSandboxFactory()
     const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
@@ -3452,8 +3532,16 @@ describe("AgentWorker", () => {
       apiBaseUrl: "http://sixb-api.local/api/",
     })
     const [firstEnvironment, secondEnvironment] = await Promise.all([
-      createConversationAgentEnvironment({ context, agent, run: firstRun }),
-      createConversationAgentEnvironment({ context, agent, run: secondRun }),
+      createConversationAgentEnvironment({
+        context,
+        plan: executionPlanFor(agent),
+        run: firstRun,
+      }),
+      createConversationAgentEnvironment({
+        context,
+        plan: executionPlanFor(agent),
+        run: secondRun,
+      }),
     ])
     let firstDisposed = false
     let secondDisposed = false
@@ -3540,7 +3628,11 @@ describe("AgentWorker", () => {
       apiBaseUrl: "http://sixb-api.local/api/",
     })
 
-    const environment = await createConversationAgentEnvironment({ context, agent, run })
+    const environment = await createConversationAgentEnvironment({
+      context,
+      plan: executionPlanFor(agent),
+      run,
+    })
     try {
       await environment.turnContext.sandboxReady
       const sandbox = sandboxes.sandboxes[0]
@@ -3599,15 +3691,16 @@ describe("AgentWorker", () => {
     })
     const run = await reserveRequestedRun(sixb, request)
     const context = await buildAgentWorkerContext(sixb)
+    const agent = requiredAgent(sixb)
     const environment = await createConversationAgentEnvironment({
       context,
-      agent: sixb.definitions.agents.getById("assistant")!,
+      plan: executionPlanFor(agent),
       run,
     })
     try {
       await runAgentTurn({
         context: environment.turnContext,
-        agent: sixb.definitions.agents.getById("assistant")!,
+        plan: executionPlanFor(agent),
         run,
         signal: new AbortController().signal,
       })
@@ -3657,15 +3750,16 @@ describe("AgentWorker", () => {
     })
     const run = await reserveRequestedRun(sixb, request)
     const context = await buildAgentWorkerContext(sixb)
+    const agent = requiredAgent(sixb)
     const environment = await createConversationAgentEnvironment({
       context,
-      agent: sixb.definitions.agents.getById("assistant")!,
+      plan: executionPlanFor(agent),
       run,
     })
     try {
       await runAgentTurn({
         context: environment.turnContext,
-        agent: sixb.definitions.agents.getById("assistant")!,
+        plan: executionPlanFor(agent),
         run,
         signal: new AbortController().signal,
       })
@@ -3719,15 +3813,16 @@ describe("AgentWorker", () => {
     })
     const run = await reserveRequestedRun(sixb, request)
     const context = await buildAgentWorkerContext(sixb)
+    const agent = requiredAgent(sixb)
     const environment = await createConversationAgentEnvironment({
       context,
-      agent: sixb.definitions.agents.getById("assistant")!,
+      plan: executionPlanFor(agent),
       run,
     })
     try {
       await runAgentTurn({
         context: environment.turnContext,
-        agent: sixb.definitions.agents.getById("assistant")!,
+        plan: executionPlanFor(agent),
         run,
         signal: new AbortController().signal,
       })
@@ -3915,7 +4010,11 @@ describe("AgentWorker", () => {
 
     // Resolves while create() is still gated: the system prompt is ready and the
     // sandbox has not been built yet.
-    const environment = await createConversationAgentEnvironment({ context, agent, run })
+    const environment = await createConversationAgentEnvironment({
+      context,
+      plan: executionPlanFor(agent),
+      run,
+    })
     expect(environment.turnContext.systemPrompt).toContain(
       "inside a live Sixb project modeled as an ontology"
     )
@@ -3961,7 +4060,7 @@ describe("AgentWorker", () => {
     let detached: Promise<void> | null = null
     const environment = await createConversationAgentEnvironment({
       context,
-      agent,
+      plan: executionPlanFor(agent),
       run,
       onDetachedTeardown: (teardown) => {
         detached = teardown
@@ -6462,10 +6561,9 @@ describe("AgentWorker", () => {
         systemPrompt: testSystemPrompt(sixb),
         streamSink: NOOP_STREAM_SINK,
         recoverAiModelCall: recoverAiModelCall(sixb),
-        defaultMaxSteps: 4,
         turnTimeoutMs: 60_000,
       },
-      agent: sixb.definitions.agents.getById("assistant")!,
+      plan: executionPlanFor(requiredAgent(sixb)),
       run: staleRun,
       signal: new AbortController().signal,
     })
@@ -6517,10 +6615,9 @@ describe("AgentWorker", () => {
         systemPrompt: testSystemPrompt(sixb),
         streamSink: NOOP_STREAM_SINK,
         recoverAiModelCall: recoverAiModelCall(sixb),
-        defaultMaxSteps: 4,
         turnTimeoutMs: 60_000,
       },
-      agent: sixb.definitions.agents.getById("assistant")!,
+      plan: executionPlanFor(requiredAgent(sixb)),
       run,
       signal: new AbortController().signal,
     })
@@ -6577,16 +6674,71 @@ describe("AgentWorker", () => {
         systemPrompt: testSystemPrompt(sixb),
         streamSink: NOOP_STREAM_SINK,
         recoverAiModelCall: recoverAiModelCall(sixb),
-        defaultMaxSteps: 4,
         turnTimeoutMs: 60_000,
       },
-      agent: sixb.definitions.agents.getById("assistant")!,
+      plan: executionPlanFor(requiredAgent(sixb)),
       run,
       signal: new AbortController().signal,
     })
 
     expect(capturedReasoning).toBe("high")
     expect(capturedProviderOptions).toEqual({ openai: { reasoningSummary: "detailed" } })
+  })
+
+  test("executes the authoritative model instance from the project catalog", async () => {
+    let declaredCalls = 0
+    const declaredModel = new MockLanguageModelV4({
+      modelId: "shared-model",
+      doStream: async () => {
+        declaredCalls += 1
+        return stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "t" },
+          { type: "text-delta", id: "t", delta: "Wrong binding" },
+          { type: "text-end", id: "t" },
+          finish("stop"),
+        ])
+      },
+    })
+    let catalogCalls = 0
+    const catalogModel = new MockLanguageModelV4({
+      modelId: "shared-model",
+      doStream: async () => {
+        catalogCalls += 1
+        return stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "t" },
+          { type: "text-delta", id: "t", delta: "Catalog binding" },
+          { type: "text-end", id: "t" },
+          finish("stop"),
+        ])
+      },
+    })
+    const sixb = buildSixb(declaredModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [catalogModel] },
+    })
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+
+    await worker.start()
+    try {
+      const request = await requestAgent(sixb, { agentId: "assistant", text: "hello" })
+      const run = await waitFor(
+        async () => {
+          const current = await agentStorageOf(sixb).runs.getById({
+            projectId: PROJECT_ID,
+            id: request.run.id,
+          })
+          return current?.status === "succeeded" ? current : null
+        },
+        { label: "catalog-backed agent run" }
+      )
+
+      expect(run.modelId).toBe("shared-model")
+      expect(declaredCalls).toBe(0)
+      expect(catalogCalls).toBe(1)
+    } finally {
+      await worker.stop()
+    }
   })
 
   test("reports a terminal model failure exactly once with the original error", async () => {
@@ -6876,10 +7028,9 @@ describe("AgentWorker", () => {
             projectId: PROJECT_ID,
           }),
           recoverAiModelCall: recoverAiModelCall(sixb),
-          defaultMaxSteps: 4,
           turnTimeoutMs: 60_000,
         },
-        agent: sixb.definitions.agents.getById("assistant")!,
+        plan: executionPlanFor(requiredAgent(sixb)),
         run,
         signal: new AbortController().signal,
       })
@@ -6915,10 +7066,9 @@ describe("AgentWorker", () => {
           projectId: PROJECT_ID,
         }),
         recoverAiModelCall: recoverAiModelCall(sixb),
-        defaultMaxSteps: 4,
         turnTimeoutMs: 60_000,
       },
-      agent: sixb.definitions.agents.getById("assistant")!,
+      plan: executionPlanFor(requiredAgent(sixb)),
       run: reclaimed,
       signal: new AbortController().signal,
     })

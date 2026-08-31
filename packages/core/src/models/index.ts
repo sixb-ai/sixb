@@ -1,26 +1,27 @@
 import type { LanguageModelV4 } from "@ai-sdk/provider"
-import { createDefinitionCatalog, type DefinitionCatalog } from "../runtime/definitions"
 import { RuntimeError } from "../runtime/errors"
 
+/** Stable identity of one configured language-model binding. */
+export interface LanguageModelRef {
+  readonly provider: string
+  readonly modelId: string
+}
+
 /** The configured language models, with the project default. */
-export interface LanguageModelCatalog extends DefinitionCatalog<LanguageModelEntry> {
+export interface LanguageModelCatalog {
   readonly default: LanguageModelEntry
+  list(): readonly LanguageModelEntry[]
+  getByRef(ref: LanguageModelRef): LanguageModelEntry | null
 }
 
 /**
  * One configured language model.
  *
- * `ref` is derived, never author-supplied, and stays internal to the runtime: it identifies the
- * configured binding, not a vendor model. The AI SDK's `provider` names the binding, so
- * `openai.chat(...)` and `openai.responses(...)` are distinct entries even for one vendor model,
- * and neither matches the canonical id the worker resolves for billing
- * (`SDK_PROVIDER_BINDINGS` in `@sixb/agent-worker`). Anything user-facing should key on
- * `provider` + `modelId` instead.
+ * The identity describes the configured binding, not only a vendor model. For example,
+ * `gateway("openai/gpt-5.4")` and `openai("gpt-5.4")` are distinct entries because their
+ * `provider` values differ.
  */
-export interface LanguageModelEntry {
-  readonly ref: string
-  readonly provider: string
-  readonly modelId: string
+export interface LanguageModelEntry extends LanguageModelRef {
   readonly model: LanguageModelV4
 }
 
@@ -34,38 +35,100 @@ export interface ModelCatalogInput {
   readonly language: readonly LanguageModelV4[]
 }
 
-/**
- * Identify a catalog entry by the binding its model was constructed from.
- *
- * `gateway("openai/gpt-5.4")` and `openai("gpt-5.4")` are different entries on purpose: they route
- * differently and bill differently. See {@link LanguageModelEntry}.
- */
-export function modelRef(model: LanguageModelV4): string {
-  return `${model.provider}/${model.modelId}`
-}
-
-/** Build the immutable project model catalog. Rejects duplicates and an empty catalog. */
+/** Build the immutable project model catalog. Rejects invalid, duplicate, and empty catalogs. */
 export function createModelCatalog(input: ModelCatalogInput): ModelCatalog {
-  const byRef = new Map<string, LanguageModelEntry>()
-
-  for (const model of input.language) {
-    const ref = modelRef(model)
-    if (byRef.has(ref)) {
-      throw new RuntimeError(
-        `[Sixb] Duplicate language model '${ref}' in 'models'. Each provider and model id pair may be configured once.`
-      )
-    }
-    byRef.set(ref, Object.freeze({ ref, provider: model.provider, modelId: model.modelId, model }))
+  if (!Array.isArray(input?.language)) {
+    throw new RuntimeError("[Sixb] 'models.language' must be an array of AI SDK language models.")
   }
 
-  const [defaultEntry] = byRef.values()
+  const entries: LanguageModelEntry[] = []
+  const byProvider = new Map<string, Map<string, LanguageModelEntry>>()
+
+  for (const [index, model] of input.language.entries()) {
+    assertLanguageModel(model, index)
+
+    let byModelId = byProvider.get(model.provider)
+    if (byModelId === undefined) {
+      byModelId = new Map()
+      byProvider.set(model.provider, byModelId)
+    }
+    if (byModelId.has(model.modelId)) {
+      throw new RuntimeError(
+        `[Sixb] Duplicate language model '${formatLanguageModelRef(model)}' in 'models'. Each provider and model id pair may be configured once.`
+      )
+    }
+
+    const entry = Object.freeze({
+      provider: model.provider,
+      modelId: model.modelId,
+      model,
+    })
+    byModelId.set(model.modelId, entry)
+    entries.push(entry)
+  }
+
+  const [defaultEntry] = entries
   if (defaultEntry === undefined) {
     throw new RuntimeError(
       "[Sixb] 'models.language' needs at least one model. Configure one or omit 'models' from createSixb()."
     )
   }
 
-  return Object.freeze({
-    language: Object.freeze({ ...createDefinitionCatalog(byRef), default: defaultEntry }),
+  const listed = Object.freeze(entries.slice())
+  const language: LanguageModelCatalog = Object.freeze({
+    default: defaultEntry,
+    list: () => listed,
+    getByRef: (ref: LanguageModelRef) => byProvider.get(ref.provider)?.get(ref.modelId) ?? null,
   })
+
+  return Object.freeze({ language })
+}
+
+function assertLanguageModel(model: unknown, index: number): asserts model is LanguageModelV4 {
+  if ((typeof model !== "object" && typeof model !== "function") || model === null) {
+    throw invalidLanguageModel(index, "expected an AI SDK LanguageModelV4 instance")
+  }
+
+  const candidate = model as Record<string, unknown>
+  if (candidate.specificationVersion !== "v4") {
+    throw invalidLanguageModel(index, "expected 'specificationVersion' to be 'v4'")
+  }
+  assertModelIdentifier(candidate.provider, "provider", index)
+  assertModelIdentifier(candidate.modelId, "modelId", index)
+  if (!isSupportedUrls(candidate.supportedUrls)) {
+    throw invalidLanguageModel(index, "expected 'supportedUrls' to be an object or PromiseLike")
+  }
+  if (typeof candidate.doGenerate !== "function") {
+    throw invalidLanguageModel(index, "expected 'doGenerate' to be a function")
+  }
+  if (typeof candidate.doStream !== "function") {
+    throw invalidLanguageModel(index, "expected 'doStream' to be a function")
+  }
+}
+
+function assertModelIdentifier(value: unknown, field: "provider" | "modelId", index: number): void {
+  if (typeof value !== "string" || value.length === 0) {
+    throw invalidLanguageModel(index, `expected '${field}' to be a non-empty string`)
+  }
+  if (value.trim() !== value) {
+    throw invalidLanguageModel(index, `expected '${field}' not to have surrounding whitespace`)
+  }
+}
+
+function isSupportedUrls(value: unknown): value is object {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) return true
+  return (
+    typeof value === "function" &&
+    typeof (value as unknown as { readonly then?: unknown }).then === "function"
+  )
+}
+
+function invalidLanguageModel(index: number, detail: string): RuntimeError {
+  return new RuntimeError(
+    `[Sixb] Invalid language model at 'models.language[${index}]': ${detail}.`
+  )
+}
+
+function formatLanguageModelRef(ref: LanguageModelRef): string {
+  return `${ref.provider}/${ref.modelId}`
 }

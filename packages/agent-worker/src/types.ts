@@ -44,16 +44,19 @@ export type RecoverAiModelCall = (input: RecoverAiModelCallInput) => Promise<voi
 
 /**
  * The host surface the agent worker is constructed with. `SixbHost` satisfies it structurally, so
- * cohosting passes the host directly. The worker resolves a run's model through
- * `definitions.agents.getById` (the model is a non-serialisable language model, never sent over the
- * wire).
+ * cohosting passes the host directly. Registered agents provide today's execution configuration;
+ * when configured, the model catalog provides the authoritative live model binding. Models are
+ * non-serialisable and never sent over the wire.
  */
 export interface AgentWorkerHost extends AgentExecutionHost {
   readonly broker: Broker
   readonly events: DomainEventLog
   readonly storage: Storage
   readonly queues: Queues
-  readonly definitions: Pick<SixbDefinitions, "agents" | "workflows" | "ontology" | "security">
+  readonly definitions: Pick<
+    SixbDefinitions,
+    "agents" | "workflows" | "ontology" | "security" | "models"
+  >
   readonly sandboxes?: SandboxFactory
   readonly projectRoot?: string
   readonly logging?: LoggingService
@@ -108,7 +111,6 @@ export interface AgentTurnContext {
   readonly sandboxWasUsed?: () => boolean
   readonly streamSink: StreamSink
   readonly recoverAiModelCall: RecoverAiModelCall
-  readonly defaultMaxSteps: number
   readonly turnTimeoutMs: number
 }
 

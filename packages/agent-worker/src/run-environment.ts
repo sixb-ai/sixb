@@ -1,4 +1,4 @@
-import type { AgentDefinition, Sandbox } from "@sixb/core"
+import type { Sandbox } from "@sixb/core"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type {
@@ -16,6 +16,7 @@ import {
   type PreparedAgentAttachmentContext,
   prepareAgentAttachments,
 } from "./attachments"
+import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { prepareAgentSandboxApiContext } from "./sandbox-api-context"
 import { AgentSandboxFileRegistry } from "./sandbox-file-registry"
 import type { AgentSandboxHandle } from "./sandbox-handle"
@@ -34,7 +35,7 @@ export interface AgentExecutionEnvironment {
 
 interface CreateAgentEnvironmentInput {
   readonly context: AgentExecutionContext
-  readonly agent: AgentDefinition
+  readonly plan: ResolvedAgentExecutionPlan
   readonly signal?: AbortSignal
   /**
    * Sink for a sandbox teardown that outlives dispose() (the model answered before the boot
@@ -61,7 +62,7 @@ export interface CreateWorkflowAgentNodeEnvironmentInput extends CreateAgentEnvi
 export async function createConversationAgentEnvironment(
   input: CreateConversationAgentEnvironmentInput
 ): Promise<AgentExecutionEnvironment> {
-  const { context, agent, run } = input
+  const { context, plan, run } = input
 
   const apiBaseUrl = createAgentApiGatewayBaseUrl({
     apiBaseUrl: context.apiBaseUrl,
@@ -79,7 +80,7 @@ export async function createConversationAgentEnvironment(
           order: "asc",
         })
         .then((history) => history.messages),
-    modelSupportsInlineImages(agent.model, input.signal),
+    modelSupportsInlineImages(plan.model, input.signal),
   ])
   const attachmentContext = await prepareAgentAttachments({
     projectId: context.id,
@@ -94,7 +95,8 @@ export async function createConversationAgentEnvironment(
   return startAgentEnvironment({
     mode: "conversation",
     context,
-    agent,
+    agentId: run.agentId,
+    plan,
     runId: run.id,
     threadId: run.threadId,
     apiBaseUrl,
@@ -108,7 +110,7 @@ export async function createConversationAgentEnvironment(
 export async function createWorkflowAgentNodeEnvironment(
   input: CreateWorkflowAgentNodeEnvironmentInput
 ): Promise<AgentExecutionEnvironment> {
-  const { context, agent, run } = input
+  const { context, plan, run } = input
   const execution = run.execution
   if (!execution) {
     throw new Error(
@@ -127,7 +129,8 @@ export async function createWorkflowAgentNodeEnvironment(
   return startAgentEnvironment({
     mode: "workflow-task",
     context,
-    agent,
+    agentId: run.agentId,
+    plan,
     runId: run.nodeRunId,
     apiBaseUrl: createAgentApiGatewayBaseUrl({
       apiBaseUrl: context.apiBaseUrl,
@@ -142,6 +145,7 @@ export async function createWorkflowAgentNodeEnvironment(
 }
 
 interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
+  readonly agentId: string
   readonly mode: AgentExecutionMode
   readonly runId: string
   readonly threadId?: string
@@ -155,14 +159,15 @@ interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
  * Sandbox boot stays concurrent with the model call; sandbox tools await it only when used.
  */
 function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvironment {
-  const { mode, context, agent, runId, threadId, apiBaseUrl, attachmentContext, skills } = input
+  const { mode, context, agentId, plan, runId, threadId, apiBaseUrl, attachmentContext, skills } =
+    input
 
   const logSession = resolveLoggingService(context.id, context.logging).startExecution({
     kind: "agent",
     id: runId,
   })
   const logger = logSession.logger.child({
-    agentId: agent.id,
+    agentId,
     ...(threadId ? { threadId } : {}),
   })
   let ready: Promise<AgentSandboxHandle>
@@ -185,17 +190,14 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
       onPublished: (artifact) => fileRegistry.register(artifact.sandboxPath, artifact.fileRef),
     })
   const tools = aiSdkToolsFromAgentDefinitions({
-    definitions: agent.tools,
+    definitions: plan.tools,
     valueTypesById: context.valueTypesById,
-    run: { id: runId, agentId: agent.id, ...(threadId ? { threadId } : {}) },
+    run: { id: runId, agentId, ...(threadId ? { threadId } : {}) },
     connector: context.connector,
     logger,
     artifactsForToolCall,
     toolResultToModelOutput: (output) => mediaBridge.toModelOutput(output),
-    errorDetails:
-      mode === "conversation"
-        ? { agentId: agent.id, runId }
-        : { agentId: agent.id, nodeRunId: runId },
+    errorDetails: mode === "conversation" ? { agentId, runId } : { agentId, nodeRunId: runId },
   })
 
   let sandboxWasUsed = false
@@ -216,7 +218,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
 
   ready = provisionSandbox({
     context,
-    agent,
+    agentId,
     run: { id: runId, ...(threadId ? { threadId } : {}) },
     apiBaseUrl,
     apiOrigin: new URL(apiBaseUrl).origin,
@@ -243,12 +245,11 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
       attachmentContext,
       tools,
       prepareStep: mediaBridge.prepareStep,
-      systemPrompt: renderAgentSystemPrompt({ mode, instructions: agent.instructions, skills }),
+      systemPrompt: renderAgentSystemPrompt({ mode, instructions: plan.instructions, skills }),
       sandboxReady: ready,
       sandboxWasUsed: () => sandboxWasUsed,
       streamSink: context.streamSink,
       recoverAiModelCall: context.recoverAiModelCall,
-      defaultMaxSteps: context.defaultMaxSteps,
       turnTimeoutMs: context.turnTimeoutMs,
     },
     async dispose() {
@@ -262,7 +263,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
 
 interface ProvisionSandboxInput {
   readonly context: AgentExecutionContext
-  readonly agent: AgentDefinition
+  readonly agentId: string
   readonly run: { readonly id: string; readonly threadId?: string }
   readonly apiBaseUrl: string
   readonly apiOrigin: string
@@ -271,7 +272,7 @@ interface ProvisionSandboxInput {
 }
 
 async function provisionSandbox(input: ProvisionSandboxInput): Promise<AgentSandboxHandle> {
-  const { context, agent, run, apiBaseUrl, apiOrigin, skills } = input
+  const { context, agentId, run, apiBaseUrl, apiOrigin, skills } = input
   let sandbox: Sandbox | null = null
   try {
     sandbox = await context.sandboxes.create({
@@ -281,7 +282,7 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<AgentSand
       sandbox,
       apiBaseUrl,
       projectId: context.id,
-      agentId: agent.id,
+      agentId,
       ...(run.threadId ? { threadId: run.threadId } : {}),
       runId: run.id,
       attachments: input.attachmentContext,

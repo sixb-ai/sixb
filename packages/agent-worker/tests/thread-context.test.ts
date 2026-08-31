@@ -8,6 +8,7 @@ import { defineAgent, InMemoryBlobStorage, InMemoryStorage, type Storage } from 
 import { toModelMessages } from "@sixb/core/internal/agents"
 import { createTestAgentExecution } from "@sixb/core/testing"
 import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test"
+import { resolveAgentExecutionPlan } from "../src/execution-plan"
 import { runAgentTurn } from "../src/run-agent-turn"
 import { NOOP_STREAM_SINK } from "../src/stream-sink"
 import type { AgentWorkerStorage } from "../src/types"
@@ -186,10 +187,9 @@ async function runAndCaptureModelPrompt(withCheckpoint: boolean) {
       systemPrompt: "Test system prompt.",
       streamSink: NOOP_STREAM_SINK,
       recoverAiModelCall: async () => {},
-      defaultMaxSteps: 4,
       turnTimeoutMs: 60_000,
     },
-    agent,
+    plan: resolveAgentExecutionPlan({ agent, defaultMaxSteps: 4 }),
     run: seeded.run,
     signal: new AbortController().signal,
   })

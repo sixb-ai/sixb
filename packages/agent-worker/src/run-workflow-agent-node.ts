@@ -1,4 +1,4 @@
-import type { AgentDefinition, AgentMessagePart, SchemaOrRef, ValueType } from "@sixb/core"
+import type { AgentMessagePart, SchemaOrRef, ValueType } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { schemaRecordToJsonSchema } from "@sixb/core/internal/ontology"
 import {
@@ -11,6 +11,7 @@ import { type AgentRunFinishReason, coerceAgentRunFinishReason } from "@sixb/cor
 import { generateText, jsonSchema, type ModelMessage, NoObjectGeneratedError, Output } from "ai"
 import { renderWorkflowOutputFinalizerPrompt } from "./agent-prompt"
 import { type AiSdkTraceStep, agentTraceFromAiSdkSteps } from "./ai-sdk-adapters"
+import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import type { AiModelCallRecorder } from "./model-call-recorder"
 import { runAgentLoop } from "./run-agent-loop"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
@@ -20,7 +21,8 @@ const WORKFLOW_OUTPUT_FINALIZATION_ATTEMPTS = 2
 
 export interface RunWorkflowAgentNodeInput {
   readonly context: AgentTurnContext
-  readonly agent: AgentDefinition
+  readonly agentId: string
+  readonly plan: ResolvedAgentExecutionPlan
   readonly agentStep: AgentStepDefinition
   readonly workflowId: string
   readonly workflowRunId: string
@@ -63,7 +65,6 @@ export class WorkflowAgentNodeExecutionError extends Error {
 export async function runWorkflowAgentNode(
   input: RunWorkflowAgentNodeInput
 ): Promise<WorkflowAgentNodeResult> {
-  const maxSteps = input.agent.loop?.stopWhen?.maxSteps ?? input.context.defaultMaxSteps
   const rawSchema = schemaRecordToJsonSchema({
     shape: input.agentStep.output as Readonly<Record<string, SchemaOrRef>>,
     valueTypesById: input.valueTypesById,
@@ -96,7 +97,7 @@ export async function runWorkflowAgentNode(
   const abortSignal = AbortSignal.any([input.signal, timeout.signal, sandboxReadiness.signal])
   const completedSteps: AiSdkTraceStep[] = []
   const traceDetails = {
-    agentId: input.agent.id,
+    agentId: input.agentId,
     workflowId: input.workflowId,
     workflowRunId: input.workflowRunId,
     nodeRunId: input.nodeRunId,
@@ -106,11 +107,10 @@ export async function runWorkflowAgentNode(
   try {
     let researchError: unknown
     const research = runAgentLoop({
-      agent: input.agent,
+      plan: input.plan,
       system: input.context.systemPrompt,
       messages: [{ role: "user", content: input.prompt }],
       tools: input.context.tools,
-      maxSteps,
       usageRecorder: input.usageRecorder,
       prepareStep: input.context.prepareStep,
       abortSignal,
@@ -136,7 +136,7 @@ export async function runWorkflowAgentNode(
     if (researchText.trim().length === 0) {
       throw createSixbError(
         "agent.execution_failed",
-        `[SixbAgentWorker] Workflow agent '${input.agent.id}' produced no final answer to structure.`,
+        `[SixbAgentWorker] Workflow agent '${input.agentId}' produced no final answer to structure.`,
         { details: traceDetails }
       )
     }
@@ -157,12 +157,12 @@ export async function runWorkflowAgentNode(
     for (let attempt = 1; attempt <= WORKFLOW_OUTPUT_FINALIZATION_ATTEMPTS; attempt += 1) {
       try {
         const finalization = await generateText({
-          model: input.usageRecorder.wrapModel(input.agent.model),
-          ...(input.agent.providerOptions === undefined
+          model: input.usageRecorder.wrapModel(input.plan.model),
+          ...(input.plan.providerOptions === undefined
             ? {}
-            : { providerOptions: input.agent.providerOptions }),
+            : { providerOptions: input.plan.providerOptions }),
           system: renderWorkflowOutputFinalizerPrompt({
-            instructions: input.agent.instructions,
+            instructions: input.plan.instructions,
           }),
           messages: finalizerMessages,
           output: Output.object({ schema, name: input.agentStep.id }),
@@ -202,7 +202,7 @@ export async function runWorkflowAgentNode(
     if (structuredValue === undefined) {
       throw createSixbError(
         "internal.unexpected",
-        `[SixbAgentWorker] Workflow output finalization for agent '${input.agent.id}' ended without a value.`,
+        `[SixbAgentWorker] Workflow output finalization for agent '${input.agentId}' ended without a value.`,
         { details: traceDetails }
       )
     }
@@ -216,7 +216,7 @@ export async function runWorkflowAgentNode(
     })
     return {
       output,
-      modelId: input.agent.model.modelId,
+      modelId: input.plan.model.modelId,
       finishReason,
       trace: agentTraceFromAiSdkSteps(completedSteps, traceDetails),
     }
