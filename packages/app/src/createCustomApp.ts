@@ -17,7 +17,7 @@ import {
   generateRouteManifest,
 } from "./codegen"
 import { renderCustomAppRuntimeScript } from "./runtime"
-import { type PageRoute, scanPages } from "./scanner"
+import { type PageRoute, routePatternKey, scanAppRoutes } from "./scanner"
 import { type CustomAppStylesheet, resolveCustomAppStylesheet } from "./styles"
 import { createTailwindCssCompiler, type TailwindCssCompiler } from "./tailwind"
 
@@ -98,11 +98,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
   const agentRoutesEnabled = options.agentRoutes ?? true
 
   async function scanRoutes(): Promise<PageRoute[]> {
-    if (!(await pathExists(appDir))) {
-      return []
-    }
-
-    return await scanPages(appDir)
+    return [...(await scanAppRoutes(appDir)).pages]
   }
 
   let tailwindCompiler: TailwindCssCompiler | null = null
@@ -236,14 +232,18 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     manifestPath: string
     routes: PageRoute[]
   }> {
-    const routes = await scanRoutes()
+    const discovery = await scanAppRoutes(appDir)
+    const routes = [...discovery.pages]
     if (routes.length === 0) {
       throw new Error(`[SixbCustomApp] No app routes found in ${appDir}`)
     }
 
     const builtInRoutes = agentRoutesEnabled ? builtInAgentRoutesFor(routes) : []
     const stylesheets = await prepareStylesheets(builtInRoutes)
-    await generateRouteManifest(routes, generatedDir, { builtInRoutes })
+    await generateRouteManifest(routes, generatedDir, {
+      builtInRoutes,
+      layouts: discovery.layouts,
+    })
     const { htmlPath, mainPath, manifestPath } = await generateAppEntry(rootDir, generatedDir, {
       apiBaseUrl,
       audience,
@@ -530,10 +530,10 @@ async function pathExists(path: string): Promise<boolean> {
 }
 
 function builtInAgentRoutesFor(routes: readonly PageRoute[]): BuiltInRouteManifestEntry[] {
-  const projectRoutePaths = new Set(routes.map((route) => route.path))
+  const projectRoutePatterns = new Set(routes.map((route) => routePatternKey(route.path)))
 
   return builtInAgentRoutePaths
-    .filter((path) => !projectRoutePaths.has(path))
+    .filter((path) => !projectRoutePatterns.has(routePatternKey(path)))
     .map((path) => ({
       path,
       moduleSpecifier: builtInAgentRouteModule,

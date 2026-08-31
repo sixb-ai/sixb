@@ -4,7 +4,7 @@ import type { AuthSessionAudience } from "@sixb/core"
 import { renderAppManifest } from "./manifest"
 import { resolveAppMetadata } from "./metadata"
 import { renderCustomAppRuntimeScript } from "./runtime"
-import type { PageRoute } from "./scanner"
+import { type AppRouteLayout, type PageRoute, routePatternKey } from "./scanner"
 
 export interface BuiltInRouteManifestEntry {
   readonly path: string
@@ -14,30 +14,35 @@ export interface BuiltInRouteManifestEntry {
 
 export interface GenerateRouteManifestOptions {
   readonly builtInRoutes?: readonly BuiltInRouteManifestEntry[]
+  readonly layouts?: readonly AppRouteLayout[]
 }
 
 export const AUTH_EXPERIENCE_BOOTSTRAP_PLACEHOLDER = "__SIXB_AUTH_BOOTSTRAP__"
 
 /**
- * Generates `.sixb/generated/routes.ts` with static route imports. Pages are
+ * Generates `.sixb/generated/routes.ts` with static page/layout imports. Modules are
  * eager on purpose: project-specific apps bundle small, and a single bundle
  * (one JS file, one render-blocking CSS file) means no Suspense gap or
  * late-arriving styles when navigating — matching how Atlas routes.
  */
 export async function generateRouteManifest(
-  routes: PageRoute[],
+  routes: readonly PageRoute[],
   generatedDir: string,
   options: GenerateRouteManifestOptions = {}
 ): Promise<string> {
   await mkdir(generatedDir, { recursive: true })
 
-  const imports = routes
+  const pages = [...routes].sort(compareRouteModules)
+  const pageImports = pages
     .map((route, index) => {
       const rel = relativeTo(generatedDir, route.filePath)
       return `import Page${index} from ${JSON.stringify(rel)}`
     })
     .join("\n")
-  const builtInRoutes = options.builtInRoutes ?? []
+  const projectRoutePatterns = new Set(pages.map((route) => routePatternKey(route.path)))
+  const builtInRoutes = (options.builtInRoutes ?? []).filter(
+    (route) => !projectRoutePatterns.has(routePatternKey(route.path))
+  )
   const builtInImports = builtInRoutes
     .map((route, index) => {
       if (route.exportName) {
@@ -47,28 +52,224 @@ export async function generateRouteManifest(
       return `import BuiltInPage${index} from ${JSON.stringify(route.moduleSpecifier)}`
     })
     .join("\n")
-
-  const entries = routes
-    .map((route, index) => `  { path: ${JSON.stringify(route.path)}, component: Page${index} },`)
+  const routePatterns = [...pages, ...builtInRoutes].map((route) => routePatternKey(route.path))
+  const layouts = [...(options.layouts ?? [])]
+    .filter((layout) => {
+      const layoutPattern = routePatternKey(layout.path)
+      return routePatterns.some(
+        (routePattern) =>
+          routePattern === layoutPattern || routePattern.startsWith(`${layoutPattern}/`)
+      )
+    })
+    .sort(compareRouteModules)
+  const layoutImports = layouts
+    .map((layout, index) => {
+      const rel = relativeTo(generatedDir, layout.filePath)
+      return `import Layout${index} from ${JSON.stringify(rel)}`
+    })
     .join("\n")
-  const builtInEntries = builtInRoutes
-    .map(
-      (route, index) => `  { path: ${JSON.stringify(route.path)}, component: BuiltInPage${index} },`
+
+  const tree = createRouteTree()
+  for (const [index, layout] of layouts.entries()) {
+    insertRouteLayout(tree, layout, `Layout${index}`)
+  }
+  for (const [index, route] of pages.entries()) {
+    insertRoutePage(tree, route.path, `Page${index}`, route.relativePath)
+  }
+  for (const [index, route] of builtInRoutes.entries()) {
+    insertRoutePage(
+      tree,
+      route.path,
+      `BuiltInPage${index}`,
+      `${route.moduleSpecifier} (${route.path})`
     )
-    .join("\n")
-  const routeEntries = [entries, builtInEntries].filter(Boolean).join("\n")
-  const importEntries = [imports, builtInImports].filter(Boolean).join("\n")
+  }
 
+  const importEntries = [
+    'import { createElement } from "react"',
+    layouts.length > 0
+      ? 'import { Outlet, type RouteObject } from "react-router-dom"'
+      : 'import type { RouteObject } from "react-router-dom"',
+    pageImports,
+    builtInImports,
+    layoutImports,
+  ]
+    .filter(Boolean)
+    .join("\n")
+  const routePaths = [
+    ...pages.map((route) => route.path),
+    ...builtInRoutes.map((route) => route.path),
+  ]
   const content = `${importEntries}
 
+export const routePaths = ${JSON.stringify(routePaths, null, 2)} as const
+
 export const routes = [
-${routeEntries}
-]
+${renderRootRouteObjects(tree)}
+] satisfies RouteObject[]
 `
 
   const outPath = join(generatedDir, "routes.ts")
   await writeFileIfChanged(outPath, content)
   return outPath
+}
+
+interface RouteTreePage {
+  readonly componentName: string
+  readonly source: string
+}
+
+interface RouteTreeLayout {
+  readonly componentName: string
+  readonly source: string
+}
+
+interface RouteTreeNode {
+  readonly segment: string
+  readonly children: Map<string, RouteTreeNode>
+  page?: RouteTreePage
+  layout?: RouteTreeLayout
+}
+
+function createRouteTree(segment = ""): RouteTreeNode {
+  return { segment, children: new Map() }
+}
+
+function insertRouteLayout(
+  root: RouteTreeNode,
+  layout: AppRouteLayout,
+  componentName: string
+): void {
+  if (layout.path === "/") {
+    throw new Error(
+      `[SixbCustomApp] Root layout ${layout.relativePath} must remain the global app wrapper.`
+    )
+  }
+  const node = resolveRouteNode(root, layout.path, layout.relativePath)
+  if (node.layout) {
+    throw new Error(
+      `[SixbCustomApp] Conflicting layouts '${node.layout.source}' and '${layout.relativePath}' own route '${layout.path}'.`
+    )
+  }
+  node.layout = { componentName, source: layout.relativePath }
+}
+
+function insertRoutePage(
+  root: RouteTreeNode,
+  path: string,
+  componentName: string,
+  source: string
+): void {
+  const node = resolveRouteNode(root, path, source)
+  if (node.page) {
+    throw new Error(
+      `[SixbCustomApp] Conflicting pages '${node.page.source}' and '${source}' match route '${path}'.`
+    )
+  }
+  node.page = { componentName, source }
+}
+
+function resolveRouteNode(root: RouteTreeNode, path: string, source: string): RouteTreeNode {
+  let node = root
+  for (const segment of splitRoutePath(path)) {
+    const key = segment.startsWith(":") ? ":" : segment.toLowerCase()
+    const existing = node.children.get(key)
+    if (existing) {
+      if (
+        existing.segment.startsWith(":") &&
+        segment.startsWith(":") &&
+        existing.segment !== segment
+      ) {
+        throw new Error(
+          `[SixbCustomApp] Route '${source}' uses dynamic segment '${segment}', but '${existing.segment}' already owns the same route position. Use one parameter name consistently.`
+        )
+      }
+      node = existing
+      continue
+    }
+
+    const child = createRouteTree(segment)
+    node.children.set(key, child)
+    node = child
+  }
+  return node
+}
+
+function renderRootRouteObjects(root: RouteTreeNode): string {
+  const lines: string[] = []
+  if (root.page) {
+    lines.push(`  { path: "/", element: createElement(${root.page.componentName}) },`)
+  }
+  for (const child of sortedRenderableChildren(root)) {
+    lines.push(...renderRouteNode(child, 1))
+  }
+  return lines.join("\n")
+}
+
+function renderRouteNode(node: RouteTreeNode, depth: number): string[] {
+  const indent = "  ".repeat(depth)
+  const children = sortedRenderableChildren(node)
+  if (!node.layout && node.page && children.length === 0) {
+    return [
+      `${indent}{ path: ${JSON.stringify(node.segment)}, element: createElement(${node.page.componentName}) },`,
+    ]
+  }
+
+  const lines = [`${indent}{`, `${indent}  path: ${JSON.stringify(node.segment)},`]
+  if (node.layout) {
+    lines.push(
+      `${indent}  element: createElement(${node.layout.componentName}, { children: createElement(Outlet) }),`
+    )
+  }
+  lines.push(`${indent}  children: [`)
+  if (node.page) {
+    lines.push(`${indent}    { index: true, element: createElement(${node.page.componentName}) },`)
+  }
+  for (const child of children) {
+    lines.push(...renderRouteNode(child, depth + 2))
+  }
+  lines.push(`${indent}  ],`, `${indent}},`)
+  return lines
+}
+
+function sortedRenderableChildren(node: RouteTreeNode): RouteTreeNode[] {
+  return [...node.children.values()].filter(hasPageDescendant).sort((a, b) => {
+    const aDynamic = a.segment.startsWith(":")
+    const bDynamic = b.segment.startsWith(":")
+    if (aDynamic !== bDynamic) return aDynamic ? 1 : -1
+    return compareText(a.segment, b.segment)
+  })
+}
+
+function hasPageDescendant(node: RouteTreeNode): boolean {
+  if (node.page) return true
+  for (const child of node.children.values()) {
+    if (hasPageDescendant(child)) return true
+  }
+  return false
+}
+
+function splitRoutePath(path: string): string[] {
+  if (path === "/") return []
+  if (!path.startsWith("/")) {
+    throw new Error(`[SixbCustomApp] Route path '${path}' must start with '/'.`)
+  }
+  const segments = path.slice(1).split("/")
+  if (segments.some((segment) => !segment)) {
+    throw new Error(`[SixbCustomApp] Route path '${path}' contains an empty segment.`)
+  }
+  return segments
+}
+
+function compareRouteModules(
+  a: Pick<AppRouteLayout, "path" | "relativePath">,
+  b: Pick<AppRouteLayout, "path" | "relativePath">
+): number {
+  return compareText(a.path, b.path) || compareText(a.relativePath, b.relativePath)
+}
+
+function compareText(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0
 }
 
 /** Generates the optional browser entry served by the API for `/auth/*`. */
@@ -273,7 +474,13 @@ export async function generateAppEntry(
   const mainContent = `import React from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { signOut } from "@sixb/client"
-import { BrowserRouter, Routes, Route, matchPath, useNavigate, useLocation } from "react-router-dom"
+import {
+  BrowserRouter,
+  matchPath,
+  useLocation,
+  useNavigate,
+  useRoutes,
+} from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import {
   configureSixbBrowserClient,
@@ -281,7 +488,7 @@ import {
   readSixbBrowserRuntimeConfig,
   requireSixbBrowserAuthSession,
 } from "@sixb/client/browser"
-import { routes } from "./routes"
+import { routePaths, routes } from "./routes"
 ${globalsCssImport}
 ${layoutImport}
 
@@ -381,7 +588,7 @@ function InternalLinkInterceptor() {
       if (isReservedPath(url.pathname)) return
       // Only intercept destinations the app actually routes; anything else may
       // be a real server resource and keeps native navigation.
-      if (!routes.some((route) => matchPath(route.path, url.pathname))) return
+      if (!routePaths.some((path) => matchPath(path, url.pathname))) return
       // Same-document hash links keep native scroll behavior.
       if (
         url.hash &&
@@ -585,6 +792,12 @@ function RoutedErrorBoundary({ children }: { children: React.ReactNode }) {
   )
 }
 
+const appRoutes = [...routes, { path: "*", element: <NotFoundView /> }]
+
+function AppRoutes() {
+  return useRoutes(appRoutes)
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -592,12 +805,7 @@ function App() {
         <InternalLinkInterceptor />
         <RoutedErrorBoundary>
           ${layoutWrapperStart}
-            <Routes>
-              {routes.map((route) => (
-                <Route key={route.path} path={route.path} element={<route.component />} />
-              ))}
-              <Route path="*" element={<NotFoundView />} />
-            </Routes>
+            <AppRoutes />
           ${layoutWrapperEnd}
         </RoutedErrorBoundary>
       </BrowserRouter>
