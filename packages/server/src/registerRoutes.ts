@@ -16,6 +16,7 @@ import { registerEventRoutes } from "./routes/events"
 import { registerFileRoutes } from "./routes/files"
 import { registerLinkRoutes } from "./routes/links"
 import { registerLogRoutes } from "./routes/logs"
+import { registerModelRoutes } from "./routes/models"
 import { registerObjectRoutes } from "./routes/objects"
 import { registerOntologyRoutes } from "./routes/ontology"
 import { registerPipelineRoutes } from "./routes/pipelines"
@@ -51,6 +52,7 @@ export function registerHttpRoutes(app: Elysia, host: SixbHostView, options: Htt
   registerFileRoutes(app, host)
   registerActionRunRoutes(app, host)
   registerAgentRoutes(app, host)
+  registerModelRoutes(app, host)
   registerLinkRoutes(app, host)
   registerTelemetryRoutes(app, host)
   registerEventRoutes(app, host)

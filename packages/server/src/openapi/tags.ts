@@ -107,6 +107,10 @@ export const OPENAPI_TAGS = {
     name: "Agents",
     description: "Agent catalog",
   },
+  models: {
+    name: "Models",
+    description: "Project model catalog",
+  },
   agentThreads: {
     name: "Agent Threads",
     description: "Agent conversation threads and messages",
