@@ -1,12 +1,21 @@
 import { StorageTransactionError } from "./errors"
+import { createObjectOperationScope } from "./operation-scope"
+import type { Storage } from "./types"
 
 type ObjectLike = Record<PropertyKey, unknown>
 
-export function createTransactionStorageProxy<T extends object>(
+export function createTransactionStorageProxy<T extends Storage>(
   target: T,
   isActive: () => boolean
 ): T {
   const proxies = new WeakMap<object, object>()
+  const objectStorage = createObjectOperationScope(target.objects, {
+    assertAvailable: () => assertTransactionActive(isActive),
+    run: async <TResult>(operation: () => Promise<TResult> | TResult): Promise<TResult> => {
+      assertTransactionActive(isActive)
+      return operation()
+    },
+  })
 
   const wrap = <TValue extends object>(value: TValue): TValue => {
     const existing = proxies.get(value)
@@ -19,7 +28,10 @@ export function createTransactionStorageProxy<T extends object>(
       // from `tx` are wrapped (a handful), not the row/link data graph, and never per-record.
       get(current, property, receiver) {
         assertTransactionActive(isActive)
-        const result = Reflect.get(current, property, receiver)
+        const result =
+          current === target && property === "objects"
+            ? objectStorage
+            : Reflect.get(current, property, receiver)
         if (typeof result === "function") {
           return (...args: unknown[]) => {
             assertTransactionActive(isActive)

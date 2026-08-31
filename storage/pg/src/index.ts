@@ -13,6 +13,7 @@ import { ProviderMaterializationTransactionLifecycle } from "@sixb/core/internal
 import {
   createAgentOperationScope,
   createAuthOperationScope,
+  createObjectOperationScope,
   createOntologyOperationScope,
   createOperationScopedFacade,
   createStorageOperationScope,
@@ -208,7 +209,7 @@ export class PostgresStorage implements MigrationCapableStorage {
       },
       () => this.assertRootOperationAvailable()
     )
-    this.objects = createOperationScopedFacade(stores.objects, scope)
+    this.objects = createObjectOperationScope(stores.objects, scope)
     this.ontology = createOntologyOperationScope(stores.ontology, scope)
     this.auth = createAuthOperationScope(stores.auth, scope)
     this.executions = createOperationScopedFacade(stores.executions, scope)

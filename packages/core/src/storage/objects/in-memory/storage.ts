@@ -12,7 +12,6 @@ import type {
   LinkDirection,
   ObjectLinkRow,
   ObjectQueryCapabilities,
-  ObjectReadScopeFactory,
   ObjectReadStorage,
   ObjectRow,
   ObjectStorage,
@@ -89,7 +88,7 @@ export function getInMemoryObjectMaterializerAdapter(
   return adapter
 }
 
-export class InMemoryObjectStorage implements ObjectStorage, ObjectReadScopeFactory {
+export class InMemoryObjectStorage implements ObjectStorage {
   private readonly rows = new Map<string, Map<string, ObjectRow>>()
   private readonly links = new Map<string, Map<string, ObjectLinkRow>>()
 

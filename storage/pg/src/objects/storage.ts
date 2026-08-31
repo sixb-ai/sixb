@@ -12,7 +12,6 @@ import type {
   ObjectLinkRow,
   ObjectQueryCapabilities,
   ObjectReadExecutionLimits,
-  ObjectReadScopeFactory,
   ObjectReadStorage,
   ObjectRow,
   ObjectStorage,
@@ -101,7 +100,7 @@ const PG_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
 }
 
 /** PostgreSQL object provider; interactive reads share one source-aware reader. */
-export class PgObjectStorage implements ObjectStorage, ObjectReadScopeFactory {
+export class PgObjectStorage implements ObjectStorage {
   private readonly reader: PgObjectReader
 
   constructor(private readonly sql: PgStoreClient) {
