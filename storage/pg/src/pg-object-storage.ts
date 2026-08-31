@@ -16,7 +16,6 @@ import type {
   ObjectLinkRow,
   ObjectQueryCapabilities,
   ObjectReadExecutionLimits,
-  ObjectReadScopeFactory,
   ObjectReadStorage,
   ObjectRow,
   ObjectRowLinks,
@@ -174,7 +173,7 @@ function valuesJoin<Row = unknown>(
  * - Reads return JSONB as native JS types (objects, numbers, booleans) when
  *   the data was stored correctly.
  */
-export class PgObjectStorage implements ObjectStorage, ObjectReadScopeFactory {
+export class PgObjectStorage implements ObjectStorage {
   constructor(private readonly sql: PgStoreClient) {}
 
   queryCapabilities(): ObjectQueryCapabilities {

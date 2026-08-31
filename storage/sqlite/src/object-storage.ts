@@ -17,7 +17,6 @@ import type {
   ObjectLinkRow,
   ObjectQueryCapabilities,
   ObjectReadExecutionLimits,
-  ObjectReadScopeFactory,
   ObjectReadStorage,
   ObjectRow,
   ObjectRowLinks,
@@ -133,7 +132,7 @@ const SQLITE_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
  * Stores object projections and links. V1 object-query IR pushdown covers the
  * scalar JSON-property and link-traversal subset declared by queryCapabilities().
  */
-export class SqliteObjectStorage implements ObjectStorage, ObjectReadScopeFactory {
+export class SqliteObjectStorage implements ObjectStorage {
   private readonly connection: SqliteStoreConnection
   private readonly db: Database
 

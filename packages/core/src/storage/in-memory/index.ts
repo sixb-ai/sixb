@@ -21,6 +21,7 @@ import { ProviderMaterializationTransactionLifecycle } from "../ontology/provide
 import {
   createAgentOperationScope,
   createAuthOperationScope,
+  createObjectOperationScope,
   createOntologyOperationScope,
   createOperationScopedFacade,
   createStorageOperationScope,
@@ -118,7 +119,7 @@ export class InMemoryStorage implements Storage {
       (run) => this.withStorageOperation(run),
       () => this.assertRootOperationAvailable()
     )
-    this.objects = createOperationScopedFacade(this.objectStorage, scope)
+    this.objects = createObjectOperationScope(this.objectStorage, scope)
     this.timeseries = createOperationScopedFacade(this.timeseriesStorage, scope)
     this.auth = createAuthOperationScope(this.authStorage, scope)
     this.executions = createOperationScopedFacade(this.executionStorage, scope)
