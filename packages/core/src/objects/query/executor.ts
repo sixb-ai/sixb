@@ -10,11 +10,10 @@ import type {
   ObjectBatchKey,
   ObjectFacetRequest,
   ObjectFacetResult,
-  ObjectLinkRow,
   ObjectQueryCapabilities,
+  ObjectReadStorage,
   ObjectRow,
   ObjectRowLinks,
-  ObjectStorage,
   QueryObjectsResult,
 } from "../../storage"
 import { linkBatchKey, objectBatchKey } from "../../storage"
@@ -51,7 +50,7 @@ export interface QueryExecutorOptions
     | "hasFacetObjects"
   > {
   ontology: OntologyRegistry
-  storage: ObjectStorage
+  storage: ObjectReadStorage
   maxLimit?: number
   maxPageSize?: number
   maxRefs?: number
@@ -820,35 +819,32 @@ async function collectIncomingEdges(
   expansion: ObjectExpansion,
   options: QueryExecutorOptions
 ): Promise<ExpansionEdge[][]> {
-  const incident = await options.storage.listIncidentLinksBatch({
+  const linksByKey = await options.storage.listLinksBatch({
     projectId,
+    direction: "incoming",
     items: parents.map((parent) => ({
       objectTypeId: parent.objectTypeId,
       objectId: parent.primaryId,
+      linkId: expansion.linkId,
     })),
   })
 
-  // Index links that point AT a parent (incoming) by that parent. The incident
-  // batch also returns outgoing links, so filter on the parent being the target.
-  const byTarget = new Map<string, ObjectLinkRow[]>()
-  for (const link of incident) {
-    if (link.linkId !== expansion.linkId) continue
-    if (expansion.sourceObjectTypeId && link.sourceTypeId !== expansion.sourceObjectTypeId) continue
-    const key = targetKey(link.targetTypeId, link.targetId)
-    const bucket = byTarget.get(key)
-    if (bucket) bucket.push(link)
-    else byTarget.set(key, [link])
-  }
-
   return parents.map((parent) => {
-    const links = byTarget.get(targetKey(parent.objectTypeId, parent.primaryId))
+    const links = linksByKey.get(
+      linkBatchKey(parent.objectTypeId, parent.primaryId, expansion.linkId)
+    )
     if (!links) return []
     // For an incoming expansion the hydrated object is the link's source.
-    return links.map((link) => ({
-      neighborTypeId: link.sourceTypeId,
-      neighborId: link.sourceId,
-      edgeProperties: link.properties,
-    }))
+    return links
+      .filter(
+        (link) =>
+          !expansion.sourceObjectTypeId || link.sourceTypeId === expansion.sourceObjectTypeId
+      )
+      .map((link) => ({
+        neighborTypeId: link.sourceTypeId,
+        neighborId: link.sourceId,
+        edgeProperties: link.properties,
+      }))
   })
 }
 

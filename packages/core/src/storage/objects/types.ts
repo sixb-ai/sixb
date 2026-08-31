@@ -189,7 +189,8 @@ export interface FacetObjectsResult {
   facets: readonly ObjectFacetResult[]
 }
 
-export interface ObjectStorage {
+/** Provider-facing read-only surface for effective objects and links. */
+export interface ObjectReadStorage {
   queryCapabilities(): ObjectQueryCapabilities
 
   queryObjects?(params: QueryObjectsInput): Promise<QueryObjectsResult>
@@ -202,6 +203,22 @@ export interface ObjectStorage {
     objectTypeId: string
     primaryId: string
   }): Promise<ObjectRow | null>
+
+  /**
+   * Check whether each requested property belongs to the reader's selection.
+   *
+   * Results align exactly with `items`, including duplicates. Selection is independent from the
+   * property's current materialized value: an unrestricted reader selects every property of an
+   * existing object even when that property has no stored value.
+   */
+  selectsObjectProperties(params: {
+    projectId: string
+    items: readonly {
+      objectTypeId: string
+      primaryId: string
+      propertyId: string
+    }[]
+  }): Promise<readonly boolean[]>
 
   listLinks(params: {
     projectId: string
@@ -221,11 +238,13 @@ export interface ObjectStorage {
   }): Promise<ReadonlyMap<ObjectBatchKey, ObjectRow>>
 
   /**
-   * Batch fetch outgoing links by (objectTypeId, objectId, linkId) tuples.
+   * Batch fetch links by (objectTypeId, objectId, linkId) tuples in the requested direction.
+   * Direction defaults to outgoing.
    * Returns a Map keyed by {@link linkBatchKey}. Missing entries are absent.
    */
   listLinksBatch(params: {
     projectId: string
+    direction?: LinkDirection
     items: readonly { objectTypeId: string; objectId: string; linkId: string }[]
   }): Promise<ReadonlyMap<LinkBatchKey, ObjectLinkRow[]>>
 
@@ -235,25 +254,6 @@ export interface ObjectStorage {
    * bounded response never requires loading every incident link into the runtime.
    */
   queryLinks(params: QueryObjectLinksInput): Promise<QueryObjectLinksResult>
-
-  /**
-   * Batch fetch every link incident to any of the given objects, in BOTH directions (the object as
-   * link source or target). Returns a flat, de-duplicated list: a physical link incident to two
-   * listed objects appears once. This unpaged primitive exists for internal materialization and
-   * per-parent expansion work; interactive reads use {@link queryLinks}.
-   */
-  listIncidentLinksBatch(params: {
-    projectId: string
-    items: readonly { objectTypeId: string; objectId: string }[]
-  }): Promise<readonly ObjectLinkRow[]>
-
-  /** Stable keyset page used by background reconciliation without a total-count scan. */
-  listByPrimaryIdPage(params: {
-    projectId: string
-    objectTypeId: string
-    afterPrimaryId?: string
-    limit: number
-  }): Promise<{ objects: readonly ObjectRow[]; nextPrimaryId?: string }>
 
   list(params: {
     projectId: string
@@ -269,4 +269,26 @@ export interface ObjectStorage {
     orderBy?: "createdAt" | "updatedAt" | "primaryId"
     order?: "asc" | "desc"
   }): Promise<{ objects: readonly ObjectRow[]; hasMore: boolean; total: number }>
+}
+
+/** Latest-state projection storage, including trusted internal read primitives. */
+export interface ObjectStorage extends ObjectReadStorage {
+  /**
+   * Batch fetch every link incident to any of the given objects, in BOTH directions (the object as
+   * link source or target). Returns a flat, de-duplicated list: a physical link incident to two
+   * listed objects appears once. This unpaged primitive is reserved for trusted internal work and
+   * deliberately absent from {@link ObjectReadStorage}; interactive reads use {@link queryLinks}.
+   */
+  listIncidentLinksBatch(params: {
+    projectId: string
+    items: readonly { objectTypeId: string; objectId: string }[]
+  }): Promise<readonly ObjectLinkRow[]>
+
+  /** Stable keyset page used by background reconciliation without a total-count scan. */
+  listByPrimaryIdPage(params: {
+    projectId: string
+    objectTypeId: string
+    afterPrimaryId?: string
+    limit: number
+  }): Promise<{ objects: readonly ObjectRow[]; nextPrimaryId?: string }>
 }
