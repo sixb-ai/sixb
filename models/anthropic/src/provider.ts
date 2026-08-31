@@ -28,6 +28,7 @@ import {
   applyAnthropicRateCardModifiers,
 } from "./model-details"
 import { decodeServerSentEvents } from "./sse"
+import { anthropicOutputSchema } from "./structured-output"
 
 type ValueSource<T> = T | (() => T)
 
@@ -38,6 +39,7 @@ const CATALOG_TIMEOUT_MS = 5_000
 const DEFAULT_CATALOG_TTL_MS = 60 * 60 * 1_000
 const DEFAULT_MAX_RETRIES = 2
 const DEFAULT_MAX_RETRY_DELAY_MS = 60_000
+const OUTPUT_TOOL_NAME = "sixb_structured_output"
 const ANTHROPIC_IMAGE_MEDIA_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"] as const
 
 export interface AnthropicOptions {
@@ -90,6 +92,7 @@ export function createAnthropic(options: AnthropicOptions = {}): AnthropicProvid
     if (!modelId.trim()) throw new TypeError("[SixbAnthropic] Model id must not be empty.")
     return new AnthropicLanguageModel(
       transport,
+      catalog,
       modelId,
       modelOptions,
       configuredModels.get(modelId)
@@ -275,6 +278,7 @@ class AnthropicLanguageModel implements LanguageModel {
 
   constructor(
     private readonly transport: AnthropicTransport,
+    private readonly catalog: AnthropicCatalog,
     modelId: string,
     private readonly options: AnthropicModelOptions,
     configuredDefinition: LanguageModelDefinition | undefined
@@ -318,10 +322,11 @@ class AnthropicLanguageModel implements LanguageModel {
 
   async stream(request: LanguageModelRequest) {
     const url = `${this.transport.baseUrl}/messages`
+    const prepared = await this.prepareRequest(request)
     const init: RequestInit = {
       method: "POST",
       headers: anthropicHeaders(this.transport, "text/event-stream", true),
-      body: JSON.stringify(this.requestBody(request)),
+      body: JSON.stringify(prepared.body),
       signal: request.signal,
     }
     let response: Response
@@ -346,10 +351,20 @@ class AnthropicLanguageModel implements LanguageModel {
         }
       )
     }
-    return { events: this.responseEvents(response.body, request.signal, requestId ?? undefined) }
+    return {
+      events: this.responseEvents(
+        response.body,
+        request.signal,
+        requestId ?? undefined,
+        prepared.outputToolName
+      ),
+    }
   }
 
-  private requestBody(request: LanguageModelRequest): JsonObject {
+  private async prepareRequest(request: LanguageModelRequest): Promise<{
+    readonly body: JsonObject
+    readonly outputToolName?: string
+  }> {
     const extra = this.options.request ?? {}
     for (const reserved of [
       "model",
@@ -360,6 +375,7 @@ class AnthropicLanguageModel implements LanguageModel {
       "stream",
       "max_tokens",
       "thinking",
+      "disable_parallel_tool_use",
     ]) {
       if (Object.hasOwn(extra, reserved)) {
         throw new TypeError(
@@ -368,6 +384,11 @@ class AnthropicLanguageModel implements LanguageModel {
       }
     }
     const mapped = messagesToAnthropic(request.messages, this.providerId)
+    const nativeOutputSchema =
+      request.responseFormat !== undefined && (await this.supportsNativeStructuredOutput())
+        ? anthropicOutputSchema(request.responseFormat.schema)
+        : undefined
+    const useOutputTool = request.responseFormat !== undefined && nativeOutputSchema === undefined
     const tools: JsonObject[] = [
       ...(this.options.providerTools ?? []),
       ...request.tools.map((tool) => ({
@@ -376,10 +397,31 @@ class AnthropicLanguageModel implements LanguageModel {
         input_schema: tool.inputSchema,
         strict: true,
       })),
+      ...(useOutputTool
+        ? [
+            {
+              name: OUTPUT_TOOL_NAME,
+              description:
+                request.responseFormat?.description ?? "Return the final structured result.",
+              input_schema: request.responseFormat?.schema ?? {},
+            },
+          ]
+        : []),
     ]
+    if (
+      useOutputTool &&
+      tools.slice(0, -1).some((tool) => string(tool.name) === OUTPUT_TOOL_NAME)
+    ) {
+      throw new TypeError(`[SixbAnthropic] Tool name '${OUTPUT_TOOL_NAME}' is reserved.`)
+    }
     const existingOutputConfig = object(extra.output_config)
     if (extra.output_config !== undefined && !existingOutputConfig) {
       throw new TypeError("[SixbAnthropic] Model request option 'output_config' must be an object.")
+    }
+    if (existingOutputConfig?.format !== undefined) {
+      throw new TypeError(
+        "[SixbAnthropic] Model request option 'output_config.format' is owned by the adapter."
+      )
     }
     const reasoning = anthropicReasoningRequest(
       request.reasoning,
@@ -390,34 +432,54 @@ class AnthropicLanguageModel implements LanguageModel {
     const outputConfig: JsonObject = {
       ...(existingOutputConfig ?? {}),
       ...(reasoning.effort === undefined ? {} : { effort: reasoning.effort }),
-      ...(request.responseFormat === undefined
+      ...(nativeOutputSchema === undefined
         ? {}
         : {
             format: {
               type: "json_schema",
-              schema: request.responseFormat.schema,
+              schema: nativeOutputSchema,
             },
           }),
     }
     return {
-      ...extra,
-      model: this.modelId,
-      messages: mapped.messages,
-      stream: true,
-      max_tokens: this.maxOutputTokens,
-      ...(mapped.system.length === 0 ? {} : { system: mapped.system }),
-      ...(tools.length === 0 ? {} : { tools, tool_choice: { type: "auto" } }),
-      ...(Object.keys(outputConfig).length === 0 ? {} : { output_config: outputConfig }),
-      ...(reasoning.thinking === undefined ? {} : { thinking: reasoning.thinking }),
+      body: {
+        ...extra,
+        model: this.modelId,
+        messages: mapped.messages,
+        stream: true,
+        max_tokens: this.maxOutputTokens,
+        ...(mapped.system.length === 0 ? {} : { system: mapped.system }),
+        ...(tools.length === 0
+          ? {}
+          : {
+              tools,
+              tool_choice: { type: useOutputTool ? "any" : "auto" },
+              ...(useOutputTool ? { disable_parallel_tool_use: true } : {}),
+            }),
+        ...(Object.keys(outputConfig).length === 0 ? {} : { output_config: outputConfig }),
+        ...(reasoning.thinking === undefined ? {} : { thinking: reasoning.thinking }),
+      },
+      ...(useOutputTool ? { outputToolName: OUTPUT_TOOL_NAME } : {}),
+    }
+  }
+
+  private async supportsNativeStructuredOutput(): Promise<boolean> {
+    const declared = this.definition.capabilities.nativeStructuredOutput
+    if (declared !== undefined) return declared
+    try {
+      return (await this.catalog.get(this.modelId))?.capabilities.nativeStructuredOutput === true
+    } catch {
+      return false
     }
   }
 
   private async *responseEvents(
     body: ReadableStream<Uint8Array>,
     signal: AbortSignal,
-    requestId?: string
+    requestId?: string,
+    outputToolName?: string
   ): AsyncIterable<LanguageModelStreamEvent> {
-    const state = new MessageState(this.providerId, this.modelId, requestId)
+    const state = new MessageState(this.providerId, this.modelId, requestId, outputToolName)
     for await (const event of decodeServerSentEvents(body, signal)) {
       let value: unknown
       try {
@@ -453,6 +515,7 @@ interface ContentBlockState {
   readonly id: string
   readonly type: string
   readonly raw: JsonObject
+  readonly structuredOutput: boolean
   toolInput: string
 }
 
@@ -461,12 +524,14 @@ class MessageState {
   private usage: JsonObject = {}
   private stopReason = ""
   private started = false
+  private outputToolSeen = false
   finished = false
 
   constructor(
     private readonly providerId: string,
     private readonly modelId: string,
-    private readonly requestId?: string
+    private readonly requestId?: string,
+    private readonly outputToolName?: string
   ) {}
 
   accept(eventName: string, value: JsonObject): readonly LanguageModelStreamEvent[] {
@@ -508,7 +573,10 @@ class MessageState {
       return [
         {
           type: "finish",
-          finishReason: finishReason(this.stopReason),
+          finishReason:
+            this.outputToolSeen && this.stopReason === "tool_use"
+              ? "stop"
+              : finishReason(this.stopReason),
           ...(this.stopReason ? { rawFinishReason: this.stopReason } : {}),
           usage: normalizeUsage(this.usage),
         },
@@ -546,7 +614,21 @@ class MessageState {
     const type = string(raw?.type)
     if (!raw || !type) throw this.protocolError(`Content block ${index} is missing its type.`)
     const id = `content:${index}`
-    const block: ContentBlockState = { id, type, raw: { ...raw }, toolInput: "" }
+    const structuredOutput =
+      type === "tool_use" &&
+      this.outputToolName !== undefined &&
+      string(raw.name) === this.outputToolName
+    if (structuredOutput && this.outputToolSeen) {
+      throw this.protocolError("Model submitted structured output more than once.")
+    }
+    if (structuredOutput) this.outputToolSeen = true
+    const block: ContentBlockState = {
+      id,
+      type,
+      raw: { ...raw },
+      structuredOutput,
+      toolInput: "",
+    }
     this.blocks.set(index, block)
     if (type === "text") {
       const text = string(raw.text)
@@ -566,7 +648,9 @@ class MessageState {
       const callId = string(raw.id)
       const name = string(raw.name)
       if (!callId || !name) throw this.protocolError(`Tool block ${index} is missing id or name.`)
-      return [{ type: "tool-input-start", id: callId, toolName: name }]
+      return structuredOutput
+        ? [{ type: "text-start", id }]
+        : [{ type: "tool-input-start", id: callId, toolName: name }]
     }
     return []
   }
@@ -594,9 +678,11 @@ class MessageState {
     if (type === "input_json_delta" && ["tool_use", "server_tool_use"].includes(block.type)) {
       const partial = string(delta?.partial_json)
       block.toolInput += partial
-      return block.type === "tool_use"
-        ? [{ type: "tool-input-delta", id: string(block.raw.id), delta: partial }]
-        : []
+      return block.structuredOutput
+        ? [{ type: "text-delta", id: block.id, delta: partial }]
+        : block.type === "tool_use"
+          ? [{ type: "tool-input-delta", id: string(block.raw.id), delta: partial }]
+          : []
     }
     if (type === "citations_delta" && block.type === "text") {
       const citation = delta?.citation
@@ -637,6 +723,14 @@ class MessageState {
         if (isJsonObject(input)) block.raw.input = input
       } catch {
         // The core loop reports the malformed tool input with the original streamed text.
+      }
+      if (block.structuredOutput) {
+        return [
+          ...(hadToolDelta
+            ? []
+            : [{ type: "text-delta" as const, id: block.id, delta: block.toolInput }]),
+          { type: "text-end", id: block.id },
+        ]
       }
       return [
         ...(hadToolDelta

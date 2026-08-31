@@ -435,7 +435,7 @@ describe("runModelLoop", () => {
     expect(calls[0]?.usage).toEqual(USAGE)
   })
 
-  test("validates structured text output and offers the reserved submission tool", async () => {
+  test("always sends the semantic response format and validates the completed output", async () => {
     let toolNames: readonly string[] = []
     let responseFormat: unknown
     const model = new MockLanguageModel({
@@ -477,12 +477,20 @@ describe("runModelLoop", () => {
       signal: new AbortController().signal,
     })
 
-    expect(toolNames).toContain("__sixb_submit_output")
-    expect(responseFormat).toBeUndefined()
+    expect(toolNames).toEqual([])
+    expect(responseFormat).toEqual({
+      type: "json",
+      name: "answer",
+      schema: {
+        type: "object",
+        properties: { answer: { type: "string" } },
+        required: ["answer"],
+      },
+    })
     expect(result).toMatchObject({ status: "completed", output: { answer: "yes" } })
   })
 
-  test("uses provider-native structured output without the reserved submission tool", async () => {
+  test("does not let model metadata change the provider-neutral output request", async () => {
     let toolNames: readonly string[] = []
     let responseFormat: unknown
     const model = new MockLanguageModel({
@@ -529,11 +537,13 @@ describe("runModelLoop", () => {
       })
     ).rejects.toBeInstanceOf(ModelStreamError)
 
-    await expect(
-      runModelLoop({
+    let structuredError: unknown
+    try {
+      await runModelLoop({
         model: modelFromCalls([
           [
             { type: "stream-start" },
+            { type: "response-metadata", id: "response-bad", modelId: "resolved-bad" },
             { type: "text-start", id: "bad" },
             { type: "text-delta", id: "bad", delta: "not-json" },
             { type: "text-end", id: "bad" },
@@ -548,8 +558,21 @@ describe("runModelLoop", () => {
         },
         maxSteps: 1,
         signal: new AbortController().signal,
+        generateCallId: () => "call-bad",
       })
-    ).rejects.toBeInstanceOf(StructuredOutputError)
+    } catch (error) {
+      structuredError = error
+    }
+    expect(structuredError).toBeInstanceOf(StructuredOutputError)
+    expect(structuredError).toMatchObject({
+      text: "not-json",
+      providerId: "mock",
+      modelId: "mock-model",
+      responseId: "response-bad",
+      responseModelId: "resolved-bad",
+      finishReason: "stop",
+      usage: USAGE,
+    })
   })
 
   test("rejects a model whose synchronous definition has a different identity", async () => {
