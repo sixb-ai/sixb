@@ -131,10 +131,7 @@ export function restoreAgentExecutionScope(input: {
   return Object.freeze({
     execution: context,
     authorization: createAgentRuntimeAuthorization({
-      projectId: input.execution.projectId,
-      executionId: input.execution.id,
-      ...(input.actorId === undefined ? {} : { actorId: input.actorId }),
-      runId: input.runId,
+      execution: context,
       authority:
         input.authorization.type === "principal"
           ? {

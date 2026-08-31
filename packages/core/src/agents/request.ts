@@ -8,6 +8,7 @@ import {
   canInheritAgentRequestAuthorization,
   createInheritedAgentExecutionRecord,
 } from "../execution/agent"
+import { resolveExecutionScopeAuthorization } from "../execution/authorization"
 import { ensureExecutionRecord, executionRecordInputFromRuntime } from "../execution/durable"
 import type { ExecutionContext } from "../execution/types"
 import type { LanguageModelCatalog, LanguageModelRef } from "../models"
@@ -81,6 +82,10 @@ export async function requestAgentRun(
   models: LanguageModelCatalog | undefined,
   input: RequestAgentRunInput
 ): Promise<RequestAgentRunResult> {
+  const authority = resolveExecutionScopeAuthorization(runtime.projectId, {
+    execution,
+    authorization: runtime.runtimeAuthorization,
+  })
   assertNoAgentSelector(input)
   assertAuthorized(runtime, { kind: "agent.run" })
   assertRequestAuthorityCanRunAgent(runtime)
@@ -92,9 +97,13 @@ export async function requestAgentRun(
 
   const agents = requireAgentStorage(runtime)
   const projectId = runtime.projectId
-  // A scoped runtime is authoritative for caller identity. `input.principal` remains available to
-  // privileged server integrations that have already authenticated their request.
-  const principal = runtime.authorization?.principal ?? input.principal ?? SYSTEM_PRINCIPAL
+  // Attribution comes from the exact capability/execution pair, never the optional context cache
+  // on the runtime. `input.principal` remains available to unrestricted server integrations that
+  // have already authenticated their request.
+  const principal =
+    authority.type === "principal"
+      ? authority.context.principal
+      : (input.principal ?? SYSTEM_PRINCIPAL)
   const runId = createAgentRunId()
   const durableExecution = await prepareDurableAgentExecution(runtime, execution, runId)
   const requesterGroupIds = durableExecution.requestedBy
@@ -179,6 +188,10 @@ export async function retryAgentRun(
   models: LanguageModelCatalog | undefined,
   failedRun: ConversationAgentRunRecord
 ): Promise<RequestAgentRunResult> {
+  resolveExecutionScopeAuthorization(runtime.projectId, {
+    execution,
+    authorization: runtime.runtimeAuthorization,
+  })
   assertAuthorized(runtime, { kind: "agent.run" })
   assertRequestAuthorityCanRunAgent(runtime)
   if (failedRun.status !== "failed") {
