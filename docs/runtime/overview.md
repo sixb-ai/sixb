@@ -73,10 +73,11 @@ The two surfaces use distinct namespaces:
 | `host.scheduler`, `host.close*()` | Process lifecycle | `host.scheduler.start()` |
 | `sixb` | Execution-bound domain operations and visible definitions | `sixb.workflows.requestById(input)` |
 
-Definition catalogs consistently expose `list()` and `getById(id)`. The execution SDK may add
-authorized operations and history below the matching primitive; it does not expose process
-lifecycle. Execution code uses `sixb.blobs` and `sixb.connector(definition)`; connector client
-resolution remains private to the host.
+Definition catalogs expose `list()` and `getById(id)`. The model catalog uses `list()` and
+`getByRef({ provider, modelId })` because a model binding has a structured identity rather than a
+Sixb definition id. The execution SDK may add authorized operations and history below the matching
+primitive; it does not expose process lifecycle. Execution code uses `sixb.blobs` and
+`sixb.connector(definition)`; connector client resolution remains private to the host.
 
 ### Typed objects
 
