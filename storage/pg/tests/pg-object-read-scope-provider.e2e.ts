@@ -3,9 +3,7 @@ import {
   compileSelectedObjectReadScope,
   linkBatchKey,
   type ObjectReadExecutionLimits,
-  type ObjectReadScopeFactory,
   type ObjectReadStorage,
-  type ObjectStorage,
   objectBatchKey,
   type SelectedObjectReadScope,
 } from "@sixb/core/storage"
@@ -292,17 +290,20 @@ describe("PgObjectStorage selected reader invariants", () => {
 
   test("reuses a serializable PostgresStorage transaction end to end", async () => {
     const { storage } = await createTestStorage()
+    let escapedReader: ObjectReadStorage | undefined
+    let escapedList: ObjectReadStorage["list"] | undefined
     try {
       await insertObject(sqlOf(storage), RootType, "root-1", { id: "root-1", hidden: "secret" })
 
       const row = await storage.transaction(
         async (tx) => {
-          const factory = tx.objects as ObjectStorage & ObjectReadScopeFactory
-          const reader = factory.createSelectedReadScope({
+          const reader = tx.objects.createSelectedReadScope({
             projectId,
             scope: compileSelectedObjectReadScope(rootOnlyScope()),
             limits: generousLimits,
           })
+          escapedReader = reader
+          escapedList = reader.list
           return reader.getByPrimaryId({
             projectId,
             objectTypeId: RootType,
@@ -312,18 +313,24 @@ describe("PgObjectStorage selected reader invariants", () => {
         { isolation: "serializable" }
       )
       expect(row).toMatchObject({ primaryId: "root-1", properties: { id: "root-1" } })
+      if (!escapedReader || !escapedList) throw new Error("expected escaped selected reader")
+      const reader = escapedReader
+      const list = escapedList
+      expect(() => reader.queryCapabilities()).toThrow("after transaction completion")
+      await expect(Promise.resolve().then(() => list({ projectId }))).rejects.toMatchObject({
+        code: "transaction_inactive",
+      })
 
       await expect(
         storage.transaction(async (tx) => {
-          const factory = tx.objects as ObjectStorage & ObjectReadScopeFactory
-          const reader = factory.createSelectedReadScope({
+          const reader = tx.objects.createSelectedReadScope({
             projectId,
             scope: compileSelectedObjectReadScope(rootOnlyScope()),
             limits: generousLimits,
           })
           return reader.list({ projectId })
         })
-      ).rejects.toThrow("cannot join an unverified PostgreSQL transaction")
+      ).rejects.toThrow('{ isolation: "serializable" }')
     } finally {
       await storage.dropSchema()
       await storage.close()
@@ -336,10 +343,7 @@ function createReader(
   scope: SelectedObjectReadScope,
   limits: ObjectReadExecutionLimits = generousLimits
 ): ObjectReadStorage {
-  const factory =
-    storage instanceof PgObjectStorage
-      ? storage
-      : (storage.objects as ObjectStorage & ObjectReadScopeFactory)
+  const factory = storage instanceof PgObjectStorage ? storage : storage.objects
   return factory.createSelectedReadScope({
     projectId,
     scope: compileSelectedObjectReadScope(scope),

@@ -344,7 +344,7 @@ export interface ObjectReadStorage {
   }): Promise<{ objects: readonly ObjectRow[]; hasMore: boolean; total: number }>
 }
 
-/** Optional provider capability for enforcing a finite, precompiled object-read selection. */
+/** Provider capability for enforcing a finite, precompiled object-read selection. */
 export interface ObjectReadScopeFactory {
   createSelectedReadScope(params: {
     projectId: string
@@ -353,8 +353,8 @@ export interface ObjectReadScopeFactory {
   }): ObjectReadStorage
 }
 
-/** Latest-state projection storage, including trusted internal read primitives. */
-export interface ObjectStorage extends ObjectReadStorage {
+/** Latest-state projection storage, including selected reads and trusted internal primitives. */
+export interface ObjectStorage extends ObjectReadStorage, ObjectReadScopeFactory {
   /**
    * Batch fetch every link incident to any of the given objects, in BOTH directions (the object as
    * link source or target). Returns a flat, de-duplicated list: a physical link incident to two

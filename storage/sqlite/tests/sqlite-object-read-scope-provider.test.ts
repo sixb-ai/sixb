@@ -8,9 +8,7 @@ import {
   compileSelectedObjectReadScope,
   linkBatchKey,
   type ObjectReadExecutionLimits,
-  type ObjectReadScopeFactory,
   type ObjectReadStorage,
-  type ObjectStorage,
   objectBatchKey,
   type SelectedObjectReadScope,
 } from "@sixb/core/storage"
@@ -279,8 +277,7 @@ describe("SqliteObjectStorage selected reader invariants", () => {
       writer = new Database(sqliteStoragePath(directory))
       insertObject(writer, RootType, "root-1", { id: "root-1", hidden: "secret" })
 
-      const factory = storage.objects as ObjectStorage & ObjectReadScopeFactory
-      const reader = factory.createSelectedReadScope({
+      const reader = storage.objects.createSelectedReadScope({
         projectId,
         scope: compileSelectedObjectReadScope(rootOnlyScope()),
         limits: generousLimits,
@@ -296,6 +293,38 @@ describe("SqliteObjectStorage selected reader invariants", () => {
       writer?.close()
       storage.close()
       await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  test("preserves selected readers through a storage transaction and expires escaped readers", async () => {
+    const storage = new SqliteStorage()
+    let escapedReader: ObjectReadStorage | undefined
+    let escapedList: ObjectReadStorage["list"] | undefined
+    try {
+      await storage.transaction(async (tx) => {
+        const reader = tx.objects.createSelectedReadScope({
+          projectId,
+          scope: compileSelectedObjectReadScope(rootOnlyScope()),
+          limits: generousLimits,
+        })
+        await expect(reader.list({ projectId })).resolves.toEqual({
+          objects: [],
+          hasMore: false,
+          total: 0,
+        })
+        escapedReader = reader
+        escapedList = reader.list
+      })
+
+      if (!escapedReader || !escapedList) throw new Error("expected escaped selected reader")
+      const reader = escapedReader
+      const list = escapedList
+      expect(() => reader.queryCapabilities()).toThrow("after transaction completion")
+      await expect(Promise.resolve().then(() => list({ projectId }))).rejects.toMatchObject({
+        code: "transaction_inactive",
+      })
+    } finally {
+      storage.close()
     }
   })
 
