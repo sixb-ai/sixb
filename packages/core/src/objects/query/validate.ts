@@ -9,6 +9,7 @@ import type {
 import { normalizeDecimalValue } from "../../ontology"
 import { formatUnknownObjectTypeMessage } from "../../ontology/errors"
 import { validatePropertyValue, validateSchemaValue } from "../../ontology/validation"
+import { assertObjectQueryComplexity } from "./complexity"
 import { ObjectQueryValidationError } from "./errors"
 import type {
   ObjectExpansion,
@@ -67,6 +68,7 @@ export function validateObjectQuery(
   query: ObjectQuery,
   options: ObjectQueryValidationOptions
 ): ValidatedObjectQuery {
+  if (options.normalize === false) assertObjectQueryComplexity(query)
   const normalized = options.normalize === false ? query : normalizeObjectQuery(query)
   const ctx = createValidationContext(options)
   const validation = validateQueryNode(normalized, "$", ctx)
@@ -86,7 +88,14 @@ export function collectObjectQueryValidationIssues(
   query: ObjectQuery,
   options: ObjectQueryValidationOptions
 ): readonly ObjectQueryValidationIssue[] {
-  const normalized = options.normalize === false ? query : normalizeObjectQuery(query)
+  let normalized: ObjectQuery
+  try {
+    if (options.normalize === false) assertObjectQueryComplexity(query)
+    normalized = options.normalize === false ? query : normalizeObjectQuery(query)
+  } catch (error) {
+    if (error instanceof ObjectQueryValidationError) return error.issues
+    throw error
+  }
   const ctx = createValidationContext(options)
   validateQueryNode(normalized, "$", ctx)
   return ctx.issues

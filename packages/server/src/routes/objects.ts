@@ -40,6 +40,10 @@ import {
   UpsertObjectBodySchema,
 } from "../schemas/objects"
 import { handleRouteError, parseOptionalInt, toIsoString } from "../utils/http"
+import {
+  mapObjectQueryRequestParseError,
+  parseBoundedObjectQueryBody,
+} from "../utils/object-query-request-admission"
 
 const ObjectFileContentQuerySchema = FileContentQuerySchema.extend({
   path: z
@@ -47,6 +51,15 @@ const ObjectFileContentQuerySchema = FileContentQuerySchema.extend({
     .min(1)
     .regex(/^\/properties(?:\/|$)/, "Object file content paths must start with /properties/"),
 })
+
+const OBJECT_QUERY_REQUEST_TOO_LARGE_RESPONSE = {
+  description: "Response for status 413",
+  content: {
+    "application/json": {
+      schema: { $ref: "#/components/schemas/ErrorResponse" },
+    },
+  },
+} as const
 
 function serializeObject(row: {
   primaryId: string
@@ -422,6 +435,8 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
         }
       },
       {
+        parse: parseBoundedObjectQueryBody,
+        error: mapObjectQueryRequestParseError,
         detail: {
           summary: "Query objects",
           tags: [OPENAPI_TAGS.objects.name],
@@ -460,6 +475,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
                 },
               },
             },
+            413: OBJECT_QUERY_REQUEST_TOO_LARGE_RESPONSE,
             500: {
               description: "Response for status 500",
               content: {
@@ -498,6 +514,8 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
         }
       },
       {
+        parse: parseBoundedObjectQueryBody,
+        error: mapObjectQueryRequestParseError,
         detail: {
           summary: "Query object links",
           tags: [OPENAPI_TAGS.links.name],
@@ -536,6 +554,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
                 },
               },
             },
+            413: OBJECT_QUERY_REQUEST_TOO_LARGE_RESPONSE,
             500: {
               description: "Response for status 500",
               content: {
@@ -567,6 +586,8 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
         }
       },
       {
+        parse: parseBoundedObjectQueryBody,
+        error: mapObjectQueryRequestParseError,
         detail: {
           summary: "Count objects",
           tags: [OPENAPI_TAGS.objects.name],
@@ -605,6 +626,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
                 },
               },
             },
+            413: OBJECT_QUERY_REQUEST_TOO_LARGE_RESPONSE,
             500: {
               description: "Response for status 500",
               content: {
@@ -636,6 +658,8 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
         }
       },
       {
+        parse: parseBoundedObjectQueryBody,
+        error: mapObjectQueryRequestParseError,
         detail: {
           summary: "Check object existence",
           tags: [OPENAPI_TAGS.objects.name],
@@ -674,6 +698,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
                 },
               },
             },
+            413: OBJECT_QUERY_REQUEST_TOO_LARGE_RESPONSE,
             500: {
               description: "Response for status 500",
               content: {
@@ -709,6 +734,8 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
         }
       },
       {
+        parse: parseBoundedObjectQueryBody,
+        error: mapObjectQueryRequestParseError,
         detail: {
           summary: "Facet objects",
           tags: [OPENAPI_TAGS.objects.name],
@@ -747,6 +774,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
                 },
               },
             },
+            413: OBJECT_QUERY_REQUEST_TOO_LARGE_RESPONSE,
             500: {
               description: "Response for status 500",
               content: {

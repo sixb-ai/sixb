@@ -1,3 +1,4 @@
+import { assertObjectQueryComplexity, assertObjectQueryPredicateComplexity } from "./complexity"
 import type {
   ObjectExpansion,
   ObjectQuery,
@@ -15,6 +16,11 @@ import type {
  * same tree (and therefore the same cache key).
  */
 export function normalizeObjectQuery(query: ObjectQuery): ObjectQuery {
+  assertObjectQueryComplexity(query)
+  return normalizeObjectQueryUnchecked(query)
+}
+
+function normalizeObjectQueryUnchecked(query: ObjectQuery): ObjectQuery {
   return hoistExpand(normalizeNode(query))
 }
 
@@ -32,16 +38,20 @@ function normalizeNode(query: ObjectQuery): ObjectQuery {
     case "text":
       return {
         ...query,
-        input: normalizeObjectQuery(query.input),
+        input: normalizeObjectQueryUnchecked(query.input),
         fields: query.fields ? uniqueStrings(query.fields) : undefined,
         fieldsByObjectType: query.fieldsByObjectType
           ? uniqueStringRecord(query.fieldsByObjectType)
           : undefined,
       }
     case "vector":
-      return { ...query, input: normalizeObjectQuery(query.input), vector: [...query.vector] }
+      return {
+        ...query,
+        input: normalizeObjectQueryUnchecked(query.input),
+        vector: [...query.vector],
+      }
     case "traverse":
-      return { ...query, input: normalizeObjectQuery(query.input) }
+      return { ...query, input: normalizeObjectQueryUnchecked(query.input) }
     case "set":
       return normalizeSet(query)
     case "sort":
@@ -49,11 +59,11 @@ function normalizeNode(query: ObjectQuery): ObjectQuery {
     case "limit":
       return normalizeLimit(query.input, query.limit)
     case "page":
-      return { ...query, input: normalizeObjectQuery(query.input) }
+      return { ...query, input: normalizeObjectQueryUnchecked(query.input) }
     case "project":
       return {
         ...query,
-        input: normalizeObjectQuery(query.input),
+        input: normalizeObjectQueryUnchecked(query.input),
         properties: query.properties ? uniqueStrings(query.properties) : undefined,
       }
     case "expand":
@@ -79,7 +89,7 @@ function hoistExpand(query: ObjectQuery): ObjectQuery {
   if (query.input.kind !== "expand") return query
 
   const inner = query.input
-  const rebuilt = normalizeObjectQuery({ ...query, input: inner.input })
+  const rebuilt = normalizeObjectQueryUnchecked({ ...query, input: inner.input })
   if (rebuilt.kind === "expand") {
     return {
       kind: "expand",
@@ -91,7 +101,7 @@ function hoistExpand(query: ObjectQuery): ObjectQuery {
 }
 
 function normalizeExpand(input: ObjectQuery, expansions: readonly ObjectExpansion[]): ObjectQuery {
-  const normalizedInput = normalizeObjectQuery(input)
+  const normalizedInput = normalizeObjectQueryUnchecked(input)
   const normalizedExpansions = normalizeExpansions(expansions)
 
   // A directly-nested expand (`a.expand(X).expand(Y)` builds
@@ -152,18 +162,25 @@ function expansionKey(expansion: ObjectExpansion): string {
 export function normalizeObjectQueryPredicate(
   predicate: ObjectQueryPredicate
 ): ObjectQueryPredicate {
+  assertObjectQueryPredicateComplexity(predicate)
+  return normalizeObjectQueryPredicateUnchecked(predicate)
+}
+
+function normalizeObjectQueryPredicateUnchecked(
+  predicate: ObjectQueryPredicate
+): ObjectQueryPredicate {
   switch (predicate.op) {
     case "and":
     case "or": {
       const items = predicate.items.flatMap((item) => {
-        const normalized = normalizeObjectQueryPredicate(item)
+        const normalized = normalizeObjectQueryPredicateUnchecked(item)
         if (normalized.op === predicate.op) return normalized.items
         return [normalized]
       })
       return items.length === 1 ? items[0] : { op: predicate.op, items }
     }
     case "not":
-      return { op: "not", item: normalizeObjectQueryPredicate(predicate.item) }
+      return { op: "not", item: normalizeObjectQueryPredicateUnchecked(predicate.item) }
     case "in":
       return { ...predicate, values: [...predicate.values] }
     default:
@@ -172,13 +189,13 @@ export function normalizeObjectQueryPredicate(
 }
 
 function normalizeFilter(input: ObjectQuery, predicate: ObjectQueryPredicate): ObjectQuery {
-  const normalizedInput = normalizeObjectQuery(input)
-  const normalizedPredicate = normalizeObjectQueryPredicate(predicate)
+  const normalizedInput = normalizeObjectQueryUnchecked(input)
+  const normalizedPredicate = normalizeObjectQueryPredicateUnchecked(predicate)
 
   // Adjacent filters are equivalent to a single conjunction and are easier for
   // capability checks and providers to inspect.
   if (normalizedInput.kind === "filter") {
-    return normalizeObjectQuery({
+    return normalizeObjectQueryUnchecked({
       kind: "filter",
       input: normalizedInput.input,
       predicate: {
@@ -197,7 +214,7 @@ function normalizeFilter(input: ObjectQuery, predicate: ObjectQueryPredicate): O
 
 function normalizeSet(query: ObjectQuerySet): ObjectQuery {
   const inputs = query.inputs.flatMap((input) => {
-    const normalized = normalizeObjectQuery(input)
+    const normalized = normalizeObjectQueryUnchecked(input)
     if (normalized.kind === "set" && normalized.op === query.op) return normalized.inputs
     return [normalized]
   })
@@ -206,7 +223,7 @@ function normalizeSet(query: ObjectQuerySet): ObjectQuery {
 }
 
 function normalizeSort(input: ObjectQuery, fields: readonly ObjectQuerySortField[]): ObjectQuery {
-  const normalizedInput = normalizeObjectQuery(input)
+  const normalizedInput = normalizeObjectQueryUnchecked(input)
   const normalizedFields = fields.map((field) => ({ ...field }))
 
   // A later sort fully determines result order, so it replaces an adjacent sort.
@@ -226,7 +243,7 @@ function normalizeSort(input: ObjectQuery, fields: readonly ObjectQuerySortField
 }
 
 function normalizeLimit(input: ObjectQuery, limit: number): ObjectQuery {
-  const normalizedInput = normalizeObjectQuery(input)
+  const normalizedInput = normalizeObjectQueryUnchecked(input)
 
   // Adjacent limits collapse to the stricter bound.
   if (normalizedInput.kind === "limit") {
