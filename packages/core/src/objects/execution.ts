@@ -124,6 +124,12 @@ export interface ExecutionObjectSet<
   byId(id: string): ExecutionObjectByIdHandle<TObjectType, TValueTypes>
 }
 
+/** Public input for querying physical links incident to an object query result. */
+export type ObjectQueryLinksInput = Omit<ExecuteObjectQueryLinksInput, "projectId">
+
+/** Public result returned by {@link ObjectsRuntime.queryLinks}. */
+export type ObjectQueryLinksResult = ExecuteObjectQueryLinksResult
+
 export interface ObjectsRuntime<TOntologySources extends readonly OntologySource[]>
   extends ExecutionObjectOperations {
   <TObjectType extends RegisteredObjectType<TOntologySources>>(
@@ -134,9 +140,7 @@ export interface ObjectsRuntime<TOntologySources extends readonly OntologySource
     RegisteredObjectType<TOntologySources>
   >
   executeQuery(input: Omit<ExecuteObjectQueryInput, "projectId">): Promise<ExecuteObjectQueryResult>
-  queryLinks(
-    input: Omit<ExecuteObjectQueryLinksInput, "projectId">
-  ): Promise<ExecuteObjectQueryLinksResult>
+  queryLinks(input: ObjectQueryLinksInput): Promise<ObjectQueryLinksResult>
   count(input: Omit<ExecuteObjectCountInput, "projectId">): Promise<ExecuteObjectCountResult>
   exists(input: Omit<ExecuteObjectExistsInput, "projectId">): Promise<ExecuteObjectExistsResult>
   facet(input: Omit<ExecuteObjectFacetsInput, "projectId">): Promise<ExecuteObjectFacetsResult>
@@ -214,7 +218,7 @@ export function createObjectsRuntime<TOntologySources extends readonly OntologyS
             authorization: runtime.authorization,
           }
         ),
-      queryLinks: (input: Omit<ExecuteObjectQueryLinksInput, "projectId">) =>
+      queryLinks: (input: ObjectQueryLinksInput) =>
         executeObjectQueryLinks(
           { projectId: runtime.projectId, ...input },
           {
