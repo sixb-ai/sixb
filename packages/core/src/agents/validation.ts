@@ -15,7 +15,6 @@ import {
   type AgentReasoningLevel,
   type AgentToolDefinition,
   type AgentToolInputSchema,
-  type DefineAgentConfig,
 } from "./types"
 
 const AGENT_TOOL_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/
@@ -47,7 +46,6 @@ export function isAgentDefinition(value: unknown): value is AgentDefinition {
     typeof value.name === "string" &&
     typeof value.instructions === "string" &&
     (value.reasoning === undefined || isAgentReasoningLevel(value.reasoning)) &&
-    (value.providerOptions === undefined || isProviderOptions(value.providerOptions)) &&
     Array.isArray(value.groupIds) &&
     isAgentToolDefinitionArray(value.tools)
   )
@@ -182,35 +180,6 @@ export function assertValidReasoningLevel(reasoning: AgentReasoningLevel | undef
   }
 }
 
-export function assertValidProviderOptions(
-  providerOptions: DefineAgentConfig["providerOptions"]
-): void {
-  if (providerOptions === undefined) {
-    return
-  }
-
-  const reason = getInvalidJsonValueReason(providerOptions, "providerOptions")
-  if (!isRecord(providerOptions) || reason) {
-    throw new AgentDefinitionError(
-      `[Sixb] Agent providerOptions must be a provider-keyed JSON object${reason ? `; ${reason}` : "."}`
-    )
-  }
-
-  for (const [provider, options] of Object.entries(providerOptions)) {
-    if (!provider.trim()) {
-      throw new AgentDefinitionError(
-        "[Sixb] Agent providerOptions provider names must not be empty."
-      )
-    }
-    const optionsReason = getInvalidJsonValueReason(options, `providerOptions.${provider}`)
-    if (!isRecord(options) || optionsReason) {
-      throw new AgentDefinitionError(
-        `[Sixb] Agent providerOptions.${provider} must be a JSON object${optionsReason ? `; ${optionsReason}` : "."}`
-      )
-    }
-  }
-}
-
 export function groupIdsFromDefinitions(
   agentId: string,
   groups: readonly GroupDefinition[] | undefined
@@ -261,20 +230,6 @@ function assertNoDuplicateGroupIds(agentId: string, groupIds: readonly string[])
 
 function isAgentReasoningLevel(value: unknown): value is AgentReasoningLevel {
   return typeof value === "string" && (AGENT_REASONING_LEVELS as readonly string[]).includes(value)
-}
-
-function isProviderOptions(
-  value: unknown
-): value is NonNullable<DefineAgentConfig["providerOptions"]> {
-  if (!isRecord(value) || getInvalidJsonValueReason(value) !== undefined) {
-    return false
-  }
-  return Object.entries(value).every(
-    ([provider, options]) =>
-      provider.trim().length > 0 &&
-      isRecord(options) &&
-      getInvalidJsonValueReason(options) === undefined
-  )
 }
 
 function assertValidAgentToolSchema(

@@ -1,3 +1,4 @@
+import type { ProviderData } from "@sixb/llm"
 import type { FileRef } from "../blob-storage"
 import type { JsonValue } from "../json"
 import type { AgentContextPart } from "./context"
@@ -8,12 +9,12 @@ import type { AgentContextPart } from "./context"
  * self-describing wrapper: the storage row owns the message's identity, and `contentVersion` (a
  * column) versions the parts shape so it can be migrated.
  *
- * The part union is intentionally focused on what V1 agents actually produce (text, reasoning, step
+ * The part union is intentionally focused on what agent runs actually produce (text, reasoning, step
  * boundaries, tool calls). It is extensible: adding a part kind later is non-breaking. The adapter
- * `fromAiSdk` is total — it throws on any part it cannot model rather than dropping it silently,
+ * `fromUiMessage` is total — it throws on any part it cannot model rather than dropping it silently,
  * which both prevents data loss and signals exactly when the union must grow.
  */
-export const AGENT_MESSAGE_CONTENT_VERSION = 1 as const
+export const AGENT_MESSAGE_CONTENT_VERSION = 2 as const
 
 export type AgentMessageRole = "system" | "user" | "assistant"
 
@@ -22,7 +23,7 @@ export interface AgentTextPart {
   readonly type: "text"
   readonly text: string
   /** Provider passthrough (kept because some providers require it on the next turn). */
-  readonly providerMetadata?: JsonValue
+  readonly providerMetadata?: ProviderData
 }
 
 /**
@@ -32,7 +33,7 @@ export interface AgentTextPart {
 export interface AgentReasoningPart {
   readonly type: "reasoning"
   readonly text: string
-  readonly providerMetadata?: JsonValue
+  readonly providerMetadata?: ProviderData
 }
 
 /** A step boundary between assistant loop iterations. */
@@ -45,19 +46,26 @@ export interface AgentFilePart {
   readonly type: "file"
   readonly fileRef: FileRef
   /** Provider passthrough for future model-specific file handling. */
-  readonly providerMetadata?: JsonValue
+  readonly providerMetadata?: ProviderData
 }
 
 interface AgentToolCallBase {
   readonly type: "tool-call"
   readonly toolCallId: string
   readonly toolName: string
-  /** `true` when reconstructed from an SDK `dynamic-tool` part (vs a static `tool-${name}` part). */
+  /** `true` when reconstructed from a dynamic tool part (vs a static `tool-${name}` part). */
   readonly dynamic?: boolean
-  /** `true` when the provider executed the tool inline (steers model projection). V1 = `false`. */
+  /** `true` when the provider executed the tool inline (steers model projection). */
   readonly providerExecuted?: boolean
   readonly input: JsonValue
-  readonly providerMetadata?: JsonValue
+  readonly providerMetadata?: ProviderData
+}
+
+/** Ordered, hidden provider state required to replay a model response losslessly. */
+export interface AgentProviderStatePart {
+  readonly type: "provider-state"
+  readonly providerId: string
+  readonly data: JsonValue
 }
 
 /**
@@ -78,6 +86,7 @@ export type AgentMessagePart =
   | AgentFilePart
   | AgentContextPart
   | AgentToolCallPart
+  | AgentProviderStatePart
 
 export type AgentMessagePartType = AgentMessagePart["type"]
 export type AgentToolCallState = AgentToolCallPart["state"]

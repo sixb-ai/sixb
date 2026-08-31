@@ -13,12 +13,14 @@ Put each definition in `agents/` and export it.
 ```ts
 // agents/business-analyst.ts
 import { defineAgent } from "@sixb/core"
-import { gateway } from "ai"
+import { vercelGateway } from "@sixb/llm-openresponses"
+
+const gateway = vercelGateway()
 
 export const businessAnalyst = defineAgent("business-analyst", {
   name: "Business Analyst",
   description: "Investigates customers, invoices, projects, and follow-ups.",
-  model: gateway("deepseek/deepseek-v4-flash"),
+  model: gateway.model("deepseek/deepseek-v4-flash"),
   instructions: [
     "You are the business operations analyst for this project.",
     "Ground answers in the data available through Sixb, and say when data is insufficient.",

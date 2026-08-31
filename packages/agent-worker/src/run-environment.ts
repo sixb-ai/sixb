@@ -3,7 +3,6 @@ import { resolveLoggingService } from "@sixb/core/internal/logging"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type { AgentRunRecord, WorkflowAgentNodeRunRecord } from "@sixb/core/storage"
 import { type AgentExecutionMode, renderAgentSkillCatalog } from "./agent-skills"
-import { aiSdkToolsFromAgentDefinitions } from "./ai-sdk-adapters"
 import { createAgentApiGatewayBaseUrl } from "./api-url"
 import {
   modelSupportsInlineImages,
@@ -11,6 +10,7 @@ import {
   prepareAgentAttachments,
 } from "./attachments"
 import { type BashSandboxHandle, createBashTool } from "./bash-tool"
+import { modelToolsFromAgentDefinitions } from "./model-adapters"
 import { prepareAgentSandboxApiContext } from "./sandbox-api-context"
 import type { AgentExecutionContext, AgentTurnContext, AgentWorkerContext } from "./types"
 import { prepareWorkflowInputAttachments } from "./workflow-input-attachments"
@@ -143,7 +143,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
     agentId: agent.id,
     ...(threadId ? { threadId } : {}),
   })
-  const tools = aiSdkToolsFromAgentDefinitions({
+  const selectedTools = modelToolsFromAgentDefinitions({
     definitions: agent.tools,
     valueTypesById: context.valueTypesById,
     run: { id: runId, agentId: agent.id, ...(threadId ? { threadId } : {}) },
@@ -157,10 +157,11 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
 
   let sandboxWasUsed = false
   let ready: Promise<BashSandboxHandle>
-  tools.bash = createBashTool(() => {
+  const bash = createBashTool(() => {
     sandboxWasUsed = true
     return ready
   })
+  const tools = [...selectedTools, bash]
 
   ready = provisionSandbox({
     context,

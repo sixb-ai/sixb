@@ -8,8 +8,8 @@ import {
   type WorkflowIOSnapshot,
 } from "@sixb/core/internal/workflows"
 import { coerceAgentRunFinishReason } from "@sixb/core/storage"
-import { generateText, jsonSchema, Output, stepCountIs } from "ai"
-import { agentTraceFromAiSdkSteps } from "./ai-sdk-adapters"
+import { type JsonObject, runModelLoop } from "@sixb/llm"
+import { agentTraceFromModelSteps } from "./model-adapters"
 import type { AiModelCallRecorder } from "./model-call-recorder"
 import type { AgentTurnContext } from "./types"
 
@@ -41,53 +41,48 @@ export async function runWorkflowAgentNode(
     shape: input.agentStep.output as Readonly<Record<string, SchemaOrRef>>,
     valueTypesById: input.valueTypesById,
   })
-  const schema = jsonSchema<Record<string, unknown>>(
-    rawSchema as Parameters<typeof jsonSchema>[0],
-    {
-      validate(value) {
-        try {
-          const validated = validateWorkflowAgentStepOutput({
+
+  const timeout = new AbortController()
+  const timer = setTimeout(() => timeout.abort(), input.context.turnTimeoutMs)
+  try {
+    const signal = AbortSignal.any([input.signal, timeout.signal])
+    const result = await runModelLoop({
+      model: input.agent.model,
+      messages: [
+        {
+          role: "system",
+          content: buildAgentSystemPrompt({
+            instructions: input.agent.instructions,
+            addendum: input.context.systemAddendum,
+            mode: "task",
+          }),
+        },
+        { role: "user", content: [{ type: "text", text: input.prompt }] },
+      ],
+      tools: input.context.tools,
+      reasoning: input.agent.reasoning,
+      maxSteps,
+      output: {
+        name: input.agentStep.id,
+        schema: rawSchema as JsonObject,
+        validate(value) {
+          return validateWorkflowAgentStepOutput({
             workflowId: input.workflowId,
             agentStep: input.agentStep,
             value,
             valueTypesById: input.valueTypesById,
           })
-          return { success: true, value: { ...validated } }
-        } catch (error) {
-          return {
-            success: false,
-            error: error instanceof Error ? error : new Error(String(error)),
-          }
-        }
+        },
       },
-    }
-  )
-
-  const timeout = new AbortController()
-  const timer = setTimeout(() => timeout.abort(), input.context.turnTimeoutMs)
-  try {
-    const result = await generateText({
-      model: input.agent.model,
-      ...(input.agent.reasoning === undefined ? {} : { reasoning: input.agent.reasoning }),
-      ...(input.agent.providerOptions === undefined
-        ? {}
-        : { providerOptions: input.agent.providerOptions }),
-      system: buildAgentSystemPrompt({
-        instructions: input.agent.instructions,
-        addendum: input.context.systemAddendum,
-        mode: "task",
-      }),
-      prompt: input.prompt,
-      tools: input.context.tools,
-      stopWhen: stepCountIs(maxSteps),
-      output: Output.object({ schema, name: input.agentStep.id }),
-      prepareStep: input.usageRecorder.prepareStep,
-      onLanguageModelCallEnd: input.usageRecorder.onLanguageModelCallEnd,
-      abortSignal: AbortSignal.any([input.signal, timeout.signal]),
+      onModelCallEnd: input.usageRecorder.onModelCallEnd,
+      signal,
     })
 
-    // A final-step callback failure has no later `prepareStep` invocation to surface it.
     input.usageRecorder.assertHealthy()
+    if (result.status === "aborted") {
+      if (signal.reason instanceof Error) throw signal.reason
+      throw new DOMException("The model call was aborted.", "AbortError")
+    }
     const output = snapshotWorkflowAgentStepOutput({
       workflowId: input.workflowId,
       agentStep: input.agentStep,
@@ -98,7 +93,7 @@ export async function runWorkflowAgentNode(
       output,
       modelId: input.agent.model.modelId,
       finishReason: coerceAgentRunFinishReason(result.finishReason) ?? "unknown",
-      trace: agentTraceFromAiSdkSteps(result.steps, {
+      trace: agentTraceFromModelSteps(result.steps, {
         agentId: input.agent.id,
         workflowId: input.workflowId,
         workflowRunId: input.workflowRunId,

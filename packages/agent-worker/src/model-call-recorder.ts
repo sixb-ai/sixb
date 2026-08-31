@@ -2,9 +2,9 @@ import { randomUUID } from "node:crypto"
 import { omitUndefinedObjectProperties } from "@sixb/core/internal/agents"
 import type { AiUsageStorage, ReadonlyJsonObject, RecordAiModelCallInput } from "@sixb/core/storage"
 import { normalizeAiModelCallRecord } from "@sixb/core/storage"
-import type { LanguageModelCallEndEvent } from "ai"
-import { aiModelCallUsageFromAiSdk } from "./ai-sdk-adapters"
+import type { ModelCallEndEvent } from "@sixb/llm"
 import { AgentUsageRecordingError } from "./errors"
+import { aiModelCallUsageFromModel } from "./model-adapters"
 import { isPermanentAiUsageRecoveryError } from "./model-call-recovery"
 import type { RecoverAiModelCall } from "./types"
 
@@ -29,11 +29,8 @@ interface AiModelCallRecorderInternals {
 }
 
 /**
- * Persist every completed AI SDK provider call before the tool loop can begin another model step.
- *
- * AI SDK deliberately swallows lifecycle callback errors. This recorder therefore hands a failed
- * append to durable recovery and retains the failure for `prepareStep` to surface before another
- * provider call. Recovery can then continue independently without allowing unaccounted spend.
+ * Persist every completed provider call before the owned loop can begin another model step.
+ * Callback failures propagate through the loop, so unaccounted spend fails closed immediately.
  */
 export class AiModelCallRecorder {
   private readonly generateId: () => string
@@ -52,12 +49,10 @@ export class AiModelCallRecorder {
     this.sleep = internals.sleep ?? sleep
   }
 
-  readonly onLanguageModelCallEnd = async (event: LanguageModelCallEndEvent): Promise<void> => {
-    if (this.recordingError) return
+  readonly onModelCallEnd = async (event: ModelCallEndEvent): Promise<void> => {
+    if (this.recordingError) throw this.recordingError
 
     try {
-      // AI SDK's JSONObject permits optional object properties with `undefined`; omission is the
-      // canonical JSON representation of those properties. Storage still validates the result.
       const rawUsage =
         event.usage.raw === undefined
           ? undefined
@@ -69,14 +64,15 @@ export class AiModelCallRecorder {
         attempt: this.input.attempt,
         callId: event.callId,
         requesterGroupIds: this.input.requesterGroupIds,
-        providerId: event.provider,
+        providerId: event.providerId,
         requestedModelId: event.modelId,
+        ...(event.responseModelId === undefined ? {} : { responseModelId: event.responseModelId }),
         responseId: event.responseId,
-        usage: aiModelCallUsageFromAiSdk(event.usage),
+        usage: aiModelCallUsageFromModel(event.usage),
         ...(rawUsage === undefined ? {} : { rawUsage }),
         occurredAt: this.now(),
       }
-      // Reject malformed SDK/provider data before retrying storage or handing a poison record to
+      // Reject malformed provider data before retrying storage or handing a poison record to
       // the durable queue. The storage boundary repeats this validation defensively.
       normalizeAiModelCallRecord(record)
 
@@ -114,13 +110,8 @@ export class AiModelCallRecorder {
           : new AgentUsageRecordingError(this.input.errorRunId, event.callId, false, {
               cause: error,
             })
+      throw this.recordingError
     }
-  }
-
-  /** AI SDK invokes this before every step; a prior append failure prevents the next provider call. */
-  readonly prepareStep = (): undefined => {
-    this.assertHealthy()
-    return undefined
   }
 
   assertHealthy(): void {

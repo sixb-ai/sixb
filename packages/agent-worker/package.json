@@ -43,13 +43,12 @@
     ]
   },
   "dependencies": {
-    "ai": "^7.0.4"
+    "@sixb/llm": "workspace:^"
   },
   "peerDependencies": {
     "@sixb/core": "workspace:*"
   },
   "devDependencies": {
-    "@ai-sdk/provider": "^4.0.0",
     "@sixb/connector-exa": "workspace:*",
     "@sixb/core": "workspace:*",
     "@types/bun": "latest",

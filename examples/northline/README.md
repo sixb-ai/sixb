@@ -35,7 +35,7 @@ AI_GATEWAY_API_KEY=your_key bun --filter @sixb/example-northline dev
 Without `AI_GATEWAY_API_KEY`, Northline still starts, syncs, and runs normally; only model-backed
 assistant turns are unavailable. To customize the assistant, edit
 [`agents/operations-assistant.ts`](./agents/operations-assistant.ts) and change the model passed to
-`gateway()` and the `instructions` prompt. Agent commands run through the local sandbox provider by
+`gateway.model()` and the `instructions` prompt. Agent commands run through the local sandbox provider by
 default.
 
 ### Hosted sandbox

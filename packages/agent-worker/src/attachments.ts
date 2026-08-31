@@ -7,6 +7,7 @@ import type {
   FileRef,
 } from "@sixb/core"
 import type { AgentMessageRecord } from "@sixb/core/storage"
+import { type LanguageModel, resolveModelCapabilities } from "@sixb/llm"
 import { type AgentAttachmentLimits, processAgentImageAttachment } from "./image-attachments"
 
 const DEFAULT_AGENT_ATTACHMENT_LIMITS: AgentAttachmentLimits = {
@@ -497,12 +498,10 @@ async function maybeImageData(input: {
   }
 }
 
-export async function modelSupportsInlineImages(model: {
-  readonly supportedUrls?: PromiseLike<Record<string, RegExp[]>> | Record<string, RegExp[]>
-}): Promise<boolean> {
+export async function modelSupportsInlineImages(model: LanguageModel): Promise<boolean> {
   try {
-    const supportedUrls = await Promise.resolve(model.supportedUrls ?? {})
-    return Object.keys(supportedUrls).some((pattern) => mediaPatternMatchesImages(pattern))
+    const mediaTypes = (await resolveModelCapabilities(model)).inputMediaTypes
+    return mediaTypes === "any" || mediaTypes?.some(mediaPatternMatchesImages) === true
   } catch {
     return false
   }

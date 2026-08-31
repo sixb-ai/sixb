@@ -12,6 +12,9 @@
   "include": ["src/**/*"],
   "references": [
     {
+      "path": "../llm/tsconfig.build.json"
+    },
+    {
       "path": "../core/tsconfig.build.json"
     }
   ]

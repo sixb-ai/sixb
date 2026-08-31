@@ -17,7 +17,7 @@ export type {
   ToModelMessagesOptions,
 } from "./adapters"
 export {
-  fromAiSdk,
+  fromUiMessage,
   omitUndefinedObjectProperties,
   toModelMessages,
   toUiMessage,
@@ -86,6 +86,7 @@ export {
   type AgentMessagePart,
   type AgentMessagePartType,
   type AgentMessageRole,
+  type AgentProviderStatePart,
   type AgentReasoningPart,
   type AgentStepStartPart,
   type AgentTextPart,

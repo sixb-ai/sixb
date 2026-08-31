@@ -17,7 +17,6 @@ import {
   assertValidAgentToolInput,
   assertValidAgentToolName,
   assertValidLoopConfig,
-  assertValidProviderOptions,
   assertValidReasoningLevel,
   groupIdsFromDefinitions,
 } from "./validation"
@@ -75,7 +74,6 @@ export function defineAgent<const TId extends string>(
     throw new AgentDefinitionError("[Sixb] Agent model is required.")
   }
   assertValidReasoningLevel(config.reasoning)
-  assertValidProviderOptions(config.providerOptions)
   assertValidLoopConfig(config.loop)
   const groupIds = groupIdsFromDefinitions(id, config.groups)
   const tools = toolsFromDefinitions(id, config.tools)
@@ -86,7 +84,6 @@ export function defineAgent<const TId extends string>(
     name: config.name,
     model: config.model,
     ...(config.reasoning !== undefined ? { reasoning: config.reasoning } : {}),
-    ...(config.providerOptions !== undefined ? { providerOptions: config.providerOptions } : {}),
     instructions: config.instructions,
     groupIds,
     tools,

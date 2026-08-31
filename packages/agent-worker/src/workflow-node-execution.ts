@@ -173,8 +173,8 @@ export async function executeWorkflowAgentNode(
   } catch (error) {
     if (lostQueueDelivery(error, signal)) return
 
-    // Output parsing and tool handling can fail after the final provider callback. Accounting
-    // failure takes precedence because AI SDK otherwise swallows the callback error.
+    // Output parsing and tool handling can fail after the final provider callback. A retained
+    // accounting failure still takes precedence so usage loss can never be hidden.
     let executionError = error
     try {
       usageRecorder.assertHealthy()

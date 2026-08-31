@@ -155,6 +155,12 @@ const AgentFilePartSchema = z.object({
   providerMetadata: JsonValueSchema.optional(),
 })
 
+const AgentProviderStatePartSchema = z.object({
+  type: z.literal("provider-state"),
+  providerId: z.string(),
+  data: JsonValueSchema,
+})
+
 const AgentToolCallBaseSchema = z.object({
   type: z.literal("tool-call"),
   toolCallId: z.string(),
@@ -180,6 +186,7 @@ export const AgentMessagePartSchema = z.union([
   AgentReasoningPartSchema,
   AgentStepStartPartSchema,
   AgentFilePartSchema,
+  AgentProviderStatePartSchema,
   AgentContextPartSchema,
   AgentToolCallOutputSchema,
   AgentToolCallErrorSchema,

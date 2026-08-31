@@ -6531,6 +6531,22 @@ export type ListAgentThreadMessagesResponses = {
               | null
           }
         | {
+            type: "provider-state"
+            providerId: string
+            /**
+             * Any JSON-compatible value.
+             */
+            data:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+          }
+        | {
             context:
               | {
                   kind: "object"

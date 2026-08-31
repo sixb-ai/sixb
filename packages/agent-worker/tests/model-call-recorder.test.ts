@@ -11,7 +11,7 @@ import {
   normalizeAiModelCallRecord,
 } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
-import type { LanguageModelCallEndEvent } from "ai"
+import type { ModelCallEndEvent } from "@sixb/llm"
 import { AgentUsageRecordingError } from "../src/errors"
 import { AiModelCallRecorder } from "../src/model-call-recorder"
 
@@ -22,42 +22,27 @@ const emptySummary: AiUsageExecutionSummary = {
   usage: { reportingStatus: "unavailable" },
 }
 
-function callEndEvent(): LanguageModelCallEndEvent {
+function callEndEvent(): ModelCallEndEvent {
   return {
     callId: "call_1",
-    provider: "gateway",
+    providerId: "gateway",
     modelId: "openai/gpt-5",
-    finishReason: "stop",
+    responseModelId: "openai/gpt-5-2026-08-01",
     usage: {
       inputTokens: 12,
-      inputTokenDetails: {
-        noCacheTokens: 9,
-        cacheReadTokens: 3,
-        cacheWriteTokens: 1,
-      },
       outputTokens: 8,
-      outputTokenDetails: {
-        textTokens: 6,
-        reasoningTokens: 2,
-      },
-      totalTokens: 20,
+      uncachedInputTokens: 9,
+      cacheReadInputTokens: 3,
+      cacheWriteInputTokens: 1,
+      textOutputTokens: 6,
+      reasoningOutputTokens: 2,
       raw: {
         input_tokens: 12,
         output_tokens: 8,
         provider_meter: 4,
-        omitted_optional_meter: undefined,
       },
     },
-    content: [],
     responseId: "response_1",
-    performance: {
-      responseTimeMs: 100,
-      effectiveOutputTokensPerSecond: 80,
-      outputTokensPerSecond: 75,
-      inputTokensPerSecond: 120,
-      effectiveTotalTokensPerSecond: 200,
-      timeToFirstOutputMs: 20,
-    },
   }
 }
 
@@ -121,7 +106,7 @@ describe("AiModelCallRecorder", () => {
       },
     })
 
-    await usage.onLanguageModelCallEnd(callEndEvent())
+    await usage.onModelCallEnd(callEndEvent())
     expect(attempts).toBe(3)
     expect(delays).toEqual([10, 20])
     expect(inputs).toHaveLength(3)
@@ -134,6 +119,7 @@ describe("AiModelCallRecorder", () => {
       requesterGroupIds: ["support", "engineering"],
       providerId: "gateway",
       requestedModelId: "openai/gpt-5",
+      responseModelId: "openai/gpt-5-2026-08-01",
       responseId: "response_1",
       usage: {
         inputTokens: 12,
@@ -149,7 +135,7 @@ describe("AiModelCallRecorder", () => {
     })
     expect(inputs[1]).toEqual(inputs[0])
     expect(inputs[2]).toEqual(inputs[0])
-    expect(usage.prepareStep()).toBeUndefined()
+    expect(() => usage.assertHealthy()).not.toThrow()
   })
 
   test("deduplicates a repeated lifecycle callback without double-counting usage", async () => {
@@ -163,8 +149,8 @@ describe("AiModelCallRecorder", () => {
     })
 
     const event = callEndEvent()
-    await usage.onLanguageModelCallEnd(event)
-    await usage.onLanguageModelCallEnd(event)
+    await usage.onModelCallEnd(event)
+    await usage.onModelCallEnd(event)
 
     expect(nextId).toBe(2)
     expect(storage.snapshot().records.size).toBe(1)
@@ -180,32 +166,22 @@ describe("AiModelCallRecorder", () => {
   })
 
   test("preserves entirely missing callback usage without inventing zeroes", async () => {
-    // Default any omitted SDK count to zero in the adapter and both assertions below fail.
+    // Default any omitted provider count to zero in the adapter and both assertions below fail.
     const storage = await createInMemoryUsageStorage()
     const usage = recorder(storage, {
       generateId: () => "usage_missing",
       now: () => occurredAt,
     })
-    const event: LanguageModelCallEndEvent = {
+    const event: ModelCallEndEvent = {
       ...callEndEvent(),
       usage: {
         inputTokens: undefined,
-        inputTokenDetails: {
-          noCacheTokens: undefined,
-          cacheReadTokens: undefined,
-          cacheWriteTokens: undefined,
-        },
         outputTokens: undefined,
-        outputTokenDetails: {
-          textTokens: undefined,
-          reasoningTokens: undefined,
-        },
-        totalTokens: undefined,
         raw: undefined,
       },
     }
 
-    await usage.onLanguageModelCallEnd(event)
+    await usage.onModelCallEnd(event)
 
     const [record] = storage.snapshot().records.values()
     expect(record?.usage).toEqual({ reportingStatus: "unavailable" })
@@ -247,16 +223,15 @@ describe("AiModelCallRecorder", () => {
       }
     )
 
-    await expect(usage.onLanguageModelCallEnd(callEndEvent())).resolves.toBeUndefined()
-    expect(attempts).toBe(3)
-    expect(recovered).toHaveLength(1)
-    expect(recovered[0]).toMatchObject({ executionId, callId: "call_1" })
     let failure: unknown
     try {
-      usage.prepareStep()
+      await usage.onModelCallEnd(callEndEvent())
     } catch (error) {
       failure = error
     }
+    expect(attempts).toBe(3)
+    expect(recovered).toHaveLength(1)
+    expect(recovered[0]).toMatchObject({ executionId, callId: "call_1" })
     expect(failure).toBeInstanceOf(AgentUsageRecordingError)
     expect(failure).toMatchObject({ recoveryScheduled: true })
   })
@@ -288,15 +263,14 @@ describe("AiModelCallRecorder", () => {
       }
     )
 
-    await expect(usage.onLanguageModelCallEnd(callEndEvent())).resolves.toBeUndefined()
-    expect(storageAttempts).toBe(3)
-    expect(recoveryAttempts).toBe(3)
     let failure: unknown
     try {
-      usage.prepareStep()
+      await usage.onModelCallEnd(callEndEvent())
     } catch (error) {
       failure = error
     }
+    expect(storageAttempts).toBe(3)
+    expect(recoveryAttempts).toBe(3)
     expect(failure).toBeInstanceOf(AgentUsageRecordingError)
     expect(failure).toMatchObject({ recoveryScheduled: false })
   })
@@ -324,15 +298,14 @@ describe("AiModelCallRecorder", () => {
       }
     )
 
-    await usage.onLanguageModelCallEnd(callEndEvent())
-    expect(storageAttempts).toBe(1)
-    expect(recoveryAttempts).toBe(0)
     let failure: unknown
     try {
-      usage.prepareStep()
+      await usage.onModelCallEnd(callEndEvent())
     } catch (error) {
       failure = error
     }
+    expect(storageAttempts).toBe(1)
+    expect(recoveryAttempts).toBe(0)
     expect(failure).toBeInstanceOf(AgentUsageRecordingError)
     expect(failure).toMatchObject({ recoveryScheduled: false })
   })
@@ -357,8 +330,10 @@ describe("AiModelCallRecorder", () => {
       },
     })
 
-    await expect(usage.onLanguageModelCallEnd(callEndEvent())).resolves.toBeUndefined()
+    await expect(usage.onModelCallEnd(callEndEvent())).rejects.toBeInstanceOf(
+      AgentUsageRecordingError
+    )
     expect(records).toBe(0)
-    expect(() => usage.prepareStep()).toThrow(AgentUsageRecordingError)
+    expect(() => usage.assertHealthy()).toThrow(AgentUsageRecordingError)
   })
 })

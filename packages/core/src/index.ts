@@ -796,6 +796,7 @@ export type {
 
 // ── Runtime ─────────────────────────────────────────────────
 
+export type { LanguageModel, ProviderData } from "@sixb/llm"
 export type { ActionRunsRuntime, ActionsRuntime } from "./actions/execution"
 export type {
   AgentRunListResult,
@@ -942,6 +943,7 @@ export type {
   AgentModelToolCallPart,
   AgentModelToolOutput,
   AgentModelToolResultPart,
+  AgentProviderStatePart,
   AgentReasoningLevel,
   AgentReasoningPart,
   AgentRequestErrorCode,

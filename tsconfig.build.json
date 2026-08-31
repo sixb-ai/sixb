@@ -92,6 +92,12 @@
       "path": "packages/core/tsconfig.build.json"
     },
     {
+      "path": "packages/llm/tsconfig.build.json"
+    },
+    {
+      "path": "packages/llm-openresponses/tsconfig.build.json"
+    },
+    {
       "path": "packages/orchestrator/tsconfig.build.json"
     },
     {

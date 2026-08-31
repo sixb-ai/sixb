@@ -29,7 +29,7 @@ await worker.start()
 - The worker transitions the durable run from `queued` to `running` when it claims the job.
 - The queue lease is the sole authority for liveness and redelivery; the worker renews it during
   turns.
-- Every completed `streamText` and `generateText` provider call is appended to `storage.aiUsage`;
+- Every completed provider call is appended to `storage.aiUsage`;
   API conversation and workflow-agent summaries are derived from that ledger. Run rows do not store
   a second usage aggregate.
 - Every delivery rotates a durable execution token that fences stale finalization after redelivery.
@@ -41,19 +41,19 @@ await worker.start()
 
 ## Usage accounting
 
-Every completed conversation and workflow-agent provider call observed by the AI SDK lifecycle is
+Every completed conversation and workflow-agent provider call observed by the Sixb model loop is
 appended to `storage.aiUsage`, including individual calls in tool loops and calls completed before
 later cancellation, tool failure, output validation, or execution ownership loss. Workflow nodes
 use their own durable execution and inherit the parent workflow's admission-time group snapshot.
 Usage writes are intentionally not fenced: a stale worker cannot finalize the execution, but a
 provider call it completed remains billable.
 
-The AI SDK swallows lifecycle callback errors, so the worker retries the idempotent append and hands
-any persistent infrastructure failure to a durable job in `queues.agents`. Recovery retries with
-bounded backoff and cannot trigger another provider call. Once an append is deferred, `prepareStep`
-blocks the next model step and the owning Agent run or workflow fails closed while accounting
-recovery continues independently. If the durable handoff also fails, the same stop prevents silent
-usage loss. This local path cannot close a process-crash window before lifecycle delivery;
+The owned loop awaits lifecycle callbacks. The worker retries the idempotent append and hands any
+persistent infrastructure failure to a durable job in `queues.agents`. Recovery retries with
+bounded backoff and cannot trigger another provider call. Once an append is deferred, the callback
+rejects before the next model step and the owning Agent run or workflow fails closed while
+accounting recovery continues independently. If the durable handoff also fails, the same stop
+prevents silent usage loss. This local path cannot close a process-crash window before delivery;
 provider-side reconciliation is the appropriate later layer for that guarantee.
 
 ## Live Stream
@@ -67,7 +67,7 @@ The default `StreamSink` writes:
 - `agent.message.finalized`
 - `agent.run.finished`
 
-Live AI SDK UI chunks are broker records only. They are not inserted into `agent_messages`.
+Live Sixb model-loop chunks are broker records only. They are not inserted into `agent_messages`.
 `agent_messages` stores the final assistant message after the model turn completes.
 
 The default sink is created with `createBrokerStreamSink(...)`. Tests can pass `NOOP_STREAM_SINK` or

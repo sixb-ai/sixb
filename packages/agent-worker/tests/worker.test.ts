@@ -2,12 +2,6 @@ import { describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type {
-  LanguageModelV4,
-  LanguageModelV4CallOptions,
-  LanguageModelV4StreamPart,
-  LanguageModelV4Usage,
-} from "@ai-sdk/provider"
 import { exa } from "@sixb/connector-exa"
 import { exaWebFetch, exaWebSearch } from "@sixb/connector-exa/agent-tools"
 import {
@@ -65,8 +59,7 @@ import {
   createTestSixb,
   createTestWorkflowExecution,
 } from "@sixb/core/testing"
-import { jsonSchema, type ToolSet, tool } from "ai"
-import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test"
+import type { LanguageModel, ModelTool, ModelUsage } from "@sixb/llm"
 import { AgentWorker, type AgentWorkerOptions } from "../src"
 import { loadAgentSkills } from "../src/agent-skills"
 import { normalizeApiBaseUrl } from "../src/api-url"
@@ -84,6 +77,7 @@ import type {
   AgentWorkerStorage,
 } from "../src/types"
 import { waitFor, writeProjectSkill } from "./helpers"
+import { testStream, WorkerTestModel, type WorkerTestStreamEvent } from "./worker-model-fixture"
 
 const PROJECT_ID = "agent-worker-tests"
 const TEST_AGENT_API_BASE_URL = "http://localhost:3002/api/"
@@ -91,29 +85,34 @@ const REQUESTER = { type: "user", id: "usr_requester" } as const
 const AGENT_PRINCIPAL = { type: "serviceAccount", id: "svc_agent_assistant" } as const
 const AGENT_RUNTIME_GROUP = defineGroup("agent-runtime", { label: "Agent runtime" })
 
-const USAGE: LanguageModelV4Usage = {
-  inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
-  outputTokens: { total: 7, text: 7, reasoning: 0 },
+const USAGE: ModelUsage = {
+  inputTokens: 10,
+  outputTokens: 7,
+  uncachedInputTokens: 10,
+  cacheReadInputTokens: 0,
+  cacheWriteInputTokens: 0,
+  textOutputTokens: 7,
+  reasoningOutputTokens: 0,
   raw: { input_tokens: 10, output_tokens: 7, provider_meter: 1 },
 }
 
-function stream(chunks: LanguageModelV4StreamPart[]) {
-  return { stream: convertArrayToReadableStream(chunks) }
+function stream(chunks: WorkerTestStreamEvent[]) {
+  return testStream(chunks)
 }
 
-function finish(unified: "stop" | "tool-calls"): LanguageModelV4StreamPart {
-  return { type: "finish", finishReason: { unified, raw: unified }, usage: USAGE }
+function finish(unified: "stop" | "tool-calls"): WorkerTestStreamEvent {
+  return { type: "finish", finishReason: unified, rawFinishReason: unified, usage: USAGE }
 }
 
 /**
  * A model that, on its first call, calls the `echo` tool, then on its second call answers with
- * reasoning + text. A stateful `doStream` (not the array form) guarantees per-call ordering.
+ * reasoning + text. A stateful stream handler guarantees per-call ordering.
  */
-function toolThenAnswerModel(captureReplay?: (prompt: string) => void): MockLanguageModelV4 {
+function toolThenAnswerModel(captureReplay?: (prompt: string) => void): WorkerTestModel {
   let call = 0
-  return new MockLanguageModelV4({
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async (options) => {
+    stream: async (options) => {
       call += 1
       if (call === 1) {
         return stream([
@@ -128,7 +127,7 @@ function toolThenAnswerModel(captureReplay?: (prompt: string) => void): MockLang
         ])
       }
       if (call === 3) {
-        captureReplay?.(JSON.stringify(options.prompt))
+        captureReplay?.(JSON.stringify(options.messages))
       }
       return stream([
         { type: "stream-start", warnings: [] },
@@ -144,14 +143,14 @@ function toolThenAnswerModel(captureReplay?: (prompt: string) => void): MockLang
   })
 }
 
-function invalidMetadataAnswerModel(): MockLanguageModelV4 {
+function invalidMetadataAnswerModel(): WorkerTestModel {
   const invalidProviderMetadata = { mock: { generatedAt: new Date() } } as never
-  return new MockLanguageModelV4({
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async () =>
+    stream: async () =>
       stream([
         { type: "stream-start", warnings: [] },
-        { type: "text-start", id: "answer", providerMetadata: invalidProviderMetadata },
+        { type: "text-start", id: "answer", providerData: invalidProviderMetadata },
         { type: "text-delta", id: "answer", delta: "Done" },
         { type: "text-end", id: "answer" },
         finish("stop"),
@@ -159,11 +158,11 @@ function invalidMetadataAnswerModel(): MockLanguageModelV4 {
   })
 }
 
-function webSearchThenAnswerModel(): MockLanguageModelV4 {
+function webSearchThenAnswerModel(): WorkerTestModel {
   let call = 0
-  return new MockLanguageModelV4({
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async () => {
+    stream: async () => {
       call += 1
       if (call === 1) {
         return stream([
@@ -190,11 +189,11 @@ function webSearchThenAnswerModel(): MockLanguageModelV4 {
 
 function webFetchThenAnswerModel(
   config: { readonly captureReplay?: (prompt: string) => void; readonly url?: string } = {}
-): MockLanguageModelV4 {
+): WorkerTestModel {
   let call = 0
-  return new MockLanguageModelV4({
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async (options) => {
+    stream: async (options) => {
       call += 1
       if (call === 1) {
         return stream([
@@ -208,7 +207,7 @@ function webFetchThenAnswerModel(
           finish("tool-calls"),
         ])
       }
-      if (call === 3) config.captureReplay?.(JSON.stringify(options.prompt))
+      if (call === 3) config.captureReplay?.(JSON.stringify(options.messages))
       return stream([
         { type: "stream-start", warnings: [] },
         { type: "text-start", id: `answer-${call}` },
@@ -220,10 +219,10 @@ function webFetchThenAnswerModel(
   })
 }
 
-function answerModel(captureTools?: (names: readonly string[]) => void): MockLanguageModelV4 {
-  return new MockLanguageModelV4({
+function answerModel(captureTools?: (names: readonly string[]) => void): WorkerTestModel {
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async (options) => {
+    stream: async (options) => {
       captureTools?.((options.tools ?? []).map((tool) => tool.name))
       return stream([
         { type: "stream-start", warnings: [] },
@@ -236,11 +235,11 @@ function answerModel(captureTools?: (names: readonly string[]) => void): MockLan
   })
 }
 
-function failingToolThenAnswerModel(captureReplay: (prompt: string) => void): MockLanguageModelV4 {
+function failingToolThenAnswerModel(captureReplay: (prompt: string) => void): WorkerTestModel {
   let call = 0
-  return new MockLanguageModelV4({
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async (options) => {
+    stream: async (options) => {
       call += 1
       if (call === 1) {
         return stream([
@@ -255,7 +254,7 @@ function failingToolThenAnswerModel(captureReplay: (prompt: string) => void): Mo
         ])
       }
       if (call === 3) {
-        captureReplay(JSON.stringify(options.prompt))
+        captureReplay(JSON.stringify(options.messages))
       }
       return stream([
         { type: "stream-start", warnings: [] },
@@ -268,11 +267,11 @@ function failingToolThenAnswerModel(captureReplay: (prompt: string) => void): Mo
   })
 }
 
-function slowAnswerModel(delayMs: number): MockLanguageModelV4 {
+function slowAnswerModel(delayMs: number): WorkerTestModel {
   let call = 0
-  return new MockLanguageModelV4({
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async () => {
+    stream: async () => {
       call += 1
       await Bun.sleep(delayMs)
       return stream([
@@ -286,11 +285,11 @@ function slowAnswerModel(delayMs: number): MockLanguageModelV4 {
   })
 }
 
-function toolOnlyModel(): MockLanguageModelV4 {
+function toolOnlyModel(): WorkerTestModel {
   let call = 0
-  return new MockLanguageModelV4({
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async () => {
+    stream: async () => {
       call += 1
       return stream([
         { type: "stream-start", warnings: [] },
@@ -306,10 +305,10 @@ function toolOnlyModel(): MockLanguageModelV4 {
   })
 }
 
-function structuredAnswerModel(): MockLanguageModelV4 {
-  return new MockLanguageModelV4({
+function structuredAnswerModel(): WorkerTestModel {
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doGenerate: async () => ({
+    generate: async () => ({
       content: [
         {
           type: "text",
@@ -323,10 +322,10 @@ function structuredAnswerModel(): MockLanguageModelV4 {
   })
 }
 
-function invalidStructuredAnswerModel(): MockLanguageModelV4 {
-  return new MockLanguageModelV4({
+function invalidStructuredAnswerModel(): WorkerTestModel {
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doGenerate: async () => ({
+    generate: async () => ({
       content: [{ type: "text", text: JSON.stringify({ answer: 42, confidence: "high" }) }],
       finishReason: { unified: "stop", raw: "stop" },
       usage: USAGE,
@@ -335,11 +334,11 @@ function invalidStructuredAnswerModel(): MockLanguageModelV4 {
   })
 }
 
-function structuredToolThenProviderFailureModel(): MockLanguageModelV4 {
+function structuredToolThenProviderFailureModel(): WorkerTestModel {
   let call = 0
-  return new MockLanguageModelV4({
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doGenerate: async () => {
+    generate: async () => {
       call += 1
       if (call === 1) {
         return {
@@ -363,12 +362,12 @@ function structuredToolThenProviderFailureModel(): MockLanguageModelV4 {
 
 function structuredToolThenAnswerModel(
   captureSystem?: (system: string | undefined) => void
-): MockLanguageModelV4 {
+): WorkerTestModel {
   let call = 0
-  return new MockLanguageModelV4({
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doGenerate: async (options) => {
-      captureSystem?.(options.prompt.find((message) => message.role === "system")?.content)
+    generate: async (options) => {
+      captureSystem?.(options.messages.find((message) => message.role === "system")?.content)
       call += 1
       if (call === 1) {
         return {
@@ -400,11 +399,11 @@ function structuredToolThenAnswerModel(
   })
 }
 
-function bashThenAnswerModel(): MockLanguageModelV4 {
+function bashThenAnswerModel(): WorkerTestModel {
   let call = 0
-  return new MockLanguageModelV4({
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async () => {
+    stream: async () => {
       call += 1
       if (call === 1) {
         return stream([
@@ -433,11 +432,11 @@ function bashThenAnswerModel(): MockLanguageModelV4 {
   })
 }
 
-function outputBashThenAnswerModel(): MockLanguageModelV4 {
+function outputBashThenAnswerModel(): WorkerTestModel {
   let call = 0
-  return new MockLanguageModelV4({
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async () => {
+    stream: async () => {
       call += 1
       if (call === 1) {
         return stream([
@@ -464,12 +463,12 @@ function outputBashThenAnswerModel(): MockLanguageModelV4 {
 
 function apiBashThenAnswerModel(
   captureSystem?: (system: string | undefined) => void
-): MockLanguageModelV4 {
+): WorkerTestModel {
   let call = 0
-  return new MockLanguageModelV4({
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async (options) => {
-      captureSystem?.(options.prompt.find((message) => message.role === "system")?.content)
+    stream: async (options) => {
+      captureSystem?.(options.messages.find((message) => message.role === "system")?.content)
       call += 1
       if (call === 1) {
         return stream([
@@ -497,7 +496,7 @@ function apiBashThenAnswerModel(
 }
 
 function controlledBlockingAnswerModel(): {
-  readonly model: MockLanguageModelV4
+  readonly model: WorkerTestModel
   startedCount(): number
   waitForStarted(count: number): Promise<void>
   releaseAll(): void
@@ -515,10 +514,10 @@ function controlledBlockingAnswerModel(): {
   }
 
   return {
-    model: new MockLanguageModelV4({
+    model: new WorkerTestModel({
       modelId: "mock-model",
-      doStream: async (options) => ({
-        stream: new ReadableStream<LanguageModelV4StreamPart>({
+      stream: async (options) => ({
+        stream: new ReadableStream<WorkerTestStreamEvent>({
           start(controller) {
             started += 1
             const callId = started
@@ -537,10 +536,10 @@ function controlledBlockingAnswerModel(): {
             controller.enqueue({ type: "stream-start", warnings: [] })
             releases.push(release)
             notifyStarted()
-            if (options.abortSignal?.aborted) {
+            if (options.signal.aborted) {
               abort()
             } else {
-              options.abortSignal?.addEventListener("abort", abort, { once: true })
+              options.signal.addEventListener("abort", abort, { once: true })
             }
           },
         }),
@@ -568,16 +567,16 @@ function controlledBlockingAnswerModel(): {
 // Streams `partial` text and then blocks until the turn is aborted, so a cancel lands mid-response
 // with real streamed content to persist.
 function partialTextThenBlockingModel(partial: string): {
-  readonly model: MockLanguageModelV4
+  readonly model: WorkerTestModel
   waitForStarted(): Promise<void>
 } {
   let started = 0
   const waiters: Array<() => void> = []
   return {
-    model: new MockLanguageModelV4({
+    model: new WorkerTestModel({
       modelId: "mock-model",
-      doStream: async (options) => ({
-        stream: new ReadableStream<LanguageModelV4StreamPart>({
+      stream: async (options) => ({
+        stream: new ReadableStream<WorkerTestStreamEvent>({
           start(controller) {
             started += 1
             for (const resolve of waiters.splice(0)) resolve()
@@ -586,10 +585,10 @@ function partialTextThenBlockingModel(partial: string): {
             controller.enqueue({ type: "text-delta", id: "t1", delta: partial })
             // No text-end / finish: the turn hangs here until the abort signal errors the stream.
             const abort = () => controller.error(new DOMException("Aborted", "AbortError"))
-            if (options.abortSignal?.aborted) {
+            if (options.signal.aborted) {
               abort()
             } else {
-              options.abortSignal?.addEventListener("abort", abort, { once: true })
+              options.signal.addEventListener("abort", abort, { once: true })
             }
           },
         }),
@@ -602,20 +601,33 @@ function partialTextThenBlockingModel(partial: string): {
   }
 }
 
-const echoTool: ToolSet = {
-  echo: tool({
+const echoTool: readonly ModelTool[] = [
+  {
+    name: "echo",
     description: "Echo a value back.",
-    inputSchema: jsonSchema<{ value: string }>({
+    inputSchema: {
       type: "object",
       properties: { value: { type: "string" } },
       required: ["value"],
       additionalProperties: false,
-    }),
-    async execute(input) {
-      return { echoed: input.value }
     },
-  }),
-}
+    parseInput(input) {
+      if (
+        typeof input !== "object" ||
+        input === null ||
+        Array.isArray(input) ||
+        typeof (input as { value?: unknown }).value !== "string"
+      ) {
+        throw new TypeError("echo.value must be a string")
+      }
+      return input as { readonly value: string }
+    },
+    async execute(input) {
+      return { echoed: (input as { readonly value: string }).value }
+    },
+    errorText: () => "Echo failed.",
+  },
+]
 
 const echoAgentTool = defineAgentTool("echo")
   .description("Echo a value back.")
@@ -854,12 +866,11 @@ class FailingSandboxFactory implements SandboxFactory {
 }
 
 function buildSixb(
-  model: LanguageModelV4,
+  model: LanguageModel,
   broker: Broker = new InMemoryBroker(),
   sandboxes: SandboxFactory = new RecordingSandboxFactory(),
   options: {
     readonly reasoning?: AgentReasoningLevel
-    readonly providerOptions?: LanguageModelV4CallOptions["providerOptions"]
     readonly projectRoot?: string
     readonly agentTools?: readonly AgentToolDefinition[]
     readonly connectors?: readonly ConnectorDefinition[]
@@ -869,7 +880,6 @@ function buildSixb(
     name: "Assistant",
     model,
     ...(options.reasoning === undefined ? {} : { reasoning: options.reasoning }),
-    ...(options.providerOptions === undefined ? {} : { providerOptions: options.providerOptions }),
     instructions: "You are a helpful test assistant.",
     groups: [AGENT_RUNTIME_GROUP],
     ...(options.agentTools === undefined ? {} : { tools: options.agentTools }),
@@ -892,7 +902,7 @@ function buildSixb(
 }
 
 function buildSixbWithEchoTool(
-  model: LanguageModelV4,
+  model: LanguageModel,
   broker: Broker = new InMemoryBroker(),
   sandboxes: SandboxFactory = new RecordingSandboxFactory()
 ): TestSixb {
@@ -956,7 +966,7 @@ async function seedRequesterUser(storage: Storage, principal = REQUESTER): Promi
 }
 
 async function queueWorkflowAgentNode(input: {
-  readonly model: LanguageModelV4
+  readonly model: LanguageModel
   readonly tools?: readonly AgentToolDefinition[]
   readonly storage?: Storage
   readonly runId: string
@@ -1210,16 +1220,16 @@ async function reserveRequestedRun(
 }
 
 async function runBashTool(
-  context: { readonly tools: ToolSet },
+  context: { readonly tools: readonly ModelTool[] },
   command: string
 ): Promise<{ readonly stdout: string }> {
-  const bash = context.tools.bash as unknown as {
-    execute(
-      input: { readonly command: string },
-      options: { readonly abortSignal?: AbortSignal }
-    ): Promise<{ readonly stdout: string }>
-  }
-  return bash.execute({ command }, { abortSignal: new AbortController().signal })
+  const bash = context.tools.find((candidate) => candidate.name === "bash")
+  if (!bash) throw new Error("expected bash tool")
+  const input = bash.parseInput({ command })
+  return bash.execute(input, {
+    signal: new AbortController().signal,
+    callId: "test-bash-call",
+  }) as Promise<{ readonly stdout: string }>
 }
 
 function stdoutValue(stdout: string, key: string): string {
@@ -1371,18 +1381,18 @@ function withObservedAgentMessageAppendStorage(
 }
 
 /** A model whose stream opens then hangs until aborted — used to force a turn timeout. */
-function hangingModel(): MockLanguageModelV4 {
-  return new MockLanguageModelV4({
+function hangingModel(): WorkerTestModel {
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async (options) => ({
-      stream: new ReadableStream<LanguageModelV4StreamPart>({
+    stream: async (options) => ({
+      stream: new ReadableStream<WorkerTestStreamEvent>({
         start(controller) {
           controller.enqueue({ type: "stream-start", warnings: [] })
           const abort = () => controller.error(new DOMException("Aborted", "AbortError"))
-          if (options.abortSignal?.aborted) {
+          if (options.signal.aborted) {
             abort()
           } else {
-            options.abortSignal?.addEventListener("abort", abort, { once: true })
+            options.signal.addEventListener("abort", abort, { once: true })
           }
         },
       }),
@@ -1856,9 +1866,9 @@ describe("AgentWorker", () => {
 
   test("surfaces final workflow accounting failure when durable handoff also fails", async () => {
     let modelCalls = 0
-    const model = new MockLanguageModelV4({
+    const model = new WorkerTestModel({
       modelId: "mock-model",
-      doGenerate: async () => {
+      generate: async () => {
         modelCalls += 1
         return {
           content: [
@@ -2085,9 +2095,9 @@ describe("AgentWorker", () => {
 
   test("translates a failed agent execution into the parent workflow vocabulary", async () => {
     const originalError = new Error("workflow agent provider failed")
-    const model = new MockLanguageModelV4({
+    const model = new WorkerTestModel({
       modelId: "mock-model",
-      doGenerate: async () => {
+      generate: async () => {
         throw originalError
       },
     })
@@ -2412,10 +2422,10 @@ describe("AgentWorker", () => {
 
   test("adds text attachment context to model prompts", async () => {
     let capturedPrompt: unknown
-    const model = new MockLanguageModelV4({
+    const model = new WorkerTestModel({
       modelId: "mock-model",
-      doStream: async (options) => {
-        capturedPrompt = options.prompt
+      stream: async (options) => {
+        capturedPrompt = options.messages
         return stream([
           { type: "stream-start", warnings: [] },
           { type: "text-start", id: "t" },
@@ -2463,11 +2473,11 @@ describe("AgentWorker", () => {
 
   test("inlines supported images only when the Bun runtime provides image processing", async () => {
     let capturedPrompt: unknown
-    const model = new MockLanguageModelV4({
+    const model = new WorkerTestModel({
       modelId: "mock-model",
-      supportedUrls: { "image/*": [/^data:/] },
-      doStream: async (options) => {
-        capturedPrompt = options.prompt
+      capabilities: { inputMediaTypes: ["image/*"] },
+      stream: async (options) => {
+        capturedPrompt = options.messages
         return stream([
           { type: "stream-start", warnings: [] },
           { type: "text-start", id: "t" },
@@ -2526,10 +2536,10 @@ describe("AgentWorker", () => {
 
   test("keeps image attachments metadata-only when the model does not advertise images", async () => {
     let capturedPrompt: unknown
-    const model = new MockLanguageModelV4({
+    const model = new WorkerTestModel({
       modelId: "mock-model",
-      doStream: async (options) => {
-        capturedPrompt = options.prompt
+      stream: async (options) => {
+        capturedPrompt = options.messages
         return stream([
           { type: "stream-start", warnings: [] },
           { type: "text-start", id: "t" },
@@ -3445,9 +3455,9 @@ describe("AgentWorker", () => {
 
   test("hands a failed usage append to the queue and fails closed before another provider call", async () => {
     let modelCalls = 0
-    const model = new MockLanguageModelV4({
+    const model = new WorkerTestModel({
       modelId: "mock-model",
-      doStream: async () => {
+      stream: async () => {
         modelCalls += 1
         if (modelCalls === 1) {
           return stream([
@@ -3598,9 +3608,9 @@ describe("AgentWorker", () => {
 
   test("fails the run before another provider call when storage and recovery queue fail", async () => {
     let modelCalls = 0
-    const model = new MockLanguageModelV4({
+    const model = new WorkerTestModel({
       modelId: "mock-model",
-      doStream: async () => {
+      stream: async () => {
         modelCalls += 1
         if (modelCalls === 1) {
           return stream([
@@ -4905,10 +4915,10 @@ describe("AgentWorker", () => {
 
   test("adds concise Sixb context to every model system prompt", async () => {
     let capturedSystem: string | undefined
-    const model = new MockLanguageModelV4({
+    const model = new WorkerTestModel({
       modelId: "mock-model",
-      doStream: async (options) => {
-        capturedSystem = options.prompt.find((message) => message.role === "system")?.content
+      stream: async (options) => {
+        capturedSystem = options.messages.find((message) => message.role === "system")?.content
         return stream([
           { type: "stream-start", warnings: [] },
           { type: "text-start", id: "t" },
@@ -4928,7 +4938,7 @@ describe("AgentWorker", () => {
         agentPrincipal: AGENT_PRINCIPAL,
         storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
-        tools: {},
+        tools: [],
         systemAddendum: "Extra sandbox context.",
         streamSink: NOOP_STREAM_SINK,
         recoverAiModelCall: recoverAiModelCall(sixb),
@@ -4955,14 +4965,12 @@ describe("AgentWorker", () => {
     )
   })
 
-  test("passes agent model options into streamText", async () => {
+  test("passes agent reasoning into the owned model request", async () => {
     let capturedReasoning: unknown
-    let capturedProviderOptions: unknown
-    const model = new MockLanguageModelV4({
+    const model = new WorkerTestModel({
       modelId: "mock-model",
-      doStream: async (options) => {
+      stream: async (options) => {
         capturedReasoning = options.reasoning
-        capturedProviderOptions = options.providerOptions
         return stream([
           { type: "stream-start", warnings: [] },
           { type: "text-start", id: "t" },
@@ -4974,7 +4982,6 @@ describe("AgentWorker", () => {
     })
     const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
       reasoning: "high",
-      providerOptions: { openai: { reasoningSummary: "detailed" } },
     })
     const request = await requestAgent(sixb, { agentId: "assistant", text: "hello" })
     const run = await reserveRequestedRun(sixb, request)
@@ -4985,7 +4992,7 @@ describe("AgentWorker", () => {
         agentPrincipal: AGENT_PRINCIPAL,
         storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
-        tools: {},
+        tools: [],
         streamSink: NOOP_STREAM_SINK,
         recoverAiModelCall: recoverAiModelCall(sixb),
         defaultMaxSteps: 4,
@@ -4997,15 +5004,14 @@ describe("AgentWorker", () => {
     })
 
     expect(capturedReasoning).toBe("high")
-    expect(capturedProviderOptions).toEqual({ openai: { reasoningSummary: "detailed" } })
   })
 
   test("reports a terminal model failure exactly once with the original error", async () => {
     const originalError = new Error("provider boom")
-    const failingModel = new MockLanguageModelV4({
+    const failingModel = new WorkerTestModel({
       modelId: "mock-model",
-      doStream: async () => ({
-        stream: new ReadableStream<LanguageModelV4StreamPart>({
+      stream: async () => ({
+        stream: new ReadableStream<WorkerTestStreamEvent>({
           start(controller) {
             controller.enqueue({ type: "stream-start", warnings: [] })
             controller.error(originalError)
@@ -5078,9 +5084,9 @@ describe("AgentWorker", () => {
   test("fails the run when the sandbox cannot be provisioned (no bash used)", async () => {
     // The model answers without ever invoking bash. Provisioning runs concurrently and fails; the
     // run must be recorded `failed` rather than finalizing as a success with no working sandbox.
-    const answerModel = new MockLanguageModelV4({
+    const answerModel = new WorkerTestModel({
       modelId: "mock-model",
-      doStream: async () =>
+      stream: async () =>
         stream([
           { type: "stream-start", warnings: [] },
           { type: "text-start", id: "t" },
@@ -5128,17 +5134,17 @@ describe("AgentWorker", () => {
 
   test("cancels the run when the worker is stopped mid-turn", async () => {
     // A model whose stream blocks until the call is aborted, so the turn is reliably in-flight.
-    const blockingModel = new MockLanguageModelV4({
+    const blockingModel = new WorkerTestModel({
       modelId: "mock-model",
-      doStream: async (options) => {
-        const blocked = new ReadableStream<LanguageModelV4StreamPart>({
+      stream: async (options) => {
+        const blocked = new ReadableStream<WorkerTestStreamEvent>({
           start(controller) {
             controller.enqueue({ type: "stream-start", warnings: [] })
             const abort = () => controller.error(new DOMException("Aborted", "AbortError"))
-            if (options.abortSignal?.aborted) {
+            if (options.signal.aborted) {
               abort()
             } else {
-              options.abortSignal?.addEventListener("abort", abort, { once: true })
+              options.signal.addEventListener("abort", abort, { once: true })
             }
           },
         })

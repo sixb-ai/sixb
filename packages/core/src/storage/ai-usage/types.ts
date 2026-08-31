@@ -37,14 +37,14 @@ export interface RecordAiModelCallInput {
   readonly executionId: string
   /** Queue delivery attempt that made the provider call. */
   readonly attempt: number
-  /** AI SDK generation ID. Tool-loop model calls share it and are distinguished by responseId. */
+  /** Sixb model-loop call ID. Tool-loop calls are also distinguished by responseId. */
   readonly callId: string
   /**
    * Durable group memberships snapshotted when the parent run was admitted. The requester itself
    * is read from the immutable execution record.
    */
   readonly requesterGroupIds: readonly string[]
-  /** AI SDK provider that handled the call, such as `openai`, `anthropic`, or `gateway`. */
+  /** Provider adapter that handled the call, such as `openai`, `anthropic`, or `gateway`. */
   readonly providerId: string
   readonly requestedModelId: string
   /** Provider-returned model identity when the capture path exposes it. */

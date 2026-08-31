@@ -344,7 +344,7 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@ai-sdk/provider": "^4.0.0"
+    "@sixb/llm": "workspace:^"
   },
   "devDependencies": {
     "@types/bun": "latest",

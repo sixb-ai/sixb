@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
-import type { LanguageModelV4 } from "@ai-sdk/provider"
+import type { LanguageModel } from "@sixb/llm"
 import {
   type AgentDefinition,
   AgentDefinitionError,
@@ -24,7 +24,13 @@ const coreModuleUrl = pathToFileURL(resolve(import.meta.dir, "..", "src", "index
 const tempRoots = new Set<string>()
 
 // These tests don't execute runs, so a stub conforming to the model type is enough.
-const model = {} as LanguageModelV4
+const model = {
+  providerId: "test",
+  modelId: "test-model",
+  async stream() {
+    throw new Error("model is not called by definition tests")
+  },
+} satisfies LanguageModel
 const agentRuntime = defineGroup("agent-runtime", { label: "Agent runtime" })
 
 const Room = defineObjectType({
@@ -63,7 +69,7 @@ function agentModule(id: string, name = "Agent"): string {
 
 export const ${id} = defineAgent("${id}", {
   name: "${name}",
-  model: { specificationVersion: "v4", provider: "test", modelId: "test" },
+  model: { providerId: "test", modelId: "test", stream() { throw new Error("not called") } },
   instructions: "You assist the user.",
 })
 `
@@ -79,7 +85,7 @@ export const searchKnowledge = defineAgentTool("search_knowledge")
 
 export const ${id} = defineAgent("${id}", {
   name: "Agent with tools",
-  model: { specificationVersion: "v4", provider: "test", modelId: "test" },
+  model: { providerId: "test", modelId: "test", stream() { throw new Error("not called") } },
   instructions: "Use selected tools when needed.",
   tools: [searchKnowledge],
 })
@@ -223,7 +229,6 @@ describe("defineAgent", () => {
     expect(agent.groupIds).toEqual([])
     expect(agent.tools).toEqual([])
     expect(agent.reasoning).toBeUndefined()
-    expect(agent.providerOptions).toBeUndefined()
     expect(agent.description).toBeUndefined()
     expect(agent.loop).toBeUndefined()
     expect(Object.isFrozen(agent)).toBe(true)
@@ -231,7 +236,7 @@ describe("defineAgent", () => {
     expect(Object.isFrozen(agent.tools)).toBe(true)
   })
 
-  test("keeps description, model options, groups, and loop when provided", () => {
+  test("keeps description, reasoning, groups, and loop when provided", () => {
     const searchKnowledge = defineAgentTool("search_knowledge")
       .description("Search project knowledge.")
       .input({ query: "string" })
@@ -241,11 +246,6 @@ describe("defineAgent", () => {
       description: "Quotes and contacts.",
       model,
       reasoning: "medium",
-      providerOptions: {
-        openai: {
-          reasoningSummary: "detailed",
-        },
-      },
       instructions: "Assist.",
       groups: [agentRuntime],
       tools: [searchKnowledge],
@@ -254,7 +254,6 @@ describe("defineAgent", () => {
 
     expect(agent.description).toBe("Quotes and contacts.")
     expect(agent.reasoning).toBe("medium")
-    expect(agent.providerOptions).toEqual({ openai: { reasoningSummary: "detailed" } })
     expect(agent.groupIds).toEqual(["agent-runtime"])
     expect(agent.tools).toEqual([searchKnowledge])
     expect(agent.tools[0]).toBe(searchKnowledge)
@@ -311,7 +310,7 @@ describe("defineAgent", () => {
       defineAgent("a", {
         name: "A",
         instructions: "x",
-        model: undefined as unknown as LanguageModelV4,
+        model: undefined as unknown as LanguageModel,
       })
     ).toThrow(AgentDefinitionError)
   })
@@ -336,33 +335,6 @@ describe("defineAgent", () => {
         model,
         instructions: "x",
         reasoning: "maximum" as never,
-      })
-    ).toThrow(AgentDefinitionError)
-  })
-
-  test("rejects invalid provider options", () => {
-    expect(() =>
-      defineAgent("bad", {
-        name: "Bad",
-        model,
-        instructions: "x",
-        providerOptions: [] as never,
-      })
-    ).toThrow(AgentDefinitionError)
-    expect(() =>
-      defineAgent("bad", {
-        name: "Bad",
-        model,
-        instructions: "x",
-        providerOptions: { openai: "fast" } as never,
-      })
-    ).toThrow(AgentDefinitionError)
-    expect(() =>
-      defineAgent("bad", {
-        name: "Bad",
-        model,
-        instructions: "x",
-        providerOptions: { openai: { fn: () => undefined } } as never,
       })
     ).toThrow(AgentDefinitionError)
   })

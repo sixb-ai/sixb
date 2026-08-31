@@ -7,21 +7,20 @@ threads) and must be unique across all agents. The call validates the config and
 ```ts
 // agents/invoice-assistant.ts
 import { defineAgent } from "@sixb/core"
-import { gateway } from "ai"
+import { vercelGateway } from "@sixb/llm-openresponses"
+
+const gateway = vercelGateway()
 
 export const invoiceAssistant = defineAgent("invoice-assistant", {
   name: "Invoice Assistant",
   description: "Tracks outstanding invoices, overdue accounts, and payment follow-ups.",
-  model: gateway("openai/gpt-5.5"),
+  model: gateway.model("openai/gpt-5.5"),
   reasoning: "medium",
   instructions: [
     "You are this project's invoicing assistant.",
     "Focus on invoices, balances, due dates, and reminder status.",
     "Never claim a reminder was sent unless the data shows it.",
   ].join("\n"),
-  providerOptions: {
-    openai: { reasoningSummary: "detailed" },
-  },
 })
 ```
 
@@ -30,25 +29,28 @@ export const invoiceAssistant = defineAgent("invoice-assistant", {
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `name` | `string` | Yes | Display name shown in catalogs and pickers. |
-| `model` | `LanguageModelV4` | Yes | An AI SDK model instance (see below). |
+| `model` | `LanguageModel` | Yes | A provider-neutral Sixb language model (see below). |
 | `instructions` | `string` | Yes | The system prompt. |
 | `description` | `string` | No | Short summary for catalogs. |
 | `reasoning` | reasoning level | No | `provider-default`, `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. |
-| `providerOptions` | provider-keyed object | No | Per-provider passthrough, e.g. `{ openai: { ... } }`. |
 | `groups` | `GroupDefinition[]` | No | Gate who can use the agent and what it can reach. See [Authorization](./authorization.md). |
 | `tools` | `AgentToolDefinition[]` | No | Worker-side tools this agent is explicitly allowed to call. Defaults to none. |
 | `loop` | `{ stopWhen?: { maxSteps?: number } }` | No | Step cap per turn. Defaults to **25**. |
 
 ## The model
 
-`model` is an [AI SDK](https://sdk.vercel.ai) `LanguageModelV4` instance, not a string. The simplest
-source is the `ai` gateway; any provider that returns a `LanguageModelV4` works.
+`model` is a `LanguageModel` from `@sixb/llm`, not a string. Provider packages construct models and
+own their provider-specific configuration. The OpenResponses adapter includes Vercel AI Gateway:
 
 ```ts
-import { gateway } from "ai"
+import { vercelGateway } from "@sixb/llm-openresponses"
 
-model: gateway("deepseek/deepseek-v4-flash")
-model: gateway("openai/gpt-5.5")
+const gateway = vercelGateway()
+
+model: gateway.model("deepseek/deepseek-v4-flash")
+model: gateway.model("openai/gpt-5.5", {
+  request: { reasoning: { summary: "detailed" } },
+})
 ```
 
 ## Instructions vs Agent Skills
@@ -73,7 +75,7 @@ skill is relevant.
 ```ts
 export const researcher = defineAgent("researcher", {
   name: "Researcher",
-  model: gateway("openai/gpt-5.5"),
+  model: gateway.model("openai/gpt-5.5"),
   instructions: "Research approved sources and cite them.",
   tools: [webSearch, webFetch],
 })

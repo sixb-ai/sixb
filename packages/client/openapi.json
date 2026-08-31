@@ -18532,6 +18532,43 @@
                                 {
                                   "type": "object",
                                   "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "enum": ["provider-state"]
+                                    },
+                                    "providerId": {
+                                      "type": "string"
+                                    },
+                                    "data": {
+                                      "description": "Any JSON-compatible value.",
+                                      "nullable": true,
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "type": "array",
+                                          "items": {}
+                                        },
+                                        {
+                                          "type": "object",
+                                          "additionalProperties": true
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": ["type", "providerId", "data"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
                                     "context": {
                                       "anyOf": [
                                         {
