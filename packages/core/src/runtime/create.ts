@@ -11,6 +11,7 @@ import type { SixbErrorHandler } from "../error-reporting/types"
 import type { LakeStorage } from "../lake-storage"
 import type { LoggerProvider, ObservabilityOptions } from "../logging"
 import type { OntologyMaintenanceOptions } from "../maintenance"
+import type { ModelCatalogInput } from "../models"
 import type { PipelineDefinition } from "../pipelines/types"
 import type { ProjectionDefinition } from "../projections/types"
 import type { Queues } from "../queues"
@@ -45,6 +46,8 @@ export interface CreateSixbOptions {
   actions?: readonly ActionDefinition[]
   /** Agent definitions to register in addition to auto-discovered `agents/` exports. */
   agents?: readonly AgentDefinition[]
+  /** Models this project allows Sixb to use. The first of each kind is the default. */
+  models?: ModelCatalogInput
   datasets?: readonly DatasetDefinition[]
   /** Connector definitions to register in addition to auto-discovered `connectors/` exports. */
   connectors?: readonly ConnectorDefinition[]
@@ -118,6 +121,7 @@ export async function createSixb(
     roles: [...(options.roles ?? []), ...definitions.roles],
     membershipPolicies: [...(options.membershipPolicies ?? []), ...definitions.membershipPolicies],
     agents: [...(options.agents ?? []), ...definitions.agents],
+    models: options.models,
     auth: options.auth,
   })
 }
