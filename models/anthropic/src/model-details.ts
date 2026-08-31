@@ -6,6 +6,36 @@ interface PriceRule {
   readonly output: string
 }
 
+interface OutputLimitRule {
+  readonly match: RegExp
+  readonly maxOutputTokens: number
+}
+
+// The Messages API requires max_tokens, so the synchronous adapter needs the operational limit
+// without turning every inference into a catalog request. Unknown Claude IDs are assumed to be
+// newer; non-Claude IDs require an explicit limit instead of inheriting an invented default.
+const OUTPUT_LIMITS: readonly OutputLimitRule[] = [
+  {
+    match: /claude-(?:fable|mythos|opus|sonnet)-5(?:-|$)/,
+    maxOutputTokens: 128_000,
+  },
+  {
+    match: /claude-(?:opus-4-(?:8|7|6)|sonnet-4-6)(?:-|$)/,
+    maxOutputTokens: 128_000,
+  },
+  {
+    match: /claude-(?:opus|sonnet|haiku)-4-5(?:-|$)/,
+    maxOutputTokens: 64_000,
+  },
+  { match: /claude-opus-4-1(?:-|$)/, maxOutputTokens: 32_000 },
+  { match: /claude-sonnet-4(?:-|$)/, maxOutputTokens: 64_000 },
+  { match: /claude-opus-4(?:-|$)/, maxOutputTokens: 32_000 },
+  {
+    match: /claude-(?:instant(?:-|$)|v?2(?=$|[-.:])|3(?=$|[-.]))/,
+    maxOutputTokens: 4_096,
+  },
+]
+
 // Anthropic publishes prices by model family, while /v1/models is the source of truth for IDs.
 // Keep the small family table here so pricing stays reviewable TypeScript rather than generated data.
 const PRICES: readonly PriceRule[] = [
@@ -17,6 +47,12 @@ const PRICES: readonly PriceRule[] = [
   { match: /^claude-haiku-4-5(?:-|$)/, input: "1", output: "5" },
   { match: /^claude-(?:3-5-haiku|haiku-3-5)(?:-|$)/, input: "0.8", output: "4" },
 ]
+
+export function anthropicMaxOutputTokens(modelId: string): number | undefined {
+  const known = OUTPUT_LIMITS.find((candidate) => candidate.match.test(modelId))
+  if (known) return known.maxOutputTokens
+  return modelId.includes("claude-") ? 128_000 : undefined
+}
 
 export function anthropicRateCard(
   modelId: string,

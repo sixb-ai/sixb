@@ -31,6 +31,11 @@ const model = provider("claude-opus-5", {
 const definitions = await provider.catalog.list()
 ```
 
+`maxOutputTokens` is optional. Anthropic requires `max_tokens` on every Messages request, so the
+adapter resolves an omitted value to the selected Claude model's provider-owned output limit (128K,
+64K, or the appropriate legacy limit). An explicit value lowers that ceiling. Unknown non-Claude
+models require an explicit value; inference never fetches the catalog to discover one.
+
 Native server tools can be supplied beside Sixb's local tools:
 
 ```ts
