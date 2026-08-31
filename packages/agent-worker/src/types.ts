@@ -12,13 +12,13 @@ import type {
 } from "@sixb/core"
 import type { AgentExecutionHost } from "@sixb/core/internal/agent-execution"
 import type { LoggingService } from "@sixb/core/internal/logging"
+import type { ModelTool } from "@sixb/core/models"
 import type {
   AgentStorage,
   AiUsageStorage,
   AuthStorage,
   RecordAiModelCallInput,
 } from "@sixb/core/storage"
-import type { ModelTool } from "@sixb/llm"
 import type { AgentSkill } from "./agent-skills"
 import type { PreparedAgentAttachmentContext } from "./attachments"
 import type { BashSandboxHandle } from "./bash-tool"

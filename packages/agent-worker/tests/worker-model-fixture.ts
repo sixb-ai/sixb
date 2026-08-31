@@ -7,7 +7,8 @@ import type {
   ModelCapabilities,
   ModelFinishReason,
   ModelUsage,
-} from "@sixb/llm"
+} from "@sixb/core/models"
+import { defineLanguageModel, type LanguageModelDefinition } from "@sixb/core/models"
 
 export type WorkerTestStreamEvent =
   | LanguageModelStreamEvent
@@ -30,6 +31,7 @@ export interface WorkerTestModelOptions {
   readonly providerId?: string
   readonly modelId?: string
   readonly capabilities?: ModelCapabilities
+  readonly definition?: LanguageModelDefinition
   readonly stream?: (request: LanguageModelRequest) => Promise<WorkerTestStream>
   readonly generate?: (request: LanguageModelRequest) => Promise<WorkerTestGeneration>
 }
@@ -38,19 +40,25 @@ export interface WorkerTestModelOptions {
 export class WorkerTestModel implements LanguageModel {
   readonly providerId: string
   readonly modelId: string
-  readonly capabilities: ModelCapabilities
+  readonly definition: LanguageModelDefinition
   private readonly handler: (request: LanguageModelRequest) => Promise<WorkerTestStream>
 
   constructor(options: WorkerTestModelOptions = {}) {
-    this.providerId = options.providerId ?? "mock"
-    this.modelId = options.modelId ?? "mock-model"
-    this.capabilities = options.capabilities ?? {
-      inputMediaTypes: [],
-      reasoning: true,
-      localTools: true,
-      parallelToolCalls: true,
-      nativeStructuredOutput: true,
-    }
+    const providerId = options.providerId ?? options.definition?.providerId ?? "mock"
+    const modelId = options.modelId ?? options.definition?.modelId ?? "mock-model"
+    const capabilities = options.capabilities ??
+      options.definition?.capabilities ?? {
+        inputMediaTypes: [],
+        reasoning: true,
+        localTools: true,
+        parallelToolCalls: true,
+        nativeStructuredOutput: true,
+      }
+    this.definition = defineLanguageModel(
+      options.definition ?? { kind: "language", providerId, modelId, capabilities }
+    )
+    this.providerId = this.definition.providerId
+    this.modelId = this.definition.modelId
     this.handler =
       options.stream ??
       (options.generate

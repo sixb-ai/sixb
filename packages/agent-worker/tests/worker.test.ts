@@ -45,6 +45,7 @@ import {
 } from "@sixb/core/internal/agents"
 import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import { createSixbError } from "@sixb/core/internal/errors"
+import type { LanguageModel, ModelTool, ModelUsage } from "@sixb/core/models"
 import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
 import {
   type AgentStorage,
@@ -59,7 +60,6 @@ import {
   createTestSixb,
   createTestWorkflowExecution,
 } from "@sixb/core/testing"
-import type { LanguageModel, ModelTool, ModelUsage } from "@sixb/llm"
 import { AgentWorker, type AgentWorkerOptions } from "../src"
 import { loadAgentSkills } from "../src/agent-skills"
 import { normalizeApiBaseUrl } from "../src/api-url"

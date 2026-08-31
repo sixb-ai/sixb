@@ -1,5 +1,5 @@
 import type { CommandResult, Sandbox } from "@sixb/core"
-import type { JsonValue, ModelTool } from "@sixb/llm"
+import type { JsonValue, ModelTool } from "@sixb/core/models"
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000
 const MAX_COMMAND_TIMEOUT_MS = 120_000

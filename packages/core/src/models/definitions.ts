@@ -1,0 +1,215 @@
+import type { ModelCapabilities } from "./language-model"
+
+export type ModelKind = "language" | "image" | "video" | "embedding"
+
+/** Common catalog identity shared by every present and future model runtime. */
+export interface ModelDefinition {
+  readonly kind: ModelKind
+  readonly providerId: string
+  readonly modelId: string
+  readonly name?: string
+  readonly description?: string
+  readonly family?: string
+  readonly tags?: readonly string[]
+  readonly releaseDate?: string
+}
+
+/** A decimal USD price per one million units. Strings keep catalog data exact and serializable. */
+export type ModelUnitPrice = string
+
+export interface ModelPricingTier {
+  readonly minTokens: number
+  readonly maxTokens?: number
+  readonly price: ModelUnitPrice
+}
+
+export type ModelTokenPrice =
+  | ModelUnitPrice
+  | {
+      readonly default: ModelUnitPrice
+      readonly tiers: readonly ModelPricingTier[]
+    }
+
+export interface LanguageModelPricing {
+  readonly currency: "USD"
+  readonly unit: "million-tokens"
+  readonly input: ModelTokenPrice
+  readonly output: ModelTokenPrice
+  readonly cacheReadInput?: ModelTokenPrice
+  readonly cacheWriteInput?: ModelTokenPrice
+}
+
+/** Serializable facts about one concrete model offering from one provider. */
+export interface LanguageModelDefinition extends ModelDefinition {
+  readonly kind: "language"
+  readonly knowledgeCutoff?: string
+  readonly contextWindow?: number
+  readonly maxOutputTokens?: number
+  readonly capabilities: ModelCapabilities
+  readonly pricing?: LanguageModelPricing
+}
+
+export function defineLanguageModel(definition: LanguageModelDefinition): LanguageModelDefinition {
+  if (definition.kind !== "language") {
+    throw new TypeError("[Sixb] Language model definitions must use kind 'language'.")
+  }
+  assertModelId(definition.providerId, "providerId")
+  assertModelId(definition.modelId, "modelId")
+  assertOptionalString(definition.name, "name")
+  assertOptionalString(definition.description, "description")
+  assertOptionalString(definition.family, "family")
+  assertOptionalString(definition.releaseDate, "releaseDate")
+  assertOptionalString(definition.knowledgeCutoff, "knowledgeCutoff")
+  const tags = freezeStrings(definition.tags, "tags")
+  const capabilities = freezeCapabilities(definition.capabilities)
+  assertOptionalPositiveInteger(definition.contextWindow, "contextWindow")
+  assertOptionalPositiveInteger(definition.maxOutputTokens, "maxOutputTokens")
+  if (definition.pricing) assertLanguageModelPricing(definition.pricing)
+  return Object.freeze({
+    kind: "language",
+    providerId: definition.providerId,
+    modelId: definition.modelId,
+    ...(definition.name === undefined ? {} : { name: definition.name }),
+    ...(definition.description === undefined ? {} : { description: definition.description }),
+    ...(definition.family === undefined ? {} : { family: definition.family }),
+    ...(tags === undefined ? {} : { tags }),
+    ...(definition.releaseDate === undefined ? {} : { releaseDate: definition.releaseDate }),
+    ...(definition.knowledgeCutoff === undefined
+      ? {}
+      : { knowledgeCutoff: definition.knowledgeCutoff }),
+    ...(definition.contextWindow === undefined ? {} : { contextWindow: definition.contextWindow }),
+    ...(definition.maxOutputTokens === undefined
+      ? {}
+      : { maxOutputTokens: definition.maxOutputTokens }),
+    capabilities,
+    ...(definition.pricing === undefined ? {} : { pricing: freezePricing(definition.pricing) }),
+  })
+}
+
+function freezeCapabilities(capabilities: ModelCapabilities): ModelCapabilities {
+  if (!capabilities || typeof capabilities !== "object" || Array.isArray(capabilities)) {
+    throw new TypeError("[Sixb] Model capabilities must be an object.")
+  }
+  const inputMediaTypes =
+    capabilities.inputMediaTypes === "any"
+      ? "any"
+      : freezeStrings(capabilities.inputMediaTypes, "capabilities.inputMediaTypes")
+  for (const [field, value] of Object.entries(capabilities)) {
+    if (field === "inputMediaTypes") continue
+    if (value !== undefined && typeof value !== "boolean") {
+      throw new TypeError(`[Sixb] Model capability '${field}' must be boolean.`)
+    }
+  }
+  return Object.freeze({
+    ...(inputMediaTypes === undefined ? {} : { inputMediaTypes }),
+    ...(capabilities.reasoning === undefined ? {} : { reasoning: capabilities.reasoning }),
+    ...(capabilities.localTools === undefined ? {} : { localTools: capabilities.localTools }),
+    ...(capabilities.parallelToolCalls === undefined
+      ? {}
+      : { parallelToolCalls: capabilities.parallelToolCalls }),
+    ...(capabilities.nativeStructuredOutput === undefined
+      ? {}
+      : { nativeStructuredOutput: capabilities.nativeStructuredOutput }),
+    ...(capabilities.providerExecutedTools === undefined
+      ? {}
+      : { providerExecutedTools: capabilities.providerExecutedTools }),
+  })
+}
+
+function freezePricing(pricing: LanguageModelPricing): LanguageModelPricing {
+  return Object.freeze({
+    currency: "USD",
+    unit: "million-tokens",
+    input: freezeTokenPrice(pricing.input),
+    output: freezeTokenPrice(pricing.output),
+    ...(pricing.cacheReadInput === undefined
+      ? {}
+      : { cacheReadInput: freezeTokenPrice(pricing.cacheReadInput) }),
+    ...(pricing.cacheWriteInput === undefined
+      ? {}
+      : { cacheWriteInput: freezeTokenPrice(pricing.cacheWriteInput) }),
+  })
+}
+
+function freezeTokenPrice(price: ModelTokenPrice): ModelTokenPrice {
+  return typeof price === "string"
+    ? price
+    : Object.freeze({
+        default: price.default,
+        tiers: Object.freeze(
+          price.tiers.map((tier) =>
+            Object.freeze({
+              minTokens: tier.minTokens,
+              ...(tier.maxTokens === undefined ? {} : { maxTokens: tier.maxTokens }),
+              price: tier.price,
+            })
+          )
+        ),
+      })
+}
+
+function assertLanguageModelPricing(pricing: LanguageModelPricing): void {
+  if (pricing.currency !== "USD" || pricing.unit !== "million-tokens") {
+    throw new TypeError("[Sixb] Model pricing must use USD per million tokens.")
+  }
+  for (const [meter, value] of Object.entries(pricing)) {
+    if (meter === "currency" || meter === "unit") continue
+    if (typeof value === "string") {
+      assertPrice(value, meter)
+      continue
+    }
+    assertPrice(value.default, `${meter}.default`)
+    let previousMax = 0
+    for (const [index, tier] of value.tiers.entries()) {
+      if (!Number.isSafeInteger(tier.minTokens) || tier.minTokens < 0) {
+        throw new TypeError(`[Sixb] Model price '${meter}' tier ${index} has an invalid minimum.`)
+      }
+      if (index > 0 && tier.minTokens < previousMax) {
+        throw new TypeError(
+          `[Sixb] Model price '${meter}' tiers must be ordered and nonoverlapping.`
+        )
+      }
+      if (
+        tier.maxTokens !== undefined &&
+        (!Number.isSafeInteger(tier.maxTokens) || tier.maxTokens <= tier.minTokens)
+      ) {
+        throw new TypeError(`[Sixb] Model price '${meter}' tier ${index} has an invalid maximum.`)
+      }
+      previousMax = tier.maxTokens ?? Number.POSITIVE_INFINITY
+      assertPrice(tier.price, `${meter}.tiers[${index}].price`)
+    }
+  }
+}
+
+function assertPrice(value: string, meter: string): void {
+  if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value)) {
+    throw new TypeError(`[Sixb] Model price '${meter}' must be a nonnegative decimal string.`)
+  }
+}
+
+function assertModelId(value: string, field: string): void {
+  if (!value.trim()) throw new TypeError(`[Sixb] Model ${field} must not be empty.`)
+}
+
+function assertOptionalPositiveInteger(value: number | undefined, field: string): void {
+  if (value !== undefined && (!Number.isSafeInteger(value) || value <= 0)) {
+    throw new TypeError(`[Sixb] Model ${field} must be a positive safe integer.`)
+  }
+}
+
+function assertOptionalString(value: string | undefined, field: string): void {
+  if (value !== undefined && typeof value !== "string") {
+    throw new TypeError(`[Sixb] Model ${field} must be a string.`)
+  }
+}
+
+function freezeStrings(
+  value: readonly string[] | undefined,
+  field: string
+): readonly string[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string" || !entry.trim())) {
+    throw new TypeError(`[Sixb] Model ${field} must contain nonempty strings.`)
+  }
+  return Object.freeze([...value])
+}

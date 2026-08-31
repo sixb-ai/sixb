@@ -16,7 +16,6 @@ import {
 } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { schemaRecordToJsonSchema } from "@sixb/core/internal/ontology"
-import type { AiModelCallUsageInput } from "@sixb/core/storage"
 import type {
   JsonObject,
   ModelAssistantPart,
@@ -25,7 +24,8 @@ import type {
   ModelToolOutput,
   ModelToolResultPart,
   ModelUsage,
-} from "@sixb/llm"
+} from "@sixb/core/models"
+import type { AiModelCallUsageInput } from "@sixb/core/storage"
 import { AgentToolExecutionError, AgentToolOutputError } from "./errors"
 
 type AgentErrorDetails =

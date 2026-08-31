@@ -7,7 +7,7 @@ import {
   noopLogger,
   stringEnum,
 } from "@sixb/core"
-import type { ModelStep, ModelUsage } from "@sixb/llm"
+import type { ModelStep, ModelUsage } from "@sixb/core/models"
 import {
   agentToolErrorText,
   agentTraceFromModelSteps,
@@ -124,6 +124,7 @@ describe("owned model adapters", () => {
         responseId: "response-1",
         finishReason: "tool-calls",
         usage: {},
+        cost: { status: "unpriceable", reason: "missing-pricing" },
         content: [
           { type: "reasoning", text: "think", providerData: { signature: "signed" } },
           {
@@ -145,6 +146,7 @@ describe("owned model adapters", () => {
         responseId: "response-2",
         finishReason: "stop",
         usage: {},
+        cost: { status: "unpriceable", reason: "missing-pricing" },
         content: [{ type: "text", text: "done" }],
       },
     ]

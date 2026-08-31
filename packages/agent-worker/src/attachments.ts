@@ -6,8 +6,8 @@ import type {
   BlobStorage,
   FileRef,
 } from "@sixb/core"
+import { type LanguageModel, resolveModelCapabilities } from "@sixb/core/models"
 import type { AgentMessageRecord } from "@sixb/core/storage"
-import { type LanguageModel, resolveModelCapabilities } from "@sixb/llm"
 import { type AgentAttachmentLimits, processAgentImageAttachment } from "./image-attachments"
 
 const DEFAULT_AGENT_ATTACHMENT_LIMITS: AgentAttachmentLimits = {

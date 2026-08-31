@@ -93,6 +93,8 @@ export {
   type AgentToolCallPart,
   type AgentToolCallState,
 } from "./message"
+export type { ModelLoopResult, RunModelLoopInput } from "./model-loop"
+export { runModelLoop } from "./model-loop"
 export {
   type BuildAgentSystemPromptInput,
   buildAgentSystemPrompt,

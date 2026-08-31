@@ -350,11 +350,11 @@
         "@sixb/client": "workspace:*",
         "@sixb/core": "workspace:*",
         "@sixb/ducklake": "workspace:*",
-        "@sixb/llm-openresponses": "workspace:*",
         "@sixb/sandboxes-local": "workspace:*",
         "@sixb/sandboxes-smolvm": "workspace:*",
         "@sixb/sqlite": "workspace:*",
         "@sixb/ui": "workspace:*",
+        "@sixb/vercel-ai-gateway": "workspace:*",
         "@tailwindcss/cli": "^4.2.2",
         "@tanstack/react-query": "^5.0.0",
         "lucide-react": "^0.562.0",
@@ -478,9 +478,6 @@
     "packages/agent-worker": {
       "name": "@sixb/agent-worker",
       "version": "0.1.1",
-      "dependencies": {
-        "@sixb/llm": "workspace:^",
-      },
       "devDependencies": {
         "@sixb/connector-exa": "workspace:*",
         "@sixb/core": "workspace:*",
@@ -489,6 +486,17 @@
       },
       "peerDependencies": {
         "@sixb/core": "workspace:*",
+      },
+    },
+    "packages/anthropic": {
+      "name": "@sixb/anthropic",
+      "version": "0.1.1",
+      "dependencies": {
+        "@sixb/core": "workspace:^",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
       },
     },
     "packages/app": {
@@ -596,9 +604,6 @@
     "packages/core": {
       "name": "@sixb/core",
       "version": "0.1.1",
-      "dependencies": {
-        "@sixb/llm": "workspace:^",
-      },
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "^5.7.0",
@@ -617,25 +622,6 @@
         "cobe": "^2.0.1",
         "react": "^19.0.0",
         "satellite.js": "^7.1.0",
-        "typescript": "^5.7.0",
-      },
-    },
-    "packages/llm": {
-      "name": "@sixb/llm",
-      "version": "0.1.1",
-      "devDependencies": {
-        "@types/bun": "latest",
-        "typescript": "^5.7.0",
-      },
-    },
-    "packages/llm-openresponses": {
-      "name": "@sixb/llm-openresponses",
-      "version": "0.1.1",
-      "dependencies": {
-        "@sixb/llm": "workspace:*",
-      },
-      "devDependencies": {
-        "@types/bun": "latest",
         "typescript": "^5.7.0",
       },
     },
@@ -766,6 +752,17 @@
       "optionalPeers": [
         "tailwindcss",
       ],
+    },
+    "packages/vercel-ai-gateway": {
+      "name": "@sixb/vercel-ai-gateway",
+      "version": "0.1.1",
+      "dependencies": {
+        "@sixb/core": "workspace:^",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
     },
     "packages/workflow-worker": {
       "name": "@sixb/workflow-worker",
@@ -1360,6 +1357,8 @@
 
     "@sixb/agent-worker": ["@sixb/agent-worker@workspace:packages/agent-worker"],
 
+    "@sixb/anthropic": ["@sixb/anthropic@workspace:packages/anthropic"],
+
     "@sixb/app": ["@sixb/app@workspace:packages/app"],
 
     "@sixb/atlas": ["@sixb/atlas@workspace:packages/atlas"],
@@ -1428,10 +1427,6 @@
 
     "@sixb/lake-local": ["@sixb/lake-local@workspace:storage/lake-local"],
 
-    "@sixb/llm": ["@sixb/llm@workspace:packages/llm"],
-
-    "@sixb/llm-openresponses": ["@sixb/llm-openresponses@workspace:packages/llm-openresponses"],
-
     "@sixb/logger-pino": ["@sixb/logger-pino@workspace:loggers/pino"],
 
     "@sixb/orchestrator": ["@sixb/orchestrator@workspace:packages/orchestrator"],
@@ -1461,6 +1456,8 @@
     "@sixb/sync-worker": ["@sixb/sync-worker@workspace:packages/sync-worker"],
 
     "@sixb/ui": ["@sixb/ui@workspace:packages/ui"],
+
+    "@sixb/vercel-ai-gateway": ["@sixb/vercel-ai-gateway@workspace:packages/vercel-ai-gateway"],
 
     "@sixb/workflow-worker": ["@sixb/workflow-worker@workspace:packages/workflow-worker"],
 

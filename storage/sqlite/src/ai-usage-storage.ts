@@ -123,10 +123,13 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
             reasoning_output_tokens,
             reporting_status,
             raw_usage,
+            model_definition,
+            cost,
+            route,
             occurred_at,
             recorded_at
           ) VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
           )
         `
       )
@@ -150,6 +153,9 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
         record.usage.reasoningOutputTokens ?? null,
         record.usage.reportingStatus,
         record.rawUsage === undefined ? null : JSON.stringify(record.rawUsage),
+        record.modelDefinition === undefined ? null : JSON.stringify(record.modelDefinition),
+        record.cost === undefined ? null : JSON.stringify(record.cost),
+        record.route === undefined ? null : JSON.stringify(record.route),
         record.occurredAt.toISOString(),
         record.recordedAt.toISOString()
       )
@@ -200,6 +206,11 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
         `
       )
       .all(row.project_id, row.id) as Array<{ group_id: string }>
+    const modelDefinition = jsonFromRow<NonNullable<AiModelCallUsageRecord["modelDefinition"]>>(
+      row.model_definition
+    )
+    const cost = jsonFromRow<NonNullable<AiModelCallUsageRecord["cost"]>>(row.cost)
+    const route = jsonFromRow<NonNullable<AiModelCallUsageRecord["route"]>>(row.route)
 
     return {
       id: row.id,
@@ -220,6 +231,9 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
       ...(row.raw_usage === null
         ? {}
         : { rawUsage: JSON.parse(row.raw_usage) as ReadonlyJsonObject }),
+      ...(modelDefinition === undefined ? {} : { modelDefinition }),
+      ...(cost === undefined ? {} : { cost }),
+      ...(route === undefined ? {} : { route }),
       occurredAt: new Date(row.occurred_at),
       recordedAt: new Date(row.recorded_at),
     }
@@ -275,8 +289,15 @@ interface AiUsageRow {
   readonly reasoning_output_tokens: number | null
   readonly reporting_status: AiModelCallUsageRecord["usage"]["reportingStatus"]
   readonly raw_usage: string | null
+  readonly model_definition: string | null
+  readonly cost: string | null
+  readonly route: string | null
   readonly occurred_at: string
   readonly recorded_at: string
+}
+
+function jsonFromRow<T>(value: string | null): T | undefined {
+  return value === null ? undefined : (JSON.parse(value) as T)
 }
 
 function aggregateExecutionRows(

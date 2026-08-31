@@ -208,13 +208,24 @@ export interface AgentWorkflowNodeRequestedQueueJob
   > {}
 
 /** JSON-safe representation of one model-call ledger append awaiting durable recovery. */
+type QueueJson<T> = T extends string | number | boolean | null
+  ? T
+  : T extends readonly (infer TItem)[]
+    ? readonly QueueJson<TItem>[]
+    : T extends object
+      ? { readonly [Key in keyof T]: QueueJson<T[Key]> }
+      : never
+
 export type AgentAiUsageRecordPayload = Omit<
   RecordAiModelCallInput,
-  "projectId" | "usage" | "occurredAt" | "recordedAt"
+  "projectId" | "usage" | "modelDefinition" | "cost" | "route" | "occurredAt" | "recordedAt"
 > & {
   readonly usage: {
     readonly [Field in keyof RecordAiModelCallInput["usage"]]: RecordAiModelCallInput["usage"][Field]
   }
+  readonly modelDefinition?: QueueJson<NonNullable<RecordAiModelCallInput["modelDefinition"]>>
+  readonly cost?: QueueJson<NonNullable<RecordAiModelCallInput["cost"]>>
+  readonly route?: QueueJson<NonNullable<RecordAiModelCallInput["route"]>>
   readonly occurredAt: string
 }
 

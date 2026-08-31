@@ -19,7 +19,7 @@
     "@sixb/client": "workspace:*",
     "@sixb/core": "workspace:*",
     "@sixb/ducklake": "workspace:*",
-    "@sixb/llm-openresponses": "workspace:*",
+    "@sixb/vercel-ai-gateway": "workspace:*",
     "@sixb/sandboxes-local": "workspace:*",
     "@sixb/sandboxes-smolvm": "workspace:*",
     "@sixb/sqlite": "workspace:*",

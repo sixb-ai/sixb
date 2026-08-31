@@ -1,6 +1,6 @@
-import type { ProviderData } from "@sixb/llm"
 import type { FileRef } from "../blob-storage"
 import type { JsonValue } from "../json"
+import type { ProviderData } from "../models"
 import type { AgentContextPart } from "./context"
 
 /**

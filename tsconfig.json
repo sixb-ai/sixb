@@ -7,6 +7,7 @@
       "@sixb/agent-ui": ["./packages/agent-ui/src/index.ts"],
       "@sixb/agent-ui/react-router": ["./packages/agent-ui/src/react-router.tsx"],
       "@sixb/agent-worker": ["./packages/agent-worker/src/index.ts"],
+      "@sixb/anthropic": ["./packages/anthropic/src/index.ts"],
       "@sixb/app": ["./packages/app/src/index.ts"],
       "@sixb/app/agents": ["./packages/app/src/agents.ts"],
       "@sixb/atlas": ["./packages/atlas/src/index.ts"],
@@ -102,6 +103,8 @@
       "@sixb/core/internal/workflows": ["./packages/core/src/workflows/index.ts"],
       "@sixb/core/lake-storage": ["./packages/core/src/lake-storage/index.ts"],
       "@sixb/core/logging": ["./packages/core/src/logging/types.ts"],
+      "@sixb/core/models": ["./packages/core/src/models/index.ts"],
+      "@sixb/core/models/testing": ["./packages/core/src/models/testing.ts"],
       "@sixb/core/ontology": ["./packages/core/src/ontology/index.ts"],
       "@sixb/core/query": ["./packages/core/src/query.ts"],
       "@sixb/core/queues": ["./packages/core/src/queues/index.ts"],
@@ -110,10 +113,6 @@
       "@sixb/core/testing": ["./packages/core/src/testing/index.ts"],
       "@sixb/ducklake": ["./storage/ducklake/src/index.ts"],
       "@sixb/lake-local": ["./storage/lake-local/src/index.ts"],
-      "@sixb/llm": ["./packages/llm/src/index.ts"],
-      "@sixb/llm/provider": ["./packages/llm/src/provider.ts"],
-      "@sixb/llm/testing": ["./packages/llm/src/testing.ts"],
-      "@sixb/llm-openresponses": ["./packages/llm-openresponses/src/index.ts"],
       "@sixb/logger-pino": ["./loggers/pino/src/index.ts"],
       "@sixb/orchestrator": ["./packages/orchestrator/src/index.ts"],
       "@sixb/pg": ["./storage/pg/src/index.ts"],
@@ -138,6 +137,7 @@
       "@sixb/ui/lib/shiki": ["./packages/ui/src/lib/shiki.ts"],
       "@sixb/ui/lib/speech": ["./packages/ui/src/lib/speech/index.ts"],
       "@sixb/ui/lib/utils": ["./packages/ui/src/lib/utils.ts"],
+      "@sixb/vercel-ai-gateway": ["./packages/vercel-ai-gateway/src/index.ts"],
       "@sixb/workflow-worker": ["./packages/workflow-worker/src/index.ts"]
     }
   }

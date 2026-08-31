@@ -64,6 +64,7 @@ describe("Postgres storage migrations", () => {
             "018-ontology-outbox-failure-record",
             "019-webhook-delivery-failure-record",
             "020-drop-run-usage-projections",
+            "021-ai-model-call-details",
           ],
         },
       ])
@@ -207,6 +208,13 @@ describe("Postgres storage migrations", () => {
           id: "020-drop-run-usage-projections",
           status: "applied",
           version: 20,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "021-ai-model-call-details",
+          status: "applied",
+          version: 21,
         },
       ])
     })
@@ -929,6 +937,9 @@ describe("Postgres storage migrations", () => {
         ])
       )
       expect(await readTableColumns(schemaName, "ai_model_call_usage")).toContain("execution_id")
+      expect(await readTableColumns(schemaName, "ai_model_call_usage")).toEqual(
+        expect.arrayContaining(["model_definition", "cost", "route"])
+      )
       expect(await readTableColumns(schemaName, "ai_model_call_usage")).not.toContain(
         "execution_kind"
       )
@@ -1274,6 +1285,13 @@ describe("Postgres storage migrations", () => {
           id: "020-drop-run-usage-projections",
           status: "applied",
           version: 20,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "021-ai-model-call-details",
+          status: "applied",
+          version: 21,
         },
       ])
     } finally {

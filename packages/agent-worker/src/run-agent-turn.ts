@@ -2,12 +2,12 @@ import type { AgentDefinition, AgentMessage, AgentMessagePart, Storage } from "@
 import {
   buildAgentSystemPrompt,
   createAgentMessageId,
+  runModelLoop,
   toModelMessages,
 } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { isAbortError, QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { AgentRunRecord, AgentStorage } from "@sixb/core/storage"
-import { runModelLoop } from "@sixb/llm"
 import { attachmentKey, modelSupportsInlineImages, prepareAgentAttachments } from "./attachments"
 import { AgentTurnTimeoutError } from "./errors"
 import { appendMessageAndFinishRunOrThrow, finishRunOrThrow } from "./finalize"

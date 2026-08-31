@@ -85,6 +85,19 @@ function toQueuePayload(record: RecordAiModelCallInput): AgentAiUsageRecordPaylo
     ...(record.responseModelId === undefined ? {} : { responseModelId: record.responseModelId }),
     responseId: record.responseId,
     usage: toQueueUsage(record.usage),
+    ...(record.modelDefinition === undefined
+      ? {}
+      : {
+          modelDefinition: structuredClone(
+            record.modelDefinition
+          ) as AgentAiUsageRecordPayload["modelDefinition"],
+        }),
+    ...(record.cost === undefined
+      ? {}
+      : { cost: structuredClone(record.cost) as AgentAiUsageRecordPayload["cost"] }),
+    ...(record.route === undefined
+      ? {}
+      : { route: structuredClone(record.route) as AgentAiUsageRecordPayload["route"] }),
     ...(record.rawUsage === undefined ? {} : { rawUsage: structuredClone(record.rawUsage) }),
     occurredAt: record.occurredAt.toISOString(),
   }
@@ -118,9 +131,23 @@ function fromQueuePayload(job: AgentAiUsageRecordRequestedQueueJob): RecordAiMod
     )
   }
 
+  const { modelDefinition, cost, route, ...record } = job.payload.record
   return {
-    ...job.payload.record,
+    ...record,
     projectId: job.projectId,
+    ...(modelDefinition === undefined
+      ? {}
+      : {
+          modelDefinition: structuredClone(
+            modelDefinition
+          ) as RecordAiModelCallInput["modelDefinition"],
+        }),
+    ...(cost === undefined
+      ? {}
+      : { cost: structuredClone(cost) as RecordAiModelCallInput["cost"] }),
+    ...(route === undefined
+      ? {}
+      : { route: structuredClone(route) as RecordAiModelCallInput["route"] }),
     occurredAt,
   }
 }

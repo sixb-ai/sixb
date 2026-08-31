@@ -1,3 +1,5 @@
+import { type FileRef, isFileRef } from "../blob-storage"
+import { getInvalidJsonValueReason, isPlainRecord, type JsonValue } from "../json"
 import type {
   ModelAssistantPart,
   ModelFilePart,
@@ -8,9 +10,7 @@ import type {
   ModelToolOutput,
   ModelToolResultPart,
   ProviderData,
-} from "@sixb/llm"
-import { type FileRef, isFileRef } from "../blob-storage"
-import { getInvalidJsonValueReason, isPlainRecord, type JsonValue } from "../json"
+} from "../models"
 import {
   type AgentContextEntryInput,
   type AgentContextInput,

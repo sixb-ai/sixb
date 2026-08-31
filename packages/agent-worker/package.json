@@ -42,9 +42,6 @@
       }
     ]
   },
-  "dependencies": {
-    "@sixb/llm": "workspace:^"
-  },
   "peerDependencies": {
     "@sixb/core": "workspace:*"
   },

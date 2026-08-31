@@ -3,7 +3,6 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
-import type { LanguageModel } from "@sixb/llm"
 import {
   type AgentDefinition,
   AgentDefinitionError,
@@ -18,6 +17,7 @@ import {
   RuntimeError,
 } from "../src"
 import { AgentToolResultValidationError } from "../src/agents/errors"
+import type { LanguageModel } from "../src/models"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const coreModuleUrl = pathToFileURL(resolve(import.meta.dir, "..", "src", "index.ts")).href
@@ -27,6 +27,12 @@ const tempRoots = new Set<string>()
 const model = {
   providerId: "test",
   modelId: "test-model",
+  definition: {
+    kind: "language",
+    providerId: "test",
+    modelId: "test-model",
+    capabilities: {},
+  },
   async stream() {
     throw new Error("model is not called by definition tests")
   },

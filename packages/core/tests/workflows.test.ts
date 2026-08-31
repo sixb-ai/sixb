@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import type { LanguageModel } from "@sixb/llm"
 import {
   defineAction,
   defineAgent,
@@ -25,6 +24,7 @@ import {
   type WorkflowDefinition,
   WorkflowDefinitionError,
 } from "../src"
+import type { LanguageModel } from "../src/models"
 import { schemaRecordToJsonSchema } from "../src/ontology/internal"
 import { createTestSixb } from "../src/testing"
 import { validateWorkflowDefinition } from "../src/workflows"

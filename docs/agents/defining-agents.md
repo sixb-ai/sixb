@@ -7,20 +7,31 @@ threads) and must be unique across all agents. The call validates the config and
 ```ts
 // agents/invoice-assistant.ts
 import { defineAgent } from "@sixb/core"
-import { vercelGateway } from "@sixb/llm-openresponses"
-
-const gateway = vercelGateway()
+import { vercelGateway } from "@sixb/vercel-ai-gateway"
 
 export const invoiceAssistant = defineAgent("invoice-assistant", {
   name: "Invoice Assistant",
   description: "Tracks outstanding invoices, overdue accounts, and payment follow-ups.",
-  model: gateway.model("openai/gpt-5.5"),
+  model: vercelGateway("openai/gpt-5.5"),
   reasoning: "medium",
   instructions: [
     "You are this project's invoicing assistant.",
     "Focus on invoices, balances, due dates, and reminder status.",
     "Never claim a reminder was sent unless the data shows it.",
   ].join("\n"),
+})
+```
+
+Providers share the same callable shape. To call Anthropic directly instead of routing through a
+gateway:
+
+```ts
+import { anthropic } from "@sixb/anthropic"
+
+export const supportAgent = defineAgent("support-agent", {
+  name: "Support Agent",
+  model: anthropic("claude-sonnet-5"),
+  instructions: "Help customers using verified account and product information.",
 })
 ```
 
@@ -39,17 +50,15 @@ export const invoiceAssistant = defineAgent("invoice-assistant", {
 
 ## The model
 
-`model` is a `LanguageModel` from `@sixb/llm`, not a string. Provider packages construct models and
-own their provider-specific configuration. The OpenResponses adapter includes Vercel AI Gateway:
+`model` is a `LanguageModel` from `@sixb/core/models`, not a string. Provider packages construct
+models and own their provider-specific configuration. Vercel AI Gateway is callable directly:
 
 ```ts
-import { vercelGateway } from "@sixb/llm-openresponses"
+import { vercelGateway } from "@sixb/vercel-ai-gateway"
 
-const gateway = vercelGateway()
-
-model: gateway.model("deepseek/deepseek-v4-flash")
-model: gateway.model("openai/gpt-5.5", {
-  request: { reasoning: { summary: "detailed" } },
+model: vercelGateway("deepseek/deepseek-v4-flash")
+model: vercelGateway("openai/gpt-5.5", {
+  providerOptions: { gateway: { order: ["openai", "azure"] } },
 })
 ```
 
@@ -75,7 +84,7 @@ skill is relevant.
 ```ts
 export const researcher = defineAgent("researcher", {
   name: "Researcher",
-  model: gateway.model("openai/gpt-5.5"),
+  model: vercelGateway("openai/gpt-5.5"),
   instructions: "Research approved sources and cite them.",
   tools: [webSearch, webFetch],
 })

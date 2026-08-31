@@ -17,15 +17,13 @@ An agent's `groups` (set on `defineAgent`) do two things:
 
 ```ts
 import { defineAgent, defineGroup } from "@sixb/core"
-import { vercelGateway } from "@sixb/llm-openresponses"
-
-const gateway = vercelGateway()
+import { vercelGateway } from "@sixb/vercel-ai-gateway"
 
 const financeAdmins = defineGroup("finance-admins")
 
 export const invoiceAssistant = defineAgent("invoice-assistant", {
   name: "Invoice Assistant",
-  model: gateway.model("openai/gpt-5.5"),
+  model: vercelGateway("openai/gpt-5.5"),
   instructions: "...",
   groups: [financeAdmins], // only finance admins can run it; it acts with their reach
 })

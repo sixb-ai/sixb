@@ -21,6 +21,9 @@ export function normalizeAiModelCallRecord(input: RecordAiModelCallInput): AiMod
   const recordedAt = cloneValidDate(input.recordedAt ?? new Date(), "recordedAt")
   const requesterGroupIds = normalizeRequesterGroupIds(input.requesterGroupIds)
   const rawUsage = cloneRawUsage(input.rawUsage)
+  const modelDefinition = cloneJsonMetadata(input.modelDefinition, "modelDefinition")
+  const cost = cloneJsonMetadata(input.cost, "cost")
+  const route = cloneJsonMetadata(input.route, "route")
 
   return {
     id: input.id,
@@ -34,10 +37,19 @@ export function normalizeAiModelCallRecord(input: RecordAiModelCallInput): AiMod
     ...(input.responseModelId === undefined ? {} : { responseModelId: input.responseModelId }),
     responseId: input.responseId,
     usage: normalizeAiModelCallUsage(input.usage),
+    ...(modelDefinition === undefined ? {} : { modelDefinition }),
+    ...(cost === undefined ? {} : { cost }),
+    ...(route === undefined ? {} : { route }),
     ...(rawUsage === undefined ? {} : { rawUsage }),
     occurredAt,
     recordedAt,
   }
+}
+
+function cloneJsonMetadata<T>(value: T | undefined, field: string): T | undefined {
+  if (value === undefined) return undefined
+  assertJsonValue(value, `AI usage ${field}`)
+  return structuredClone(value)
 }
 
 /** Validate a durable execution reference at storage and query boundaries. */

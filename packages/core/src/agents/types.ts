@@ -1,7 +1,7 @@
-import type { LanguageModel, ModelReasoningLevel } from "@sixb/llm"
 import type { ConnectorRuntime } from "../connectors"
 import type { JsonPrimitive, JsonValue, ReadonlyJsonValue } from "../json"
 import type { Logger } from "../logging"
+import type { LanguageModel, ModelReasoningLevel } from "../models"
 import type { InferSchema } from "../ontology/inference"
 import type { Schema } from "../ontology/types"
 import type { GroupDefinition } from "../security"

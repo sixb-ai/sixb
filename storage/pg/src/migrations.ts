@@ -53,6 +53,7 @@ import webhookDeliveryFailureRecordSql from "./migrations/019-webhook-delivery-f
 import dropRunUsageProjectionsSql from "./migrations/020-drop-run-usage-projections.sql" with {
   type: "text",
 }
+import aiModelCallDetailsSql from "./migrations/021-ai-model-call-details.sql" with { type: "text" }
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -326,6 +327,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("018-ontology-outbox-failure-record", ontologyOutboxFailureRecordSql),
     pgSql("019-webhook-delivery-failure-record", webhookDeliveryFailureRecordSql),
     pgSql("020-drop-run-usage-projections", dropRunUsageProjectionsSql),
+    pgSql("021-ai-model-call-details", aiModelCallDetailsSql),
   ],
 })
 

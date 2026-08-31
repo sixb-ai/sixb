@@ -9,10 +9,5 @@
     "rootDir": "./src",
     "tsBuildInfoFile": "./.tsbuild/tsconfig.build.tsbuildinfo"
   },
-  "include": ["src/**/*"],
-  "references": [
-    {
-      "path": "../llm/tsconfig.build.json"
-    }
-  ]
+  "include": ["src/**/*"]
 }

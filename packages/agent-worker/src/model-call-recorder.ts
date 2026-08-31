@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto"
 import { omitUndefinedObjectProperties } from "@sixb/core/internal/agents"
+import type { ModelCallEndEvent } from "@sixb/core/models"
 import type { AiUsageStorage, ReadonlyJsonObject, RecordAiModelCallInput } from "@sixb/core/storage"
 import { normalizeAiModelCallRecord } from "@sixb/core/storage"
-import type { ModelCallEndEvent } from "@sixb/llm"
 import { AgentUsageRecordingError } from "./errors"
 import { aiModelCallUsageFromModel } from "./model-adapters"
 import { isPermanentAiUsageRecoveryError } from "./model-call-recovery"
@@ -69,6 +69,9 @@ export class AiModelCallRecorder {
         ...(event.responseModelId === undefined ? {} : { responseModelId: event.responseModelId }),
         responseId: event.responseId,
         usage: aiModelCallUsageFromModel(event.usage),
+        modelDefinition: event.definition,
+        cost: event.cost,
+        ...(event.route === undefined ? {} : { route: event.route }),
         ...(rawUsage === undefined ? {} : { rawUsage }),
         occurredAt: this.now(),
       }

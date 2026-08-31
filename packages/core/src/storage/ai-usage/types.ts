@@ -1,4 +1,5 @@
 import type { ReadonlyJsonObject } from "../../json"
+import type { LanguageModelDefinition, ModelCallCost, ModelRoute } from "../../models"
 
 /** How much normalized token usage a provider reported for one model call. */
 export type AiUsageReportingStatus = "complete" | "partial" | "unavailable"
@@ -52,6 +53,10 @@ export interface RecordAiModelCallInput {
   /** Provider-returned response ID used for later usage and cost reconciliation. */
   readonly responseId: string
   readonly usage: AiModelCallUsageInput
+  /** Definition and valuation captured at call time so later catalog changes cannot rewrite history. */
+  readonly modelDefinition?: LanguageModelDefinition
+  readonly cost?: ModelCallCost
+  readonly route?: ModelRoute
   readonly rawUsage?: ReadonlyJsonObject
   /** When the provider call completed, used for historical pricing and accounting periods. */
   readonly occurredAt: Date

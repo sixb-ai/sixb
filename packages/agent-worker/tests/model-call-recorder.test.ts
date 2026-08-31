@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import type { ModelCallEndEvent } from "@sixb/core/models"
 import type {
   AiUsageExecutionSummary,
   AiUsageStorage,
@@ -11,7 +12,6 @@ import {
   normalizeAiModelCallRecord,
 } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
-import type { ModelCallEndEvent } from "@sixb/llm"
 import { AgentUsageRecordingError } from "../src/errors"
 import { AiModelCallRecorder } from "../src/model-call-recorder"
 
@@ -27,6 +27,12 @@ function callEndEvent(): ModelCallEndEvent {
     callId: "call_1",
     providerId: "gateway",
     modelId: "openai/gpt-5",
+    definition: {
+      kind: "language",
+      providerId: "gateway",
+      modelId: "openai/gpt-5",
+      capabilities: {},
+    },
     responseModelId: "openai/gpt-5-2026-08-01",
     usage: {
       inputTokens: 12,
@@ -43,6 +49,12 @@ function callEndEvent(): ModelCallEndEvent {
       },
     },
     responseId: "response_1",
+    cost: {
+      status: "reported",
+      money: { currency: "USD", amountNanos: "42000" },
+      providerId: "gateway",
+    },
+    route: { providerId: "openai", modelId: "openai/gpt-5-2026-08-01" },
   }
 }
 
@@ -121,6 +133,18 @@ describe("AiModelCallRecorder", () => {
       requestedModelId: "openai/gpt-5",
       responseModelId: "openai/gpt-5-2026-08-01",
       responseId: "response_1",
+      modelDefinition: {
+        kind: "language",
+        providerId: "gateway",
+        modelId: "openai/gpt-5",
+        capabilities: {},
+      },
+      cost: {
+        status: "reported",
+        money: { currency: "USD", amountNanos: "42000" },
+        providerId: "gateway",
+      },
+      route: { providerId: "openai", modelId: "openai/gpt-5-2026-08-01" },
       usage: {
         inputTokens: 12,
         outputTokens: 8,

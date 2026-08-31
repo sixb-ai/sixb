@@ -168,6 +168,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 20,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "021-ai-model-call-details",
+    status: "applied",
+    version: 21,
+  },
 ]
 
 afterEach(async () => {
@@ -1364,6 +1371,9 @@ describe("SQLite storage migrations", () => {
     expect(tables).toContain("ai_model_call_usage")
     expect(tables).toContain("ai_model_call_usage_groups")
     expect(readTableColumns(path, "ai_model_call_usage")).toContain("execution_id")
+    expect(readTableColumns(path, "ai_model_call_usage")).toEqual(
+      expect.arrayContaining(["model_definition", "cost", "route"])
+    )
     expect(readTableColumns(path, "ai_model_call_usage")).not.toContain("execution_kind")
     expect(readTableColumns(path, "ai_model_call_usage")).not.toContain("requester_principal_id")
     expect(readTableForeignKeys(path, "ai_model_call_usage")).toContainEqual({

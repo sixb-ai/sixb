@@ -796,7 +796,6 @@ export type {
 
 // ── Runtime ─────────────────────────────────────────────────
 
-export type { LanguageModel, ProviderData } from "@sixb/llm"
 export type { ActionRunsRuntime, ActionsRuntime } from "./actions/execution"
 export type {
   AgentRunListResult,
@@ -831,6 +830,12 @@ export type {
   OntologyOperationalStatus,
   SixbReadiness,
 } from "./maintenance"
+export type {
+  LanguageModel,
+  LanguageModelDefinition,
+  LanguageModelPricing,
+  ProviderData,
+} from "./models"
 export type {
   ExecutionObjectByIdHandle,
   ExecutionObjectSet,

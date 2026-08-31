@@ -1,5 +1,5 @@
 import type { AgentDefinition, AgentMessagePart, SchemaOrRef, ValueType } from "@sixb/core"
-import { buildAgentSystemPrompt } from "@sixb/core/internal/agents"
+import { buildAgentSystemPrompt, runModelLoop } from "@sixb/core/internal/agents"
 import { schemaRecordToJsonSchema } from "@sixb/core/internal/ontology"
 import {
   type AgentStepDefinition,
@@ -7,8 +7,8 @@ import {
   validateWorkflowAgentStepOutput,
   type WorkflowIOSnapshot,
 } from "@sixb/core/internal/workflows"
+import type { JsonObject } from "@sixb/core/models"
 import { coerceAgentRunFinishReason } from "@sixb/core/storage"
-import { type JsonObject, runModelLoop } from "@sixb/llm"
 import { agentTraceFromModelSteps } from "./model-adapters"
 import type { AiModelCallRecorder } from "./model-call-recorder"
 import type { AgentTurnContext } from "./types"
