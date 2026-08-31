@@ -1,5 +1,9 @@
-import { readFile, writeFile } from "node:fs/promises"
-import { basename } from "node:path"
+import { randomUUID } from "node:crypto"
+import { createWriteStream } from "node:fs"
+import { readFile, rename, rm } from "node:fs/promises"
+import { basename, dirname, join } from "node:path"
+import { Readable } from "node:stream"
+import { pipeline } from "node:stream/promises"
 import { CliError, EXIT_API, fail } from "./output"
 
 export class ApiClient {
@@ -36,7 +40,15 @@ export class ApiClient {
     query?: Readonly<Record<string, string | undefined>>
   ): Promise<void> {
     const response = await this.fetch(this.url(path, query), { method: "GET" })
-    await writeFile(output, new Uint8Array(await response.arrayBuffer()))
+    const temporary = join(dirname(output), `.${basename(output)}.sixb-${randomUUID()}.tmp`)
+    try {
+      const body = Readable.from(response.body ?? [])
+      await pipeline(body, createWriteStream(temporary, { flags: "wx" }))
+      await rename(temporary, output)
+    } catch (error) {
+      await rm(temporary, { force: true }).catch(() => {})
+      throw error
+    }
   }
 
   private url(path: string, query?: Readonly<Record<string, string | undefined>>): URL {
