@@ -1,5 +1,6 @@
 import type { ObjectQuery } from "@sixb/core"
 import type {
+  CompiledSelectedObjectReadScope,
   CountObjectsInput,
   CountObjectsResult,
   ExistsObjectsInput,
@@ -11,8 +12,11 @@ import type {
   LinkBatchKey,
   LinkDirection,
   ObjectBatchKey,
+  ObjectFacetResult,
   ObjectLinkRow,
   ObjectQueryCapabilities,
+  ObjectReadExecutionLimits,
+  ObjectReadScopeFactory,
   ObjectReadStorage,
   ObjectRow,
   ObjectRowLinks,
@@ -22,7 +26,15 @@ import type {
   QueryObjectsInput,
   QueryObjectsResult,
 } from "@sixb/core/storage"
-import { linkBatchKey, objectBatchKey } from "@sixb/core/storage"
+import {
+  assertObjectReaderProject,
+  assertObjectReadFacetCount,
+  assertObjectReadOutputWithinLimit,
+  linkBatchKey,
+  ObjectReadLimitExceededError,
+  objectBatchKey,
+  snapshotObjectReadExecutionLimits,
+} from "@sixb/core/storage"
 import type { SQLClient, SqlParameter } from "./pg-client"
 import {
   type CompiledPgObjectQuery,
@@ -30,8 +42,14 @@ import {
   compilePgObjectExistsQuery,
   compilePgObjectFacetQuery,
   compilePgObjectQuery,
+  compilePgObjectStatement,
+  type PgObjectQuerySource,
 } from "./pg-object-query-compiler"
-import type { PgStoreClient } from "./transactions"
+import {
+  compilePgSelectedObjectReadSource,
+  type PgSelectedObjectReadSource,
+} from "./pg-object-read-scope"
+import { type PgStoreClient, runPgRepeatableReadTransaction } from "./transactions"
 
 const PG_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
   queryObjects: true,
@@ -156,19 +174,110 @@ function valuesJoin<Row = unknown>(
  * - Reads return JSONB as native JS types (objects, numbers, booleans) when
  *   the data was stored correctly.
  */
-export class PgObjectStorage implements ObjectStorage {
+export class PgObjectStorage implements ObjectStorage, ObjectReadScopeFactory {
   constructor(private readonly sql: PgStoreClient) {}
 
   queryCapabilities(): ObjectQueryCapabilities {
     return PG_OBJECT_QUERY_CAPABILITIES
   }
 
+  createSelectedReadScope(params: {
+    projectId: string
+    scope: CompiledSelectedObjectReadScope
+    limits: ObjectReadExecutionLimits
+  }): ObjectReadStorage {
+    const projectId = params.projectId
+    const limits = snapshotObjectReadExecutionLimits(params.limits)
+    const source = compilePgSelectedObjectReadSource(
+      projectId,
+      params.scope,
+      limits.maxTraversalFacts
+    )
+    const assertProject = (actualProjectId: string): void =>
+      assertObjectReaderProject(projectId, actualProjectId)
+    const read = <T>(run: (sql: SQLClient) => Promise<T>): Promise<T> =>
+      runPgRepeatableReadTransaction(this.sql, async (sql) => {
+        await assertTraversalBudget(sql, source, limits.maxTraversalFacts)
+        const value = await run(sql)
+        assertObjectReadOutputWithinLimit(value, limits)
+        return value
+      })
+    const readMap = <TKey, TValue>(
+      run: (sql: SQLClient) => Promise<Map<TKey, TValue>>
+    ): Promise<Map<TKey, TValue>> =>
+      runPgRepeatableReadTransaction(this.sql, async (sql) => {
+        await assertTraversalBudget(sql, source, limits.maxTraversalFacts)
+        const value = await run(sql)
+        assertObjectReadOutputWithinLimit([...value.entries()], limits)
+        return value
+      })
+
+    return Object.freeze({
+      queryCapabilities: () => this.queryCapabilities(),
+      queryObjects: async (input) => {
+        assertProject(input.projectId)
+        return read((sql) => this.queryObjectsFromSource(sql, input, source))
+      },
+      countObjects: async (input) => {
+        assertProject(input.projectId)
+        return read((sql) => this.countObjectsFromSource(sql, input, source))
+      },
+      existsObjects: async (input) => {
+        assertProject(input.projectId)
+        return read((sql) => this.existsObjectsFromSource(sql, input, source))
+      },
+      facetObjects: async (input) => {
+        assertProject(input.projectId)
+        assertObjectReadFacetCount(input.facets.length)
+        return read((sql) => this.facetObjectsFromSource(sql, input, source))
+      },
+      getByPrimaryId: async (input) => {
+        assertProject(input.projectId)
+        return read((sql) => this.getByPrimaryIdFromSource(sql, input, source))
+      },
+      selectsObjectProperties: async (input) => {
+        assertProject(input.projectId)
+        return read((sql) => this.selectsObjectPropertiesFromSource(sql, input, source))
+      },
+      listLinks: async (input) => {
+        assertProject(input.projectId)
+        return read((sql) => this.listLinksFromSource(sql, input, source))
+      },
+      getByPrimaryIdBatch: async (input) => {
+        assertProject(input.projectId)
+        return readMap((sql) => this.getByPrimaryIdBatchFromSource(sql, input, source))
+      },
+      listLinksBatch: async (input) => {
+        assertProject(input.projectId)
+        return readMap((sql) => this.listLinksBatchFromSource(sql, input, source))
+      },
+      queryLinks: async (input) => {
+        assertProject(input.projectId)
+        assertLinkQueryLimit(input.limit)
+        return read((sql) => this.queryLinksFromSource(sql, input, source))
+      },
+      list: async (input) => {
+        assertProject(input.projectId)
+        return read((sql) => this.listFromSource(sql, input, source))
+      },
+    } satisfies ObjectReadStorage)
+  }
+
   async queryObjects(params: QueryObjectsInput): Promise<QueryObjectsResult> {
+    return this.queryObjectsFromSource(this.sql, params)
+  }
+
+  private async queryObjectsFromSource(
+    sql: SQLClient,
+    params: QueryObjectsInput,
+    source?: PgObjectQuerySource
+  ): Promise<QueryObjectsResult> {
     const compiled = compilePgObjectQuery(params.projectId, params.query, {
       includeTotal: params.includeTotal,
+      ...(source ? { source } : {}),
     })
-    const total = params.includeTotal === false ? undefined : await readTotal(this.sql, compiled)
-    const rawRows = await this.sql.unsafe<ObjectQueryDatabaseRow[]>(
+    const total = params.includeTotal === false ? undefined : await readTotal(sql, compiled)
+    const rawRows = await sql.unsafe<ObjectQueryDatabaseRow[]>(
       compiled.sql,
       compiled.args as SqlParameter[]
     )
@@ -177,7 +286,7 @@ export class PgObjectStorage implements ObjectStorage {
       total === undefined && compiled.hasMoreProbe
         ? compiled.hasMoreProbe.hasMore(
             (
-              await this.sql.unsafe(
+              await sql.unsafe(
                 compiled.hasMoreProbe.sql,
                 compiled.hasMoreProbe.args as SqlParameter[]
               )
@@ -194,8 +303,18 @@ export class PgObjectStorage implements ObjectStorage {
   }
 
   async countObjects(params: CountObjectsInput): Promise<CountObjectsResult> {
-    const compiled = compilePgObjectCountQuery(params.projectId, stripOuterRowShape(params.query))
-    const [row] = await this.sql.unsafe<{ count: string | number | bigint }[]>(
+    return this.countObjectsFromSource(this.sql, params)
+  }
+
+  private async countObjectsFromSource(
+    sql: SQLClient,
+    params: CountObjectsInput,
+    source?: PgObjectQuerySource
+  ): Promise<CountObjectsResult> {
+    const compiled = compilePgObjectCountQuery(params.projectId, stripOuterRowShape(params.query), {
+      ...(source ? { source } : {}),
+    })
+    const [row] = await sql.unsafe<{ count: string | number | bigint }[]>(
       compiled.sql,
       compiled.args as SqlParameter[]
     )
@@ -203,28 +322,49 @@ export class PgObjectStorage implements ObjectStorage {
   }
 
   async existsObjects(params: ExistsObjectsInput): Promise<ExistsObjectsResult> {
-    const compiled = compilePgObjectExistsQuery(params.projectId, stripOuterRowShape(params.query))
-    const [row] = await this.sql.unsafe<unknown[]>(compiled.sql, compiled.args as SqlParameter[])
+    return this.existsObjectsFromSource(this.sql, params)
+  }
+
+  private async existsObjectsFromSource(
+    sql: SQLClient,
+    params: ExistsObjectsInput,
+    source?: PgObjectQuerySource
+  ): Promise<ExistsObjectsResult> {
+    const compiled = compilePgObjectExistsQuery(
+      params.projectId,
+      stripOuterRowShape(params.query),
+      { ...(source ? { source } : {}) }
+    )
+    const [row] = await sql.unsafe<unknown[]>(compiled.sql, compiled.args as SqlParameter[])
     return { exists: row !== undefined }
   }
 
   async facetObjects(params: FacetObjectsInput): Promise<FacetObjectsResult> {
-    return {
-      facets: await Promise.all(
-        params.facets.map(async (facet) => ({
-          propertyId: facet.propertyId,
-          buckets: await readFacetBuckets(
-            this.sql,
-            compilePgObjectFacetQuery(
-              params.projectId,
-              stripOuterRowShape(params.query),
-              facet.propertyId,
-              facet.limit
-            )
-          ),
-        }))
-      ),
+    return this.facetObjectsFromSource(this.sql, params)
+  }
+
+  private async facetObjectsFromSource(
+    sql: SQLClient,
+    params: FacetObjectsInput,
+    source?: PgObjectQuerySource
+  ): Promise<FacetObjectsResult> {
+    const facets: ObjectFacetResult[] = []
+    for (const facet of params.facets) {
+      facets.push({
+        propertyId: facet.propertyId,
+        buckets: await readFacetBuckets(
+          sql,
+          compilePgObjectFacetQuery(
+            params.projectId,
+            stripOuterRowShape(params.query),
+            facet.propertyId,
+            facet.limit,
+            { ...(source ? { source } : {}) }
+          )
+        ),
+      })
     }
+    return { facets }
   }
 
   async getByPrimaryId(params: {
@@ -232,12 +372,31 @@ export class PgObjectStorage implements ObjectStorage {
     objectTypeId: string
     primaryId: string
   }): Promise<ObjectRow | null> {
-    const [row] = await this.sql<ObjectDatabaseRow[]>`
-      SELECT * FROM objects
-      WHERE project_id = ${params.projectId}
-        AND object_type_id = ${params.objectTypeId}
-        AND primary_id = ${params.primaryId}
-    `
+    return this.getByPrimaryIdFromSource(this.sql, params)
+  }
+
+  private async getByPrimaryIdFromSource(
+    sql: SQLClient,
+    params: {
+      projectId: string
+      objectTypeId: string
+      primaryId: string
+    },
+    source?: PgObjectQuerySource
+  ): Promise<ObjectRow | null> {
+    const statement = compilePgObjectStatement(
+      `
+        SELECT *
+        FROM ${source?.objectsTable ?? "objects"}
+        WHERE project_id = ? AND object_type_id = ? AND primary_id = ?
+      `,
+      [params.projectId, params.objectTypeId, params.primaryId],
+      source
+    )
+    const [row] = await sql.unsafe<ObjectDatabaseRow[]>(
+      statement.sql,
+      statement.args as SqlParameter[]
+    )
 
     return row ? rowToObject(row) : null
   }
@@ -245,13 +404,45 @@ export class PgObjectStorage implements ObjectStorage {
   async selectsObjectProperties(
     params: Parameters<ObjectReadStorage["selectsObjectProperties"]>[0]
   ): Promise<readonly boolean[]> {
-    const objects = await this.getByPrimaryIdBatch({
-      projectId: params.projectId,
-      items: params.items,
-    })
-    return params.items.map((item) =>
-      objects.has(objectBatchKey(item.objectTypeId, item.primaryId))
+    return this.selectsObjectPropertiesFromSource(this.sql, params)
+  }
+
+  private async selectsObjectPropertiesFromSource(
+    sql: SQLClient,
+    params: Parameters<ObjectReadStorage["selectsObjectProperties"]>[0],
+    source?: PgSelectedObjectReadSource
+  ): Promise<readonly boolean[]> {
+    const result = params.items.map(() => false)
+    if (params.items.length === 0) return result
+
+    const items = params.items.map((item, batchIndex) => ({ ...item, batchIndex }))
+    const storedTable = source?.objectPropertyPermissionsTable ?? "objects"
+    const propertyJoin = source ? 'AND stored.property_id = requested."propertyId"' : ""
+    const statement = compilePgObjectStatement(
+      `
+        SELECT DISTINCT requested."batchIndex" AS _batch_index
+        FROM ${storedTable} AS stored
+        JOIN jsonb_to_recordset(?::text::jsonb)
+          AS requested(
+            "objectTypeId" text,
+            "primaryId" text,
+            "propertyId" text,
+            "batchIndex" integer
+          )
+          ON stored.object_type_id = requested."objectTypeId"
+         AND stored.primary_id = requested."primaryId"
+         ${propertyJoin}
+        WHERE stored.project_id = ?
+      `,
+      [JSON.stringify(items), params.projectId],
+      source
     )
+    const rows = await sql.unsafe<PropertyPermissionBatchDatabaseRow[]>(
+      statement.sql,
+      statement.args as SqlParameter[]
+    )
+    for (const row of rows) result[row._batch_index] = true
+    return result
   }
 
   async listLinks(params: {
@@ -261,20 +452,46 @@ export class PgObjectStorage implements ObjectStorage {
     linkId?: string
     direction?: LinkDirection
   }): Promise<readonly ObjectLinkRow[]> {
+    return this.listLinksFromSource(this.sql, params)
+  }
+
+  private async listLinksFromSource(
+    sql: SQLClient,
+    params: {
+      projectId: string
+      objectTypeId: string
+      objectId: string
+      linkId?: string
+      direction?: LinkDirection
+    },
+    source?: PgObjectQuerySource
+  ): Promise<readonly ObjectLinkRow[]> {
     const direction = params.direction ?? "outgoing"
     const directionWhere =
       direction === "incoming"
-        ? "target_type_id = $2 AND target_id = $3"
+        ? "target_type_id = ? AND target_id = ?"
         : direction === "both"
-          ? "((source_type_id = $2 AND source_id = $3) OR (target_type_id = $2 AND target_id = $3))"
-          : "source_type_id = $2 AND source_id = $3"
-    const query = `SELECT * FROM links WHERE project_id = $1 AND ${directionWhere}${
-      params.linkId ? " AND link_id = $4" : ""
+          ? "((source_type_id = ? AND source_id = ?) OR (target_type_id = ? AND target_id = ?))"
+          : "source_type_id = ? AND source_id = ?"
+    const args: unknown[] =
+      direction === "both"
+        ? [
+            params.projectId,
+            params.objectTypeId,
+            params.objectId,
+            params.objectTypeId,
+            params.objectId,
+          ]
+        : [params.projectId, params.objectTypeId, params.objectId]
+    const query = `SELECT * FROM ${source?.linksTable ?? "links"} WHERE project_id = ? AND ${directionWhere}${
+      params.linkId ? " AND link_id = ?" : ""
     }`
-    const args = params.linkId
-      ? [params.projectId, params.objectTypeId, params.objectId, params.linkId]
-      : [params.projectId, params.objectTypeId, params.objectId]
-    const rows = await this.sql.unsafe<LinkDatabaseRow[]>(query, args)
+    if (params.linkId) args.push(params.linkId)
+    const statement = compilePgObjectStatement(query, args, source)
+    const rows = await sql.unsafe<LinkDatabaseRow[]>(
+      statement.sql,
+      statement.args as SqlParameter[]
+    )
 
     return rows.map((row) => rowToLink(row))
   }
@@ -283,19 +500,41 @@ export class PgObjectStorage implements ObjectStorage {
     projectId: string
     items: readonly { objectTypeId: string; primaryId: string }[]
   }): Promise<Map<ObjectBatchKey, ObjectRow>> {
+    return this.getByPrimaryIdBatchFromSource(this.sql, params)
+  }
+
+  private async getByPrimaryIdBatchFromSource(
+    sql: SQLClient,
+    params: {
+      projectId: string
+      items: readonly { objectTypeId: string; primaryId: string }[]
+    },
+    source?: PgObjectQuerySource
+  ): Promise<Map<ObjectBatchKey, ObjectRow>> {
     const result = new Map<ObjectBatchKey, ObjectRow>()
     if (params.items.length === 0) return result
-    const rows = await valuesJoin<ObjectDatabaseRow>(
-      this.sql,
-      "SELECT o.* FROM objects o",
-      ["object_type_id", "primary_id"],
-      params.items.map((i) => [i.objectTypeId, i.primaryId]),
-      `WHERE o.project_id = $1`,
-      [params.projectId]
+    const items = params.items.map((item, batchIndex) => ({ ...item, batchIndex }))
+    const statement = compilePgObjectStatement(
+      `
+        SELECT object.*, requested."batchIndex" AS _batch_index
+        FROM jsonb_to_recordset(?::text::jsonb)
+          AS requested("objectTypeId" text, "primaryId" text, "batchIndex" integer)
+        JOIN ${source?.objectsTable ?? "objects"} AS object
+          ON object.project_id = ?
+         AND object.object_type_id = requested."objectTypeId"
+         AND object.primary_id = requested."primaryId"
+      `,
+      [JSON.stringify(items), params.projectId],
+      source
     )
-
-    for (const row of rows) {
-      result.set(objectBatchKey(row.object_type_id, row.primary_id), rowToObject(row))
+    const rows = await sql.unsafe<ObjectBatchDatabaseRow[]>(
+      statement.sql,
+      statement.args as SqlParameter[]
+    )
+    const rowsByIndex = new Map(rows.map((row) => [row._batch_index, row]))
+    for (const [index, item] of params.items.entries()) {
+      const row = rowsByIndex.get(index)
+      if (row) result.set(objectBatchKey(item.objectTypeId, item.primaryId), rowToObject(row))
     }
     return result
   }
@@ -305,105 +544,204 @@ export class PgObjectStorage implements ObjectStorage {
     direction?: LinkDirection
     items: readonly { objectTypeId: string; objectId: string; linkId: string }[]
   }): Promise<Map<LinkBatchKey, ObjectLinkRow[]>> {
-    const result = new Map<LinkBatchKey, Map<string, ObjectLinkRow>>()
-    if (params.items.length === 0) return new Map()
+    return this.listLinksBatchFromSource(this.sql, params)
+  }
 
-    const readSide = async (side: "source" | "target"): Promise<void> => {
-      const rows = await valuesJoin<LinkDatabaseRow>(
-        this.sql,
-        "SELECT l.* FROM links l",
-        [`${side}_type_id`, `${side}_id`, "link_id"],
-        params.items.map((item) => [item.objectTypeId, item.objectId, item.linkId]),
-        `WHERE l.project_id = $1`,
-        [params.projectId]
-      )
-      for (const row of rows) {
-        const link = rowToLink(row)
-        const objectTypeId = side === "source" ? row.source_type_id : row.target_type_id
-        const objectId = side === "source" ? row.source_id : row.target_id
-        const key = linkBatchKey(objectTypeId, objectId, row.link_id)
-        const bucket = result.get(key) ?? new Map<string, ObjectLinkRow>()
-        bucket.set(linkIdentity(link), link)
-        result.set(key, bucket)
-      }
-    }
+  private async listLinksBatchFromSource(
+    sql: SQLClient,
+    params: {
+      projectId: string
+      direction?: LinkDirection
+      items: readonly { objectTypeId: string; objectId: string; linkId: string }[]
+    },
+    source?: PgObjectQuerySource
+  ): Promise<Map<LinkBatchKey, ObjectLinkRow[]>> {
+    const result = new Map<LinkBatchKey, ObjectLinkRow[]>()
+    if (params.items.length === 0) return result
 
     const direction = params.direction ?? "outgoing"
-    if (direction === "outgoing" || direction === "both") await readSide("source")
-    if (direction === "incoming" || direction === "both") await readSide("target")
+    const outgoing =
+      'stored.source_type_id = requested."objectTypeId" AND stored.source_id = requested."objectId"'
+    const incoming =
+      'stored.target_type_id = requested."objectTypeId" AND stored.target_id = requested."objectId"'
+    const items = params.items.map((item, batchIndex) => ({ ...item, batchIndex }))
+    const requestedSql = `
+      jsonb_to_recordset(?::text::jsonb)
+        AS requested(
+          "objectTypeId" text,
+          "objectId" text,
+          "linkId" text,
+          "batchIndex" integer
+        )
+    `
+    const table = source?.linksTable ?? "links"
+    const selectedSql =
+      direction === "both"
+        ? `
+          SELECT stored.*, requested."batchIndex" AS _batch_index
+          FROM ${requestedSql}
+          CROSS JOIN LATERAL (
+            SELECT outgoing_link.*
+            FROM ${table} AS outgoing_link
+            WHERE outgoing_link.project_id = ?
+              AND outgoing_link.source_type_id = requested."objectTypeId"
+              AND outgoing_link.source_id = requested."objectId"
+              AND outgoing_link.link_id = requested."linkId"
 
-    return new Map([...result].map(([key, links]) => [key, [...links.values()]] as const))
+            UNION
+
+            SELECT incoming_link.*
+            FROM ${table} AS incoming_link
+            WHERE incoming_link.project_id = ?
+              AND incoming_link.target_type_id = requested."objectTypeId"
+              AND incoming_link.target_id = requested."objectId"
+              AND incoming_link.link_id = requested."linkId"
+          ) AS stored
+        `
+        : `
+          SELECT stored.*, requested."batchIndex" AS _batch_index
+          FROM ${requestedSql}
+          JOIN ${table} AS stored
+            ON ${direction === "incoming" ? incoming : outgoing}
+           AND stored.link_id = requested."linkId"
+          WHERE stored.project_id = ?
+        `
+    const statement = compilePgObjectStatement(
+      `
+        ${selectedSql}
+        ORDER BY
+          _batch_index,
+          source_type_id COLLATE "C",
+          source_id COLLATE "C",
+          link_id COLLATE "C",
+          target_type_id COLLATE "C",
+          target_id COLLATE "C"
+      `,
+      direction === "both"
+        ? [JSON.stringify(items), params.projectId, params.projectId]
+        : [JSON.stringify(items), params.projectId],
+      source
+    )
+    const rows = await sql.unsafe<LinkBatchDatabaseRow[]>(
+      statement.sql,
+      statement.args as SqlParameter[]
+    )
+    const rowsByIndex = params.items.map(() => new Map<string, ObjectLinkRow>())
+    for (const row of rows) {
+      const link = rowToLink(row)
+      rowsByIndex[row._batch_index]?.set(linkIdentity(link), link)
+    }
+    for (const [index, item] of params.items.entries()) {
+      const links = [...(rowsByIndex[index]?.values() ?? [])]
+      if (links.length > 0) {
+        result.set(linkBatchKey(item.objectTypeId, item.objectId, item.linkId), links)
+      }
+    }
+    return result
   }
 
   async queryLinks(params: QueryObjectLinksInput): Promise<QueryObjectLinksResult> {
     assertLinkQueryLimit(params.limit)
+    return this.queryLinksFromSource(this.sql, params)
+  }
+
+  private async queryLinksFromSource(
+    sql: SQLClient,
+    params: QueryObjectLinksInput,
+    source?: PgObjectQuerySource
+  ): Promise<QueryObjectLinksResult> {
     if (params.objectRefs.length === 0 || params.endpointObjectTypeIds?.length === 0) {
       return { links: [], hasMore: false }
     }
 
-    const args: SqlParameter[] = [JSON.stringify(params.objectRefs), params.projectId]
-    const addArg = (value: SqlParameter): string => {
+    const requestedJson = JSON.stringify(params.objectRefs)
+    const args: unknown[] =
+      params.direction === "both"
+        ? [requestedJson, params.projectId, params.projectId]
+        : [requestedJson, params.projectId]
+    const addArg = (value: unknown): string => {
       args.push(value)
-      return `$${args.length}`
+      return "?"
     }
-    const sourceJoin = `
-      SELECT link.*
-      FROM links AS link
-      JOIN requested
-        ON requested.object_type_id = link.source_type_id
-       AND requested.object_id = link.source_id
-      WHERE link.project_id = $2
+    const requestedSql = `
+      jsonb_to_recordset(?::text::jsonb)
+        AS requested("objectTypeId" text, "primaryId" text)
     `
-    const targetJoin = `
-      SELECT link.*
-      FROM links AS link
-      JOIN requested
-        ON requested.object_type_id = link.target_type_id
-       AND requested.object_id = link.target_id
-      WHERE link.project_id = $2
-    `
+    const table = source?.linksTable ?? "links"
     const incidentSql =
-      params.direction === "outgoing"
-        ? sourceJoin
-        : params.direction === "incoming"
-          ? targetJoin
-          : `${sourceJoin} UNION ${targetJoin}`
+      params.direction === "both"
+        ? `
+          SELECT DISTINCT link.*
+          FROM ${requestedSql}
+          CROSS JOIN LATERAL (
+            SELECT outgoing_link.*
+            FROM ${table} AS outgoing_link
+            WHERE outgoing_link.project_id = ?
+              AND outgoing_link.source_type_id = requested."objectTypeId"
+              AND outgoing_link.source_id = requested."primaryId"
+
+            UNION
+
+            SELECT incoming_link.*
+            FROM ${table} AS incoming_link
+            WHERE incoming_link.project_id = ?
+              AND incoming_link.target_type_id = requested."objectTypeId"
+              AND incoming_link.target_id = requested."primaryId"
+          ) AS link
+        `
+        : `
+          SELECT DISTINCT link.*
+          FROM ${requestedSql}
+          JOIN ${table} AS link
+            ON requested."objectTypeId" = link.${params.direction === "incoming" ? "target_type_id" : "source_type_id"}
+           AND requested."primaryId" = link.${params.direction === "incoming" ? "target_id" : "source_id"}
+          WHERE link.project_id = ?
+        `
 
     const predicates: string[] = []
     if (params.linkId !== undefined) {
       predicates.push(`link_id = ${addArg(params.linkId)}::text`)
     }
     if (params.endpointObjectTypeIds !== undefined) {
-      const allowedTypes = addArg(JSON.stringify([...new Set(params.endpointObjectTypeIds)]))
+      const allowedTypes = JSON.stringify([...new Set(params.endpointObjectTypeIds)])
       predicates.push(
-        `source_type_id IN (SELECT jsonb_array_elements_text(${allowedTypes}::text::jsonb))`,
-        `target_type_id IN (SELECT jsonb_array_elements_text(${allowedTypes}::text::jsonb))`
+        `source_type_id IN (SELECT jsonb_array_elements_text(${addArg(allowedTypes)}::text::jsonb))`,
+        `target_type_id IN (SELECT jsonb_array_elements_text(${addArg(allowedTypes)}::text::jsonb))`
       )
     }
     if (params.after) {
-      const cursor = params.after.map((value) => `${addArg(value)}::text`)
+      const cursor = params.after.map((value) => `${addArg(value)}::text COLLATE "C"`)
       predicates.push(
-        `(source_type_id, source_id, link_id, target_type_id, target_id) > (${cursor.join(", ")})`
+        `(
+          source_type_id COLLATE "C",
+          source_id COLLATE "C",
+          link_id COLLATE "C",
+          target_type_id COLLATE "C",
+          target_id COLLATE "C"
+        ) > (${cursor.join(", ")})`
       )
     }
     const limit = addArg(params.limit + 1)
     const whereSql = predicates.length > 0 ? `WHERE ${predicates.join(" AND ")}` : ""
-    const rows = await this.sql.unsafe<LinkDatabaseRow[]>(
+    const statement = compilePgObjectStatement(
       `
-        WITH requested AS (
-          SELECT DISTINCT
-            requested."objectTypeId" AS object_type_id,
-            requested."primaryId" AS object_id
-          FROM jsonb_to_recordset($1::text::jsonb)
-            AS requested("objectTypeId" text, "primaryId" text)
-        ), incident AS (${incidentSql})
         SELECT *
-        FROM incident
+        FROM (${incidentSql}) AS incident
         ${whereSql}
-        ORDER BY source_type_id, source_id, link_id, target_type_id, target_id
+        ORDER BY
+          source_type_id COLLATE "C",
+          source_id COLLATE "C",
+          link_id COLLATE "C",
+          target_type_id COLLATE "C",
+          target_id COLLATE "C"
         LIMIT ${limit}
       `,
-      args
+      args,
+      source
+    )
+    const rows = await sql.unsafe<LinkDatabaseRow[]>(
+      statement.sql,
+      statement.args as SqlParameter[]
     )
 
     return {
@@ -487,81 +825,103 @@ export class PgObjectStorage implements ObjectStorage {
     orderBy?: "createdAt" | "updatedAt" | "primaryId"
     order?: "asc" | "desc"
   }): Promise<{ objects: readonly ObjectRow[]; hasMore: boolean; total: number }> {
+    return this.listFromSource(this.sql, params)
+  }
+
+  private async listFromSource(
+    sql: SQLClient,
+    params: Parameters<ObjectReadStorage["list"]>[0],
+    source?: PgObjectQuerySource
+  ): Promise<{ objects: readonly ObjectRow[]; hasMore: boolean; total: number }> {
     const queryOffset = params.offset ?? 0
     const limit = params.limit ?? 50
     const orderBy = params.orderBy ?? "updatedAt"
     const order = params.order ?? "desc"
     const orderColumn =
       orderBy === "primaryId" ? "primary_id" : orderBy === "createdAt" ? "created_at" : "updated_at"
+    const filters = ["project_id = ?"]
+    const args: unknown[] = [params.projectId]
+    if (typeof params.objectTypeId === "string") {
+      filters.push("object_type_id = ?")
+      args.push(params.objectTypeId)
+    } else if (params.objectTypeId !== undefined) {
+      filters.push("object_type_id IN (SELECT jsonb_array_elements_text(?::text::jsonb))")
+      args.push(JSON.stringify(params.objectTypeId))
+    }
+    if (params.primaryIdPrefix) {
+      filters.push("primary_id LIKE ?")
+      args.push(`${params.primaryIdPrefix}%`)
+    }
+    if (params.primaryIdSuffix) {
+      filters.push("primary_id LIKE ?")
+      args.push(`%${params.primaryIdSuffix}`)
+    }
+    if (params.updatedAfter) {
+      filters.push("updated_at >= ?")
+      args.push(params.updatedAfter)
+    }
+    if (params.updatedBefore) {
+      filters.push("updated_at <= ?")
+      args.push(params.updatedBefore)
+    }
+    if (params.createdAfter) {
+      filters.push("created_at >= ?")
+      args.push(params.createdAfter)
+    }
+    if (params.createdBefore) {
+      filters.push("created_at <= ?")
+      args.push(params.createdBefore)
+    }
 
-    // Build WHERE conditions using conditional fragments
-    const typeFilter =
-      params.objectTypeId === undefined
-        ? this.sql``
-        : typeof params.objectTypeId === "string"
-          ? this.sql`AND object_type_id = ${params.objectTypeId}`
-          : this.sql`AND object_type_id IN ${this.sql(params.objectTypeId as string[])}`
-
-    const primaryIdPrefixFilter = params.primaryIdPrefix
-      ? this.sql`AND primary_id LIKE ${`${params.primaryIdPrefix}%`}`
-      : this.sql``
-
-    const primaryIdSuffixFilter = params.primaryIdSuffix
-      ? this.sql`AND primary_id LIKE ${`%${params.primaryIdSuffix}`}`
-      : this.sql``
-
-    const updatedAfterFilter = params.updatedAfter
-      ? this.sql`AND updated_at >= ${params.updatedAfter}`
-      : this.sql``
-
-    const updatedBeforeFilter = params.updatedBefore
-      ? this.sql`AND updated_at <= ${params.updatedBefore}`
-      : this.sql``
-
-    const createdAfterFilter = params.createdAfter
-      ? this.sql`AND created_at >= ${params.createdAfter}`
-      : this.sql``
-
-    const createdBeforeFilter = params.createdBefore
-      ? this.sql`AND created_at <= ${params.createdBefore}`
-      : this.sql``
-
-    const filters = this.sql`
-      ${typeFilter}
-      ${primaryIdPrefixFilter}
-      ${primaryIdSuffixFilter}
-      ${updatedAfterFilter}
-      ${updatedBeforeFilter}
-      ${createdAfterFilter}
-      ${createdBeforeFilter}
-    `
-
-    // Get total count
-    const [countResult] = await this.sql<{ total: number }[]>`
-      SELECT COUNT(*)::int AS total FROM objects
-      WHERE project_id = ${params.projectId}
-      ${filters}
-    `
-    const total = countResult.total
+    const objectsTable = source?.objectsTable ?? "objects"
+    const whereSql = filters.join(" AND ")
+    const countStatement = compilePgObjectStatement(
+      `SELECT COUNT(*)::int AS total FROM ${objectsTable} WHERE ${whereSql}`,
+      args,
+      source
+    )
+    const [countResult] = await sql.unsafe<{ total: number }[]>(
+      countStatement.sql,
+      countStatement.args as SqlParameter[]
+    )
+    const total = countResult?.total ?? 0
 
     if (limit === 0) return { objects: [], hasMore: queryOffset < total, total }
 
-    // Get paginated results (+1 for hasMore check)
-    // Column and direction derived from a fixed mapping — safe to use as identifiers
     const fetchLimit = limit + 1
-    const rows = await this.sql<ObjectDatabaseRow[]>`
-      SELECT * FROM objects
-      WHERE project_id = ${params.projectId}
-      ${filters}
-      ORDER BY ${this.sql(orderColumn)} ${order === "asc" ? this.sql`ASC` : this.sql`DESC`}
-      LIMIT ${fetchLimit}
-      OFFSET ${queryOffset}
-    `
+    const rowsStatement = compilePgObjectStatement(
+      `
+        SELECT * FROM ${objectsTable}
+        WHERE ${whereSql}
+        ORDER BY ${orderColumn} ${order === "asc" ? "ASC" : "DESC"}
+        LIMIT ? OFFSET ?
+      `,
+      [...args, fetchLimit, queryOffset],
+      source
+    )
+    const rows = await sql.unsafe<ObjectDatabaseRow[]>(
+      rowsStatement.sql,
+      rowsStatement.args as SqlParameter[]
+    )
 
     const hasMore = rows.length > limit
     const objects = rows.slice(0, limit).map((row) => rowToObject(row))
 
     return { objects, hasMore, total }
+  }
+}
+
+async function assertTraversalBudget(
+  sql: SQLClient,
+  source: PgSelectedObjectReadSource,
+  maxTraversalFacts: number
+): Promise<void> {
+  const [row] = await sql.unsafe<{ total: string | number | bigint }[]>(
+    source.traversalProbe.sql,
+    source.traversalProbe.args as SqlParameter[]
+  )
+  if (BigInt(row?.total ?? 0) > BigInt(maxTraversalFacts)) {
+    throw new ObjectReadLimitExceededError("traversalFacts", maxTraversalFacts)
   }
 }
 
@@ -698,7 +1058,7 @@ function rowToLink(row: LinkDatabaseRow): ObjectLinkRow {
     linkId: row.link_id,
     targetTypeId: row.target_type_id,
     targetId: row.target_id,
-    properties: row.properties ? (row.properties as Record<string, unknown>) : undefined,
+    ...(row.properties === null ? {} : { properties: row.properties as Record<string, unknown> }),
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
     lastCommitId: row.last_commit_id,
@@ -738,6 +1098,14 @@ interface ObjectQueryDatabaseRow extends ObjectDatabaseRow {
   _expand?: unknown
 }
 
+interface ObjectBatchDatabaseRow extends ObjectDatabaseRow {
+  _batch_index: number
+}
+
+interface PropertyPermissionBatchDatabaseRow {
+  _batch_index: number
+}
+
 interface FacetDatabaseRow {
   value_type: string | null
   value_text: string | null
@@ -755,4 +1123,8 @@ interface LinkDatabaseRow {
   created_at: Date | string
   updated_at: Date | string
   last_commit_id: string
+}
+
+interface LinkBatchDatabaseRow extends LinkDatabaseRow {
+  _batch_index: number
 }
