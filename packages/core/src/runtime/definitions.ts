@@ -2,6 +2,7 @@ import type { ActionDefinitionCatalog } from "../actions"
 import type { AgentDefinition } from "../agents"
 import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets"
+import type { ModelCatalog } from "../models"
 import type { OntologyDefinitionCatalog } from "../ontology"
 import type { PipelineDefinition } from "../pipelines"
 import type { ProjectionDefinitionCatalog } from "../projections"
@@ -24,6 +25,8 @@ export interface SixbDefinitions {
   readonly agents: DefinitionCatalog<AgentDefinition>
   readonly connectors: DefinitionCatalog<ConnectorDefinition>
   readonly datasets: DefinitionCatalog<DatasetDefinition>
+  /** Absent until a project configures `models` in createSixb(). */
+  readonly models?: ModelCatalog
   readonly pipelines: DefinitionCatalog<PipelineDefinition>
   readonly projections: ProjectionDefinitionCatalog
   readonly rules: DefinitionCatalog<RuleDefinition>

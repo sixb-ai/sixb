@@ -1,6 +1,13 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type { LanguageModelV4 } from "@ai-sdk/provider"
+import { createSixb, defineAgent, defineObjectType, prop } from "../src"
 import { createModelCatalog } from "../src/models"
+import { createTestRuntimeDeps } from "./test-runtime-deps"
+
+const tempRoots = new Set<string>()
 
 /** The catalog only reads `provider` and `modelId`, so a conforming stub is enough. */
 function testModel(provider: string, modelId: string): LanguageModelV4 {
@@ -9,6 +16,25 @@ function testModel(provider: string, modelId: string): LanguageModelV4 {
 
 const gpt = testModel("gateway", "openai/gpt-5.4")
 const sonnet = testModel("gateway", "anthropic/claude-sonnet-4.6")
+
+const Room = defineObjectType({
+  id: "Room",
+  name: "Room",
+  properties: [prop("id", "string", { required: true, primary: true })],
+})
+
+async function createTempProjectRoot(): Promise<string> {
+  const projectRoot = await mkdtemp(join(tmpdir(), "sixb-core-models-"))
+  tempRoots.add(projectRoot)
+  return projectRoot
+}
+
+afterEach(async () => {
+  for (const root of tempRoots) {
+    await rm(root, { recursive: true, force: true })
+  }
+  tempRoots.clear()
+})
 
 describe("createModelCatalog", () => {
   test("derives an entry reference from provider and modelId", () => {
@@ -64,5 +90,69 @@ describe("createModelCatalog", () => {
     expect(() => createModelCatalog({ language: [] })).toThrow(
       /'models.language' needs at least one model/
     )
+  })
+})
+
+describe("createSixb models", () => {
+  test("registers the configured catalog", async () => {
+    const projectRoot = await createTempProjectRoot()
+
+    const sixb = await createSixb({
+      projectRoot,
+      ontologies: [Room],
+      models: { language: [gpt, sonnet] },
+      ...createTestRuntimeDeps(),
+    })
+
+    expect(sixb.definitions.models?.language.default.ref).toBe("gateway/openai/gpt-5.4")
+  })
+
+  test("leaves the catalog absent when models are not configured", async () => {
+    const projectRoot = await createTempProjectRoot()
+
+    const sixb = await createSixb({ projectRoot, ontologies: [Room], ...createTestRuntimeDeps() })
+
+    expect(sixb.definitions.models).toBeUndefined()
+  })
+
+  test("rejects an agent whose model is outside the configured catalog", async () => {
+    const projectRoot = await createTempProjectRoot()
+    const stray = defineAgent("stray", {
+      name: "Stray",
+      model: testModel("openai", "gpt-5.4"),
+      instructions: "Answer questions.",
+    })
+
+    // Proven by removal: drop the `validateAgentModelReferences` call in `resolveDefinitions` and
+    // this fails. Matched on the message because a bare `RuntimeError` is also what an unrelated
+    // startup failure in a temp project throws.
+    await expect(
+      createSixb({
+        projectRoot,
+        ontologies: [Room],
+        agents: [stray],
+        models: { language: [gpt] },
+        ...createTestRuntimeDeps(),
+      })
+    ).rejects.toThrow(/Agent 'stray' uses unknown language model 'openai\/gpt-5\.4'/)
+  })
+
+  test("accepts an agent whose model is in the configured catalog", async () => {
+    const projectRoot = await createTempProjectRoot()
+    const known = defineAgent("known", {
+      name: "Known",
+      model: gpt,
+      instructions: "Answer questions.",
+    })
+
+    const sixb = await createSixb({
+      projectRoot,
+      ontologies: [Room],
+      agents: [known],
+      models: { language: [gpt] },
+      ...createTestRuntimeDeps(),
+    })
+
+    expect(sixb.definitions.agents.getById("known")?.name).toBe("Known")
   })
 })

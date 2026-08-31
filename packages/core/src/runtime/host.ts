@@ -48,6 +48,7 @@ import {
   type SixbReadiness,
 } from "../maintenance"
 import { createOntologyMaterializer, type OntologyMaterializerContract } from "../materializer"
+import type { ModelCatalogInput } from "../models"
 import type { PipelineDefinition } from "../pipelines/types"
 import { registerProjectionRegistry } from "../projections/internal"
 import type { ProjectionDefinition } from "../projections/types"
@@ -108,6 +109,7 @@ export interface SixbHostOptions<TOntologySources extends readonly OntologySourc
   rules?: readonly RuleDefinition[]
   workflows?: readonly WorkflowDefinition[]
   agents?: readonly AgentDefinition[]
+  models?: ModelCatalogInput
   groups?: readonly GroupDefinition[]
   roles?: readonly RoleDefinition[]
   membershipPolicies?: readonly MembershipPolicyDefinition[]
