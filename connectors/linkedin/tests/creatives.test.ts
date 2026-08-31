@@ -47,7 +47,8 @@ describe("linkedin creatives", () => {
     expect(page.totalCount).toBe(42)
   })
 
-  test("creates and updates creatives without reshaping content", async () => {
+  // Regression guard: widen create's result back to a string and the test typecheck fails at update.
+  test("returns a created creative URN that can be passed directly to update", async () => {
     const id = sponsoredCreativeUrn(789)
     const calls = recorder([empty(201, { "x-restli-id": id }), empty()])
     const client = await createTestClient()
@@ -57,11 +58,30 @@ describe("linkedin creatives", () => {
       intendedStatus: "DRAFT",
       content: { reference: "urn:li:ugcPost:42" },
     })
-    await client.adAccount(123).creatives.update(id, { intendedStatus: "ACTIVE" })
+    await client.adAccount(123).creatives.update(created.id, { intendedStatus: "ACTIVE" })
 
     expect(created.id).toBe(id)
     expect(JSON.parse(calls[0]?.body ?? "{}").content).toEqual({ reference: "urn:li:ugcPost:42" })
     expect(calls[1]?.headers.get("x-restli-method")).toBe("PARTIAL_UPDATE")
+    expect(new URL(calls[1]?.url ?? "").pathname).toEndWith(
+      "/creatives/urn%3Ali%3AsponsoredCreative%3A789"
+    )
+  })
+
+  // Regression guard: bypass sponsoredCreativeUrn in createInline to reproduce failure.
+  test("normalizes legacy numeric create ids and rejects invalid creative URNs", async () => {
+    recorder([
+      empty(201, { "x-restli-id": "789" }),
+      empty(201, { "x-restli-id": "urn:li:sponsoredCampaign:789" }),
+    ])
+    const client = await createTestClient()
+
+    const created = await client.adAccount(123).creatives.createInline({ creative: {} })
+    expect(created.id).toBe("urn:li:sponsoredCreative:789")
+
+    await expect(client.adAccount(123).creatives.createInline({ creative: {} })).rejects.toThrow(
+      "positive numeric ID or a sponsored creative URN"
+    )
   })
 
   test("enforces LinkedIn's creative page-size limit", async () => {

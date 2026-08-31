@@ -61,8 +61,9 @@ export function createCampaignsResource(http: LinkedinHttp, accountId: string): 
     searchAll(options) {
       return listAllCursor(resource.search, options)
     },
-    create(input) {
+    async create(input) {
       assertNonEmpty(input.name, "campaign name")
+      assertRunSchedule(input.runSchedule)
       return http.create(path, input)
     },
     update(id, input, deleteFields) {
@@ -82,6 +83,16 @@ export function createCampaignsResource(http: LinkedinHttp, accountId: string): 
     },
   }
   return resource
+}
+
+function assertRunSchedule(
+  runSchedule: LinkedinCreateCampaignInput["runSchedule"] | undefined
+): void {
+  if (!runSchedule || !Number.isFinite(runSchedule.start)) {
+    throw new Error(
+      "[SixbLinkedin] campaign runSchedule.start is required and must be a finite timestamp."
+    )
+  }
 }
 
 function assertSearch(options: LinkedinCampaignSearchOptions): void {

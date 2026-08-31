@@ -1,6 +1,32 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import type { LinkedinCreateCampaignInput } from "../src"
 import { sponsoredAccountUrn, sponsoredCampaignGroupUrn, sponsoredCampaignUrn } from "../src"
 import { createTestClient, empty, json, recorder } from "./helpers"
+
+// Regression guard: making runSchedule optional again must fail the connector test typecheck.
+const campaignRunScheduleIsRequired: undefined extends LinkedinCreateCampaignInput["runSchedule"]
+  ? false
+  : true = true
+
+const validCampaignInput = {
+  account: sponsoredAccountUrn(123),
+  campaignGroup: sponsoredCampaignGroupUrn(456),
+  name: "Awareness",
+  costType: "CPM",
+  locale: { country: "US", language: "en" },
+  offsiteDeliveryEnabled: false,
+  targetingCriteria: {
+    include: {
+      and: [{ or: { "urn:li:adTargetingFacet:locations": ["urn:li:geo:103644278"] } }],
+    },
+  },
+  type: "SPONSORED_UPDATES",
+  unitCost: { amount: "15", currencyCode: "USD" },
+  dailyBudget: { amount: "50", currencyCode: "USD" },
+  runSchedule: { start: 1_788_134_400_000 },
+  status: "ACTIVE",
+  politicalIntent: "NOT_POLITICAL",
+} as const satisfies LinkedinCreateCampaignInput
 
 const originalFetch = globalThis.fetch
 afterEach(() => {
@@ -22,34 +48,33 @@ describe("linkedin campaigns", () => {
   test("creates a campaign faithfully and returns the response id", async () => {
     const calls = recorder([empty(201, { "x-restli-id": "987" })])
     const client = await createTestClient()
-    const account = sponsoredAccountUrn(123)
 
-    const result = await client.adAccount(123).campaigns.create({
-      account,
-      campaignGroup: sponsoredCampaignGroupUrn(456),
-      name: "Awareness",
-      costType: "CPM",
-      locale: { country: "US", language: "en" },
-      offsiteDeliveryEnabled: false,
-      targetingCriteria: {
-        include: {
-          and: [{ or: { "urn:li:adTargetingFacet:locations": ["urn:li:geo:103644278"] } }],
-        },
-      },
-      type: "SPONSORED_UPDATES",
-      unitCost: { amount: "15", currencyCode: "USD" },
-      dailyBudget: { amount: "50", currencyCode: "USD" },
-      status: "ACTIVE",
-      politicalIntent: "NOT_POLITICAL",
-    })
+    const result = await client.adAccount(123).campaigns.create(validCampaignInput)
 
     const body = JSON.parse(calls[0]?.body ?? "{}")
     expect(result.id).toBe("987")
     expect(body.campaignGroup).toBe("urn:li:sponsoredCampaignGroup:456")
     expect(body.politicalIntent).toBe("NOT_POLITICAL")
+    expect(body.runSchedule).toEqual({ start: 1_788_134_400_000 })
+    expect(campaignRunScheduleIsRequired).toBe(true)
     expect(body.targetingCriteria.include.and[0].or).toEqual({
       "urn:li:adTargetingFacet:locations": ["urn:li:geo:103644278"],
     })
+  })
+
+  // Regression guard: remove assertRunSchedule from createCampaignsResource to reproduce failure.
+  test("rejects a campaign without a run schedule before calling LinkedIn", async () => {
+    const calls = recorder([])
+    const client = await createTestClient()
+    const { runSchedule, ...withoutRunSchedule } = validCampaignInput
+    expect(runSchedule).toBeDefined()
+
+    await expect(
+      client
+        .adAccount(123)
+        .campaigns.create(withoutRunSchedule as unknown as LinkedinCreateCampaignInput)
+    ).rejects.toThrow("campaign runSchedule.start is required")
+    expect(calls).toHaveLength(0)
   })
 
   test("updates and deletes campaigns with the documented wire methods", async () => {

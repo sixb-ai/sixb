@@ -299,11 +299,14 @@ export type LinkedinCreateCampaignInput = Omit<
   | "totalBudget"
   | "status"
   | "politicalIntent"
+  | "runSchedule"
 > &
   LinkedinCampaignBudget & {
     readonly status: "ACTIVE" | "DRAFT"
     /** Required by current LinkedIn Marketing API versions. */
     readonly politicalIntent: LinkedinPoliticalIntent
+    /** Required when creating a campaign, even though older read payloads may omit it. */
+    readonly runSchedule: LinkedinRunSchedule
   }
 
 export type LinkedinUpdateCampaignInput = Partial<

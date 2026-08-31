@@ -14,6 +14,7 @@ import type {
   LinkedinCursorPage,
   LinkedinSponsoredCreativeUrn,
 } from "../types/common"
+import { sponsoredCreativeUrn } from "../urns"
 
 export interface CreativesResource {
   get<TContent extends LinkedinCreativeContent = LinkedinCreativeContent>(
@@ -23,9 +24,11 @@ export interface CreativesResource {
   searchAll(options?: LinkedinCreativeSearchOptions): AsyncIterable<LinkedinCreative>
   create<TContent extends LinkedinCreativeContent = LinkedinCreativeContent>(
     input: LinkedinCreateCreativeInput<TContent>
-  ): Promise<LinkedinCreatedEntity>
+  ): Promise<LinkedinCreatedEntity<LinkedinSponsoredCreativeUrn>>
   /** Create a creative and its post in one `action=createInline` request. */
-  createInline(input: LinkedinCreateInlineCreativeInput): Promise<LinkedinCreatedEntity>
+  createInline(
+    input: LinkedinCreateInlineCreativeInput
+  ): Promise<LinkedinCreatedEntity<LinkedinSponsoredCreativeUrn>>
   update(id: LinkedinSponsoredCreativeUrn, input: LinkedinUpdateCreativeInput): Promise<void>
   deleteDraft(id: LinkedinSponsoredCreativeUrn): Promise<void>
 }
@@ -73,11 +76,13 @@ export function createCreativesResource(http: LinkedinHttp, accountId: string): 
     searchAll(options) {
       return listAllCursor(resource.search, options)
     },
-    create(input) {
-      return http.create(path, input)
+    async create(input) {
+      const created = await http.create(path, input)
+      return { id: sponsoredCreativeUrn(created.id) }
     },
-    createInline(input) {
-      return http.create(withQuery(path, { action: "createInline" }), input)
+    async createInline(input) {
+      const created = await http.create(withQuery(path, { action: "createInline" }), input)
+      return { id: sponsoredCreativeUrn(created.id) }
     },
     update(id, input) {
       if (Object.keys(input).length === 0) {

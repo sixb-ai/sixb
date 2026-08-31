@@ -85,12 +85,13 @@ export interface LinkedinOffsetOptions {
   readonly count?: number
 }
 
-export interface LinkedinCreatedEntity {
+export interface LinkedinCreatedEntity<TId extends string = string> {
   /** Value returned by LinkedIn in the `x-restli-id` response header. */
-  readonly id: string
+  readonly id: TId
 }
 
-export interface LinkedinCreatedResource<TResource> extends LinkedinCreatedEntity {
+export interface LinkedinCreatedResource<TResource, TId extends string = string>
+  extends LinkedinCreatedEntity<TId> {
   /** Parsed response body returned alongside the Rest.li identifier. */
   readonly data: TResource
 }
