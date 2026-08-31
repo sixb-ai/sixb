@@ -18,7 +18,7 @@ import {
 } from "@sixb/core"
 import { findActionEditCommit } from "@sixb/core/internal/actions"
 import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
-import { bindPrimitiveExecution } from "@sixb/core/internal/primitive-execution"
+import { bindDurablePrimitiveExecution } from "@sixb/core/internal/primitive-execution"
 import type { ActionRunParams, ActionRunRecord } from "@sixb/core/storage"
 import { createTestSixb, queueTestActionRun } from "@sixb/core/testing"
 import { runActionJob } from "../src/run-action-job"
@@ -32,6 +32,10 @@ const Device = defineObjectType({
     prop("id", "string", { required: true, primary: true }),
     prop("name", "string", { required: true }),
     prop("status", "string"),
+    prop("temperature", "double", {
+      mode: "telemetry",
+      semanticType: "Temperature",
+    }),
   ],
   links: [link.ref("sensor", "Sensor", { cardinality: "one" })],
 })
@@ -71,14 +75,25 @@ function createSixb(
   return { host, sixb: createTestSixb(host) }
 }
 
-function createContext(host: ActionWorkerHost): ActionWorkerContext {
-  const execution = bindPrimitiveExecution(host, {
-    primitive: {
-      kind: "action",
-      id: host.definitions.actions.list()[0]?.id ?? "test-action",
-      runId: "direct-action-job-test",
-    },
-    source: { type: "queue", queue: "actions", jobId: "direct-action-job-test" },
+async function createContext(
+  host: ActionWorkerHost,
+  run: ActionRunRecord
+): Promise<ActionWorkerContext> {
+  const durableExecution = await host.storage.executions.getById({
+    projectId: host.id,
+    id: run.executionId,
+  })
+  if (!durableExecution) {
+    throw new Error(`Action run '${run.id}' references missing execution '${run.executionId}'.`)
+  }
+  const primitive = {
+    kind: "action" as const,
+    id: run.actionId,
+    runId: run.id,
+  }
+  const execution = bindDurablePrimitiveExecution(host, {
+    execution: durableExecution,
+    primitive,
   })
   return {
     id: host.id,
@@ -117,16 +132,17 @@ async function queueActionRun(
 }
 
 async function runStoredActionJob(
-  input: Omit<RunActionJobInput, "run">
+  input: Omit<RunActionJobInput, "run" | "runtime"> & { readonly host: ActionWorkerHost }
 ): ReturnType<typeof runActionJob> {
-  const run = await input.runtime.actionRunsStorage.getById({
-    projectId: input.runtime.id,
+  const run = await input.host.storage.actionRuns?.getById({
+    projectId: input.host.id,
     id: input.job.id,
   })
   if (!run) {
     throw new Error(`[Test] Action run '${input.job.id}' was not queued.`)
   }
-  return runActionJob({ ...input, run })
+  const { host, ...jobInput } = input
+  return runActionJob({ ...jobInput, runtime: await createContext(host, run), run })
 }
 
 describe("runActionJob", () => {
@@ -144,7 +160,7 @@ describe("runActionJob", () => {
 
     await expect(
       runActionJob({
-        runtime: createContext(host),
+        runtime: await createContext(host, run),
         job: {
           id: "act_other",
           actionId: "count",
@@ -182,7 +198,7 @@ describe("runActionJob", () => {
     })
 
     const result = await runStoredActionJob({
-      runtime: createContext(host),
+      host,
       job: { id: "act_nullable", actionId: "captureNullable" },
     })
 
@@ -212,7 +228,7 @@ describe("runActionJob", () => {
     })
 
     const result = await runStoredActionJob({
-      runtime: createContext(host),
+      host,
       job: {
         id: "act_1",
         actionId: "setStatus",
@@ -262,7 +278,7 @@ describe("runActionJob", () => {
     })
 
     const result = await runStoredActionJob({
-      runtime: createContext(host),
+      host,
       job: {
         id: "act_1",
         actionId: "failWriteback",
@@ -311,7 +327,7 @@ describe("runActionJob", () => {
     }
 
     const result = await runStoredActionJob({
-      runtime: createContext(host),
+      host,
       job: { id: "act_finalize", actionId: "complete" },
     })
 
@@ -351,7 +367,7 @@ describe("runActionJob", () => {
     })
 
     const result = await runStoredActionJob({
-      runtime: createContext(host),
+      host,
       job: {
         id: "act_blob",
         actionId: "persistPayload",
@@ -390,7 +406,6 @@ describe("runActionJob", () => {
       id: "device-1",
       name: "Device 1",
     })
-    const context = createContext(host)
     await queueActionRun(host, {
       id: "act_1",
       actionId: "count",
@@ -399,7 +414,7 @@ describe("runActionJob", () => {
     })
 
     await runStoredActionJob({
-      runtime: context,
+      host,
       job: {
         id: "act_1",
         actionId: "count",
@@ -407,7 +422,7 @@ describe("runActionJob", () => {
     })
 
     const duplicate = await runStoredActionJob({
-      runtime: context,
+      host,
       job: {
         id: "act_1",
         actionId: "count",
@@ -438,7 +453,7 @@ describe("runActionJob", () => {
       params: { id: "device-1" },
     })
     const result = await runStoredActionJob({
-      runtime: createContext(host),
+      host,
       job: {
         id: "act_1",
         actionId: "createDevice",
@@ -476,7 +491,7 @@ describe("runActionJob", () => {
       params: { id: "device-1", name: "Device 1" },
     })
     const created = await runStoredActionJob({
-      runtime: createContext(host),
+      host,
       job: { id: "act_create", actionId: "createDevice" },
     })
 
@@ -487,7 +502,7 @@ describe("runActionJob", () => {
       params: { id: "device-1", name: "Renamed Device" },
     })
     const updated = await runStoredActionJob({
-      runtime: createContext(host),
+      host,
       job: { id: "act_rename", actionId: "renameDevice" },
     })
 
@@ -579,7 +594,7 @@ describe("runActionJob", () => {
     expect(
       (
         await runStoredActionJob({
-          runtime: createContext(host),
+          host,
           job: { id: "act_assign_sensor", actionId: "assignSensor" },
         })
       ).status
@@ -610,7 +625,7 @@ describe("runActionJob", () => {
     expect(
       (
         await runStoredActionJob({
-          runtime: createContext(host),
+          host,
           job: { id: "act_clear_sensor", actionId: "clearSensor" },
         })
       ).status
@@ -676,7 +691,7 @@ describe("runActionJob", () => {
     })
 
     const result = await runStoredActionJob({
-      runtime: createContext(host),
+      host,
       job: {
         id: "act_1",
         actionId: "detachSensor",
@@ -742,7 +757,7 @@ describe("runActionJob", () => {
     })
 
     const result = await runStoredActionJob({
-      runtime: createContext(host),
+      host,
       job: {
         id: "act_1",
         actionId: "captureSensorName",
@@ -752,6 +767,105 @@ describe("runActionJob", () => {
     expect(result.status).toBe("succeeded")
     const updated = await deviceObjects(sixb).get("device-1")
     expect(updated?.properties.status).toBe("Sensor 1")
+  })
+
+  test("reads typed telemetry histories in one action batch", async () => {
+    const generateReport = defineAction("generateReport")
+      .on(Device)
+      .params({})
+      .writeback(async ({ read, run, target }) => {
+        const histories = await read.telemetry.historyBatch({
+          series: [
+            { objectId: "device-2", property: Device.p.temperature },
+            { objectId: target.primaryId, property: Device.p.temperature },
+            { objectId: "device-2", property: Device.p.temperature },
+          ],
+          from: new Date("2026-04-01T00:00:00.000Z"),
+          to: run.startedAt,
+          limitPerSeries: 2,
+          order: "desc",
+        })
+
+        return {
+          series: histories.map((history) => ({
+            objectId: history.objectId,
+            propertyId: history.property.id,
+            values: history.points.map((point) => point.value),
+            units: history.points.map((point) => point.unit ?? null),
+          })),
+        }
+      })
+
+    const { host, sixb } = createSixb([generateReport])
+    await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
+    await sixb.objects.upsert("Device", { id: "device-2", name: "Device 2" })
+    await sixb.objects.appendTelemetry("Device", [
+      {
+        id: "device-1",
+        properties: { temperature: { value: 18, unit: "degreeCelsius" } },
+        at: new Date("2026-04-02T08:00:00.000Z"),
+      },
+      {
+        id: "device-1",
+        properties: { temperature: { value: 19, unit: "degreeCelsius" } },
+        at: new Date("2026-04-03T08:00:00.000Z"),
+      },
+      {
+        id: "device-2",
+        properties: { temperature: { value: 20, unit: "degreeCelsius" } },
+        at: new Date("2026-04-02T08:00:00.000Z"),
+      },
+      {
+        id: "device-2",
+        properties: { temperature: { value: 21, unit: "degreeCelsius" } },
+        at: new Date("2026-04-03T08:00:00.000Z"),
+      },
+      {
+        id: "device-2",
+        properties: { temperature: { value: 22, unit: "degreeCelsius" } },
+        at: new Date("2026-04-04T08:00:00.000Z"),
+      },
+      {
+        id: "device-2",
+        properties: { temperature: { value: 99, unit: "degreeCelsius" } },
+        at: new Date("2099-05-01T08:00:00.000Z"),
+      },
+    ])
+    await queueActionRun(host, {
+      id: "act_report",
+      actionId: "generateReport",
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
+      params: {},
+    })
+
+    const result = await runStoredActionJob({
+      host,
+      job: { id: "act_report", actionId: "generateReport" },
+    })
+
+    expect(result.status).toBe("succeeded")
+    expect(result.record.writeback?.result).toEqual({
+      series: [
+        {
+          objectId: "device-2",
+          propertyId: "temperature",
+          values: [22, 21],
+          units: ["degreeCelsius", "degreeCelsius"],
+        },
+        {
+          objectId: "device-1",
+          propertyId: "temperature",
+          values: [19, 18],
+          units: ["degreeCelsius", "degreeCelsius"],
+        },
+        {
+          objectId: "device-2",
+          propertyId: "temperature",
+          values: [22, 21],
+          units: ["degreeCelsius", "degreeCelsius"],
+        },
+      ],
+    })
   })
 
   test("fences a writeback read against a change made before the commit", async () => {
@@ -803,7 +917,7 @@ describe("runActionJob", () => {
     })
 
     const result = await runStoredActionJob({
-      runtime: createContext(host),
+      host,
       job: { id: "act_1", actionId: "captureSensorName" },
     })
 
@@ -822,7 +936,7 @@ describe("runActionJob", () => {
     })
 
     const result = await runStoredActionJob({
-      runtime: createContext(host),
+      host,
       job: {
         id: "act_1",
         actionId: "missingAction",
@@ -868,7 +982,7 @@ describe("runActionJob", () => {
     })
 
     const result = await runStoredActionJob({
-      runtime: createContext(host),
+      host,
       job: {
         id: "act_1",
         actionId: "count",
@@ -889,7 +1003,7 @@ describe("runActionJob", () => {
     expect(run?.finishedAt).toBeInstanceOf(Date)
 
     const redelivered = await runStoredActionJob({
-      runtime: createContext(host),
+      host,
       job: { id: "act_1", actionId: "count" },
       attempt: 2,
     })
@@ -931,7 +1045,7 @@ describe("runActionJob", () => {
     })
 
     const result = await runStoredActionJob({
-      runtime: createContext(host),
+      host,
       job: {
         id: "act_1",
         actionId: "setStatus",
@@ -953,14 +1067,15 @@ describe("runActionJob", () => {
       })
     const { host, sixb } = createSixb([deleteDevice])
     await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
-    await queueActionRun(host, {
+    const queuedRun = await queueActionRun(host, {
       id: "act_delete",
       actionId: "deleteDevice",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
       params: {},
     })
     await host.storage.actionRuns!.start({ projectId: host.id, id: "act_delete" })
-    await createContext(host).ontologyMutations.commitEdits({
+    const context = await createContext(host, queuedRun)
+    await context.ontologyMutations.commitEdits({
       mode: "atomic",
       source: { kind: "action", actionId: "deleteDevice", runId: "act_delete" },
       operations: [
@@ -976,7 +1091,7 @@ describe("runActionJob", () => {
     })
 
     const resumed = await runStoredActionJob({
-      runtime: createContext(host),
+      host,
       job: { id: "act_delete", actionId: "deleteDevice" },
       attempt: 2,
     })
@@ -1014,7 +1129,7 @@ describe("runActionJob", () => {
     })
 
     const result = await runStoredActionJob({
-      runtime: createContext(host),
+      host,
       job: {
         id: "act_1",
         actionId: "setStatus",
@@ -1079,7 +1194,7 @@ describe("runActionJob", () => {
     const controller = new AbortController()
 
     const execution = runStoredActionJob({
-      runtime: createContext(host),
+      host,
       job: { id: "act_cancelled", actionId: "waitForCancel" },
       signal: controller.signal,
       attempt: 1,
@@ -1127,7 +1242,7 @@ describe("runActionJob", () => {
     })
 
     const result = await runStoredActionJob({
-      runtime: createContext(host),
+      host,
       job: {
         id: "act_1",
         actionId: "setStatus",

@@ -1,14 +1,21 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import { defineObjectType, prop } from "@sixb/core"
 import { createClient, createConfig } from "../src/generated/client"
+import { client as defaultClient } from "../src/generated/client.gen"
 import {
   type BulkTelemetryHistory,
   bulkTelemetryHistoryQueryOptions,
   type ListObjectSummariesPage,
   listObjectsInfiniteOptions,
+  listRelationshipsOptions,
   type TelemetryHistoryPoint,
   telemetryHistoryQueryOptions,
 } from "../src/hooks"
+import { encodeObjectId } from "../src/models"
+
+afterEach(() => {
+  defaultClient.setConfig({ baseUrl: undefined, fetch: undefined })
+})
 
 const SocialMetricSeries = defineObjectType({
   id: "SocialMetricSeries",
@@ -66,6 +73,115 @@ describe("listObjectsInfiniteOptions", () => {
     expect(
       options.getNextPageParam?.(objectPage(20, false), [objectPage(20, false)], "100", ["100"])
     ).toBeUndefined()
+  })
+})
+
+describe("listRelationshipsOptions", () => {
+  test("queries opaque object refs in the request body and follows link pages", async () => {
+    const requests: Request[] = []
+    const bodies: Array<Record<string, unknown>> = []
+    defaultClient.setConfig({
+      baseUrl: "http://sixb.test",
+      fetch: (async (request: Request) => {
+        requests.push(request)
+        const body = (await request.json()) as Record<string, unknown>
+        bodies.push(body)
+        const secondPage = body.pageToken === "page-2"
+        return Response.json({
+          objects: [],
+          links: [
+            {
+              source: {
+                objectTypeId: secondPage ? "RepositoryComment" : "RepositoryIssue",
+                primaryId: secondPage ? "comment-1" : "github:issue:sixb-ai/sixb#297",
+              },
+              linkId: secondPage ? "issue" : "repository",
+              target: {
+                objectTypeId: secondPage ? "RepositoryIssue" : "Repository",
+                primaryId: secondPage ? "github:issue:sixb-ai/sixb#297" : "sixb-ai/sixb",
+              },
+              createdAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+          hasMore: !secondPage,
+          ...(secondPage ? {} : { nextPageToken: "page-2" }),
+        })
+      }) as unknown as typeof fetch,
+    })
+
+    const options = listRelationshipsOptions({
+      query: {
+        objectId: encodeObjectId("RepositoryIssue", "github:issue:sixb-ai/sixb#297"),
+      },
+    })
+    const queryFn = options.queryFn as unknown as (context: {
+      signal: AbortSignal
+    }) => Promise<Array<{ source: string; target: string; type: string }>>
+    const relationships = await queryFn({ signal: new AbortController().signal })
+
+    expect(requests.map((request) => new URL(request.url).pathname)).toEqual([
+      "/api/objects/query/links",
+      "/api/objects/query/links",
+    ])
+    expect(bodies[0]).toEqual({
+      query: {
+        kind: "refs",
+        refs: [
+          {
+            objectTypeId: "RepositoryIssue",
+            primaryId: "github:issue:sixb-ai/sixb#297",
+          },
+        ],
+      },
+      direction: "both",
+      pageSize: 1_000,
+    })
+    expect(bodies[1]).toMatchObject({ pageToken: "page-2" })
+    expect(relationships).toHaveLength(2)
+  })
+
+  test("stops when a provider repeats a link page token", async () => {
+    defaultClient.setConfig({
+      baseUrl: "http://sixb.test",
+      fetch: (async () =>
+        Response.json({
+          objects: [],
+          links: [],
+          hasMore: true,
+          nextPageToken: "repeated",
+        })) as unknown as typeof fetch,
+    })
+
+    const options = listRelationshipsOptions({
+      query: { objectId: encodeObjectId("RepositoryIssue", "issue-1") },
+    })
+    const queryFn = options.queryFn as unknown as (context: {
+      signal: AbortSignal
+    }) => Promise<unknown>
+
+    await expect(queryFn({ signal: new AbortController().signal })).rejects.toThrow(
+      "[SixbClient] Link pagination returned a repeated nextPageToken."
+    )
+  })
+
+  test("rejects inconsistent link pagination metadata", async () => {
+    defaultClient.setConfig({
+      baseUrl: "http://sixb.test",
+      fetch: (async () =>
+        Response.json({ objects: [], links: [], hasMore: true })) as unknown as typeof fetch,
+    })
+
+    const options = listRelationshipsOptions({
+      query: { objectId: encodeObjectId("RepositoryIssue", "issue-1") },
+    })
+    const queryFn = options.queryFn as unknown as (context: {
+      signal: AbortSignal
+    }) => Promise<unknown>
+
+    await expect(queryFn({ signal: new AbortController().signal })).rejects.toThrow(
+      "[SixbClient] Link page has inconsistent hasMore and nextPageToken values."
+    )
   })
 })
 

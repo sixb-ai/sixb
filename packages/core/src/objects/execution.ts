@@ -29,8 +29,11 @@ import {
   type ExecuteObjectFacetsInput,
   type ExecuteObjectFacetsResult,
   type ExecuteObjectQueryInput,
+  type ExecuteObjectQueryLinksInput,
+  type ExecuteObjectQueryLinksResult,
   type ExecuteObjectQueryResult,
   executeObjectQuery,
+  executeObjectQueryLinks,
   existsObjects,
   facetObjects,
 } from "./query"
@@ -121,6 +124,12 @@ export interface ExecutionObjectSet<
   byId(id: string): ExecutionObjectByIdHandle<TObjectType, TValueTypes>
 }
 
+/** Public input for querying physical links incident to an object query result. */
+export type ObjectQueryLinksInput = Omit<ExecuteObjectQueryLinksInput, "projectId">
+
+/** Public result returned by {@link ObjectsRuntime.queryLinks}. */
+export type ObjectQueryLinksResult = ExecuteObjectQueryLinksResult
+
 export interface ObjectsRuntime<TOntologySources extends readonly OntologySource[]>
   extends ExecutionObjectOperations {
   <TObjectType extends RegisteredObjectType<TOntologySources>>(
@@ -131,6 +140,7 @@ export interface ObjectsRuntime<TOntologySources extends readonly OntologySource
     RegisteredObjectType<TOntologySources>
   >
   executeQuery(input: Omit<ExecuteObjectQueryInput, "projectId">): Promise<ExecuteObjectQueryResult>
+  queryLinks(input: ObjectQueryLinksInput): Promise<ObjectQueryLinksResult>
   count(input: Omit<ExecuteObjectCountInput, "projectId">): Promise<ExecuteObjectCountResult>
   exists(input: Omit<ExecuteObjectExistsInput, "projectId">): Promise<ExecuteObjectExistsResult>
   facet(input: Omit<ExecuteObjectFacetsInput, "projectId">): Promise<ExecuteObjectFacetsResult>
@@ -200,6 +210,16 @@ export function createObjectsRuntime<TOntologySources extends readonly OntologyS
         runtime.ontology.isValidLinkTarget(expected, actual),
       executeQuery: (input: Omit<ExecuteObjectQueryInput, "projectId">) =>
         executeObjectQuery(
+          { projectId: runtime.projectId, ...input },
+          {
+            ontology: runtime.ontology,
+            storage: runtime.storage.objects,
+            runtimeAuthorization: runtime.runtimeAuthorization,
+            authorization: runtime.authorization,
+          }
+        ),
+      queryLinks: (input: ObjectQueryLinksInput) =>
+        executeObjectQueryLinks(
           { projectId: runtime.projectId, ...input },
           {
             ontology: runtime.ontology,

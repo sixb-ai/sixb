@@ -39,7 +39,6 @@ export async function createTestWorkflowExecution(
     source: { type: "execution", executionId: parentExecutionId },
     ...(input.requestedBy === undefined ? {} : { requestedBy: structuredClone(input.requestedBy) }),
     correlationId: `test_correlation:${input.runId}`,
-    parentExecutionId,
     authorizationRef: { type: "trustedPrimitive", primitive },
   })
 

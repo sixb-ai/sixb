@@ -16,6 +16,7 @@ registered ontology.
 | Route | Body | Returns |
 | --- | --- | --- |
 | `POST /api/objects/query` | `{ query, includeTotal? }` | `{ objects, hasMore, nextPageToken?, total?, plan }` |
+| `POST /api/objects/query/links` | `{ query, direction?, linkId?, includeObjects?, pageSize?, pageToken? }` | `{ objects, links, hasMore, nextPageToken? }` |
 | `POST /api/objects/query/count` | `{ query }` | `{ count, plan }` |
 | `POST /api/objects/query/exists` | `{ query }` | `{ exists, plan }` |
 | `POST /api/objects/query/facets` | `{ query, facets }` | `{ facets, plan }` |
@@ -26,6 +27,9 @@ count when it is not needed, because counting can be more expensive than fetchin
 Every response carries a diagnostic `plan` object for debugging. Application code ignores it and
 reads the result fields above. Validation and planning failures return HTTP 400 with a structured
 `issues` array (the client surfaces these as `SixbQueryError`).
+
+The links terminal has its own edge-page contract and therefore does not return an object-query
+plan.
 
 
 ## Raw Query JSON
@@ -79,6 +83,90 @@ Each object in the response carries its primary id, type, properties, and timest
 }
 ```
 
+
+## Exact Object References
+
+Use a `refs` source when object identities are already known. References can be heterogeneous,
+primary ids remain in JSON rather than URL paths, missing objects are omitted, and duplicates are
+removed. Results use canonical identity order by `objectTypeId` and `primaryId`:
+
+```json
+{
+  "query": {
+    "kind": "refs",
+    "refs": [
+      { "objectTypeId": "Customer", "primaryId": "github:customer:acme/co#42" },
+      { "objectTypeId": "Invoice", "primaryId": "inv-1042" }
+    ]
+  },
+  "includeTotal": false
+}
+```
+
+`refs` accepts between 1 and 1,000 unique references and is intrinsically bounded. SQLite,
+PostgreSQL, and the in-memory provider execute it natively, so it composes with traversal, sets,
+filtering, projection, expansion, and pagination. Providers without native support use the storage
+batch identity primitive for the bounded core fallback.
+
+
+## Querying Physical Links
+
+`POST /api/objects/query/links` evaluates any bounded object query as a selector, then returns the
+physical links incident to that selected set. `direction` is relative to the selected objects and
+defaults to `both`; use `linkId` to restrict the returned edges. Set `includeObjects: true` to also
+return the selected objects and the visible endpoints of the current edge page, de-duplicated.
+Because this terminal returns its own canonical object and edge shapes, selectors reject `project`
+and `expand` rather than silently discarding them. When a selector contains an object `page`, it
+must be the outermost node; edge pagination remains controlled by the request's top-level
+`pageSize` and `pageToken`.
+
+```json
+{
+  "query": {
+    "kind": "refs",
+    "refs": [{ "objectTypeId": "Customer", "primaryId": "cust-7" }]
+  },
+  "direction": "both",
+  "includeObjects": true,
+  "pageSize": 100
+}
+```
+
+```json
+{
+  "objects": [
+    {
+      "primaryId": "cust-7",
+      "objectTypeId": "Customer",
+      "properties": { "id": "cust-7", "name": "Globex" },
+      "createdAt": "2026-01-02T00:00:00.000Z",
+      "updatedAt": "2026-01-02T00:00:00.000Z"
+    }
+  ],
+  "links": [
+    {
+      "source": { "objectTypeId": "Invoice", "primaryId": "inv-1042" },
+      "linkId": "customer",
+      "target": { "objectTypeId": "Customer", "primaryId": "cust-7" },
+      "properties": {},
+      "createdAt": "2026-05-01T09:00:00.000Z",
+      "updatedAt": "2026-05-01T09:00:00.000Z"
+    }
+  ],
+  "hasMore": false
+}
+```
+
+The selector is capped at 1,000 objects. Edge pages default to 100 and accept at most 1,000;
+return `nextPageToken` as `pageToken` with the same selector, direction, and link filter. A caller
+must be able to view every type touched by the selector. Links to an endpoint type the caller cannot
+view are omitted, matching the singular link-read authorization behavior. SQLite and PostgreSQL
+apply the direction, link filter, authorization-visible endpoint types, cursor, ordering, and edge
+limit before returning rows to the runtime.
+
+Link page tokens are scoped to the project, normalized selector, direction, and link filter. A token
+cannot be reused with a different link query; `includeObjects` and `pageSize` may change between
+pages because neither changes which edges belong to the result set.
 
 ## Count, Exists, And Facets
 
@@ -222,6 +310,7 @@ relationship's edge fields:
 | Node | Fields | Purpose |
 | --- | --- | --- |
 | `start` | `objectTypeId`, `includeSubtypes?` | Begin with all objects of one type. |
+| `refs` | `refs` | Begin with 1–1,000 exact, heterogeneous `{ objectTypeId, primaryId }` identities. |
 | `filter` | `input`, `predicate` | Apply a property predicate tree. |
 | `text` | `input`, `query`, `fields?` | Keyword search over `search.defaultText` or explicit `fields`. |
 | `vector` | `input`, `vector`, `propertyId`, `k` | Nearest-neighbor search on a numeric-array property. |
@@ -284,8 +373,13 @@ Authentication and CSRF handling follow your server configuration; see
 
 ## Provider Support
 
-SQLite and PostgreSQL object storage cover the common graph workflow: property filters, text
-search, sorting, limits, cursor pages, link traversal, set operations, and projection.
+SQLite and PostgreSQL object storage cover the common graph workflow: exact reference sets,
+property filters, text search, sorting, limits, cursor pages, link traversal, set operations, and
+projection.
+
+Exact `refs` sources are pushed down by the bundled providers and fall back to core's bounded batch
+primitive on providers without native support. Object-set link reads use a provider-owned stable
+edge page, so response pagination does not require loading every incident link into core.
 
 Vector search and relevance sorting require explicit storage-provider support. When a provider
 can't execute a requested feature, Sixb returns a structured planning error rather than a partial

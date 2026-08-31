@@ -1,5 +1,5 @@
 import type { SixbFailure } from "../errors/types"
-import type { EventActor, EventOrigin } from "../events/envelope"
+import type { EventOrigin } from "../events/envelope"
 import type { PropertyChange, PropertyChangeMap } from "../events/property-changes"
 import type { JsonValue } from "../json"
 import type { ProjectionProtocolIdentity, ProjectionRunFailureCode } from "../projections/types"
@@ -116,7 +116,6 @@ export type OntologyEditOperation =
     }
 
 interface BaseOntologyEditCommit {
-  readonly actor?: EventActor
   readonly operations: readonly OntologyEditOperation[]
 }
 
@@ -153,6 +152,10 @@ export type ProjectionSourceAssertion =
       readonly kind: "object"
       readonly ref: OntologyObjectRef
       readonly properties: Readonly<Record<string, JsonValue>>
+      /** Canonical source-system update time. Presence after validation pins `mostRecent`. */
+      readonly sourceUpdatedAt?: string
+      /** Projected properties represented by an absence candidate in this source row. */
+      readonly absentSourcePropertyIds?: readonly string[]
     }
   | {
       readonly kind: "link"
@@ -237,7 +240,6 @@ export interface TelemetryAppend {
         /** True when this batch consumed the final row of the immutable dataset version. */
         readonly inputExhausted: boolean
       }
-  readonly actor?: EventActor
   readonly points: readonly TelemetryPointWrite[]
 }
 
@@ -367,19 +369,6 @@ export interface TelemetryCommitResult extends BaseCommitResult {
   readonly pointsUpdated: number
   readonly pointsUnchanged: number
   readonly latestObjectsChanged: number
-}
-
-export interface OntologyMaterializer {
-  readonly edits: {
-    commit(input: OntologyEditCommit): Promise<EditCommitResult>
-  }
-  readonly projections: {
-    replace(input: ProjectionSourceReplacement): Promise<ProjectionCommitResult>
-    finishRun(input: ProjectionRunFinishInput): Promise<void>
-  }
-  readonly telemetry: {
-    append(input: TelemetryAppend): Promise<TelemetryCommitResult>
-  }
 }
 
 export type ObjectOverride =

@@ -1,4 +1,3 @@
-import type { EventActor } from "../../events/envelope"
 import { assertJsonValue, cloneJsonValue, compareStrings, stableJsonStringify } from "../../json"
 import { MaterializationValidationError } from "../../materialization/errors"
 import type {
@@ -26,6 +25,7 @@ import {
   projectionEntityKey,
   telemetryPointKey,
 } from "../../materialization/refs"
+import { parseDatasetTimestamp } from "../../projections/timestamp"
 
 export function normalizeJsonProperties(
   properties: Readonly<Record<string, unknown>>,
@@ -60,27 +60,22 @@ function normalizeNonblank(value: string, label: string): string {
   return value
 }
 
-function normalizeEventActor(actor: EventActor): EventActor {
-  if (typeof actor !== "object" || actor === null || Array.isArray(actor)) {
-    throw new MaterializationValidationError("Event actor must be an object.")
-  }
-  if (actor.type !== "user" && actor.type !== "serviceAccount" && actor.type !== "system") {
-    throw new MaterializationValidationError(
-      "Event actor type must be 'user', 'serviceAccount', or 'system'."
-    )
-  }
-  return Object.freeze({
-    type: actor.type,
-    id: normalizeNonblank(actor.id, "Event actor id"),
-  })
-}
-
 function normalizeTimestamp(value: string, label: string): string {
   const milliseconds = Date.parse(value)
   if (!Number.isFinite(milliseconds)) {
     throw new MaterializationValidationError(`${label} must be a valid timestamp.`)
   }
   return new Date(milliseconds).toISOString()
+}
+
+function normalizeProjectionSourceTimestamp(value: string): string {
+  const timestamp = parseDatasetTimestamp(value)
+  if (!timestamp) {
+    throw new MaterializationValidationError(
+      "Projection source update timestamp must be a valid timestamp."
+    )
+  }
+  return timestamp.toISOString()
 }
 
 function normalizePropertyIds(values: readonly string[], label: string): readonly string[] {
@@ -280,7 +275,6 @@ export function normalizeOntologyEditCommit(input: OntologyEditCommit): Ontology
         kind: "runtime",
         requestId: normalizeNonblank(input.source.requestId, "Runtime request id"),
       }),
-      ...(input.actor !== undefined ? { actor: normalizeEventActor(input.actor) } : {}),
       operations: Object.freeze(operations),
       ...(input.operationGroups !== undefined
         ? { operationGroups: normalizeOperationGroups(input.operationGroups, operationIds) }
@@ -306,7 +300,6 @@ export function normalizeOntologyEditCommit(input: OntologyEditCommit): Ontology
   return Object.freeze({
     mode: "atomic",
     source,
-    ...(input.actor !== undefined ? { actor: normalizeEventActor(input.actor) } : {}),
     operations: Object.freeze(operations),
     expectedObjects: deduplicateExpectations(
       expectedObjects,
@@ -365,6 +358,11 @@ function normalizeProjectionAssertion(
         kind: "object",
         ref: normalizeObjectRef(assertion.ref),
         properties: normalizeJsonProperties(assertion.properties),
+        ...(assertion.sourceUpdatedAt !== undefined
+          ? {
+              sourceUpdatedAt: normalizeProjectionSourceTimestamp(assertion.sourceUpdatedAt),
+            }
+          : {}),
       })
     : Object.freeze({
         kind: "link",
@@ -521,7 +519,6 @@ export function normalizeTelemetryAppend(input: TelemetryAppend): TelemetryAppen
   }
   return Object.freeze({
     source,
-    ...(input.actor !== undefined ? { actor: normalizeEventActor(input.actor) } : {}),
     points: Object.freeze(points),
   })
 }

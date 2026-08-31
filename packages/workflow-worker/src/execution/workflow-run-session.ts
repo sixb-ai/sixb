@@ -38,6 +38,14 @@ import type {
 import type { WorkflowExecutionState, WorkflowNodeExecutorRegistry } from "./node-executor"
 import { WorkflowNodeRunner } from "./workflow-node-runner"
 
+interface WorkflowResumeContext {
+  readonly signal: AbortSignal
+  readonly workflow: WorkflowDefinition
+  readonly valueTypesById: ReadonlyMap<string, ValueType>
+  readonly run: WorkflowRunRecord
+  readonly nodeRun: WorkflowNodeRunRecord
+}
+
 export class WorkflowRunSession {
   private sideEffectBoundaryPassed = false
 
@@ -213,157 +221,59 @@ export class WorkflowRunSession {
     const signal = input.signal ?? new AbortController().signal
     const workflow = requireWorkflow(runtime.sixb.workflows.getById(job.workflowId), job)
     const valueTypesById = runtime.ontology.getValueTypesById()
-    if (job.resume.kind === "agentNode") {
-      throwIfAborted(signal)
-      const run = await requireWorkflowRun({
-        workflowRuns: runtime.workflowRuns,
-        projectId: runtime.projectId,
-        workflowId: workflow.id,
-        id: job.id,
-      })
-      const completedNode = await requireWorkflowNodeRun({
-        workflowRuns: runtime.workflowRuns,
-        projectId: runtime.projectId,
-        workflowId: workflow.id,
-        workflowRunId: job.id,
-        id: job.resume.nodeRunId,
-      })
-      const execution = await runtime.workflowRuns.agentNodes.getByNodeRunId({
-        projectId: runtime.projectId,
-        nodeRunId: completedNode.id,
-      })
-      if (
-        completedNode.workflowRunId !== run.id ||
-        completedNode.workflowId !== workflow.id ||
-        completedNode.nodeType !== "agent" ||
-        !execution ||
-        execution.nodeRunId !== completedNode.id
-      ) {
-        throw createSixbError(
-          "internal.unexpected",
-          `[SixbWorkflowWorker] Agent node '${completedNode.id}' does not belong to workflow run '${run.id}'.`,
-          {
-            details: {
-              workflowId: workflow.id,
-              workflowRunId: run.id,
-              nodeId: completedNode.nodeId,
-              nodeRunId: completedNode.id,
-              ...(execution ? { agentId: execution.agentId } : {}),
-            },
-          }
-        )
-      }
-      if (run.status === "running") {
-        return WorkflowRunSession.recoverRunning(input, options)
-      }
-      const nodeRuns = await runtime.workflowRuns.nodes.list({
-        projectId: runtime.projectId,
-        workflowRunId: job.id,
-        order: "asc",
-      })
-      if (run.status === "succeeded") {
-        return {
-          id: job.id,
-          workflowId: workflow.id,
-          status: "succeeded",
-          run,
-          nodes: nodeRuns.nodes,
-          steps: reconstructWorkflowState({
-            workflow,
-            run,
-            nodeRuns: nodeRuns.nodes,
-            upToNodeIndex: workflow.nodes.length,
-            valueTypesById,
-          }).steps,
-        }
-      }
-      if (run.status !== "waiting" || completedNode.status !== "succeeded") {
-        throw createSixbError(
-          "internal.unexpected",
-          `[SixbWorkflowWorker] Workflow run '${job.id}' and agent node '${completedNode.id}' must be waiting/succeeded to resume.`,
-          {
-            details: {
-              agentId: execution.agentId,
-              workflowId: workflow.id,
-              workflowRunId: run.id,
-              nodeId: completedNode.nodeId,
-              nodeRunId: completedNode.id,
-            },
-          }
-        )
-      }
-      if (execution.status !== "succeeded" || !completedNode.output) {
-        throw createSixbError(
-          "internal.unexpected",
-          `[SixbWorkflowWorker] Agent execution '${completedNode.id}' must have a validated output to resume.`,
-          {
-            details: {
-              agentId: execution.agentId,
-              workflowId: workflow.id,
-              workflowRunId: run.id,
-              nodeId: completedNode.nodeId,
-              nodeRunId: completedNode.id,
-            },
-          }
-        )
-      }
-      const agentNode = requireAgentNode(workflow, completedNode)
-      const output = validateWorkflowAgentStepOutput({
-        workflowId: workflow.id,
-        agentStep: agentNode.agentStep,
-        value: completedNode.output,
-        valueTypesById,
-      })
-      const state = reconstructWorkflowState({
-        workflow,
-        run,
-        nodeRuns: nodeRuns.nodes,
-        upToNodeIndex: completedNode.nodeIndex,
-        valueTypesById,
-      })
-      const recorder = new WorkflowRunRecorder({
-        projectId: runtime.projectId,
-        workflow,
-        runId: job.id,
-        workflowRuns: runtime.workflowRuns,
-        observer: input.observer ?? noopWorkflowRunObserver,
-        initialCompletedNodes: nodeRuns.nodes.filter(
-          (nodeRun) =>
-            nodeRun.nodeIndex <= completedNode.nodeIndex && nodeRun.status === "succeeded"
-        ),
-        alreadyStarted: true,
-        execution: job.execution,
-      })
-      const logSession = resolveLoggingService(runtime.projectId, runtime.logging).startExecution({
-        kind: "workflow",
-        id: job.id,
-      })
-      const session = new WorkflowRunSession({
-        runtime,
-        job,
-        workflow,
+    throwIfAborted(signal)
+    const run = await requireWorkflowRun({
+      workflowRuns: runtime.workflowRuns,
+      projectId: runtime.projectId,
+      workflowId: workflow.id,
+      id: job.id,
+    })
+    const resumeNode = await requireWorkflowNodeRun({
+      workflowRuns: runtime.workflowRuns,
+      projectId: runtime.projectId,
+      workflowId: workflow.id,
+      workflowRunId: run.id,
+      id: job.nodeRunId,
+    })
+    if (resumeNode.nodeType === "intervention") {
+      return WorkflowRunSession.createForInterventionResume(input, options, {
         signal,
-        logSession,
+        workflow,
         valueTypesById,
-        workflowInputSnapshot: run.input,
-        state,
-        recorder,
-        runner: new WorkflowNodeRunner({ recorder, executors: options.executors }),
-        onRunFailed: input.onRunFailed,
+        run,
+        nodeRun: resumeNode,
       })
-      await runtime.workflowRuns.resume({
-        projectId: runtime.projectId,
-        id: job.id,
-        execution: job.execution,
-      })
-      session.markSideEffectBoundaryPassed()
-      const outputRecord: Record<string, unknown> = { ...output }
-      state.current = outputRecord
-      state.currentSnapshot = completedNode.output
-      state.steps[agentNode.key] = outputRecord
-      session.resumeFromIndex = completedNode.nodeIndex + 1
-      return session
     }
+    if (resumeNode.nodeType !== "agent") {
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbWorkflowWorker] Workflow node '${resumeNode.id}' of type '${resumeNode.nodeType}' cannot resume a run.`,
+        {
+          details: {
+            workflowId: workflow.id,
+            workflowRunId: run.id,
+            nodeId: resumeNode.nodeId,
+            nodeRunId: resumeNode.id,
+          },
+        }
+      )
+    }
+    return WorkflowRunSession.createForAgentNodeResume(input, options, {
+      signal,
+      workflow,
+      valueTypesById,
+      run,
+      nodeRun: resumeNode,
+    })
+  }
+
+  private static async createForInterventionResume(
+    input: RunWorkflowResumeJobInput,
+    options: { readonly executors: WorkflowNodeExecutorRegistry },
+    context: WorkflowResumeContext
+  ): Promise<WorkflowRunSession | WorkflowRunResult> {
+    const { runtime, job } = input
+    const { workflow, valueTypesById, run, nodeRun: waitingNode } = context
     const workflowInterventions = runtime.storage.workflowInterventions
 
     if (!workflowInterventions) {
@@ -374,40 +284,26 @@ export class WorkflowRunSession {
           details: {
             workflowId: job.workflowId,
             workflowRunId: job.id,
-            interventionRecordId: job.resume.interventionId,
+            nodeId: waitingNode.nodeId,
+            nodeRunId: waitingNode.id,
           },
         }
       )
     }
 
-    throwIfAborted(signal)
-
-    const intervention = await requireInterventionRecord({
+    const intervention = await requireInterventionForNode({
       storage: workflowInterventions,
       projectId: runtime.projectId,
       workflowId: workflow.id,
       workflowRunId: job.id,
-      id: job.resume.interventionId,
+      nodeRunId: waitingNode.id,
     })
-    const run = await requireWorkflowRun({
-      workflowRuns: runtime.workflowRuns,
-      projectId: runtime.projectId,
-      workflowId: workflow.id,
-      id: job.id,
-    })
-    const waitingNode = await requireWorkflowNodeRun({
-      workflowRuns: runtime.workflowRuns,
-      projectId: runtime.projectId,
-      workflowId: workflow.id,
-      workflowRunId: job.id,
-      id: intervention.nodeRunId,
-    })
+
+    assertResumeMatchesRun({ workflow, job, run, intervention, waitingNode })
 
     if (run.status === "running") {
       return WorkflowRunSession.recoverRunning(input, options)
     }
-
-    assertResumeMatchesRun({ workflow, job, run, intervention, waitingNode })
 
     const nodeRuns = await runtime.workflowRuns.nodes.list({
       projectId: runtime.projectId,
@@ -416,20 +312,7 @@ export class WorkflowRunSession {
     })
 
     if (run.status === "succeeded" && waitingNode.status === "succeeded") {
-      return {
-        id: job.id,
-        workflowId: workflow.id,
-        status: "succeeded",
-        run,
-        nodes: nodeRuns.nodes,
-        steps: reconstructWorkflowState({
-          workflow,
-          run,
-          nodeRuns: nodeRuns.nodes,
-          upToNodeIndex: workflow.nodes.length,
-          valueTypesById,
-        }).steps,
-      }
+      return completedWorkflowResumeResult(context, nodeRuns.nodes)
     }
 
     if (run.status !== "waiting") {
@@ -515,33 +398,14 @@ export class WorkflowRunSession {
       alreadyStarted: true,
       execution: job.execution,
     })
-    const logSession = resolveLoggingService(runtime.projectId, runtime.logging).startExecution({
-      kind: "workflow",
-      id: job.id,
-    })
-    const session = new WorkflowRunSession({
-      runtime,
-      job,
-      workflow,
-      signal,
-      logSession,
-      valueTypesById,
-      workflowInputSnapshot: run.input,
+    const session = WorkflowRunSession.createResumedSession({
+      input,
+      options,
+      context,
       state,
       recorder,
-      runner: new WorkflowNodeRunner({
-        recorder,
-        executors: options.executors,
-      }),
-      onRunFailed: input.onRunFailed,
     })
-
-    await runtime.workflowRuns.resume({
-      projectId: runtime.projectId,
-      id: job.id,
-      execution: job.execution,
-    })
-
+    await resumeWorkflowRun(input)
     session.markSideEffectBoundaryPassed()
 
     try {
@@ -560,6 +424,152 @@ export class WorkflowRunSession {
     session.resumeFromIndex = intervention.nodeIndex + 1
 
     return session
+  }
+
+  private static async createForAgentNodeResume(
+    input: RunWorkflowResumeJobInput,
+    options: { readonly executors: WorkflowNodeExecutorRegistry },
+    context: WorkflowResumeContext
+  ): Promise<WorkflowRunSession | WorkflowRunResult> {
+    const { runtime, job } = input
+    const { workflow, valueTypesById, run, nodeRun } = context
+    const execution = await runtime.workflowRuns.agentNodes.getByNodeRunId({
+      projectId: runtime.projectId,
+      nodeRunId: nodeRun.id,
+    })
+    if (
+      nodeRun.workflowRunId !== run.id ||
+      nodeRun.workflowId !== workflow.id ||
+      !execution ||
+      execution.nodeRunId !== nodeRun.id
+    ) {
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbWorkflowWorker] Agent node '${nodeRun.id}' does not belong to workflow run '${run.id}'.`,
+        {
+          details: {
+            workflowId: workflow.id,
+            workflowRunId: run.id,
+            nodeId: nodeRun.nodeId,
+            nodeRunId: nodeRun.id,
+            ...(execution ? { agentId: execution.agentId } : {}),
+          },
+        }
+      )
+    }
+    if (run.status === "running") {
+      return WorkflowRunSession.recoverRunning(input, options)
+    }
+    const nodeRuns = await runtime.workflowRuns.nodes.list({
+      projectId: runtime.projectId,
+      workflowRunId: job.id,
+      order: "asc",
+    })
+    if (run.status === "succeeded") {
+      return completedWorkflowResumeResult(context, nodeRuns.nodes)
+    }
+    if (run.status !== "waiting" || nodeRun.status !== "succeeded") {
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbWorkflowWorker] Workflow run '${job.id}' and agent node '${nodeRun.id}' must be waiting/succeeded to resume.`,
+        {
+          details: {
+            agentId: execution.agentId,
+            workflowId: workflow.id,
+            workflowRunId: run.id,
+            nodeId: nodeRun.nodeId,
+            nodeRunId: nodeRun.id,
+          },
+        }
+      )
+    }
+    if (execution.status !== "succeeded" || !nodeRun.output) {
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbWorkflowWorker] Agent execution '${nodeRun.id}' must have a validated output to resume.`,
+        {
+          details: {
+            agentId: execution.agentId,
+            workflowId: workflow.id,
+            workflowRunId: run.id,
+            nodeId: nodeRun.nodeId,
+            nodeRunId: nodeRun.id,
+          },
+        }
+      )
+    }
+    const agentNode = requireAgentNode(workflow, nodeRun)
+    const output = validateWorkflowAgentStepOutput({
+      workflowId: workflow.id,
+      agentStep: agentNode.agentStep,
+      value: nodeRun.output,
+      valueTypesById,
+    })
+    const state = reconstructWorkflowState({
+      workflow,
+      run,
+      nodeRuns: nodeRuns.nodes,
+      upToNodeIndex: nodeRun.nodeIndex,
+      valueTypesById,
+    })
+    const recorder = new WorkflowRunRecorder({
+      projectId: runtime.projectId,
+      workflow,
+      runId: job.id,
+      workflowRuns: runtime.workflowRuns,
+      observer: input.observer ?? noopWorkflowRunObserver,
+      initialCompletedNodes: nodeRuns.nodes.filter(
+        (completed) => completed.nodeIndex <= nodeRun.nodeIndex && completed.status === "succeeded"
+      ),
+      alreadyStarted: true,
+      execution: job.execution,
+    })
+    const session = WorkflowRunSession.createResumedSession({
+      input,
+      options,
+      context,
+      state,
+      recorder,
+    })
+    await resumeWorkflowRun(input)
+    session.markSideEffectBoundaryPassed()
+    const outputRecord: Record<string, unknown> = { ...output }
+    state.current = outputRecord
+    state.currentSnapshot = nodeRun.output
+    state.steps[agentNode.key] = outputRecord
+    session.resumeFromIndex = nodeRun.nodeIndex + 1
+    return session
+  }
+
+  private static createResumedSession(input: {
+    readonly input: RunWorkflowResumeJobInput
+    readonly options: { readonly executors: WorkflowNodeExecutorRegistry }
+    readonly context: WorkflowResumeContext
+    readonly state: WorkflowExecutionState
+    readonly recorder: WorkflowRunRecorder
+  }): WorkflowRunSession {
+    const { runtime, job } = input.input
+    const { signal, workflow, valueTypesById, run } = input.context
+    const logSession = resolveLoggingService(runtime.projectId, runtime.logging).startExecution({
+      kind: "workflow",
+      id: job.id,
+    })
+    return new WorkflowRunSession({
+      runtime,
+      job,
+      workflow,
+      signal,
+      logSession,
+      valueTypesById,
+      workflowInputSnapshot: run.input,
+      state: input.state,
+      recorder: input.recorder,
+      runner: new WorkflowNodeRunner({
+        recorder: input.recorder,
+        executors: input.options.executors,
+      }),
+      onRunFailed: input.input.onRunFailed,
+    })
   }
 
   private resumeFromIndex = 0
@@ -718,6 +728,35 @@ export class WorkflowRunSession {
   }
 }
 
+function completedWorkflowResumeResult(
+  context: WorkflowResumeContext,
+  nodeRuns: readonly WorkflowNodeRunRecord[]
+): WorkflowRunResult {
+  const { workflow, run, valueTypesById } = context
+  return {
+    id: run.id,
+    workflowId: workflow.id,
+    status: "succeeded",
+    run,
+    nodes: nodeRuns,
+    steps: reconstructWorkflowState({
+      workflow,
+      run,
+      nodeRuns,
+      upToNodeIndex: workflow.nodes.length,
+      valueTypesById,
+    }).steps,
+  }
+}
+
+async function resumeWorkflowRun(input: RunWorkflowResumeJobInput): Promise<void> {
+  await input.runtime.workflowRuns.resume({
+    projectId: input.runtime.projectId,
+    id: input.job.id,
+    execution: input.job.execution,
+  })
+}
+
 function requireWorkflow(
   workflow: WorkflowDefinition | null,
   job: { readonly id: string; readonly workflowId: string }
@@ -733,32 +772,32 @@ function requireWorkflow(
   return workflow
 }
 
-async function requireInterventionRecord(input: {
+async function requireInterventionForNode(input: {
   readonly storage: WorkflowInterventionStorage
   readonly projectId: string
   readonly workflowId: string
   readonly workflowRunId: string
-  readonly id: string
+  readonly nodeRunId: string
 }): Promise<WorkflowInterventionRecord> {
-  const intervention = await input.storage.getById({
+  const result = await input.storage.list({
     projectId: input.projectId,
-    id: input.id,
+    nodeRunId: input.nodeRunId,
+    limit: 2,
   })
-
-  if (!intervention) {
+  const intervention = result.interventions[0]
+  if (!intervention || result.total !== 1) {
     throw createSixbError(
       "internal.unexpected",
-      `[SixbWorkflowWorker] Workflow intervention '${input.id}' not found.`,
+      `[SixbWorkflowWorker] Workflow node '${input.nodeRunId}' must reference exactly one intervention.`,
       {
         details: {
           workflowId: input.workflowId,
           workflowRunId: input.workflowRunId,
-          interventionRecordId: input.id,
+          nodeRunId: input.nodeRunId,
         },
       }
     )
   }
-
   return intervention
 }
 

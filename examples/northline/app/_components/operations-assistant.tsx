@@ -22,6 +22,8 @@ const pageLabels: ReadonlyArray<readonly [prefix: string, label: string]> = [
 export function OperationsAssistant() {
   const location = useLocation()
   const [open, setOpen] = useState(false)
+  if (location.pathname.startsWith("/agents")) return null
+
   const pageLabel =
     pageLabels.find(([prefix]) => location.pathname.startsWith(prefix))?.[1] ?? "Today"
   const pageContext = agentContext.appState("northline-current-page", {

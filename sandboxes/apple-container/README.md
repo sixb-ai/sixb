@@ -1,6 +1,6 @@
 # @sixb/sandboxes-apple-container
 
-Runs each agent's bash inside a local [Apple Container](https://github.com/apple/container)
+Runs each agent's sandbox tools inside a local [Apple Container](https://github.com/apple/container)
 container. Drop-in `Sandbox` provider - wire it once into `createSixb({ sandboxes })`; agent code
 still uses the provider-neutral Sixb sandbox contract.
 
@@ -13,13 +13,16 @@ Install Apple Container on an Apple silicon Mac running macOS 26 or newer, then 
 container system start
 ```
 
-The default image is `node:22-bookworm` because Sixb's built-in bash tool executes commands through
-`bash -lc` and the agent skills use `curl`. Custom images should include:
+The default is the official `node:22-bookworm` multi-platform image pinned to an immutable OCI
+digest. Custom images used by agents need:
 
 - `bash`
 - `/bin/sh`
-- `curl`
-- `base64`, `dirname`, `mkdir`, `cat`, and `chmod`
+- standard file utilities for reads and output collection
+- CA certificates and Bun 1.3+ or Node 22+ for the portable `sixb` CLI
+- `dirname`, `mkdir`, `cat`, and optionally `chmod` for file materialization
+
+`curl` and `jq` are not required.
 
 ## Use
 
@@ -53,7 +56,6 @@ reachable origin.
 
 ```ts
 new AppleContainerSandboxFactory({
-  image: "node:22-bookworm",
   timeout: 30_000,
   memory: "2G",
   cpus: 2,
@@ -64,7 +66,7 @@ new AppleContainerSandboxFactory({
 
 | Option | Default | Notes |
 | --- | --- | --- |
-| `image` | `node:22-bookworm` | OCI image used for each sandbox. |
+| `image` | pinned `node:22-bookworm` | OCI image used for each sandbox. |
 | `bin` | `container` | Apple Container CLI binary name or absolute path. |
 | `timeout` | - | Default per-command timeout, in ms. |
 | `setupTimeoutMs` | `30_000` | Timeout for provider bootstrap/cleanup commands. |

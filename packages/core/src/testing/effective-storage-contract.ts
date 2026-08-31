@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { defineObjectType, link, OntologyRegistry, prop } from "../ontology"
-import type { Storage } from "../storage"
+import { linkBatchKey, objectBatchKey, objectLinkCursor, type Storage } from "../storage"
 import { createMaterializerTestFixture } from "./materializer-fixture"
 
 export interface EffectiveStorageContractSuiteOptions<TStorage extends Storage> {
@@ -19,7 +19,25 @@ const Device = defineObjectType({
   ],
   links: [link.self("peers", { cardinality: "many" })],
 })
-const ontology = new OntologyRegistry({ sources: [Device] })
+const OpaqueA = defineObjectType({
+  id: "A",
+  name: "Opaque A",
+  properties: [
+    prop("id", "string", { primary: true, required: true }),
+    prop("name", "string", { required: true }),
+  ],
+  links: [link.self("D", { cardinality: "many" })],
+})
+const OpaqueAB = defineObjectType({
+  id: "A:B",
+  name: "Opaque AB",
+  properties: [
+    prop("id", "string", { primary: true, required: true }),
+    prop("name", "string", { required: true }),
+  ],
+  links: [link.self("D", { cardinality: "many" })],
+})
+const ontology = new OntologyRegistry({ sources: [Device, OpaqueA, OpaqueAB] })
 
 export function runEffectiveStorageContractSuite<TStorage extends Storage>(
   name: string,
@@ -56,7 +74,7 @@ export function runEffectiveStorageContractSuite<TStorage extends Storage>(
             { objectTypeId: Device.id, primaryId: "missing" },
           ],
         })
-        expect([...batch.keys()]).toEqual([`${Device.id}:a`])
+        expect([...batch.keys()]).toEqual([objectBatchKey(Device.id, "a")])
       })
     })
 
@@ -81,7 +99,179 @@ export function runEffectiveStorageContractSuite<TStorage extends Storage>(
           projectId,
           items: [{ objectTypeId: Device.id, objectId: "a", linkId: "peers" }],
         })
-        expect(linksByScope.get(`${Device.id}:a:peers`)).toHaveLength(2)
+        expect(linksByScope.get(linkBatchKey(Device.id, "a", "peers"))).toHaveLength(2)
+      })
+    })
+
+    test("pages and filters incident links in the provider", async () => {
+      await withStorage(async (storage) => {
+        const first = await storage.objects.queryLinks({
+          projectId,
+          objectRefs: [{ objectTypeId: Device.id, primaryId: "a" }],
+          direction: "outgoing",
+          linkId: "peers",
+          endpointObjectTypeIds: [Device.id],
+          limit: 1,
+        })
+        expect(first.links.map((row) => row.targetId)).toEqual(["b"])
+        expect(first.hasMore).toBe(true)
+
+        const second = await storage.objects.queryLinks({
+          projectId,
+          objectRefs: [{ objectTypeId: Device.id, primaryId: "a" }],
+          direction: "outgoing",
+          linkId: "peers",
+          endpointObjectTypeIds: [Device.id],
+          after: objectLinkCursor(first.links[0]),
+          limit: 1,
+        })
+        expect(second.links.map((row) => row.targetId)).toEqual(["c"])
+        expect(second.hasMore).toBe(false)
+
+        const duplicateRefs = await storage.objects.queryLinks({
+          projectId,
+          objectRefs: [
+            { objectTypeId: Device.id, primaryId: "a" },
+            { objectTypeId: Device.id, primaryId: "a" },
+          ],
+          direction: "outgoing",
+          limit: 10,
+        })
+        expect(duplicateRefs.links.map((row) => row.targetId)).toEqual(["b", "c"])
+
+        const incoming = await storage.objects.queryLinks({
+          projectId,
+          objectRefs: [{ objectTypeId: Device.id, primaryId: "b" }],
+          direction: "incoming",
+          limit: 10,
+        })
+        expect(incoming.links.map((row) => [row.sourceId, row.targetId])).toEqual([["a", "b"]])
+
+        const bothDirections = await storage.objects.queryLinks({
+          projectId,
+          objectRefs: [
+            { objectTypeId: Device.id, primaryId: "a" },
+            { objectTypeId: Device.id, primaryId: "b" },
+          ],
+          direction: "both",
+          endpointObjectTypeIds: [Device.id],
+          limit: 10,
+        })
+        expect(bothDirections.links.map((row) => [row.sourceId, row.targetId])).toEqual([
+          ["a", "b"],
+          ["a", "c"],
+        ])
+
+        const unauthorized = await storage.objects.queryLinks({
+          projectId,
+          objectRefs: [{ objectTypeId: Device.id, primaryId: "a" }],
+          direction: "both",
+          endpointObjectTypeIds: [],
+          limit: 10,
+        })
+        expect(unauthorized).toEqual({ links: [], hasMore: false })
+      })
+    })
+
+    test("keeps delimiter-bearing object and batch-link identities distinct", async () => {
+      await withStorage(async (storage) => {
+        const opaqueProjectId = `${projectId}-opaque-batch-keys`
+        const fixture = createMaterializerTestFixture({
+          projectId: opaqueProjectId,
+          ontology,
+          storage,
+        })
+        await fixture.seed({
+          objects: [
+            {
+              ref: { objectTypeId: OpaqueA.id, primaryId: "B:C" },
+              properties: { id: "B:C", name: "First" },
+            },
+            {
+              ref: { objectTypeId: OpaqueAB.id, primaryId: "C" },
+              properties: { id: "C", name: "Second" },
+            },
+          ],
+          links: [
+            {
+              ref: {
+                source: { objectTypeId: OpaqueA.id, primaryId: "B:C" },
+                linkId: "D",
+                target: { objectTypeId: OpaqueA.id, primaryId: "B:C" },
+              },
+            },
+            {
+              ref: {
+                source: { objectTypeId: OpaqueAB.id, primaryId: "C" },
+                linkId: "D",
+                target: { objectTypeId: OpaqueAB.id, primaryId: "C" },
+              },
+            },
+          ],
+        })
+
+        const objects = await storage.objects.getByPrimaryIdBatch({
+          projectId: opaqueProjectId,
+          items: [
+            { objectTypeId: OpaqueA.id, primaryId: "B:C" },
+            { objectTypeId: OpaqueAB.id, primaryId: "C" },
+          ],
+        })
+        expect(objects.get(objectBatchKey(OpaqueA.id, "B:C"))?.properties.name).toBe("First")
+        expect(objects.get(objectBatchKey(OpaqueAB.id, "C"))?.properties.name).toBe("Second")
+
+        const links = await storage.objects.listLinksBatch({
+          projectId: opaqueProjectId,
+          items: [
+            { objectTypeId: OpaqueA.id, objectId: "B:C", linkId: "D" },
+            { objectTypeId: OpaqueAB.id, objectId: "C", linkId: "D" },
+          ],
+        })
+        expect(links.get(linkBatchKey(OpaqueA.id, "B:C", "D"))).toHaveLength(1)
+        expect(links.get(linkBatchKey(OpaqueAB.id, "C", "D"))).toHaveLength(1)
+      })
+    })
+
+    test("preserves distinct incident links when opaque ids contain delimiters", async () => {
+      await withStorage(async (storage) => {
+        const opaqueIdsProjectId = `${projectId}-opaque-link-ids`
+        const firstSourceId = "opaque:source"
+        const firstTargetId = `target:peers:${Device.id}:opaque:end`
+        const secondSourceId = `${firstSourceId}:peers:${Device.id}:target`
+        const secondTargetId = "opaque:end"
+        const fixture = createMaterializerTestFixture({
+          projectId: opaqueIdsProjectId,
+          ontology,
+          storage,
+        })
+        await fixture.seed({
+          objects: [
+            device(firstSourceId, "First source"),
+            device(firstTargetId, "First target"),
+            device(secondSourceId, "Second source"),
+            device(secondTargetId, "Second target"),
+          ],
+          links: [peer(firstSourceId, firstTargetId), peer(secondSourceId, secondTargetId)],
+        })
+
+        const incident = await storage.objects.listIncidentLinksBatch({
+          projectId: opaqueIdsProjectId,
+          items: [
+            { objectTypeId: Device.id, objectId: firstSourceId },
+            { objectTypeId: Device.id, objectId: secondSourceId },
+          ],
+        })
+        const matching = incident.filter(
+          (row) => row.sourceId === firstSourceId || row.sourceId === secondSourceId
+        )
+
+        expect(matching.map((row) => [row.sourceId, row.linkId, row.targetId])).toEqual(
+          expect.arrayContaining([
+            [firstSourceId, "peers", firstTargetId],
+            [secondSourceId, "peers", secondTargetId],
+          ])
+        )
+        expect(matching).toHaveLength(2)
       })
     })
 

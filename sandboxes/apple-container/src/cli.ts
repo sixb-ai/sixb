@@ -19,7 +19,7 @@ export interface NormalizedAppleContainerMount {
 export interface AppleContainerCliConfig {
   /** Resolved Apple Container CLI binary name or absolute path. */
   readonly bin: string
-  /** OCI image used for each sandbox. Must include /bin/sh; Sixb agents also need bash + curl. */
+  /** For agent use, the image must include the worker's CLI runtime and shell utilities. */
   readonly image: string
   readonly cpus?: string
   readonly memory?: string

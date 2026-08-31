@@ -1,3 +1,5 @@
+import { isRecord } from "./guards"
+
 /**
  * Raised when a Google API request fails. Parses the standard Google error
  * envelope (`{ error: { code, message, status, ... } }`) shared by every
@@ -53,8 +55,4 @@ function extractMessage(value: unknown): string | null {
   }
 
   return null
-}
-
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
 }

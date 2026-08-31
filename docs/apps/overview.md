@@ -14,12 +14,16 @@ and an app shell, and serves it. There is no separate framework to configure: th
 file tree is the routing table, and sixb wires up everything pages need to talk to
 the API.
 
-| You provide | sixb wires up |
+| You provide | Purpose |
 | --- | --- |
-| `app/**/page.tsx` route components | React Router (file-based routing) |
-| `app/layout.tsx` (optional) | TanStack Query (`QueryClientProvider`) |
-| `app/globals.css` (optional) | Auth session + cookies, CSRF handling |
-| `app/public/` static assets | Same-origin `<a>` click interception (SPA nav) |
+| `app/**/page.tsx` | Route components |
+| `app/layout.tsx` (optional) | Global wrapper and document metadata |
+| `app/**/layout.tsx` (optional) | Persistent layouts for a route subtree |
+| `app/globals.css` (optional) | App-wide styles |
+| `app/public/` | Root-relative static assets |
+
+sixb supplies React Router, TanStack Query, the authenticated client runtime, and conservative
+same-origin SPA navigation around these files.
 
 Pages fetch data with the typed hooks from `@sixb/client/hooks` and the typed
 query builder from `@sixb/client/query`, run action buttons with
@@ -39,7 +43,9 @@ app/
   page.tsx                       -> /
   projects/page.tsx              -> /projects
   invoices/page.tsx              -> /invoices
+  invoices/layout.tsx            -> wraps /invoices/**
   review/[interventionId]/page.tsx -> /review/:interventionId
+  review/[interventionId]/layout.tsx -> wraps /review/:interventionId/**
   layout.tsx                     -> root wrapper and metadata
   globals.css                    -> app styles
   public/logo.svg                -> /logo.svg
@@ -52,10 +58,15 @@ Routing rules:
 | `app/page.tsx` | `/` |
 | `app/invoices/page.tsx` | `/invoices` |
 | `app/review/[interventionId]/page.tsx` | `/review/:interventionId` |
+| `app/invoices/layout.tsx` | Layout for `/invoices` and descendants |
 
 - Only `page.tsx` and `page.ts` create routes.
+- A descendant `layout.tsx` wraps pages in its directory and below; a layout alone does not create
+  a route.
 - A folder named `[param]` becomes a dynamic segment `:param`. Read it with React
   Router's `useParams` inside the `[param]/page.tsx` component.
+- Route groups such as `(admin)` are reserved for future framework support and currently fail with
+  an actionable error.
 - Files or folders starting with `_` are ignored — use the prefix for components,
   helpers, or routes you do not want mounted.
 - The route component is the page module's `default` export.
@@ -124,7 +135,7 @@ its `href` matches a known route, so you get SPA navigation without React Router
 Links to `/api`, `/auth`, `/ws`, `/docs`, cross-origin URLs, `download` links, and
 modified clicks (new tab, etc.) fall through to native navigation.
 
-## Layout and metadata
+## Layouts and metadata
 
 `app/layout.tsx` is optional. Its `default` export wraps every route, and its
 named `metadata` export sets the static document and install identity. sixb loads
@@ -148,6 +159,36 @@ export default function RootLayout({ children }: PropsWithChildren) {
   return <>{children}</>
 }
 ```
+
+Use descendant layouts for feature-owned shells, providers, and persistent state. They receive
+`children` directly — Sixb owns the React Router `Outlet` wiring:
+
+```tsx
+// app/analytics/layout.tsx
+import type { PropsWithChildren } from "react"
+
+export default function AnalyticsLayout({ children }: PropsWithChildren) {
+  return <AnalyticsShell>{children}</AnalyticsShell>
+}
+```
+
+This wraps `/analytics` and every routed descendant. The layout stays mounted when navigating from
+`/analytics/reports/a` to `/analytics/reports/b`, so shell state and subscriptions persist. A
+layout inside a dynamic directory can read that directory's parameter normally:
+
+```tsx
+// app/analytics/reports/[reportId]/layout.tsx
+import type { PropsWithChildren } from "react"
+import { useParams } from "react-router-dom"
+
+export default function ReportLayout({ children }: PropsWithChildren) {
+  const { reportId } = useParams()
+  return <ReportShell reportId={reportId}>{children}</ReportShell>
+}
+```
+
+Only the root `app/layout.tsx` owns `metadata`; metadata exports from descendant layouts are not
+read. Descendant layouts are browser route components.
 
 `AppMetadata` fields are all optional:
 
@@ -229,6 +270,36 @@ bun add tailwindcss @tailwindcss/cli
 ```
 
 Bringing your own UI? Keep `globals.css` plain CSS and skip the install.
+
+## Custom login experience
+
+Add `app/auth.tsx` to give the app audience an organization-specific magic-link experience. The
+component renders before a session exists and receives safe states and actions from Sixb:
+
+```tsx
+import type { AuthExperienceProps } from "@sixb/app/auth"
+
+export default function AuthExperience({ state, actions }: AuthExperienceProps) {
+  if (state.kind === "checkEmail") {
+    return <p>Check your inbox for a secure sign-in link.</p>
+  }
+
+  if (state.kind !== "signIn") {
+    return <button onClick={actions.restartSignIn}>Request a new link</button>
+  }
+
+  return <SignInForm onSubmit={actions.requestMagicLink} />
+}
+```
+
+The available states are `signIn`, `checkEmail`, `confirm`, `invalidLink`, and `error`. The auth
+entry automatically includes `app/globals.css` and uses the app metadata for its document title and
+theme. It is not wrapped in `app/layout.tsx`, because layouts may assume an authenticated session.
+
+Sixb builds this as a separate bundle and serves it from the API's existing `/auth/*` routes. The
+component controls presentation only: the API retains tokens, cookies, callback completion,
+audience checks, neutral email responses, and safe return redirects. Without `app/auth.tsx`, the
+generic server login remains unchanged. Atlas also continues to use the generic login.
 
 ## Running
 

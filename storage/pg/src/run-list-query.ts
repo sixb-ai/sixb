@@ -12,7 +12,10 @@ type PgRunListTable =
 
 /** Column projection — `sync_runs` needs the derived `checkpoint_present` flag. */
 type PgRunListSelectList = "*" | "*, checkpoint IS NOT NULL AS checkpoint_present"
-type StartedAtExpression = "started_at" | "COALESCE(started_at, created_at)"
+type StartedAtExpression =
+  | "started_at"
+  | "COALESCE(started_at, created_at)"
+  | "COALESCE(started_at, queued_at)"
 
 export function hasEmptyStatuses(input: { readonly statuses?: readonly unknown[] }): boolean {
   return input.statuses !== undefined && input.statuses.length === 0
@@ -78,9 +81,11 @@ export async function queryRunList<TRow>(input: {
   const orderColumn =
     input.tableName === "agent_runs"
       ? "COALESCE(started_at, created_at)"
-      : input.tableName === "workflow_agent_node_runs"
-        ? "created_at"
-        : "started_at"
+      : input.tableName === "sync_runs" || input.tableName === "pipeline_runs"
+        ? "COALESCE(started_at, queued_at)"
+        : input.tableName === "workflow_agent_node_runs"
+          ? "created_at"
+          : "started_at"
   const idColumn = input.tableName === "workflow_agent_node_runs" ? "node_run_id" : "id"
   let query = `
     SELECT ${input.selectList ?? "*"} FROM ${input.tableName}

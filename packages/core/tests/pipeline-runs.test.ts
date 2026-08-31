@@ -1,7 +1,36 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryStorage } from "../src"
-import type { PipelineRunFailureCode, SixbFailure } from "../src/storage"
+import type { PipelineRunFailureCode, QueuePipelineRunInput, SixbFailure } from "../src/storage"
 import { InMemoryPipelineRunStorage, PipelineRunError } from "../src/storage"
+import { createTestPipelineExecution } from "../src/testing"
+
+type TestStartPipelineRunInput = Omit<QueuePipelineRunInput, "executionId" | "queuedAt"> & {
+  readonly startedAt?: Date
+}
+
+async function startPipelineRun(storage: InMemoryStorage, input: TestStartPipelineRunInput) {
+  const executionId = `exec:${input.projectId}:${input.id}`
+  if (!(await storage.executions.getById({ projectId: input.projectId, id: executionId }))) {
+    await storage.executions.create({
+      id: executionId,
+      projectId: input.projectId,
+      executor: { type: "primitive", kind: "pipeline", runId: input.id },
+      source: { type: "schedule", eventId: `event:${input.id}` },
+      correlationId: `correlation:${input.id}`,
+      authorizationRef: {
+        type: "trustedPrimitive",
+        primitive: { kind: "pipeline", id: input.pipelineId, runId: input.id },
+      },
+    })
+  }
+  const { startedAt, ...run } = input
+  await storage.pipelineRuns.queue({
+    ...run,
+    executionId,
+    queuedAt: startedAt,
+  })
+  return storage.pipelineRuns.start({ id: input.id, projectId: input.projectId, startedAt })
+}
 
 const FAILURE: SixbFailure<PipelineRunFailureCode> = {
   code: "internal.unexpected",
@@ -19,20 +48,20 @@ const CANCELLED_FAILURE: SixbFailure<PipelineRunFailureCode> = {
 
 describe("InMemoryPipelineRunStorage", () => {
   test("starts and finishes a successful pipeline run", async () => {
-    const storage = new InMemoryPipelineRunStorage()
+    const storage = new InMemoryStorage()
     const startedAt = new Date("2026-05-08T10:00:00.000Z")
     const finishedAt = new Date("2026-05-08T10:00:04.500Z")
 
-    const started = await storage.start({
+    const started = await startPipelineRun(storage, {
       id: "piperun_1",
       projectId: "my-app",
       pipelineId: "customers",
       startedAt,
     })
 
-    started.startedAt.setUTCFullYear(2040)
+    started.startedAt!.setUTCFullYear(2040)
 
-    const finished = await storage.finish({
+    const finished = await storage.pipelineRuns.finish({
       id: "piperun_1",
       projectId: "my-app",
       status: "succeeded",
@@ -43,7 +72,7 @@ describe("InMemoryPipelineRunStorage", () => {
       },
     })
 
-    const stored = await storage.getById({
+    const stored = await storage.pipelineRuns.getById({
       projectId: "my-app",
       id: "piperun_1",
     })
@@ -53,20 +82,20 @@ describe("InMemoryPipelineRunStorage", () => {
       datasetId: "insights.customers",
       versionId: "ver_final",
     })
-    expect(stored?.startedAt.toISOString()).toBe(startedAt.toISOString())
+    expect(stored?.startedAt?.toISOString()).toBe(startedAt.toISOString())
     expect(stored?.finishedAt?.toISOString()).toBe(finishedAt.toISOString())
   })
 
   test("stores failed pipeline runs and lists with filters, ordering, and paging", async () => {
-    const storage = new InMemoryPipelineRunStorage()
+    const storage = new InMemoryStorage()
 
-    await storage.start({
+    await startPipelineRun(storage, {
       id: "run-1",
       projectId: "my-app",
       pipelineId: "customers",
       startedAt: new Date("2026-05-08T10:00:00.000Z"),
     })
-    await storage.finish({
+    await storage.pipelineRuns.finish({
       id: "run-1",
       projectId: "my-app",
       status: "failed",
@@ -74,13 +103,13 @@ describe("InMemoryPipelineRunStorage", () => {
       error: { ...FAILURE, message: "No committed source version" },
     })
 
-    await storage.start({
+    await startPipelineRun(storage, {
       id: "run-2",
       projectId: "my-app",
       pipelineId: "customers",
       startedAt: new Date("2026-05-08T11:00:00.000Z"),
     })
-    await storage.finish({
+    await storage.pipelineRuns.finish({
       id: "run-2",
       projectId: "my-app",
       status: "succeeded",
@@ -90,14 +119,14 @@ describe("InMemoryPipelineRunStorage", () => {
       },
     })
 
-    await storage.start({
+    await startPipelineRun(storage, {
       id: "run-3",
       projectId: "my-app",
       pipelineId: "orders",
       startedAt: new Date("2026-05-08T12:00:00.000Z"),
     })
 
-    const page = await storage.list({
+    const page = await storage.pipelineRuns.list({
       projectId: "my-app",
       pipelineId: "customers",
       statuses: ["running", "succeeded"],
@@ -110,7 +139,7 @@ describe("InMemoryPipelineRunStorage", () => {
     expect(page.hasMore).toBe(false)
     expect(page.runs.map((run) => run.id)).toEqual(["run-2"])
 
-    const selectedPipelines = await storage.list({
+    const selectedPipelines = await storage.pipelineRuns.list({
       projectId: "my-app",
       pipelineIds: ["orders"],
     })
@@ -118,10 +147,10 @@ describe("InMemoryPipelineRunStorage", () => {
     expect(selectedPipelines.runs.map((run) => run.id)).toEqual(["run-3"])
 
     // An empty allowlist must deny all — never fall through to an unfiltered list.
-    const noneAllowed = await storage.list({ projectId: "my-app", pipelineIds: [] })
+    const noneAllowed = await storage.pipelineRuns.list({ projectId: "my-app", pipelineIds: [] })
     expect(noneAllowed).toEqual({ runs: [], hasMore: false, total: 0 })
 
-    const empty = await storage.list({
+    const empty = await storage.pipelineRuns.list({
       projectId: "my-app",
       statuses: [],
     })
@@ -131,7 +160,7 @@ describe("InMemoryPipelineRunStorage", () => {
       total: 0,
     })
 
-    const failed = await storage.getById({
+    const failed = await storage.pipelineRuns.getById({
       projectId: "my-app",
       id: "run-1",
     })
@@ -141,34 +170,34 @@ describe("InMemoryPipelineRunStorage", () => {
   })
 
   test("lists the latest run for multiple pipeline ids", async () => {
-    const storage = new InMemoryPipelineRunStorage()
+    const storage = new InMemoryStorage()
 
-    await storage.start({
+    await startPipelineRun(storage, {
       id: "run-customers-a",
       projectId: "my-app",
       pipelineId: "customers",
       startedAt: new Date("2026-05-08T11:00:00.000Z"),
     })
-    await storage.start({
+    await startPipelineRun(storage, {
       id: "run-customers-z",
       projectId: "my-app",
       pipelineId: "customers",
       startedAt: new Date("2026-05-08T11:00:00.000Z"),
     })
-    await storage.start({
+    await startPipelineRun(storage, {
       id: "run-orders",
       projectId: "my-app",
       pipelineId: "orders",
       startedAt: new Date("2026-05-08T10:00:00.000Z"),
     })
-    await storage.start({
+    await startPipelineRun(storage, {
       id: "run-other-project",
       projectId: "other-app",
       pipelineId: "customers",
       startedAt: new Date("2026-05-08T12:00:00.000Z"),
     })
 
-    const latest = await storage.listLatestByPipelineIds({
+    const latest = await storage.pipelineRuns.listLatestByPipelineIds({
       projectId: "my-app",
       pipelineIds: ["orders", "missing", "customers", "customers"],
     })
@@ -177,18 +206,18 @@ describe("InMemoryPipelineRunStorage", () => {
   })
 
   test("starts and finishes step runs with pinned inputs", async () => {
-    const storage = new InMemoryPipelineRunStorage()
+    const storage = new InMemoryStorage()
     const startedAt = new Date("2026-05-08T10:00:00.000Z")
     const finishedAt = new Date("2026-05-08T10:00:01.200Z")
 
-    await storage.start({
+    await startPipelineRun(storage, {
       id: "piperun_1",
       projectId: "my-app",
       pipelineId: "customers",
       startedAt,
     })
 
-    const started = await storage.startStep({
+    const started = await storage.pipelineRuns.startStep({
       id: "step_1",
       projectId: "my-app",
       pipelineRunId: "piperun_1",
@@ -207,7 +236,7 @@ describe("InMemoryPipelineRunStorage", () => {
 
     ;(started.inputs as { datasetId: string; versionId: string }[])[0]!.versionId = "mutated"
 
-    const finished = await storage.finishStep({
+    const finished = await storage.pipelineRuns.finishStep({
       id: "step_1",
       projectId: "my-app",
       status: "succeeded",
@@ -219,7 +248,7 @@ describe("InMemoryPipelineRunStorage", () => {
       },
     })
 
-    const steps = await storage.listSteps({
+    const steps = await storage.pipelineRuns.listSteps({
       projectId: "my-app",
       pipelineRunId: "piperun_1",
     })
@@ -243,15 +272,15 @@ describe("InMemoryPipelineRunStorage", () => {
   })
 
   test("stores failed step runs and lists with filters, ordering, and paging", async () => {
-    const storage = new InMemoryPipelineRunStorage()
+    const storage = new InMemoryStorage()
 
-    await storage.start({
+    await startPipelineRun(storage, {
       id: "piperun_1",
       projectId: "my-app",
       pipelineId: "customers",
     })
 
-    await storage.startStep({
+    await storage.pipelineRuns.startStep({
       id: "step-1",
       projectId: "my-app",
       pipelineRunId: "piperun_1",
@@ -262,7 +291,7 @@ describe("InMemoryPipelineRunStorage", () => {
       startedAt: new Date("2026-05-08T10:00:00.000Z"),
       inputs: [],
     })
-    await storage.finishStep({
+    await storage.pipelineRuns.finishStep({
       id: "step-1",
       projectId: "my-app",
       status: "failed",
@@ -270,7 +299,7 @@ describe("InMemoryPipelineRunStorage", () => {
       error: { ...FAILURE, message: "Invalid row" },
     })
 
-    await storage.startStep({
+    await storage.pipelineRuns.startStep({
       id: "step-2",
       projectId: "my-app",
       pipelineRunId: "piperun_1",
@@ -281,7 +310,7 @@ describe("InMemoryPipelineRunStorage", () => {
       startedAt: new Date("2026-05-08T11:00:00.000Z"),
       inputs: [],
     })
-    await storage.finishStep({
+    await storage.pipelineRuns.finishStep({
       id: "step-2",
       projectId: "my-app",
       status: "succeeded",
@@ -291,7 +320,7 @@ describe("InMemoryPipelineRunStorage", () => {
       },
     })
 
-    await storage.startStep({
+    await storage.pipelineRuns.startStep({
       id: "step-3",
       projectId: "my-app",
       pipelineRunId: "piperun_1",
@@ -303,7 +332,7 @@ describe("InMemoryPipelineRunStorage", () => {
       inputs: [],
     })
 
-    const page = await storage.listSteps({
+    const page = await storage.pipelineRuns.listSteps({
       projectId: "my-app",
       pipelineId: "customers",
       statuses: ["running", "succeeded"],
@@ -316,7 +345,7 @@ describe("InMemoryPipelineRunStorage", () => {
     expect(page.hasMore).toBe(false)
     expect(page.steps.map((step) => step.id)).toEqual(["step-2"])
 
-    const failedSteps = await storage.listSteps({
+    const failedSteps = await storage.pipelineRuns.listSteps({
       projectId: "my-app",
       statuses: ["failed"],
     })
@@ -325,16 +354,16 @@ describe("InMemoryPipelineRunStorage", () => {
   })
 
   test("rejects duplicate starts, missing finishes, terminal rewrites, and mismatched outputs", async () => {
-    const storage = new InMemoryPipelineRunStorage()
+    const storage = new InMemoryStorage()
 
-    await storage.start({
+    await startPipelineRun(storage, {
       id: "piperun_1",
       projectId: "my-app",
       pipelineId: "customers",
     })
 
     await expect(
-      storage.start({
+      startPipelineRun(storage, {
         id: "piperun_1",
         projectId: "my-app",
         pipelineId: "customers",
@@ -342,7 +371,7 @@ describe("InMemoryPipelineRunStorage", () => {
     ).rejects.toBeInstanceOf(PipelineRunError)
 
     await expect(
-      storage.finish({
+      storage.pipelineRuns.finish({
         id: "missing",
         projectId: "my-app",
         status: "failed",
@@ -350,7 +379,7 @@ describe("InMemoryPipelineRunStorage", () => {
       })
     ).rejects.toBeInstanceOf(PipelineRunError)
 
-    await storage.startStep({
+    await storage.pipelineRuns.startStep({
       id: "step_1",
       projectId: "my-app",
       pipelineRunId: "piperun_1",
@@ -362,7 +391,7 @@ describe("InMemoryPipelineRunStorage", () => {
     })
 
     await expect(
-      storage.finishStep({
+      storage.pipelineRuns.finishStep({
         id: "step_1",
         projectId: "my-app",
         status: "succeeded",
@@ -373,7 +402,7 @@ describe("InMemoryPipelineRunStorage", () => {
       })
     ).rejects.toBeInstanceOf(PipelineRunError)
 
-    await storage.finishStep({
+    await storage.pipelineRuns.finishStep({
       id: "step_1",
       projectId: "my-app",
       status: "cancelled",
@@ -381,7 +410,7 @@ describe("InMemoryPipelineRunStorage", () => {
     })
 
     await expect(
-      storage.finishStep({
+      storage.pipelineRuns.finishStep({
         id: "step_1",
         projectId: "my-app",
         status: "failed",
@@ -389,7 +418,7 @@ describe("InMemoryPipelineRunStorage", () => {
       })
     ).rejects.toBeInstanceOf(PipelineRunError)
 
-    await storage.finish({
+    await storage.pipelineRuns.finish({
       id: "piperun_1",
       projectId: "my-app",
       status: "cancelled",
@@ -397,7 +426,7 @@ describe("InMemoryPipelineRunStorage", () => {
     })
 
     await expect(
-      storage.startStep({
+      storage.pipelineRuns.startStep({
         id: "step_2",
         projectId: "my-app",
         pipelineRunId: "piperun_1",
@@ -410,7 +439,7 @@ describe("InMemoryPipelineRunStorage", () => {
     ).rejects.toBeInstanceOf(PipelineRunError)
 
     await expect(
-      storage.finish({
+      storage.pipelineRuns.finish({
         id: "piperun_1",
         projectId: "my-app",
         status: "failed",
@@ -422,5 +451,23 @@ describe("InMemoryPipelineRunStorage", () => {
   test("InMemoryStorage includes pipeline run storage", () => {
     const storage = new InMemoryStorage()
     expect(storage.pipelineRuns).toBeInstanceOf(InMemoryPipelineRunStorage)
+  })
+
+  test("rejects a run whose execution authorizes a different Pipeline", async () => {
+    const storage = new InMemoryStorage()
+    const executionId = await createTestPipelineExecution(storage.executions, {
+      projectId: "my-app",
+      pipelineId: "pipeline-customers",
+      runId: "run-1",
+    })
+
+    await expect(
+      storage.pipelineRuns.queue({
+        id: "run-1",
+        projectId: "my-app",
+        executionId,
+        pipelineId: "pipeline-orders",
+      })
+    ).rejects.toBeInstanceOf(PipelineRunError)
   })
 })

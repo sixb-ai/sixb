@@ -52,6 +52,12 @@ export type {
   ModelToolResultPart,
   ProviderData,
 } from "./messages"
-export type { ModelCallCost, ModelMoney, ModelReportedCost } from "./pricing"
+export type {
+  ModelCallCost,
+  ModelCostComponent,
+  ModelCostMeter,
+  ModelMoney,
+  ModelReportedCost,
+} from "./pricing"
 export { priceModelCall } from "./pricing"
 export type { ModelOutput, ModelTool, ModelToolExecutionContext } from "./tools"

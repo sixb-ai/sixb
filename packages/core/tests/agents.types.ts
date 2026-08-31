@@ -1,5 +1,6 @@
 import {
   type AgentToolDefinition,
+  type AgentToolResult,
   type AgentToolRunContext,
   defineAgent,
   defineAgentTool,
@@ -119,5 +120,25 @@ defineAgentTool("readonly_output")
   .description("Accept readonly JSON-compatible output.")
   .input({})
   .run(() => ({ results: readonlyResults }))
+
+defineAgentTool("create_image")
+  .description("Create an image artifact.")
+  .input({ prompt: "string" })
+  .run(async ({ artifacts, toolCallId }) => {
+    const { fileRef } = await artifacts.put({
+      body: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+      fileName: "image.png",
+      mediaType: "image/png",
+    })
+    const callId: string = toolCallId
+    const result: AgentToolResult = {
+      kind: "agentToolResult",
+      content: [
+        { type: "text", text: `Created an image for ${callId}.` },
+        { type: "file", fileRef },
+      ],
+    }
+    return result
+  })
 
 void definition

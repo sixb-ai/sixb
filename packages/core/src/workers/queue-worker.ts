@@ -1,5 +1,5 @@
 import { captureSixbFailure } from "../errors/internal"
-import type { SixbErrorCode } from "../errors/types"
+import type { SixbErrorCode, SixbFailure } from "../errors/types"
 import type { ClaimedQueueJob, Queue, QueueJob } from "../queues"
 import { WorkerAbortError } from "./errors"
 import {
@@ -29,10 +29,22 @@ export interface QueueWorkerConfig<
   readonly idlePollMs?: number
 }
 
-export interface QueueWorkerFailureDecision {
-  readonly kind: "retry" | "fail"
-  readonly availableAt?: string
-}
+/**
+ * Queue settlement selected after execution stops.
+ *
+ * A worker must name its allowed failure-code union before it can supply an already-persisted
+ * failure. Workers that only choose retry vs fail need no generic annotation.
+ */
+export type QueueWorkerFailureDecision<TFailureCode extends SixbErrorCode = never> =
+  | {
+      readonly kind: "retry"
+      readonly availableAt?: string
+    }
+  | {
+      readonly kind: "fail"
+      /** Exact durable run failure, when execution already persisted one. */
+      readonly failure?: SixbFailure<TFailureCode>
+    }
 
 const DEFAULT_LEASE_MS = 15 * 60_000
 const DEFAULT_CLAIM_LIMIT = 1
@@ -54,9 +66,14 @@ export abstract class QueueWorker<
       failureCodes: config.failureCodes,
       workerId: config.workerId,
       leaseMs: config.leaseMs ?? DEFAULT_LEASE_MS,
-      claimLimit: config.claimLimit ?? DEFAULT_CLAIM_LIMIT,
+      claimLimit: normalizeClaimLimit(config.claimLimit),
       idlePollMs: config.idlePollMs ?? DEFAULT_IDLE_POLL_MS,
     }
+  }
+
+  /** Maximum jobs this worker process claims and executes at once. */
+  get concurrency(): number {
+    return this.config.claimLimit
   }
 
   protected async run(signal: AbortSignal): Promise<void> {
@@ -103,14 +120,18 @@ export abstract class QueueWorker<
   protected onExecutionError(
     _claimed: ClaimedQueueJob<TJob>,
     _error: unknown
-  ): Promise<QueueWorkerFailureDecision> | QueueWorkerFailureDecision {
+  ):
+    | Promise<QueueWorkerFailureDecision<TFailureCodes[number]>>
+    | QueueWorkerFailureDecision<TFailureCodes[number]> {
     return { kind: "fail" }
   }
 
   protected onAbortError(
     _claimed: ClaimedQueueJob<TJob>,
     _error: unknown
-  ): Promise<QueueWorkerFailureDecision> | QueueWorkerFailureDecision {
+  ):
+    | Promise<QueueWorkerFailureDecision<TFailureCodes[number]>>
+    | QueueWorkerFailureDecision<TFailureCodes[number]> {
     // Shutdown should normally release work for another process. Workers with non-idempotent
     // partial commits can override this and fail the job instead.
     return { kind: "retry" }
@@ -208,7 +229,7 @@ export abstract class QueueWorker<
 
   private async applyFailureDecision(
     delivery: QueueDelivery<TJob, TFailureCodes[number]>,
-    decision: QueueWorkerFailureDecision,
+    decision: QueueWorkerFailureDecision<TFailureCodes[number]>,
     error: unknown,
     defaultCode: "internal.unexpected" | "runtime.cancelled"
   ): Promise<void> {
@@ -217,13 +238,22 @@ export abstract class QueueWorker<
       return
     }
 
-    await delivery.fail(
+    const failure =
+      decision.failure ??
       captureSixbFailure(error, {
         allowedCodes: this.config.failureCodes,
         defaultCode,
       })
-    )
+    await delivery.fail(failure)
   }
+}
+
+function normalizeClaimLimit(value: number | undefined): number {
+  const claimLimit = value ?? DEFAULT_CLAIM_LIMIT
+  if (!Number.isSafeInteger(claimLimit) || claimLimit < 1) {
+    throw new Error("[SixbQueueWorker] Worker concurrency must be a positive safe integer.")
+  }
+  return claimLimit
 }
 
 async function settleOrLog<TJob extends QueueJob, TFailureCode extends SixbErrorCode>(

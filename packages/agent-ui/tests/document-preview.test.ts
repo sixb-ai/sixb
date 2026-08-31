@@ -13,6 +13,7 @@ import {
   parseDelimitedText,
 } from "../src/document-preview/delimited"
 import { buildSafeHtmlPreviewDocument, HTML_PREVIEW_SANDBOX } from "../src/document-preview/html"
+import { parseDocumentPreviewState } from "../src/document-preview/persistence"
 import { documentPreviewPresentation } from "../src/document-preview/presentation"
 import { agentDocumentPreviewRenderer } from "../src/document-preview/rendering"
 import { createAgentDocumentSource } from "../src/document-preview/source"
@@ -39,12 +40,15 @@ describe("agent document classification", () => {
     expect(agentDocumentKind("text/csv", "rows.bin")).toBe("csv")
     expect(agentDocumentKind("text/tab-separated-values", "rows.bin")).toBe("tsv")
     expect(agentDocumentKind("application/pdf", "report.bin")).toBe("pdf")
+    expect(agentDocumentKind("image/png", "generated.bin")).toBe("image")
+    expect(agentDocumentKind("image/jpeg; charset=binary", "photo.bin")).toBe("image")
   })
 
   test("uses extensions only for missing or generic media metadata", () => {
     expect(agentDocumentKind(undefined, "REPORT.MD")).toBe("markdown")
     expect(agentDocumentKind("application/octet-stream", "report.pdf")).toBe("pdf")
-    expect(agentDocumentKind("image/png", "not-really.md")).toBeNull()
+    expect(agentDocumentKind("application/octet-stream", "generated.WEBP")).toBe("image")
+    expect(agentDocumentKind("image/svg+xml", "not-really.png")).toBeNull()
     expect(agentDocumentKind(undefined, "workbook.xlsx")).toBeNull()
   })
 })
@@ -88,6 +92,7 @@ describe("document preview rendering", () => {
     expect(agentDocumentPreviewRenderer("html")).toBe("html-static")
     expect(agentDocumentPreviewRenderer("csv")).toBe("delimited-text")
     expect(agentDocumentPreviewRenderer("tsv")).toBe("delimited-text")
+    expect(agentDocumentPreviewRenderer("image")).toBe("image-native")
     expect(agentDocumentPreviewRenderer(null)).toBeNull()
   })
 })
@@ -264,6 +269,47 @@ describe("document preview tabs", () => {
     state = documentPreviewReducer(state, { type: "close", id: "first" })
 
     expect(state.activeId).toBe("second")
+  })
+
+  test("keeps the thread's panel width after its document tabs are closed", () => {
+    let state = documentPreviewReducer(EMPTY_DOCUMENT_PREVIEW_STATE, {
+      type: "set-panel-width",
+      width: 640,
+    })
+    state = documentPreviewReducer(state, { type: "open", document: document("first", "first.md") })
+    state = documentPreviewReducer(state, { type: "close-all" })
+
+    expect(state).toEqual({ documents: [], activeId: null, panelWidth: 640 })
+    expect(parseDocumentPreviewState(JSON.stringify(state), "thread-1")).toEqual(state)
+  })
+
+  test("restores only valid, unique documents from the current thread", () => {
+    const first = document("first", "first.md")
+    const second = document("second", "second.md")
+    const state = parseDocumentPreviewState(
+      JSON.stringify({
+        documents: [first, first, { ...second, threadId: "another-thread" }, second],
+        activeId: "second",
+        panelWidth: 640,
+      }),
+      "thread-1"
+    )
+
+    expect(state.documents.map((item) => item.id)).toEqual(["first", "second"])
+    expect(state.activeId).toBe("second")
+    expect(state.panelWidth).toBe(640)
+  })
+
+  test("falls back safely when persisted preview state is stale or malformed", () => {
+    const first = document("first", "first.md")
+
+    expect(
+      parseDocumentPreviewState(
+        JSON.stringify({ documents: [first], activeId: "missing" }),
+        "thread-1"
+      )
+    ).toEqual({ documents: [first], activeId: "first", panelWidth: null })
+    expect(parseDocumentPreviewState("not-json", "thread-1")).toBe(EMPTY_DOCUMENT_PREVIEW_STATE)
   })
 })
 

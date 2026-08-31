@@ -113,6 +113,37 @@ sixb worker-group sync pipeline projection
 sixb worker-group
 ```
 
+Agent turns have a 10-minute wall-clock budget by default. Override it for `sixb dev`,
+`sixb worker agent`, or a worker group containing `agent` with a duration such as `30s`, `10m`,
+or `1h`; the flag wins over the environment:
+
+```bash
+sixb worker agent --agent-turn-timeout 20m
+SIXB_AGENT_TURN_TIMEOUT=20m sixb worker-group
+```
+
+Queue workers execute a bounded number of jobs in each process. Agent workers default to `4`;
+sync, pipeline, projection, workflow, and action workers default to `1`. Set a scalar count for a
+single worker process:
+
+```bash
+sixb worker agent --concurrency 8
+sixb worker sync --concurrency 2
+```
+
+For `sixb worker-group` and `sixb dev`, repeat `--concurrency <type>=<count>` so each lane keeps an
+independent resource budget:
+
+```bash
+sixb worker-group sync agent --concurrency sync=2 --concurrency agent=8
+sixb dev --concurrency agent=1
+```
+
+The flag wins over `SIXB_<TYPE>_WORKER_CONCURRENCY`, such as
+`SIXB_AGENT_WORKER_CONCURRENCY=8`. Action execution remains serial and rejects a concurrency
+override. Concurrency is jobs inside one process; use deployment replicas to run more worker
+processes.
+
 A role process is **idle**, not an error, when it has nothing to do — an
 orchestrator with no routes, a rules process with no rules, or a worker group
 with no registered worker types prints a warning and stays running.
@@ -173,15 +204,16 @@ This is the core production data flow. Everything asynchronous in Sixb moves
 through it:
 
 ```txt
-event  ->  orchestrator  ->  queue  ->  worker  ->  event
+event  ->  orchestrator  ->  dispatcher  ->  execution + run  ->  queue  ->  worker  ->  event
 ```
 
 1. Something produces a [domain event](../events/overview.md) — a sync finishes,
    a dataset version is committed, or a schedule triggers.
 2. The **orchestrator** subscribes to events, matches each against compiled
-   routes, and enqueues a job onto the right queue.
-3. A **worker** claims the job, runs it, and writes a run record.
-4. The worker emits a finished event, which can drive the next step (for example
+   routes, and delegates to the primitive's Core dispatcher.
+3. The **dispatcher** atomically persists the immutable execution and queued run, then publishes a queue job containing the run identity.
+4. A **worker** claims the job, restores the stored execution, and advances the durable run lifecycle.
+5. The worker emits a finished event, which can drive the next step (for example
    `sync.run.finished` -> a projection job).
 
 The orchestrator subscribes only to the event types its routes need, and fan-out
@@ -306,6 +338,10 @@ orchestrator, scheduler, and rules roles must each run as a **single process**.
 | `sixb rules`                       | **one**  | reconciliation has no cross-process lease               |
 
 Running two of a single-process role does not corrupt data — it duplicates runs.
+
+Worker concurrency and replicas multiply. For example, three agent-worker replicas at concurrency
+`8` can run up to 24 agent jobs. Size that total for model-provider limits, sandbox capacity,
+connector quotas, and storage write contention.
 
 ## Related
 

@@ -65,7 +65,10 @@
   },
   "overrides": [
     {
-      "includes": ["packages/client/openapi.json"],
+      "includes": [
+        "packages/agent-worker/src/models-dev/catalog.json",
+        "packages/client/openapi.json"
+      ],
       "formatter": {
         "enabled": false
       }

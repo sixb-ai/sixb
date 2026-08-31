@@ -19,6 +19,7 @@ export type ModelFinishReason =
   | "length"
   | "content-filter"
   | "tool-calls"
+  | "pause"
   | "error"
   | "other"
   | "unknown"
@@ -29,6 +30,8 @@ export interface ModelUsage {
   readonly uncachedInputTokens?: number
   readonly cacheReadInputTokens?: number
   readonly cacheWriteInputTokens?: number
+  readonly cacheWrite5mInputTokens?: number
+  readonly cacheWrite1hInputTokens?: number
   readonly textOutputTokens?: number
   readonly reasoningOutputTokens?: number
   readonly raw?: JsonObject

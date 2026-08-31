@@ -1,3 +1,4 @@
+import type { EventActor } from "../../events/envelope"
 import { stableJsonStringify } from "../../json"
 import { MaterializationObjectNotFoundError } from "../../materialization/errors"
 import type {
@@ -62,6 +63,12 @@ interface TelemetryPlanContext {
   readonly input: TelemetryAppend
   readonly identity: TimedCommitIdentity
   readonly origin: OntologyMaterializationOrigin
+  readonly event: TelemetryEventContext
+}
+
+interface TelemetryEventContext {
+  readonly correlationId: string
+  readonly actor?: EventActor
 }
 
 export async function planTelemetryAppend(
@@ -70,10 +77,11 @@ export async function planTelemetryAppend(
   session: MaterializationSession,
   input: TelemetryAppend,
   identity: TimedCommitIdentity,
-  origin: OntologyMaterializationOrigin
+  origin: OntologyMaterializationOrigin,
+  event: TelemetryEventContext
 ): Promise<TelemetryPlanCounts> {
   const counts = emptyTelemetryCounts()
-  const planContext = { input, identity, origin }
+  const planContext = { input, identity, origin, event }
   const objects = await loadTelemetryObjects(context, storage, session, input.points)
   const existingPoints = await loadExistingPoints(context, storage, session, input.points)
   for (const group of telemetryObjectGroups(input.points)) {
@@ -348,9 +356,10 @@ function telemetryEventContext(
     commitId: planContext.identity.commitId,
     committedAt: planContext.identity.committedAt,
     origin: planContext.origin,
+    correlationId: planContext.event.correlationId,
   }
-  if (planContext.input.actor === undefined) return eventContext
-  return { ...eventContext, actor: planContext.input.actor }
+  if (planContext.event.actor === undefined) return eventContext
+  return { ...eventContext, actor: planContext.event.actor }
 }
 
 function emptyTelemetryCounts(): MutableTelemetryPlanCounts {

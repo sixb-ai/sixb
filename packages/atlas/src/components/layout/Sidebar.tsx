@@ -21,9 +21,9 @@ import {
   Bot,
   Box,
   Cable,
+  ChartNoAxesCombined,
   Database,
   GitBranch,
-  Globe,
   Layers,
   LayoutGrid,
   ListChecks,
@@ -35,6 +35,7 @@ import {
 
 export type ViewMode =
   | "home"
+  | "ai-usage"
   | "datasets"
   | "connectors"
   | "syncs"
@@ -65,10 +66,28 @@ const projectNavItems: NavItem[] = [
   { id: "actions", label: "Actions", Icon: Bolt },
   { id: "workflows", label: "Workflows", Icon: GitBranch },
   { id: "agents", label: "Agents", Icon: Bot },
+  { id: "ai-usage", label: "AI usage", Icon: ChartNoAxesCombined },
   { id: "logs", label: "Logs", Icon: ScrollText },
   { id: "rules", label: "Rules", Icon: ListChecks },
   { id: "settings", label: "Settings", Icon: Settings },
 ]
+
+function SixbMark({ className }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 480 394"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path
+        d="M5.42 162.63 39.47 392.44 342.17 296.69 472.14 104.34 183.6 1.82C120.12 59.31 59.11 114.33 5.42 162.63Z"
+        fill="currentColor"
+      />
+    </svg>
+  )
+}
 
 function apiDocsUrl(): string {
   return new URL("/docs", client.getConfig().baseUrl ?? window.location.origin).toString()
@@ -78,6 +97,7 @@ interface SidebarProps {
   selectedProject: ProjectInfo | null
   viewMode: ViewMode
   onViewChange: (mode: ViewMode) => void
+  onViewIntent?: (mode: ViewMode) => void
   datasetCount?: number
   connectorCount?: number
   syncCount?: number
@@ -95,6 +115,7 @@ export function Sidebar({
   selectedProject,
   viewMode,
   onViewChange,
+  onViewIntent,
   datasetCount,
   connectorCount,
   syncCount,
@@ -122,37 +143,9 @@ export function Sidebar({
     return undefined
   }
 
-  const session = useQuery(getAuthSessionOptions()).data
-  const signOut = useMutation(signOutMutation())
-  const user =
-    session?.authenticated === true
-      ? {
-          name: session.user.displayName ?? session.user.email,
-          email: session.user.displayName ? session.user.email : undefined,
-          avatarUrl: session.user.avatarUrl,
-        }
-      : null
-  const handleSignOut = () => {
-    signOut.mutate({}, { onSettled: () => window.location.reload() })
-  }
-
   return (
     <ShadcnSidebar collapsible="icon">
-      <SidebarHeader className="border-b border-sidebar-border">
-        <div className="flex items-center gap-3 px-2 py-2 group-data-[collapsible=icon]:px-0 group-data-[collapsible=icon]:justify-center">
-          {/* App icon */}
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-sidebar-border bg-sidebar-accent text-sidebar-accent-foreground">
-            <Globe className="h-4 w-4" />
-          </div>
-          {/* App name + project slug */}
-          <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
-            <p className="truncate text-sm font-semibold text-sidebar-foreground">Atlas</p>
-            <p className="truncate text-xs text-sidebar-foreground">
-              {selectedProject ? selectedProject.name : "Loading project"}
-            </p>
-          </div>
-        </div>
-      </SidebarHeader>
+      <AtlasSidebarHeader selectedProject={selectedProject} />
 
       <SidebarContent>
         <SidebarGroup>
@@ -166,6 +159,9 @@ export function Sidebar({
                     <SidebarMenuButton
                       isActive={isActive}
                       tooltip={item.label}
+                      onPointerEnter={() => onViewIntent?.(item.id)}
+                      onPointerDown={() => onViewIntent?.(item.id)}
+                      onFocus={() => onViewIntent?.(item.id)}
                       onClick={() => onViewChange(item.id)}
                     >
                       <item.Icon />
@@ -192,11 +188,53 @@ export function Sidebar({
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="border-t border-sidebar-border">
-        <SidebarUserMenu user={user} apiHref={apiDocsUrl()} onSignOut={handleSignOut} />
-      </SidebarFooter>
+      <AtlasSidebarFooter />
 
       <SidebarRail />
     </ShadcnSidebar>
+  )
+}
+
+export function AtlasSidebarHeader({ selectedProject }: { selectedProject: ProjectInfo | null }) {
+  return (
+    <SidebarHeader className="h-[54px] justify-center border-b border-sidebar-border">
+      <div className="flex items-center gap-3 px-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
+        {/* Sixb's orbit mark anchors Atlas to the website identity. */}
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center text-sidebar-accent-foreground">
+          <SixbMark className="h-[18px] w-[22px]" />
+        </div>
+        <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
+          <p className="truncate text-[14px] font-semibold tracking-[-0.02em] text-sidebar-accent-foreground">
+            Sixb Atlas
+          </p>
+          <p className="truncate text-[11px] text-sidebar-foreground">
+            {selectedProject ? selectedProject.name : "Loading project"}
+          </p>
+        </div>
+      </div>
+    </SidebarHeader>
+  )
+}
+
+export function AtlasSidebarFooter() {
+  const session = useQuery(getAuthSessionOptions()).data
+  const signOut = useMutation(signOutMutation())
+  const user =
+    session?.authenticated === true
+      ? {
+          name: session.user.displayName ?? session.user.email,
+          email: session.user.displayName ? session.user.email : undefined,
+          avatarUrl: session.user.avatarUrl,
+        }
+      : null
+
+  return (
+    <SidebarFooter className="border-t border-sidebar-border">
+      <SidebarUserMenu
+        user={user}
+        apiHref={apiDocsUrl()}
+        onSignOut={() => signOut.mutate({}, { onSettled: () => window.location.reload() })}
+      />
+    </SidebarFooter>
   )
 }

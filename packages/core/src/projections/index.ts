@@ -1,5 +1,10 @@
 // ── Builders ─────────────────────────────────────────────────
 
+export type {
+  ObjectProjectionBuilder,
+  ObjectProjectionConflictResolution,
+  ProjectionForeignKeyInput,
+} from "./builders"
 export {
   categorizeProjections,
   defineProjection,
@@ -24,7 +29,9 @@ export type {
   ProjectionKind,
   ProjectionTarget,
   ProjectionTargetByKind,
+  SourceEditConflictResolution,
   TelemetryProjectionDefinition,
+  TelemetryProjectionPropertyMapping,
 } from "./types"
 // ── Validation ───────────────────────────────────────────────
 export {

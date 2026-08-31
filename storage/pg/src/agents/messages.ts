@@ -4,6 +4,7 @@ import {
   type AgentMessageStore,
   AgentStorageError,
   type AppendAgentMessageInput,
+  type DeleteAgentMessagesByRunInput,
   type ListAgentMessagesInput,
   type ListAgentMessagesResult,
 } from "@sixb/core/storage"
@@ -20,6 +21,23 @@ export class PgAgentMessageStore implements AgentMessageStore {
 
     try {
       return await runPgTransaction(this.sql, async (tx) => {
+        // Assistant finalization appends and finishes in one outer transaction. Lock its run first
+        // so every operation that needs both rows follows the same run -> thread order.
+        if (input.runId !== null) {
+          const [run] = await tx<{ id: string }[]>`
+            SELECT id FROM agent_runs
+            WHERE project_id = ${input.projectId} AND id = ${input.runId}
+            FOR UPDATE
+          `
+
+          if (!run) {
+            throw new AgentStorageError(
+              "run_not_found",
+              `[SixbPg] Agent run '${input.runId}' not found for project '${input.projectId}'.`
+            )
+          }
+        }
+
         const [thread] = await tx<{ id: string }[]>`
           SELECT id FROM agent_threads
           WHERE project_id = ${input.projectId} AND id = ${input.threadId}
@@ -31,19 +49,6 @@ export class PgAgentMessageStore implements AgentMessageStore {
             "thread_not_found",
             `[SixbPg] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
           )
-        }
-
-        if (input.runId !== null) {
-          const [run] = await tx<{ id: string }[]>`
-            SELECT id FROM agent_runs WHERE project_id = ${input.projectId} AND id = ${input.runId}
-          `
-
-          if (!run) {
-            throw new AgentStorageError(
-              "run_not_found",
-              `[SixbPg] Agent run '${input.runId}' not found for project '${input.projectId}'.`
-            )
-          }
         }
 
         const [seqRow] = await tx<{ next: number | string }[]>`
@@ -104,6 +109,54 @@ export class PgAgentMessageStore implements AgentMessageStore {
     }
   }
 
+  async deleteByRunId(input: DeleteAgentMessagesByRunInput): Promise<number> {
+    return runPgTransaction(this.sql, async (tx) => {
+      const [thread] = await tx<{ id: string }[]>`
+        SELECT id FROM agent_threads
+        WHERE project_id = ${input.projectId} AND id = ${input.threadId}
+        FOR UPDATE
+      `
+
+      if (!thread) {
+        throw new AgentStorageError(
+          "thread_not_found",
+          `[SixbPg] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
+        )
+      }
+
+      const deleted = await tx<{ id: string }[]>`
+        DELETE FROM agent_messages
+        WHERE project_id = ${input.projectId}
+          AND thread_id = ${input.threadId}
+          AND run_id = ${input.runId}
+        RETURNING id
+      `
+      if (deleted.length === 0) {
+        return 0
+      }
+
+      const updatedAt = new Date()
+      await tx`
+        UPDATE agent_threads
+        SET
+          message_count = (
+            SELECT COUNT(*) FROM agent_messages
+            WHERE project_id = ${input.projectId} AND thread_id = ${input.threadId}
+          ),
+          last_message_at = (
+            SELECT created_at FROM agent_messages
+            WHERE project_id = ${input.projectId} AND thread_id = ${input.threadId}
+            ORDER BY seq DESC
+            LIMIT 1
+          ),
+          updated_at = ${updatedAt}
+        WHERE project_id = ${input.projectId} AND id = ${input.threadId}
+      `
+
+      return deleted.length
+    })
+  }
+
   async getById(params: { projectId: string; id: string }): Promise<AgentMessageRecord | null> {
     const [row] = await this.sql<AgentMessageRow[]>`
       SELECT * FROM agent_messages WHERE project_id = ${params.projectId} AND id = ${params.id}
@@ -120,6 +173,11 @@ export class PgAgentMessageStore implements AgentMessageStore {
     const whereClauses = ["project_id = $1", "thread_id = $2"]
     const params: SqlParameter[] = [input.projectId, input.threadId]
     let index = 3
+
+    if (input.afterSeq !== undefined) {
+      whereClauses.push(`seq > $${index++}`)
+      params.push(input.afterSeq)
+    }
 
     if (input.roles) {
       const placeholders = input.roles.map(() => `$${index++}`)

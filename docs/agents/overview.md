@@ -1,7 +1,7 @@
 # Agents
 
 An agent is a conversational assistant you define alongside your ontology. It calls a language
-model, selected worker tools, sandboxed `bash`, and an authorized Sixb API.
+model, selected worker tools, sandboxed `read` and `bash`, and an authorized Sixb API.
 
 You define an agent declaratively and export it from `agents/`; `createSixb()` discovers it. A
 worker runs it, and clients drive it over HTTP and a websocket.
@@ -37,7 +37,7 @@ See [Defining agents](./defining-agents.md) for every config field.
 | **Thread** | One conversation with an agent, owned by a principal. |
 | **Run** | One turn. Posting a user message triggers a run. |
 | **Message** | A `system`, `user`, or `assistant` message made of `text`, `reasoning`, `step-start`, and `tool-call` parts. |
-| **Tools** | Explicitly selected worker tools plus built-in `bash` in a [sandbox](../sandboxes/overview.md). |
+| **Tools** | Explicitly selected worker tools plus built-in `read` and `bash` in a [sandbox](../sandboxes/overview.md). |
 
 ## Run an agent
 
@@ -46,7 +46,7 @@ Defining an agent needs nothing extra. **Running** one needs two things:
 - The **agent-worker** process. `bun sixb dev` runs it for you; in production run it like the other
   workers.
 - A **sandbox factory** — `createSixb({ sandboxes })`. The worker won't start without one, because
-  the `bash` tool runs in a sandbox.
+  the `read` and `bash` tools run in a sandbox.
 
 ```ts
 import { createSixb } from "@sixb/core"
@@ -59,15 +59,15 @@ export const sixb = createSixb({
 })
 ```
 
-For each turn, the worker offers that agent's selected tools plus `bash`, executes them in their
-respective boundaries, and persists the reply. See
+For each turn, the worker offers that agent's selected tools plus `read` and `bash`, executes them
+in their respective boundaries, and persists the reply. See
 [Running and streaming](./running-and-streaming.md).
 
 ## Related
 
 - [Defining agents](./defining-agents.md) — the `defineAgent` config.
 - [Running and streaming](./running-and-streaming.md) — threads, the HTTP API, and the websocket.
-- [Tools and gateway](./tools-and-gateway.md) — selected worker tools, connector-backed web access,
-  sandboxed `bash`, and scoped data access.
+- [Tools and gateway](./tools-and-gateway.md) — selected worker tools, connector-backed web
+  access, sandboxed file and command access, and scoped data access.
 - [Authorization](./authorization.md) — gate who can use an agent and what it can reach.
-- [Sandboxes](../sandboxes/overview.md) — where the bash tool runs.
+- [Sandboxes](../sandboxes/overview.md) — where the sandbox tools run.

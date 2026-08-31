@@ -1,8 +1,8 @@
 # Local sandbox
 
 `@sixb/sandboxes-local` runs agent commands as child processes on the host, wrapped in an OS-level
-isolation backend when one is available. It is the default choice for development: it has no external
-dependencies and always boots, falling back to passthrough when no sandboxing tool is present.
+isolation backend when one is available. It is the default choice for development: it needs no
+external service and always boots, falling back to passthrough when no sandboxing tool is present.
 
 ```ts
 import { createSixb } from "@sixb/core"
@@ -13,6 +13,12 @@ createSixb({ sandboxes: new LocalSandboxFactory() })
 
 See the [overview](./overview.md) for the shared `Sandbox` / `SandboxFactory` contract this provider
 implements.
+
+The built-in agent tools use the host's `PATH`. For agent use, the host needs Bash, the standard
+file utilities used by reads and output collection, CA certificates, and either Bun 1.3+ or Node
+22+. The agent worker validates the environment immediately after provisioning and reports the
+failed behavior when a dependency is missing. The local provider does not install or modify host
+tools. `curl` and `jq` are not required.
 
 ## Isolation backends
 

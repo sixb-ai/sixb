@@ -1,6 +1,6 @@
 {
   "name": "@sixb/client",
-  "version": "0.1.1",
+  "version": "0.1.5",
   "description": "Type-safe SDK for Sixb API with TanStack Query hooks",
   "keywords": [
     "sixb",
@@ -84,9 +84,13 @@
   "devDependencies": {
     "@hey-api/openapi-ts": "0.90.10",
     "@tanstack/react-query": "^5.0.0",
+    "@testing-library/react": "^16.3.2",
     "@types/bun": "latest",
     "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "happy-dom": "^20.11.6",
     "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "typescript": "^5.7.0"
   },
   "license": "MIT",

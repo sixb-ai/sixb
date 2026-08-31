@@ -1,6 +1,8 @@
 # @sixb/sandboxes-smolvm
 
-Runs each agent's bash inside a hardware-isolated [smolvm](https://github.com/smol-machines/smolvm) microVM. Drop-in `Sandbox` provider — wire it once into `createSixb({ sandboxes })`; nothing else changes.
+Runs each agent's sandbox tools inside a hardware-isolated
+[smolvm](https://github.com/smol-machines/smolvm) microVM. Drop-in `Sandbox` provider — wire it once
+into `createSixb({ sandboxes })`; nothing else changes.
 
 ## Setup
 
@@ -15,10 +17,13 @@ curl -sSL https://smolmachines.com/install.sh | bash
 **2. Build the agent image** (needs Docker or Podman):
 
 ```bash
-bun run agent:image
+bunx -p @sixb/sandboxes-smolvm sixb-agent-image
 ```
 
-This builds [`agent-image/Dockerfile`](./agent-image/Dockerfile) — alpine + `bash curl jq git ripgrep python3`, ~73 MB — and caches it at `~/.cache/sixb/smolvm/sixb-agent.tar`.
+This builds [`agent-image/Dockerfile`](./agent-image/Dockerfile) — pinned Node 22 on Alpine plus
+Bash, Git, certificates, ripgrep, and Python — and caches the versioned image at
+`~/.cache/sixb/smolvm/sixb-agent-runtime-v1.tar`. Alpine's BusyBox base supplies the standard file
+utilities used by reads and output collection.
 
 ## Use
 
@@ -29,15 +34,20 @@ import { SmolvmSandboxFactory } from "@sixb/sandboxes-smolvm"
 createSixb({ sandboxes: new SmolvmSandboxFactory() })
 ```
 
-Each run boots a microVM from the cached image, runs the agent's bash, and destroys it. Networking is locked to the sixb gateway — no open internet. Boot (~0.7 s) overlaps the model's first response, so it's effectively instant. If a setup step is missing, `create()` throws a message telling you exactly what to run.
+Each run boots a microVM from the cached image, runs the agent's sandbox tools, and destroys it.
+Networking is locked to the sixb gateway — no open internet. Boot (~0.7 s) overlaps the model's
+first response, so it's effectively instant. If a setup step is missing, `create()` throws a message
+telling you exactly what to run.
 
 ## Custom tools
 
-Edit the Dockerfile and rebuild. Keep it lean — boot time scales with image size, and run-time installs won't work (egress is locked down).
+Edit the Dockerfile and rebuild. Custom images used by agents need Bash, standard file utilities,
+CA certificates, and Bun 1.3+ or Node 22+. `curl` and `jq` are not required. Keep the image lean —
+boot time scales with image size, and run-time installs will not work because egress is locked down.
 
 ```bash
 # edit agent-image/Dockerfile, then:
-bun run agent:image
+bun --filter @sixb/sandboxes-smolvm agent:image
 ```
 
 ## Production (no Docker on the server)
@@ -45,9 +55,9 @@ bun run agent:image
 Docker is only needed to *build* the image. The server needs only the smolvm binary and the `.tar`. Build for the server's architecture on any machine with Docker, copy it over, and point `image` at it.
 
 ```bash
-bun run agent:image --platform linux/amd64
-# Built agent image -> ~/.cache/sixb/smolvm/sixb-agent-amd64.tar
-scp ~/.cache/sixb/smolvm/sixb-agent-amd64.tar server:/opt/sixb/agent.tar
+bunx -p @sixb/sandboxes-smolvm sixb-agent-image --platform linux/amd64
+# Built agent image -> ~/.cache/sixb/smolvm/sixb-agent-runtime-v1-amd64.tar
+scp ~/.cache/sixb/smolvm/sixb-agent-runtime-v1-amd64.tar server:/opt/sixb/agent.tar
 ```
 
 ```ts
@@ -79,4 +89,5 @@ The provider warns once if it sees a `localhost` gateway. (In production the gat
 bun test sandboxes/smolvm/tests/   # VM tests skip without a smolvm binary
 ```
 
-Pure unit tests cover the CLI flags and network policy; a fake `smolvm` covers the lifecycle and the full data path; `smolvm-integration.test.ts` runs a real VM when a binary is present.
+Pure unit tests cover the CLI flags and network policy; a fake `smolvm` covers the lifecycle and the
+full data path; `smolvm-integration.test.ts` runs a real VM when a binary is present.

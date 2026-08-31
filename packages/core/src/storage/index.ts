@@ -5,6 +5,8 @@
  * the interface cannot be implemented from outside the package.
  */
 export type { Principal } from "../auth"
+export type { ConnectorAccountCandidate } from "../connectors"
+export type { SealedConnectorCredential } from "../connectors/credentials"
 export type { SixbFailure } from "../errors/types"
 export type { StoredRuleResolvedEvent, StoredRuleTriggeredEvent } from "../events"
 export type { ReadonlyJsonObject } from "../json"
@@ -50,6 +52,9 @@ export {
   isTerminalActionRun,
 } from "./action-runs"
 export type {
+  AgentContextCheckpointReason,
+  AgentContextCheckpointRecord,
+  AgentContextCheckpointStore,
   AgentExecutionStatus,
   AgentMessageRecord,
   AgentMessageRole,
@@ -70,8 +75,10 @@ export type {
   AgentThreadStore,
   AppendAgentMessageInput,
   ConfirmAgentRunExecutionOwnershipInput,
+  CreateAgentContextCheckpointInput,
   CreateAgentRunInput,
   CreateAgentThreadInput,
+  DeleteAgentMessagesByRunInput,
   FinishAgentRunInput,
   FinishQueuedAgentRunInput,
   ListAgentMessagesInput,
@@ -92,6 +99,38 @@ export {
   InMemoryAgentStorage,
 } from "./agents"
 export type {
+  AiAccountingAgentBreakdown,
+  AiAccountingAggregate,
+  AiAccountingAttribution,
+  AiAccountingBucket,
+  AiAccountingModelBreakdown,
+  AiAccountingOverview,
+  AiAccountingRange,
+  AiAccountingTimeBucket,
+  AiAccountingWorkflowBreakdown,
+  AiBillableMeter,
+  AiBillingIdentity,
+  AiCostComponent,
+  AiCostStorage,
+  AiCostStorageErrorCode,
+  AiCostSummary,
+  AiModelCallAccountingItem,
+  AiModelCallCostRecord,
+  AiMoney,
+  AiPriceSource,
+  AiPricingContext,
+  AiRatedModelCallCostRecord,
+  AiUnpriceableModelCallCostRecord,
+  AiUnpriceableReason,
+  InMemoryAiAccountingAttributionSource,
+  InMemoryAiCostStorageSnapshot,
+  ListAiModelCallAccountingInput,
+  ListAiModelCallAccountingResult,
+  QueryAiAccountingOverviewInput,
+  SummarizeAiCostExecutionsInput,
+} from "./ai-cost"
+export { AiCostStorageError, InMemoryAiCostStorage } from "./ai-cost"
+export type {
   AiModelCallUsage,
   AiModelCallUsageInput,
   AiModelCallUsageRecord,
@@ -99,6 +138,7 @@ export type {
   AiUsageReportingStatus,
   AiUsageStorage,
   AiUsageStorageErrorCode,
+  GetLatestAiModelCallForExecutionInput,
   InMemoryAiUsageGroupRow,
   InMemoryAiUsageStorageSnapshot,
   RecordAiModelCallInput,
@@ -172,6 +212,72 @@ export type {
 } from "./auth"
 export { AuthStorageError, InMemoryAuthStorage } from "./auth"
 export type {
+  AttachConnectorConnectionRunAuthorizationInput,
+  ClaimConnectorConnectionRunCallbackInput,
+  ClaimConnectorConnectionRunCallbackResult,
+  ClaimConnectorCredentialMutationInput,
+  ClaimConnectorCredentialMutationResult,
+  ConnectorAuthorizationAttemptRecord,
+  ConnectorAuthorizationKey,
+  ConnectorAuthorizationRecord,
+  ConnectorAuthorizationStatus,
+  ConnectorConnectionKey,
+  ConnectorConnectionOwner,
+  ConnectorConnectionRecord,
+  ConnectorConnectionRunAwaitingProviderRecord,
+  ConnectorConnectionRunAwaitingSelectionRecord,
+  ConnectorConnectionRunCancelledRecord,
+  ConnectorConnectionRunExpiredRecord,
+  ConnectorConnectionRunFailedRecord,
+  ConnectorConnectionRunFailure,
+  ConnectorConnectionRunFailureCode,
+  ConnectorConnectionRunKind,
+  ConnectorConnectionRunProcessingRecord,
+  ConnectorConnectionRunRecord,
+  ConnectorConnectionRunSucceededRecord,
+  ConnectorConnectionSelector,
+  ConnectorConnectionStatus,
+  ConnectorConnectionStorage,
+  ConnectorConnectionStorageErrorCode,
+  ConnectorCredentialMutation,
+  ConnectorCredentialMutationFence,
+  ConnectorCredentialMutationKind,
+  ConnectorCredentialMutationPhase,
+  ConnectorStagedCredentials,
+  ConsumeConnectorAuthorizationAttemptInput,
+  CreateConnectorAuthorizationAttemptInput,
+  CreateConnectorAuthorizationInput,
+  CreateConnectorConnectionRunInput,
+  CreateConnectorConnectionSelectionRunInput,
+  DisconnectConnectorConnectionResult,
+  FinalizeConnectorReauthorizationInput,
+  FinishConnectorConnectionRunInput,
+  GetConnectorConnectionInput,
+  GetConnectorConnectionRunInput,
+  InitializeConnectorAuthorizationAccountsInput,
+  InMemoryConnectorConnectionStorageOptions,
+  InMemoryConnectorConnectionStorageSnapshot,
+  ListConnectorConnectionsInput,
+  MarkConnectorAuthorizationNeedsReauthorizationInput,
+  MarkConnectorCredentialMutationExecutingInput,
+  ProjectConnectorConnectionOwner,
+  PutConnectorConnectionFromRunInput,
+  PutConnectorConnectionFromRunResult,
+  PutConnectorConnectionInput,
+  PutConnectorConnectionResult,
+  RecoverExpiredConnectorCredentialMutationInput,
+  ReleaseConnectorCredentialMutationInput,
+  RenewConnectorCredentialMutationInput,
+  StageConnectorCredentialMutationCredentialsInput,
+  StageConnectorCredentialMutationRevocationInput,
+  WaitForConnectorConnectionRunSelectionInput,
+} from "./connector-connections"
+export {
+  CONNECTOR_CONNECTION_RUN_FAILURE_CODES,
+  ConnectorConnectionStorageError,
+  InMemoryConnectorConnectionStorage,
+} from "./connector-connections"
+export type {
   StorageTransactionErrorCode,
   StorageTransactionErrorOptions,
 } from "./errors"
@@ -211,6 +317,7 @@ export {
   FileUploadSessionError,
   InMemoryFileUploadSessions,
 } from "./file-upload-sessions"
+export type { InMemoryStorageOptions } from "./in-memory"
 export { InMemoryStorage } from "./in-memory"
 export type {
   DefineMigrationsOptions,
@@ -246,10 +353,13 @@ export type {
   ExpandedObjectRow,
   FacetObjectsInput,
   FacetObjectsResult,
+  LinkBatchKey,
   LinkDirection,
+  ObjectBatchKey,
   ObjectFacetBucket,
   ObjectFacetRequest,
   ObjectFacetResult,
+  ObjectLinkCursor,
   ObjectLinkRow,
   ObjectQueryCapabilities,
   ObjectQueryCapabilityMap,
@@ -258,8 +368,15 @@ export type {
   ObjectRow,
   ObjectRowLinks,
   ObjectStorage,
+  QueryObjectLinksInput,
+  QueryObjectLinksResult,
   QueryObjectsInput,
   QueryObjectsResult,
+} from "./objects"
+export {
+  linkBatchKey,
+  objectBatchKey,
+  objectLinkCursor,
 } from "./objects"
 export type {
   AbandonSourceMaterializationCandidateInput,
@@ -382,16 +499,20 @@ export type {
   PipelineRunStatus,
   PipelineRunStorage,
   PipelineStepRunRecord,
+  PipelineStepRunStatus,
+  QueuePipelineRunInput,
   StartPipelineRunInput,
   StartPipelineStepRunInput,
 } from "./pipeline-runs"
 export {
+  canRequeuePipelineRunAfterEnqueueFailure,
   InMemoryPipelineRunStorage,
   PIPELINE_RUN_FAILURE_CODES,
   PipelineRunError,
 } from "./pipeline-runs"
 export type {
   AdvanceProjectionTelemetryCheckpointInput,
+  FailProjectionRunEnqueueInput,
   FinishProjectionRunInput,
   LinkProjectionRunRecord,
   LinkProjectionTarget,
@@ -412,6 +533,7 @@ export type {
   ProjectionRunStorage,
   ProjectionTarget,
   ProjectionTelemetryCheckpoint,
+  QueueProjectionRunInput,
   RecordProjectionMissingTargetInput,
   StartOrReclaimProjectionRunInput,
   TelemetryProjectionRunRecord,
@@ -443,6 +565,7 @@ export type {
   ListLatestSyncRunsResult,
   ListSyncRunsInput,
   ListSyncRunsResult,
+  QueueSyncRunInput,
   StartSyncRunInput,
   SyncRunFailureCode,
   SyncRunMode,
@@ -450,7 +573,12 @@ export type {
   SyncRunStatus,
   SyncRunStorage,
 } from "./sync-runs"
-export { InMemorySyncRunStorage, SYNC_RUN_FAILURE_CODES, SyncRunError } from "./sync-runs"
+export {
+  canRequeueSyncRunAfterEnqueueFailure,
+  InMemorySyncRunStorage,
+  SYNC_RUN_FAILURE_CODES,
+  SyncRunError,
+} from "./sync-runs"
 export type {
   TimeseriesHistoryBatchInput,
   TimeseriesHistoryBatchResult,
@@ -465,31 +593,21 @@ export {
 } from "./transaction"
 export type { Storage, StorageTransactionOptions } from "./types"
 export type {
-  WebhookDeliveryClaimRecord,
-  WebhookDeliveryClaimResult,
-  WebhookDeliveryFailure,
-  WebhookDeliveryFailureCode,
-  WebhookDeliveryKey,
-  WebhookDeliveryRecord,
-  WebhookDeliveryStatus,
-  WebhookDeliveryStorage,
-} from "./webhook-deliveries"
-export {
-  InMemoryWebhookDeliveryStorage,
-  WEBHOOK_DELIVERY_FAILURE_CODES,
-} from "./webhook-deliveries"
-export type {
   FinishWebhookRunInput,
   FinishWebhookRunStatus,
+  GetWebhookRunByDeliveryInput,
   ListWebhookRunsInput,
   ListWebhookRunsResult,
+  RestartWebhookRunInput,
   StartWebhookRunInput,
+  WebhookRunErrorCode,
   WebhookRunFailureCode,
   WebhookRunRecord,
   WebhookRunStatus,
   WebhookRunStorage,
 } from "./webhook-runs"
 export {
+  canRetryWebhookRun,
   InMemoryWebhookRunStorage,
   WEBHOOK_RUN_FAILURE_CODES,
   WebhookRunError,

@@ -1,6 +1,7 @@
 import type {
   AgentInboundUiMessagePart,
   AgentMessagePart,
+  AgentToolArtifacts,
   AgentToolDefinition,
   AgentToolRunContext,
   AgentToolRunInfo,
@@ -27,6 +28,7 @@ import type {
 } from "@sixb/core/models"
 import type { AiModelCallUsageInput } from "@sixb/core/storage"
 import { AgentToolExecutionError, AgentToolOutputError } from "./errors"
+import type { AgentToolModelOutput } from "./tool-result-output"
 
 type AgentErrorDetails =
   | { readonly agentId: string; readonly runId: string }
@@ -44,6 +46,16 @@ interface ModelToolsFromAgentDefinitionsInput {
   readonly run: AgentToolRunInfo
   readonly connector: AgentToolRunContext["connector"]
   readonly logger: Logger
+  readonly artifactsForToolCall: (input: {
+    readonly toolName: string
+    readonly toolCallId: string
+    readonly signal: AbortSignal
+  }) => AgentToolArtifacts
+  readonly toolResultToModelOutput: (input: {
+    readonly output: JsonValue
+    readonly signal: AbortSignal
+    readonly toolCallId: string
+  }) => AgentToolModelOutput | Promise<AgentToolModelOutput>
   readonly errorDetails?: AgentErrorDetails
 }
 
@@ -91,14 +103,20 @@ function modelToolFromAgentDefinition(
         context.valueTypesById
       )
     },
-    async execute(toolInput, { signal }) {
+    async execute(toolInput, { signal, toolCallId }) {
       try {
         return await definition.handler({
           input: toolInput,
+          toolCallId,
           signal,
           run: context.run,
           connector: context.connector,
           logger: context.logger,
+          artifacts: context.artifactsForToolCall({
+            toolName: definition.name,
+            toolCallId,
+            signal,
+          }),
         })
       } catch (error) {
         if (error instanceof AgentToolResultValidationError) {
@@ -107,6 +125,9 @@ function modelToolFromAgentDefinition(
         if (error instanceof AgentToolPublicError) throw error
         throw new AgentToolExecutionError(definition.name, { cause: error })
       }
+    },
+    toModelOutput(output, { signal, toolCallId }) {
+      return context.toolResultToModelOutput({ output, signal, toolCallId })
     },
     errorText: agentToolErrorText,
   }
@@ -197,7 +218,12 @@ function indexToolOutcomes(
   const outcomes = new Map<string, ToolOutcome>()
   for (const part of content) {
     if (part.type !== "tool-result") continue
-    outcomes.set(part.toolCallId, modelToolOutcome(part.output))
+    outcomes.set(
+      part.toolCallId,
+      part.originalOutput === undefined
+        ? modelToolOutcome(part.output)
+        : { state: "output-available", output: part.originalOutput }
+    )
   }
   return outcomes
 }

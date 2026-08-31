@@ -1,3 +1,4 @@
+import { createTestingScope } from "../execution/scopes"
 import type { JsonValue } from "../json"
 import type {
   EditCommitResult,
@@ -8,8 +9,8 @@ import type {
   TelemetryPointWrite,
 } from "../materialization/model"
 import {
+  type BoundOntologyMaterializer,
   createOntologyMaterializer,
-  type OntologyMaterializer,
   type OntologyMaterializerDependencies,
 } from "../materializer/materializer"
 import type { OntologyRegistry } from "../ontology"
@@ -33,7 +34,7 @@ export interface MaterializerFixtureSeed {
 }
 
 export interface MaterializerTestFixture {
-  readonly materializer: OntologyMaterializer
+  readonly materializer: BoundOntologyMaterializer
   commit(operations: readonly OntologyEditOperation[]): Promise<EditCommitResult>
   appendTelemetry(points: readonly TelemetryPointWrite[]): Promise<TelemetryCommitResult>
   seed(input: MaterializerFixtureSeed): Promise<void>
@@ -60,7 +61,14 @@ export function createMaterializerTestFixture(input: {
     projections,
     storage: input.storage,
     dependencies: input.dependencies,
-  })
+  }).withScope(
+    createTestingScope({
+      projectId: input.projectId,
+      executionId: `materializer_fixture_execution:${input.projectId}`,
+      requestId: `materializer_fixture_request:${input.projectId}`,
+      correlationId: `materializer_fixture_correlation:${input.projectId}`,
+    })
+  )
   let requestOrdinal = 0
 
   function nextRequestId(kind: "edit" | "telemetry"): string {

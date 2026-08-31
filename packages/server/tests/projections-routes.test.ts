@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import type { AuthorizationContext, ObjectProjectionDefinition, OntologySource } from "@sixb/core"
+import type {
+  AuthorizationContext,
+  ObjectProjectionDefinition,
+  OntologySource,
+  ProjectionDefinition,
+  TelemetryProjectionDefinition,
+} from "@sixb/core"
 import {
   emptyGrantIndex,
   InMemoryBlobStorage,
@@ -38,6 +44,19 @@ const sensorsProjection: ObjectProjectionDefinition = {
   links: {},
 }
 
+const roomActivityProjection: TelemetryProjectionDefinition = {
+  _tag: "TelemetryProjectionDefinition",
+  id: "room-activity",
+  objectTypeId: "room",
+  datasetId: "ds.room-activity",
+  objectIdField: "room_id",
+  atField: "observed_at",
+  properties: {
+    temperature: { valueField: "temperature", unitField: "temperature_unit" },
+    humidity: { valueField: "humidity" },
+  },
+}
+
 const projectionFailure = {
   code: "internal.unexpected",
   message: "Projection failed",
@@ -56,6 +75,7 @@ function makeRun(
   return {
     id: "run-1",
     projectId: "my-app",
+    executionId: "execution-run-1",
     identity: {
       projectionId: input.projectionId ?? "rooms",
       projectionKind: "object",
@@ -72,6 +92,7 @@ function makeRun(
     target: { objectTypeId: input.objectTypeId ?? "room" },
     status: "succeeded",
     attempt: 2,
+    queuedAt: new Date("2026-05-04T08:59:00.000Z"),
     startedAt: new Date("2026-05-04T09:00:00.000Z"),
     progress: { sourceRowsRead: 0, sourceRowsSkipped: 0 },
     ...input.run,
@@ -103,15 +124,16 @@ function createSixbStub(
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
   })
-  const definitions = [roomsProjection, sensorsProjection]
+  const objectProjections = [roomsProjection, sensorsProjection]
+  const definitions: ProjectionDefinition[] = [...objectProjections, roomActivityProjection]
   Object.defineProperty(sixb, "definitions", {
     value: {
       ...sixb.definitions,
       projections: {
         list: () => definitions,
-        listObjects: () => definitions,
+        listObjects: () => objectProjections,
         listLinks: () => [],
-        listTelemetry: () => [],
+        listTelemetry: () => [roomActivityProjection],
         getById: (id: string) => definitions.find((projection) => projection.id === id) ?? null,
       },
     },
@@ -151,13 +173,17 @@ describe("projection routes", () => {
 
     const body = (await response.json()) as {
       objectProjections: { id: string; latestRun: { id: string } | null }[]
+      telemetryProjections: Array<
+        TelemetryProjectionDefinition & { latestRun: { id: string } | null }
+      >
     }
 
     // Only the room projection is visible; the latest-run lookup is scoped to it.
-    expect(requested).toEqual([["rooms"]])
+    expect(requested).toEqual([["rooms", "room-activity"]])
     expect(body.objectProjections.map((p) => [p.id, p.latestRun?.id ?? null])).toEqual([
       ["rooms", "run-rooms"],
     ])
+    expect(body.telemetryProjections).toEqual([{ ...roomActivityProjection, latestRun: null }])
   })
 
   test("run list passes the viewable object type set to storage", async () => {
@@ -212,7 +238,11 @@ describe("projection routes", () => {
     )
     const body = (await response.json()) as { runs: Record<string, unknown>[] }
 
-    expect(body.runs[0]).toMatchObject({ attempt: 2 })
+    expect(body.runs[0]).toMatchObject({
+      executionId: "execution-run-1",
+      attempt: 2,
+      queuedAt: "2026-05-04T08:59:00.000Z",
+    })
     expect(body.runs[0]).not.toHaveProperty("executionToken")
     expect(body.runs[0]).not.toHaveProperty("telemetryCheckpoint")
     expect(body.runs[0]).toHaveProperty("identity.ontologyRevision", "ontology-revision")

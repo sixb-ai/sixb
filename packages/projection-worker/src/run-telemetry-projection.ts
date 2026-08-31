@@ -6,9 +6,11 @@ import {
   MaterializationValidationError,
   type Schema,
   type TelemetryProjectionDefinition,
+  type TelemetryProjectionPropertyMapping,
 } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
 import type { TelemetryPointWrite } from "@sixb/core/internal/materialization"
+import { parseDatasetTimestamp } from "@sixb/core/internal/projections"
 import { getOntologyMutationRuntime } from "@sixb/core/internal/runtime"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import { resolveProjectionSchema } from "./projection-schema"
@@ -16,18 +18,22 @@ import { normalizeProjectedValue } from "./projection-value-coercion"
 import type { ClaimedProjectionExecution, ProjectionWorkerContext } from "./types"
 import { isBlank, isPlainObject, throwIfAborted } from "./utils"
 
-export const TELEMETRY_PROJECTION_BATCH_SIZE = 500
-
 interface TelemetryProjectionPlan {
   readonly projection: TelemetryProjectionDefinition
   readonly dataset: DatasetDefinition
-  readonly valueColumnType: DatasetColumnDefinition["type"]
-  readonly valueSchema: Schema
+  readonly properties: readonly TelemetryProjectionPropertyPlan[]
   readonly readColumns: readonly string[]
 }
 
+interface TelemetryProjectionPropertyPlan {
+  readonly propertyId: string
+  readonly mapping: TelemetryProjectionPropertyMapping
+  readonly valueColumnType: DatasetColumnDefinition["type"]
+  readonly valueSchema: Schema
+}
+
 type ProjectTelemetryRowResult =
-  | { readonly kind: "point"; readonly point: TelemetryPointWrite }
+  | { readonly kind: "points"; readonly points: readonly TelemetryPointWrite[] }
   | { readonly kind: "skip" }
   | { readonly kind: "invalid"; readonly message: string }
 
@@ -192,7 +198,7 @@ async function appendPhysicalBatch(input: {
       sourceRowsSkipped += 1
       continue
     }
-    points.push(projected.point)
+    points.push(...projected.points)
   }
 
   throwIfAborted(signal)
@@ -223,11 +229,7 @@ function buildTelemetryProjectionPlan(input: {
 }): TelemetryProjectionPlan {
   const { runtime, projection, dataset, errorDetails } = input
   const objectType = runtime.ontology.getObjectTypeById(projection.objectTypeId)
-  const property = objectType?.properties.find(
-    (candidate) => candidate.id === projection.propertyId
-  )
-  const valueColumn = dataset.schema.columns.find((column) => column.name === projection.valueField)
-  if (!objectType || !property || !valueColumn) {
+  if (!objectType) {
     throw createSixbError(
       "internal.unexpected",
       `[SixbProjectionWorker] Telemetry projection '${projection.id}' was not validated before execution.`,
@@ -235,25 +237,56 @@ function buildTelemetryProjectionPlan(input: {
         details: {
           ...errorDetails,
           objectTypeId: projection.objectTypeId,
-          propertyId: projection.propertyId,
-          columnName: projection.valueField,
         },
       }
     )
   }
 
+  const propertiesById = new Map(objectType.properties.map((property) => [property.id, property]))
+  const columnsByName = new Map(dataset.schema.columns.map((column) => [column.name, column]))
+  const properties = Object.entries(projection.properties)
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .map(([propertyId, mapping]): TelemetryProjectionPropertyPlan => {
+      const property = propertiesById.get(propertyId)
+      const valueColumn = columnsByName.get(mapping.valueField)
+      if (!property || !valueColumn) {
+        throw createSixbError(
+          "internal.unexpected",
+          `[SixbProjectionWorker] Telemetry projection '${projection.id}' was not validated before execution.`,
+          {
+            details: {
+              ...errorDetails,
+              objectTypeId: projection.objectTypeId,
+              propertyId,
+              columnName: mapping.valueField,
+            },
+          }
+        )
+      }
+
+      return {
+        propertyId,
+        mapping,
+        valueColumnType: valueColumn.type,
+        valueSchema: resolveProjectionSchema(
+          property.schema,
+          runtime.ontology.getValueTypesById(),
+          {
+            details: {
+              ...errorDetails,
+              objectTypeId: objectType.id,
+              propertyId,
+              columnName: valueColumn.name,
+            },
+          }
+        ),
+      }
+    })
+
   return {
     projection,
     dataset,
-    valueColumnType: valueColumn.type,
-    valueSchema: resolveProjectionSchema(property.schema, runtime.ontology.getValueTypesById(), {
-      details: {
-        ...errorDetails,
-        objectTypeId: objectType.id,
-        propertyId: property.id,
-        columnName: valueColumn.name,
-      },
-    }),
+    properties,
     readColumns: telemetryProjectionReadColumns(projection),
   }
 }
@@ -265,8 +298,10 @@ function telemetryProjectionReadColumns(
     ...new Set([
       projection.objectIdField,
       projection.atField,
-      projection.valueField,
-      ...(projection.unitField !== undefined ? [projection.unitField] : []),
+      ...Object.values(projection.properties).flatMap((mapping) => [
+        mapping.valueField,
+        ...(mapping.unitField !== undefined ? [mapping.unitField] : []),
+      ]),
     ]),
   ]
 }
@@ -286,8 +321,10 @@ function projectTelemetryRow(
 
   const objectId = row[projection.objectIdField]
   const at = row[projection.atField]
-  const value = row[projection.valueField]
-  if (isBlank(objectId) || isBlank(at) || isBlank(value)) return { kind: "skip" }
+  if (isBlank(objectId) || isBlank(at)) return { kind: "skip" }
+  if (plan.properties.every((property) => isBlank(row[property.mapping.valueField]))) {
+    return { kind: "skip" }
+  }
   if (typeof objectId !== "string") {
     return invalidIdentity(projection, projection.objectIdField)
   }
@@ -300,38 +337,44 @@ function projectTelemetryRow(
     }
   }
 
-  const normalized = normalizeProjectedValue({
-    columnType: plan.valueColumnType,
-    schema: plan.valueSchema,
-    value,
-  })
-  if (!normalized.ok || !isJsonValue(normalized.value)) {
-    return {
-      kind: "invalid",
-      message: `Telemetry projection '${projection.id}' value field '${projection.valueField}' is invalid${normalized.ok ? "" : `: ${normalized.errorMessage}`}.`,
-    }
-  }
+  const points: TelemetryPointWrite[] = []
+  for (const property of plan.properties) {
+    const value = row[property.mapping.valueField]
+    if (isBlank(value)) continue
 
-  const rawUnit = projection.unitField === undefined ? undefined : row[projection.unitField]
-  if (!isBlank(rawUnit) && typeof rawUnit !== "string") {
-    return {
-      kind: "invalid",
-      message: `Telemetry projection '${projection.id}' unit field '${projection.unitField}' must be a string.`,
+    const normalized = normalizeProjectedValue({
+      columnType: property.valueColumnType,
+      schema: property.valueSchema,
+      value,
+    })
+    if (!normalized.ok || !isJsonValue(normalized.value)) {
+      return {
+        kind: "invalid",
+        message: `Telemetry projection '${projection.id}' property '${property.propertyId}' value field '${property.mapping.valueField}' is invalid${normalized.ok ? "" : `: ${normalized.errorMessage}`}.`,
+      }
     }
-  }
 
-  return {
-    kind: "point",
-    point: {
+    const rawUnit =
+      property.mapping.unitField === undefined ? undefined : row[property.mapping.unitField]
+    if (!isBlank(rawUnit) && typeof rawUnit !== "string") {
+      return {
+        kind: "invalid",
+        message: `Telemetry projection '${projection.id}' property '${property.propertyId}' unit field '${property.mapping.unitField}' must be a string.`,
+      }
+    }
+
+    points.push({
       series: {
         object: { objectTypeId: projection.objectTypeId, primaryId: objectId },
-        propertyId: projection.propertyId,
+        propertyId: property.propertyId,
       },
       value: normalized.value,
       at: parsedAt.toISOString(),
       ...(typeof rawUnit === "string" && rawUnit.trim().length > 0 ? { unit: rawUnit } : {}),
-    },
+    })
   }
+
+  return points.length === 0 ? { kind: "skip" } : { kind: "points", points }
 }
 
 function invalidIdentity(
@@ -344,68 +387,4 @@ function invalidIdentity(
   }
 }
 
-const TELEMETRY_TIMESTAMP =
-  /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?)?([zZ]|[+-]\d{2}:?\d{2})?$/
-
-interface TimestampComponents {
-  readonly year: number
-  readonly month: number
-  readonly day: number
-  readonly hour: number
-  readonly minute: number
-  readonly second: number
-  readonly milliseconds: number
-}
-
-export function parseTelemetryTimestamp(value: unknown): Date | null {
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value
-  if (typeof value !== "string") return null
-
-  const match = TELEMETRY_TIMESTAMP.exec(value.trim())
-  if (!match) return null
-  const [, year, month, day, hour, minute, second, fraction, zone] = match
-  const offsetMinutes = parseZoneOffsetMinutes(zone)
-  if (offsetMinutes === null) return null
-
-  const components: TimestampComponents = {
-    year: Number(year),
-    month: Number(month),
-    day: Number(day),
-    hour: hour === undefined ? 0 : Number(hour),
-    minute: minute === undefined ? 0 : Number(minute),
-    second: second === undefined ? 0 : Number(second),
-    milliseconds: fraction === undefined ? 0 : Math.trunc(Number(`0.${fraction}`) * 1000),
-  }
-  const wallClock = Date.UTC(
-    components.year,
-    components.month - 1,
-    components.day,
-    components.hour,
-    components.minute,
-    components.second,
-    components.milliseconds
-  )
-  if (!wallClockMatchesComponents(wallClock, components)) return null
-  return new Date(wallClock - offsetMinutes * 60_000)
-}
-
-function parseZoneOffsetMinutes(zone: string | undefined): number | null {
-  if (zone === undefined || zone === "Z" || zone === "z") return 0
-  const digits = zone.slice(1).replace(":", "")
-  const hours = Number(digits.slice(0, 2))
-  const minutes = Number(digits.slice(2, 4))
-  if (hours > 23 || minutes > 59) return null
-  return (zone[0] === "-" ? -1 : 1) * (hours * 60 + minutes)
-}
-
-function wallClockMatchesComponents(wallClock: number, components: TimestampComponents): boolean {
-  const date = new Date(wallClock)
-  return (
-    date.getUTCFullYear() === components.year &&
-    date.getUTCMonth() === components.month - 1 &&
-    date.getUTCDate() === components.day &&
-    date.getUTCHours() === components.hour &&
-    date.getUTCMinutes() === components.minute &&
-    date.getUTCSeconds() === components.second
-  )
-}
+export const parseTelemetryTimestamp = parseDatasetTimestamp

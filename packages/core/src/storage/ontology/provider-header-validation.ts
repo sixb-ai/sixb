@@ -35,6 +35,7 @@ function assertCommitEnvelope(commit: OntologyCommitWrite): void {
   assertNonblank(commit.id, "Materialization commit id")
   assertNonblank(commit.idempotencyKey, "Materialization idempotency key")
   assertNonblank(commit.requestHash, "Materialization request hash")
+  assertNonblank(commit.executionId, "Materialization execution id")
   assertNonblank(commit.ontologyRevision, "Materialization ontology revision")
   assertTimestamp(commit.committedAt, "Materialization commit time")
 }
@@ -154,9 +155,9 @@ function assertProjectionTelemetryBatch(
   if (source.sourceRowsSkipped > source.sourceRowCount) {
     invalidCorrelation("Projection telemetry skipped rows exceed its source row count.")
   }
-  if (source.sourceRowCount !== inputPointCount + source.sourceRowsSkipped) {
+  if (inputPointCount < source.sourceRowCount - source.sourceRowsSkipped) {
     invalidCorrelation(
-      "Projection telemetry source row count does not match input points plus skipped rows."
+      "Projection telemetry input points do not account for every non-skipped source row."
     )
   }
   if (typeof source.inputExhausted !== "boolean") {

@@ -25,6 +25,8 @@ interface ObjectEditInput {
   readonly operation: ObjectEditOperation
   readonly sourceProperties: Readonly<Record<string, JsonValue>> | null
   readonly authority: ObjectOverride | null
+  readonly editedAt: Readonly<Record<string, string>>
+  readonly committedAt: string
   readonly effectiveExists: boolean
   readonly normalizedProperties?: Readonly<Record<string, JsonValue>>
   readonly normalizedSet?: Readonly<Record<string, JsonValue>>
@@ -43,7 +45,11 @@ export interface AuthorityTransition<T> {
   readonly changed: boolean
 }
 
-export function applyObjectEdit(input: ObjectEditInput): AuthorityTransition<ObjectOverride> {
+export interface ObjectAuthorityTransition extends AuthorityTransition<ObjectOverride> {
+  readonly editedAt: Readonly<Record<string, string>>
+}
+
+export function applyObjectEdit(input: ObjectEditInput): ObjectAuthorityTransition {
   const current = input.authority
   let next: ObjectOverride | null
 
@@ -67,7 +73,54 @@ export function applyObjectEdit(input: ObjectEditInput): AuthorityTransition<Obj
       throw new MaterializationValidationError("Expected an object edit operation.")
   }
 
-  return transition(current, next)
+  const editedAt = applyObjectEditTimes(input, next)
+  const authority = transition(current, next)
+  return {
+    ...authority,
+    editedAt,
+    changed: authority.changed || !sameStringRecord(input.editedAt, editedAt),
+  }
+}
+
+function applyObjectEditTimes(
+  input: ObjectEditInput,
+  next: ObjectOverride | null
+): Readonly<Record<string, string>> {
+  if (!next || next.kind === "delete") return {}
+  const editedAt =
+    input.operation.kind === "object.create" || input.authority?.kind === "delete"
+      ? {}
+      : { ...input.editedAt }
+
+  switch (input.operation.kind) {
+    case "object.create":
+    case "object.upsert": {
+      const properties = input.normalizedProperties ?? input.operation.properties
+      for (const propertyId of Object.keys(properties)) editedAt[propertyId] = input.committedAt
+      break
+    }
+    case "object.patch":
+      for (const propertyId of input.operation.reset) delete editedAt[propertyId]
+      for (const propertyId of input.operation.unset) editedAt[propertyId] = input.committedAt
+      for (const propertyId of Object.keys(input.normalizedSet ?? input.operation.set)) {
+        editedAt[propertyId] = input.committedAt
+      }
+      break
+    case "object.delete":
+      return editedAt
+    case "object.restore":
+      break
+  }
+  return editedAt
+}
+
+function sameStringRecord(
+  left: Readonly<Record<string, string>>,
+  right: Readonly<Record<string, string>>
+): boolean {
+  const leftKeys = Object.keys(left)
+  if (leftKeys.length !== Object.keys(right).length) return false
+  return leftKeys.every((key) => left[key] === right[key])
 }
 
 function applyObjectCreate(

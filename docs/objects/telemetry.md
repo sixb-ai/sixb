@@ -119,7 +119,9 @@ const points = await progress.history({
 `history()` returns `{ value, at, unit? }` in chronological order — pass `order: "desc"` for newest
 first. The value is typed through the property token, the same way `append` is.
 
-For cross-series reads, or `getLatest`, drop to the time-series store at `sixb.storage.timeseries`:
+Inside an [Action](../actions/overview.md#reading-telemetry-in-actions), use the typed
+`read.telemetry.historyBatch(...)` facade for cross-series history. In other trusted runtime code,
+or for `getLatest`, use the time-series store at `sixb.storage.timeseries`:
 
 ```ts
 const history = await sixb.storage.timeseries.getHistory({

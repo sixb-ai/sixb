@@ -30,9 +30,7 @@ import {
   Bot,
   Box,
   CalendarClock,
-  Check,
   ChevronLeft,
-  Copy,
   Crosshair,
   GitBranch,
   History,
@@ -45,8 +43,9 @@ import {
   X,
   Zap,
 } from "lucide-react"
-import { type ReactNode, useEffect, useMemo, useState } from "react"
+import { type ReactNode, useEffect, useMemo } from "react"
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom"
+import { CopyButton } from "../components/CopyButton"
 import { SixbFailureSummary } from "../components/SixbFailureSummary"
 import { StructuredValue } from "../components/StructuredValue"
 import {
@@ -56,12 +55,14 @@ import {
 import { SchemaShape } from "../features/workflows/components/nodes/SchemaShape"
 import { WorkflowInterventionPanel } from "../features/workflows/components/nodes/WorkflowInterventionPanel"
 import { RequestWorkflowRunDialog } from "../features/workflows/components/RequestWorkflowRunDialog"
+import { AgentExecutionPanel } from "../features/workflows/components/runs/AgentExecutionPanel"
 import { RunProgress } from "../features/workflows/components/runs/RunProgress"
 import {
   NodeStatusBadge,
   StatusBadge,
   WorkflowRunStatusIcon,
 } from "../features/workflows/components/runs/StatusBadge"
+import { WorkflowNodeExecutionPanel } from "../features/workflows/components/runs/WorkflowNodeExecutionPanel"
 import { useWorkflowLiveUpdates } from "../features/workflows/hooks/useWorkflowLiveUpdates"
 import {
   formatDate,
@@ -71,7 +72,6 @@ import {
   formatRunStartedDate,
   isActiveRunStatus,
   runTimeLabel,
-  type WorkflowAgentNodeExecution,
   type WorkflowDetail,
   type WorkflowNode,
   type WorkflowNodeStatus,
@@ -318,7 +318,9 @@ export function WorkflowDetailPage() {
           </div>
         </div>
 
-        <WorkflowSidePanel open={panelOpen}>{panelContent}</WorkflowSidePanel>
+        <WorkflowSidePanel open={panelOpen} wide={runNodesByFlowId.has(selectedNodeId ?? "")}>
+          {panelContent}
+        </WorkflowSidePanel>
       </ReactFlowProvider>
     </div>
   )
@@ -708,16 +710,26 @@ function WorkflowCanvas({
 // Side panel — shell + router
 // --------------------------------------------------------------------------
 
-function WorkflowSidePanel({ open, children }: { open: boolean; children: ReactNode }) {
+function WorkflowSidePanel({
+  open,
+  wide,
+  children,
+}: {
+  open: boolean
+  wide: boolean
+  children: ReactNode
+}) {
+  const width = wide ? "w-[36rem]" : "w-[22rem]"
   return (
     <aside
       className={cn(
         "h-full shrink-0 overflow-hidden border-l border-border bg-card transition-[width] duration-300 ease-out",
-        open ? "w-[22rem] max-w-[calc(100vw-1rem)]" : "w-0"
+        open ? width : "w-0",
+        "max-w-[calc(100vw-1rem)]"
       )}
       aria-hidden={!open}
     >
-      <div className="flex h-full w-[22rem] max-w-[calc(100vw-1rem)] flex-col">{children}</div>
+      <div className={cn("flex h-full max-w-[calc(100vw-1rem)] flex-col", width)}>{children}</div>
     </aside>
   )
 }
@@ -890,39 +902,6 @@ function PanelHeader({
         <X />
       </Button>
     </div>
-  )
-}
-
-function CopyButton({ value, label }: { value: string; label: string }) {
-  const [copied, setCopied] = useState(false)
-
-  useEffect(() => {
-    if (!copied) return
-    const timer = window.setTimeout(() => setCopied(false), 1500)
-    return () => window.clearTimeout(timer)
-  }, [copied])
-
-  const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(value)
-      setCopied(true)
-    } catch {
-      // Clipboard access can be denied; fail silently.
-    }
-  }
-
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon-xs"
-      onClick={onCopy}
-      aria-label={label}
-      title={label}
-      className="shrink-0 text-muted-foreground hover:text-foreground"
-    >
-      {copied ? <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" /> : <Copy />}
-    </Button>
   )
 }
 
@@ -1471,6 +1450,11 @@ function RunNodePanel({
               <AgentExecutionPanel
                 summary={runNode.agentExecution}
                 execution={agentExecutionQuery.data}
+                nodeInput={runNode.input}
+                nodeOutput={runNode.output}
+                nodeError={runNode.error}
+                inputFileLinkForPath={fileLinkForRoot("input")}
+                outputFileLinkForPath={fileLinkForRoot("output")}
                 loading={agentExecutionQuery.isLoading}
                 failed={agentExecutionQuery.isError}
               />
@@ -1480,29 +1464,12 @@ function RunNodePanel({
               <WorkflowInterventionPanel node={runNode} />
             ) : null}
 
-            <PanelBlock label="Input" icon={<ArrowDownToLine className={SECTION_ICON} />}>
-              <StructuredValue
-                value={runNode.input}
-                emptyLabel="No input"
-                fileLinkForPath={fileLinkForRoot("input")}
+            {runNode.nodeType === "agent" ? null : (
+              <WorkflowNodeExecutionPanel
+                node={runNode}
+                inputFileLinkForPath={fileLinkForRoot("input")}
+                outputFileLinkForPath={fileLinkForRoot("output")}
               />
-            </PanelBlock>
-
-            {runNode.error ? (
-              <PanelBlock label="Error" icon={<X className={cn(SECTION_ICON, "text-red-500")} />}>
-                <SixbFailureSummary failure={runNode.error} className="text-sm" />
-              </PanelBlock>
-            ) : (
-              <PanelBlock
-                label={runNode.nodeType === "intervention" ? "Response" : "Output"}
-                icon={<ArrowUpFromLine className={SECTION_ICON} />}
-              >
-                <StructuredValue
-                  value={runNode.output ?? null}
-                  emptyLabel="No output"
-                  fileLinkForPath={fileLinkForRoot("output")}
-                />
-              </PanelBlock>
             )}
           </>
         ) : (
@@ -1518,63 +1485,5 @@ function RunNodePanel({
         )}
       </PanelScroll>
     </>
-  )
-}
-
-function AgentExecutionPanel({
-  summary,
-  execution,
-  loading,
-  failed,
-}: {
-  summary: WorkflowRunNode["agentExecution"]
-  execution: WorkflowAgentNodeExecution | undefined
-  loading: boolean
-  failed: boolean
-}) {
-  const data = execution ?? summary
-  return (
-    <PanelBlock label="Agent execution" icon={<Bot className={SECTION_ICON} />}>
-      {data ? (
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-2">
-            <RunStat label="Agent" value={data.agentId} />
-            <RunStat label="Attempt" value={String(data.attempt)} />
-            <RunStat label="Status" value={data.status} />
-            <RunStat label="Model" value={data.modelId ?? "—"} />
-          </div>
-          {data.usage ? (
-            <StructuredValue value={data.usage} emptyLabel="No token usage reported" />
-          ) : null}
-          {execution?.prompt ? (
-            <div>
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Prompt
-              </p>
-              <pre className="whitespace-pre-wrap break-words rounded-lg bg-muted/30 p-3 font-mono text-xs text-foreground">
-                {execution.prompt}
-              </pre>
-            </div>
-          ) : null}
-          {execution?.trace ? (
-            <div>
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Trace
-              </p>
-              <StructuredValue value={execution.trace} emptyLabel="No trace" />
-            </div>
-          ) : null}
-          {execution?.error ? (
-            <SixbFailureSummary failure={execution.error} className="text-sm" />
-          ) : null}
-        </div>
-      ) : loading ? (
-        <p className="text-xs text-muted-foreground">Loading agent execution...</p>
-      ) : failed ? (
-        <p className="text-xs text-destructive">Could not load agent execution.</p>
-      ) : (
-        <p className="text-xs text-muted-foreground">No agent execution record.</p>
-      )}
-    </PanelBlock>
   )
 }

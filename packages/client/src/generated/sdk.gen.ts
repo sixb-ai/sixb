@@ -11,6 +11,9 @@ import type {
   AbortFileUploadData,
   AbortFileUploadErrors,
   AbortFileUploadResponses,
+  AddConnectorConnectionData,
+  AddConnectorConnectionErrors,
+  AddConnectorConnectionResponses,
   AppendTelemetryData,
   AppendTelemetryErrors,
   AppendTelemetryResponses,
@@ -50,6 +53,9 @@ import type {
   DisableAuthServiceAccountData,
   DisableAuthServiceAccountErrors,
   DisableAuthServiceAccountResponses,
+  DisconnectConnectorConnectionData,
+  DisconnectConnectorConnectionErrors,
+  DisconnectConnectorConnectionResponses,
   ExistsObjectsData,
   ExistsObjectsErrors,
   ExistsObjectsResponses,
@@ -77,6 +83,9 @@ import type {
   GetAgentThreadData,
   GetAgentThreadErrors,
   GetAgentThreadResponses,
+  GetAiAccountingOverviewData,
+  GetAiAccountingOverviewErrors,
+  GetAiAccountingOverviewResponses,
   GetAuthAccessManagementOptionsData,
   GetAuthAccessManagementOptionsErrors,
   GetAuthAccessManagementOptionsResponses,
@@ -91,6 +100,9 @@ import type {
   GetBulkTelemetryHistoryData,
   GetBulkTelemetryHistoryErrors,
   GetBulkTelemetryHistoryResponses,
+  GetConnectorConnectionRunData,
+  GetConnectorConnectionRunErrors,
+  GetConnectorConnectionRunResponses,
   GetConnectorData,
   GetConnectorErrors,
   GetConnectorResponses,
@@ -186,6 +198,9 @@ import type {
   ListAgentThreadsData,
   ListAgentThreadsErrors,
   ListAgentThreadsResponses,
+  ListAiModelCallsData,
+  ListAiModelCallsErrors,
+  ListAiModelCallsResponses,
   ListAuthAccessTokensData,
   ListAuthAccessTokensErrors,
   ListAuthAccessTokensResponses,
@@ -204,6 +219,9 @@ import type {
   ListAuthSessionsData,
   ListAuthSessionsErrors,
   ListAuthSessionsResponses,
+  ListConnectorConnectionsData,
+  ListConnectorConnectionsErrors,
+  ListConnectorConnectionsResponses,
   ListConnectorsData,
   ListConnectorsResponses,
   ListDatasetRowsData,
@@ -221,9 +239,8 @@ import type {
   ListLogsData,
   ListLogsErrors,
   ListLogsResponses,
-  ListObjectLinksData,
-  ListObjectLinksErrors,
-  ListObjectLinksResponses,
+  ListModelsData,
+  ListModelsResponses,
   ListObjectsData,
   ListObjectsErrors,
   ListObjectsResponses,
@@ -263,12 +280,18 @@ import type {
   PostAgentThreadMessageData,
   PostAgentThreadMessageErrors,
   PostAgentThreadMessageResponses,
+  QueryObjectLinksData,
+  QueryObjectLinksErrors,
+  QueryObjectLinksResponses,
   QueryObjectsData,
   QueryObjectsErrors,
   QueryObjectsResponses,
   ReactivateAuthMemberData,
   ReactivateAuthMemberErrors,
   ReactivateAuthMemberResponses,
+  ReauthorizeConnectorConnectionData,
+  ReauthorizeConnectorConnectionErrors,
+  ReauthorizeConnectorConnectionResponses,
   RemoveObjectLinkData,
   RemoveObjectLinkErrors,
   RemoveObjectLinkResponses,
@@ -299,9 +322,15 @@ import type {
   RevokeAuthSessionData,
   RevokeAuthSessionErrors,
   RevokeAuthSessionResponses,
+  RevokeConnectorConnectionData,
+  RevokeConnectorConnectionErrors,
+  RevokeConnectorConnectionResponses,
   SearchObjectsData,
   SearchObjectsErrors,
   SearchObjectsResponses,
+  SelectConnectorConnectionRunAccountData,
+  SelectConnectorConnectionRunAccountErrors,
+  SelectConnectorConnectionRunAccountResponses,
   SignFileUploadPartData,
   SignFileUploadPartErrors,
   SignFileUploadPartResponses,
@@ -311,6 +340,9 @@ import type {
   SignOutData,
   SignOutErrors,
   SignOutResponses,
+  StartConnectorConnectionRunData,
+  StartConnectorConnectionRunErrors,
+  StartConnectorConnectionRunResponses,
   SubmitWorkflowInterventionData,
   SubmitWorkflowInterventionErrors,
   SubmitWorkflowInterventionResponses,
@@ -739,6 +771,29 @@ export const reactivateAuthMember = <ThrowOnError extends boolean = false>(
   })
 
 /**
+ * Get project AI usage and cost analytics
+ */
+export const getAiAccountingOverview = <ThrowOnError extends boolean = false>(
+  options: Options<GetAiAccountingOverviewData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetAiAccountingOverviewResponses,
+    GetAiAccountingOverviewErrors,
+    ThrowOnError
+  >({ url: "/api/ai/accounting/overview", ...options })
+
+/**
+ * List project AI model-call accounting records
+ */
+export const listAiModelCalls = <ThrowOnError extends boolean = false>(
+  options: Options<ListAiModelCallsData, ThrowOnError>
+) =>
+  (options.client ?? client).get<ListAiModelCallsResponses, ListAiModelCallsErrors, ThrowOnError>({
+    url: "/api/ai/model-calls",
+    ...options,
+  })
+
+/**
  * Get current project metadata
  */
 export const getProjectInfo = <ThrowOnError extends boolean = false>(
@@ -781,6 +836,142 @@ export const getConnector = <ThrowOnError extends boolean = false>(
   (options.client ?? client).get<GetConnectorResponses, GetConnectorErrors, ThrowOnError>({
     url: "/api/connectors/{connectorId}",
     ...options,
+  })
+
+/**
+ * List connector connections
+ */
+export const listConnectorConnections = <ThrowOnError extends boolean = false>(
+  options: Options<ListConnectorConnectionsData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    ListConnectorConnectionsResponses,
+    ListConnectorConnectionsErrors,
+    ThrowOnError
+  >({ url: "/api/connectors/{connectorId}/connections", ...options })
+
+/**
+ * Disconnect a connector account
+ */
+export const disconnectConnectorConnection = <ThrowOnError extends boolean = false>(
+  options: Options<DisconnectConnectorConnectionData, ThrowOnError>
+) =>
+  (options.client ?? client).delete<
+    DisconnectConnectorConnectionResponses,
+    DisconnectConnectorConnectionErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/connectors/{connectorId}/connections/{connectionId}",
+    ...options,
+  })
+
+/**
+ * Revoke a connector authorization
+ */
+export const revokeConnectorConnection = <ThrowOnError extends boolean = false>(
+  options: Options<RevokeConnectorConnectionData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    RevokeConnectorConnectionResponses,
+    RevokeConnectorConnectionErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/connectors/{connectorId}/connections/{connectionId}/revoke",
+    ...options,
+  })
+
+/**
+ * Start a connector connection run
+ */
+export const startConnectorConnectionRun = <ThrowOnError extends boolean = false>(
+  options: Options<StartConnectorConnectionRunData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    StartConnectorConnectionRunResponses,
+    StartConnectorConnectionRunErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/connectors/{connectorId}/connection-runs",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Get a connector connection run
+ */
+export const getConnectorConnectionRun = <ThrowOnError extends boolean = false>(
+  options: Options<GetConnectorConnectionRunData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetConnectorConnectionRunResponses,
+    GetConnectorConnectionRunErrors,
+    ThrowOnError
+  >({ url: "/api/connectors/{connectorId}/connection-runs/{runId}", ...options })
+
+/**
+ * Add a connector connection from an existing authorization
+ */
+export const addConnectorConnection = <ThrowOnError extends boolean = false>(
+  options: Options<AddConnectorConnectionData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    AddConnectorConnectionResponses,
+    AddConnectorConnectionErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/connectors/{connectorId}/connections/{connectionId}/connection-runs",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Select a connector account
+ */
+export const selectConnectorConnectionRunAccount = <ThrowOnError extends boolean = false>(
+  options: Options<SelectConnectorConnectionRunAccountData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    SelectConnectorConnectionRunAccountResponses,
+    SelectConnectorConnectionRunAccountErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/connectors/{connectorId}/connection-runs/{runId}/selection",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Reauthorize a connector connection
+ */
+export const reauthorizeConnectorConnection = <ThrowOnError extends boolean = false>(
+  options: Options<ReauthorizeConnectorConnectionData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    ReauthorizeConnectorConnectionResponses,
+    ReauthorizeConnectorConnectionErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/connectors/{connectorId}/connections/{connectionId}/reauthorize",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   })
 
 /**
@@ -1278,6 +1469,25 @@ export const queryObjects = <ThrowOnError extends boolean = false>(
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/objects/query",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Query object links
+ */
+export const queryObjectLinks = <ThrowOnError extends boolean = false>(
+  options: Options<QueryObjectLinksData, ThrowOnError>
+) =>
+  (options.client ?? client).post<QueryObjectLinksResponses, QueryObjectLinksErrors, ThrowOnError>({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/objects/query/links",
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -1787,14 +1997,13 @@ export const getAgentRun = <ThrowOnError extends boolean = false>(
   })
 
 /**
- * List object links
+ * List the project model catalog
  */
-export const listObjectLinks = <ThrowOnError extends boolean = false>(
-  options: Options<ListObjectLinksData, ThrowOnError>
+export const listModels = <ThrowOnError extends boolean = false>(
+  options?: Options<ListModelsData, ThrowOnError>
 ) =>
-  (options.client ?? client).get<ListObjectLinksResponses, ListObjectLinksErrors, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
-    url: "/api/objects/{objectTypeId}/{objectId}/links",
+  (options?.client ?? client).get<ListModelsResponses, unknown, ThrowOnError>({
+    url: "/api/models",
     ...options,
   })
 

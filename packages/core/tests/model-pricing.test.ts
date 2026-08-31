@@ -25,6 +25,26 @@ describe("model definitions and pricing", () => {
     expect(cost).toEqual({
       status: "rated",
       money: { currency: "USD", amountNanos: "4000000" },
+      components: [
+        {
+          meter: "tokens.input.uncached",
+          quantity: "750",
+          rateAmountNanosPerMillion: "2500000000",
+          chargeAmountNanos: "1875000",
+        },
+        {
+          meter: "tokens.input.cacheRead",
+          quantity: "250",
+          rateAmountNanosPerMillion: "500000000",
+          chargeAmountNanos: "125000",
+        },
+        {
+          meter: "tokens.output.total",
+          quantity: "100",
+          rateAmountNanosPerMillion: "20000000000",
+          chargeAmountNanos: "2000000",
+        },
+      ],
     })
   })
 

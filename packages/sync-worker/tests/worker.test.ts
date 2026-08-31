@@ -34,6 +34,16 @@ const erpDb = defineConnector("erpDb", {
   },
 })
 
+function storedErpCheckpoint(cursor: string) {
+  return {
+    kind: "sync_checkpoint",
+    version: 1,
+    connectorId: erpDb.id,
+    strategy: "single",
+    value: { cursor },
+  }
+}
+
 function makeDataset(id: string) {
   return defineDataset(id, {
     schema: [col("orderId", "string"), col("customerName", "string", { nullable: true })],
@@ -106,7 +116,57 @@ function createSixbForSync(
   })
 }
 
+async function enqueueSyncRun(
+  sixb: Pick<SixbHost, "id" | "storage" | "queues" | "definitions">,
+  input: { readonly syncId: string; readonly runId: string }
+) {
+  const sync = sixb.definitions.syncs.getById(input.syncId)
+  if (!sync) throw new Error(`[Test] Unknown Sync '${input.syncId}'.`)
+  const executionId = `exec:${input.runId}`
+  await sixb.storage.executions.create({
+    id: executionId,
+    projectId: sixb.id,
+    executor: { type: "primitive", kind: "sync", runId: input.runId },
+    source: { type: "schedule", eventId: `event:${input.runId}` },
+    correlationId: `correlation:${input.runId}`,
+    authorizationRef: {
+      type: "trustedPrimitive",
+      primitive: { kind: "sync", id: input.syncId, runId: input.runId },
+    },
+  })
+  await sixb.storage.syncRuns!.queue({
+    id: input.runId,
+    projectId: sixb.id,
+    executionId,
+    syncId: input.syncId,
+    datasetId: sync.target.dataset.id,
+    mode: sync.config.mode,
+  })
+  return sixb.queues.syncRuns.enqueue({
+    projectId: sixb.id,
+    jobs: [
+      {
+        id: input.runId,
+        type: "sync.run.requested",
+        payload: { runId: input.runId },
+      },
+    ],
+  })
+}
+
 describe("SyncWorker", () => {
+  test("defaults to one concurrent job and accepts an explicit limit", () => {
+    const dataset = makeDataset("raw.erp.concurrency-options")
+    const sync = defineSync("sync-concurrency-options")
+      .from(erpDb)
+      .read(() => [])
+      .intoDataset(dataset)
+    const sixb = createSixbForSync(sync)
+
+    expect(new SyncWorker(sixb).concurrency).toBe(1)
+    expect(new SyncWorker(sixb, { concurrency: 3 }).concurrency).toBe(3)
+  })
+
   test("processes queued sync jobs end-to-end", async () => {
     const rawOrdersDataset = makeDataset("raw.erp.orders")
     const sync = defineSync("sync-orders")
@@ -116,18 +176,7 @@ describe("SyncWorker", () => {
     const sixb = createSixbForSync(sync)
     const worker = new SyncWorker(sixb)
 
-    await sixb.queues.syncRuns.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          type: "sync.run.requested",
-          payload: {
-            syncId: "sync-orders",
-            runId: "run-1",
-          },
-        },
-      ],
-    })
+    await enqueueSyncRun(sixb, { syncId: "sync-orders", runId: "run-1" })
 
     await worker.start()
 
@@ -162,17 +211,15 @@ describe("SyncWorker", () => {
     const sixb = createSixbForSync(sync, undefined, (error, context) => {
       reports.push({ error, context })
     })
+    let settledFailure: unknown
+    const fail = sixb.queues.syncRuns.fail.bind(sixb.queues.syncRuns)
+    sixb.queues.syncRuns.fail = async (input) => {
+      settledFailure = input.failure
+      await fail(input)
+    }
     const worker = new SyncWorker(sixb)
 
-    await sixb.queues.syncRuns.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          type: "sync.run.requested",
-          payload: { syncId: sync.id, runId: "run-failed" },
-        },
-      ],
-    })
+    await enqueueSyncRun(sixb, { syncId: sync.id, runId: "run-failed" })
 
     await worker.start()
     try {
@@ -183,6 +230,10 @@ describe("SyncWorker", () => {
       await waitFor(
         async () => reports.length,
         (count) => count === 1
+      )
+      await waitFor(
+        async () => settledFailure,
+        (failure) => failure !== undefined
       )
 
       expect(run?.error).toMatchObject({
@@ -208,6 +259,7 @@ describe("SyncWorker", () => {
         },
         failure: run!.error!,
       })
+      expect(settledFailure).toEqual(run!.error)
 
       const claimed = await sixb.queues.syncRuns.claim({
         projectId: sixb.id,
@@ -246,10 +298,7 @@ describe("SyncWorker", () => {
     const sixb = createSixbForSync(sync)
     const worker = new SyncWorker(sixb)
 
-    await sixb.queues.syncRuns.enqueue({
-      projectId: sixb.id,
-      jobs: [{ type: "sync.run.requested", payload: { syncId: "sync-logged", runId: "run-log" } }],
-    })
+    await enqueueSyncRun(sixb, { syncId: "sync-logged", runId: "run-log" })
 
     await worker.start()
     await waitFor(
@@ -277,40 +326,6 @@ describe("SyncWorker", () => {
     expect(payload.context?.run).toEqual({ kind: "sync", id: "run-log" })
   })
 
-  test("uses a fallback run id when the queue payload does not provide one", async () => {
-    const rawOrdersDataset = makeDataset("raw.erp.orders")
-    const sync = defineSync("sync-orders")
-      .from(erpDb)
-      .read(() => [])
-      .intoDataset(rawOrdersDataset)
-    const sixb = createSixbForSync(sync)
-    const worker = new SyncWorker(sixb)
-
-    const [queued] = await sixb.queues.syncRuns.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          type: "sync.run.requested",
-          payload: {
-            syncId: "sync-orders",
-          },
-        },
-      ],
-    })
-
-    await worker.start()
-
-    const fallbackRunId = `${queued!.id}:attempt:1`
-    const run = await waitFor(
-      () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: fallbackRunId }),
-      (value) => value?.status === "succeeded"
-    )
-
-    expect(run?.id).toBe(fallbackRunId)
-
-    await worker.stop()
-  })
-
   test("retries an aborted in-flight sync without reporting it", async () => {
     let reportCount = 0
     const rawOrdersDataset = makeDataset("raw.erp.orders")
@@ -336,17 +351,9 @@ describe("SyncWorker", () => {
     })
     const worker = new SyncWorker(sixb)
 
-    const [queued] = await sixb.queues.syncRuns.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          type: "sync.run.requested",
-          payload: {
-            syncId: "sync-orders",
-            runId: "run-retry",
-          },
-        },
-      ],
+    const [queued] = await enqueueSyncRun(sixb, {
+      syncId: "sync-orders",
+      runId: "run-retry",
     })
 
     await worker.start()
@@ -403,15 +410,7 @@ describe("SyncWorker", () => {
       return originalClaim(params)
     }
 
-    await sixb.queues.syncRuns.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          type: "sync.run.requested",
-          payload: { syncId: "sync-orders", runId: "run-after-error" },
-        },
-      ],
-    })
+    await enqueueSyncRun(sixb, { syncId: "sync-orders", runId: "run-after-error" })
 
     const worker = new SyncWorker(sixb)
     await worker.start()
@@ -435,15 +434,7 @@ describe("SyncWorker", () => {
     const sixb = createSixbForSync(sync)
     const worker = new SyncWorker(sixb)
 
-    await sixb.queues.syncRuns.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          type: "sync.run.requested",
-          payload: { syncId: "sync-orders", runId: "run-emit" },
-        },
-      ],
-    })
+    await enqueueSyncRun(sixb, { syncId: "sync-orders", runId: "run-emit" })
 
     await worker.start()
 
@@ -520,30 +511,14 @@ describe("SyncWorker", () => {
     const sixb = createSixbForSync(sync)
     const worker = new SyncWorker(sixb)
 
-    await sixb.queues.syncRuns.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          type: "sync.run.requested",
-          payload: { syncId: sync.id, runId: "run-merge-created" },
-        },
-      ],
-    })
+    await enqueueSyncRun(sixb, { syncId: sync.id, runId: "run-merge-created" })
     await worker.start()
     const createdRun = await waitFor(
       () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-merge-created" }),
       (run) => run?.status === "succeeded"
     )
 
-    await sixb.queues.syncRuns.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          type: "sync.run.requested",
-          payload: { syncId: sync.id, runId: "run-merge-noop" },
-        },
-      ],
-    })
+    await enqueueSyncRun(sixb, { syncId: sync.id, runId: "run-merge-noop" })
     const noOpRun = await waitFor(
       () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-merge-noop" }),
       (run) => run?.status === "succeeded"
@@ -551,8 +526,8 @@ describe("SyncWorker", () => {
     await Bun.sleep(50)
     await worker.stop()
 
-    expect(createdRun?.checkpoint).toEqual({ cursor: "cursor-1" })
-    expect(noOpRun?.checkpoint).toEqual({ cursor: "cursor-2" })
+    expect(createdRun?.checkpoint).toEqual(storedErpCheckpoint("cursor-1"))
+    expect(noOpRun?.checkpoint).toEqual(storedErpCheckpoint("cursor-2"))
     expect(noOpRun?.output?.versionId).toBe(createdRun?.output?.versionId)
 
     const events = await sixb.events.read({
@@ -582,15 +557,7 @@ describe("SyncWorker", () => {
 
     const sixb = createSixbForSync(sync, lakeStorage)
     const worker = new SyncWorker(sixb)
-    await sixb.queues.syncRuns.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          type: "sync.run.requested",
-          payload: { syncId: sync.id, runId: "run-no-op" },
-        },
-      ],
-    })
+    await enqueueSyncRun(sixb, { syncId: sync.id, runId: "run-no-op" })
 
     await worker.start()
     await waitFor(
@@ -625,15 +592,7 @@ describe("SyncWorker", () => {
     const sixb = createSixbForSync(sync)
     const worker = new SyncWorker(sixb)
 
-    await sixb.queues.syncRuns.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          type: "sync.run.requested",
-          payload: { syncId: sync.id, runId: "run-first-empty" },
-        },
-      ],
-    })
+    await enqueueSyncRun(sixb, { syncId: sync.id, runId: "run-first-empty" })
 
     await worker.start()
     const run = await waitFor(
@@ -644,7 +603,7 @@ describe("SyncWorker", () => {
     await worker.stop()
 
     expect(run?.output).toBeUndefined()
-    expect(run?.checkpoint).toEqual({ cursor: "cursor-1" })
+    expect(run?.checkpoint).toEqual(storedErpCheckpoint("cursor-1"))
     const events = await sixb.events.read({
       types: ["sync.run.started", "dataset.version.committed", "sync.run.finished"],
     })
@@ -657,7 +616,7 @@ describe("SyncWorker", () => {
     })
   })
 
-  test("finishes a first empty snapshot without emitting a dataset version", async () => {
+  test("commits and emits a dataset version for a first empty snapshot", async () => {
     const dataset = defineDataset("raw.erp.empty-orders", {
       schema: [col("orderId", "string")],
     })
@@ -668,15 +627,7 @@ describe("SyncWorker", () => {
     const sixb = createSixbForSync(sync)
     const worker = new SyncWorker(sixb)
 
-    await sixb.queues.syncRuns.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          type: "sync.run.requested",
-          payload: { syncId: sync.id, runId: "run-first-empty-snapshot" },
-        },
-      ],
-    })
+    await enqueueSyncRun(sixb, { syncId: sync.id, runId: "run-first-empty-snapshot" })
 
     await worker.start()
     const run = await waitFor(
@@ -690,16 +641,30 @@ describe("SyncWorker", () => {
     await Bun.sleep(50)
     await worker.stop()
 
-    expect(run?.output).toBeUndefined()
+    expect(run?.output).toMatchObject({ datasetId: dataset.id })
     const events = await sixb.events.read({
       types: ["sync.run.started", "dataset.version.committed", "sync.run.finished"],
     })
-    expect(events.map((event) => event.type)).toEqual(["sync.run.started", "sync.run.finished"])
-    expect(events[1]?.payload).toEqual({
+    expect(events.map((event) => event.type)).toEqual([
+      "sync.run.started",
+      "dataset.version.committed",
+      "sync.run.finished",
+    ])
+    expect(events[1]?.payload).toMatchObject({
+      datasetId: dataset.id,
+      versionId: run?.output?.versionId,
+      producer: {
+        kind: "sync",
+        id: sync.id,
+        runId: "run-first-empty-snapshot",
+      },
+    })
+    expect(events[2]?.payload).toEqual({
       syncId: sync.id,
       runId: "run-first-empty-snapshot",
       status: "succeeded",
       datasetId: dataset.id,
+      versionId: run?.output?.versionId,
     })
   })
 
@@ -728,15 +693,7 @@ describe("SyncWorker", () => {
       throw new Error("Lease already expired")
     }
 
-    await sixb.queues.syncRuns.enqueue({
-      projectId: sixb.id,
-      jobs: [
-        {
-          type: "sync.run.requested",
-          payload: { syncId: "sync-orders", runId: "run-expired-lease" },
-        },
-      ],
-    })
+    await enqueueSyncRun(sixb, { syncId: "sync-orders", runId: "run-expired-lease" })
 
     const worker = new SyncWorker(sixb)
     await worker.start()

@@ -1,3 +1,4 @@
+import { cn } from "@sixb/ui/lib/utils"
 import { useCallback } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { AgentChat, type AgentChatProps } from "./AgentChat"
@@ -8,12 +9,25 @@ export interface AgentChatPageProps
     "threadId" | "draftAgentId" | "onNavigateHome" | "onNavigateDraft" | "onNavigateThread"
   > {
   readonly routeBase?: string
+  /** Destination outside the standalone Agents workspace. */
+  readonly backTo?: string
+  readonly backLabel?: string
 }
 
-export function AgentChatPage({ routeBase = "/agents", ...props }: AgentChatPageProps) {
+export function AgentChatPage({
+  routeBase = "/agents",
+  backTo = "/",
+  backLabel = "Back to app",
+  className,
+  ...props
+}: AgentChatPageProps) {
   const navigate = useNavigate()
   const { agentId: routeAgentId, threadId: routeThreadId } = useParams()
   const normalizedRouteBase = normalizeRouteBase(routeBase)
+
+  const onExit = useCallback(() => {
+    navigate(backTo)
+  }, [backTo, navigate])
 
   const onNavigateHome = useCallback(() => {
     navigate(normalizedRouteBase)
@@ -34,14 +48,19 @@ export function AgentChatPage({ routeBase = "/agents", ...props }: AgentChatPage
   )
 
   return (
-    <AgentChat
-      {...props}
-      threadId={routeThreadId ?? null}
-      draftAgentId={routeAgentId ?? null}
-      onNavigateHome={onNavigateHome}
-      onNavigateDraft={onNavigateDraft}
-      onNavigateThread={onNavigateThread}
-    />
+    <section className="fixed inset-0 z-50 flex h-dvh min-h-0 overflow-hidden bg-background text-foreground">
+      <AgentChat
+        {...props}
+        threadId={routeThreadId ?? null}
+        draftAgentId={routeAgentId ?? null}
+        onNavigateHome={onNavigateHome}
+        onNavigateDraft={onNavigateDraft}
+        onNavigateThread={onNavigateThread}
+        onExit={onExit}
+        exitLabel={backLabel}
+        className={cn("min-h-0 flex-1", className)}
+      />
+    </section>
   )
 }
 

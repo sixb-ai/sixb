@@ -86,6 +86,7 @@ interface LinkScopeRow extends EffectiveLinkRow {
 interface ObjectOverrideRow extends SqliteStoredOverrideRow {
   readonly object_type_id: string
   readonly primary_id: string
+  readonly edited_at: string
 }
 
 interface LinkOverrideRow extends SqliteStoredOverrideRow {
@@ -1028,6 +1029,7 @@ function storedObjectOverride(row: ObjectOverrideRow): StoredObjectOverride {
   return {
     ref,
     value: parseJson<StoredObjectOverride["value"]>(row.value),
+    editedAt: parseJson<Readonly<Record<string, string>>>(row.edited_at),
     lastCommitId: row.last_commit_id,
     updatedAt: row.updated_at,
   }

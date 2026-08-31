@@ -26,11 +26,8 @@ export function executionRecordInputFromRuntime(input: {
       ? {}
       : { requestedBy: structuredClone(execution.requestedBy) }),
     executor: durableExecutor(execution),
-    source: durableSource(execution),
+    source: structuredClone(execution.source),
     correlationId: execution.correlationId,
-    ...(execution.parentExecutionId === undefined
-      ? {}
-      : { parentExecutionId: execution.parentExecutionId }),
     authorizationRef: getAuthorizationRef(input.runtimeAuthorization),
   }
 }
@@ -73,9 +70,10 @@ type PrimitiveExecutionOrigin =
       readonly projectId: string
       readonly source: Extract<
         CreateExecutionInput["source"],
-        { readonly type: "schedule" | "event" }
+        { readonly type: "schedule" | "event" | "datasetVersion" | "webhook" }
       >
       readonly correlationId: string
+      readonly requestedBy?: CreateExecutionInput["requestedBy"]
     }
 
 /** Build an immutable primitive execution from its parent execution or automatic trigger. */
@@ -93,10 +91,12 @@ export function createPrimitiveExecutionRecord(input: {
             : { requestedBy: structuredClone(input.origin.parent.requestedBy) }),
           source: { type: "execution" as const, executionId: input.origin.parent.id },
           correlationId: input.origin.parent.correlationId,
-          parentExecutionId: input.origin.parent.id,
         }
       : {
           projectId: input.origin.projectId,
+          ...(input.origin.requestedBy === undefined
+            ? {}
+            : { requestedBy: structuredClone(input.origin.requestedBy) }),
           source: structuredClone(input.origin.source),
           correlationId: input.origin.correlationId,
         }
@@ -127,13 +127,10 @@ export function restoreTrustedPrimitiveExecutionScope(input: {
     projectId: input.execution.projectId,
     ...(input.execution.requestedBy === undefined
       ? {}
-      : { requestedBy: structuredClone(input.execution.requestedBy) }),
+      : { requestedBy: Object.freeze(structuredClone(input.execution.requestedBy)) }),
     executor: Object.freeze({ type: "primitive", ...structuredClone(input.primitive) }),
     source: Object.freeze(structuredClone(input.execution.source)),
     correlationId: input.execution.correlationId,
-    ...(input.execution.parentExecutionId === undefined
-      ? {}
-      : { parentExecutionId: input.execution.parentExecutionId }),
   })
   return Object.freeze({
     execution: context,
@@ -159,16 +156,6 @@ function durableExecutor(execution: ExecutionContext): CreateExecutionInput["exe
     case "kernel":
       return { type: "kernel", operation: structuredClone(execution.executor.operation) }
   }
-}
-
-function durableSource(execution: ExecutionContext): CreateExecutionInput["source"] {
-  if (execution.source.type === "queue") {
-    throw new ExecutionStorageError(
-      "invalid_input",
-      `[Sixb] Execution '${execution.id}' has a transient queue source and cannot be persisted.`
-    )
-  }
-  return structuredClone(execution.source)
 }
 
 function assertExecutionRecordMatches(

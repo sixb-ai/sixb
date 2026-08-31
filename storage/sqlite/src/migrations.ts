@@ -56,7 +56,26 @@ import webhookDeliveryFailureRecordSql from "./migrations/019-webhook-delivery-f
 import dropRunUsageProjectionsSql from "./migrations/020-drop-run-usage-projections.sql" with {
   type: "text",
 }
-import aiModelCallDetailsSql from "./migrations/021-ai-model-call-details.sql" with { type: "text" }
+import syncPipelineExecutionsSql from "./migrations/021-sync-pipeline-executions.sql" with {
+  type: "text",
+}
+import projectionExecutionsSql from "./migrations/022-projection-executions.sql" with {
+  type: "text",
+}
+import webhookExecutionsSql from "./migrations/023-webhook-executions.sql" with { type: "text" }
+import ontologyCommitExecutionsSql from "./migrations/024-ontology-commit-executions.sql" with {
+  type: "text",
+}
+import connectorConnectionsSql from "./migrations/025-connector-connections.sql" with {
+  type: "text",
+}
+import aiCostAccountingSql from "./migrations/026-ai-cost-accounting.sql" with { type: "text" }
+import agentContextCheckpointsSql from "./migrations/027-agent-context-checkpoints.sql" with {
+  type: "text",
+}
+import objectOverrideEditTimesSql from "./migrations/028-object-override-edit-times.sql" with {
+  type: "text",
+}
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -97,7 +116,49 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("018-ontology-outbox-failure-record", ontologyOutboxFailureRecordSql),
     sqliteSql("019-webhook-delivery-failure-record", webhookDeliveryFailureRecordSql),
     sqliteSql("020-drop-run-usage-projections", dropRunUsageProjectionsSql),
-    sqliteSql("021-ai-model-call-details", aiModelCallDetailsSql),
+    sqliteSql("021-sync-pipeline-executions", syncPipelineExecutionsSql),
+    sqliteStep(
+      "022-projection-executions",
+      (db) => {
+        if (db.query("SELECT 1 FROM projection_runs LIMIT 1").get()) {
+          throw new Error(
+            "[SixbSqliteStorage] Projection execution migration cannot preserve legacy runs with unknown authority."
+          )
+        }
+        db.run(projectionExecutionsSql)
+      },
+      { checksum: checksum(projectionExecutionsSql) }
+    ),
+    sqliteStep(
+      "023-webhook-executions",
+      (db) => {
+        const hasRuns = db.query("SELECT 1 FROM webhook_runs LIMIT 1").get()
+        const hasDeliveries = db.query("SELECT 1 FROM webhook_deliveries LIMIT 1").get()
+        if (hasRuns || hasDeliveries) {
+          throw new Error(
+            "[SixbSqliteStorage] Webhook execution migration cannot preserve legacy runs or deliveries with unknown authority."
+          )
+        }
+        db.run(webhookExecutionsSql)
+      },
+      { checksum: checksum(webhookExecutionsSql) }
+    ),
+    sqliteStep(
+      "024-ontology-commit-executions",
+      (db) => {
+        if (db.query("SELECT 1 FROM ontology_commits LIMIT 1").get()) {
+          throw new Error(
+            "[SixbSqliteStorage] Ontology commit execution migration cannot preserve commits with unknown authority."
+          )
+        }
+        db.run(ontologyCommitExecutionsSql)
+      },
+      { checksum: checksum(ontologyCommitExecutionsSql) }
+    ),
+    sqliteSql("025-connector-connections", connectorConnectionsSql),
+    sqliteSql("026-ai-cost-accounting", aiCostAccountingSql),
+    sqliteSql("027-agent-context-checkpoints", agentContextCheckpointsSql),
+    sqliteSql("028-object-override-edit-times", objectOverrideEditTimesSql),
   ],
 })
 
@@ -208,15 +269,27 @@ function sqliteMigrationHistoryStore(db: Database): MigrationHistoryStore {
       `).run(at, adapterId, migration.version)
     },
     async transaction(run) {
+      // SQLite cannot rebuild a referenced parent table while foreign-key enforcement is active,
+      // even when the replacement satisfies every deferred reference. Migrations therefore run
+      // with enforcement paused, validate the complete schema before commit, then restore it.
+      db.run("PRAGMA foreign_keys = OFF")
       db.run("BEGIN")
 
       try {
         const result = await run()
+        const violations = db.query("PRAGMA foreign_key_check").all()
+        if (violations.length > 0) {
+          throw new Error(
+            `[${SQLITE_STORAGE_ADAPTER_ID}] Migration produced ${violations.length} foreign-key violation(s).`
+          )
+        }
         db.run("COMMIT")
         return result
       } catch (error) {
         rollbackQuietly(db)
         throw error
+      } finally {
+        db.run("PRAGMA foreign_keys = ON")
       }
     },
   }

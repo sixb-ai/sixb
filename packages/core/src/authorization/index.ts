@@ -4,6 +4,7 @@ export {
   assertAuthorized,
   assertCanAppendTelemetry,
   assertCanEdit,
+  assertCanManageConnector,
   assertPrivileged,
   assertProviderAccess,
   evaluate,

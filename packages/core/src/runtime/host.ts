@@ -17,8 +17,15 @@ import {
 } from "../auth"
 import type { BlobStorage } from "../blob-storage"
 import type { Broker } from "../broker"
+import { registerConnectorConnectionCallbackProcess } from "../connectors/connections/capability"
+import { createConnectorCredentialProtectorFromKey } from "../connectors/credentials"
+import { createConnectorCodedError } from "../connectors/errors"
 import { ConnectorService } from "../connectors/service"
-import type { ConnectorDefinition } from "../connectors/types"
+import {
+  type ConnectorConnectionOptions,
+  type ConnectorDefinition,
+  isOAuthConnectorDefinition,
+} from "../connectors/types"
 import type { DatasetDefinition } from "../datasets/types"
 import { attachSixbErrorReporter, shareSixbErrorReporter } from "../error-reporting/capability"
 import { reportEventDeliveryFailure } from "../error-reporting/reports"
@@ -29,10 +36,7 @@ import {
   type DomainEventService,
   OntologyOutboxDispatcher,
 } from "../events"
-import {
-  assertExecutionScopeProject,
-  resolveRuntimeAuthorization,
-} from "../execution/authorization"
+import { resolveExecutionScopeAuthorization } from "../execution/authorization"
 import type { ExecutionScope } from "../execution/types"
 import type { LakeStorage } from "../lake-storage"
 import { type LoggerProvider, LoggingService, type ObservabilityOptions } from "../logging"
@@ -43,7 +47,8 @@ import {
   type OntologyOperationalStatus,
   type SixbReadiness,
 } from "../maintenance"
-import { createOntologyMaterializer } from "../materializer"
+import { createOntologyMaterializer, type OntologyMaterializerContract } from "../materializer"
+import type { ModelCatalogInput } from "../models"
 import type { PipelineDefinition } from "../pipelines/types"
 import { registerProjectionRegistry } from "../projections/internal"
 import type { ProjectionDefinition } from "../projections/types"
@@ -95,6 +100,8 @@ export interface SixbHostOptions<TOntologySources extends readonly OntologySourc
   datasets?: readonly DatasetDefinition[]
   /** Connector definitions registered with this host. */
   connectors?: readonly ConnectorDefinition[]
+  /** Persistent connector connection settings. Required for OAuth with durable storage. */
+  connectorConnections?: ConnectorConnectionOptions
   schedules?: readonly ScheduleDefinition[]
   syncs?: readonly SyncDefinition[]
   pipelines?: readonly PipelineDefinition[]
@@ -102,6 +109,7 @@ export interface SixbHostOptions<TOntologySources extends readonly OntologySourc
   rules?: readonly RuleDefinition[]
   workflows?: readonly WorkflowDefinition[]
   agents?: readonly AgentDefinition[]
+  models?: ModelCatalogInput
   groups?: readonly GroupDefinition[]
   roles?: readonly RoleDefinition[]
   membershipPolicies?: readonly MembershipPolicyDefinition[]
@@ -119,6 +127,7 @@ export class SixbHost<
   private readonly ontologyMaintenance: OntologyMaintenance
   private readonly storageReadiness: StorageReadiness
   private readonly connectorService: ConnectorService
+  private readonly materializer: OntologyMaterializerContract
   readonly definitions: SixbDefinitions
   readonly broker: Broker
   readonly events: DomainEventLog
@@ -168,11 +177,26 @@ export class SixbHost<
     })
     validateAuthStrategySecurityReferences(this.auth.getStrategy(), definitions.security)
     const connectors = definitions.connectors.list()
-    this.connectorService = new ConnectorService(this.projectId, connectors)
-    assertWebhookDeliveryStorage(connectors, this.storage)
+    assertConnectorConnectionSurfaces(connectors)
+    const hasOAuthConnectors = connectors.some(isOAuthConnectorDefinition)
+    const credentialProtector =
+      hasOAuthConnectors && options.connectorConnections?.encryptionKey !== undefined
+        ? createConnectorCredentialProtectorFromKey(options.connectorConnections.encryptionKey)
+        : undefined
+    this.connectorService = new ConnectorService(this.projectId, connectors, {
+      storage: this.storage,
+      credentialProtector,
+    })
+    if (this.connectorService.connectionProcess) {
+      registerConnectorConnectionCallbackProcess(
+        this,
+        this.connectorService.connectionProcess.callbackProcess
+      )
+    }
+    assertWebhookRunStorage(connectors, this.storage)
     this.webhookRegistry = new WebhookRegistry({ connectors })
 
-    const materializer = createOntologyMaterializer({
+    this.materializer = createOntologyMaterializer({
       projectId: this.projectId,
       ontology: definitions.ontology,
       projections: definitions.projections,
@@ -197,6 +221,7 @@ export class SixbHost<
 
     this.hostContext = {
       projectId: this.projectId,
+      broker: this.broker,
       ontology: definitions.ontology,
       actionRegistry: definitions.actions,
       events: this.events,
@@ -204,12 +229,6 @@ export class SixbHost<
       queues: this.queues,
     }
     registerProjectionRegistry(this.hostContext, definitions.projections)
-    const ontologyMutations = createOntologyMutationRuntime({
-      materializer,
-      notifyCommittedFacts: () => this.committedFacts.notify(),
-    })
-    registerOntologyMutationRuntime(this, ontologyMutations)
-    registerOntologyMutationRuntime(this.hostContext, ontologyMutations)
     shareSixbErrorReporter(this, this.hostContext)
     this.scheduler = new SchedulerRuntime({
       schedules: definitions.schedules.list(),
@@ -219,11 +238,7 @@ export class SixbHost<
 
   /** Bind an existing opaque scope. This method never creates or escalates authority. */
   withScope(scope: ExecutionScope): Sixb<TOntologySources> {
-    assertExecutionScopeProject(this.projectId, scope)
-    const authorization = resolveRuntimeAuthorization(scope.authorization)
-    if (authorization.type === "denied") {
-      throw new Error("[Sixb] Execution scope carries unregistered runtime authorization.")
-    }
+    const authorization = resolveExecutionScopeAuthorization(this.projectId, scope)
     if (authorization.ref.type === "kernel") {
       throw new Error("[Sixb] Kernel authority cannot be bound to the domain SDK.")
     }
@@ -233,6 +248,13 @@ export class SixbHost<
       runtimeAuthorization: scope.authorization,
       ...(authorization.type === "principal" ? { authorization: authorization.context } : {}),
     }
+    registerOntologyMutationRuntime(
+      runtime,
+      createOntologyMutationRuntime({
+        materializer: this.materializer.withScope(scope),
+        notifyCommittedFacts: () => this.committedFacts.notify(),
+      })
+    )
     return createBoundSixb<TOntologySources>(runtime, this.sixbDependencies(), scope.execution)
   }
 
@@ -291,6 +313,9 @@ export class SixbHost<
       definitions: this.definitions,
       logging: this.logging,
       connectorService: this.connectorService,
+      ...(this.connectorService.connectionProcess === undefined
+        ? {}
+        : { connectorConnections: this.connectorService.connectionProcess }),
       blobStorage: this.blobStorage,
     }
   }
@@ -323,23 +348,31 @@ function validateAuthStrategySecurityReferences(
   }
 }
 
-function assertWebhookDeliveryStorage(
+function assertWebhookRunStorage(
   connectors: readonly ConnectorDefinition[],
   storage: Storage
 ): void {
-  if (storage.webhookDeliveries !== undefined) {
+  if (storage.webhookRuns !== undefined) {
     return
   }
 
   for (const connector of connectors) {
     const webhooks = connector.adapter.webhooks
-    if (!Array.isArray(webhooks)) {
-      continue
-    }
-
-    if (webhooks.some((webhook) => webhook.idempotencyKey !== undefined)) {
+    if (Array.isArray(webhooks) && webhooks.length > 0) {
       throw new WebhookValidationError(
-        "[Sixb] Webhook idempotency requires storage.webhookDeliveries to be configured."
+        "[Sixb] Webhooks require storage.webhookRuns to be configured."
+      )
+    }
+  }
+}
+
+function assertConnectorConnectionSurfaces(connectors: readonly ConnectorDefinition[]): void {
+  for (const connector of connectors) {
+    if (!isOAuthConnectorDefinition(connector)) continue
+    if (connector.adapter.webhooks !== undefined) {
+      throw createConnectorCodedError(
+        "connector.configuration_invalid",
+        `OAuth connector '${connector.id}' cannot register webhooks until connection routing is defined.`
       )
     }
   }

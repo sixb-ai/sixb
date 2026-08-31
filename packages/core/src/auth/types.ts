@@ -73,6 +73,8 @@ export interface InvitationDeliveryInput {
   readonly audience: AuthSessionAudience
   readonly returnTo: string
   readonly requestOrigin: string
+  /** Return the delivered link once so the inviter can copy it through an approved channel. */
+  readonly revealLink?: boolean
   readonly now?: Date
 }
 
@@ -80,8 +82,18 @@ export type AuthEmailDeliveryStatus = "sent" | "skipped" | "rate_limited"
 
 export type InviteDeliveryStatus = AuthEmailDeliveryStatus | "not_supported"
 
+export interface RevealedInvitationLink {
+  readonly url: string
+  readonly expiresAt?: Date
+}
+
 export interface InviteDeliveryResult {
   readonly status: InviteDeliveryStatus
+  /**
+   * Present only when the caller explicitly requests `revealLink`. Treat this as a credential:
+   * never persist it or include it in list responses, logs, or analytics.
+   */
+  readonly link?: RevealedInvitationLink
 }
 
 export interface InvitationDeliveryAuthStrategy extends AuthStrategy {
@@ -214,6 +226,8 @@ export interface InviteUserInput {
   readonly groupIds?: readonly string[]
   readonly expiresAt?: Date
   readonly returnTo?: string
+  /** Reveal the delivered link once in the result. Defaults to false. */
+  readonly revealLink?: boolean
 }
 
 export interface InviteUserResult {

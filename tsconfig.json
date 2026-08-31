@@ -7,9 +7,10 @@
       "@sixb/agent-ui": ["./packages/agent-ui/src/index.ts"],
       "@sixb/agent-ui/react-router": ["./packages/agent-ui/src/react-router.tsx"],
       "@sixb/agent-worker": ["./packages/agent-worker/src/index.ts"],
-      "@sixb/anthropic": ["./packages/anthropic/src/index.ts"],
+      "@sixb/anthropic": ["./models/anthropic/src/index.ts"],
       "@sixb/app": ["./packages/app/src/index.ts"],
       "@sixb/app/agents": ["./packages/app/src/agents.ts"],
+      "@sixb/app/auth": ["./packages/app/src/auth.ts"],
       "@sixb/atlas": ["./packages/atlas/src/index.ts"],
       "@sixb/auth-magic-link": ["./auth/magic-link/src/index.ts"],
       "@sixb/auth-oidc": ["./auth/oidc/src/index.ts"],
@@ -31,6 +32,7 @@
       "@sixb/connector-github": ["./connectors/github/src/index.ts"],
       "@sixb/connector-google": ["./connectors/google/src/index.ts"],
       "@sixb/connector-imap": ["./connectors/imap/src/index.ts"],
+      "@sixb/connector-linkedin": ["./connectors/linkedin/src/index.ts"],
       "@sixb/connector-mercury": ["./connectors/mercury/src/index.ts"],
       "@sixb/connector-meta": ["./connectors/meta/src/index.ts"],
       "@sixb/connector-pandadoc": ["./connectors/pandadoc/src/index.ts"],
@@ -39,7 +41,9 @@
       "@sixb/connector-rest": ["./connectors/rest/src/index.ts"],
       "@sixb/connector-sftp": ["./connectors/sftp/src/index.ts"],
       "@sixb/connector-sql": ["./connectors/sql/src/index.ts"],
+      "@sixb/connector-stripe": ["./connectors/stripe/src/index.ts"],
       "@sixb/connector-teamleader": ["./connectors/teamleader/src/index.ts"],
+      "@sixb/connector-tiktok": ["./connectors/tiktok/src/index.ts"],
       "@sixb/connector-unipile": ["./connectors/unipile/src/index.ts"],
       "@sixb/core": ["./packages/core/src/index.ts"],
       "@sixb/core/actions/worker": ["./packages/core/src/actions/worker.ts"],
@@ -59,9 +63,18 @@
       "@sixb/core/internal/agent-run-storage-provider": [
         "./packages/core/src/storage/agents/provider.ts"
       ],
+      "@sixb/core/internal/ai-cost-storage-provider": [
+        "./packages/core/src/storage/ai-cost/provider.ts"
+      ],
       "@sixb/core/internal/auth": ["./packages/core/src/auth/index.ts"],
       "@sixb/core/internal/authorization": ["./packages/core/src/authorization/index.ts"],
       "@sixb/core/internal/bootstrap": ["./packages/core/src/bootstrap/index.ts"],
+      "@sixb/core/internal/connector-connections": [
+        "./packages/core/src/connectors/connections/internal.ts"
+      ],
+      "@sixb/core/internal/connector-connection-storage-provider": [
+        "./packages/core/src/storage/connector-connections/provider.ts"
+      ],
       "@sixb/core/internal/edits": ["./packages/core/src/edits/index.ts"],
       "@sixb/core/internal/error-reporting": ["./packages/core/src/error-reporting/internal.ts"],
       "@sixb/core/internal/errors": ["./packages/core/src/errors/internal.ts"],
@@ -75,8 +88,17 @@
       "@sixb/core/internal/ontology-storage-provider": [
         "./packages/core/src/storage/ontology/provider.ts"
       ],
+      "@sixb/core/internal/pipeline-run-storage-provider": [
+        "./packages/core/src/storage/pipeline-runs/provider.ts"
+      ],
       "@sixb/core/internal/projection-run-storage-provider": [
-        "./packages/core/src/storage/projection-runs/lifecycle.ts"
+        "./packages/core/src/storage/projection-runs/provider.ts"
+      ],
+      "@sixb/core/internal/sync-run-storage-provider": [
+        "./packages/core/src/storage/sync-runs/provider.ts"
+      ],
+      "@sixb/core/internal/webhook-run-storage-provider": [
+        "./packages/core/src/storage/webhook-runs/provider.ts"
       ],
       "@sixb/core/internal/workflow-run-storage-provider": [
         "./packages/core/src/storage/workflow-runs/provider.ts"
@@ -88,9 +110,11 @@
       "@sixb/core/internal/agent-execution": ["./packages/core/src/execution/agent.ts"],
       "@sixb/core/internal/primitive-execution": ["./packages/core/src/execution/primitive.ts"],
       "@sixb/core/internal/request-execution": ["./packages/core/src/execution/request.ts"],
+      "@sixb/core/internal/webhooks": ["./packages/core/src/webhooks/internal.ts"],
       "@sixb/core/internal/execution-storage": [
         "./packages/core/src/storage/executions/provider.ts"
       ],
+      "@sixb/core/internal/pipelines": ["./packages/core/src/pipelines/index.ts"],
       "@sixb/core/internal/query": ["./packages/core/src/objects/query/index.ts"],
       "@sixb/core/internal/rules": ["./packages/core/src/rules/internal.ts"],
       "@sixb/core/internal/runtime": ["./packages/core/src/runtime/internal.ts"],
@@ -99,6 +123,7 @@
       "@sixb/core/internal/storage-operation-scope": [
         "./packages/core/src/storage/operation-scope.ts"
       ],
+      "@sixb/core/internal/syncs": ["./packages/core/src/syncs/index.ts"],
       "@sixb/core/internal/workers": ["./packages/core/src/workers/index.ts"],
       "@sixb/core/internal/workflows": ["./packages/core/src/workflows/index.ts"],
       "@sixb/core/lake-storage": ["./packages/core/src/lake-storage/index.ts"],
@@ -137,7 +162,7 @@
       "@sixb/ui/lib/shiki": ["./packages/ui/src/lib/shiki.ts"],
       "@sixb/ui/lib/speech": ["./packages/ui/src/lib/speech/index.ts"],
       "@sixb/ui/lib/utils": ["./packages/ui/src/lib/utils.ts"],
-      "@sixb/vercel-ai-gateway": ["./packages/vercel-ai-gateway/src/index.ts"],
+      "@sixb/vercel-ai-gateway": ["./models/vercel-ai-gateway/src/index.ts"],
       "@sixb/workflow-worker": ["./packages/workflow-worker/src/index.ts"]
     }
   }

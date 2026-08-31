@@ -270,6 +270,10 @@ new rows to the existing target. Omitting a source `versionId` resolves the late
 committed version at execution time; providing a `versionId` pins that source for
 repeatable transforms.
 
+DuckDB promotes `sum(BIGINT)` results to `HUGEINT`. When the matching target column is a Sixb
+`int64`, the executor applies a checked conversion back to `BIGINT` before comparing or writing
+rows. Values outside the signed 64-bit range fail the transform instead of being truncated.
+
 ## Definition Updates
 
 DuckLake supports schema evolution, and this provider exposes a small safe

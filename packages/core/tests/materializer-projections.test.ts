@@ -8,6 +8,7 @@ import {
   OntologyRegistry,
   prop,
 } from "../src"
+import { createTestingScope } from "../src/execution/scopes"
 import {
   createEventId,
   createOntologyMaterializer,
@@ -22,6 +23,7 @@ import {
 } from "../src/storage"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
+import { startTestProjectionRun } from "../src/testing"
 import {
   atomic,
   claimProjectionExecution,
@@ -29,6 +31,7 @@ import {
   Device,
   entries,
   pendingProjectionExecution,
+  projectionScope,
   replacement,
   sourceEntry,
   sourceEntryWithParent,
@@ -81,7 +84,7 @@ describe("ontology materializer projection replacement", () => {
       versionId: "wrong-target",
       createdAt: "2026-01-01T00:00:00.000Z",
     }
-    const run = await storage.projectionRuns.startOrReclaim({
+    const run = await startTestProjectionRun(storage, {
       id: "wrong-target-run",
       projectId: "project",
       identity: {
@@ -578,7 +581,7 @@ describe("ontology materializer projection replacement", () => {
     })
     resume()
 
-    await expect(losing).rejects.toMatchObject({ kind: "run-correlation" })
+    await expect(losing).rejects.toMatchObject({ kind: "idempotency" })
     const loser = [
       ...getInMemoryOntologyStorageTestingAdapter(storage.ontology)
         .snapshot()
@@ -1288,22 +1291,31 @@ describe("ontology materializer projection replacement", () => {
         materializationId: () => "standalone-link-materialization",
       },
     })
-    await materializer.edits.commit(
-      atomic("standalone-link-endpoints", [
-        {
-          id: "one",
-          kind: "object.create",
-          ref: ref("one"),
-          properties: { name: "one" },
-        },
-        {
-          id: "two",
-          kind: "object.create",
-          ref: ref("two"),
-          properties: { name: "two" },
-        },
-      ])
-    )
+    await materializer
+      .withScope(
+        createTestingScope({
+          projectId: "project",
+          executionId: "standalone-link-request-execution",
+          requestId: "standalone-link-request",
+          correlationId: "standalone-link-correlation",
+        })
+      )
+      .edits.commit(
+        atomic("standalone-link-endpoints", [
+          {
+            id: "one",
+            kind: "object.create",
+            ref: ref("one"),
+            properties: { name: "one" },
+          },
+          {
+            id: "two",
+            kind: "object.create",
+            ref: ref("two"),
+            properties: { name: "two" },
+          },
+        ])
+      )
     const linkRef = { source: ref("one"), linkId: "peers", target: ref("two") }
     const datasetVersion = {
       datasetId: "device-peers",
@@ -1316,17 +1328,25 @@ describe("ontology materializer projection replacement", () => {
       protocol: "replacement",
       datasetVersion,
     })
-    const result = await materializer.projections.replace({
-      source: { projectionId: "device-peers" },
-      datasetVersion,
-      execution,
-      entries: entries([
-        {
-          root: { kind: "link", ref: linkRef },
-          assertions: [{ kind: "link", ref: linkRef }],
-        },
-      ]),
-    })
+    const result = await materializer
+      .withScope(
+        await projectionScope(storage, {
+          projectId: "project",
+          projectionId: "device-peers",
+          runId: execution.projectionRunId,
+        })
+      )
+      .projections.replace({
+        source: { projectionId: "device-peers" },
+        datasetVersion,
+        execution,
+        entries: entries([
+          {
+            root: { kind: "link", ref: linkRef },
+            assertions: [{ kind: "link", ref: linkRef }],
+          },
+        ]),
+      })
     expect(result.counts).toMatchObject({ linksCreated: 1 })
     expect(streamedLanes).toEqual(["source-replacement.link"])
     expect(
@@ -1383,23 +1403,31 @@ describe("ontology materializer projection replacement", () => {
       datasetVersion,
     })
     await expect(
-      materializer.projections.replace({
-        source: { projectionId: "owned" },
-        datasetVersion,
-        execution,
-        entries: entries([
-          {
-            root: { kind: "object", ref: { objectTypeId: "Owned", primaryId: "one" } },
-            assertions: [
-              {
-                kind: "object",
-                ref: { objectTypeId: "Owned", primaryId: "one" },
-                properties: { owned: "yes", unowned: "no" },
-              },
-            ],
-          },
-        ]),
-      })
+      materializer
+        .withScope(
+          await projectionScope(storage, {
+            projectId: "project",
+            projectionId: "owned",
+            runId: execution.projectionRunId,
+          })
+        )
+        .projections.replace({
+          source: { projectionId: "owned" },
+          datasetVersion,
+          execution,
+          entries: entries([
+            {
+              root: { kind: "object", ref: { objectTypeId: "Owned", primaryId: "one" } },
+              assertions: [
+                {
+                  kind: "object",
+                  ref: { objectTypeId: "Owned", primaryId: "one" },
+                  properties: { owned: "yes", unowned: "no" },
+                },
+              ],
+            },
+          ]),
+        })
     ).rejects.toThrow("unowned property")
 
     const { materializer: fixtureMaterializer } = createMaterializerFixture()

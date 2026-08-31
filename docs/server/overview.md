@@ -70,10 +70,10 @@ All JSON routes are prefixed with `/api` and mirror the runtime's typed APIs; se
 | Group          | Representative routes                                                                | See                                             |
 | -------------- | ----------------------------------------------------------------------------------- | ----------------------------------------------- |
 | Objects CRUD   | `GET /api/objects`, `GET/PUT /api/objects/:type/:id`                                 | [Objects](../objects/overview.md)               |
-| Object query   | `POST /api/objects/query`, `.../query/count`, `.../query/exists`, `.../query/facets` | [Querying](../objects/querying.md)              |
+| Object query   | `POST /api/objects/query`, `.../query/links`, `.../query/count`, `.../query/exists`, `.../query/facets` | [Querying](../objects/querying.md)              |
 | Files          | `POST /api/files`, `/api/files/uploads/...`, `GET .../files/content`                 | [Files](#files)                                 |
 | Telemetry      | `GET/POST /api/objects/:type/:id/telemetry/:prop`, `.../history`, `.../latest`       | [Telemetry](../objects/telemetry.md)            |
-| Links          | `GET/PUT/DELETE /api/objects/:type/:id/links/:linkId`                                | [Links](../ontology/links.md)                   |
+| Links          | `POST /api/objects/query/links`; `PUT/DELETE /api/objects/:type/:id/links/:linkId`    | [Links](../ontology/links.md)                   |
 | Actions        | `GET /api/actions`, `POST /api/actions/:actionId`                                    | [Actions](../actions/overview.md)               |
 | Action runs    | `GET /api/action-runs`, `GET /api/action-runs/:runId`                                | [Actions](../actions/overview.md)               |
 | Ontology       | `GET /api/object-types`, `GET /api/object-types/:objectTypeId`                       | [Ontology](../ontology/overview.md)             |

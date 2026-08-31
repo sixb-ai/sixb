@@ -2,9 +2,13 @@
 
 Local process sandbox provider for Sixb agents.
 
-Runs each agent's bash on the host machine, confined by the OS sandbox facility when one is available:
-`sandbox-exec` (seatbelt) on macOS, `bwrap` (bubblewrap) on Linux. Drop-in `Sandbox` provider — wire it
-once into `createSixb({ sandboxes })` and nothing else changes.
+Runs each agent's sandbox tools on the host machine, confined by the OS sandbox facility when
+available: `sandbox-exec` (seatbelt) on macOS, `bwrap` (bubblewrap) on Linux. Drop-in `Sandbox`
+provider — wire it once into `createSixb({ sandboxes })` and nothing else changes.
+
+For agent use, the host needs Bash with `BASH_ENV` support, standard file utilities, CA
+certificates, and Bun 1.3+ or Node 22+. The provider does not install or modify host tools. `curl`
+and `jq` are not required.
 
 ## Install
 
@@ -40,7 +44,7 @@ export const sixb = createSixb({
 ## Isolation is best-effort
 
 With `isolation: "auto"` on a platform where neither backend is available — and always with
-`isolation: "none"` — the agent's bash runs as an ordinary child process of your application, with
+`isolation: "none"` — the agent's tools run as ordinary child processes of your application, with
 that process's privileges. That is fine for local development and wrong for anything running
 untrusted instructions.
 

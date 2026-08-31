@@ -11,10 +11,17 @@ import type {
   ValueType,
 } from "@sixb/core"
 import type { AgentExecutionHost } from "@sixb/core/internal/agent-execution"
+import type { RunModelLoopInput } from "@sixb/core/internal/agents"
 import type { LoggingService } from "@sixb/core/internal/logging"
-import type { ModelTool } from "@sixb/core/models"
+import type {
+  LanguageModelDefinition,
+  ModelCallCost,
+  ModelRoute,
+  ModelTool,
+} from "@sixb/core/models"
 import type {
   AgentStorage,
+  AiCostStorage,
   AiUsageStorage,
   AuthStorage,
   RecordAiModelCallInput,
@@ -28,10 +35,19 @@ import type { StreamSink } from "./stream-sink"
 export type AgentWorkerStorage = Storage & {
   readonly agents: AgentStorage
   readonly aiUsage: AiUsageStorage
+  readonly aiCosts: AiCostStorage
   readonly auth: AuthStorage
 }
 
-export type RecoverAiModelCall = (record: RecordAiModelCallInput) => Promise<void>
+export interface RecoverAiModelCallInput {
+  readonly usage: RecordAiModelCallInput
+  readonly definition: LanguageModelDefinition
+  readonly cost: ModelCallCost
+  readonly route?: ModelRoute
+  readonly ratedAt: Date
+}
+
+export type RecoverAiModelCall = (input: RecoverAiModelCallInput) => Promise<void>
 
 /**
  * The host surface the agent worker is constructed with. `SixbHost` satisfies it structurally, so
@@ -87,11 +103,12 @@ export interface AgentTurnContext {
   /** Run-scoped agent API gateway base URL, when this turn was created through a run environment. */
   readonly apiBaseUrl?: string
   readonly tools: readonly ModelTool[]
+  readonly prepareStep?: RunModelLoopInput["prepareStep"]
   readonly systemAddendum?: string
   readonly attachmentContext?: PreparedAgentAttachmentContext
   /**
    * The concurrently provisioning sandbox, exposed so the turn can fail if it rejects. Resolved
-   * value is irrelevant here (the bash tool consumes the handle); only its rejection matters.
+   * value is irrelevant here (the sandbox tools consume the handle); only its rejection matters.
    */
   readonly sandboxReady?: Promise<BashSandboxHandle>
   readonly sandboxWasUsed?: () => boolean
@@ -122,7 +139,7 @@ export interface AgentWorkerOptions {
   /**
    * Wall-clock budget for a single turn, in ms. A turn that exceeds it is aborted and recorded
    * `failed`, releasing the thread — a slow-but-alive model cannot hold a thread indefinitely.
-   * Defaults to 5 minutes.
+   * Defaults to 10 minutes.
    */
   readonly turnTimeoutMs?: number
 }

@@ -21,6 +21,12 @@ export function queryLatestRunsByOwnerId<TRow>(
   }
 
   const placeholders = ownerIds.map(() => "?").join(", ")
+  const orderColumn =
+    input.tableName === "sync_runs" ||
+    input.tableName === "pipeline_runs" ||
+    input.tableName === "projection_runs"
+      ? "COALESCE(started_at, queued_at)"
+      : "started_at"
   const rows = input.db
     .query(
       `
@@ -30,7 +36,7 @@ export function queryLatestRunsByOwnerId<TRow>(
             *,
             ROW_NUMBER() OVER (
               PARTITION BY ${input.ownerColumn}
-              ORDER BY started_at DESC, id DESC
+              ORDER BY ${orderColumn} DESC, id DESC
             ) AS sixb_latest_rank
           FROM ${input.tableName}
           WHERE project_id = ? AND ${input.ownerColumn} IN (${placeholders})

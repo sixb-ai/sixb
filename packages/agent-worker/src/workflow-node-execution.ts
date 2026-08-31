@@ -1,10 +1,21 @@
-import type { AgentDefinition, SixbFailure, ValueType, WorkflowDefinition } from "@sixb/core"
+import type {
+  AgentDefinition,
+  AgentMessagePart,
+  SixbFailure,
+  ValueType,
+  WorkflowDefinition,
+} from "@sixb/core"
 import {
   createAgentRunExecutionToken,
   resolveAgentExecutionAuthorization,
 } from "@sixb/core/internal/agents"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
-import { createSixbError, summarizeErrorMessage, toSixbFailure } from "@sixb/core/internal/errors"
+import {
+  createSixbError,
+  isSixbError,
+  summarizeErrorMessage,
+  toSixbFailure,
+} from "@sixb/core/internal/errors"
 import type { QueueDelivery } from "@sixb/core/internal/workers"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { WorkflowAgentNodeDefinition } from "@sixb/core/internal/workflows"
@@ -15,6 +26,7 @@ import type {
   AgentWorkflowNodeRequestedQueueJob,
 } from "@sixb/core/queues"
 import type {
+  AgentRunFinishReason,
   ExecutionRecord,
   WorkflowAgentNodeRunExecution,
   WorkflowAgentNodeRunRecord,
@@ -32,7 +44,11 @@ import {
   type AgentExecutionEnvironment,
   createWorkflowAgentNodeEnvironment,
 } from "./run-environment"
-import { runWorkflowAgentNode } from "./run-workflow-agent-node"
+import {
+  runWorkflowAgentNode,
+  type WorkflowAgentFailurePhase,
+  WorkflowAgentNodeExecutionError,
+} from "./run-workflow-agent-node"
 import type { AgentWorkerContext, AgentWorkerHost } from "./types"
 
 export interface ExecuteWorkflowAgentNodeInput {
@@ -110,7 +126,7 @@ export async function executeWorkflowAgentNode(
     )
   }
   const usageRecorder = new AiModelCallRecorder({
-    storage: context.storage.aiUsage,
+    storage: context.storage,
     projectId: context.id,
     executionId: executionRecord.executionId,
     attempt: reserved.attempt,
@@ -121,6 +137,7 @@ export async function executeWorkflowAgentNode(
 
   let environment: AgentExecutionEnvironment | null = null
   const cancel = await input.watchForCancel(nodeRun.id)
+  const turnSignal = AbortSignal.any([signal, cancel.signal])
   const stopOwnershipProjection = projectQueueOwnership({
     delivery,
     runs,
@@ -142,6 +159,7 @@ export async function executeWorkflowAgentNode(
       agent,
       run: reserved,
       nodeInput: nodeRun.input,
+      signal: turnSignal,
       onDetachedTeardown: input.onDetachedTeardown,
     })
     const result = await runWorkflowAgentNode({
@@ -154,7 +172,7 @@ export async function executeWorkflowAgentNode(
       prompt: reserved.prompt,
       valueTypesById,
       usageRecorder,
-      signal: AbortSignal.any([signal, cancel.signal]),
+      signal: turnSignal,
     })
     const completedNode = await finishWorkflowAgentNodeSucceeded({
       context,
@@ -173,13 +191,25 @@ export async function executeWorkflowAgentNode(
   } catch (error) {
     if (lostQueueDelivery(error, signal)) return
 
-    // Output parsing and tool handling can fail after the final provider callback. A retained
-    // accounting failure still takes precedence so usage loss can never be hidden.
-    let executionError = error
+    const debug =
+      error instanceof WorkflowAgentNodeExecutionError
+        ? {
+            cause: error.cause,
+            phase: error.phase,
+            finishReason: error.finishReason,
+            trace: error.trace,
+          }
+        : undefined
+
+    // Output parsing and tool handling can fail after the final provider callback. Accounting
+    // Accounting failure takes precedence so no later billable model call can start.
+    let executionError = debug?.cause ?? error
+    let failurePhase = debug?.phase
     try {
       usageRecorder.assertHealthy()
     } catch (recordingError) {
       executionError = recordingError
+      failurePhase = undefined
     }
 
     if (signal.aborted) throw executionError
@@ -201,6 +231,9 @@ export async function executeWorkflowAgentNode(
       executionToken,
       status,
       error: executionError,
+      trace: debug?.trace,
+      finishReason: debug?.finishReason,
+      failurePhase,
     })
     if (status === "failed") {
       reportRunFailure(input.host, executionError, {
@@ -295,7 +328,10 @@ async function loadWorkflowAgentNodeExecution(
       }
     )
   }
-  if (durableExecution.parentExecutionId !== workflowRun.executionId) {
+  if (
+    durableExecution.source.type !== "execution" ||
+    durableExecution.source.executionId !== workflowRun.executionId
+  ) {
     throw createSixbError(
       "internal.unexpected",
       `[SixbAgentWorker] Agent workflow node '${nodeRun.id}' execution is not linked to workflow run '${workflowRun.id}'.`,
@@ -432,12 +468,23 @@ async function finishWorkflowAgentNodeFailed(input: {
   readonly executionToken: string
   readonly status: "failed" | "cancelled"
   readonly error: unknown
+  readonly finishReason?: AgentRunFinishReason
+  readonly trace?: readonly AgentMessagePart[]
+  readonly failurePhase?: WorkflowAgentFailurePhase
 }): Promise<{
   readonly node: WorkflowNodeRunRecord
   readonly run: WorkflowRunRecord
   readonly failure: SixbFailure<WorkflowRunFailureCode>
 }> {
   const at = new Date()
+  const agentErrorDetails = {
+    ...workflowAgentErrorDetails(input.agent.id, input.nodeRun),
+    ...(input.failurePhase === undefined ? {} : { failurePhase: input.failurePhase }),
+  }
+  const agentExecutionError =
+    input.failurePhase === undefined
+      ? input.error
+      : attachWorkflowAgentFailureDetails(input.error, input.status, agentErrorDetails)
   const workflowFailureError =
     input.status === "failed"
       ? createWorkflowNodeFailure(input.error, {
@@ -452,7 +499,7 @@ async function finishWorkflowAgentNodeFailed(input: {
           summarizeErrorMessage(input.error, "Agent workflow node execution failed."),
           {
             cause: input.error,
-            details: workflowAgentErrorDetails(input.agent.id, input.nodeRun),
+            details: agentErrorDetails,
           }
         )
   const workflowFailure = toSixbFailure(workflowFailureError, {
@@ -474,10 +521,12 @@ async function finishWorkflowAgentNodeFailed(input: {
       executionToken: input.executionToken,
       status: input.status,
       modelId: input.agent.model.modelId,
-      error: toAgentExecutionFailure(input.error, {
+      finishReason: input.finishReason,
+      trace: input.trace,
+      error: toAgentExecutionFailure(agentExecutionError, {
         status: input.status,
         at,
-        details: workflowAgentErrorDetails(input.agent.id, input.nodeRun),
+        details: agentErrorDetails,
       }),
       completedAt: at,
     })
@@ -497,6 +546,27 @@ async function finishWorkflowAgentNodeFailed(input: {
     })
     return { node, run, failure: workflowFailure }
   })
+}
+
+function attachWorkflowAgentFailureDetails(
+  error: unknown,
+  status: "failed" | "cancelled",
+  details: Readonly<Record<string, string>>
+): unknown {
+  if (status === "cancelled") {
+    return createSixbError(
+      "runtime.cancelled",
+      summarizeErrorMessage(error, "Agent workflow node execution was cancelled."),
+      { cause: error, details }
+    )
+  }
+  if (
+    isSixbError(error) &&
+    (error.code === "internal.unexpected" || error.code === "agent.execution_failed")
+  ) {
+    return createSixbError(error.code, error.message, { cause: error, details })
+  }
+  return error
 }
 
 async function emitNodeSucceeded(
@@ -589,7 +659,7 @@ export async function enqueueWorkflowAgentNodeResume(
         type: "workflow.run.resume.requested",
         payload: {
           runId: node.workflowRunId,
-          resume: { kind: "agentNode", nodeRunId: node.id },
+          nodeRunId: node.id,
         },
       },
     ],

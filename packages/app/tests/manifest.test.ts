@@ -3,7 +3,6 @@ import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { generateAppEntry } from "../src/codegen"
-import { createCustomApp } from "../src/createCustomApp"
 
 interface GeneratedFixture {
   readonly root: string
@@ -201,23 +200,44 @@ describe("custom app metadata and manifest generation", () => {
       "dir"
     )
 
-    const app = await createCustomApp({
-      rootDir: fixture.root,
-      authEnabled: false,
-      agentRoutes: false,
-    })
-    const result = await app.build()
-
-    expect(result.success).toBe(true)
-    const builtHtml = await readFile(join(result.outdir, "index.html"), "utf-8")
-    const builtManifest = JSON.parse(
-      await readFile(join(result.outdir, "app.webmanifest"), "utf-8")
+    // Keep Bun.build in a disposable process. A completed in-process split build leaves bundler
+    // state that can break a later HTML dev bundle in the same bun:test process.
+    const buildScript = join(fixture.root, "run-build.ts")
+    const createCustomAppPath = join(import.meta.dir, "..", "src", "createCustomApp.ts")
+    await writeFile(
+      buildScript,
+      [
+        `import { createCustomApp } from ${JSON.stringify(createCustomAppPath)}`,
+        `const app = await createCustomApp({ rootDir: ${JSON.stringify(fixture.root)}, authEnabled: false, agentRoutes: false })`,
+        "const result = await app.build()",
+        "if (!result.success) throw new Error((result.logs ?? []).join('\\n'))",
+        "",
+      ].join("\n")
     )
+    const proc = Bun.spawn([process.execPath, "run", buildScript], {
+      cwd: fixture.root,
+      stdout: "ignore",
+      stderr: "pipe",
+    })
+    const exitCode = await proc.exited
+    if (exitCode !== 0) {
+      throw new Error(await new Response(proc.stderr).text())
+    }
+
+    const outdir = join(fixture.root, ".sixb", "dist", "app")
+    const builtHtml = await readFile(join(outdir, "index.html"), "utf-8")
+    const builtManifest = JSON.parse(await readFile(join(outdir, "app.webmanifest"), "utf-8"))
     expect(builtHtml).toContain('href="/app.webmanifest"')
     expect(builtHtml).toContain('href="/favicon.svg"')
+    expect(builtHtml).toContain('class="sixb-loading-shell"')
+    expect(builtHtml).not.toContain("main.tsx")
+    const scriptFile = builtHtml.match(/src="\/(app-[a-z0-9]+\.js)"/)?.[1]
+    expect(scriptFile).toBeDefined()
+    expect(await Bun.file(join(outdir, `${scriptFile}.br`)).exists()).toBe(true)
+    expect(await Bun.file(join(outdir, `${scriptFile}.gz`)).exists()).toBe(true)
     expect(builtManifest.name).toBe("Built PWA")
     expect(builtManifest.icons[0].src).toBe("/icon-192.png")
-    expect(await readFile(join(result.outdir, "icon-192.png"), "utf-8")).toBe("fixture png")
+    expect(await readFile(join(outdir, "icon-192.png"), "utf-8")).toBe("fixture png")
   })
 
   test("does not rewrite unchanged HTML or manifest output", async () => {

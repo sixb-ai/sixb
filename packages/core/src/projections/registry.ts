@@ -241,6 +241,13 @@ function cloneObjectProjectionDefinition(
         },
       ])
     ),
+    conflictResolution:
+      projection.conflictResolution?.strategy === "mostRecent"
+        ? {
+            strategy: "mostRecent",
+            sourceTimestamp: projection.conflictResolution.sourceTimestamp,
+          }
+        : { strategy: "editsWin" },
   }
 }
 
@@ -266,12 +273,18 @@ function cloneTelemetryProjectionDefinition(
     _tag: "TelemetryProjectionDefinition",
     id: projection.id,
     objectTypeId: projection.objectTypeId,
-    propertyId: projection.propertyId,
     datasetId: projection.datasetId,
     objectIdField: projection.objectIdField,
     atField: projection.atField,
-    valueField: projection.valueField,
-    ...(projection.unitField !== undefined ? { unitField: projection.unitField } : {}),
+    properties: Object.fromEntries(
+      Object.entries(projection.properties).map(([propertyId, mapping]) => [
+        propertyId,
+        {
+          valueField: mapping.valueField,
+          ...(mapping.unitField !== undefined ? { unitField: mapping.unitField } : {}),
+        },
+      ])
+    ),
   }
 }
 

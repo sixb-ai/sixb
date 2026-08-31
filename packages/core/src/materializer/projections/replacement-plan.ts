@@ -33,6 +33,7 @@ import {
   resolveEffectiveLink,
   resolveEffectiveLinkSlotMember,
   resolveEffectiveObject,
+  storedObjectEditedAt,
   usableLinkSlotOverride,
 } from "../effective/resolve"
 import { validateEffectiveObject } from "../effective/validate"
@@ -53,6 +54,7 @@ export interface ProjectionReplacementPlanInput {
   readonly projectionKind: "object" | "link"
   readonly identity: TimedCommitIdentity
   readonly origin: OntologyMaterializationOrigin
+  readonly correlationId: string
   readonly signal?: AbortSignal
 }
 
@@ -160,6 +162,7 @@ function appendObjectChangeWork(
         commitId: input.identity.commitId,
         committedAt: input.identity.committedAt,
         origin: input.origin,
+        correlationId: input.correlationId,
         change,
       })
     )
@@ -356,6 +359,7 @@ function appendLinkChangeWork(
         commitId: input.identity.commitId,
         committedAt: input.identity.committedAt,
         origin: input.origin,
+        correlationId: input.correlationId,
         change,
       })
     )
@@ -371,6 +375,7 @@ function resolveReplacementObject(
     primaryPropertyId: context.ontology.getPrimaryPropertyId(state.ref.objectTypeId),
     source: state.candidateSource,
     override: state.override?.value ?? null,
+    editedAt: storedObjectEditedAt(state.override),
     latestTelemetry: state.latestTelemetry,
   })
 }

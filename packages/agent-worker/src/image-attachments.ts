@@ -56,8 +56,10 @@ export async function processAgentImageAttachment(input: {
   readonly declaredMediaType?: string
   readonly fileName?: string
   readonly limits: AgentAttachmentLimits
+  readonly signal?: AbortSignal
 }): Promise<ProcessedAgentImage> {
   const { bytes, limits } = input
+  input.signal?.throwIfAborted()
   if (typeof Bun.Image !== "function") {
     return {
       ok: false,
@@ -69,7 +71,9 @@ export async function processAgentImageAttachment(input: {
   let metadata: ImageMetadata
   try {
     metadata = await readImageMetadata(bytes, limits)
+    input.signal?.throwIfAborted()
   } catch (error) {
+    input.signal?.throwIfAborted()
     return {
       ok: false,
       reason: imageErrorMessage(error),
@@ -102,7 +106,10 @@ export async function processAgentImageAttachment(input: {
     }
   }
 
-  candidates.push(...(await encodedCandidates(bytes, metadata, originalMediaType, limits)))
+  candidates.push(
+    ...(await encodedCandidates(bytes, metadata, originalMediaType, limits, input.signal))
+  )
+  input.signal?.throwIfAborted()
   const winner = candidates
     .filter((candidate) => candidate.encodedSize < limits.imageMaxBase64Bytes)
     .sort((left, right) => left.encodedSize - right.encodedSize)[0]
@@ -154,7 +161,8 @@ async function encodedCandidates(
   bytes: Uint8Array,
   metadata: ImageMetadata,
   originalMediaType: string,
-  limits: AgentAttachmentLimits
+  limits: AgentAttachmentLimits,
+  signal?: AbortSignal
 ): Promise<ImageCandidate[]> {
   const result: ImageCandidate[] = []
   const resized = () =>
@@ -165,7 +173,9 @@ async function encodedCandidates(
     )
 
   try {
+    signal?.throwIfAborted()
     const pngBytes = await resized().png().bytes()
+    signal?.throwIfAborted()
     result.push(
       await candidateFromEncodedBytes({
         bytes: pngBytes,
@@ -177,12 +187,15 @@ async function encodedCandidates(
       })
     )
   } catch {
+    signal?.throwIfAborted()
     // Keep trying JPEG candidates below. The caller reports omission if none fit.
   }
 
   for (const quality of limits.imageJpegQualities) {
     try {
+      signal?.throwIfAborted()
       const jpegBytes = await resized().jpeg({ quality }).bytes()
+      signal?.throwIfAborted()
       result.push(
         await candidateFromEncodedBytes({
           bytes: jpegBytes,
@@ -194,6 +207,7 @@ async function encodedCandidates(
         })
       )
     } catch {
+      signal?.throwIfAborted()
       // Try the next quality; some source formats/platforms may reject a candidate.
     }
   }

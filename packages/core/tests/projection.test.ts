@@ -32,6 +32,7 @@ const Room = defineObjectType({
     prop("buildingRef", "string"),
     prop("sensorRef", "string"),
     prop("temperature", "double", { mode: "telemetry" }),
+    prop("humidity", "double", { mode: "telemetry" }),
   ],
   links: [
     link("inBuilding", Building, { cardinality: "one" }),
@@ -45,6 +46,7 @@ const canonicalRoomsDataset = defineDataset("canonical.rooms", {
     col("room_name", "string"),
     col("building_id", "string"),
     col("building_ref", "string"),
+    col("updated_at", "timestamp"),
   ],
 })
 
@@ -61,6 +63,7 @@ const roomReadingsDataset = defineDataset("canonical.room-readings", {
     col("room_id", "string"),
     col("observed_at", "timestamp"),
     col("temperature", "float64"),
+    col("humidity", "float64"),
     col("unit", "string"),
   ],
 })
@@ -93,6 +96,19 @@ describe("defineProjection", () => {
     expect(result.datasetId).toBe("canonical.rooms")
     expect(result.properties).toEqual({ id: "room_id", name: "room_name" })
     expect(result.links).toEqual({})
+    expect(result.conflictResolution).toEqual({ strategy: "editsWin" })
+  })
+
+  test("configures most-recent source/edit conflict resolution", () => {
+    const result = defineProjection("room-proj", Room)
+      .fromDataset(canonicalRoomsDataset)
+      .properties({ id: "room_id", name: "room_name" })
+      .resolveConflicts({ strategy: "mostRecent", sourceTimestamp: "updated_at" })
+
+    expect(result.conflictResolution).toEqual({
+      strategy: "mostRecent",
+      sourceTimestamp: "updated_at",
+    })
   })
 
   test("rejects empty id", () => {
@@ -474,12 +490,10 @@ describe("defineProjection — telemetry target", () => {
     expect(result._tag).toBe("TelemetryProjectionDefinition")
     expect(result.id).toBe("room-temperatures")
     expect(result.objectTypeId).toBe("room")
-    expect(result.propertyId).toBe("temperature")
     expect(result.datasetId).toBe("canonical.room-readings")
     expect(result.objectIdField).toBe("room_id")
     expect(result.atField).toBe("observed_at")
-    expect(result.valueField).toBe("temperature")
-    expect(result.unitField).toBeUndefined()
+    expect(result.properties).toEqual({ temperature: { valueField: "temperature" } })
   })
 
   test("builds definition with optional unit field", () => {
@@ -492,7 +506,73 @@ describe("defineProjection — telemetry target", () => {
         unit: "unit",
       })
 
-    expect(result.unitField).toBe("unit")
+    expect(result.properties).toEqual({
+      temperature: { valueField: "temperature", unitField: "unit" },
+    })
+  })
+
+  test("builds one canonical definition for multiple telemetry properties", () => {
+    const result = defineProjection("room-readings", Room)
+      .fromDataset(roomReadingsDataset)
+      .points({
+        objectId: "room_id",
+        at: "observed_at",
+        properties: {
+          temperature: { value: "temperature", unit: "unit" },
+          humidity: "humidity",
+        },
+      })
+
+    expect(result).toEqual({
+      _tag: "TelemetryProjectionDefinition",
+      id: "room-readings",
+      objectTypeId: "room",
+      datasetId: "canonical.room-readings",
+      objectIdField: "room_id",
+      atField: "observed_at",
+      properties: {
+        temperature: { valueField: "temperature", unitField: "unit" },
+        humidity: { valueField: "humidity" },
+      },
+    })
+  })
+
+  test("rejects invalid grouped telemetry mappings", () => {
+    expect(() =>
+      defineProjection("empty", Room)
+        .fromDataset(roomReadingsDataset)
+        .points({ objectId: "room_id", at: "observed_at", properties: {} } as never)
+    ).toThrow("requires at least one property")
+
+    expect(() =>
+      defineProjection("static", Room)
+        .fromDataset(roomReadingsDataset)
+        .points({
+          objectId: "room_id",
+          at: "observed_at",
+          properties: { name: "temperature" },
+        } as never)
+    ).toThrow("must be telemetry-enabled")
+
+    expect(() =>
+      defineProjection("unknown", Room)
+        .fromDataset(roomReadingsDataset)
+        .points({
+          objectId: "room_id",
+          at: "observed_at",
+          properties: { missing: "temperature" },
+        } as never)
+    ).toThrow("does not exist")
+
+    expect(() =>
+      defineProjection("descriptor", Room)
+        .fromDataset(roomReadingsDataset)
+        .points({
+          objectId: "room_id",
+          at: "observed_at",
+          properties: { temperature: { value: "temperature", extra: "unit" } },
+        } as never)
+    ).toThrow("unknown key 'extra'")
   })
 
   test("rejects static property token", () => {

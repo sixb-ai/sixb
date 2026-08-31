@@ -1,6 +1,5 @@
 import { lstat, readdir, readFile } from "node:fs/promises"
 import { basename, join, relative, sep } from "node:path"
-import { fileURLToPath } from "node:url"
 import type { SandboxFileRecord } from "@sixb/core"
 
 export interface AgentSkillFile {
@@ -15,30 +14,20 @@ export interface AgentSkill {
   readonly files: readonly AgentSkillFile[]
 }
 
-export type AgentExecutionMode = "conversation" | "workflow-task"
-
 interface AgentSkillMetadata {
   readonly name?: string
   readonly description?: string
 }
 
 const SKILL_NAME_RE = /^[a-z0-9][a-z0-9._-]*$/
-const BUNDLED_SKILLS_DIR = fileURLToPath(new URL("./skills/", import.meta.url))
 
 export async function loadAgentSkills(
   input: { readonly projectSkillsDir?: string | false } = {}
 ): Promise<readonly AgentSkill[]> {
-  const bundledSkills = await loadSkillsDirectory(BUNDLED_SKILLS_DIR, { source: "bundled" })
   if (input.projectSkillsDir === false || input.projectSkillsDir === undefined) {
-    return bundledSkills
+    return []
   }
-
-  const projectSkills = await loadSkillsDirectory(input.projectSkillsDir, {
-    source: "project",
-    missingAllowed: true,
-    builtInNames: new Set(bundledSkills.map((skill) => skill.name)),
-  })
-  return [...bundledSkills, ...projectSkills]
+  return loadSkillsDirectory(input.projectSkillsDir)
 }
 
 /**
@@ -58,54 +47,12 @@ export function buildAgentSkillFiles(
   )
 }
 
-export function renderAgentSkillCatalog(
-  skills: readonly AgentSkill[],
-  mode: AgentExecutionMode
-): string {
-  const executionGuidance =
-    mode === "conversation"
-      ? "Execution mode: conversation. You may start a declared workflow only after showing the user a concise preview and receiving approval."
-      : "Execution mode: workflow-task. This is a headless workflow node: never start another workflow and never ask the user for approval."
-
-  return [
-    executionGuidance,
-    "Sixb API access is available from the sandboxed bash tool through a per-run gateway URL.",
-    "Agent Skills are installed under $SIXB_SKILLS_DIR.",
-    "Message attachments, when present, are listed in $SIXB_ATTACHMENTS and materialized under $SIXB_ATTACHMENT_DIR when size limits allow.",
-    "Prepare user-facing files under $SIXB_OUTPUT_STAGING_DIR, then atomically publish each complete file or directory with mv into $SIXB_OUTPUT_DIR. Only files under $SIXB_OUTPUT_DIR are attached to the final chat message when size limits allow.",
-    "Never write a file directly in $SIXB_OUTPUT_DIR and never modify it after publication; publish only complete outputs.",
-    "Use $SIXB_SKILLS_DIR and attachment/output env vars to reference file paths; do not hardcode sandbox directory paths.",
-    "Before applying a matching skill, read that skill's SKILL.md with bash/cat.",
-    "Load referenced files only when needed.",
-    "Use live ontology and object APIs rather than guessing schema or relying on stale context.",
-    "Do not add Authorization or Cookie headers. The gateway authenticates allowed requests.",
-    [
-      "Operate through the ontology layer: object types, object reads/queries, telemetry reads,",
-      "file publication, and declared actions or workflows.",
-    ].join(" "),
-    "",
-    "Available Agent Skills:",
-    ...skills.map(
-      (skill) => `- ${skill.name}: ${skill.description} Path: $SIXB_SKILLS_DIR/${skill.name}`
-    ),
-  ].join("\n")
-}
-
-interface LoadSkillsDirectoryOptions {
-  readonly source: "bundled" | "project"
-  readonly missingAllowed?: boolean
-  readonly builtInNames?: ReadonlySet<string>
-}
-
-async function loadSkillsDirectory(
-  skillsDir: string,
-  options: LoadSkillsDirectoryOptions
-): Promise<readonly AgentSkill[]> {
+async function loadSkillsDirectory(skillsDir: string): Promise<readonly AgentSkill[]> {
   let entries: string[]
   try {
     entries = await readdir(skillsDir)
   } catch (error) {
-    if (options.missingAllowed && isNotFound(error)) {
+    if (isNotFound(error)) {
       return []
     }
     throw error
@@ -121,15 +68,12 @@ async function loadSkillsDirectory(
     if (!info.isDirectory()) {
       continue
     }
-    skills.push(await loadAgentSkill(skillDir, options))
+    skills.push(await loadAgentSkill(skillDir))
   }
   return skills
 }
 
-async function loadAgentSkill(
-  skillDir: string,
-  options: LoadSkillsDirectoryOptions
-): Promise<AgentSkill> {
+async function loadAgentSkill(skillDir: string): Promise<AgentSkill> {
   const files = await collectSkillFiles(skillDir)
   const skillFile = files.find((file) => file.relativePath === "SKILL.md")
   if (!skillFile || typeof skillFile.contents !== "string") {
@@ -137,7 +81,7 @@ async function loadAgentSkill(
   }
 
   const metadata = parseSkillMetadata(skillFile.contents, skillDir)
-  validateSkillMetadata(skillDir, metadata, options)
+  validateSkillMetadata(skillDir, metadata)
   return {
     name: metadata.name,
     description: metadata.description,
@@ -147,8 +91,7 @@ async function loadAgentSkill(
 
 function validateSkillMetadata(
   skillDir: string,
-  metadata: AgentSkillMetadata,
-  options: LoadSkillsDirectoryOptions
+  metadata: AgentSkillMetadata
 ): asserts metadata is Required<AgentSkillMetadata> {
   if (!metadata.name?.trim()) {
     throw skillError(skillDir, "SKILL.md frontmatter must include a non-empty string name.")
@@ -164,13 +107,7 @@ function validateSkillMetadata(
   if (metadata.name !== dirName) {
     throw skillError(skillDir, `Skill name '${metadata.name}' must match directory '${dirName}'.`)
   }
-  if (options.source === "project" && options.builtInNames?.has(metadata.name)) {
-    throw skillError(
-      skillDir,
-      `Skill name '${metadata.name}' collides with a built-in agent skill.`
-    )
-  }
-  if (options.source === "project" && metadata.name.startsWith("sixb-")) {
+  if (metadata.name.startsWith("sixb-")) {
     throw skillError(skillDir, `Skill name '${metadata.name}' uses the reserved 'sixb-' prefix.`)
   }
 }

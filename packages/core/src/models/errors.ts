@@ -6,15 +6,27 @@ export class ModelProviderError extends Error {
     message: string,
     readonly providerId: string,
     readonly modelId: string,
-    options?: ErrorOptions & { readonly status?: number; readonly code?: string }
+    options?: ErrorOptions & {
+      readonly status?: number
+      readonly code?: string
+      readonly requestId?: string
+      readonly retryAfterMs?: number
+      readonly retryable?: boolean
+    }
   ) {
     super(message, options)
     this.status = options?.status
     this.code = options?.code
+    this.requestId = options?.requestId
+    this.retryAfterMs = options?.retryAfterMs
+    this.retryable = options?.retryable ?? false
   }
 
   readonly status?: number
   readonly code?: string
+  readonly requestId?: string
+  readonly retryAfterMs?: number
+  readonly retryable: boolean
 }
 
 export class ModelStreamError extends Error {

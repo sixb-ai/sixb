@@ -17,6 +17,18 @@ import {
 } from "../src/model-adapters"
 
 const connector = (() => Promise.reject(new Error("unused"))) as AgentToolRunContext["connector"]
+const toolRuntime = {
+  artifactsForToolCall() {
+    return {
+      async put() {
+        throw new Error("unused")
+      },
+    }
+  },
+  toolResultToModelOutput() {
+    return { type: "text" as const, value: "unused" }
+  },
+}
 
 describe("owned model adapters", () => {
   test("converts Sixb tool definitions and supplies normalized run-scoped input", async () => {
@@ -45,6 +57,7 @@ describe("owned model adapters", () => {
       run: { id: run.id, agentId: run.agentId, threadId: run.threadId },
       connector: resolve,
       logger: noopLogger,
+      ...toolRuntime,
     })
 
     expect(tool?.inputSchema).toEqual({
@@ -60,7 +73,11 @@ describe("owned model adapters", () => {
     const parsed = tool?.parseInput({ query: "sixb", limit: 2, mode: "quick" })
     expect(Object.isFrozen(parsed)).toBe(true)
     await expect(
-      tool?.execute(parsed, { signal: new AbortController().signal, callId: "call-1" })
+      tool?.execute(parsed, {
+        signal: new AbortController().signal,
+        callId: "call-1",
+        toolCallId: "tool-call-1",
+      })
     ).resolves.toEqual({
       results: ["found:sixb"],
       limit: 2,
@@ -82,6 +99,7 @@ describe("owned model adapters", () => {
         run: { id: "run-2", agentId: "agent" },
         connector,
         logger: noopLogger,
+        ...toolRuntime,
       })
     ).toThrow("duplicate selected tool name 'echo'")
 
@@ -91,6 +109,7 @@ describe("owned model adapters", () => {
       run: { id: "run-2", agentId: "agent" },
       connector,
       logger: noopLogger,
+      ...toolRuntime,
     })
     expect(() => tool?.parseInput({ text: 42 })).toThrow()
   })
@@ -112,9 +131,17 @@ describe("owned model adapters", () => {
       run: { id: "run-3", agentId: "agent" },
       connector,
       logger: noopLogger,
+      ...toolRuntime,
     })
     await expect(
-      tool?.execute({}, { signal: new AbortController().signal, callId: "call-2" })
+      tool?.execute(
+        {},
+        {
+          signal: new AbortController().signal,
+          callId: "call-2",
+          toolCallId: "tool-call-2",
+        }
+      )
     ).rejects.toBe(safe)
   })
 

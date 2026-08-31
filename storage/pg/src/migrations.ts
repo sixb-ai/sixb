@@ -53,7 +53,26 @@ import webhookDeliveryFailureRecordSql from "./migrations/019-webhook-delivery-f
 import dropRunUsageProjectionsSql from "./migrations/020-drop-run-usage-projections.sql" with {
   type: "text",
 }
-import aiModelCallDetailsSql from "./migrations/021-ai-model-call-details.sql" with { type: "text" }
+import syncPipelineExecutionsSql from "./migrations/021-sync-pipeline-executions.sql" with {
+  type: "text",
+}
+import projectionExecutionsSql from "./migrations/022-projection-executions.sql" with {
+  type: "text",
+}
+import webhookExecutionsSql from "./migrations/023-webhook-executions.sql" with { type: "text" }
+import ontologyCommitExecutionsSql from "./migrations/024-ontology-commit-executions.sql" with {
+  type: "text",
+}
+import connectorConnectionsSql from "./migrations/025-connector-connections.sql" with {
+  type: "text",
+}
+import aiCostAccountingSql from "./migrations/026-ai-cost-accounting.sql" with { type: "text" }
+import agentContextCheckpointsSql from "./migrations/027-agent-context-checkpoints.sql" with {
+  type: "text",
+}
+import objectOverrideEditTimesSql from "./migrations/028-object-override-edit-times.sql" with {
+  type: "text",
+}
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -327,7 +346,14 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("018-ontology-outbox-failure-record", ontologyOutboxFailureRecordSql),
     pgSql("019-webhook-delivery-failure-record", webhookDeliveryFailureRecordSql),
     pgSql("020-drop-run-usage-projections", dropRunUsageProjectionsSql),
-    pgSql("021-ai-model-call-details", aiModelCallDetailsSql),
+    pgSql("021-sync-pipeline-executions", syncPipelineExecutionsSql),
+    pgSql("022-projection-executions", projectionExecutionsSql),
+    pgSql("023-webhook-executions", webhookExecutionsSql),
+    pgSql("024-ontology-commit-executions", ontologyCommitExecutionsSql),
+    pgSql("025-connector-connections", connectorConnectionsSql),
+    pgSql("026-ai-cost-accounting", aiCostAccountingSql),
+    pgSql("027-agent-context-checkpoints", agentContextCheckpointsSql),
+    pgSql("028-object-override-edit-times", objectOverrideEditTimesSql),
   ],
 })
 

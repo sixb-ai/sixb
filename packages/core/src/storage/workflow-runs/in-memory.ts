@@ -629,7 +629,7 @@ export class InMemoryWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRun
       executionId: input.executionId,
       nodeRunId: input.nodeRunId,
       agentId: input.agentId,
-      parentExecutionId: workflowRun.executionId,
+      workflowExecutionId: workflowRun.executionId,
     })
     if (node.status !== "running") {
       throw new WorkflowRunError(

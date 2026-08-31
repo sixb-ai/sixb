@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from "bun:test"
 import { defineObjectType, link, prop, SixbHost } from "../src"
 import type { DomainEventService } from "../src/events"
+import { objectBatchKey } from "../src/storage"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps, waitFor } from "./test-runtime-deps"
 
@@ -115,7 +116,9 @@ describe("upsert no-op suppression", () => {
     expect(replayed.map((result) => result.ok)).toEqual([true, true, true])
     for (const result of replayed) {
       if (!result.ok) continue
-      const rowBeforeReplay = rowsBeforeReplay.get(`noop-source:${result.value.primaryId}`)
+      const rowBeforeReplay = rowsBeforeReplay.get(
+        objectBatchKey("noop-source", result.value.primaryId)
+      )
       expect(rowBeforeReplay).toBeDefined()
       if (rowBeforeReplay) expect(result.value).toEqual(rowBeforeReplay)
     }

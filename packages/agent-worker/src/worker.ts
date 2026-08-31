@@ -16,7 +16,19 @@ import type { AgentRunExecution, AgentRunRecord } from "@sixb/core/storage"
 import { AGENT_RUN_FAILURE_CODES, AgentStorageError } from "@sixb/core/storage"
 import { loadAgentSkills } from "./agent-skills"
 import { normalizeApiBaseUrl } from "./api-url"
-import { AgentExecutionLostError, AgentFinalizationError, AgentUsageRecordingError } from "./errors"
+import {
+  type AgentContextBudget,
+  type AgentModelContextLimits,
+  DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS,
+  resolveAgentContextBudget,
+} from "./context-budget"
+import { prepareAgentConversationContext } from "./context-compaction"
+import {
+  AgentExecutionLostError,
+  AgentFinalizationError,
+  AgentTurnTimeoutError,
+  AgentUsageRecordingError,
+} from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
 import { type AgentRunFailure, toAgentExecutionFailure, toAgentRunFailure } from "./failure"
 import { finishRunOrThrow } from "./finalize"
@@ -30,7 +42,8 @@ import {
   type AgentExecutionEnvironment,
   createConversationAgentEnvironment,
 } from "./run-environment"
-import { createBrokerStreamSink, isolateStreamSink } from "./stream-sink"
+import { createBrokerStreamSink, isolateStreamSink, withAgentActivityStream } from "./stream-sink"
+import { type AgentTurnRuntime, createAgentTurnRuntime } from "./turn-runtime"
 import type {
   AgentWorkerContext,
   AgentWorkerHost,
@@ -41,7 +54,8 @@ import { enqueueWorkflowAgentNodeResume, executeWorkflowAgentNode } from "./work
 
 const DEFAULT_AGENT_QUEUE_LEASE_MS = 60_000
 const DEFAULT_AGENT_CONCURRENCY = 4
-const DEFAULT_TURN_TIMEOUT_MS = 5 * 60_000
+const DEFAULT_TURN_TIMEOUT_MS = 10 * 60_000
+const MAX_TIMER_DURATION_MS = 2_147_483_647
 const AGENT_DISPATCH_POLL_MS = 1_000
 /** Reconciliation is a safety net for failed request-time publication; an empty scan idles longer. */
 const AGENT_DISPATCH_IDLE_MS = 10_000
@@ -71,8 +85,10 @@ type Reservation =
  */
 export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAILURE_CODES> {
   private readonly host: AgentWorkerHost
+  private readonly agents: readonly AgentDefinition[]
   private readonly context: AgentWorkerContext | null
   private readonly idleWithoutAgents: boolean
+  private contextBudgets: ReadonlyMap<string, AgentContextBudget> = new Map()
   /**
    * Sandbox teardowns that outlived their run's dispose() (boot still in flight when the turn
    * ended). stop() drains these so a graceful shutdown does not leave machines mid-teardown.
@@ -81,24 +97,33 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
 
   constructor(host: AgentWorkerHost, options: AgentWorkerOptions) {
     const leaseMs = options.leaseMs ?? DEFAULT_AGENT_QUEUE_LEASE_MS
+    const turnTimeoutMs = normalizeTurnTimeoutMs(options.turnTimeoutMs)
     super({
       projectId: host.id,
       queue: host.queues.agents,
       failureCodes: AGENT_RUN_FAILURE_CODES,
       workerId: `agent-worker-${host.id}`,
-      claimLimit: normalizeConcurrency(options.concurrency),
+      claimLimit: options.concurrency ?? DEFAULT_AGENT_CONCURRENCY,
       leaseMs,
       idlePollMs: options.idlePollMs,
     })
 
     this.host = host
-    this.idleWithoutAgents = host.definitions.agents.list().length === 0
-    this.context = this.idleWithoutAgents ? null : buildAgentContext(host, options)
+    this.agents = host.definitions.agents.list()
+    this.idleWithoutAgents = this.agents.length === 0
+    this.context = this.idleWithoutAgents ? null : buildAgentContext(host, options, turnTimeoutMs)
   }
 
   override async start(): Promise<void> {
     if (this.context) {
-      await this.context.agentSkills
+      const [modelsDev] = await Promise.all([
+        import("./models-dev/catalog"),
+        this.context.agentSkills,
+      ])
+      this.contextBudgets = resolveContextBudgets(
+        this.agents,
+        modelsDev.resolveModelsDevContextLimits
+      )
     }
     await super.start()
   }
@@ -148,7 +173,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     const context = this.requireContext()
     const { job } = claimed
     if (job.type === "agent.ai-usage.record.requested") {
-      await recordRecoveredAiModelCall(context.storage.aiUsage, job)
+      await recordRecoveredAiModelCall(context.storage, job)
       return
     }
     if (job.type === "agent.workflow-node.requested") {
@@ -265,10 +290,12 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       )
     }
     let environment: AgentExecutionEnvironment | null = null
+    let runtime: AgentTurnRuntime | null = null
     let stopOwnershipProjection: (() => void) | undefined
     // Watch for a user cancel (an out-of-band `/cancel` publishes to the run's control stream). Its
     // signal joins the turn's abort sources, so a cancel stops the model stream just like a shutdown.
     const cancel = await this.watchForCancel(run.id)
+    const turnSignal = AbortSignal.any([signal, cancel.signal])
 
     try {
       // The queue remains the sole source of ownership timing. Persist its latest confirmed
@@ -293,17 +320,36 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       await this.confirmExecutionOwnership(context, run.id, executionToken, delivery.leaseExpiresAt)
 
       await context.streamSink.publishStarted(run)
+      runtime = createAgentTurnRuntime({
+        context: executionContext,
+        run,
+        signal: turnSignal,
+        providerOptions: agent.providerOptions,
+      })
+      const prepared = await prepareAgentConversationContext({
+        context: executionContext,
+        agent,
+        budget: requiredContextBudget(this.contextBudgets, agent.id),
+        run,
+        runtime,
+      })
       environment = await createConversationAgentEnvironment({
         context: executionContext,
         agent,
         run,
+        signal: turnSignal,
+        messages: prepared.threadContext.retainedMessages,
+        skills: prepared.skills,
         onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
       })
+      runtime.assertCanContinue()
       await runAgentTurn({
         context: environment.turnContext,
         agent,
         run,
-        signal: AbortSignal.any([signal, cancel.signal]),
+        signal: turnSignal,
+        runtime,
+        threadContext: prepared.threadContext,
       })
     } catch (error) {
       // Queue ownership or the durable execution token was lost. Touch nothing; the current
@@ -335,7 +381,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         error
       )
       if (finalized) {
-        if (finalized.run.status === "failed") {
+        if (finalized.run.status === "failed" && !(error instanceof AgentTurnTimeoutError)) {
           this.reportFailure(error, finalized.run, job.attempt, finalized.failure)
         }
         await context.streamSink.publishRunFinished(finalized.run)
@@ -348,6 +394,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     } finally {
       stopOwnershipProjection?.()
       cancel.stop()
+      runtime?.dispose()
       await environment?.dispose()
     }
   }
@@ -636,7 +683,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       const failure = toAgentExecutionFailure(error, {
         status,
         at: completedAt,
-        details: agentRunFailureDetails(run),
+        details: {
+          ...agentRunFailureDetails(run),
+          ...(error instanceof AgentTurnTimeoutError ? { timeoutMs: String(error.timeoutMs) } : {}),
+        },
       })
       const finalized = await finishRunOrThrow(context.storage.agents, {
         projectId: context.id,
@@ -645,6 +695,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         status,
         error: failure,
         completedAt,
+        ...(error instanceof AgentTurnTimeoutError ? { finishReason: "timeout" as const } : {}),
       })
       return { run: finalized, failure }
     } catch (finalizeError) {
@@ -658,13 +709,60 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
   }
 }
 
-function buildAgentContext(host: AgentWorkerHost, options: AgentWorkerOptions): AgentWorkerContext {
+function resolveContextBudgets(
+  agents: readonly AgentDefinition[],
+  resolveModelContextLimits: (
+    model: AgentDefinition["model"]
+  ) => AgentModelContextLimits | undefined
+): ReadonlyMap<string, AgentContextBudget> {
+  const budgets = new Map<string, AgentContextBudget>()
+  const warnedModels = new Set<string>()
+  for (const agent of agents) {
+    const modelLimits =
+      agent.loop?.context?.windowTokens === undefined
+        ? resolveModelContextLimits(agent.model)
+        : undefined
+    const budget = resolveAgentContextBudget(agent, modelLimits)
+    budgets.set(agent.id, budget)
+    if (budget.source !== "fallback") continue
+
+    const model = `${agent.model.provider}/${agent.model.modelId}`
+    if (warnedModels.has(model)) continue
+    warnedModels.add(model)
+    console.warn(
+      `[SixbAgentWorker] Models.dev has no context limit for '${model}'; using the ${DEFAULT_CONTEXT_WINDOW_LABEL} fallback. Configure loop.context.windowTokens to override it.`
+    )
+  }
+  return budgets
+}
+
+const DEFAULT_CONTEXT_WINDOW_LABEL = `${DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS.toLocaleString("en-US")}-token`
+
+function requiredContextBudget(
+  budgets: ReadonlyMap<string, AgentContextBudget>,
+  agentId: string
+): AgentContextBudget {
+  const budget = budgets.get(agentId)
+  if (!budget) {
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbAgentWorker] Agent '${agentId}' has no resolved context budget.`
+    )
+  }
+  return budget
+}
+
+function buildAgentContext(
+  host: AgentWorkerHost,
+  options: AgentWorkerOptions,
+  turnTimeoutMs: number
+): AgentWorkerContext {
   const storage = host.storage
   assertAgentWorkerStorage(storage)
   if (!host.sandboxes) {
     throw createSixbError(
       "internal.unexpected",
-      "[SixbAgentWorker] Agent workers require createSixb({ sandboxes }) for the built-in bash tool."
+      "[SixbAgentWorker] Agent workers require createSixb({ sandboxes }) for the built-in read and bash tools."
     )
   }
   const agentSkills = loadAgentSkills({
@@ -674,7 +772,6 @@ function buildAgentContext(host: AgentWorkerHost, options: AgentWorkerOptions): 
         : options.skillsDir,
   })
   agentSkills.catch(() => {})
-
   return {
     id: host.id,
     storage,
@@ -685,12 +782,15 @@ function buildAgentContext(host: AgentWorkerHost, options: AgentWorkerOptions): 
     // URL builder, the sandbox run context) consumes it verbatim.
     apiBaseUrl: normalizeApiBaseUrl(normalizeRequiredString(options.apiBaseUrl)),
     streamSink: isolateStreamSink(
-      options.streamSink ?? createBrokerStreamSink({ broker: host.broker, projectId: host.id })
+      withAgentActivityStream(
+        options.streamSink ?? createBrokerStreamSink({ broker: host.broker, projectId: host.id }),
+        host.broker
+      )
     ),
-    recoverAiModelCall: (record) => enqueueAiModelCallRecovery(host.queues.agents, record),
+    recoverAiModelCall: (input) => enqueueAiModelCallRecovery(host.queues.agents, input),
     agentSkills,
     defaultMaxSteps: options.defaultMaxSteps ?? DEFAULT_MAX_STEPS,
-    turnTimeoutMs: options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
+    turnTimeoutMs,
   }
 }
 
@@ -713,6 +813,12 @@ function assertAgentWorkerStorage(
     throw createSixbError(
       "internal.unexpected",
       "[SixbAgentWorker] Agent workers require storage.aiUsage support."
+    )
+  }
+  if (!storage.aiCosts) {
+    throw createSixbError(
+      "internal.unexpected",
+      "[SixbAgentWorker] Agent workers require storage.aiCosts support."
     )
   }
 }
@@ -774,16 +880,13 @@ async function waitForAbort(ms: number, signal: AbortSignal): Promise<void> {
     signal.addEventListener("abort", finish, { once: true })
   })
 }
-
-function normalizeConcurrency(value: number | undefined): number {
-  if (value === undefined) {
-    return DEFAULT_AGENT_CONCURRENCY
-  }
-  if (!Number.isFinite(value) || value < 1) {
+function normalizeTurnTimeoutMs(value: number | undefined): number {
+  const timeoutMs = value ?? DEFAULT_TURN_TIMEOUT_MS
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_TIMER_DURATION_MS) {
     throw createSixbError(
       "internal.unexpected",
-      "[SixbAgentWorker] Agent worker concurrency must be at least 1."
+      `[SixbAgentWorker] Agent turn timeout must be a positive integer no greater than ${MAX_TIMER_DURATION_MS}ms.`
     )
   }
-  return Math.floor(value)
+  return timeoutMs
 }

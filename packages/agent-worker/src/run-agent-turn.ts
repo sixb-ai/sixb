@@ -7,16 +7,27 @@ import {
 } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { isAbortError, QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
-import type { AgentRunRecord, AgentStorage } from "@sixb/core/storage"
-import { attachmentKey, modelSupportsInlineImages, prepareAgentAttachments } from "./attachments"
+import {
+  type AgentRunFinishReason,
+  type AgentRunRecord,
+  type AgentStorage,
+  coerceAgentRunFinishReason,
+} from "@sixb/core/storage"
+import { assistantPartsWithAttachments } from "./assistant-attachments"
+import {
+  attachmentKey,
+  modelSupportsInlineImages,
+  prepareAgentAttachments,
+  toolResultAttachmentKey,
+} from "./attachments"
 import { AgentTurnTimeoutError } from "./errors"
+import { type AgentRunFailure, toAgentExecutionFailure } from "./failure"
 import { appendMessageAndFinishRunOrThrow, finishRunOrThrow } from "./finalize"
 import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
 import { AiModelCallRecorder } from "./model-call-recorder"
-import {
-  type AgentOutputAttachmentResult,
-  collectAgentOutputAttachments,
-} from "./output-attachments"
+import { collectAgentOutputAttachments } from "./output-attachments"
+import { FINAL_AGENT_LOOP_STEP_INSTRUCTION } from "./run-agent-loop"
+import { loadAgentThreadModelContext } from "./thread-context"
 import type { AgentTurnContext } from "./types"
 
 export const DEFAULT_MAX_STEPS = 25
@@ -46,29 +57,44 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   }
   const agents = storage.agents
 
-  const history = await agents.messages.list({ projectId, threadId: run.threadId, order: "asc" })
+  const threadContext = await loadAgentThreadModelContext({
+    storage: agents,
+    projectId,
+    threadId: run.threadId,
+  })
   const attachmentContext =
     context.attachmentContext ??
     (context.apiBaseUrl
       ? await prepareAgentAttachments({
           projectId,
           threadId: run.threadId,
-          messages: history.messages,
+          messages: threadContext.retainedMessages,
           blobStorage: context.blobStorage,
           apiBaseUrl: context.apiBaseUrl,
-          inlineImages: await modelSupportsInlineImages(agent.model),
+          inlineImages: await modelSupportsInlineImages(agent.model, signal),
+          signal,
         })
       : undefined)
-  const modelMessages = toModelMessages(history.messages, {
+  const modelMessages = toModelMessages(threadContext.modelMessages, {
     fileText: ({ message, partIndex }) =>
-      attachmentContext?.promptTextByPartKey.get(attachmentKey(message.id, partIndex)),
+      message.id
+        ? attachmentContext?.promptTextByPartKey.get(attachmentKey(message.id, partIndex))
+        : undefined,
     fileData: ({ message, partIndex }) =>
-      attachmentContext?.modelFileDataByPartKey.get(attachmentKey(message.id, partIndex)),
+      message.id
+        ? attachmentContext?.modelFileDataByPartKey.get(attachmentKey(message.id, partIndex))
+        : undefined,
+    toolResultFileText: ({ message, partIndex, contentIndex }) =>
+      message.id
+        ? attachmentContext?.promptTextByPartKey.get(
+            toolResultAttachmentKey(message.id, partIndex, contentIndex)
+          )
+        : undefined,
   })
 
   const maxSteps = agent.loop?.stopWhen?.maxSteps ?? defaultMaxSteps
   const usageRecorder = new AiModelCallRecorder({
-    storage: storage.aiUsage,
+    storage,
     projectId,
     executionId: run.executionId,
     attempt: run.attempt,
@@ -84,8 +110,8 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     timeoutAbort.abort()
   }, turnTimeoutMs)
 
-  // Sandbox provisioning runs alongside the first model call. If it fails before the turn drains,
-  // abort promptly and prefer the provisioning failure over its synthetic abort.
+  // Sandbox provisioning runs beside the first model call. A failure aborts the turn promptly and
+  // takes precedence over the synthetic abort it causes.
   const provisionAbort = new AbortController()
   let provisionError: unknown
   context.sandboxReady?.catch((error) => {
@@ -94,15 +120,40 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   })
 
   const abortSignal = AbortSignal.any([signal, timeoutAbort.signal, provisionAbort.signal])
-  let cancelledParts: readonly AgentMessagePart[] | undefined
+  let interruptedParts: readonly AgentMessagePart[] | undefined
 
   const finalizeIfInterrupted = async (error?: unknown): Promise<AgentRunRecord | null> => {
     if (signal.reason instanceof QueueDeliveryLeaseLostError) throw signal.reason
     usageRecorder.assertHealthy()
     if (provisionError !== undefined) throw provisionError
-    if (timedOut) throw new AgentTurnTimeoutError(runId, turnTimeoutMs)
+    if (timedOut) {
+      const completedAt = new Date()
+      return finalizeInterruptedTurn({
+        storage,
+        agents,
+        context,
+        run,
+        executionToken,
+        projectId,
+        modelId: agent.model.modelId,
+        status: "failed",
+        finishReason: "timeout",
+        error: toAgentExecutionFailure(new AgentTurnTimeoutError(runId, turnTimeoutMs), {
+          status: "failed",
+          at: completedAt,
+          details: {
+            agentId: run.agentId,
+            runId,
+            threadId: run.threadId,
+            timeoutMs: String(turnTimeoutMs),
+          },
+        }),
+        completedAt,
+        parts: interruptedParts,
+      })
+    }
     if (!abortSignal.aborted && (error === undefined || !isAbortError(error))) return null
-    return finalizeCancelledTurn({
+    return finalizeInterruptedTurn({
       storage,
       agents,
       context,
@@ -110,7 +161,8 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       executionToken,
       projectId,
       modelId: agent.model.modelId,
-      parts: cancelledParts,
+      status: "cancelled",
+      parts: interruptedParts,
     })
   }
 
@@ -133,6 +185,8 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         tools,
         ...(agent.reasoning === undefined ? {} : { reasoning: agent.reasoning }),
         maxSteps,
+        finalStepInstruction: FINAL_AGENT_LOOP_STEP_INSTRUCTION,
+        ...(context.prepareStep === undefined ? {} : { prepareStep: context.prepareStep }),
         signal: abortSignal,
         onModelCallEnd: usageRecorder.onModelCallEnd,
         onEvent: async (chunk) => {
@@ -145,7 +199,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       throw error
     }
 
-    cancelledParts =
+    interruptedParts =
       result.status === "aborted"
         ? agentTraceFromPartialModelLoop(result.steps, result.partialContent, {
             agentId: agent.id,
@@ -156,9 +210,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     const interruptedAfterModel = await finalizeIfInterrupted()
     if (interruptedAfterModel) return interruptedAfterModel
     if (result.status === "aborted") {
-      // A provider may stop without propagating a signal reason; preserve its coherent partial and
-      // still finalize as cancelled rather than treating it as a successful empty response.
-      return finalizeCancelledTurn({
+      return finalizeInterruptedTurn({
         storage,
         agents,
         context,
@@ -166,16 +218,17 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         executionToken,
         projectId,
         modelId: agent.model.modelId,
-        parts: cancelledParts,
+        status: "cancelled",
+        parts: interruptedParts,
       })
     }
 
-    const finishReason = result.finishReason
+    const finishReason = coerceAgentRunFinishReason(result.finishReason) ?? "unknown"
     const assistant = ensureVisibleAssistantMessage(
-      { role: "assistant", parts: cancelledParts },
+      { role: "assistant", parts: interruptedParts },
       { finishReason, maxSteps }
     )
-    let outputAttachments: AgentOutputAttachmentResult
+    let outputAttachments: Awaited<ReturnType<typeof collectAgentOutputAttachments>>
     try {
       outputAttachments = await collectAgentOutputAttachments({
         sandboxReady: context.sandboxReady,
@@ -191,7 +244,10 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
     const interruptedAfterCollection = await finalizeIfInterrupted()
     if (interruptedAfterCollection) return interruptedAfterCollection
-    const assistantParts = assistantPartsWithOutputAttachments(assistant.parts, outputAttachments)
+    const assistantParts = assistantPartsWithAttachments(
+      assistant.parts,
+      outputAttachments.attachments
+    )
     const assistantMessageId = createAgentMessageId()
 
     const interruptedBeforeCommit = await finalizeIfInterrupted()
@@ -228,19 +284,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   }
 }
 
-function assistantPartsWithOutputAttachments(
-  parts: readonly AgentMessagePart[],
-  output: AgentOutputAttachmentResult
-): AgentMessagePart[] {
-  return [
-    ...parts,
-    ...output.attachments.map((attachment) => ({
-      type: "file" as const,
-      fileRef: attachment.fileRef,
-    })),
-  ]
-}
-
 function ensureVisibleAssistantMessage(
   message: AgentMessage,
   input: { readonly finishReason: string | undefined; readonly maxSteps: number }
@@ -262,8 +305,8 @@ function hasVisibleText(parts: AgentMessage["parts"]): boolean {
   return parts.some((part) => part.type === "text" && part.text.trim().length > 0)
 }
 
-/** Persist a cancelled turn, retaining coherent partial content when any was produced. */
-async function finalizeCancelledTurn(input: {
+/** Persist an interrupted turn, retaining coherent partial content when any was produced. */
+async function finalizeInterruptedTurn(input: {
   readonly storage: Storage
   readonly agents: AgentStorage
   readonly context: AgentTurnContext
@@ -271,18 +314,39 @@ async function finalizeCancelledTurn(input: {
   readonly executionToken: string
   readonly projectId: string
   readonly modelId?: string
+  readonly status: "failed" | "cancelled"
+  readonly finishReason?: AgentRunFinishReason
+  readonly error?: AgentRunFailure
+  readonly completedAt?: Date
   readonly parts?: readonly AgentMessagePart[]
 }): Promise<AgentRunRecord> {
-  const { storage, agents, context, run, executionToken, projectId, modelId } = input
-  const parts = input.parts?.some((part) => part.type !== "step-start") ? input.parts : undefined
+  const {
+    storage,
+    agents,
+    context,
+    run,
+    executionToken,
+    projectId,
+    modelId,
+    status,
+    finishReason,
+    error,
+    completedAt,
+  } = input
+  const parts = input.parts?.some((part) => part.type !== "step-start")
+    ? assistantPartsWithAttachments(input.parts)
+    : undefined
 
   if (!parts) {
     const finalizedRun = await finishRunOrThrow(agents, {
       projectId,
       id: run.id,
       executionToken,
-      status: "cancelled",
+      status,
       ...(modelId === undefined ? {} : { modelId }),
+      ...(finishReason === undefined ? {} : { finishReason }),
+      ...(error === undefined ? {} : { error }),
+      ...(completedAt === undefined ? {} : { completedAt }),
     })
     await context.streamSink.publishRunFinished(finalizedRun)
     return finalizedRun
@@ -303,8 +367,11 @@ async function finalizeCancelledTurn(input: {
       projectId,
       id: run.id,
       executionToken,
-      status: "cancelled",
+      status,
       ...(modelId === undefined ? {} : { modelId }),
+      ...(finishReason === undefined ? {} : { finishReason }),
+      ...(error === undefined ? {} : { error }),
+      ...(completedAt === undefined ? {} : { completedAt }),
     },
   })
   await context.streamSink.publishMessageFinalized({ run, messageId: assistantMessageId })

@@ -39,15 +39,15 @@ export type ExecutionExecutor =
 /**
  * Occurrence that directly triggered an execution.
  *
- * The `queue` source is transitional until workers restore durable execution authority.
+ * An `execution` source is the single logical parent of a nested execution.
  */
 export type ExecutionSource =
   | { readonly type: "http"; readonly requestId: string }
   | { readonly type: "webhook"; readonly deliveryId: string }
   | { readonly type: "schedule"; readonly eventId: string }
   | { readonly type: "event"; readonly eventId: string }
+  | { readonly type: "datasetVersion"; readonly datasetId: string; readonly versionId: string }
   | { readonly type: "execution"; readonly executionId: string }
-  | { readonly type: "queue"; readonly queue: string; readonly jobId: string }
 
 /** Immutable provenance for one request, primitive run, agent run, or kernel operation. */
 export interface ExecutionContext {
@@ -57,7 +57,6 @@ export interface ExecutionContext {
   readonly executor: ExecutionExecutor
   readonly source: ExecutionSource
   readonly correlationId: string
-  readonly parentExecutionId?: string
 }
 
 /** Durable descriptor used to rebuild authority. A reference is never authoritative by itself. */

@@ -4,6 +4,7 @@ import {
   collectObjectQueryValidationIssues,
   countObjects,
   executeObjectQuery,
+  executeObjectQueryLinks,
   existsObjects,
   facetObjects,
   normalizeObjectQuery,
@@ -145,7 +146,7 @@ export const objectQueryContractOntology = new OntologyRegistry({
  *
  * The contract defines the portable V1 query surface: capability declarations,
  * validation/normalization handoff, provider pushdown, bounded fallback,
- * traversal, set operations, pagination, search profile defaults, and stable
+ * canonical reference sets, traversal, set operations, pagination, search profile defaults, and stable
  * structured rejections for features outside a provider's capability map.
  */
 export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
@@ -342,6 +343,212 @@ export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
         })
         expect(result.total).toBe(2)
         expect(result.hasMore).toBe(false)
+      })
+    })
+
+    test("queries opaque ids through canonical exact refs", async () => {
+      await withStorage(async ({ objects: storage, fixture }) => {
+        const issue297 = "github:issue:sixb-ai/sixb#297"
+        const issue298 = "github:issue:sixb-ai/sixb#298"
+        await fixture.seed({
+          objects: [
+            objectSeed(Asset.id, issue297, { id: issue297 }),
+            objectSeed(Asset.id, issue298, { id: issue298 }),
+          ],
+        })
+
+        const refs = await executeObjectQuery(
+          {
+            projectId,
+            query: {
+              kind: "refs",
+              refs: [
+                { objectTypeId: Asset.id, primaryId: issue298 },
+                { objectTypeId: Asset.id, primaryId: issue297 },
+              ],
+            },
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+
+        // The JSON query body preserves URL-reserved characters without encoding.
+        expect(refs.plan.mode).toBe(
+          storage.queryCapabilities().nodes?.refs === true ? "pushdown" : "fallback"
+        )
+        expect(ids(refs)).toEqual([issue297, issue298])
+      })
+    })
+
+    test("executes canonical heterogeneous refs with pagination and projection", async () => {
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await seedObjectQueryContractData(fixture)
+
+        const refs: Extract<ObjectQuery, { kind: "refs" }>["refs"] = [
+          { objectTypeId: Device.id, primaryId: "device-sensor" },
+          { objectTypeId: Room.id, primaryId: "room-gamma" },
+          { objectTypeId: Room.id, primaryId: "missing" },
+          { objectTypeId: Room.id, primaryId: "room-alpha" },
+        ]
+        const first = await executeObjectQuery(
+          {
+            projectId,
+            query: {
+              kind: "project",
+              properties: ["id"],
+              input: { kind: "page", pageSize: 2, input: { kind: "refs", refs } },
+            },
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+        const second = await executeObjectQuery(
+          {
+            projectId,
+            query: {
+              kind: "project",
+              properties: ["id"],
+              input: {
+                kind: "page",
+                pageSize: 2,
+                pageToken: first.nextPageToken,
+                input: { kind: "refs", refs },
+              },
+            },
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+        const count = await countObjects(
+          { projectId, query: { kind: "refs", refs } },
+          { ontology: objectQueryContractOntology, storage }
+        )
+
+        const expectedMode =
+          storage.queryCapabilities().nodes?.refs === true ? "pushdown" : "fallback"
+        expect(first.plan.mode).toBe(expectedMode)
+        expect(ids(first)).toEqual(["device-sensor", "room-alpha"])
+        expect(first.objects.map((row) => row.properties)).toEqual([
+          { id: "device-sensor" },
+          { id: "room-alpha" },
+        ])
+        expect(first.total).toBe(3)
+        expect(first.hasMore).toBe(true)
+        expect(first.nextPageToken).toBeTruthy()
+        expect(second.plan.mode).toBe(expectedMode)
+        expect(ids(second)).toEqual(["room-gamma"])
+        expect(second.hasMore).toBe(false)
+        expect(count.plan.mode).toBe(expectedMode)
+        expect(count.count).toBe(3)
+      })
+    })
+
+    test("composes refs with traversal in provider pushdown", async () => {
+      await withStorage(async ({ objects: storage, fixture }) => {
+        if (storage.queryCapabilities().nodes?.refs !== true) return
+        await seedObjectQueryContractData(fixture)
+
+        const result = await executeObjectQuery(
+          {
+            projectId,
+            query: {
+              kind: "traverse",
+              direction: "outgoing",
+              linkId: "hasDevice",
+              input: {
+                kind: "refs",
+                refs: [{ objectTypeId: Room.id, primaryId: "room-alpha" }],
+              },
+            },
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+
+        expect(result.plan.mode).toBe("pushdown")
+        expect(ids(result)).toEqual(["device-projector"])
+      })
+    })
+
+    test("queries and paginates incident links over a provider-backed object set", async () => {
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await seedObjectQueryContractData(fixture)
+        const query: ObjectQuery = {
+          kind: "refs",
+          refs: [{ objectTypeId: Device.id, primaryId: "device-projector" }],
+        }
+
+        const first = await executeObjectQueryLinks(
+          {
+            projectId,
+            query,
+            direction: "incoming",
+            includeObjects: true,
+            pageSize: 1,
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+        const second = await executeObjectQueryLinks(
+          {
+            projectId,
+            query,
+            direction: "incoming",
+            includeObjects: true,
+            pageSize: 1,
+            pageToken: first.nextPageToken,
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+
+        expect(first.links).toEqual([
+          expect.objectContaining({
+            sourceTypeId: Room.id,
+            sourceId: "room-alpha",
+            linkId: "hasDevice",
+            targetTypeId: Device.id,
+            targetId: "device-projector",
+          }),
+        ])
+        expect(first.objects.map((row) => row.primaryId)).toEqual([
+          "device-projector",
+          "room-alpha",
+        ])
+        expect(first.hasMore).toBe(true)
+        expect(first.nextPageToken).toBeTruthy()
+        expect(second.links).toEqual([
+          expect.objectContaining({
+            sourceTypeId: Zone.id,
+            sourceId: "zone-one",
+            linkId: "hasDevice",
+            targetTypeId: Device.id,
+            targetId: "device-projector",
+          }),
+        ])
+        expect(second.objects.map((row) => row.primaryId)).toEqual(["device-projector", "zone-one"])
+        expect(second.hasMore).toBe(false)
+      })
+    })
+
+    test("does not admit a provider page probe into the link selector", async () => {
+      await withStorage(async ({ objects: storage, fixture }) => {
+        await seedObjectQueryContractData(fixture)
+
+        const result = await executeObjectQueryLinks(
+          {
+            projectId,
+            query: {
+              kind: "page",
+              pageSize: 1,
+              input: {
+                kind: "sort",
+                fields: [{ kind: "property", propertyId: "id", direction: "asc" }],
+                input: { kind: "start", objectTypeId: Room.id },
+              },
+            },
+            direction: "outgoing",
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+
+        expect(result.links).toEqual([
+          expect.objectContaining({ sourceId: "room-alpha", targetId: "device-projector" }),
+        ])
       })
     })
 

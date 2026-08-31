@@ -17,7 +17,9 @@ import {
   SixbHost,
   type WorkflowDefinition,
 } from "@sixb/core"
+import { createSixbError } from "@sixb/core/internal/errors"
 import { LOGS_STREAM } from "@sixb/core/internal/logging"
+import type { ClaimedQueueJob, WorkflowQueueJob } from "@sixb/core/queues"
 import {
   createTestSixb,
   createTestWorkflowExecution,
@@ -89,6 +91,12 @@ const finalizeInvoice = defineWorkflowStep("finalize-invoice")
 
 const workers: WorkflowWorker[] = []
 
+class InspectableWorkflowWorker extends WorkflowWorker {
+  decideExecutionError(claimed: ClaimedQueueJob<WorkflowQueueJob>, error: unknown) {
+    return this.onExecutionError(claimed, error)
+  }
+}
+
 afterEach(async () => {
   for (const worker of workers) {
     await worker.stop().catch(() => {})
@@ -144,6 +152,16 @@ async function waitFor<T>(
 }
 
 describe("WorkflowWorker", () => {
+  test("defaults to one concurrent job and accepts an explicit limit", () => {
+    const workflow = defineWorkflow("concurrency-options")
+      .input({ transaction: ref(Transaction) })
+      .then(findBestInvoice)
+    const sixb = createSixb({ workflows: [workflow] })
+
+    expect(new WorkflowWorker(sixb).concurrency).toBe(1)
+    expect(new WorkflowWorker(sixb, { concurrency: 3 }).concurrency).toBe(3)
+  })
+
   test("requires registered workflows and workflow storage", () => {
     expect(() => new WorkflowWorker(createSixb({}))).toThrow("No workflow definitions")
 
@@ -186,6 +204,45 @@ describe("WorkflowWorker", () => {
     expect(() => new WorkflowWorker(withoutWorkflowInterventions)).toThrow(
       "storage.workflowInterventions"
     )
+  })
+
+  test("does not retry deterministic coded delivery failures", async () => {
+    const workflow = defineWorkflow("deterministic-delivery-failure")
+      .input({ transaction: ref(Transaction) })
+      .then(findBestInvoice)
+    const sixb = createSixb({ workflows: [workflow] })
+    const worker = new InspectableWorkflowWorker(sixb)
+    const now = new Date().toISOString()
+    const claimed: ClaimedQueueJob<WorkflowQueueJob> = {
+      leaseId: "workflow-lease-1",
+      claimedAt: now,
+      leaseExpiresAt: now,
+      job: {
+        id: "workflow-job-1",
+        projectId: sixb.id,
+        createdAt: now,
+        availableAt: now,
+        attempt: 1,
+        type: "workflow.run.resume.requested",
+        payload: {
+          runId: "workflow-run-1",
+          nodeRunId: "workflow-run-1:node:0",
+        },
+      },
+    }
+
+    await expect(
+      worker.decideExecutionError(
+        claimed,
+        createSixbError(
+          "internal.unexpected",
+          "[SixbWorkflowWorker] Durable resume identity is invalid."
+        )
+      )
+    ).resolves.toEqual({ kind: "fail" })
+    await expect(
+      worker.decideExecutionError(claimed, new Error("storage unavailable"))
+    ).resolves.toMatchObject({ kind: "retry", availableAt: expect.any(String) })
   })
 
   test("streams a run-scoped log line to the broker", async () => {
@@ -379,7 +436,7 @@ describe("WorkflowWorker", () => {
       ],
     })
 
-    const worker = new WorkflowWorker(sixb)
+    const worker = new InspectableWorkflowWorker(sixb)
     workers.push(worker)
     await worker.start()
 
@@ -422,6 +479,27 @@ describe("WorkflowWorker", () => {
       failure: run?.error,
     })
     expect(reported[0]?.context.occurredAt).toBe(run?.error?.at ?? "")
+
+    const settledAt = new Date().toISOString()
+    await expect(
+      worker.decideExecutionError(
+        {
+          leaseId: "workflow-failed-lease",
+          claimedAt: settledAt,
+          leaseExpiresAt: settledAt,
+          job: {
+            id: "workflow-failed-job",
+            projectId: sixb.id,
+            createdAt: settledAt,
+            availableAt: settledAt,
+            attempt: 1,
+            type: "workflow.run.requested",
+            payload: { runId: "wfrun_worker_failed" },
+          },
+        },
+        workflowExplosion
+      )
+    ).resolves.toEqual({ kind: "fail", failure: run?.error })
 
     const events = await waitFor(
       () =>
@@ -679,10 +757,7 @@ describe("WorkflowWorker", () => {
           type: "workflow.run.resume.requested",
           payload: {
             runId: "wfrun_worker_resume",
-            resume: {
-              kind: "intervention",
-              interventionId: "wfrun_worker_resume:intervention:1",
-            },
+            nodeRunId: "wfrun_worker_resume:node:1",
           },
         },
       ],
@@ -784,10 +859,7 @@ describe("WorkflowWorker", () => {
           type: "workflow.run.resume.requested",
           payload: {
             runId: "wfrun_worker_resume_failed",
-            resume: {
-              kind: "intervention",
-              interventionId: "wfrun_worker_resume_failed:intervention:1",
-            },
+            nodeRunId: "wfrun_worker_resume_failed:node:1",
           },
         },
       ],

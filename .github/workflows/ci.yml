@@ -107,7 +107,7 @@ jobs:
         run: bun run test:publish
 
   client:
-    name: Generated client
+    name: Generated artifacts
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -133,7 +133,10 @@ jobs:
       - name: Generate client
         run: bun run generate:client
 
-      - name: Verify generated client is committed
+      - name: Generate agent CLI
+        run: bun run generate:agent-cli
+
+      - name: Verify generated artifacts are committed
         run: git diff --exit-code
 
   test:

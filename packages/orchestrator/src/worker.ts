@@ -5,7 +5,6 @@ import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projectio
 import { evaluateEventSchedule } from "@sixb/core/internal/schedules"
 import { Worker } from "@sixb/core/internal/workers"
 import { runProjectionDispatchReconciler } from "./projection-dispatch-reconciler"
-import { buildProjectionJob } from "./projection-job"
 import { routeKeysForEvent } from "./route-key"
 import type {
   OrchestratorDispatchers,
@@ -30,10 +29,10 @@ export class OrchestratorWorker extends Worker {
     super()
     this.options = options
     this.projectionDescriptors = projectionDescriptors(options.projectId, options.routes)
-    if (this.projectionDescriptors.length > 0 && !options.projectionDispatch) {
+    if (this.projectionDescriptors.length > 0 && !options.projectionReconciliation) {
       throw createSixbError(
         "internal.unexpected",
-        "[SixbOrchestrator] Projection routes require lake and projection-run storage for durable dispatch.",
+        "[SixbOrchestrator] Projection routes require lake storage for durable reconciliation.",
         {
           details: {
             projectId: options.projectId,
@@ -42,7 +41,9 @@ export class OrchestratorWorker extends Worker {
         }
       )
     }
-    if (hasWorkflowRoutes(options.routes)) requireDispatcher(options, "workflows")
+    for (const key of ["syncs", "pipelines", "projections", "workflows"] as const) {
+      if (hasDispatcherRoutes(options.routes, key)) requireDispatcher(options, key)
+    }
   }
 
   protected async run(signal: AbortSignal): Promise<void> {
@@ -56,14 +57,21 @@ export class OrchestratorWorker extends Worker {
       consumers.push(consumeRetainedEventSchedules(this.options, eventType, signal))
     }
     if (this.projectionDescriptors.length > 0) {
-      const dispatch = this.options.projectionDispatch!
+      const reconciliation = this.options.projectionReconciliation
+      if (!reconciliation) {
+        throw createSixbError(
+          "internal.unexpected",
+          "[SixbOrchestrator] Projection reconciliation is not configured.",
+          { details: { projectId: this.options.projectId } }
+        )
+      }
       consumers.push(
         runProjectionDispatchReconciler(
           {
             projectId: this.options.projectId,
-            queue: this.options.queues.projections,
+            dispatcher: requireDispatcher(this.options, "projections"),
             descriptors: this.projectionDescriptors,
-            ...dispatch,
+            ...reconciliation,
           },
           signal
         )
@@ -243,26 +251,47 @@ async function enqueueDirectJob(
 ): Promise<void> {
   const metadata = buildMetadata(sourceEvent)
   switch (item.queue) {
-    case "syncRuns":
-      await options.queues.syncRuns.enqueue({
-        projectId: options.projectId,
-        jobs: [
-          { ...item.job, payload: withSyncScheduleRunId(item.job.payload, sourceEvent), metadata },
-        ],
+    case "syncRuns": {
+      if (sourceEvent.type !== "schedule.triggered") {
+        throw createSixbError(
+          "internal.unexpected",
+          `[SixbOrchestrator] Direct Sync route received unsupported event '${sourceEvent.type}'.`,
+          { details: { projectId: options.projectId, sourceEventType: sourceEvent.type } }
+        )
+      }
+      const scheduleId = sourceEvent.payload.scheduleId
+      await requireDispatcher(options, "syncs").dispatch({
+        syncId: item.job.payload.syncId,
+        runId: scheduleConsumerRunId("sync", item.job.payload.syncId, scheduleId, sourceEvent.id),
+        source: { type: "schedule", eventId: sourceEvent.id },
+        correlationId: correlationIdForEvent(sourceEvent),
+        metadata,
       })
       return
-    case "pipelines":
-      await options.queues.pipelines.enqueue({
-        projectId: options.projectId,
-        jobs: [
-          {
-            ...item.job,
-            payload: withPipelineScheduleRunId(item.job.payload, sourceEvent),
-            metadata,
-          },
-        ],
+    }
+    case "pipelines": {
+      if (sourceEvent.type !== "schedule.triggered") {
+        throw createSixbError(
+          "internal.unexpected",
+          `[SixbOrchestrator] Direct Pipeline route received unsupported event '${sourceEvent.type}'.`,
+          { details: { projectId: options.projectId, sourceEventType: sourceEvent.type } }
+        )
+      }
+      const scheduleId = sourceEvent.payload.scheduleId
+      await requireDispatcher(options, "pipelines").dispatch({
+        pipelineId: item.job.payload.pipelineId,
+        runId: scheduleConsumerRunId(
+          "pipeline",
+          item.job.payload.pipelineId,
+          scheduleId,
+          sourceEvent.id
+        ),
+        source: { type: "schedule", eventId: sourceEvent.id },
+        correlationId: correlationIdForEvent(sourceEvent),
+        metadata,
       })
       return
+    }
     case "projections": {
       if (sourceEvent.type !== "dataset.version.committed") {
         throw createSixbError(
@@ -294,19 +323,14 @@ async function enqueueDirectJob(
           }
         )
       }
-      const job = buildProjectionJob({
-        projectId: options.projectId,
-        descriptor: item.job.payload,
+      await requireDispatcher(options, "projections").dispatch({
+        projectionId: item.job.payload.projectionId,
         datasetVersion: {
           datasetId: sourceEvent.payload.datasetId,
           versionId: sourceEvent.payload.versionId,
           createdAt: sourceEvent.payload.createdAt,
         },
         metadata,
-      })
-      await options.queues.projections.enqueue({
-        projectId: options.projectId,
-        jobs: [job],
       })
       return
     }
@@ -355,38 +379,21 @@ async function enqueueEventScheduleTarget(
   const metadata = { ...buildMetadata(sourceEvent), scheduleId }
   switch (target.queue) {
     case "syncRuns":
-      await options.queues.syncRuns.enqueue({
-        projectId: options.projectId,
-        jobs: [
-          {
-            type: "sync.run.requested",
-            payload: {
-              syncId: target.syncId,
-              runId: scheduleConsumerRunId("sync", target.syncId, scheduleId, sourceEvent.id),
-            },
-            metadata,
-          },
-        ],
+      await requireDispatcher(options, "syncs").dispatch({
+        syncId: target.syncId,
+        runId: scheduleConsumerRunId("sync", target.syncId, scheduleId, sourceEvent.id),
+        source: { type: "event", eventId: sourceEvent.id },
+        correlationId: correlationIdForEvent(sourceEvent),
+        metadata,
       })
       return
     case "pipelines":
-      await options.queues.pipelines.enqueue({
-        projectId: options.projectId,
-        jobs: [
-          {
-            type: "pipeline.run.requested",
-            payload: {
-              pipelineId: target.pipelineId,
-              runId: scheduleConsumerRunId(
-                "pipeline",
-                target.pipelineId,
-                scheduleId,
-                sourceEvent.id
-              ),
-            },
-            metadata,
-          },
-        ],
+      await requireDispatcher(options, "pipelines").dispatch({
+        pipelineId: target.pipelineId,
+        runId: scheduleConsumerRunId("pipeline", target.pipelineId, scheduleId, sourceEvent.id),
+        source: { type: "event", eventId: sourceEvent.id },
+        correlationId: correlationIdForEvent(sourceEvent),
+        metadata,
       })
       return
     case "workflows": {
@@ -417,38 +424,6 @@ async function enqueueEventScheduleTarget(
       })
       return
     }
-  }
-}
-
-function withSyncScheduleRunId(
-  payload: { readonly syncId: string; readonly runId?: string },
-  sourceEvent: StoredDomainEvent
-): { readonly syncId: string; readonly runId?: string } {
-  if (payload.runId !== undefined || sourceEvent.type !== "schedule.triggered") return payload
-  return {
-    ...payload,
-    runId: scheduleConsumerRunId(
-      "sync",
-      payload.syncId,
-      sourceEvent.payload.scheduleId,
-      sourceEvent.id
-    ),
-  }
-}
-
-function withPipelineScheduleRunId(
-  payload: { readonly pipelineId: string; readonly runId?: string },
-  sourceEvent: StoredDomainEvent
-): { readonly pipelineId: string; readonly runId?: string } {
-  if (payload.runId !== undefined || sourceEvent.type !== "schedule.triggered") return payload
-  return {
-    ...payload,
-    runId: scheduleConsumerRunId(
-      "pipeline",
-      payload.pipelineId,
-      sourceEvent.payload.scheduleId,
-      sourceEvent.id
-    ),
   }
 }
 
@@ -542,12 +517,16 @@ function projectionDescriptors(
   )
 }
 
-function hasWorkflowRoutes(routes: OrchestratorRoutes): boolean {
+function hasDispatcherRoutes(
+  routes: OrchestratorRoutes,
+  key: keyof OrchestratorDispatchers
+): boolean {
+  const queue = key === "syncs" ? "syncRuns" : key
   for (const route of routes.values()) {
-    if (route.jobs.some((item) => item.queue === "workflows")) return true
+    if (route.jobs.some((item) => item.queue === queue)) return true
     if (
       route.eventSchedules?.some((binding) =>
-        binding.targets.some((target) => target.queue === "workflows")
+        binding.targets.some((target) => target.queue === queue)
       )
     ) {
       return true

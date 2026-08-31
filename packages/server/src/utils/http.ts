@@ -14,6 +14,18 @@ import { RequestBodyTooLargeError } from "./request-body"
 
 /** Explicit transport policy for coded failures that are safe to surface as non-500 responses. */
 const HTTP_STATUS_BY_ERROR_CODE: Partial<Record<SixbErrorCode, number>> = {
+  "connector.adapter_invalid": 502,
+  "connector.authorization_invalid": 400,
+  "connector.authorization_required": 409,
+  "connector.configuration_invalid": 400,
+  "connector.credentials_unavailable": 503,
+  "connector.not_found": 404,
+  "connector.operation_conflict": 409,
+  "connector.operation_in_progress": 409,
+  "connector.provider_failed": 502,
+  "connector.provider_unavailable": 503,
+  "connector.replacement_required": 409,
+  "connector.revocation_pending": 409,
   "dataset.not_found": 404,
   "dataset.version_not_found": 404,
 }

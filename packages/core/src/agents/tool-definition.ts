@@ -1,5 +1,11 @@
-import { cloneJsonValue, getInvalidJsonValueReason } from "../json"
+import {
+  cloneJsonValue,
+  getInvalidJsonValueReason,
+  type JsonValue,
+  type ReadonlyJsonValue,
+} from "../json"
 import { AgentDefinitionError, AgentToolResultValidationError } from "./errors"
+import { getInvalidAgentToolResultReason } from "./tool-result"
 import type {
   AgentToolDefinition,
   AgentToolHandler,
@@ -41,8 +47,12 @@ export function createAgentToolDefinition<
     input,
     handler: async (context) => {
       const result = await definition.handler(context)
+      let snapshot: JsonValue
       try {
-        return cloneJsonValue(result, "result")
+        // AgentToolResult is intentionally expressed with FileRef instead of a duplicate JSON-only
+        // shape. Runtime validation below proves that the complete envelope crosses the same JSON
+        // boundary as legacy results.
+        snapshot = cloneJsonValue(result as ReadonlyJsonValue, "result")
       } catch (cause) {
         throw new AgentToolResultValidationError(
           definition.name,
@@ -50,6 +60,11 @@ export function createAgentToolDefinition<
           { cause }
         )
       }
+      const richResultReason = getInvalidAgentToolResultReason(snapshot)
+      if (richResultReason) {
+        throw new AgentToolResultValidationError(definition.name, richResultReason)
+      }
+      return snapshot
     },
   }
 

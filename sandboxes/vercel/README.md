@@ -1,6 +1,6 @@
 # @sixb/sandboxes-vercel
 
-Runs each agent's bash inside a managed [Vercel Sandbox](https://vercel.com/docs/sandbox)
+Runs each agent's sandbox tools inside a managed [Vercel Sandbox](https://vercel.com/docs/sandbox)
 Firecracker microVM. Drop-in `Sandbox` provider — wire it once into `createSixb({ sandboxes })`;
 agent code still uses the provider-neutral Sixb sandbox contract.
 
@@ -63,8 +63,9 @@ For production, expose the Sixb API gateway at a public HTTPS origin reachable f
 
 ## Runtime and dependencies
 
-By default, Vercel boots its stock `node24` runtime. Sixb's built-in bash tool expects at least
-`bash` and `curl`. The stock runtimes are usually enough for API-oriented agent work.
+Sixb explicitly selects Vercel's stock `node24` runtime by default. Custom images and snapshots used
+by agents need Bash, standard file utilities, CA certificates, and Bun 1.3+ or Node 22+. `curl` and
+`jq` are not required.
 
 For additional tools, prefer one of these setup strategies:
 
@@ -90,7 +91,7 @@ new VercelSandboxFactory({
 
 | Option | Default | Notes |
 | --- | --- | --- |
-| `runtime` | Vercel default (`node24`) | `"node26"`, `"node24"`, `"node22"`, or `"python3.13"`; ignored with `image`/`snapshotId`. |
+| `runtime` | `node24` | `"node26"`, `"node24"`, `"node22"`, or `"python3.13"`; ignored with `image`/`snapshotId`. Python alone cannot execute the portable agent CLI. |
 | `image` | — | Vercel Container Registry image reference. |
 | `snapshotId` | — | Boot from a Vercel Sandbox snapshot; mutually exclusive with `runtime`, `image`, and `source`. |
 | `source` | — | Git or tarball source for Vercel to clone/mount at create time. |

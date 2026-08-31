@@ -26,7 +26,7 @@ bun add @sixb/core
 
 **Connectors** -- Typed external system clients that you register with the runtime and resolve lazily with `sixb.connector(...)`.
 
-**Syncs** -- Declarative batch sync definitions that read from one connector and write into one raw dataset. V1 supports `snapshot`, `append`, and keyed `merge` modes with optional triggers and typed source checkpoints.
+**Syncs** -- Declarative batch sync definitions that read from one connector and write into one raw dataset. OAuth connectors fan out across their connected accounts with isolated checkpoints. V1 supports `snapshot`, `append`, and keyed `merge` modes with optional triggers and typed source checkpoints.
 
 **Queues** -- Typed durable work lanes for executable jobs such as sync runs, pipeline runs, and projection runs. App setup passes one `Queues` provider, while workers claim from lanes like `sixb.queues.syncRuns`.
 
@@ -248,9 +248,7 @@ const edgeGateway = defineConnector(
 )
 ```
 
-Use `.json(schema)` for JSON bodies so payloads are validated at runtime. The `.verify(...)`,
-`.idempotencyKey(...)`, and `.handle(...)` callbacks each receive a run-scoped `logger`. Omit
-`.idempotencyKey(...)` for deterministic upserts where duplicate provider deliveries are harmless.
+Use `.json(schema)` for JSON bodies so payloads are validated at runtime. Verification and idempotency resolution run before admission and cannot access the execution SDK. After admission, `.handle(...)` receives the execution-bound `sixb` and its run-scoped `logger`. Omit `.idempotencyKey(...)` for deterministic upserts where duplicate provider deliveries are harmless.
 
 ## Syncs
 

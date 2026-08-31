@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { defineObjectType, InMemoryStorage, link, OntologyRegistry, prop } from "../src"
+import { createTestingScope } from "../src/execution/scopes"
 import {
   createEventId,
   createLinkScopeFingerprint,
@@ -12,18 +13,21 @@ import {
   type MaterializationPlanFinalization,
   type MaterializationPlanHeader,
   type MaterializationPlanWorkItem,
+  type MaterializationSession,
   type OntologyCommitRecord,
   type OntologyCommitWrite,
   type OntologyOutboxFailure,
+  type Storage,
   StorageTransactionError,
 } from "../src/storage"
 import { getInMemoryStorageTestingAdapter } from "../src/storage/in-memory/testing"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
-import { queueTestActionRun } from "../src/testing"
+import { claimTestProjectionRun, queueTestActionRun, startTestProjectionRun } from "../src/testing"
 import {
   atomic,
   createMaterializerFixture,
   pendingProjectionExecution,
+  projectionScope,
   replacement,
   sourceEntry,
 } from "./materializer-fixture"
@@ -136,7 +140,15 @@ describe("in-memory ontology storage", () => {
       runId: otherReplacement.execution.projectionRunId,
       datasetVersion: otherReplacement.datasetVersion,
     })
-    await other.projections.replace({ ...otherReplacement, execution: otherExecution })
+    await other
+      .withScope(
+        await projectionScope(storage, {
+          projectId: "other-project",
+          projectionId: "devices",
+          runId: otherExecution.projectionRunId,
+        })
+      )
+      .projections.replace({ ...otherReplacement, execution: otherExecution })
     expect(
       (
         await storage.ontology.sources.getActive({
@@ -154,31 +166,40 @@ describe("in-memory ontology storage", () => {
       )?.datasetVersion.versionId
     ).toBe("other-v1")
 
-    await other.edits.commit(
-      atomic("other-incident-authority", [
-        {
-          id: "hub",
-          kind: "object.create",
-          ref: { objectTypeId: "Device", primaryId: "hub" },
-          properties: { name: "other hub" },
-        },
-        {
-          id: "target",
-          kind: "object.create",
-          ref: { objectTypeId: "Device", primaryId: "other-target" },
-          properties: { name: "other target" },
-        },
-        {
-          id: "link",
-          kind: "link.upsert",
-          ref: {
-            source: { objectTypeId: "Device", primaryId: "hub" },
-            linkId: "parent",
-            target: { objectTypeId: "Device", primaryId: "other-target" },
+    await other
+      .withScope(
+        createTestingScope({
+          projectId: "other-project",
+          executionId: "other-incident-execution",
+          requestId: "other-incident-authority",
+          correlationId: "other-incident-correlation",
+        })
+      )
+      .edits.commit(
+        atomic("other-incident-authority", [
+          {
+            id: "hub",
+            kind: "object.create",
+            ref: { objectTypeId: "Device", primaryId: "hub" },
+            properties: { name: "other hub" },
           },
-        },
-      ])
-    )
+          {
+            id: "target",
+            kind: "object.create",
+            ref: { objectTypeId: "Device", primaryId: "other-target" },
+            properties: { name: "other target" },
+          },
+          {
+            id: "link",
+            kind: "link.upsert",
+            ref: {
+              source: { objectTypeId: "Device", primaryId: "hub" },
+              linkId: "parent",
+              target: { objectTypeId: "Device", primaryId: "other-target" },
+            },
+          },
+        ])
+      )
     const removed = await materializer.projections.replace(
       replacement("project-v2", "2026-01-02T00:00:00Z", [])
     )
@@ -409,6 +430,7 @@ describe("in-memory ontology storage", () => {
         id: "commit",
         idempotencyKey: "runtime:empty",
         requestHash: "hash",
+        executionId: "execution:empty",
         origin: { kind: "runtime", requestId: "empty" },
         ontologyRevision: "revision",
         intent: { kind: "edit", mode: "atomic", operationCount: 0 },
@@ -424,7 +446,7 @@ describe("in-memory ontology storage", () => {
     } satisfies MaterializationPlanHeader
     await storage.transaction(async (tx) => {
       if (!tx.ontology) throw new Error("missing ontology")
-      const session = await tx.ontology.materializations.begin(header)
+      const session = await beginMaterialization(tx, header)
       await tx.ontology.materializations.finalize({
         session,
         finalization: {
@@ -525,6 +547,7 @@ describe("in-memory ontology storage", () => {
         id: "session-lifecycle",
         idempotencyKey: "runtime:session-lifecycle",
         requestHash: "hash",
+        executionId: "execution:session-lifecycle",
         origin: { kind: "runtime", requestId: "session-lifecycle" },
         ontologyRevision: "revision",
         intent: { kind: "edit", mode: "atomic", operationCount: 0 },
@@ -538,7 +561,7 @@ describe("in-memory ontology storage", () => {
         points: [],
       },
     } satisfies MaterializationPlanHeader
-    await expect(storage.ontology.materializations.begin(header)).rejects.toThrow(
+    await expect(beginMaterialization(storage, header)).rejects.toThrow(
       "require an active storage transaction"
     )
 
@@ -547,7 +570,7 @@ describe("in-memory ontology storage", () => {
     await expect(
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
-        unfinished = await tx.ontology.materializations.begin(header)
+        unfinished = await beginMaterialization(tx, header)
       })
     ).rejects.toThrow("unfinished materialization session")
     await expect(
@@ -647,6 +670,7 @@ describe("in-memory ontology storage", () => {
         id: "work-commit",
         idempotencyKey: "runtime:work",
         requestHash: "work-hash",
+        executionId: "execution:work",
         origin: { kind: "runtime", requestId: "work" },
         ontologyRevision: "revision",
         intent: { kind: "edit", mode: "atomic", operationCount: 0 },
@@ -665,7 +689,7 @@ describe("in-memory ontology storage", () => {
     await storage.transaction(async (tx) => {
       if (!tx.ontology) throw new Error("missing ontology")
       const materializations = tx.ontology.materializations
-      const session = await materializations.begin(header)
+      const session = await beginMaterialization(tx, header)
       closedSession = session
       const classification = {
         kind: "classification" as const,
@@ -745,6 +769,7 @@ describe("in-memory ontology storage", () => {
               schemaVersion: 1,
               projectId: "project",
               occurredAt: "2026-01-01T00:00:00.000Z",
+              correlationId: "correlation:work",
               origin: { kind: "runtime", requestId: "work" },
               commitId: "work-commit",
               type: "object.updated",
@@ -767,6 +792,7 @@ describe("in-memory ontology storage", () => {
               schemaVersion: 1,
               projectId: "project",
               occurredAt: "2026-01-01T00:00:00.000Z",
+              correlationId: "correlation:work",
               origin: { kind: "runtime", requestId: "work" },
               commitId: "work-commit",
               type: "object.created",
@@ -917,12 +943,13 @@ describe("in-memory ontology storage", () => {
     await expect(
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
-        leakedSession = await tx.ontology.materializations.begin({
+        leakedSession = await beginMaterialization(tx, {
           commit: {
             projectId: "project",
             id: "rolled-back-session",
             idempotencyKey: "runtime:rolled-back-session",
             requestHash: "hash",
+            executionId: "execution:rolled-back-session",
             origin: { kind: "runtime", requestId: "rolled-back-session" },
             ontologyRevision: "revision",
             intent: { kind: "edit", mode: "atomic", operationCount: 0 },
@@ -1268,6 +1295,7 @@ describe("in-memory ontology storage", () => {
         id,
         idempotencyKey: `runtime:${id}`,
         requestHash: id,
+        executionId: `execution:${id}`,
         origin: { kind: "runtime", requestId: id },
         ontologyRevision: projections.ontologyRevision,
         intent: { kind: "edit", mode: "atomic", operationCount: 0 },
@@ -1284,7 +1312,7 @@ describe("in-memory ontology storage", () => {
     const expectBeginConflict = async (header: MaterializationPlanHeader, message: string) => {
       await storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
-        await expect(tx.ontology.materializations.begin(header)).rejects.toThrow(message)
+        await expect(beginMaterialization(tx, header)).rejects.toThrow(message)
       })
     }
     await expectBeginConflict(
@@ -1401,7 +1429,7 @@ describe("in-memory ontology storage", () => {
 
     await storage.transaction(async (tx) => {
       if (!tx.ontology) throw new Error("missing ontology")
-      const session = await tx.ontology.materializations.begin({
+      const session = await beginMaterialization(tx, {
         ...baseHeader("valid-cas"),
         expected: {
           ...baseHeader("valid-cas").expected,
@@ -1485,26 +1513,35 @@ describe("in-memory ontology storage", () => {
       dependencies: { clock: () => new Date("2026-01-01T00:00:00Z") },
     })
     const object = (primaryId: string) => ({ objectTypeId: "UnicodeNode", primaryId })
-    await materializer.edits.commit({
-      mode: "atomic",
-      source: { kind: "runtime", requestId: "unicode-links" },
-      operations: [
-        ...["source", "\uE000", "😀"].map((primaryId) => ({
-          id: `object-${primaryId}`,
-          kind: "object.create" as const,
-          ref: object(primaryId),
-          properties: { name: primaryId },
-        })),
-        ...["\uE000", "😀"].map((primaryId) => ({
-          id: `link-${primaryId}`,
-          kind: "link.upsert" as const,
-          ref: { source: object("source"), linkId: "neighbors", target: object(primaryId) },
-        })),
-      ],
-      expectedObjects: [],
-      expectedLinks: [],
-      expectedLinkScopes: [],
-    })
+    await materializer
+      .withScope(
+        createTestingScope({
+          projectId: "unicode-project",
+          executionId: "unicode-links-execution",
+          requestId: "unicode-links",
+          correlationId: "unicode-links-correlation",
+        })
+      )
+      .edits.commit({
+        mode: "atomic",
+        source: { kind: "runtime", requestId: "unicode-links" },
+        operations: [
+          ...["source", "\uE000", "😀"].map((primaryId) => ({
+            id: `object-${primaryId}`,
+            kind: "object.create" as const,
+            ref: object(primaryId),
+            properties: { name: primaryId },
+          })),
+          ...["\uE000", "😀"].map((primaryId) => ({
+            id: `link-${primaryId}`,
+            kind: "link.upsert" as const,
+            ref: { source: object("source"), linkId: "neighbors", target: object(primaryId) },
+          })),
+        ],
+        expectedObjects: [],
+        expectedLinks: [],
+        expectedLinkScopes: [],
+      })
     const rows = await storage.objects.listLinks({
       projectId: "unicode-project",
       objectTypeId: "UnicodeNode",
@@ -1525,12 +1562,13 @@ describe("in-memory ontology storage", () => {
     )
     await storage.transaction(async (tx) => {
       if (!tx.ontology) throw new Error("missing ontology")
-      const session = await tx.ontology.materializations.begin({
+      const session = await beginMaterialization(tx, {
         commit: {
           projectId: "unicode-project",
           id: "unicode-cas",
           idempotencyKey: "runtime:unicode-cas",
           requestHash: "unicode-cas",
+          executionId: "execution:unicode-cas",
           origin: { kind: "runtime", requestId: "unicode-cas" },
           ontologyRevision: projections.ontologyRevision,
           intent: { kind: "edit", mode: "atomic", operationCount: 0 },
@@ -1682,6 +1720,7 @@ describe("in-memory ontology storage", () => {
           value.overrides.objects.upserts.push({
             ref: objectA,
             value: { kind: "create", properties: { name: "a" } },
+            editedAt: { name: committedAt },
             expectedLastCommitId: null,
             lastCommitId: "wrong",
             updatedAt: committedAt,
@@ -1695,6 +1734,7 @@ describe("in-memory ontology storage", () => {
           value.overrides.objects.upserts.push({
             ref: objectA,
             value: { kind: "create", properties: { name: "a" } },
+            editedAt: { name: committedAt },
             expectedLastCommitId: "stale",
             lastCommitId: commitId,
             updatedAt: committedAt,
@@ -1821,6 +1861,7 @@ describe("in-memory ontology storage", () => {
               schemaVersion: 1,
               projectId: "other-project",
               occurredAt: committedAt,
+              correlationId: `correlation:${commitId}`,
               origin: { kind: "runtime", requestId: commitId },
               commitId,
               commitOrdinal: 0,
@@ -1849,12 +1890,13 @@ describe("in-memory ontology storage", () => {
       await expect(
         storage.transaction(async (tx) => {
           if (!tx.ontology) throw new Error("missing ontology")
-          const session = await tx.ontology.materializations.begin({
+          const session = await beginMaterialization(tx, {
             commit: {
               projectId: "project",
               id: commitId,
               idempotencyKey: `runtime:${commitId}`,
               requestHash: commitId,
+              executionId: `execution:${commitId}`,
               origin: { kind: "runtime", requestId: commitId },
               ontologyRevision: "revision",
               intent: { kind: "edit", mode: "atomic", operationCount: 0 },
@@ -1907,6 +1949,7 @@ describe("in-memory ontology storage", () => {
         id,
         idempotencyKey: `action:${id}:edits`,
         requestHash: id,
+        executionId: `execution:${id}`,
         origin: { kind: "action", actionId: "action", runId: "run" },
         ontologyRevision: "revision",
         intent: { kind: "edit", mode: "atomic", operationCount },
@@ -1924,7 +1967,7 @@ describe("in-memory ontology storage", () => {
     await expect(
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
-        const session = await tx.ontology.materializations.begin(header("ordinal-gap"))
+        const session = await beginMaterialization(tx, header("ordinal-gap"))
         await tx.ontology.materializations.stageWork({
           session,
           records: [
@@ -1937,6 +1980,7 @@ describe("in-memory ontology storage", () => {
                 schemaVersion: 1,
                 projectId: "project",
                 occurredAt: committedAt,
+                correlationId: "correlation:ordinal-gap",
                 origin: { kind: "action", actionId: "action", runId: "run" },
                 commitId: "ordinal-gap",
                 partitionKey: "Device:one",
@@ -1983,6 +2027,7 @@ describe("in-memory ontology storage", () => {
                   schemaVersion: 1,
                   projectId: "project",
                   occurredAt: committedAt,
+                  correlationId: "correlation:ordinal-gap",
                   origin: { kind: "action", actionId: "action", runId: "run" },
                   commitId: "ordinal-gap",
                   commitOrdinal: 1,
@@ -2039,7 +2084,7 @@ describe("in-memory ontology storage", () => {
       projectionRevision: "projection-revision",
       ownershipHash: "ownership-hash",
     }
-    const run = await storage.projectionRuns.startOrReclaim({
+    const run = await startTestProjectionRun(storage, {
       id: "sealed-run",
       projectId: "project",
       identity,
@@ -2092,6 +2137,7 @@ describe("in-memory ontology storage", () => {
         id: "sealed-commit",
         idempotencyKey: "projection:sealed",
         requestHash: "sealed",
+        executionId: "execution:sealed",
         origin: {
           kind: "projection",
           projectionId: "devices",
@@ -2142,7 +2188,7 @@ describe("in-memory ontology storage", () => {
     const finalizeWithoutSemanticWork = (streamReplacement: boolean) =>
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
-        const session = await tx.ontology.materializations.begin(header)
+        const session = await beginMaterialization(tx, header)
         if (streamReplacement) {
           for (const entityKind of ["object", "link"] as const) {
             for await (const _page of tx.ontology.materializations.streamSourceReplacementState({
@@ -2250,7 +2296,7 @@ describe("in-memory ontology storage", () => {
         versionId: "v1",
         createdAt: "2026-01-01T00:00:00.000Z",
       }
-      const run = await storage.projectionRuns.startOrReclaim({
+      const run = await startTestProjectionRun(storage, {
         id: "run",
         projectId: "project",
         identity: {
@@ -2310,6 +2356,7 @@ describe("in-memory ontology storage", () => {
           id: `correlation-${testCase.name}`,
           idempotencyKey: `projection:correlation:${testCase.name}`,
           requestHash: testCase.name,
+          executionId: `execution:correlation:${testCase.name}`,
           origin: {
             kind: "projection",
             projectionId: "devices",
@@ -2372,7 +2419,7 @@ describe("in-memory ontology storage", () => {
       await expect(
         storage.transaction(async (tx) => {
           if (!tx.ontology) throw new Error("missing ontology")
-          const session = await tx.ontology.materializations.begin(header)
+          const session = await beginMaterialization(tx, header)
           await tx.ontology.materializations.finalize({ session, finalization })
         })
       ).rejects.toThrow(testCase.message)
@@ -2428,6 +2475,28 @@ describe("in-memory ontology storage", () => {
   })
 })
 
+async function beginMaterialization(
+  storage: Pick<Storage, "executions" | "ontology">,
+  header: MaterializationPlanHeader
+): Promise<MaterializationSession> {
+  if (!storage.ontology) throw new Error("missing ontology")
+  const execution = await storage.executions.getById({
+    projectId: header.commit.projectId,
+    id: header.commit.executionId,
+  })
+  if (!execution) {
+    await storage.executions.create({
+      id: header.commit.executionId,
+      projectId: header.commit.projectId,
+      executor: { type: "request", requestId: `request:${header.commit.id}` },
+      source: { type: "http", requestId: `request:${header.commit.id}` },
+      correlationId: `correlation:${header.commit.id}`,
+      authorizationRef: { type: "disabled" },
+    })
+  }
+  return storage.ontology.materializations.begin(header)
+}
+
 async function expectLogicalOriginDuplicateRejected(
   storage: InMemoryStorage,
   commit: OntologyCommitRecord | null
@@ -2444,7 +2513,7 @@ async function expectLogicalOriginDuplicateRejected(
   await expect(
     storage.transaction(async (tx) => {
       if (!tx.ontology) throw new Error("missing ontology")
-      await tx.ontology.materializations.begin({
+      await beginMaterialization(tx, {
         commit: duplicate,
         expected: { sources: [], objects: [], links: [], linkScopes: [], points: [] },
       })
@@ -2475,7 +2544,7 @@ async function claimReplacementExecution(
   if (resolved.definition._tag !== "ObjectProjectionDefinition") {
     throw new Error("Expected the devices object projection")
   }
-  const run = await storage.projectionRuns.startOrReclaim({
+  const run = await claimTestProjectionRun(storage, {
     id: input.runId,
     projectId: input.projectId,
     identity: replacementIdentity(projections, input.datasetVersion),

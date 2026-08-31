@@ -1,6 +1,6 @@
 {
   "name": "@sixb/app",
-  "version": "0.1.1",
+  "version": "0.1.4",
   "description": "Custom app toolkit for Sixb projects — route scanning, dev serving, and production builds",
   "keywords": [
     "sixb",
@@ -33,10 +33,17 @@
       "bun": "./src/agents.ts",
       "import": "./dist/agents.js",
       "default": "./dist/agents.js"
+    },
+    "./auth": {
+      "types": "./dist/auth.d.ts",
+      "bun": "./src/auth.ts",
+      "import": "./dist/auth.js",
+      "default": "./dist/auth.js"
     }
   },
   "scripts": {
     "build": "bun ../../scripts/build-package.ts",
+    "test:e2e": "bun test ./tests/build-browser.e2e.ts",
     "typecheck": "tsc --noEmit",
     "prepack": "bun run build"
   },
@@ -54,8 +61,11 @@
     "react-router-dom": "^7.0.0"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.2",
     "@types/bun": "latest",
     "@types/react": "^19.0.0",
+    "happy-dom": "^20.11.6",
+    "libphonenumber-js": "1.13.9",
     "typescript": "^5.7.0"
   },
   "license": "MIT",

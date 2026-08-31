@@ -10,6 +10,10 @@ import {
   prop,
   type Storage,
 } from ".."
+import type { TrustedPrimitiveRef } from "../execution"
+import { restoreTrustedPrimitiveExecutionScope } from "../execution/durable"
+import { createTestingScope } from "../execution/scopes"
+import type { OntologyMaterializer } from "../materializer"
 import {
   createOntologyMaterializer,
   type OntologyEditOperation,
@@ -17,7 +21,8 @@ import {
   type ProjectionSourceEntry,
 } from "../materializer"
 import type { ActionRunStorage, ProjectionRunStorage } from "../storage"
-import { queueTestActionRun } from "./action-execution"
+import { createTestActionExecution, queueTestActionRun } from "./action-execution"
+import { createTestProjectionExecution, startTestProjectionRun } from "./projection-execution"
 
 export interface MaterializerStorageContractProvider<TStorage extends Storage> {
   readonly createStorage: () => TStorage | Promise<TStorage>
@@ -50,6 +55,23 @@ const devices = defineDataset("storage_contract_devices", {
 const readings = defineDataset("storage_contract_readings", {
   schema: [col("device_id", "string"), col("at", "timestamp"), col("value", "float64")],
 })
+const ConflictDevice = defineObjectType({
+  id: "StorageContractConflictDevice",
+  name: "Conflict device",
+  properties: [
+    prop("id", "string", { primary: true, required: true }),
+    prop("name", "string", { required: true }),
+    prop("state", "string", { required: true }),
+  ],
+})
+const conflictDevices = defineDataset("storage_contract_conflict_devices", {
+  schema: [
+    col("id", "string"),
+    col("name", "string"),
+    col("state", "string"),
+    col("updated_at", "timestamp"),
+  ],
+})
 const deviceProjection = defineProjection("storage_contract_devices", Device)
   .fromDataset(devices)
   .properties({ id: "id", name: "name" })
@@ -66,14 +88,22 @@ const temperatureProjection = defineProjection(
 )
   .fromDataset(readings)
   .points({ objectId: "device_id", at: "at", value: "value" })
+const conflictDeviceProjection = defineProjection(
+  "storage_contract_conflict_devices",
+  ConflictDevice
+)
+  .fromDataset(conflictDevices)
+  .properties({ id: "id", name: "name", state: "state" })
+  .resolveConflicts({ strategy: "mostRecent", sourceTimestamp: "updated_at" })
 
-const ontology = new OntologyRegistry({ sources: [Device] })
+const ontology = new OntologyRegistry({ sources: [Device, ConflictDevice] })
 const projections = new ProjectionRegistry({
-  projections: [deviceProjection, temperatureProjection],
+  projections: [deviceProjection, temperatureProjection, conflictDeviceProjection],
   ontology,
   datasetsById: new Map<string, DatasetDefinition>([
     [devices.id, devices],
     [readings.id, readings],
+    [conflictDevices.id, conflictDevices],
   ]),
 })
 
@@ -96,7 +126,6 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
         materializationId: () => `storage-contract-candidate-${++materializationOrdinal}`,
       },
     })
-
     try {
       const firstVersion = {
         datasetId: devices.id,
@@ -109,7 +138,13 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
         protocol: "replacement",
         datasetVersion: firstVersion,
       })
-      const first = await materializer.projections.replace({
+      const firstMaterializer = await projectionMaterializer(
+        materializer,
+        storage,
+        deviceProjection.id,
+        "replacement-v1"
+      )
+      const first = await firstMaterializer.projections.replace({
         source: { projectionId: deviceProjection.id },
         datasetVersion: firstVersion,
         execution: firstExecution,
@@ -135,7 +170,13 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
         protocol: "replacement",
         datasetVersion: secondVersion,
       })
-      const second = await materializer.projections.replace({
+      const secondMaterializer = await projectionMaterializer(
+        materializer,
+        storage,
+        deviceProjection.id,
+        "replacement-v2"
+      )
+      const second = await secondMaterializer.projections.replace({
         source: { projectionId: deviceProjection.id },
         datasetVersion: secondVersion,
         execution: secondExecution,
@@ -154,8 +195,18 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
         })
       ).toBeNull()
 
+      await createTestActionExecution(storage.executions, {
+        projectId: "materializer-storage-contract",
+        actionId: "renameDevice",
+        runId: "missing-action-run",
+      })
+      const missingActionMaterializer = await primitiveMaterializer(materializer, storage, {
+        kind: "action",
+        id: "renameDevice",
+        runId: "missing-action-run",
+      })
       await expect(
-        materializer.edits.commit({
+        missingActionMaterializer.edits.commit({
           mode: "atomic",
           source: { kind: "action", actionId: "renameDevice", runId: "missing-action-run" },
           operations: [
@@ -186,7 +237,12 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
         id: "action-run",
         projectId: "materializer-storage-contract",
       })
-      const actionCommit = await materializer.edits.commit({
+      const actionMaterializer = await primitiveMaterializer(materializer, storage, {
+        kind: "action",
+        id: "renameDevice",
+        runId: "action-run",
+      })
+      const actionCommit = await actionMaterializer.edits.commit({
         mode: "atomic",
         source: { kind: "action", actionId: "renameDevice", runId: "action-run" },
         operations: [
@@ -215,8 +271,20 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
         versionId: "readings-v1",
         createdAt: "2026-01-03T00:00:00.000Z",
       }
+      await createTestProjectionExecution(storage.executions, {
+        projectId: "materializer-storage-contract",
+        projectionId: temperatureProjection.id,
+        runId: "missing-telemetry-run",
+        datasetId: readings.id,
+        datasetVersionId: "missing-readings-run",
+      })
+      const missingTelemetryMaterializer = await primitiveMaterializer(materializer, storage, {
+        kind: "projection",
+        id: temperatureProjection.id,
+        runId: "missing-telemetry-run",
+      })
       await expect(
-        materializer.telemetry.append({
+        missingTelemetryMaterializer.telemetry.append({
           source: {
             kind: "projection",
             projection: { projectionId: temperatureProjection.id },
@@ -254,7 +322,13 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
         datasetVersion: telemetryVersion,
         fixedBatchSize: 1,
       })
-      const telemetry = await materializer.telemetry.append({
+      const telemetryMaterializer = await projectionMaterializer(
+        materializer,
+        storage,
+        temperatureProjection.id,
+        "telemetry-v1"
+      )
+      const telemetry = await telemetryMaterializer.telemetry.append({
         source: {
           kind: "projection",
           projection: { projectionId: temperatureProjection.id },
@@ -290,6 +364,99 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
     }
   })
 
+  test(`${name} persists per-property Action edit times`, async () => {
+    const createdStorage = await provider.createStorage()
+    const storage = requireContractStorage(createdStorage)
+    let materializationOrdinal = 0
+    let now = new Date("2026-02-01T00:00:10.000Z")
+    const materializer = createOntologyMaterializer({
+      projectId: "materializer-storage-contract",
+      ontology,
+      projections,
+      storage,
+      dependencies: {
+        batching: { sourceStageRows: 1, statePageRows: 1, planChunkRows: 1 },
+        clock: () => now,
+        materializationId: () => `conflict-contract-candidate-${++materializationOrdinal}`,
+      },
+    })
+    const runtimeMaterializer = materializer.withScope(runtimeScope())
+    const ref = { objectTypeId: ConflictDevice.id, primaryId: "one" }
+    const replace = async (
+      versionId: string,
+      sourceUpdatedAt: string,
+      name: string,
+      state: string
+    ) => {
+      const datasetVersion = {
+        datasetId: conflictDevices.id,
+        versionId,
+        createdAt: sourceUpdatedAt,
+      }
+      const execution = await claim(storage, {
+        runId: `conflict-${versionId}`,
+        projectionId: conflictDeviceProjection.id,
+        protocol: "replacement",
+        datasetVersion,
+      })
+      const projectionMaterializerForRun = await projectionMaterializer(
+        materializer,
+        storage,
+        conflictDeviceProjection.id,
+        `conflict-${versionId}`
+      )
+      await projectionMaterializerForRun.projections.replace({
+        source: { projectionId: conflictDeviceProjection.id },
+        datasetVersion,
+        execution,
+        entries: entries([
+          {
+            root: { kind: "object", ref },
+            assertions: [{ kind: "object", ref, properties: { name, state }, sourceUpdatedAt }],
+          },
+        ]),
+      })
+    }
+    const edit = (requestId: string, propertyId: "name" | "state", value: string) =>
+      runtimeMaterializer.edits.commit({
+        mode: "atomic",
+        source: { kind: "runtime", requestId },
+        operations: [
+          {
+            id: requestId,
+            kind: "object.patch",
+            ref,
+            set: { [propertyId]: value },
+            unset: [],
+            reset: [],
+          },
+        ],
+        expectedObjects: [],
+        expectedLinks: [],
+        expectedLinkScopes: [],
+      })
+
+    try {
+      await replace("v1", "2026-02-01T00:00:10.000Z", "Source A", "source-open")
+
+      now = new Date("2026-02-01T00:00:11.000Z")
+      await edit("conflict-name", "name", "Action B")
+      now = new Date("2026-02-01T00:00:13.000Z")
+      await edit("conflict-state", "state", "action-closed")
+
+      await replace("v2", "2026-02-01T00:00:12.000Z", "Source C", "source-changed")
+      expect(
+        await storage.objects.getByPrimaryId({
+          projectId: "materializer-storage-contract",
+          objectTypeId: ConflictDevice.id,
+          primaryId: "one",
+        })
+      ).toMatchObject({ properties: { id: "one", name: "Source C", state: "action-closed" } })
+    } finally {
+      await provider.cleanup?.(createdStorage)
+    }
+  })
+
   test(`${name} persists cardinality-one edit authority by scope`, async () => {
     const createdStorage = await provider.createStorage()
     const storage = requireContractStorage(createdStorage)
@@ -305,6 +472,7 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
         materializationId: () => `scope-contract-candidate-${++materializationOrdinal}`,
       },
     })
+    const runtimeMaterializer = materializer.withScope(runtimeScope())
     const linkRef = (targetId: string) => ({
       source: { objectTypeId: Device.id, primaryId: "document" },
       linkId: "parent",
@@ -322,7 +490,13 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
         protocol: "replacement",
         datasetVersion,
       })
-      await materializer.projections.replace({
+      const projectionMaterializerForRun = await projectionMaterializer(
+        materializer,
+        storage,
+        deviceProjection.id,
+        `scope-${versionId}`
+      )
+      await projectionMaterializerForRun.projections.replace({
         source: { projectionId: deviceProjection.id },
         datasetVersion,
         execution,
@@ -334,7 +508,7 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
       })
     }
     const edit = (requestId: string, operation: OntologyEditOperation) =>
-      materializer.edits.commit({
+      runtimeMaterializer.edits.commit({
         mode: "atomic",
         source: { kind: "runtime", requestId },
         operations: [operation],
@@ -387,6 +561,52 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
       await provider.cleanup?.(createdStorage)
     }
   })
+}
+
+function runtimeScope() {
+  return createTestingScope({
+    projectId: "materializer-storage-contract",
+    executionId: "materializer-storage-contract-runtime-execution",
+    requestId: "materializer-storage-contract-runtime-request",
+    correlationId: "materializer-storage-contract-runtime-correlation",
+  })
+}
+
+async function projectionMaterializer(
+  materializer: OntologyMaterializer,
+  storage: ContractStorage,
+  projectionId: string,
+  runId: string
+) {
+  return primitiveMaterializer(materializer, storage, {
+    kind: "projection",
+    id: projectionId,
+    runId,
+  })
+}
+
+async function primitiveMaterializer(
+  materializer: OntologyMaterializer,
+  storage: ContractStorage,
+  primitive: TrustedPrimitiveRef
+) {
+  const run =
+    primitive.kind === "action"
+      ? await storage.actionRuns.getById({
+          projectId: "materializer-storage-contract",
+          id: primitive.runId,
+        })
+      : await storage.projectionRuns.getById({
+          projectId: "materializer-storage-contract",
+          id: primitive.runId,
+        })
+  const executionId = run?.executionId ?? `test_${primitive.kind}_execution:${primitive.runId}`
+  const execution = await storage.executions.getById({
+    projectId: "materializer-storage-contract",
+    id: executionId,
+  })
+  if (!execution) throw new Error(`Test execution '${executionId}' is missing.`)
+  return materializer.withScope(restoreTrustedPrimitiveExecutionScope({ execution, primitive }))
 }
 
 function requireContractStorage(storage: Storage): ContractStorage {
@@ -459,7 +679,7 @@ async function claim(
   } as const
 
   if (definition._tag === "TelemetryProjectionDefinition") {
-    const claim = await storage.projectionRuns.startOrReclaim({
+    const claim = await startTestProjectionRun(storage, {
       ...common,
       identity: { ...identityBase, projectionKind: "telemetry", protocol: "telemetry" },
       target: { objectTypeId: definition.objectTypeId },
@@ -469,7 +689,7 @@ async function claim(
   }
 
   if (definition._tag === "LinkProjectionDefinition") {
-    const claim = await storage.projectionRuns.startOrReclaim({
+    const claim = await startTestProjectionRun(storage, {
       ...common,
       identity: { ...identityBase, projectionKind: "link", protocol: "replacement" },
       target: {
@@ -480,7 +700,7 @@ async function claim(
     return claim.execution
   }
 
-  const claim = await storage.projectionRuns.startOrReclaim({
+  const claim = await startTestProjectionRun(storage, {
     ...common,
     identity: { ...identityBase, projectionKind: "object", protocol: "replacement" },
     target: { objectTypeId: definition.objectTypeId },

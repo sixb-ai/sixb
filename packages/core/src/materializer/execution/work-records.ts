@@ -22,7 +22,8 @@ export function appendObjectOverrideWork(
 ): void {
   if (
     stableJsonStringify(working.originalOverride?.value ?? null) ===
-    stableJsonStringify(working.override)
+      stableJsonStringify(working.override) &&
+    stableJsonStringify(working.originalEditedAt) === stableJsonStringify(working.editedAt)
   ) {
     return
   }
@@ -32,6 +33,7 @@ export function appendObjectOverrideWork(
       value: {
         ref: working.ref,
         value: working.override,
+        editedAt: working.editedAt,
         expectedLastCommitId: working.originalOverride?.lastCommitId ?? null,
         lastCommitId: identity.commitId,
         updatedAt: identity.committedAt,

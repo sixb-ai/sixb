@@ -1,5 +1,4 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@sixb/ui/components"
-import { cn } from "@sixb/ui/lib/utils"
 import {
   Activity,
   BarChart3,
@@ -15,25 +14,27 @@ import {
   Zap,
 } from "lucide-react"
 import { useState } from "react"
+import { ActivityStatusText } from "../components/ActivityStatus"
 import {
   type BashIcon,
   type BashIntent,
   classifyCommand,
   coerceBashInput,
   coerceBashOutput,
+  commandPreview,
   describeBash,
   type ParsedBashOutput,
 } from "./interpret"
 import {
   ActionResultView,
   ActionRunView,
-  ApiDataView,
   FacetsView,
   GenericCommandView,
   ObjectDetailView,
   ObjectListView,
   ObjectTypeSchemaView,
   ObjectTypesView,
+  StructuredDataView,
   TelemetryBulkView,
   TelemetryHistoryView,
 } from "./renderers"
@@ -67,12 +68,16 @@ const ICONS: Record<BashIcon, LucideIcon> = {
  * A "View raw" toggle keeps the underlying payload one click away for developers.
  */
 export function BashToolView({ tool }: { tool: BashTool }) {
+  if (tool.state === "input-streaming") {
+    return <ToolLine icon={Terminal} label="Preparing a command" running />
+  }
+
   const input = coerceBashInput(tool.input)
   const command = input?.command ?? tool.inputText ?? ""
   const intent = classifyCommand(command)
   const parsed = coerceBashOutput(tool.output)
 
-  const running = tool.state === "input-streaming" || tool.state === "input-available"
+  const running = tool.state === "input-available"
   const isError = tool.state === "output-error" || (parsed !== null && !parsed.ok)
   const description = describeBash(intent, parsed)
   const Icon = ICONS[description.icon]
@@ -88,7 +93,7 @@ export function BashToolView({ tool }: { tool: BashTool }) {
         <CollapsibleTrigger className="group flex w-fit max-w-full items-center gap-1.5 text-[13px] leading-normal text-muted-foreground transition-colors hover:text-foreground">
           <Icon className="size-3.5 shrink-0" />
           <span className="min-w-0 truncate font-medium">{label}</span>
-          <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
+          <ChevronRight className="size-3.5 shrink-0 opacity-0 transition-all group-hover:opacity-100 group-focus-visible:opacity-100 group-data-[state=open]:rotate-90 group-data-[state=open]:opacity-100" />
         </CollapsibleTrigger>
         <CollapsibleContent>
           <div className="mt-3 space-y-2 text-xs">
@@ -117,13 +122,17 @@ export function BashToolView({ tool }: { tool: BashTool }) {
     <Collapsible>
       <CollapsibleTrigger className="group flex w-fit max-w-full items-center gap-1.5 text-[13px] leading-normal text-muted-foreground transition-colors hover:text-foreground">
         <Icon className="size-3.5 shrink-0" />
-        <span className={cn("min-w-0 truncate font-medium", running && "shimmer")}>{label}</span>
+        {running ? (
+          <ActivityStatusText label={label} className="font-medium shimmer" />
+        ) : (
+          <span className="min-w-0 truncate font-medium">{label}</span>
+        )}
         {!running && description.detail ? (
           <span className="min-w-0 shrink truncate text-muted-foreground/60">
             {description.detail}
           </span>
         ) : null}
-        <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
+        <ChevronRight className="size-3.5 shrink-0 opacity-0 transition-all group-hover:opacity-100 group-focus-visible:opacity-100 group-data-[state=open]:rotate-90 group-data-[state=open]:opacity-100" />
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="mt-3 space-y-3 text-xs">
@@ -150,7 +159,11 @@ function ToolLine({
   return (
     <div className="flex w-fit max-w-full items-center gap-1.5 text-[13px] leading-normal text-muted-foreground">
       <Icon className="size-3.5 shrink-0" />
-      <span className={cn("min-w-0 truncate font-medium", running && "shimmer")}>{label}</span>
+      {running ? (
+        <ActivityStatusText label={label} className="font-medium shimmer" />
+      ) : (
+        <span className="min-w-0 truncate font-medium">{label}</span>
+      )}
       {detail ? (
         <span className="min-w-0 shrink truncate text-muted-foreground/60">{detail}</span>
       ) : null}
@@ -160,12 +173,8 @@ function ToolLine({
 
 /** Results whose headline already says everything — no expandable body needed. */
 function isLeafResult(intent: BashIntent, running: boolean): boolean {
-  if (running) return false
-  return (
-    intent.kind === "api-count" ||
-    intent.kind === "api-exists" ||
-    intent.kind === "api-telemetry-latest"
-  )
+  if (running || intent.kind !== "sixb") return false
+  return ["objects.count", "objects.exists", "telemetry.latest"].includes(intent.command)
 }
 
 function BashResult({
@@ -178,41 +187,45 @@ function BashResult({
   command: string
 }) {
   if (parsed === null) {
-    // Still running — show the command being run, nothing else.
+    // Still running — keep multiline payloads folded; the raw disclosure retains the full command.
     return command ? (
-      <pre className="overflow-x-auto rounded bg-muted/50 px-2 py-1.5 font-mono text-[11px] text-muted-foreground">
+      <pre className="overflow-x-auto rounded bg-muted/50 px-2 py-1.5 font-mono text-[11px] whitespace-pre-wrap text-muted-foreground">
         <span className="select-none text-muted-foreground/50">$ </span>
-        {command}
+        {commandPreview(command)}
       </pre>
     ) : null
   }
 
-  switch (intent.kind) {
-    case "api-object-types":
+  if (intent.kind === "generic" || intent.kind === "compound") {
+    return <GenericCommandView parsed={parsed} command={command} />
+  }
+  if (intent.kind === "read-skill") return <StructuredDataView parsed={parsed} />
+
+  switch (intent.command) {
+    case "ontology.list":
       return <ObjectTypesView parsed={parsed} />
-    case "api-objects-list":
-    case "api-objects-query":
+    case "objects.list":
+    case "objects.get":
+    case "objects.search":
+    case "objects.query":
       return <ObjectListView parsed={parsed} />
-    case "api-object-detail":
+    case "objects.inspect":
       return <ObjectDetailView parsed={parsed} />
-    case "api-object-type-detail":
+    case "ontology.get":
       return <ObjectTypeSchemaView parsed={parsed} />
-    case "api-facets":
+    case "objects.facets":
       return <FacetsView parsed={parsed} />
-    case "api-telemetry-history":
+    case "telemetry.history":
       return <TelemetryHistoryView parsed={parsed} />
-    case "api-telemetry-bulk":
+    case "telemetry.query":
       return <TelemetryBulkView parsed={parsed} />
-    case "api-action-request":
+    case "actions.request":
       return <ActionResultView parsed={parsed} />
-    case "api-action-run":
+    case "action-runs.get":
       return <ActionRunView parsed={parsed} />
-    case "generic":
-      return <GenericCommandView parsed={parsed} command={command} />
-    // Remaining surfaces (actions list, project info) render through the neutral data view —
-    // structured, never raw JSON.
+    // Remaining CLI surfaces render through the neutral data view — structured, never raw JSON.
     default:
-      return <ApiDataView parsed={parsed} />
+      return <StructuredDataView parsed={parsed} />
   }
 }
 

@@ -92,6 +92,8 @@ function runStatusClasses(status: RunStatus): string {
       return "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-300"
     case "running":
       return "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-300"
+    case "queued":
+      return "border-border bg-muted text-muted-foreground"
   }
 }
 
@@ -143,7 +145,7 @@ function runDuration(run: ProjectionRun): string {
     return run.status === "running" ? "Running" : "Pending"
   }
 
-  const durationMs = new Date(run.finishedAt).getTime() - new Date(run.startedAt).getTime()
+  const durationMs = new Date(run.finishedAt).getTime() - new Date(runActivityAt(run)).getTime()
   if (!Number.isFinite(durationMs) || durationMs < 0) return "Unknown"
   if (durationMs < 1000) return "<1s"
   if (durationMs < 60_000) return `${Math.round(durationMs / 1000)}s`
@@ -151,6 +153,10 @@ function runDuration(run: ProjectionRun): string {
   const minutes = Math.floor(durationMs / 60_000)
   const seconds = Math.round((durationMs % 60_000) / 1000)
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`
+}
+
+function runActivityAt(run: ProjectionRun): string {
+  return run.startedAt ?? run.queuedAt
 }
 
 function ProjectionListItem({
@@ -180,7 +186,7 @@ function ProjectionListItem({
         <div className="hidden shrink-0 flex-col items-end gap-1 sm:flex">
           <RunStatusBadge status={latestRun.status} />
           <span className="text-xs text-muted-foreground">
-            {formatRelativeTime(latestRun.startedAt)}
+            {formatRelativeTime(runActivityAt(latestRun))}
           </span>
         </div>
       ) : (
@@ -234,7 +240,7 @@ function ProjectionTableView({
                   <div className="flex flex-col items-start gap-1">
                     <RunStatusBadge status={projection.latestRun.status} />
                     <span className="text-xs text-muted-foreground">
-                      {formatRelativeTime(projection.latestRun.startedAt)}
+                      {formatRelativeTime(runActivityAt(projection.latestRun))}
                     </span>
                   </div>
                 ) : (
@@ -415,7 +421,9 @@ function LatestRunSummary({ run }: { run: ProjectionRun | null }) {
           <span className="text-muted-foreground">No runs yet</span>
         )}
       </MetricTile>
-      <MetricTile label="Started">{run ? formatRelativeTime(run.startedAt) : dash}</MetricTile>
+      <MetricTile label={run?.startedAt ? "Started" : "Queued"}>
+        {run ? formatRelativeTime(runActivityAt(run)) : dash}
+      </MetricTile>
       <MetricTile label="Duration">
         {run ? <span className="tabular-nums">{runDuration(run)}</span> : dash}
       </MetricTile>
@@ -451,7 +459,7 @@ function ProjectionRunList({ runs }: { runs: ProjectionRun[] }) {
             <tr className="sticky top-0 z-10 border-b border-border bg-card">
               <th className={cn(headCell, "pr-3")}>Status</th>
               <th className={cn(headCell, "px-3")}>Run</th>
-              <th className={cn(headCell, "px-3")}>Started</th>
+              <th className={cn(headCell, "px-3")}>Queued / started</th>
               <th className={cn(headCell, "px-3 text-right")}>Duration</th>
               {metricLabels.map((label) => (
                 <th key={label} className={cn(headCell, "px-3 text-right")}>
@@ -479,7 +487,7 @@ function ProjectionRunList({ runs }: { runs: ProjectionRun[] }) {
                   {run.error && <SixbFailureSummary failure={run.error} className="mt-1 text-xs" />}
                 </td>
                 <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">
-                  {formatRelativeTime(run.startedAt)}
+                  {formatRelativeTime(runActivityAt(run))}
                 </td>
                 <td className={cn(numCell, "text-muted-foreground")}>{runDuration(run)}</td>
                 {runMetrics(run).map((metric) => (
@@ -506,7 +514,7 @@ function ProjectionRunList({ runs }: { runs: ProjectionRun[] }) {
             <div className="flex items-center justify-between gap-2">
               <RunStatusBadge status={run.status} />
               <span className="text-xs text-muted-foreground">
-                {formatRelativeTime(run.startedAt)}
+                {formatRelativeTime(runActivityAt(run))}
               </span>
             </div>
             <p className="mt-2 font-mono text-xs text-foreground" title={run.id}>
@@ -624,6 +632,10 @@ function ProjectionFlow({ projection }: { projection: GetProjectionResponse }) {
       onClick={() => navigate(`/datasets/${encodeURIComponent(projection.datasetId)}`)}
     />
   )
+  const telemetryPropertyCount =
+    projection._tag === "TelemetryProjectionDefinition"
+      ? Object.keys(projection.properties).length
+      : 0
 
   if (projection._tag === "LinkProjectionDefinition") {
     return (
@@ -656,7 +668,10 @@ function ProjectionFlow({ projection }: { projection: GetProjectionResponse }) {
         onClick={() => toType(projection.objectTypeId)}
       />
       {projection._tag === "TelemetryProjectionDefinition" && (
-        <Mono value={`· ${projection.propertyId}`} muted />
+        <Mono
+          value={`· ${telemetryPropertyCount} telemetry ${telemetryPropertyCount === 1 ? "property" : "properties"}`}
+          muted
+        />
       )}
     </div>
   )
@@ -737,8 +752,9 @@ function ProjectionMapping({ projection }: { projection: GetProjectionResponse }
     )
   }
 
+  const properties = Object.entries(projection.properties)
   return (
-    <div className="max-w-md">
+    <div className="grid gap-6 lg:grid-cols-2">
       <MappingTable
         columns={["Point field", "Dataset column"]}
         rows={[
@@ -747,21 +763,24 @@ function ProjectionMapping({ projection }: { projection: GetProjectionResponse }
             cells: ["Object id", <Mono key="c" value={projection.objectIdField} muted />],
           },
           { key: "at", cells: ["Timestamp", <Mono key="c" value={projection.atField} muted />] },
-          { key: "value", cells: ["Value", <Mono key="c" value={projection.valueField} muted />] },
-          {
-            key: "unit",
-            cells: [
-              "Unit",
-              projection.unitField ? (
-                <Mono key="c" value={projection.unitField} muted />
-              ) : (
-                <span key="c" className="text-muted-foreground">
-                  —
-                </span>
-              ),
-            ],
-          },
         ]}
+      />
+      <MappingTable
+        columns={["Telemetry property", "Value column", "Unit column"]}
+        rows={properties.map(([propertyId, mapping]) => ({
+          key: propertyId,
+          cells: [
+            <Mono key="p" value={propertyId} />,
+            <Mono key="v" value={mapping.valueField} muted />,
+            mapping.unitField ? (
+              <Mono key="u" value={mapping.unitField} muted />
+            ) : (
+              <span key="u" className="text-muted-foreground">
+                —
+              </span>
+            ),
+          ],
+        }))}
       />
     </div>
   )

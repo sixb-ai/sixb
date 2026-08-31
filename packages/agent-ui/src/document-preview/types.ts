@@ -1,6 +1,6 @@
 import type { AgentFileRef } from "../types"
 
-export type AgentDocumentKind = "markdown" | "html" | "csv" | "tsv" | "pdf"
+export type AgentDocumentKind = "markdown" | "html" | "csv" | "tsv" | "pdf" | "image"
 
 /** A file part tied to the durable message route that authorizes reading its bytes. */
 export interface AgentDocumentSource {

@@ -39,9 +39,26 @@ export interface RunModelLoopInput<TOutput = string> {
   readonly reasoning?: ModelReasoningLevel
   readonly maxSteps: number
   readonly signal: AbortSignal
+  /** Reserve the final provider call for a tool-free synthesis response. */
+  readonly finalStepInstruction?: string
+  readonly prepareStep?: (
+    input: PrepareModelStepInput
+  ) => PrepareModelStepResult | undefined | Promise<PrepareModelStepResult | undefined>
   readonly onEvent?: (event: ModelUiChunk) => void | Promise<void>
   readonly onModelCallEnd?: (event: ModelCallEndEvent) => void | Promise<void>
+  readonly onStepEnd?: (step: ModelStep) => void | Promise<void>
   readonly generateCallId?: () => string
+}
+
+export interface PrepareModelStepInput {
+  readonly stepIndex: number
+  readonly messages: readonly ModelMessage[]
+  readonly model: LanguageModel
+  readonly signal: AbortSignal
+}
+
+export interface PrepareModelStepResult {
+  readonly messages?: readonly ModelMessage[]
 }
 
 export type ModelLoopResult<TOutput = string> =
@@ -95,19 +112,22 @@ export async function runModelLoop<TOutput = string>(
     description: tool.description,
     inputSchema: tool.inputSchema,
   }))
-  if (input.output) {
-    toolSpecifications.push({
-      name: OUTPUT_TOOL_NAME,
-      description:
-        input.output.description ??
-        "Submit the final structured result after all required investigation is complete.",
-      inputSchema: input.output.schema,
-    })
-  }
-
   const messages: ModelMessage[] = [...input.messages]
   const steps: ModelStep[] = []
   const modelDefinition = await resolveLanguageModelDefinition(input.model)
+  const nativeStructuredOutput =
+    input.output !== undefined && modelDefinition.capabilities.nativeStructuredOutput === true
+  const outputToolSpecification: ModelToolSpecification | undefined =
+    input.output === undefined || nativeStructuredOutput
+      ? undefined
+      : {
+          name: OUTPUT_TOOL_NAME,
+          description:
+            input.output.description ??
+            "Submit the final structured result after all required investigation is complete.",
+          inputSchema: input.output.schema,
+        }
+  if (outputToolSpecification) toolSpecifications.push(outputToolSpecification)
   const generateCallId = input.generateCallId ?? (() => `model_call_${randomUUID()}`)
   const callIds = new Set<string>()
 
@@ -116,6 +136,22 @@ export async function runModelLoop<TOutput = string>(
       return { status: "aborted", steps, partialContent: [] }
     }
     await input.onEvent?.({ type: "start-step" })
+
+    const prepared = await input.prepareStep?.({
+      stepIndex,
+      messages,
+      model: input.model,
+      signal: input.signal,
+    })
+    let requestMessages = prepared?.messages ?? messages
+    let requestTools: readonly ModelToolSpecification[] = toolSpecifications
+    if (input.finalStepInstruction !== undefined && stepIndex === input.maxSteps - 1) {
+      requestMessages = [
+        ...requestMessages,
+        { role: "user", content: [{ type: "text", text: input.finalStepInstruction }] },
+      ]
+      requestTools = outputToolSpecification ? [outputToolSpecification] : []
+    }
 
     const callId = generateCallId()
     if (!callId || callIds.has(callId)) {
@@ -127,10 +163,10 @@ export async function runModelLoop<TOutput = string>(
     try {
       const stream = await input.model.stream({
         callId,
-        messages,
-        tools: toolSpecifications,
+        messages: requestMessages,
+        tools: requestTools,
         ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
-        ...(input.output === undefined
+        ...(!nativeStructuredOutput
           ? {}
           : {
               responseFormat: {
@@ -232,13 +268,27 @@ export async function runModelLoop<TOutput = string>(
       )
       const step = modelStep(response, responseId, content, cost)
       steps.push(step)
+      await input.onStepEnd?.(step)
       return { status: "completed", output, steps, finishReason: response.finishReason }
     }
 
     const localCalls = response.toolCalls.filter((call) => call.part.providerExecuted !== true)
+    if (response.finishReason === "pause" && localCalls.length === 0) {
+      const step = modelStep(response, responseId, response.content, cost)
+      steps.push(step)
+      await input.onStepEnd?.(step)
+      messages.push({ role: "assistant", content: response.content })
+      if (stepIndex + 1 === input.maxSteps) {
+        throw new ModelStreamError(
+          "[SixbModels] Model reached the step limit while a provider continuation was pending."
+        )
+      }
+      continue
+    }
     if (localCalls.length === 0) {
       const step = modelStep(response, responseId, response.content, cost)
       steps.push(step)
+      await input.onStepEnd?.(step)
       if (input.output) {
         const text = response.content
           .filter((part): part is ModelTextPart => part.type === "text")
@@ -278,6 +328,7 @@ export async function runModelLoop<TOutput = string>(
     const toolResults = executions.map((execution) => execution.result)
     const step = modelStep(response, responseId, [...response.content, ...toolResults], cost)
     steps.push(step)
+    await input.onStepEnd?.(step)
 
     if (input.signal.aborted) {
       return {
@@ -299,12 +350,11 @@ export async function runModelLoop<TOutput = string>(
           "[SixbModels] Model reached the step limit without structured output."
         )
       }
-      return {
-        status: "completed",
-        output: "" as TOutput,
-        steps,
-        finishReason: "tool-calls",
-      }
+      const output = response.content
+        .filter((part): part is ModelTextPart => part.type === "text")
+        .map((part) => part.text)
+        .join("") as TOutput
+      return { status: "completed", output, steps, finishReason: response.finishReason }
     }
   }
 
@@ -418,7 +468,8 @@ async function executeToolCall(
     input: part.input,
   })
   try {
-    const output = await tool.execute(parsed, { signal, callId })
+    const context = { signal, callId, toolCallId: part.toolCallId }
+    const output = await tool.execute(parsed, context)
     assertJsonValue(output, `tool '${part.toolName}' output`)
     await onEvent?.({
       type: "tool-output-available",
@@ -426,12 +477,17 @@ async function executeToolCall(
       toolName: part.toolName,
       output,
     })
+    const modelOutput = tool.toModelOutput
+      ? await tool.toModelOutput(output, context)
+      : modelToolOutput(output)
+    validateModelToolOutput(modelOutput, part.toolName)
     return {
       result: {
         type: "tool-result",
         toolCallId: part.toolCallId,
         toolName: part.toolName,
-        output: modelToolOutput(output),
+        output: modelOutput,
+        ...(modelOutputMatchesOriginal(modelOutput, output) ? {} : { originalOutput: output }),
       },
     }
   } catch (error) {
@@ -444,6 +500,22 @@ async function executeToolCall(
     })
     return { result: toolErrorResult(part, errorText) }
   }
+}
+
+function validateModelToolOutput(output: ModelToolOutput, toolName: string): void {
+  if (output.type === "text" || output.type === "error-text") {
+    if (typeof output.value !== "string") {
+      throw new TypeError(`[SixbModels] Tool '${toolName}' model output must contain text.`)
+    }
+    return
+  }
+  assertJsonValue(output.value, `tool '${toolName}' model output`)
+}
+
+function modelOutputMatchesOriginal(output: ModelToolOutput, original: JsonValue): boolean {
+  if (output.type === "text") return typeof original === "string" && output.value === original
+  if (output.type === "json") return output.value === original
+  return false
 }
 
 function modelToolOutput(value: JsonValue): ModelToolOutput {

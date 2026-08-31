@@ -17,6 +17,7 @@ Repo-wide agent instructions for `sixb`.
 - `packages/cli`: CLI entrypoint for `sixb`
 - `packages/create-sixb`: zero-dependency project scaffolder and template
 - `packages/app`: custom app integration
+- `models/`: model providers such as Anthropic and Vercel AI Gateway
 - `connectors/`, `storage/`, `broker/`: integrations and infrastructure providers
 - `examples/`: runnable sample projects
 
@@ -69,6 +70,11 @@ job's `timeout-minutes` is only a backstop: a job that dies at its own wall cloc
 "cancelled" with the log ending mid-stream, which is indistinguishable from every other cause. The
 guard exists because a `Bun.build()` deadlock once cost five 15-minute runs before anyone found the
 one named failure buried in the log.
+
+Run `test:ci` outside restricted process sandboxes. Its self-tests exercise process inspection and
+signaling, and several suite fixtures require local process or network access. In Codex, request
+elevated sandbox permissions before the first full-suite run instead of rerunning after an expected
+restricted failure.
 
 `typecheck` uses the TypeScript project-reference graph: `bun run build:types` (`tsc -b
 tsconfig.build.json`) checks every package's `src` exactly once, `tsconfig.tests.json` checks

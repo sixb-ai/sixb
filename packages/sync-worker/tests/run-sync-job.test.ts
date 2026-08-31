@@ -4,12 +4,10 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type {
   BlobStorage,
-  ConnectorAdapter,
-  ConnectorClient,
-  ConnectorDefinition,
   DatasetDefinition,
   DatasetRow,
   FileRef,
+  JsonValue,
   LakeStorage,
   SyncDefinition,
 } from "@sixb/core"
@@ -23,14 +21,15 @@ import {
   InMemoryLakeStorage,
   InMemoryStorage,
 } from "@sixb/core"
-import type { BeginDatasetWriteInput, LakeWriteSession } from "@sixb/core/lake-storage"
-import type { SyncRunRecord, SyncRunStorage } from "@sixb/core/storage"
-import { InMemorySyncRunStorage } from "@sixb/core/storage"
+import type { SyncConnectorSourceResolver } from "@sixb/core/internal/syncs"
+import type { LakeWriteSession } from "@sixb/core/lake-storage"
+import type { ExecutionStorage, SyncRunRecord, SyncRunStorage } from "@sixb/core/storage"
 import { LocalLakeStorage } from "@sixb/lake-local"
-import { runSyncJob } from "../src/run-sync-job"
-import type { SyncWorkerContext } from "../src/types"
+import { runSyncJob as runSyncJobWithDurableRun } from "../src/run-sync-job"
+import type { RunSyncJobInput, SyncWorkerContext } from "../src/types"
 
 const tempDirs: string[] = []
+const executionsByRunStorage = new WeakMap<SyncRunStorage, ExecutionStorage>()
 
 afterEach(async () => {
   while (tempDirs.length > 0) {
@@ -86,6 +85,16 @@ const keyedDocsDataset = defineDataset("raw.keyed-docs", {
   primaryKey: "id",
 })
 
+function storedErpCheckpoint(value: JsonValue): JsonValue {
+  return {
+    kind: "sync_checkpoint",
+    version: 1,
+    connectorId: erpDb.id,
+    strategy: "single",
+    value,
+  }
+}
+
 function createRuntime(options: {
   sync: SyncDefinition
   syncRunsStorage?: SyncRunStorage
@@ -94,10 +103,23 @@ function createRuntime(options: {
   client?: unknown
   onConnect?: () => Promise<void> | void
 }): SyncWorkerContext {
-  const syncRunsStorage = options.syncRunsStorage ?? new InMemorySyncRunStorage()
+  const syncRunsStorage = options.syncRunsStorage ?? createSyncRunStorage()
   const lakeStorage = options.lakeStorage ?? new InMemoryLakeStorage()
   const blobStorage = options.blobStorage ?? new InMemoryBlobStorage()
   const client = options.client ?? {}
+
+  const connectorSources: SyncConnectorSourceResolver = {
+    async list() {
+      return [
+        {
+          async connect() {
+            await options.onConnect?.()
+            return client
+          },
+        },
+      ] as never
+    },
+  }
 
   return {
     id: "project-1",
@@ -114,13 +136,105 @@ function createRuntime(options: {
         return syncId === options.sync.id ? options.sync : null
       },
     },
-    async connector<TAdapter extends ConnectorAdapter>(
-      _definition: ConnectorDefinition<string, TAdapter>
-    ): Promise<ConnectorClient<TAdapter>> {
-      await options.onConnect?.()
-      return client as ConnectorClient<TAdapter>
-    },
+    connectorSources,
   }
+}
+
+function createSyncRunStorage(): SyncRunStorage {
+  const provider = new InMemoryStorage()
+  executionsByRunStorage.set(provider.syncRuns, provider.executions)
+  return provider.syncRuns
+}
+
+function registerSyncRunStorage(
+  storage: SyncRunStorage,
+  executions: ExecutionStorage
+): SyncRunStorage {
+  executionsByRunStorage.set(storage, executions)
+  return storage
+}
+
+interface TestSyncJob {
+  readonly id: string
+  readonly syncId: string
+  readonly expectedLatestVersionId?: string
+  readonly commitMessage?: string
+}
+
+type TestRunSyncJobInput = Omit<RunSyncJobInput, "run"> & {
+  readonly job: TestSyncJob
+}
+
+async function queueTestSyncRun(runtime: SyncWorkerContext, job: TestSyncJob) {
+  const existing = await runtime.syncRunsStorage.getById({ projectId: runtime.id, id: job.id })
+  if (existing) return existing
+
+  const sync = runtime.syncs.getById(job.syncId)
+  if (!sync) throw new Error(`[Test] Unknown Sync '${job.syncId}'.`)
+  const executions = executionsByRunStorage.get(runtime.syncRunsStorage)
+  if (!executions) throw new Error("[Test] Sync run storage has no associated execution storage.")
+  const executionId = `exec:${job.id}`
+  await executions.create({
+    id: executionId,
+    projectId: runtime.id,
+    executor: { type: "primitive", kind: "sync", runId: job.id },
+    source: { type: "schedule", eventId: `event:${job.id}` },
+    correlationId: `correlation:${job.id}`,
+    authorizationRef: {
+      type: "trustedPrimitive",
+      primitive: { kind: "sync", id: job.syncId, runId: job.id },
+    },
+  })
+  return runtime.syncRunsStorage.queue({
+    id: job.id,
+    projectId: runtime.id,
+    executionId,
+    syncId: job.syncId,
+    datasetId: sync.target.dataset.id,
+    mode: sync.config.mode,
+    expectedLatestVersionId: job.expectedLatestVersionId,
+    commitMessage: job.commitMessage,
+  })
+}
+
+async function runSyncJob(input: TestRunSyncJobInput) {
+  const { job, ...options } = input
+  const run = await queueTestSyncRun(input.runtime, job)
+  return runSyncJobWithDurableRun({ ...options, run })
+}
+
+async function startSyncRun(
+  storage: SyncRunStorage,
+  input: {
+    readonly id: string
+    readonly projectId: string
+    readonly syncId: string
+    readonly datasetId: string
+    readonly mode: "snapshot" | "append" | "merge"
+    readonly startedAt?: Date
+  }
+) {
+  const executions = executionsByRunStorage.get(storage)
+  if (!executions) throw new Error("[Test] Sync run storage has no associated execution storage.")
+  const executionId = `exec:${input.id}`
+  await executions.create({
+    id: executionId,
+    projectId: input.projectId,
+    executor: { type: "primitive", kind: "sync", runId: input.id },
+    source: { type: "schedule", eventId: `event:${input.id}` },
+    correlationId: `correlation:${input.id}`,
+    authorizationRef: {
+      type: "trustedPrimitive",
+      primitive: { kind: "sync", id: input.syncId, runId: input.id },
+    },
+  })
+  const { startedAt, ...queuedRun } = input
+  await storage.queue({ ...queuedRun, executionId, queuedAt: startedAt })
+  return storage.start({
+    id: input.id,
+    projectId: input.projectId,
+    startedAt: input.startedAt,
+  })
 }
 
 async function collectRows(rows: AsyncIterable<DatasetRow>): Promise<DatasetRow[]> {
@@ -129,33 +243,6 @@ async function collectRows(rows: AsyncIterable<DatasetRow>): Promise<DatasetRow[
     result.push(row)
   }
   return result
-}
-
-class RejectingFirstEmptyCommitLakeStorage extends InMemoryLakeStorage {
-  override async beginWrite(input: BeginDatasetWriteInput): Promise<LakeWriteSession> {
-    const write = await super.beginWrite(input)
-    let rowsWritten = 0
-
-    return {
-      async writeRows(rows) {
-        await write.writeRows(
-          (async function* () {
-            for await (const row of rows) {
-              rowsWritten += 1
-              yield row
-            }
-          })()
-        )
-      },
-      commit: async (commitInput) => {
-        if (rowsWritten === 0 && !(await this.getLatestVersion(input.dataset.id))) {
-          throw new Error("A first empty commit cannot create a dataset version.")
-        }
-        return write.commit(commitInput)
-      },
-      abort: () => write.abort(),
-    }
-  }
 }
 
 describe("runSyncJob", () => {
@@ -219,7 +306,7 @@ describe("runSyncJob", () => {
       })
       .intoDataset(rawOrdersDataset)
 
-    const syncRunsStorage = new InMemorySyncRunStorage()
+    const syncRunsStorage = createSyncRunStorage()
     const runtime = createRuntime({
       sync,
       syncRunsStorage,
@@ -324,8 +411,8 @@ describe("runSyncJob", () => {
   })
 
   test("passes the latest successful checkpoint and stores the next checkpoint", async () => {
-    const syncRunsStorage = new InMemorySyncRunStorage()
-    await syncRunsStorage.start({
+    const syncRunsStorage = createSyncRunStorage()
+    await startSyncRun(syncRunsStorage, {
       id: "run_previous",
       projectId: "project-1",
       syncId: "sync-orders",
@@ -345,7 +432,7 @@ describe("runSyncJob", () => {
       },
       checkpoint: { cursor: "cursor-1" },
     })
-    await syncRunsStorage.start({
+    await startSyncRun(syncRunsStorage, {
       id: "run_running",
       projectId: "project-1",
       syncId: "sync-orders",
@@ -381,12 +468,12 @@ describe("runSyncJob", () => {
       id: "run_1",
     })
     expect(seenCheckpoint).toEqual({ cursor: "cursor-1" })
-    expect(run?.checkpoint).toEqual({ cursor: "cursor-2" })
+    expect(run?.checkpoint).toEqual(storedErpCheckpoint({ cursor: "cursor-2" }))
   })
 
   test("streams ordered merge changes and stores the successful checkpoint", async () => {
     const lakeStorage = new InMemoryLakeStorage()
-    const syncRunsStorage = new InMemorySyncRunStorage()
+    const syncRunsStorage = createSyncRunStorage()
     const sync = defineSync("sync-keyed-orders", { mode: "merge" })
       .checkpoint<{ cursor: string }>()
       .from(erpDb)
@@ -422,7 +509,7 @@ describe("runSyncJob", () => {
       mode: "merge",
       status: "succeeded",
       rowsRead: 2,
-      checkpoint: { cursor: "event-2" },
+      checkpoint: storedErpCheckpoint({ cursor: "event-2" }),
     })
   })
 
@@ -448,7 +535,7 @@ describe("runSyncJob", () => {
   })
 
   test("verifies file references for merge upserts but not deletes", async () => {
-    const syncRunsStorage = new InMemorySyncRunStorage()
+    const syncRunsStorage = createSyncRunStorage()
     const sync = defineSync("sync-keyed-docs", { mode: "merge" })
       .from(erpDb)
       .read(() => [
@@ -478,7 +565,7 @@ describe("runSyncJob", () => {
 
   test("advances a checkpoint for an initial merge no-op without inventing a version", async () => {
     const lakeStorage = new InMemoryLakeStorage()
-    const syncRunsStorage = new InMemorySyncRunStorage()
+    const syncRunsStorage = createSyncRunStorage()
     const sync = defineSync("sync-keyed-orders", { mode: "merge" })
       .checkpoint<{ cursor: string }>()
       .from(erpDb)
@@ -501,7 +588,7 @@ describe("runSyncJob", () => {
     ).toMatchObject({
       status: "succeeded",
       rowsRead: 1,
-      checkpoint: { cursor: "event-1" },
+      checkpoint: storedErpCheckpoint({ cursor: "event-1" }),
       output: undefined,
     })
   })
@@ -537,7 +624,7 @@ describe("runSyncJob", () => {
 
   test("rejects a stale requested merge version before connecting to the source", async () => {
     const lakeStorage = new InMemoryLakeStorage()
-    const syncRunsStorage = new InMemorySyncRunStorage()
+    const syncRunsStorage = createSyncRunStorage()
     await lakeStorage.createDataset(keyedOrdersDataset)
     const seed = await lakeStorage.beginMerge({ dataset: keyedOrdersDataset })
     await seed.writeChanges([change.upsert({ orderId: "ord_1", status: "open" })])
@@ -581,7 +668,7 @@ describe("runSyncJob", () => {
 
   test("does not store a checkpoint when a concurrent merge makes the session stale", async () => {
     const lakeStorage = new InMemoryLakeStorage()
-    const syncRunsStorage = new InMemorySyncRunStorage()
+    const syncRunsStorage = createSyncRunStorage()
     const sync = defineSync("sync-keyed-orders", { mode: "merge" })
       .checkpoint<{ cursor: string }>()
       .from(erpDb)
@@ -615,7 +702,7 @@ describe("runSyncJob", () => {
   test("cancels and discards an in-flight merge", async () => {
     const controller = new AbortController()
     const lakeStorage = new InMemoryLakeStorage()
-    const syncRunsStorage = new InMemorySyncRunStorage()
+    const syncRunsStorage = createSyncRunStorage()
     const sync = defineSync("sync-keyed-orders", { mode: "merge" })
       .from(erpDb)
       .read(async function* () {
@@ -640,7 +727,7 @@ describe("runSyncJob", () => {
   })
 
   test("succeeds and advances the checkpoint for a first empty append", async () => {
-    const syncRunsStorage = new InMemorySyncRunStorage()
+    const syncRunsStorage = createSyncRunStorage()
     const sync = defineSync("sync-orders", { mode: "append" })
       .checkpoint<{ cursor: string }>()
       .from(erpDb)
@@ -667,13 +754,13 @@ describe("runSyncJob", () => {
     ).toMatchObject({
       status: "succeeded",
       rowsRead: 0,
-      checkpoint: { cursor: "cursor-1" },
+      checkpoint: storedErpCheckpoint({ cursor: "cursor-1" }),
     })
   })
 
-  test("succeeds without committing a first empty snapshot", async () => {
-    const syncRunsStorage = new InMemorySyncRunStorage()
-    const lakeStorage = new RejectingFirstEmptyCommitLakeStorage()
+  test("commits a first empty snapshot as an addressable dataset version", async () => {
+    const syncRunsStorage = createSyncRunStorage()
+    const lakeStorage = new InMemoryLakeStorage()
     const sync = defineSync("sync-empty-orders")
       .from(erpDb)
       .read(() => [])
@@ -688,21 +775,30 @@ describe("runSyncJob", () => {
     expect(result).toMatchObject({
       mode: "snapshot",
       rowsRead: 0,
-      versionCreated: false,
+      versionCreated: true,
+      version: {
+        datasetId: rawOrdersDataset.id,
+        mode: "snapshot",
+        rowCount: 0,
+      },
     })
-    expect(result.version).toBeUndefined()
-    expect(await lakeStorage.getLatestVersion(rawOrdersDataset.id)).toBeNull()
+    expect(await lakeStorage.getLatestVersion(rawOrdersDataset.id)).toMatchObject({
+      versionId: result.version?.versionId,
+    })
     expect(
       await syncRunsStorage.getById({ projectId: "project-1", id: "run_empty_snapshot" })
     ).toMatchObject({
       status: "succeeded",
       rowsRead: 0,
-      output: undefined,
+      output: {
+        datasetId: rawOrdersDataset.id,
+        versionId: result.version?.versionId,
+      },
     })
   })
 
   test("commits an empty snapshot when it must clear a previous version", async () => {
-    const lakeStorage = new RejectingFirstEmptyCommitLakeStorage()
+    const lakeStorage = new InMemoryLakeStorage()
     await lakeStorage.createDataset(rawOrdersDataset)
     const seed = await lakeStorage.beginWrite({ dataset: rawOrdersDataset, mode: "snapshot" })
     await seed.writeRows([{ orderId: "ord_1" }])
@@ -726,8 +822,8 @@ describe("runSyncJob", () => {
   })
 
   test("does not advance checkpoints from failed runs", async () => {
-    const syncRunsStorage = new InMemorySyncRunStorage()
-    await syncRunsStorage.start({
+    const syncRunsStorage = createSyncRunStorage()
+    await startSyncRun(syncRunsStorage, {
       id: "run_previous",
       projectId: "project-1",
       syncId: "sync-orders",
@@ -801,11 +897,11 @@ describe("runSyncJob", () => {
       id: "run_succeeded",
     })
     expect(seenCheckpoints).toEqual([{ cursor: "cursor-1" }, { cursor: "cursor-1" }])
-    expect(succeededRun?.checkpoint).toEqual({ cursor: "cursor-2" })
+    expect(succeededRun?.checkpoint).toEqual(storedErpCheckpoint({ cursor: "cursor-2" }))
   })
 
   test("rejects non-JSON checkpoint values", async () => {
-    const syncRunsStorage = new InMemorySyncRunStorage()
+    const syncRunsStorage = createSyncRunStorage()
     const sync = defineSync("sync-orders", { mode: "append" })
       .checkpoint<unknown>()
       .from(erpDb)
@@ -840,7 +936,7 @@ describe("runSyncJob", () => {
   })
 
   test("writes the running record before connector execution", async () => {
-    const syncRunsStorage = new InMemorySyncRunStorage()
+    const syncRunsStorage = createSyncRunStorage()
     let seenStatus: string | undefined
 
     const sync = defineSync("sync-orders")
@@ -873,7 +969,7 @@ describe("runSyncJob", () => {
   })
 
   test("marks the run failed and aborts the write when a row is invalid", async () => {
-    const syncRunsStorage = new InMemorySyncRunStorage()
+    const syncRunsStorage = createSyncRunStorage()
     const lakeStorage = new InMemoryLakeStorage()
     let abortCalls = 0
 
@@ -969,7 +1065,7 @@ describe("runSyncJob", () => {
   })
 
   test("rejects unsupported top-level read results", async () => {
-    const syncRunsStorage = new InMemorySyncRunStorage()
+    const syncRunsStorage = createSyncRunStorage()
     const sync = defineSync("sync-orders")
       .from(erpDb)
       .read(() => 42)
@@ -1010,7 +1106,7 @@ describe("runSyncJob", () => {
   })
 
   test("marks the run failed when a row does not match the dataset schema", async () => {
-    const syncRunsStorage = new InMemorySyncRunStorage()
+    const syncRunsStorage = createSyncRunStorage()
     const sync = defineSync("sync-orders")
       .from(erpDb)
       .read(() => [{ customerName: "Ada", unexpected: true }])
@@ -1051,7 +1147,7 @@ describe("runSyncJob", () => {
   })
 
   test("marks the run failed when a fileRef references a missing blob", async () => {
-    const syncRunsStorage = new InMemorySyncRunStorage()
+    const syncRunsStorage = createSyncRunStorage()
     const sync = defineSync("sync-docs")
       .from(erpDb)
       .read(() => [
@@ -1101,7 +1197,7 @@ describe("runSyncJob", () => {
   })
 
   test("lets sync read handlers store blobs and return validated fileRefs", async () => {
-    const syncRunsStorage = new InMemorySyncRunStorage()
+    const syncRunsStorage = createSyncRunStorage()
     const blobStorage = new InMemoryBlobStorage()
     const body = new TextEncoder().encode("hello from a synced document")
     let storedFileRef: FileRef | undefined
@@ -1164,7 +1260,7 @@ describe("runSyncJob", () => {
 
   test("marks the run cancelled when the signal aborts during iteration", async () => {
     const controller = new AbortController()
-    const syncRunsStorage = new InMemorySyncRunStorage()
+    const syncRunsStorage = createSyncRunStorage()
 
     const sync = defineSync("sync-orders")
       .from(erpDb)
@@ -1239,8 +1335,11 @@ describe("runSyncJob", () => {
   })
 
   test("surfaces bookkeeping failures after the lake commit clearly", async () => {
-    const delegate = new InMemorySyncRunStorage()
+    const delegate = createSyncRunStorage()
     const syncRunsStorage: SyncRunStorage = {
+      queue(input) {
+        return delegate.queue(input)
+      },
       start(input) {
         return delegate.start(input)
       },
@@ -1261,6 +1360,7 @@ describe("runSyncJob", () => {
         return delegate.listLatestBySyncIds(input)
       },
     }
+    registerSyncRunStorage(syncRunsStorage, executionsByRunStorage.get(delegate)!)
 
     const lakeStorage = new InMemoryLakeStorage()
     const finishedRuns: SyncRunRecord[] = []
@@ -1315,7 +1415,7 @@ describe("runSyncJob", () => {
     tempDirs.push(rootDir)
 
     const lakeStorage = new LocalLakeStorage({ path: rootDir })
-    const syncRunsStorage = new InMemoryStorage().syncRuns
+    const syncRunsStorage = createSyncRunStorage()
     const sync = defineSync("sync-orders")
       .from(erpDb)
       .read(() => [
@@ -1379,7 +1479,7 @@ describe("runSyncJob", () => {
     tempDirs.push(rootDir)
 
     const lakeStorage = new LocalLakeStorage({ path: rootDir })
-    const syncRunsStorage = new InMemoryStorage().syncRuns
+    const syncRunsStorage = createSyncRunStorage()
     const expectedRows: DatasetRow[] = [
       {
         orderId: "ord_1",

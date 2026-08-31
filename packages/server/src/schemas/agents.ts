@@ -2,10 +2,12 @@ import { AGENT_REASONING_LEVELS, MAX_AGENT_CONTEXT_ENTRIES } from "@sixb/core"
 import {
   AGENT_RUN_DIAGNOSTIC_CODES,
   AGENT_RUN_FAILURE_CODES,
+  AGENT_RUN_FINISH_REASONS,
   type AgentRunFailureCode,
   type SixbFailure,
 } from "@sixb/core/storage"
 import { z } from "zod"
+import { AiCostSummarySchema } from "./ai-accounting"
 import { AiUsageSummarySchema } from "./ai-usage"
 import { JsonValueSchema, sixbFailureSchema } from "./common"
 import { FileRefSchema } from "./files"
@@ -249,15 +251,7 @@ export const AgentRunStatusSchema = z.enum([
   "cancelled",
 ])
 
-export const AgentRunFinishReasonSchema = z.enum([
-  "stop",
-  "length",
-  "content-filter",
-  "tool-calls",
-  "error",
-  "other",
-  "unknown",
-])
+export const AgentRunFinishReasonSchema = z.enum(AGENT_RUN_FINISH_REASONS)
 
 export const AgentRunSchema = z.object({
   id: z.string(),
@@ -270,6 +264,7 @@ export const AgentRunSchema = z.object({
   modelId: z.string().optional(),
   finishReason: AgentRunFinishReasonSchema.optional(),
   usage: AiUsageSummarySchema.optional(),
+  cost: AiCostSummarySchema.optional(),
   diagnostics: z.array(AgentRunDiagnosticSchema).optional(),
   error: AgentRunFailureSchema.optional(),
   attempt: z.number(),

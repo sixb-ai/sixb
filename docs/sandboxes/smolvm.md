@@ -1,9 +1,9 @@
 # smolvm sandbox
 
-`@sixb/sandboxes-smolvm` runs each agent's bash inside a hardware-isolated
+`@sixb/sandboxes-smolvm` runs each agent's sandbox tools inside a hardware-isolated
 [smolvm](https://github.com/smol-machines/smolvm) microVM. Reach for it in production, or whenever
-you want stronger isolation than the [local](./local.md) provider's OS sandboxing: every run gets its
-own VM with a real per-host network allow list, and the guest filesystem and processes are fully
+you want stronger isolation than the [local](./local.md) provider's OS sandboxing: every run gets
+its own VM with a real per-host network allow list, and the guest filesystem and processes are fully
 separated from the host.
 
 ```ts
@@ -18,7 +18,7 @@ It implements the same `Sandbox` / `SandboxFactory` contract as every provider �
 
 ## How a run works
 
-Per agent run the factory creates a machine, boots it from an image, runs the agent's bash through
+Per agent run the factory creates a machine, boots it from an image, runs the agent's tools through
 `smolvm machine exec`, then stops and deletes the machine on teardown. The guest filesystem is fully
 isolated from the host — there is no bind mount. Files the worker needs in the guest (skills, run
 context) are materialized **in-guest** by `writeFiles`, which executes a short script inside the VM
@@ -46,28 +46,36 @@ curl -sSL https://smolmachines.com/install.sh | bash
 ## The agent image
 
 The VM boots from an OCI image that contains the tooling the agent uses. The package ships a
-canonical agent image — Alpine plus `bash curl jq git ripgrep python3`, roughly 73 MB — kept lean so
-boot stays fast.
+versioned managed image recipe: pinned Node 22 on Alpine plus Bash, Git, certificates, ripgrep, and
+Python. Alpine's BusyBox base provides the standard file utilities used by reads and output
+collection. `curl` and `jq` are not required by the portable CLI.
 
 Build it once with Docker or Podman. The build is the only step that needs a container builder; every
 run after reads the cached archive offline.
 
 ```bash
-bun run agent:image
+bunx -p @sixb/sandboxes-smolvm sixb-agent-image
 ```
 
 This builds `agent-image/Dockerfile` and caches the archive at
-`~/.cache/sixb/smolvm/sixb-agent.tar` (honoring `XDG_CACHE_HOME`). To add tools, edit the Dockerfile
-and rebuild — keep it lean, and remember run-time installs will not work because egress is locked to
-the gateway.
+`~/.cache/sixb/smolvm/sixb-agent-runtime-v1.tar` (honoring `XDG_CACHE_HOME`). The versioned cache
+name prevents an older image from silently surviving a managed-image change. To add tools, edit the
+Dockerfile and rebuild — keep it lean, and remember run-time installs will not work because egress
+is locked to the gateway.
+
+The previous unversioned `sixb-agent.tar` is intentionally not selected. Re-run the image command
+once when upgrading to runtime-v1.
+
+For agent use, custom archives and registry images need Bash, standard file utilities, CA
+certificates, and Bun 1.3+ or Node 22+. A bare BusyBox machine is not a complete Sixb agent image.
 
 For a server that has no Docker, cross-build the image elsewhere and copy it over. The build writes an
 arch-suffixed file so it does not clobber the host build:
 
 ```bash
-bun run agent:image --platform linux/amd64
-# Built agent image -> ~/.cache/sixb/smolvm/sixb-agent-amd64.tar
-scp ~/.cache/sixb/smolvm/sixb-agent-amd64.tar server:/opt/sixb/agent.tar
+bunx -p @sixb/sandboxes-smolvm sixb-agent-image --platform linux/amd64
+# Built agent image -> ~/.cache/sixb/smolvm/sixb-agent-runtime-v1-amd64.tar
+scp ~/.cache/sixb/smolvm/sixb-agent-runtime-v1-amd64.tar server:/opt/sixb/agent.tar
 ```
 
 The server then needs only the `smolvm` binary and the `.tar`.
@@ -78,7 +86,7 @@ The `image` option selects what the VM boots from:
 
 | `image` value | Mode | Behavior |
 | --- | --- | --- |
-| `undefined` (default) | Managed archive | The cached `sixb-agent.tar` (or a cross-built `sixb-agent-<arch>.tar` in the cache). Offline, fast, strict egress |
+| `undefined` (default) | Managed archive | The cached `sixb-agent-runtime-v1.tar` (or a cross-built `sixb-agent-runtime-v1-<arch>.tar` in the cache). Offline, fast, strict egress |
 | a local `.tar` / `.tar.gz` / `.tgz` path | Local archive | Loaded at start with no network; boots fully offline |
 | a registry reference (e.g. `"node:22"`) | Registry pull | Pulled from the registry **at start**, from inside the guest |
 | `null` | Bare machine | smolvm's built-in busybox rootfs; no image, fully offline |
@@ -163,4 +171,4 @@ new SmolvmSandboxFactory({ image: null, overlayGiB: 8 })
 
 - [Sandboxes overview](./overview.md) — the shared contract and network model
 - [Local sandbox](./local.md) — OS-level isolation for development
-- [Agent tools and the gateway](../agents/tools-and-gateway.md) — what the bash tool reaches
+- [Agent tools and the gateway](../agents/tools-and-gateway.md) — what the sandbox tools reach

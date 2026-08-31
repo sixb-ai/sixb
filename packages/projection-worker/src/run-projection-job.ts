@@ -30,7 +30,7 @@ import {
 import { MISSING_TARGET_GRACE_MS } from "./retry-backoff"
 import { mapLinkProjectionEntries } from "./run-link-projection"
 import { mapObjectProjectionEntries } from "./run-object-projection"
-import { runTelemetryProjection, TELEMETRY_PROJECTION_BATCH_SIZE } from "./run-telemetry-projection"
+import { runTelemetryProjection } from "./run-telemetry-projection"
 import type {
   ClaimedProjectionExecution,
   ProjectionJob,
@@ -44,24 +44,31 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
   const terminal = await findMatchingTerminalRun(input)
   if (terminal) return terminalResult(terminal)
 
-  const validated = await validateProjectionJob(input.runtime, input.job)
-  const execution = await claimOrReplaySucceededRun(input, validated)
+  const execution = await claimOrReplaySucceededRun(input)
   if ("replayedTerminal" in execution) return execution
+  let finishBoundary: "run" | "materialization" = "run"
   try {
+    const validated = await validateProjectionJob(input.runtime, input.job)
+    finishBoundary = "materialization"
     const completion = await materializeProjection(input, validated, execution, signal)
-    await finishProjection(input, execution, { ...completion, status: "succeeded" })
+    await finishProjection(input, execution, { ...completion, status: "succeeded" }, finishBoundary)
     return { run: await requireRun(input), replayedTerminal: false }
   } catch (error) {
     const succeeded = await findSucceededRun(input)
     if (succeeded) return terminalResult(succeeded)
 
     if (isExplicitCancellation(error)) {
-      await finishProjection(input, execution, projectionFailure(input, error, "cancelled"))
+      await finishProjection(
+        input,
+        execution,
+        projectionFailure(input, error, "cancelled"),
+        finishBoundary
+      )
       throw error
     }
     if ((await isPermanentFailure(input, execution, error)) && !signal.aborted) {
       const decision = projectionFailure(input, error, "failed")
-      await finishProjection(input, execution, decision)
+      await finishProjection(input, execution, decision, finishBoundary)
       const run = await requireRun(input)
       input.onRunFailed?.(error, run, decision.error)
     }
@@ -72,11 +79,10 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
 }
 
 async function claimOrReplaySucceededRun(
-  input: RunProjectionJobInput,
-  validated: ValidatedProjectionJob
+  input: RunProjectionJobInput
 ): Promise<ClaimedProjectionExecution | ProjectionJobResult> {
   try {
-    return await claimExecution(input, validated)
+    return await claimExecution(input)
   } catch (error) {
     // Another delivery may have finished after our initial terminal read but before the claim.
     const succeeded = await findSucceededRun(input)
@@ -94,7 +100,7 @@ async function findMatchingTerminalRun(
   })
   if (!run) return null
   assertRunMatchesJob(run, input.job)
-  if (run.status === "running") return null
+  if (run.status === "queued" || run.status === "running") return null
   if (run.status === "succeeded") return run
   throw createSixbError(
     "projection.run_already_terminal",
@@ -111,32 +117,53 @@ async function findMatchingTerminalRun(
   )
 }
 
-async function claimExecution(
-  input: RunProjectionJobInput,
-  validated: ValidatedProjectionJob
-): Promise<ClaimedProjectionExecution> {
-  const common = { projectId: input.runtime.projectId, id: input.job.id }
-  switch (validated.kind) {
-    case "object":
+async function claimExecution(input: RunProjectionJobInput): Promise<ClaimedProjectionExecution> {
+  const run = await requireRun(input)
+  assertRunMatchesJob(run, input.job)
+  const common = { projectId: run.projectId, id: run.id }
+  switch (run.identity.projectionKind) {
+    case "object": {
+      if (!("objectTypeId" in run.target)) throw inconsistentRunTarget(run)
       return input.runtime.projectionRunsStorage.startOrReclaim({
         ...common,
-        identity: validated.job,
-        target: validated.target,
+        identity: run.identity,
+        target: run.target,
       })
-    case "link":
+    }
+    case "link": {
+      if (!("sourceObjectTypeId" in run.target)) throw inconsistentRunTarget(run)
       return input.runtime.projectionRunsStorage.startOrReclaim({
         ...common,
-        identity: validated.job,
-        target: validated.target,
+        identity: run.identity,
+        target: run.target,
       })
-    case "telemetry":
+    }
+    case "telemetry": {
+      if (!("objectTypeId" in run.target) || !run.telemetryCheckpoint) {
+        throw inconsistentRunTarget(run)
+      }
       return input.runtime.projectionRunsStorage.startOrReclaim({
         ...common,
-        identity: validated.job,
-        target: validated.target,
-        fixedBatchSize: input.telemetryBatchSize ?? TELEMETRY_PROJECTION_BATCH_SIZE,
+        identity: run.identity,
+        target: run.target,
+        fixedBatchSize: input.telemetryBatchSize ?? run.telemetryCheckpoint.fixedBatchSize,
       })
+    }
   }
+}
+
+function inconsistentRunTarget(run: ProjectionRunRecord): ReturnType<typeof createSixbError> {
+  return createSixbError(
+    "internal.unexpected",
+    `[SixbProjectionWorker] Projection run '${run.id}' has inconsistent target metadata.`,
+    {
+      details: {
+        projectionId: run.identity.projectionId,
+        projectionKind: run.identity.projectionKind,
+        runId: run.id,
+      },
+    }
+  )
 }
 
 async function materializeProjection(
@@ -208,8 +235,19 @@ function replacementEntries(
 async function finishProjection(
   input: RunProjectionJobInput,
   execution: ClaimedProjectionExecution,
-  decision: ProjectionRunTerminalDecision & { readonly finishedAt?: Date }
+  decision: ProjectionRunTerminalDecision & { readonly finishedAt?: Date },
+  boundary: "run" | "materialization"
 ): Promise<void> {
+  if (boundary === "run") {
+    await input.runtime.projectionRunsStorage.finish({
+      id: input.job.id,
+      projectId: input.runtime.projectId,
+      identity: input.job,
+      executionToken: execution.execution.executionToken,
+      ...decision,
+    })
+    return
+  }
   const common = {
     source: { projectionId: input.job.projectionId },
     datasetVersion: input.job.datasetVersion,

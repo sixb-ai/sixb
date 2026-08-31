@@ -1,4 +1,5 @@
 import { canViewPipelineRun, isAllowed } from "../authorization"
+import type { ExecutionContext } from "../execution"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type {
   ListLatestPipelineRunsResult,
@@ -37,6 +38,7 @@ export interface PipelinesRuntime {
 
 export function createPipelinesRuntime(
   runtime: SixbRuntimeContext,
+  execution: ExecutionContext,
   source: Pick<PipelinesRuntime, "list" | "getById">
 ): PipelinesRuntime {
   const allowed = (pipelineId: string) =>
@@ -65,7 +67,7 @@ export function createPipelinesRuntime(
     request: async (input) => {
       const pipeline = source.getById(input.pipelineId)
       if (!pipeline) throw new PipelineError(`[Sixb] Unknown pipeline '${input.pipelineId}'`)
-      return requestPipelineRun(runtime, pipeline, input)
+      return requestPipelineRun(runtime, execution, pipeline, input)
     },
     runs: {
       getById: getRun,

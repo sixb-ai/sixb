@@ -23,12 +23,18 @@ export async function queryLatestRunsByOwnerId<TRow>(
   }
 
   const placeholders = ownerIds.map((_, index) => `$${index + 2}`).join(", ")
+  const orderColumn =
+    input.tableName === "sync_runs" ||
+    input.tableName === "pipeline_runs" ||
+    input.tableName === "projection_runs"
+      ? "COALESCE(started_at, queued_at)"
+      : "started_at"
   const rows = await input.sql.unsafe<TRow[]>(
     `
       SELECT DISTINCT ON (${input.ownerColumn}) ${input.selectList ?? "*"}
       FROM ${input.tableName}
       WHERE project_id = $1 AND ${input.ownerColumn} IN (${placeholders})
-      ORDER BY ${input.ownerColumn}, started_at DESC, id DESC
+      ORDER BY ${input.ownerColumn}, ${orderColumn} DESC, id DESC
     `,
     [input.projectId, ...ownerIds] as SqlParameter[]
   )

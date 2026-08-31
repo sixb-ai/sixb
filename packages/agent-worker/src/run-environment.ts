@@ -1,6 +1,7 @@
 import type { AgentDefinition, Sandbox } from "@sixb/core"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
+import type { ModelTool } from "@sixb/core/models"
 import type { AgentRunRecord, WorkflowAgentNodeRunRecord } from "@sixb/core/storage"
 import { type AgentExecutionMode, renderAgentSkillCatalog } from "./agent-skills"
 import { createAgentApiGatewayBaseUrl } from "./api-url"
@@ -11,8 +12,13 @@ import {
 } from "./attachments"
 import { type BashSandboxHandle, createBashTool } from "./bash-tool"
 import { modelToolsFromAgentDefinitions } from "./model-adapters"
+import { createReadTool } from "./read-tool"
 import { prepareAgentSandboxApiContext } from "./sandbox-api-context"
+import { AgentSandboxFileRegistry } from "./sandbox-file-registry"
+import { AgentToolArtifactBudget, createAgentToolArtifacts } from "./tool-artifacts"
+import { AgentToolResultMediaBridge } from "./tool-result-media"
 import type { AgentExecutionContext, AgentTurnContext, AgentWorkerContext } from "./types"
+import { createViewFileTool } from "./view-file-tool"
 import { prepareWorkflowInputAttachments } from "./workflow-input-attachments"
 
 export interface AgentExecutionEnvironment {
@@ -23,6 +29,7 @@ export interface AgentExecutionEnvironment {
 interface CreateAgentEnvironmentInput {
   readonly context: AgentExecutionContext
   readonly agent: AgentDefinition
+  readonly signal?: AbortSignal
   /**
    * Sink for a sandbox teardown that outlives dispose() (the model answered before the boot
    * finished, so dispose returns without stalling on it). The worker registers these so a graceful
@@ -59,7 +66,7 @@ export async function createConversationAgentEnvironment(
       threadId: run.threadId,
       order: "asc",
     }),
-    modelSupportsInlineImages(agent.model),
+    modelSupportsInlineImages(agent.model, input.signal),
   ])
   const attachmentContext = await prepareAgentAttachments({
     projectId: context.id,
@@ -68,6 +75,7 @@ export async function createConversationAgentEnvironment(
     blobStorage: context.blobStorage,
     apiBaseUrl,
     inlineImages,
+    signal: input.signal,
   })
 
   return startAgentEnvironment({
@@ -99,6 +107,7 @@ export async function createWorkflowAgentNodeEnvironment(
     prepareWorkflowInputAttachments({
       input: input.nodeInput,
       blobStorage: context.blobStorage,
+      signal: input.signal,
     }),
   ])
 
@@ -130,7 +139,7 @@ interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
 
 /**
  * Start the shared tools, sandbox, and teardown lifecycle after source-specific preparation.
- * Sandbox boot stays concurrent with the model call; the bash tool awaits it only when used.
+ * Sandbox boot stays concurrent with the model call; sandbox tools await it only when used.
  */
 function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvironment {
   const { mode, context, agent, runId, threadId, apiBaseUrl, attachmentContext, skills } = input
@@ -143,25 +152,59 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
     agentId: agent.id,
     ...(threadId ? { threadId } : {}),
   })
-  const selectedTools = modelToolsFromAgentDefinitions({
-    definitions: agent.tools,
-    valueTypesById: context.valueTypesById,
-    run: { id: runId, agentId: agent.id, ...(threadId ? { threadId } : {}) },
-    connector: context.connector,
-    logger,
-    errorDetails:
-      mode === "conversation"
-        ? { agentId: agent.id, runId }
-        : { agentId: agent.id, nodeRunId: runId },
+  let ready: Promise<BashSandboxHandle>
+  const fileRegistry = new AgentSandboxFileRegistry()
+  const artifactBudget = new AgentToolArtifactBudget()
+  const mediaBridge = new AgentToolResultMediaBridge({
+    blobStorage: context.blobStorage,
+    sandboxPathForFileRef: (fileRef) => fileRegistry.pathFor(fileRef),
   })
+  const artifactsForToolCall = (input: {
+    readonly toolName: string
+    readonly toolCallId: string
+    readonly signal: AbortSignal
+  }) =>
+    createAgentToolArtifacts({
+      ...input,
+      blobStorage: context.blobStorage,
+      budget: artifactBudget,
+      resolveSandbox: () => ready,
+      onPublished: (artifact) => fileRegistry.register(artifact.sandboxPath, artifact.fileRef),
+    })
+  const tools = [
+    ...modelToolsFromAgentDefinitions({
+      definitions: agent.tools,
+      valueTypesById: context.valueTypesById,
+      run: { id: runId, agentId: agent.id, ...(threadId ? { threadId } : {}) },
+      connector: context.connector,
+      logger,
+      artifactsForToolCall,
+      toolResultToModelOutput: (output) => mediaBridge.toModelOutput(output),
+      errorDetails:
+        mode === "conversation"
+          ? { agentId: agent.id, runId }
+          : { agentId: agent.id, nodeRunId: runId },
+    }),
+  ]
 
   let sandboxWasUsed = false
-  let ready: Promise<BashSandboxHandle>
-  const bash = createBashTool(() => {
+  appendBuiltInTool(
+    tools,
+    createViewFileTool({
+      resolveSandbox: () => ready,
+      attachments: attachmentContext,
+      registry: fileRegistry,
+      artifactsForToolCall: ({ toolCallId, signal }) =>
+        artifactsForToolCall({ toolName: "view_file", toolCallId, signal }),
+      toolResultToModelOutput: (output) => mediaBridge.toModelOutput(output),
+    })
+  )
+  const resolveSandbox = () => {
     sandboxWasUsed = true
     return ready
-  })
-  const tools = [...selectedTools, bash]
+  }
+  appendBuiltInTool(tools, createReadTool(resolveSandbox))
+  appendBuiltInTool(tools, createBashTool(resolveSandbox))
 
   ready = provisionSandbox({
     context,
@@ -172,7 +215,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
     attachmentContext,
     skills,
   })
-  // Creation failure is surfaced where it is awaited (turn / bash tool / dispose); attach a no-op
+  // Creation failure is surfaced where it is awaited (turn / sandbox tool / dispose); attach a no-op
   // catch so a rejection observed by none of them is not reported as unhandled.
   ready.catch(() => {})
   // Track settlement so dispose() can avoid blocking teardown on a boot still in flight.
@@ -191,6 +234,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
       apiBaseUrl,
       attachmentContext,
       tools,
+      prepareStep: mediaBridge.prepareStep,
       systemAddendum: renderAgentSkillCatalog(skills, mode),
       sandboxReady: ready,
       sandboxWasUsed: () => sandboxWasUsed,
@@ -267,4 +311,13 @@ function disposeEnvironment(
   // rather than orphaning a machine that is still being torn down.
   onDetachedTeardown?.(teardown)
   return Promise.resolve()
+}
+
+function appendBuiltInTool(tools: ModelTool[], tool: ModelTool): void {
+  if (tools.some((candidate) => candidate.name === tool.name)) {
+    throw new Error(
+      `[SixbAgentWorker] Agent tool name '${tool.name}' is reserved by the worker runtime.`
+    )
+  }
+  tools.push(tool)
 }

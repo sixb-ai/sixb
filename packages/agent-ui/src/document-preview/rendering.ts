@@ -5,6 +5,7 @@ export type AgentDocumentPreviewRenderer =
   | "html-static"
   | "delimited-text"
   | "pdf-native"
+  | "image-native"
 
 /** Keep attachment click behavior and viewer dispatch on one supported-format decision. */
 export function agentDocumentPreviewRenderer(
@@ -14,5 +15,6 @@ export function agentDocumentPreviewRenderer(
   if (kind === "html") return "html-static"
   if (kind === "csv" || kind === "tsv") return "delimited-text"
   if (kind === "pdf") return "pdf-native"
+  if (kind === "image") return "image-native"
   return null
 }

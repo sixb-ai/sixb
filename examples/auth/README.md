@@ -62,6 +62,15 @@ Try the complete flow:
 The custom app is intentionally small: it proves the selected invitation destination, audience
 cookie, application grant, group membership, and scoped `Note` read in one screen.
 
+It also exports `app/auth.tsx`, so app-audience magic-link requests use the branded Acme login,
+check-email, confirmation, and expired-link states. Atlas intentionally keeps the generic Sixb
+login to demonstrate the audience-specific fallback.
+
+The magic-link email is branded too. `sixb.config.ts` sets the Acme subject and passes the
+framework-generated `message.url` to `lib/magic-link-email.ts`, which owns the organization-specific
+plain-text and HTML presentation. Link generation, expiry, and single-use behavior remain owned by
+the magic-link strategy.
+
 ## Use OIDC instead (Google Workspace)
 
 ```bash

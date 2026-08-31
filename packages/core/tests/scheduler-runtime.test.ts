@@ -335,4 +335,86 @@ describe("SchedulerRuntime", () => {
       console.error = originalError
     }
   })
+
+  // Guards the `MAX_TIMER_DELAY_MS` clamp in `armTimer`. To prove it still guards, drop the
+  // `Math.min(..., MAX_TIMER_DELAY_MS)` and this test fails: Node coerces the oversized delay to
+  // 1ms, so the timer fires immediately, finds nothing due, and re-arms forever.
+  test("clamps an occurrence beyond the setTimeout ceiling instead of spinning", async () => {
+    const eventsRuntime = createEvents()
+    const clock = createTestClock(new Date("2026-01-02T00:00:00Z"))
+    // Next 1 January is ~364 days out, far beyond the 24.8-day timer ceiling.
+    const schedule = defineSchedule("yearly").cron("0 0 1 1 *")
+
+    const delays: number[] = []
+    const originalSetTimeout = globalThis.setTimeout
+    globalThis.setTimeout = ((handler: TimerHandler, timeout?: number, ...rest: unknown[]) => {
+      if (typeof timeout === "number") delays.push(timeout)
+      return (originalSetTimeout as (...args: unknown[]) => ReturnType<typeof setTimeout>)(
+        handler,
+        timeout,
+        ...rest
+      )
+    }) as unknown as typeof globalThis.setTimeout
+
+    try {
+      const runtime = new SchedulerRuntime({
+        schedules: [schedule],
+        events: eventsRuntime,
+        now: clock.now,
+      })
+      await runtime.start()
+
+      // A whole second of wall clock must not wake the scheduler even once.
+      clock.advance(1_000)
+      jest.advanceTimersByTime(1_000)
+
+      expect(delays).toHaveLength(1)
+      expect(delays[0]).toBe(2_147_483_647)
+      expect(await eventsRuntime.read({ types: ["schedule.triggered"] })).toHaveLength(0)
+
+      await runtime.stop()
+    } finally {
+      globalThis.setTimeout = originalSetTimeout
+    }
+  })
+
+  // Guards the try/catch added to `start()`. To prove it, remove that try/catch: `start()` throws,
+  // which the CLI turns into `process.exit(1)`, so one bad expression stops every schedule.
+  test("starts the remaining schedules when one expression has no reachable occurrence", async () => {
+    const eventsRuntime = createEvents()
+    const clock = createTestClock(new Date("2026-01-01T10:30:00Z"))
+
+    // `0 0 30 2 *` is syntactically valid and passes definition validation, but 30 February
+    // never occurs, so computing its next occurrence throws.
+    const unreachable = defineSchedule("feb-30").cron("0 0 30 2 *")
+    const healthy = defineSchedule("hourly").cron("0 * * * *")
+
+    const originalError = console.error
+    const errors: unknown[][] = []
+    console.error = (...args: unknown[]) => {
+      errors.push(args)
+    }
+
+    try {
+      const runtime = new SchedulerRuntime({
+        schedules: [unreachable, healthy],
+        events: eventsRuntime,
+        now: clock.now,
+      })
+
+      await runtime.start()
+
+      clock.advance(30 * MINUTE)
+      jest.advanceTimersByTime(30 * MINUTE)
+
+      const events = await eventsRuntime.read({ types: ["schedule.triggered"] })
+      expect(events).toHaveLength(1)
+      expect((events[0] as StoredScheduleTriggeredEvent).payload.scheduleId).toBe("hourly")
+      expect(errors.some((args) => String(args[0]).includes("feb-30"))).toBe(true)
+
+      await runtime.stop()
+    } finally {
+      console.error = originalError
+    }
+  })
 })

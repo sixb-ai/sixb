@@ -611,6 +611,7 @@ function materializerFixture(storage: Storage): MaterializerTestFixture {
 
 function materializationCorrelation(cursor: string) {
   return {
+    correlationId: `correlation-${cursor}`,
     origin: { kind: "runtime" as const, requestId: `request-${cursor}` },
     commitId: `commit-${cursor}`,
     commitOrdinal: 0,

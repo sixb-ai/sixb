@@ -6,6 +6,15 @@ import { SchedulerValidationError } from "./errors"
 /** Matches the `onError` flush budget: long enough for a healthy broker, short enough to shut down. */
 const DEFAULT_EMIT_DRAIN_TIMEOUT_MS = 5_000
 
+/**
+ * Largest delay `setTimeout` accepts before it overflows its 32-bit counter.
+ *
+ * Node coerces anything larger to `1`, so an unclamped monthly or yearly occurrence would fire
+ * immediately, find nothing due, and re-arm on the next tick -- spinning the event loop and
+ * emitting a `TimeoutOverflowWarning` for every re-arm until the occurrence came into range.
+ */
+const MAX_TIMER_DELAY_MS = 2_147_483_647
+
 export interface SchedulerRuntimeOptions {
   schedules: readonly ScheduleDefinition[]
   events: DomainEventLog
@@ -46,8 +55,19 @@ export class SchedulerRuntime implements SchedulerController {
 
     const now = this.now()
     for (const schedule of this.schedules) {
-      const next = nextCronOccurrence(schedule.trigger.expression, now, schedule.trigger.timezone)
-      this.nextOccurrences.set(schedule.id, next)
+      // Syntactically valid expressions can still have no reachable occurrence -- `0 0 30 2 *`
+      // parses but never matches. `tick()` already tolerates that per schedule; start-up must
+      // agree, or one unschedulable expression stops every other schedule in the project and
+      // crash-loops the scheduler role.
+      try {
+        const next = nextCronOccurrence(schedule.trigger.expression, now, schedule.trigger.timezone)
+        this.nextOccurrences.set(schedule.id, next)
+      } catch (error) {
+        console.error(
+          `[Sixb] Scheduler failed to compute next occurrence for '${schedule.id}':`,
+          error
+        )
+      }
     }
 
     this.armTimer()
@@ -107,7 +127,12 @@ export class SchedulerRuntime implements SchedulerController {
 
     if (earliest === null) return
 
-    const delayMs = Math.max(0, earliest.getTime() - this.now().getTime())
+    // Waking early is harmless: `tick()` re-arms from the same occurrence map, so a clamped delay
+    // just becomes several sleeps instead of one.
+    const delayMs = Math.min(
+      Math.max(0, earliest.getTime() - this.now().getTime()),
+      MAX_TIMER_DELAY_MS
+    )
     this.timer = setTimeout(() => this.tick(), delayMs)
   }
 

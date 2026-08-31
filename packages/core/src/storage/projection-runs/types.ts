@@ -16,7 +16,7 @@ import type {
 export type { ProjectionRunFailureCode } from "../../projections/types"
 export { PROJECTION_RUN_FAILURE_CODES } from "../../projections/types"
 
-export type ProjectionRunStatus = "running" | "succeeded" | "failed" | "cancelled"
+export type ProjectionRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled"
 
 export interface ProjectionRunProgress {
   /** Physical immutable-version rows consumed, before normalization or semantic materialization. */
@@ -68,10 +68,12 @@ export interface ProjectionMissingTarget {
 interface ProjectionRunRecordBase {
   readonly id: string
   readonly projectId: string
+  readonly executionId: string
   readonly status: ProjectionRunStatus
   readonly attempt: number
   readonly progress: ProjectionRunProgress
-  readonly startedAt: Date
+  readonly queuedAt: Date
+  readonly startedAt?: Date
   readonly finishedAt?: Date
   readonly error?: SixbFailure<ProjectionRunFailureCode>
 }
@@ -123,28 +125,42 @@ export function projectionRunObjectTypesVisible(
   return canView(target.objectTypeId)
 }
 
-interface StartOrReclaimProjectionRunBase {
+interface ProjectionRunAdmissionBase {
   readonly id: string
   readonly projectId: string
-  readonly startedAt?: Date
+  readonly executionId: string
+  readonly queuedAt?: Date
 }
 
-export type StartOrReclaimProjectionRunInput =
-  | (StartOrReclaimProjectionRunBase & {
+export type QueueProjectionRunInput =
+  | (ProjectionRunAdmissionBase & {
       readonly identity: ProjectionIdentity<"object">
       readonly target: ObjectProjectionRunRecord["target"]
       readonly fixedBatchSize?: never
     })
-  | (StartOrReclaimProjectionRunBase & {
+  | (ProjectionRunAdmissionBase & {
       readonly identity: ProjectionIdentity<"link">
       readonly target: LinkProjectionRunRecord["target"]
       readonly fixedBatchSize?: never
     })
-  | (StartOrReclaimProjectionRunBase & {
+  | (ProjectionRunAdmissionBase & {
       readonly identity: ProjectionIdentity<"telemetry">
       readonly target: TelemetryProjectionRunRecord["target"]
       readonly fixedBatchSize: number
     })
+
+export type StartOrReclaimProjectionRunInput = QueueProjectionRunInput extends infer TInput
+  ? TInput extends QueueProjectionRunInput
+    ? Omit<TInput, "executionId" | "queuedAt"> & { readonly startedAt?: Date }
+    : never
+  : never
+
+export interface FailProjectionRunEnqueueInput {
+  readonly id: string
+  readonly projectId: string
+  readonly finishedAt?: Date
+  readonly error: SixbFailure<ProjectionRunFailureCode>
+}
 
 export interface ProjectionRunClaim {
   readonly run: ProjectionRunRecord
@@ -220,7 +236,9 @@ export interface ListLatestProjectionRunsResult {
 }
 
 export interface ProjectionRunStorage {
+  queue(input: QueueProjectionRunInput): Promise<ProjectionRunRecord>
   startOrReclaim(input: StartOrReclaimProjectionRunInput): Promise<ProjectionRunClaim>
+  failEnqueue(input: FailProjectionRunEnqueueInput): Promise<ProjectionRunRecord>
   /** Transactionally fences the current execution before ontology materialization writes. */
   lockForMaterialization(
     input: LockProjectionRunForMaterializationInput

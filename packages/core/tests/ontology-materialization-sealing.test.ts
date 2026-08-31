@@ -11,7 +11,9 @@ import type {
   MaterializationStatePage,
   OntologyMaterializationStorage,
   ProjectionRunClaim,
+  Storage,
 } from "../src/storage"
+import { startTestProjectionRun } from "../src/testing"
 import { createMaterializerFixture } from "./materializer-fixture"
 
 const projectId = "project"
@@ -26,6 +28,7 @@ interface CandidateFixture {
   readonly materializationId: string
   readonly projectionKind: ReplacementKind
   readonly execution: { readonly projectionRunId: string; readonly executionToken: string }
+  readonly executionId: string
   readonly datasetVersion: {
     readonly datasetId: string
     readonly versionId: string
@@ -57,7 +60,7 @@ async function prepareEmptyCandidate(
   let run: ProjectionRunClaim
   const common = { id: input.runId, projectId }
   if (input.projectionKind === "object") {
-    run = await storage.projectionRuns.startOrReclaim({
+    run = await startTestProjectionRun(storage, {
       ...common,
       identity: {
         projectionId: input.projectionId,
@@ -71,7 +74,7 @@ async function prepareEmptyCandidate(
       target: { objectTypeId: "Device" },
     })
   } else {
-    run = await storage.projectionRuns.startOrReclaim({
+    run = await startTestProjectionRun(storage, {
       ...common,
       identity: {
         projectionId: input.projectionId,
@@ -113,6 +116,7 @@ async function prepareEmptyCandidate(
     materializationId: input.materializationId,
     projectionKind: input.projectionKind,
     execution,
+    executionId: run.run.executionId,
     datasetVersion,
     readyAt: input.readyAt,
   }
@@ -130,6 +134,7 @@ function replacementHeader(
       id: commitId,
       idempotencyKey: `projection:${commitId}`,
       requestHash: commitId,
+      executionId: candidate.executionId,
       origin: {
         kind: "projection",
         projectionId: candidate.source.projectionId,
@@ -240,6 +245,7 @@ function emptyEditHeader(commitId: string): MaterializationPlanHeader {
       id: commitId,
       idempotencyKey: `runtime:${commitId}`,
       requestHash: commitId,
+      executionId: `execution:${commitId}`,
       origin: { kind: "runtime", requestId: commitId },
       ontologyRevision,
       intent: { kind: "edit", mode: "atomic", operationCount: 0 },
@@ -319,6 +325,28 @@ function objectUpsertChunk(
   }
 }
 
+async function beginMaterialization(
+  storage: Pick<Storage, "executions" | "ontology">,
+  header: MaterializationPlanHeader
+): Promise<MaterializationSession> {
+  if (!storage.ontology) throw new Error("missing ontology")
+  const execution = await storage.executions.getById({
+    projectId: header.commit.projectId,
+    id: header.commit.executionId,
+  })
+  if (!execution) {
+    await storage.executions.create({
+      id: header.commit.executionId,
+      projectId: header.commit.projectId,
+      executor: { type: "request", requestId: `request:${header.commit.id}` },
+      source: { type: "http", requestId: `request:${header.commit.id}` },
+      correlationId: `correlation:${header.commit.id}`,
+      authorizationRef: { type: "disabled" },
+    })
+  }
+  return storage.ontology.materializations.begin(header)
+}
+
 describe("in-memory ontology materialization finalization", () => {
   test("rejects ontology sessions inherited from a completed transaction", async () => {
     const storage = new InMemoryStorage()
@@ -330,7 +358,7 @@ describe("in-memory ontology materialization finalization", () => {
 
     await storage.transaction(() => {
       inheritedBegin = gate.then(() =>
-        storage.ontology.materializations.begin(emptyEditHeader("stale-transaction-context"))
+        beginMaterialization(storage, emptyEditHeader("stale-transaction-context"))
       )
     })
     release()
@@ -346,7 +374,7 @@ describe("in-memory ontology materialization finalization", () => {
     await expect(
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
-        const session = await tx.ontology.materializations.begin(emptyEditHeader("leaked-stream"))
+        const session = await beginMaterialization(tx, emptyEditHeader("leaked-stream"))
         const requests = (async function* () {
           yield {
             objects: [
@@ -386,7 +414,7 @@ describe("in-memory ontology materialization finalization", () => {
     await expect(
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
-        const session = await tx.ontology.materializations.begin(header)
+        const session = await beginMaterialization(tx, header)
         for await (const _page of tx.ontology.materializations.streamSourceReplacementState({
           session,
           source: candidate.source,
@@ -419,7 +447,7 @@ describe("in-memory ontology materialization finalization", () => {
     const header = replacementHeader(candidate, "empty-link-commit", "2026-01-03T00:00:00.000Z")
     await storage.transaction(async (tx) => {
       if (!tx.ontology) throw new Error("missing ontology")
-      const session = await tx.ontology.materializations.begin(header)
+      const session = await beginMaterialization(tx, header)
       await drainReplacementState(tx.ontology.materializations, session, candidate)
       await tx.ontology.materializations.finalize({
         session,
@@ -451,7 +479,7 @@ describe("in-memory ontology materialization finalization", () => {
     await expect(
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
-        const session = await tx.ontology.materializations.begin(header)
+        const session = await beginMaterialization(tx, header)
         await drainReplacementState(tx.ontology.materializations, session, candidate)
         await tx.ontology.materializations.stageWork({
           session,
@@ -477,6 +505,7 @@ describe("in-memory ontology materialization finalization", () => {
         id: "telemetry-classification",
         idempotencyKey: "runtime:telemetry-classification",
         requestHash: "telemetry-classification",
+        executionId: "execution:telemetry-classification",
         origin: {
           kind: "telemetry",
           source: { kind: "runtime", requestId: "telemetry-classification" },
@@ -495,7 +524,7 @@ describe("in-memory ontology materialization finalization", () => {
     await expect(
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
-        const session = await tx.ontology.materializations.begin(telemetryHeader)
+        const session = await beginMaterialization(tx, telemetryHeader)
         await tx.ontology.materializations.finalize({
           session,
           finalization: {
@@ -523,7 +552,7 @@ describe("in-memory ontology materialization finalization", () => {
     await expect(
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
-        const session = await tx.ontology.materializations.begin(planHeader)
+        const session = await beginMaterialization(tx, planHeader)
         await tx.ontology.materializations.stageWork({
           session,
           records: [
@@ -570,7 +599,7 @@ describe("in-memory ontology materialization finalization", () => {
     await expect(
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
-        const session = await tx.ontology.materializations.begin(eventHeader)
+        const session = await beginMaterialization(tx, eventHeader)
         await tx.ontology.materializations.stageWork({
           session,
           records: [
@@ -583,6 +612,7 @@ describe("in-memory ontology materialization finalization", () => {
                 schemaVersion: 1,
                 projectId,
                 occurredAt: eventHeader.commit.committedAt,
+                correlationId: `correlation:${eventHeader.commit.id}`,
                 origin: eventHeader.commit.origin,
                 commitId: eventHeader.commit.id,
                 type: "object.created",
@@ -622,7 +652,7 @@ describe("in-memory ontology materialization finalization", () => {
     await expect(
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
-        const session = await tx.ontology.materializations.begin(header)
+        const session = await beginMaterialization(tx, header)
         await tx.ontology.materializations.stageWork({ session, records: [first, second] })
 
         await expect(
@@ -690,7 +720,7 @@ describe("in-memory ontology materialization finalization", () => {
     await expect(
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
-        const session = await tx.ontology.materializations.begin(header)
+        const session = await beginMaterialization(tx, header)
         await tx.ontology.materializations.stageWork({ session, records })
         for await (const _page of tx.ontology.materializations.streamWork({
           session,
@@ -742,7 +772,7 @@ describe("in-memory ontology materialization finalization", () => {
     await expect(
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
-        const session = await tx.ontology.materializations.begin(header)
+        const session = await beginMaterialization(tx, header)
         await tx.ontology.materializations.stageWork({
           session,
           records: [
@@ -802,7 +832,7 @@ describe("in-memory ontology materialization finalization", () => {
     await expect(
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
-        const session = await tx.ontology.materializations.begin(header)
+        const session = await beginMaterialization(tx, header)
         await drainReplacementState(tx.ontology.materializations, session, opened)
         await tx.ontology.materializations.finalize({
           session,
@@ -832,7 +862,7 @@ describe("in-memory ontology materialization finalization", () => {
     await expect(
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
-        const session = await tx.ontology.materializations.begin(tooEarlyHeader)
+        const session = await beginMaterialization(tx, tooEarlyHeader)
         await drainReplacementState(tx.ontology.materializations, session, first)
         await tx.ontology.materializations.finalize({
           session,
@@ -844,7 +874,7 @@ describe("in-memory ontology materialization finalization", () => {
     const firstHeader = replacementHeader(first, "first-commit", "2026-01-03T00:00:00.000Z")
     await storage.transaction(async (tx) => {
       if (!tx.ontology) throw new Error("missing ontology")
-      const session = await tx.ontology.materializations.begin(firstHeader)
+      const session = await beginMaterialization(tx, firstHeader)
       await drainReplacementState(tx.ontology.materializations, session, first)
       await tx.ontology.materializations.finalize({
         session,
@@ -871,7 +901,7 @@ describe("in-memory ontology materialization finalization", () => {
     await expect(
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
-        const session = await tx.ontology.materializations.begin(secondHeader)
+        const session = await beginMaterialization(tx, secondHeader)
         await drainReplacementState(tx.ontology.materializations, session, second)
         await tx.ontology.materializations.finalize({
           session,
@@ -900,7 +930,7 @@ describe("in-memory ontology materialization finalization", () => {
     )
     await storage.transaction(async (tx) => {
       if (!tx.ontology) throw new Error("missing ontology")
-      const session = await tx.ontology.materializations.begin(activeHeader)
+      const session = await beginMaterialization(tx, activeHeader)
       await drainReplacementState(tx.ontology.materializations, session, active)
       await tx.ontology.materializations.finalize({
         session,
@@ -953,7 +983,7 @@ describe("in-memory ontology materialization finalization", () => {
       await expect(
         storage.transaction(async (tx) => {
           if (!tx.ontology) throw new Error("missing ontology")
-          const session = await tx.ontology.materializations.begin(header)
+          const session = await beginMaterialization(tx, header)
           await drainReplacementState(tx.ontology.materializations, session, candidate)
           await tx.ontology.materializations.finalize({
             session,
