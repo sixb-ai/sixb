@@ -23,6 +23,7 @@ import {
   type ProjectionRunFailureCode,
 } from "./types"
 
+/** Target maximum mapped points per telemetry commit; a single-property projection reads 500 rows. */
 export const PROJECTION_TELEMETRY_BATCH_SIZE = 500
 
 export interface ProjectionRunDispatchInput {
@@ -403,9 +404,17 @@ function queueProjectionRun(
         ...common,
         identity: input.identity,
         target: { objectTypeId: input.projection.objectTypeId },
-        fixedBatchSize: PROJECTION_TELEMETRY_BATCH_SIZE,
+        fixedBatchSize: telemetryProjectionBatchRowCount(input.projection),
       })
   }
+}
+
+function telemetryProjectionBatchRowCount(
+  projection: Extract<ProjectionDefinition, { readonly _tag: "TelemetryProjectionDefinition" }>
+): number {
+  const mappedPropertyCount = Object.keys(projection.properties).length
+  if (mappedPropertyCount === 0) throw invalidProjectionDefinition(projection.id)
+  return Math.max(1, Math.floor(PROJECTION_TELEMETRY_BATCH_SIZE / mappedPropertyCount))
 }
 
 function requeueProjectionRun(

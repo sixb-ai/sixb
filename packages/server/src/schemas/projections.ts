@@ -115,12 +115,15 @@ export const TelemetryProjectionSchema = z.object({
   _tag: z.literal("TelemetryProjectionDefinition"),
   id: z.string(),
   objectTypeId: z.string(),
-  propertyId: z.string(),
   datasetId: z.string(),
   objectIdField: z.string(),
   atField: z.string(),
-  valueField: z.string(),
-  unitField: z.string().optional(),
+  properties: z.record(
+    z.object({
+      valueField: z.string(),
+      unitField: z.string().optional(),
+    })
+  ),
   latestRun: ProjectionRunSchema.nullable(),
 })
 

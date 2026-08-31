@@ -31,6 +31,7 @@ export type {
   ProjectionTargetByKind,
   SourceEditConflictResolution,
   TelemetryProjectionDefinition,
+  TelemetryProjectionPropertyMapping,
 } from "./types"
 // ── Validation ───────────────────────────────────────────────
 export {

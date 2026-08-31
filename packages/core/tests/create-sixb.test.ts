@@ -1158,7 +1158,9 @@ export const roomTemperatureProjection = defineProjection(
     expect(sixb.definitions.projections.listTelemetry()).toHaveLength(1)
     expect(sixb.definitions.projections.listTelemetry()[0].id).toBe("room-temperatures")
     expect(sixb.definitions.projections.listTelemetry()[0].objectTypeId).toBe("Room")
-    expect(sixb.definitions.projections.listTelemetry()[0].propertyId).toBe("temperature")
+    expect(sixb.definitions.projections.listTelemetry()[0].properties).toEqual({
+      temperature: { valueField: "temperature" },
+    })
     expect(sixb.definitions.projections.listTelemetry()[0].datasetId).toBe(
       "canonical.room-readings"
     )
@@ -1555,11 +1557,10 @@ export const setTemperature = defineAction("setTemperature")
       _tag: "TelemetryProjectionDefinition" as const,
       id: "room-temperatures",
       objectTypeId: "Room",
-      propertyId: "temperature",
       datasetId: "canonical.room-readings",
       objectIdField: "room_id",
       atField: "missing_observed_at",
-      valueField: "temperature",
+      properties: { temperature: { valueField: "temperature" } },
     }
 
     await expect(
@@ -1604,11 +1605,10 @@ export const setTemperature = defineAction("setTemperature")
       _tag: "TelemetryProjectionDefinition" as const,
       id: "room-temperatures",
       objectTypeId: "Room",
-      propertyId: "temperature",
       datasetId: "canonical.room-readings",
       objectIdField: "room_id",
       atField: "observed_at",
-      valueField: "temperature",
+      properties: { temperature: { valueField: "temperature" } },
     }
 
     await expect(
@@ -1629,6 +1629,85 @@ export const setTemperature = defineAction("setTemperature")
         ...createTestRuntimeDeps(),
       })
     ).rejects.toThrow('property "temperature" on type "Room" must be telemetry-enabled')
+  })
+
+  test("validates grouped telemetry units from each property's semantic type", async () => {
+    const projectRoot = await createTempProjectRoot()
+    const Room = defineObjectType({
+      id: "Room",
+      name: "Room",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("temperature", "double", { mode: "telemetry", semanticType: "Temperature" }),
+        prop("humidity", "double", { mode: "telemetry" }),
+      ],
+    })
+    const readings = defineDataset("room-readings", {
+      schema: [
+        col("room_id", "string"),
+        col("observed_at", "timestamp"),
+        col("temperature", "float64"),
+        col("temperature_unit", "string"),
+        col("humidity", "float64"),
+        col("humidity_unit", "string"),
+      ],
+    })
+
+    const missingUnit = defineProjection("missing-unit", Room)
+      .fromDataset(readings)
+      .points({
+        objectId: "room_id",
+        at: "observed_at",
+        properties: { temperature: "temperature" },
+      })
+    await expect(
+      createSixb({
+        projectRoot,
+        ontologies: [Room],
+        datasets: [readings],
+        projections: [missingUnit],
+        ...createTestRuntimeDeps(),
+      })
+    ).rejects.toThrow(
+      'property "temperature" requires a unit field because it uses semantic type "Temperature"'
+    )
+
+    const unexpectedUnit = defineProjection("unexpected-unit", Room)
+      .fromDataset(readings)
+      .points({
+        objectId: "room_id",
+        at: "observed_at",
+        properties: { humidity: { value: "humidity", unit: "humidity_unit" } },
+      })
+    await expect(
+      createSixb({
+        projectRoot,
+        ontologies: [Room],
+        datasets: [readings],
+        projections: [unexpectedUnit],
+        ...createTestRuntimeDeps(),
+      })
+    ).rejects.toThrow('property "humidity" cannot map a unit field because it has no semantic type')
+
+    const valid = defineProjection("room-activity", Room)
+      .fromDataset(readings)
+      .points({
+        objectId: "room_id",
+        at: "observed_at",
+        properties: {
+          temperature: { value: "temperature", unit: "temperature_unit" },
+          humidity: "humidity",
+        },
+      })
+    await expect(
+      createSixb({
+        projectRoot,
+        ontologies: [Room],
+        datasets: [readings],
+        projections: [valid],
+        ...createTestRuntimeDeps(),
+      })
+    ).resolves.toBeDefined()
   })
 
   test("treats missing projections folder as empty", async () => {

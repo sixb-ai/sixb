@@ -10925,12 +10925,15 @@ export type ListProjectionsResponses = {
       _tag: "TelemetryProjectionDefinition"
       id: string
       objectTypeId: string
-      propertyId: string
       datasetId: string
       objectIdField: string
       atField: string
-      valueField: string
-      unitField?: string
+      properties: {
+        [key: string]: {
+          valueField: string
+          unitField?: string
+        }
+      }
       latestRun:
         | {
             id: string
@@ -11487,12 +11490,15 @@ export type GetProjectionResponses = {
         _tag: "TelemetryProjectionDefinition"
         id: string
         objectTypeId: string
-        propertyId: string
         datasetId: string
         objectIdField: string
         atField: string
-        valueField: string
-        unitField?: string
+        properties: {
+          [key: string]: {
+            valueField: string
+            unitField?: string
+          }
+        }
         latestRun:
           | {
               id: string

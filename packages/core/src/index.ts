@@ -1034,6 +1034,7 @@ export type {
   ProjectionTargetByKind,
   SourceEditConflictResolution,
   TelemetryProjectionDefinition,
+  TelemetryProjectionPropertyMapping,
 } from "./projections"
 
 export {

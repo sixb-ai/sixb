@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import type { AuthorizationContext, ObjectProjectionDefinition, OntologySource } from "@sixb/core"
+import type {
+  AuthorizationContext,
+  ObjectProjectionDefinition,
+  OntologySource,
+  ProjectionDefinition,
+  TelemetryProjectionDefinition,
+} from "@sixb/core"
 import {
   emptyGrantIndex,
   InMemoryBlobStorage,
@@ -36,6 +42,19 @@ const sensorsProjection: ObjectProjectionDefinition = {
   datasetId: "ds.sensors",
   properties: { id: "sensor_id" },
   links: {},
+}
+
+const roomActivityProjection: TelemetryProjectionDefinition = {
+  _tag: "TelemetryProjectionDefinition",
+  id: "room-activity",
+  objectTypeId: "room",
+  datasetId: "ds.room-activity",
+  objectIdField: "room_id",
+  atField: "observed_at",
+  properties: {
+    temperature: { valueField: "temperature", unitField: "temperature_unit" },
+    humidity: { valueField: "humidity" },
+  },
 }
 
 const projectionFailure = {
@@ -105,15 +124,16 @@ function createSixbStub(
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
   })
-  const definitions = [roomsProjection, sensorsProjection]
+  const objectProjections = [roomsProjection, sensorsProjection]
+  const definitions: ProjectionDefinition[] = [...objectProjections, roomActivityProjection]
   Object.defineProperty(sixb, "definitions", {
     value: {
       ...sixb.definitions,
       projections: {
         list: () => definitions,
-        listObjects: () => definitions,
+        listObjects: () => objectProjections,
         listLinks: () => [],
-        listTelemetry: () => [],
+        listTelemetry: () => [roomActivityProjection],
         getById: (id: string) => definitions.find((projection) => projection.id === id) ?? null,
       },
     },
@@ -153,13 +173,17 @@ describe("projection routes", () => {
 
     const body = (await response.json()) as {
       objectProjections: { id: string; latestRun: { id: string } | null }[]
+      telemetryProjections: Array<
+        TelemetryProjectionDefinition & { latestRun: { id: string } | null }
+      >
     }
 
     // Only the room projection is visible; the latest-run lookup is scoped to it.
-    expect(requested).toEqual([["rooms"]])
+    expect(requested).toEqual([["rooms", "room-activity"]])
     expect(body.objectProjections.map((p) => [p.id, p.latestRun?.id ?? null])).toEqual([
       ["rooms", "run-rooms"],
     ])
+    expect(body.telemetryProjections).toEqual([{ ...roomActivityProjection, latestRun: null }])
   })
 
   test("run list passes the viewable object type set to storage", async () => {

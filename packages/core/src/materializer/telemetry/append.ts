@@ -90,7 +90,6 @@ function prepareTelemetryAppend(
     points: raw.input.points.map((point) => validateTelemetryPoint(context.ontology, point)),
   })
   const inputPointCount = telemetryInputPointCount(input, rawInputPointCount)
-  validateTelemetryBatch(input, inputPointCount)
 
   const ontologyRevision = context.projectionRegistry.ontologyRevision
   const execution = prepareMaterializerExecution(context.projectId, raw.scope)
@@ -112,21 +111,6 @@ function telemetryInputPointCount(
 ): number {
   if (input.source.kind === "projection") return rawInputPointCount
   return input.points.length
-}
-
-function validateTelemetryBatch(input: NormalizedTelemetryAppend, inputPointCount: number): void {
-  if (input.source.kind === "projection") {
-    if (input.source.sourceRowCount === 0) {
-      throw new MaterializationValidationError(
-        "Projection telemetry batches must consume at least one source row; an empty dataset produces no batch commit."
-      )
-    }
-    if (input.source.sourceRowCount !== inputPointCount + input.source.sourceRowsSkipped) {
-      throw new MaterializationValidationError(
-        "Projection telemetry sourceRowCount must equal input points plus skipped rows."
-      )
-    }
-  }
 }
 
 function prepareRuntimeTelemetry(
@@ -157,6 +141,7 @@ function prepareProjectionTelemetry(
   )
   validateTelemetryProjectionDataset(resolvedProjection, source)
   validateTelemetryOwnership(resolvedProjection, input)
+  validateTelemetryBatchCardinality(resolvedProjection, source, inputPointCount)
 
   const runIdentity = createProjectionRunMaterializationIdentity({
     resolved: resolvedProjection,
@@ -179,6 +164,38 @@ function prepareProjectionTelemetry(
     identity,
     resolvedProjection,
     runIdentity,
+  }
+}
+
+function validateTelemetryBatchCardinality(
+  resolved: ResolvedTelemetryProjection,
+  source: ProjectionTelemetrySource,
+  inputPointCount: number
+): void {
+  if (source.sourceRowCount === 0) {
+    throw new MaterializationValidationError(
+      "Projection telemetry batches must consume at least one source row; an empty dataset produces no batch commit."
+    )
+  }
+
+  const mappedPropertyCount = resolved.ownership.telemetry.length
+  if (mappedPropertyCount === 0) {
+    throw new MaterializationValidationError(
+      `Telemetry projection '${resolved.projectionId}' must own at least one telemetry property.`
+    )
+  }
+
+  const sourceRowsEmitted = source.sourceRowCount - source.sourceRowsSkipped
+  const maximumPointCount = sourceRowsEmitted * mappedPropertyCount
+  if (!Number.isSafeInteger(maximumPointCount)) {
+    throw new MaterializationValidationError(
+      `Telemetry projection '${resolved.projectionId}' batch point capacity exceeds the safe integer range.`
+    )
+  }
+  if (inputPointCount < sourceRowsEmitted || inputPointCount > maximumPointCount) {
+    throw new MaterializationValidationError(
+      `Telemetry projection '${resolved.projectionId}' must emit between ${sourceRowsEmitted} and ${maximumPointCount} points for ${source.sourceRowCount} source rows with ${source.sourceRowsSkipped} skipped.`
+    )
   }
 }
 

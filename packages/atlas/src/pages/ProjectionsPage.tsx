@@ -632,6 +632,10 @@ function ProjectionFlow({ projection }: { projection: GetProjectionResponse }) {
       onClick={() => navigate(`/datasets/${encodeURIComponent(projection.datasetId)}`)}
     />
   )
+  const telemetryPropertyCount =
+    projection._tag === "TelemetryProjectionDefinition"
+      ? Object.keys(projection.properties).length
+      : 0
 
   if (projection._tag === "LinkProjectionDefinition") {
     return (
@@ -664,7 +668,10 @@ function ProjectionFlow({ projection }: { projection: GetProjectionResponse }) {
         onClick={() => toType(projection.objectTypeId)}
       />
       {projection._tag === "TelemetryProjectionDefinition" && (
-        <Mono value={`· ${projection.propertyId}`} muted />
+        <Mono
+          value={`· ${telemetryPropertyCount} telemetry ${telemetryPropertyCount === 1 ? "property" : "properties"}`}
+          muted
+        />
       )}
     </div>
   )
@@ -745,8 +752,9 @@ function ProjectionMapping({ projection }: { projection: GetProjectionResponse }
     )
   }
 
+  const properties = Object.entries(projection.properties)
   return (
-    <div className="max-w-md">
+    <div className="grid gap-6 lg:grid-cols-2">
       <MappingTable
         columns={["Point field", "Dataset column"]}
         rows={[
@@ -755,21 +763,24 @@ function ProjectionMapping({ projection }: { projection: GetProjectionResponse }
             cells: ["Object id", <Mono key="c" value={projection.objectIdField} muted />],
           },
           { key: "at", cells: ["Timestamp", <Mono key="c" value={projection.atField} muted />] },
-          { key: "value", cells: ["Value", <Mono key="c" value={projection.valueField} muted />] },
-          {
-            key: "unit",
-            cells: [
-              "Unit",
-              projection.unitField ? (
-                <Mono key="c" value={projection.unitField} muted />
-              ) : (
-                <span key="c" className="text-muted-foreground">
-                  —
-                </span>
-              ),
-            ],
-          },
         ]}
+      />
+      <MappingTable
+        columns={["Telemetry property", "Value column", "Unit column"]}
+        rows={properties.map(([propertyId, mapping]) => ({
+          key: propertyId,
+          cells: [
+            <Mono key="p" value={propertyId} />,
+            <Mono key="v" value={mapping.valueField} muted />,
+            mapping.unitField ? (
+              <Mono key="u" value={mapping.unitField} muted />
+            ) : (
+              <span key="u" className="text-muted-foreground">
+                —
+              </span>
+            ),
+          ],
+        }))}
       />
     </div>
   )

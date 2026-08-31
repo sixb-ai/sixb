@@ -31995,9 +31995,6 @@
                           "objectTypeId": {
                             "type": "string"
                           },
-                          "propertyId": {
-                            "type": "string"
-                          },
                           "datasetId": {
                             "type": "string"
                           },
@@ -32007,11 +32004,21 @@
                           "atField": {
                             "type": "string"
                           },
-                          "valueField": {
-                            "type": "string"
-                          },
-                          "unitField": {
-                            "type": "string"
+                          "properties": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object",
+                              "properties": {
+                                "valueField": {
+                                  "type": "string"
+                                },
+                                "unitField": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["valueField"],
+                              "additionalProperties": false
+                            }
                           },
                           "latestRun": {
                             "anyOf": [
@@ -32554,11 +32561,10 @@
                           "_tag",
                           "id",
                           "objectTypeId",
-                          "propertyId",
                           "datasetId",
                           "objectIdField",
                           "atField",
-                          "valueField",
+                          "properties",
                           "latestRun"
                         ],
                         "additionalProperties": false
@@ -33774,9 +33780,6 @@
                         "objectTypeId": {
                           "type": "string"
                         },
-                        "propertyId": {
-                          "type": "string"
-                        },
                         "datasetId": {
                           "type": "string"
                         },
@@ -33786,11 +33789,21 @@
                         "atField": {
                           "type": "string"
                         },
-                        "valueField": {
-                          "type": "string"
-                        },
-                        "unitField": {
-                          "type": "string"
+                        "properties": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "valueField": {
+                                "type": "string"
+                              },
+                              "unitField": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["valueField"],
+                            "additionalProperties": false
+                          }
                         },
                         "latestRun": {
                           "anyOf": [
@@ -34315,11 +34328,10 @@
                         "_tag",
                         "id",
                         "objectTypeId",
-                        "propertyId",
                         "datasetId",
                         "objectIdField",
                         "atField",
-                        "valueField",
+                        "properties",
                         "latestRun"
                       ],
                       "additionalProperties": false
