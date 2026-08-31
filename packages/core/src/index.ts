@@ -1016,6 +1016,15 @@ export {
   requestAgentRun,
 } from "./agents"
 
+// ── Models ──────────────────────────────────────────────────
+
+export type {
+  LanguageModelCatalog,
+  LanguageModelEntry,
+  ModelCatalog,
+  ModelCatalogInput,
+} from "./models"
+
 // ── Scheduling ──────────────────────────────────────────────
 
 export { CronValidationError } from "./schedules"
