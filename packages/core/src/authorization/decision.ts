@@ -13,7 +13,8 @@
 import type { AuthSessionAudience } from "../auth/audience"
 import {
   type ResolvedRuntimeAuthorization,
-  resolveRuntimeAuthorization,
+  resolveExecutionScopeAuthorization,
+  resolveRuntimeAuthorizationForProject,
 } from "../execution/authorization"
 import type { ExecutionContext, RuntimeAuthorization } from "../execution/types"
 import { AuthorizationError } from "./errors"
@@ -47,6 +48,7 @@ export interface AuthzDecision {
 }
 
 interface AuthorizedRuntime {
+  readonly projectId: string
   readonly runtimeAuthorization?: RuntimeAuthorization
   readonly authorization?: AuthorizationContext
 }
@@ -148,7 +150,7 @@ export function assertAuthorized(runtime: AuthorizedRuntime, request: AuthzReque
 export function assertRuntimeAuthorizationBound(
   runtime: AuthorizedRuntime
 ): Exclude<ResolvedRuntimeAuthorization, { readonly type: "denied" }> {
-  const resolved = resolveRuntimeAuthorization(runtime.runtimeAuthorization)
+  const resolved = resolveRuntimeAuthorizationForProject(runtime)
   if (resolved.type === "denied") {
     throw new AuthorizationError(
       "runtime:unbound",
@@ -217,27 +219,22 @@ export function assertPrivileged(runtime: AuthorizedRuntime, operation: string):
  * Assert access to process providers that trusted executions and genuine agent runs may use.
  *
  * Agent provenance alone is not authority: the registered capability must be bound to the exact
- * same agent and run before this check succeeds.
+ * same immutable execution before this check succeeds.
  */
 export function assertProviderAccess(
-  runtime: AuthorizedRuntime,
+  runtime: AuthorizedRuntime & { readonly runtimeAuthorization: RuntimeAuthorization },
   execution: ExecutionContext,
   operation: string
 ): void {
-  const resolved = assertRuntimeAuthorizationBound(runtime)
+  const resolved = resolveExecutionScopeAuthorization(runtime.projectId, {
+    execution,
+    authorization: runtime.runtimeAuthorization,
+  })
   if (resolved.type === "unrestricted") {
     return
   }
 
-  const binding = resolved.executionBinding
-  const executor = execution.executor
-  if (
-    binding?.type === "agent" &&
-    executor.type === "agent" &&
-    binding.executionId === execution.id &&
-    binding.agentId === executor.agentId &&
-    binding.runId === executor.runId
-  ) {
+  if (execution.executor.type === "agent") {
     return
   }
 

@@ -6,6 +6,7 @@ import { isSixbError } from "../src/errors/internal"
 import { restoreAgentExecutionScope } from "../src/execution/agent"
 import {
   assertExecutionScopeProject,
+  createAgentRuntimeAuthorization,
   createPrincipalRuntimeAuthorization,
   createTrustedPrimitiveRuntimeAuthorization,
   getAuthorizationRef,
@@ -14,6 +15,7 @@ import {
 } from "../src/execution/authorization"
 import {
   createPrimitiveExecutionRecord,
+  executionRecordInputFromRuntime,
   restoreTrustedPrimitiveExecutionScope,
 } from "../src/execution/durable"
 import {
@@ -24,6 +26,7 @@ import {
 } from "../src/execution/scopes"
 import {
   createRuntimeAuthorizationCapability,
+  type ExecutionContext,
   type ExecutionScope,
   type RuntimeAuthorization,
 } from "../src/execution/types"
@@ -33,8 +36,9 @@ describe("runtime authorization capabilities", () => {
     const context = authorizationContext({ type: "user", id: "user-1" }, "session-1")
     const groups = context.groupIds as string[]
     const agentGrants = context.grants["run:agent"] as Set<string>
+    agentGrants.add("original-agent")
     const authorization = createPrincipalRuntimeAuthorization({
-      projectId: "project-1",
+      execution: requestExecution("principal-snapshot", { type: "user", id: "user-1" }),
       context,
       credential: { type: "session", id: "session-1" },
     })
@@ -47,6 +51,18 @@ describe("runtime authorization capabilities", () => {
     if (resolved.type !== "principal") throw new Error("expected principal authorization")
     expect(resolved.context.groupIds).toEqual(["group-1"])
     expect(resolved.context.grants["run:agent"].has("late-agent")).toBe(false)
+    expect(resolved.context.grants["run:agent"].has("original-agent")).toBe(true)
+
+    const runtimeGrants = resolved.context.grants["run:agent"] as Set<string>
+    expect(() => runtimeGrants.add("injected-agent")).toThrow(
+      "Runtime authorization grants are immutable"
+    )
+    expect(() => runtimeGrants.delete("original-agent")).toThrow(
+      "Runtime authorization grants are immutable"
+    )
+    expect(() => runtimeGrants.clear()).toThrow("Runtime authorization grants are immutable")
+    expect(runtimeGrants.has("injected-agent")).toBe(false)
+    expect(runtimeGrants.has("original-agent")).toBe(true)
 
     const firstRef = getAuthorizationRef(authorization)
     expect(firstRef).toEqual({
@@ -100,7 +116,7 @@ describe("runtime authorization capabilities", () => {
   test("rejects system principals and invalid authority identifiers", () => {
     expect(() =>
       createPrincipalRuntimeAuthorization({
-        projectId: "project-1",
+        execution: requestExecution("system-principal"),
         context: authorizationContext({ type: "system", id: "system" }),
       })
     ).toThrow("Principal type 'system' cannot hold runtime authorization")
@@ -112,21 +128,85 @@ describe("runtime authorization capabilities", () => {
   test("rejects inconsistent session credential references", () => {
     expect(() =>
       createPrincipalRuntimeAuthorization({
-        projectId: "project-1",
+        execution: requestExecution("missing-session-credential", {
+          type: "user",
+          id: "user-1",
+        }),
         context: authorizationContext({ type: "user", id: "user-1" }, "session-1"),
       })
     ).toThrow("Authorization context session requires a matching session credential")
     expect(() =>
       createPrincipalRuntimeAuthorization({
-        projectId: "project-1",
+        execution: requestExecution("mismatched-session-credential", {
+          type: "user",
+          id: "user-1",
+        }),
         context: authorizationContext({ type: "user", id: "user-1" }),
         credential: { type: "session", id: "session-1" },
       })
     ).toThrow("Session credential id must match the authorization context session id")
   })
+
+  test("binds Agent authority to its definition-owned service account", () => {
+    const execution: ExecutionContext = {
+      id: "execution-agent-identity",
+      projectId: "project-1",
+      executor: { type: "agent", agentId: "research", runId: "run-1" },
+      source: { type: "execution", executionId: "execution-parent" },
+      correlationId: "correlation-1",
+    }
+
+    expect(() =>
+      createAgentRuntimeAuthorization({
+        execution,
+        context: authorizationContext({ type: "serviceAccount", id: "svc_agent_other" }),
+      })
+    ).toThrow("must reference service account 'svc_agent_research'")
+    expect(() =>
+      createAgentRuntimeAuthorization({
+        execution: { ...execution, source: { type: "event", eventId: "event-forged" } },
+        context: authorizationContext({
+          type: "serviceAccount",
+          id: agentServiceAccountId("research"),
+        }),
+      })
+    ).toThrow("agent authority does not match its execution binding")
+  })
 })
 
 describe("execution scopes", () => {
+  test("durable serialization rejects a mismatched execution and authority pair", () => {
+    const projectOne = createTestingScope({ projectId: "project-1" })
+    const projectTwo = createTestingScope({ projectId: "project-2" })
+    const principalOne = createTestingScope({
+      projectId: "project-1",
+      context: authorizationContext({ type: "user", id: "user-1" }),
+    })
+    const principalTwo = createTestingScope({
+      projectId: "project-1",
+      context: authorizationContext({ type: "user", id: "user-2" }),
+    })
+
+    expect(() =>
+      executionRecordInputFromRuntime({
+        execution: projectTwo.execution,
+        runtimeAuthorization: projectOne.authorization,
+      })
+    ).toThrow("belongs to project 'project-1', not 'project-2'")
+    expect(() =>
+      executionRecordInputFromRuntime({
+        execution: principalTwo.execution,
+        runtimeAuthorization: principalOne.authorization,
+      })
+    ).toThrow("authority is bound to different execution provenance")
+    expect(
+      executionRecordInputFromRuntime({
+        execution: projectOne.execution,
+        runtimeAuthorization: projectOne.authorization,
+      })
+    ).toMatchObject({ projectId: "project-1", authorizationRef: { type: "disabled" } })
+  })
+
   test("rejects mixing an execution with authority from another scope", () => {
     const principalScope = createTestingScope({
       projectId: "project-1",
@@ -150,6 +230,89 @@ describe("execution scopes", () => {
       "message",
       expect.stringContaining("incompatible with its authority")
     )
+  })
+
+  test("binds request authority to exact id, source, and correlation provenance", () => {
+    const context = authorizationContext({ type: "user", id: "user-1" })
+    const scope = createTestingScope({
+      projectId: "project-1",
+      executionId: "execution-request-1",
+      requestId: "request-1",
+      correlationId: "correlation-1",
+      context,
+    })
+    const anotherExecution = createTestingScope({
+      projectId: "project-1",
+      executionId: "execution-request-2",
+      requestId: "request-1",
+      correlationId: "correlation-1",
+      context,
+    }).execution
+    const forgedCorrelation: ExecutionContext = {
+      ...scope.execution,
+      correlationId: "correlation-forged",
+    }
+    const forgedSourceAndExecutor: ExecutionContext = {
+      ...scope.execution,
+      executor: { type: "request", requestId: "request-forged" },
+      source: { type: "http", requestId: "request-forged" },
+    }
+    const forgedRequestedBy: ExecutionContext = {
+      ...scope.execution,
+      requestedBy: { type: "user", id: "user-forged" },
+    }
+
+    for (const execution of [
+      anotherExecution,
+      forgedCorrelation,
+      forgedSourceAndExecutor,
+      forgedRequestedBy,
+    ]) {
+      expect(() =>
+        resolveExecutionScopeAuthorization("project-1", {
+          execution,
+          authorization: scope.authorization,
+        })
+      ).toThrow("authority is bound to different execution provenance")
+    }
+
+    expect(() =>
+      executionRecordInputFromRuntime({
+        execution: forgedCorrelation,
+        runtimeAuthorization: scope.authorization,
+      })
+    ).toThrow("authority is bound to different execution provenance")
+  })
+
+  test("binds primitive and kernel authority to their complete execution provenance", () => {
+    const primitive = { kind: "action", id: "send-email", runId: "action-run-1" } as const
+    const primitiveScope = restoreTrustedPrimitiveExecutionScope({
+      execution: {
+        id: "execution-action-binding",
+        projectId: "project-1",
+        executor: { type: "primitive", kind: primitive.kind, runId: primitive.runId },
+        source: { type: "event", eventId: "event-1" },
+        correlationId: "correlation-1",
+        authorizationRef: { type: "trustedPrimitive", primitive },
+        createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      },
+      primitive,
+    })
+    const kernelScope = createKernelScope({
+      projectId: "project-1",
+      operation: { type: "ontology.recover", recoveryId: "recovery-1" },
+      source: { type: "event", eventId: "event-1" },
+      correlationId: "correlation-1",
+    })
+
+    for (const scope of [primitiveScope, kernelScope]) {
+      expect(() =>
+        resolveExecutionScopeAuthorization("project-1", {
+          execution: { ...scope.execution, correlationId: "correlation-forged" },
+          authorization: scope.authorization,
+        })
+      ).toThrow("authority is bound to different execution provenance")
+    }
   })
 
   test("creates a principal request scope with explicit request provenance", () => {
@@ -297,7 +460,7 @@ describe("execution scopes", () => {
     ).toThrow("does not authorize Agent run")
     expect(() =>
       createTrustedPrimitiveRuntimeAuthorization({
-        projectId: "project-1",
+        execution: requestExecution("invalid-trusted-primitive"),
         primitive: { kind: "agent", id: "research", runId: "agent-run-2" } as never,
       })
     ).toThrow("Unknown trusted primitive kind 'agent'")
@@ -355,5 +518,19 @@ function authorizationContext(principal: Principal, sessionId?: string): Authori
     groupIds: ["group-1"],
     roleIds: ["role-1"],
     grants: emptyGrantIndex(),
+  }
+}
+
+function requestExecution(
+  id: string,
+  requestedBy?: ExecutionContext["requestedBy"]
+): ExecutionContext {
+  return {
+    id,
+    projectId: "project-1",
+    ...(requestedBy === undefined ? {} : { requestedBy }),
+    executor: { type: "request", requestId: `request-${id}` },
+    source: { type: "http", requestId: `request-${id}` },
+    correlationId: `correlation-${id}`,
   }
 }
