@@ -6,7 +6,6 @@ import {
   getInMemoryObjectMaterializerAdapter,
   InMemoryObjectStorage,
 } from "../src/storage/objects/in-memory"
-import type { ObjectReadScopeFactory, ObjectStorage } from "../src/storage/objects/types"
 import {
   createMaterializerTestFixture,
   objectReadScopeContractOntology,
@@ -16,7 +15,7 @@ import {
 runObjectReadScopeContractSuite("InMemoryStorage selected object-read scope contract", {
   createHarness: () => {
     const storage = new InMemoryStorage()
-    return { storage, objectReadScopeFactory: requireScopeFactory(storage.objects) }
+    return { storage, objectReadScopeFactory: storage.objects }
   },
 })
 
@@ -82,7 +81,7 @@ describe("InMemoryObjectStorage selected read behavior", () => {
       ],
     })
 
-    const reader = requireScopeFactory(storage.objects).createSelectedReadScope({
+    const reader = storage.objects.createSelectedReadScope({
       projectId: "in-memory-vector-scope",
       scope: compileSelectedObjectReadScope({
         kind: "selected",
@@ -188,14 +187,3 @@ describe("InMemoryObjectStorage selected read behavior", () => {
     ).toMatchObject({ properties: { id: "prototype-1" } })
   })
 })
-
-function requireScopeFactory(storage: ObjectStorage): ObjectReadScopeFactory {
-  if (!("createSelectedReadScope" in storage)) {
-    throw new Error("[Sixb] Expected the in-memory object-read scope factory.")
-  }
-  const factory = storage as ObjectStorage & Partial<ObjectReadScopeFactory>
-  if (typeof factory.createSelectedReadScope !== "function") {
-    throw new Error("[Sixb] Expected the in-memory object-read scope factory.")
-  }
-  return factory as ObjectReadScopeFactory
-}
