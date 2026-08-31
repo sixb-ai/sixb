@@ -1,6 +1,6 @@
 {
   "name": "@sixb/pipeline-worker",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Worker that runs Sixb pipelines",
   "keywords": [
     "sixb",

@@ -2,6 +2,43 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-08-30 — Framework 0.1.3
+
+This selective release is anchored by `@sixb/core` `0.1.3`.
+
+### Highlights
+
+- Add catalog-backed AI model-call pricing, persist rated and unpriceable valuations, expose cost
+  accounting through the server and generated client, and add AI usage analytics to Atlas.
+- Preserve long-running agent progress with timeout recovery and durable context checkpoints; let
+  agents inspect sandbox files and publish tool-created file and image artifacts.
+- Unify conversation and workflow agent execution around one loop, expose detailed execution traces,
+  and improve workflow node debugging in Atlas.
+- Add configurable per-process worker concurrency while preserving safe defaults and bounded agent
+  turn retries.
+- Resolve projection sources and edits by recency, retain compact `mostRecent` assertion metadata,
+  and persist per-property object override edit times.
+- Add custom magic-link authentication experiences for applications and align LinkedIn analytics
+  requests with the current API payload contract.
+
+### Upgrade notes
+
+- Apply the bundled SQLite or PostgreSQL migrations before rolling out all runtime roles. Migration
+  026 adds AI model-call valuations, 027 adds durable agent context checkpoints, and 028 adds
+  per-property edit timestamps to ontology object overrides. Validate the migrations on a backup
+  before production rollout.
+- Deploy `@sixb/core`, its exact worker and storage consumers, and `@sixb/cli` as one coordinated
+  release so packages importing core internals remain on the same version line.
+- This pre-1.0 release has no database downgrade path.
+
+### Package versions
+
+- `0.1.3`: `@sixb/core`, `@sixb/action-worker`, `@sixb/agent-ui`, `@sixb/agent-worker`,
+  `@sixb/app`, `@sixb/atlas`, `@sixb/cli`, `@sixb/client`, `@sixb/orchestrator`, `@sixb/pg`,
+  `@sixb/pipeline-worker`, `@sixb/projection-worker`, `@sixb/rules-worker`, `@sixb/server`,
+  `@sixb/sqlite`, `@sixb/sync-worker`, and `@sixb/workflow-worker`.
+- `0.1.2`: `@sixb/auth-magic-link` and `@sixb/connector-linkedin`.
+
 ## 2026-08-26 — Framework 0.1.2
 
 This selective release is anchored by `@sixb/core` `0.1.2`.
