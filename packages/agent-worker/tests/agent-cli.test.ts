@@ -7,6 +7,7 @@ import { runAgentCliContractSuite } from "./agent-cli-contract"
 
 const launcherPath = resolve(import.meta.dir, "..", "src", "agent-cli", "bin", "sixb")
 const artifactPath = resolve(import.meta.dir, "..", "src", "agent-cli", "generated", "sixb.mjs")
+const GENERATOR_CHECK_TIMEOUT_MS = 10_000
 
 runAgentCliContractSuite({
   name: "generated artifact on Bun",
@@ -75,28 +76,46 @@ describe("Sixb agent CLI route coverage", () => {
 })
 
 describe("Sixb agent CLI generated artifact", () => {
-  test("is current and has no workspace or third-party runtime imports", async () => {
-    const check = Bun.spawn({
-      cmd: [process.execPath, "./scripts/generate-agent-cli.ts", "--check"],
-      cwd: resolve(import.meta.dir, ".."),
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    const [exitCode, stdout, stderr] = await Promise.all([
-      check.exited,
-      new Response(check.stdout).text(),
-      new Response(check.stderr).text(),
-    ])
-    expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
-    expect(stdout).toContain("Generated CLI is current")
+  test(
+    "is current and has no workspace or third-party runtime imports",
+    async () => {
+      const check = Bun.spawn({
+        cmd: [process.execPath, "./scripts/generate-agent-cli.ts", "--check"],
+        cwd: resolve(import.meta.dir, ".."),
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      let timedOut = false
+      const killTimer = setTimeout(() => {
+        timedOut = true
+        check.kill("SIGKILL")
+      }, GENERATOR_CHECK_TIMEOUT_MS)
+      try {
+        const [exitCode, stdout, stderr] = await Promise.all([
+          check.exited,
+          new Response(check.stdout).text(),
+          new Response(check.stderr).text(),
+        ])
+        if (timedOut) {
+          throw new Error(
+            `Agent CLI generation exceeded ${GENERATOR_CHECK_TIMEOUT_MS}ms and was killed.`
+          )
+        }
+        expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" })
+        expect(stdout).toContain("Generated CLI is current")
 
-    const artifact = await readFile(artifactPath, "utf8")
-    expect(artifact).not.toMatch(/from\s+["']@sixb\//)
-    expect(artifact).not.toMatch(/from\s+["']ai(?:\/|["'])/)
-    expect(artifact).not.toContain("curl")
-    expect(artifact).not.toContain("jq")
-    expect(Buffer.byteLength(artifact)).toBeLessThan(200_000)
-  })
+        const artifact = await readFile(artifactPath, "utf8")
+        expect(artifact).not.toMatch(/from\s+["']@sixb\//)
+        expect(artifact).not.toMatch(/from\s+["']ai(?:\/|["'])/)
+        expect(artifact).not.toContain("curl")
+        expect(artifact).not.toContain("jq")
+        expect(Buffer.byteLength(artifact)).toBeLessThan(200_000)
+      } finally {
+        clearTimeout(killTimer)
+      }
+    },
+    GENERATOR_CHECK_TIMEOUT_MS + 5_000
+  )
 
   test("launcher falls back to Node and reports a stable error when neither runtime exists", async () => {
     const nodePath = Bun.which("node")

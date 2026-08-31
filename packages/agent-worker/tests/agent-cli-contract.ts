@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -816,6 +816,74 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
       }
     })
 
+    test("streams downloads to a temporary file before publishing the destination", async () => {
+      // Regression guard: regenerate the artifact after replacing the streaming pipeline in
+      // ApiClient.download with response.arrayBuffer(); no temporary file appears and this fails.
+      const firstChunk = new TextEncoder().encode("a".repeat(128 * 1024))
+      const finalChunk = new TextEncoder().encode("complete")
+      let releaseResponse = () => {}
+      const responseReleased = new Promise<void>((resolve) => {
+        releaseResponse = resolve
+      })
+      let markResponseStarted = () => {}
+      const responseStarted = new Promise<void>((resolve) => {
+        markResponseStarted = resolve
+      })
+      const api = startTestApi((request) => {
+        if (!request.url.pathname.endsWith("/files/content")) return undefined
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(firstChunk)
+              markResponseStarted()
+              responseReleased.then(() => {
+                controller.enqueue(finalChunk)
+                controller.close()
+              })
+            },
+          })
+        )
+      })
+      const tempDir = await mkdtemp(join(tmpdir(), "sixb-agent-cli-stream-"))
+      const outputPath = join(tempDir, "download.bin")
+      const resultPromise = runCli(
+        implementation,
+        [
+          "files",
+          "download",
+          "workflow-run",
+          "run-1",
+          "--path",
+          "/output/file",
+          "--output",
+          outputPath,
+        ],
+        apiEnv(api)
+      )
+
+      try {
+        await responseStarted
+        const temporaryPath = await waitForTemporaryDownload(tempDir, ".download.bin.sixb-")
+        expect((await readFile(temporaryPath)).byteLength).toBeGreaterThan(0)
+        expect((await readdir(tempDir)).includes("download.bin")).toBe(false)
+
+        releaseResponse()
+        const result = await resultPromise
+        expect(result.exitCode).toBe(0)
+        expect((await readFile(outputPath)).byteLength).toBe(
+          firstChunk.byteLength + finalChunk.byteLength
+        )
+        expect(
+          (await readdir(tempDir)).some((name) => name.startsWith(".download.bin.sixb-"))
+        ).toBe(false)
+      } finally {
+        releaseResponse()
+        await resultPromise.catch(() => {})
+        api.close()
+        await rm(tempDir, { recursive: true, force: true })
+      }
+    })
+
     test("exposes no raw request, origin, or header override", async () => {
       const api = startGraphApi()
       try {
@@ -978,6 +1046,16 @@ function startTestApi(handler: TestApiHandler): TestApi {
 
 function apiEnv(api: TestApi): Readonly<Record<string, string>> {
   return { SIXB_API_BASE_URL: api.baseUrl }
+}
+
+async function waitForTemporaryDownload(directory: string, prefix: string): Promise<string> {
+  const deadline = Date.now() + 2_000
+  while (Date.now() < deadline) {
+    const name = (await readdir(directory)).find((entry) => entry.startsWith(prefix))
+    if (name) return join(directory, name)
+    await Bun.sleep(10)
+  }
+  throw new Error(`No streamed download temporary file appeared within 2000ms.`)
 }
 
 function json(value: unknown, status = 200): Response {
