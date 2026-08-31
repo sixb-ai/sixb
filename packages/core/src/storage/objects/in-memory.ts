@@ -1,6 +1,13 @@
 import type { EffectiveLinkSnapshot, EffectiveObjectSnapshot } from "../../materialization/model"
 import type { ObjectQuery, ObjectQueryPredicate, ObjectQuerySortField } from "../../objects/query"
 import { compareQueryScalarValues, queryScalarValuesEqual } from "../../objects/query/scalar-values"
+import type { ObjectReadExecutionLimits } from "./execution-limits"
+import {
+  assertObjectReadFacetCount,
+  assertObjectReadOutputWithinLimit,
+  ObjectReadLimitExceededError,
+  snapshotObjectReadExecutionLimits,
+} from "./execution-limits"
 import type { LinkBatchKey, ObjectBatchKey } from "./keys"
 import {
   compareObjectLinkCursors,
@@ -9,7 +16,11 @@ import {
   objectBatchKey,
   objectLinkCursor,
 } from "./keys"
+import { assertObjectReaderProject } from "./read-scope"
 import type {
+  CompiledObjectReadRoot,
+  CompiledObjectReadStep,
+  CompiledSelectedObjectReadScope,
   CountObjectsInput,
   CountObjectsResult,
   ExistsObjectsInput,
@@ -21,6 +32,7 @@ import type {
   ObjectFacetResult,
   ObjectLinkRow,
   ObjectQueryCapabilities,
+  ObjectReadScopeFactory,
   ObjectReadStorage,
   ObjectRow,
   ObjectStorage,
@@ -142,6 +154,19 @@ type QueryEvaluation = {
   nextPageToken?: string
 }
 
+interface InMemoryReadUniverse {
+  readonly objects: ReadonlyMap<string, ObjectRow>
+  readonly links: ReadonlyMap<string, ObjectLinkRow>
+  readonly linksBySource: ReadonlyMap<string, readonly ObjectLinkRow[]>
+  readonly objectProperties: ReadonlyMap<string, ReadonlySet<string>>
+}
+
+interface InMemoryReadPlan {
+  readonly roots: readonly CompiledObjectReadRoot[]
+  readonly selectionsByNode: ReadonlyMap<number, ReadonlyMap<string, ReadonlySet<string>>>
+  readonly steps: readonly CompiledObjectReadStep[]
+}
+
 const PAGE_TOKEN_PREFIX = "offset:"
 
 export interface InMemoryObjectStorageSnapshot {
@@ -193,7 +218,7 @@ export function getInMemoryObjectMaterializerAdapter(
   return adapter
 }
 
-export class InMemoryObjectStorage implements ObjectStorage {
+export class InMemoryObjectStorage implements ObjectStorage, ObjectReadScopeFactory {
   private readonly rows = new Map<string, Map<string, ObjectRow>>()
   private readonly links = new Map<string, Map<string, ObjectLinkRow>>()
 
@@ -334,6 +359,142 @@ export class InMemoryObjectStorage implements ObjectStorage {
     return IN_MEMORY_OBJECT_QUERY_CAPABILITIES
   }
 
+  createSelectedReadScope(params: {
+    projectId: string
+    scope: CompiledSelectedObjectReadScope
+    limits: ObjectReadExecutionLimits
+  }): ObjectReadStorage {
+    const projectId = params.projectId
+    const plan = prepareReadPlan(params.scope)
+    const limits = snapshotObjectReadExecutionLimits(params.limits)
+    const assertProject = (actualProjectId: string) =>
+      assertObjectReaderProject(projectId, actualProjectId)
+    const visible = <T>(value: T): T => {
+      assertObjectReadOutputWithinLimit(value, limits)
+      return value
+    }
+    const visibleMap = <TKey, TValue>(value: Map<TKey, TValue>): Map<TKey, TValue> => {
+      assertObjectReadOutputWithinLimit([...value.entries()], limits)
+      return value
+    }
+    const selectsObjectProperties: ObjectReadStorage["selectsObjectProperties"] = async (input) => {
+      assertProject(input.projectId)
+      const universe = this.resolveReadUniverse(projectId, plan, limits)
+      return visible(
+        input.items.map((item) => {
+          const key = rowIdentityKeyParts(item.objectTypeId, item.primaryId)
+          if (!universe.objects.has(key)) return false
+          return universe.objectProperties.get(key)?.has(item.propertyId) ?? false
+        })
+      )
+    }
+
+    return Object.freeze({
+      queryCapabilities: () => this.queryCapabilities(),
+      queryObjects: async (input: QueryObjectsInput) => {
+        assertProject(input.projectId)
+        const universe = this.resolveReadUniverse(projectId, plan, limits)
+        const result = this.evaluateObjectQuery(projectId, input.query, universe)
+        return visible({
+          objects: result.entries.map((entry) => structuredClone(entry.row)),
+          hasMore: result.hasMore,
+          nextPageToken: result.nextPageToken,
+          ...(input.includeTotal === false ? {} : { total: result.total }),
+        })
+      },
+      countObjects: async (input: CountObjectsInput) => {
+        assertProject(input.projectId)
+        const universe = this.resolveReadUniverse(projectId, plan, limits)
+        return visible({
+          count: this.evaluateObjectQuery(projectId, stripOuterRowShape(input.query), universe)
+            .total,
+        })
+      },
+      existsObjects: async (input: ExistsObjectsInput) => {
+        assertProject(input.projectId)
+        const universe = this.resolveReadUniverse(projectId, plan, limits)
+        return visible({
+          exists:
+            this.evaluateObjectQuery(projectId, stripOuterRowShape(input.query), universe).total >
+            0,
+        })
+      },
+      facetObjects: async (input: FacetObjectsInput) => {
+        assertProject(input.projectId)
+        assertObjectReadFacetCount(input.facets.length)
+        const universe = this.resolveReadUniverse(projectId, plan, limits)
+        const result = this.evaluateObjectQuery(
+          projectId,
+          stripOuterRowShape(input.query),
+          universe
+        )
+        return visible(
+          structuredClone({
+            facets: buildFacetResults(
+              result.entries.map((entry) => entry.row),
+              input.facets
+            ),
+          })
+        )
+      },
+      getByPrimaryId: async (input) => {
+        assertProject(input.projectId)
+        const universe = this.resolveReadUniverse(projectId, plan, limits)
+        const row = universe.objects.get(rowIdentityKeyParts(input.objectTypeId, input.primaryId))
+        return visible(row ? structuredClone(row) : null)
+      },
+      selectsObjectProperties,
+      listLinks: async (input) => {
+        assertProject(input.projectId)
+        const universe = this.resolveReadUniverse(projectId, plan, limits)
+        return visible(this.listUniverseLinks(universe, input).map((row) => structuredClone(row)))
+      },
+      getByPrimaryIdBatch: async (input) => {
+        assertProject(input.projectId)
+        const universe = this.resolveReadUniverse(projectId, plan, limits)
+        const rows = new Map<ObjectBatchKey, ObjectRow>()
+        for (const item of input.items) {
+          const row = universe.objects.get(rowIdentityKeyParts(item.objectTypeId, item.primaryId))
+          if (row) {
+            rows.set(objectBatchKey(item.objectTypeId, item.primaryId), structuredClone(row))
+          }
+        }
+        return visibleMap(rows)
+      },
+      listLinksBatch: async (input) => {
+        assertProject(input.projectId)
+        const universe = this.resolveReadUniverse(projectId, plan, limits)
+        return visibleMap(
+          collectLinksBatch(
+            {
+              all: () => universe.links.values(),
+              outgoing: (item) =>
+                universe.linksBySource.get(
+                  sourceLinkBucketKey(projectId, item.objectTypeId, item.objectId)
+                ) ?? [],
+            },
+            input,
+            true
+          )
+        )
+      },
+      queryLinks: async (input) => {
+        assertProject(input.projectId)
+        const universe = this.resolveReadUniverse(projectId, plan, limits)
+        return visible(
+          structuredClone(
+            await queryLinksFrom(input, (item) => this.listUniverseLinks(universe, item))
+          )
+        )
+      },
+      list: async (input) => {
+        assertProject(input.projectId)
+        const universe = this.resolveReadUniverse(projectId, plan, limits)
+        return visible(listRows(input, [...universe.objects.values()]))
+      },
+    } satisfies ObjectReadStorage)
+  }
+
   async queryObjects(params: QueryObjectsInput): Promise<QueryObjectsResult> {
     const result = this.evaluateObjectQuery(params.projectId, params.query)
     return {
@@ -367,21 +528,25 @@ export class InMemoryObjectStorage implements ObjectStorage {
     }
   }
 
-  private evaluateObjectQuery(projectId: string, query: ObjectQuery): QueryEvaluation {
+  private evaluateObjectQuery(
+    projectId: string,
+    query: ObjectQuery,
+    universe?: InMemoryReadUniverse
+  ): QueryEvaluation {
     switch (query.kind) {
       case "start":
-        return this.evaluateStart(projectId, query.objectTypeId)
+        return this.evaluateStart(projectId, query.objectTypeId, universe)
       case "refs":
-        return this.evaluateRefs(projectId, query.refs)
+        return this.evaluateRefs(projectId, query.refs, universe)
       case "filter": {
-        const input = this.evaluateObjectQuery(projectId, query.input)
+        const input = this.evaluateObjectQuery(projectId, query.input, universe)
         const entries = input.entries.filter((entry) =>
           matchesPredicate(entry.row, query.predicate)
         )
         return completeEvaluation(entries)
       }
       case "text": {
-        const input = this.evaluateObjectQuery(projectId, query.input)
+        const input = this.evaluateObjectQuery(projectId, query.input, universe)
         const scoredEntries = input.entries.flatMap((entry) => {
           const score = textScore(entry.row, query.query, query.fields, query.fieldsByObjectType)
           return score > 0 ? [{ ...entry, score: entry.score + score }] : []
@@ -389,7 +554,7 @@ export class InMemoryObjectStorage implements ObjectStorage {
         return completeEvaluation(scoredEntries)
       }
       case "vector": {
-        const input = this.evaluateObjectQuery(projectId, query.input)
+        const input = this.evaluateObjectQuery(projectId, query.input, universe)
         const scoredEntries = input.entries.flatMap((entry) => {
           const score = vectorSimilarity(entry.row.properties[query.propertyId], query.vector)
           return score === null ? [] : [{ ...entry, score: entry.score + score }]
@@ -403,29 +568,30 @@ export class InMemoryObjectStorage implements ObjectStorage {
         }
       }
       case "traverse": {
-        const input = this.evaluateObjectQuery(projectId, query.input)
+        const input = this.evaluateObjectQuery(projectId, query.input, universe)
         const entries =
           query.direction === "outgoing"
-            ? this.traverseOutgoing(projectId, input.entries, query.linkId)
+            ? this.traverseOutgoing(projectId, input.entries, query.linkId, universe)
             : this.traverseIncoming(
                 projectId,
                 input.entries,
                 query.linkId,
-                query.sourceObjectTypeId
+                query.sourceObjectTypeId,
+                universe
               )
         return completeEvaluation(entries)
       }
       case "set":
-        return this.evaluateSet(projectId, query.op, query.inputs)
+        return this.evaluateSet(projectId, query.op, query.inputs, universe)
       case "sort": {
-        const input = this.evaluateObjectQuery(projectId, query.input)
+        const input = this.evaluateObjectQuery(projectId, query.input, universe)
         return {
           ...input,
           entries: sortEntries(input.entries, query.fields),
         }
       }
       case "limit": {
-        const input = this.evaluateObjectQuery(projectId, query.input)
+        const input = this.evaluateObjectQuery(projectId, query.input, universe)
         const limit = Math.max(0, query.limit)
         return {
           entries: input.entries.slice(0, limit),
@@ -434,7 +600,7 @@ export class InMemoryObjectStorage implements ObjectStorage {
         }
       }
       case "page": {
-        const input = this.evaluateObjectQuery(projectId, query.input)
+        const input = this.evaluateObjectQuery(projectId, query.input, universe)
         const offset = decodePageOffset(query.pageToken)
         const pageSize = Math.max(0, query.pageSize)
         const nextOffset = offset + pageSize
@@ -447,7 +613,7 @@ export class InMemoryObjectStorage implements ObjectStorage {
         }
       }
       case "project": {
-        const input = this.evaluateObjectQuery(projectId, query.input)
+        const input = this.evaluateObjectQuery(projectId, query.input, universe)
         if (!query.properties) return input
         const properties = query.properties
         return {
@@ -466,9 +632,15 @@ export class InMemoryObjectStorage implements ObjectStorage {
     }
   }
 
-  private evaluateStart(projectId: string, objectTypeId: string): QueryEvaluation {
-    const bucket = this.rows.get(objectRowKey(projectId, objectTypeId))
-    const entries = [...(bucket?.values() ?? [])].map((row, index) => ({
+  private evaluateStart(
+    projectId: string,
+    objectTypeId: string,
+    universe?: InMemoryReadUniverse
+  ): QueryEvaluation {
+    const rows = universe
+      ? [...universe.objects.values()].filter((row) => row.objectTypeId === objectTypeId)
+      : [...(this.rows.get(objectRowKey(projectId, objectTypeId))?.values() ?? [])]
+    const entries = rows.map((row, index) => ({
       row,
       score: 0,
       order: index,
@@ -478,7 +650,8 @@ export class InMemoryObjectStorage implements ObjectStorage {
 
   private evaluateRefs(
     projectId: string,
-    refs: readonly { objectTypeId: string; primaryId: string }[]
+    refs: readonly { objectTypeId: string; primaryId: string }[],
+    universe?: InMemoryReadUniverse
   ): QueryEvaluation {
     const seen = new Set<string>()
     const entries = refs
@@ -486,7 +659,9 @@ export class InMemoryObjectStorage implements ObjectStorage {
         const key = JSON.stringify([ref.objectTypeId, ref.primaryId])
         if (seen.has(key)) return []
         seen.add(key)
-        const row = this.rows.get(objectRowKey(projectId, ref.objectTypeId))?.get(ref.primaryId)
+        const row = universe
+          ? universe.objects.get(rowIdentityKeyParts(ref.objectTypeId, ref.primaryId))
+          : this.rows.get(objectRowKey(projectId, ref.objectTypeId))?.get(ref.primaryId)
         return row ? [row] : []
       })
       .sort(
@@ -502,9 +677,10 @@ export class InMemoryObjectStorage implements ObjectStorage {
   private evaluateSet(
     projectId: string,
     op: "union" | "intersect" | "subtract",
-    inputs: readonly ObjectQuery[]
+    inputs: readonly ObjectQuery[],
+    universe?: InMemoryReadUniverse
   ): QueryEvaluation {
-    const evaluations = inputs.map((input) => this.evaluateObjectQuery(projectId, input))
+    const evaluations = inputs.map((input) => this.evaluateObjectQuery(projectId, input, universe))
     const first = evaluations[0]
     if (!first) return completeEvaluation([])
 
@@ -542,19 +718,27 @@ export class InMemoryObjectStorage implements ObjectStorage {
   private traverseOutgoing(
     projectId: string,
     entries: readonly QueryEntry[],
-    linkId: string
+    linkId: string,
+    universe?: InMemoryReadUniverse
   ): QueryEntry[] {
     const resultsByKey = new Map<string, QueryEntry>()
 
     entries.forEach((entry, index) => {
-      const bucket = this.links.get(
-        sourceLinkBucketKey(projectId, entry.row.objectTypeId, entry.row.primaryId)
-      )
-      if (!bucket) return
+      const links = universe
+        ? (universe.linksBySource.get(
+            sourceLinkBucketKey(projectId, entry.row.objectTypeId, entry.row.primaryId)
+          ) ?? [])
+        : [
+            ...(this.links
+              .get(sourceLinkBucketKey(projectId, entry.row.objectTypeId, entry.row.primaryId))
+              ?.values() ?? []),
+          ]
 
-      for (const link of bucket.values()) {
+      for (const link of links) {
         if (link.linkId !== linkId) continue
-        const target = this.rows.get(objectRowKey(projectId, link.targetTypeId))?.get(link.targetId)
+        const target = universe
+          ? universe.objects.get(rowIdentityKeyParts(link.targetTypeId, link.targetId))
+          : this.rows.get(objectRowKey(projectId, link.targetTypeId))?.get(link.targetId)
         if (!target) continue
         upsertEntry(resultsByKey, {
           row: target,
@@ -571,31 +755,177 @@ export class InMemoryObjectStorage implements ObjectStorage {
     projectId: string,
     entries: readonly QueryEntry[],
     linkId: string,
-    sourceObjectTypeId?: string
+    sourceObjectTypeId?: string,
+    universe?: InMemoryReadUniverse
   ): QueryEntry[] {
     const inputEntriesByTarget = new Map(entries.map((entry) => [rowIdentityKey(entry.row), entry]))
     const resultsByKey = new Map<string, QueryEntry>()
 
-    for (const bucket of this.links.values()) {
-      for (const link of bucket.values()) {
-        if (link.projectId !== projectId || link.linkId !== linkId) continue
-        if (sourceObjectTypeId !== undefined && link.sourceTypeId !== sourceObjectTypeId) continue
-        const targetEntry = inputEntriesByTarget.get(
-          rowIdentityKeyParts(link.targetTypeId, link.targetId)
-        )
-        if (!targetEntry) continue
+    const links = universe
+      ? universe.links.values()
+      : [...this.links.values()].flatMap((bucket) => [...bucket.values()])
+    for (const link of links) {
+      if (link.projectId !== projectId || link.linkId !== linkId) continue
+      if (sourceObjectTypeId !== undefined && link.sourceTypeId !== sourceObjectTypeId) continue
+      const targetEntry = inputEntriesByTarget.get(
+        rowIdentityKeyParts(link.targetTypeId, link.targetId)
+      )
+      if (!targetEntry) continue
 
-        const source = this.rows.get(objectRowKey(projectId, link.sourceTypeId))?.get(link.sourceId)
-        if (!source) continue
-        upsertEntry(resultsByKey, {
-          row: source,
-          score: targetEntry.score,
-          order: targetEntry.order,
-        })
-      }
+      const source = universe
+        ? universe.objects.get(rowIdentityKeyParts(link.sourceTypeId, link.sourceId))
+        : this.rows.get(objectRowKey(projectId, link.sourceTypeId))?.get(link.sourceId)
+      if (!source) continue
+      upsertEntry(resultsByKey, {
+        row: source,
+        score: targetEntry.score,
+        order: targetEntry.order,
+      })
     }
 
     return [...resultsByKey.values()]
+  }
+
+  private resolveReadUniverse(
+    projectId: string,
+    plan: InMemoryReadPlan,
+    limits: ObjectReadExecutionLimits
+  ): InMemoryReadUniverse {
+    return this.resolveSelectedReadUniverse(projectId, plan, limits)
+  }
+
+  private resolveSelectedReadUniverse(
+    projectId: string,
+    plan: InMemoryReadPlan,
+    limits: ObjectReadExecutionLimits
+  ): InMemoryReadUniverse {
+    // Reachability stays path-sensitive until every finite selection step has run. The final
+    // object/link universes union exact identities only after that traversal, so the same type
+    // reached through another branch cannot inherit nested link authority.
+    const reachableByNode = new Map<number, Map<string, ObjectRow>>()
+    const rawObjects = new Map<string, ObjectRow>()
+    const objectProperties = new Map<string, Set<string>>()
+    const authorizedLinks = new Map<
+      string,
+      { readonly row: ObjectLinkRow; readonly propertyIds: Set<string> }
+    >()
+    let traversalFacts = 0
+    const consumeTraversalFact = (): void => {
+      traversalFacts += 1
+      if (traversalFacts > limits.maxTraversalFacts) {
+        throw new ObjectReadLimitExceededError("traversalFacts", limits.maxTraversalFacts)
+      }
+    }
+
+    const addReachable = (nodeId: number, row: ObjectRow): void => {
+      const selectedProperties = plan.selectionsByNode.get(nodeId)?.get(row.objectTypeId)
+      if (!selectedProperties) return
+      const key = rowIdentityKey(row)
+      const reachable = reachableByNode.get(nodeId) ?? new Map<string, ObjectRow>()
+      reachable.set(key, row)
+      reachableByNode.set(nodeId, reachable)
+      rawObjects.set(key, row)
+      unionInto(objectProperties, key, selectedProperties)
+    }
+
+    for (const root of plan.roots) {
+      const row = this.rows.get(objectRowKey(projectId, root.objectTypeId))?.get(root.primaryId)
+      if (row) {
+        consumeTraversalFact()
+        addReachable(root.nodeId, row)
+      }
+    }
+
+    for (const step of plan.steps) {
+      const parents = reachableByNode.get(step.parentNodeId)
+      if (!parents) continue
+      for (const parent of parents.values()) {
+        if (parent.objectTypeId !== step.sourceObjectTypeId) continue
+        const bucket = this.links.get(
+          sourceLinkBucketKey(projectId, parent.objectTypeId, parent.primaryId)
+        )
+        if (!bucket) continue
+        for (const link of bucket.values()) {
+          if (link.linkId !== step.linkId || link.targetTypeId !== step.targetObjectTypeId) {
+            continue
+          }
+          const target = this.rows
+            .get(objectRowKey(projectId, link.targetTypeId))
+            ?.get(link.targetId)
+          if (!target) continue
+          consumeTraversalFact()
+          addReachable(step.nodeId, target)
+
+          const linkKey = fullLinkRowKey(link)
+          const selected = authorizedLinks.get(linkKey)
+          if (selected) {
+            for (const propertyId of step.propertyIds) selected.propertyIds.add(propertyId)
+          } else {
+            authorizedLinks.set(linkKey, {
+              row: link,
+              propertyIds: new Set(step.propertyIds),
+            })
+          }
+        }
+      }
+    }
+
+    const objects = new Map<string, ObjectRow>()
+    for (const [key, propertyIds] of objectProperties) {
+      const row = rawObjects.get(key)
+      if (row) objects.set(key, redactObjectRow(row, propertyIds))
+    }
+
+    const links = new Map<string, ObjectLinkRow>()
+    for (const [key, selected] of authorizedLinks) {
+      // Both endpoint identities must remain live and selected. This also prevents a stale link
+      // from exposing metadata after its target object disappears.
+      if (
+        !objects.has(rowIdentityKeyParts(selected.row.sourceTypeId, selected.row.sourceId)) ||
+        !objects.has(rowIdentityKeyParts(selected.row.targetTypeId, selected.row.targetId))
+      ) {
+        continue
+      }
+      links.set(key, redactLinkRow(selected.row, selected.propertyIds))
+    }
+
+    return createReadUniverse(objects, links, objectProperties)
+  }
+
+  private listUniverseLinks(
+    universe: InMemoryReadUniverse,
+    params: {
+      readonly projectId: string
+      readonly objectTypeId: string
+      readonly objectId: string
+      readonly linkId?: string
+      readonly direction?: LinkDirection
+    }
+  ): ObjectLinkRow[] {
+    const direction = params.direction ?? "outgoing"
+    const matches = (row: ObjectLinkRow) => !params.linkId || row.linkId === params.linkId
+    const rows: ObjectLinkRow[] = []
+
+    if (direction === "outgoing" || direction === "both") {
+      const outgoing = universe.linksBySource.get(
+        sourceLinkBucketKey(params.projectId, params.objectTypeId, params.objectId)
+      )
+      if (outgoing) rows.push(...outgoing.filter(matches))
+    }
+    if (direction === "incoming" || direction === "both") {
+      for (const row of universe.links.values()) {
+        if (
+          row.targetTypeId === params.objectTypeId &&
+          row.targetId === params.objectId &&
+          matches(row)
+        ) {
+          rows.push(row)
+        }
+      }
+    }
+
+    if (direction !== "both") return rows
+    return [...new Map(rows.map((row) => [fullLinkRowKey(row), row])).values()]
   }
 
   /**
@@ -618,12 +948,10 @@ export class InMemoryObjectStorage implements ObjectStorage {
   async selectsObjectProperties(
     params: Parameters<ObjectReadStorage["selectsObjectProperties"]>[0]
   ): Promise<readonly boolean[]> {
-    const objects = await this.getByPrimaryIdBatch({
-      projectId: params.projectId,
-      items: params.items,
-    })
-    return params.items.map((item) =>
-      objects.has(objectBatchKey(item.objectTypeId, item.primaryId))
+    return params.items.map(
+      (item) =>
+        this.rows.get(objectRowKey(params.projectId, item.objectTypeId))?.has(item.primaryId) ??
+        false
     )
   }
 
@@ -687,56 +1015,21 @@ export class InMemoryObjectStorage implements ObjectStorage {
     direction?: LinkDirection
     items: readonly { objectTypeId: string; objectId: string; linkId: string }[]
   }): Promise<Map<LinkBatchKey, ObjectLinkRow[]>> {
-    const result = new Map<LinkBatchKey, ObjectLinkRow[]>()
-    for (const item of params.items) {
-      const rows = await this.listLinks({
-        projectId: params.projectId,
-        objectTypeId: item.objectTypeId,
-        objectId: item.objectId,
-        linkId: item.linkId,
-        direction: params.direction,
-      })
-      if (rows.length > 0) {
-        result.set(linkBatchKey(item.objectTypeId, item.objectId, item.linkId), [...rows])
-      }
-    }
-    return result
+    return collectLinksBatch(
+      {
+        all: () => allLinkRows(this.links),
+        outgoing: (item) =>
+          this.links
+            .get(sourceLinkBucketKey(params.projectId, item.objectTypeId, item.objectId))
+            ?.values() ?? [],
+      },
+      params,
+      false
+    )
   }
 
   async queryLinks(params: QueryObjectLinksInput): Promise<QueryObjectLinksResult> {
-    assertLinkQueryLimit(params.limit)
-    if (params.objectRefs.length === 0 || params.endpointObjectTypeIds?.length === 0) {
-      return { links: [], hasMore: false }
-    }
-
-    const allowedTypes = params.endpointObjectTypeIds
-      ? new Set(params.endpointObjectTypeIds)
-      : undefined
-    const deduped = new Map<string, ObjectLinkRow>()
-    for (const object of params.objectRefs) {
-      const rows = await this.listLinks({
-        projectId: params.projectId,
-        objectTypeId: object.objectTypeId,
-        objectId: object.primaryId,
-        direction: params.direction,
-        ...(params.linkId === undefined ? {} : { linkId: params.linkId }),
-      })
-      for (const row of rows) {
-        if (
-          allowedTypes &&
-          (!allowedTypes.has(row.sourceTypeId) || !allowedTypes.has(row.targetTypeId))
-        ) {
-          continue
-        }
-        if (params.after && compareObjectLinkCursors(objectLinkCursor(row), params.after) <= 0) {
-          continue
-        }
-        deduped.set(fullLinkRowKey(row), row)
-      }
-    }
-
-    const rows = [...deduped.values()].sort(compareObjectLinks).slice(0, params.limit + 1)
-    return { links: rows.slice(0, params.limit), hasMore: rows.length > params.limit }
+    return queryLinksFrom(params, (input) => this.listLinks(input))
   }
 
   async listIncidentLinksBatch(params: {
@@ -888,6 +1181,139 @@ export class InMemoryObjectStorage implements ObjectStorage {
   ): void {
     const bucket = this.links.get(sourceLinkBucketKey(projectId, sourceTypeId, sourceId))
     bucket?.delete(linkRowKey(linkId, targetTypeId, targetId))
+  }
+}
+
+function prepareReadPlan(scope: CompiledSelectedObjectReadScope): InMemoryReadPlan {
+  const selectionsByNode = new Map<number, Map<string, ReadonlySet<string>>>()
+  for (const selection of scope.objects) {
+    const byType = selectionsByNode.get(selection.nodeId) ?? new Map()
+    byType.set(selection.objectTypeId, new Set(selection.propertyIds))
+    selectionsByNode.set(selection.nodeId, byType)
+  }
+
+  // The compiler allocates node ids parent-first. Resolve every step from lower parent ids to
+  // higher child ids so a node reached through several concrete definitions is complete before
+  // its nested selections run.
+  const steps = [...scope.steps].sort(
+    (left, right) =>
+      left.parentNodeId - right.parentNodeId ||
+      left.nodeId - right.nodeId ||
+      left.sourceObjectTypeId.localeCompare(right.sourceObjectTypeId) ||
+      left.linkId.localeCompare(right.linkId) ||
+      left.targetObjectTypeId.localeCompare(right.targetObjectTypeId)
+  )
+  return {
+    roots: scope.roots,
+    selectionsByNode,
+    steps,
+  }
+}
+
+function createReadUniverse(
+  objects: ReadonlyMap<string, ObjectRow>,
+  links: ReadonlyMap<string, ObjectLinkRow>,
+  objectProperties: ReadonlyMap<string, ReadonlySet<string>>
+): InMemoryReadUniverse {
+  const linksBySource = new Map<string, ObjectLinkRow[]>()
+  for (const link of links.values()) {
+    const key = sourceLinkBucketKey(link.projectId, link.sourceTypeId, link.sourceId)
+    const bucket = linksBySource.get(key) ?? []
+    bucket.push(link)
+    linksBySource.set(key, bucket)
+  }
+  return { objects, links, linksBySource, objectProperties }
+}
+
+function unionInto(
+  target: Map<string, Set<string>>,
+  key: string,
+  values: ReadonlySet<string>
+): void {
+  const union = target.get(key) ?? new Set<string>()
+  for (const value of values) union.add(value)
+  target.set(key, union)
+}
+
+function redactObjectRow(row: ObjectRow, propertyIds: ReadonlySet<string>): ObjectRow {
+  const clone = structuredClone(row)
+  delete clone.links
+  clone.properties = redactProperties(clone.properties, propertyIds)
+  return clone
+}
+
+function redactLinkRow(row: ObjectLinkRow, propertyIds: ReadonlySet<string>): ObjectLinkRow {
+  const clone = structuredClone(row)
+  const properties = redactProperties(clone.properties ?? {}, propertyIds)
+  if (Object.keys(properties).length === 0) {
+    delete clone.properties
+  } else {
+    clone.properties = properties
+  }
+  return clone
+}
+
+function redactProperties(
+  properties: Readonly<Record<string, unknown>>,
+  propertyIds: ReadonlySet<string>
+): Record<string, unknown> {
+  // Object.fromEntries uses CreateDataProperty, so valid ontology ids such as `__proto__` remain
+  // ordinary own properties without changing the returned object's prototype.
+  return Object.fromEntries(
+    [...propertyIds]
+      .filter((propertyId) => Object.hasOwn(properties, propertyId))
+      .map((propertyId) => [propertyId, properties[propertyId]])
+  )
+}
+
+function listRows(
+  params: Parameters<ObjectReadStorage["list"]>[0],
+  candidates: readonly ObjectRow[]
+): { objects: readonly ObjectRow[]; hasMore: boolean; total: number } {
+  const requestedTypes =
+    params.objectTypeId === undefined
+      ? undefined
+      : new Set(
+          typeof params.objectTypeId === "string" ? [params.objectTypeId] : params.objectTypeId
+        )
+  let rows = candidates.filter(
+    (row) =>
+      row.projectId === params.projectId &&
+      (!requestedTypes || requestedTypes.has(row.objectTypeId))
+  )
+
+  rows = rows.filter(
+    (row) =>
+      (!params.primaryIdPrefix || row.primaryId.startsWith(params.primaryIdPrefix)) &&
+      (!params.primaryIdSuffix || row.primaryId.endsWith(params.primaryIdSuffix)) &&
+      (!params.updatedAfter || row.updatedAt >= params.updatedAfter) &&
+      (!params.updatedBefore || row.updatedAt <= params.updatedBefore) &&
+      (!params.createdAfter || row.createdAt >= params.createdAfter) &&
+      (!params.createdBefore || row.createdAt <= params.createdBefore)
+  )
+
+  const total = rows.length
+  const offset = params.offset ?? 0
+  const limit = params.limit ?? 50
+  if (limit === 0) return { objects: [], hasMore: offset < total, total }
+
+  const orderBy = params.orderBy ?? "updatedAt"
+  const order = params.order ?? "desc"
+  rows.sort((left, right) => {
+    const comparison =
+      orderBy === "primaryId"
+        ? left.primaryId.localeCompare(right.primaryId)
+        : orderBy === "createdAt"
+          ? left.createdAt.getTime() - right.createdAt.getTime()
+          : left.updatedAt.getTime() - right.updatedAt.getTime()
+    return order === "desc" ? -comparison : comparison
+  })
+
+  const objects = rows.slice(offset, offset + limit).map((row) => structuredClone(row))
+  return {
+    objects,
+    hasMore: offset + limit < total,
+    total,
   }
 }
 
@@ -1208,6 +1634,109 @@ function facetValueKey(value: unknown): string {
 
 function facetValueSortKey(value: unknown): string {
   return JSON.stringify(value) ?? String(value)
+}
+
+async function queryLinksFrom(
+  params: QueryObjectLinksInput,
+  listLinks: (
+    input: Parameters<ObjectReadStorage["listLinks"]>[0]
+  ) => Promise<readonly ObjectLinkRow[]> | readonly ObjectLinkRow[]
+): Promise<QueryObjectLinksResult> {
+  assertLinkQueryLimit(params.limit)
+  if (params.objectRefs.length === 0 || params.endpointObjectTypeIds?.length === 0) {
+    return { links: [], hasMore: false }
+  }
+
+  const allowedTypes = params.endpointObjectTypeIds
+    ? new Set(params.endpointObjectTypeIds)
+    : undefined
+  const deduped = new Map<string, ObjectLinkRow>()
+  for (const object of params.objectRefs) {
+    const rows = await listLinks({
+      projectId: params.projectId,
+      objectTypeId: object.objectTypeId,
+      objectId: object.primaryId,
+      direction: params.direction,
+      ...(params.linkId === undefined ? {} : { linkId: params.linkId }),
+    })
+    for (const row of rows) {
+      if (
+        allowedTypes &&
+        (!allowedTypes.has(row.sourceTypeId) || !allowedTypes.has(row.targetTypeId))
+      ) {
+        continue
+      }
+      if (params.after && compareObjectLinkCursors(objectLinkCursor(row), params.after) <= 0) {
+        continue
+      }
+      deduped.set(fullLinkRowKey(row), row)
+    }
+  }
+
+  const rows = [...deduped.values()].sort(compareObjectLinks).slice(0, params.limit + 1)
+  return { links: rows.slice(0, params.limit), hasMore: rows.length > params.limit }
+}
+
+interface LinkBatchSource {
+  all(): Iterable<ObjectLinkRow>
+  outgoing(item: {
+    readonly objectTypeId: string
+    readonly objectId: string
+    readonly linkId: string
+  }): Iterable<ObjectLinkRow>
+}
+
+function collectLinksBatch(
+  source: LinkBatchSource,
+  params: Parameters<ObjectReadStorage["listLinksBatch"]>[0],
+  cloneRows: boolean
+): Map<LinkBatchKey, ObjectLinkRow[]> {
+  const direction = params.direction ?? "outgoing"
+  const orderedKeys = [
+    ...new Set(
+      params.items.map((item) => linkBatchKey(item.objectTypeId, item.objectId, item.linkId))
+    ),
+  ]
+  const requestedKeys = new Set(orderedKeys)
+  const grouped = new Map<LinkBatchKey, Map<string, ObjectLinkRow>>()
+  const append = (key: LinkBatchKey, row: ObjectLinkRow): void => {
+    const bucket = grouped.get(key) ?? new Map<string, ObjectLinkRow>()
+    bucket.set(fullLinkRowKey(row), row)
+    grouped.set(key, bucket)
+  }
+
+  if (direction === "outgoing" || direction === "both") {
+    for (const item of params.items) {
+      const key = linkBatchKey(item.objectTypeId, item.objectId, item.linkId)
+      for (const row of source.outgoing(item)) {
+        if (row.projectId === params.projectId && row.linkId === item.linkId) append(key, row)
+      }
+    }
+  }
+
+  if (direction === "incoming" || direction === "both") {
+    for (const row of source.all()) {
+      if (row.projectId !== params.projectId) continue
+      const key = linkBatchKey(row.targetTypeId, row.targetId, row.linkId)
+      if (requestedKeys.has(key)) append(key, row)
+    }
+  }
+
+  return new Map(
+    orderedKeys.flatMap((key) => {
+      const bucket = grouped.get(key)
+      if (!bucket) return []
+      return [
+        [key, [...bucket.values()].map((row) => (cloneRows ? structuredClone(row) : row))] as const,
+      ]
+    })
+  )
+}
+
+function* allLinkRows(
+  buckets: ReadonlyMap<string, ReadonlyMap<string, ObjectLinkRow>>
+): Iterable<ObjectLinkRow> {
+  for (const bucket of buckets.values()) yield* bucket.values()
 }
 
 function rowIdentityKey(row: ObjectRow): string {

@@ -6,6 +6,7 @@ import type {
   ObjectQuerySortField,
   QueryScalarKind,
 } from "../../objects/query"
+import type { ObjectReadExecutionLimits } from "./execution-limits"
 import type { LinkBatchKey, ObjectBatchKey } from "./keys"
 
 /**
@@ -83,6 +84,78 @@ export interface QueryObjectLinksInput {
 export interface QueryObjectLinksResult {
   links: readonly ObjectLinkRow[]
   hasMore: boolean
+}
+
+/**
+ * A finite, provider-neutral selection rooted at exact object identities.
+ *
+ * Object and link instances are resolved live by the provider for every operation. The selection
+ * describes only which paths and properties may become visible.
+ */
+export interface SelectedObjectReadScope {
+  readonly kind: "selected"
+  readonly roots: readonly ObjectReadRoot[]
+}
+
+export interface ObjectReadRoot {
+  readonly anchor: {
+    readonly objectTypeId: string
+    readonly primaryId: string
+  }
+  readonly node: ObjectReadNode
+}
+
+export interface ObjectReadNode {
+  /** Visible properties for every concrete object type selected at this path occurrence. */
+  readonly objects: readonly ObjectReadObjectSelection[]
+  readonly links: readonly ObjectReadLinkSelection[]
+}
+
+export interface ObjectReadObjectSelection {
+  readonly objectTypeId: string
+  readonly propertyIds: readonly string[]
+}
+
+export interface ObjectReadLinkSelection {
+  /** Physical ontology link definitions allowed from this exact path occurrence. */
+  readonly definitions: readonly ObjectReadLinkDefinitionSelection[]
+  readonly target: ObjectReadNode
+}
+
+export interface ObjectReadLinkDefinitionSelection {
+  readonly sourceObjectTypeId: string
+  readonly linkId: string
+  readonly targetObjectTypeIds: readonly string[]
+  readonly propertyIds: readonly string[]
+}
+
+/** Detached and deeply immutable selection consumed by storage providers. */
+export interface CompiledSelectedObjectReadScope {
+  readonly kind: "selected"
+  readonly roots: readonly CompiledObjectReadRoot[]
+  readonly objects: readonly CompiledObjectReadObjectSelection[]
+  readonly steps: readonly CompiledObjectReadStep[]
+}
+
+export interface CompiledObjectReadRoot {
+  /** Id of this root's path occurrence. */
+  readonly nodeId: number
+  readonly objectTypeId: string
+  readonly primaryId: string
+}
+
+export interface CompiledObjectReadObjectSelection extends ObjectReadObjectSelection {
+  readonly nodeId: number
+}
+
+export interface CompiledObjectReadStep {
+  /** Id of the target path occurrence reached by this step. */
+  readonly nodeId: number
+  readonly parentNodeId: number
+  readonly sourceObjectTypeId: string
+  readonly linkId: string
+  readonly targetObjectTypeId: string
+  readonly propertyIds: readonly string[]
 }
 
 export type ObjectQueryCapabilityMap<T extends string> = Readonly<Partial<Record<T, boolean>>>
@@ -269,6 +342,15 @@ export interface ObjectReadStorage {
     orderBy?: "createdAt" | "updatedAt" | "primaryId"
     order?: "asc" | "desc"
   }): Promise<{ objects: readonly ObjectRow[]; hasMore: boolean; total: number }>
+}
+
+/** Optional provider capability for enforcing a finite, precompiled object-read selection. */
+export interface ObjectReadScopeFactory {
+  createSelectedReadScope(params: {
+    projectId: string
+    scope: CompiledSelectedObjectReadScope
+    limits: ObjectReadExecutionLimits
+  }): ObjectReadStorage
 }
 
 /** Latest-state projection storage, including trusted internal read primitives. */
