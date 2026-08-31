@@ -43,6 +43,7 @@
   },
   "scripts": {
     "build": "bun ../../scripts/build-package.ts",
+    "test:e2e": "bun test ./tests/build-browser.e2e.ts",
     "typecheck": "tsc --noEmit",
     "prepack": "bun run build"
   },
@@ -62,6 +63,8 @@
   "devDependencies": {
     "@types/bun": "latest",
     "@types/react": "^19.0.0",
+    "happy-dom": "^20.11.6",
+    "libphonenumber-js": "1.13.9",
     "typescript": "^5.7.0"
   },
   "license": "MIT",

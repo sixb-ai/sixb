@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs"
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises"
-import { basename, dirname, extname, join, resolve } from "node:path"
+import { basename, dirname, join, resolve } from "node:path"
 import { promisify } from "node:util"
 import {
   brotliCompress as brotliCompressCallback,
@@ -229,9 +229,11 @@ const extensionlessSourceImportPlugin: Bun.BunPlugin = {
     // A direct TypeScript entry with splitting exposes a Bun 1.3 resolver edge in linked workspace
     // packages: extensionless relative imports such as `../json` can fail even though `json.ts`
     // exists. HTML entries masked it, but HTML splitting can point at the wrong dynamic chunk.
-    build.onResolve({ filter: /^\.\.?\// }, (args) => {
-      if (extname(args.path)) return undefined
-
+    // Let Bun resolve already-explicit imports without entering this hook. On affected Bun
+    // releases (including 1.3.14 and 1.4.0), merely intercepting a package's explicit `.js`
+    // imports and returning `undefined` can corrupt DCE: subclass wrappers remain in the bundle
+    // while their imported superclass is removed.
+    build.onResolve({ filter: /^\.\.?\/(?:.*\/)?[^/.]+$/ }, (args) => {
       const base = resolve(dirname(args.importer), args.path)
       for (const candidate of [
         `${base}.ts`,
