@@ -1,7 +1,8 @@
 # @sixb/vercel-ai-gateway
 
-Callable Vercel AI Gateway provider for Sixb's core model contract. It uses native `fetch`, loads
-model metadata and pricing from the gateway catalog, and preserves routing and provider billing.
+Callable Vercel AI Gateway provider for Sixb's core model contract. It uses native `fetch`, exposes
+model metadata and fixed rate cards through the gateway catalog, and preserves routing and actual
+gateway-reported billing.
 
 ```ts
 import { vercelGateway } from "@sixb/vercel-ai-gateway"
@@ -23,8 +24,23 @@ const model = gateway("anthropic/claude-sonnet-4.5", {
 const definitions = await gateway.catalog.list()
 ```
 
-The remote catalog is cached in memory. Inference still works if catalog enrichment is unavailable;
-those calls use conservative capabilities and provider-reported billing when present.
+The remote catalog is cached in memory and is discovery-only. Constructing or running a model never
+fetches it. Model instances use conservative synchronous capabilities unless configured explicitly.
+Gateway-reported cost is authoritative; route-dependent prices are never collapsed into a local
+estimate, and a missing report remains explicitly unpriceable.
+
+Gateway reasoning uses named provider-neutral efforts, including `none` when the model can disable
+reasoning:
+
+```ts
+reasoning: "high"
+```
+
+The catalog's `reasoning_options` are normalized into the efforts exposed by
+`definition.capabilities.reasoning`. For budget-native models, Gateway translates named efforts to
+the routed provider's token budget. The Responses API does not expose a portable exact-budget field,
+so `{ budgetTokens }` is rejected by this adapter; use a named effort or an explicit native
+`providerOptions` override when routing is constrained to a compatible provider.
 
 Retryable `429` and `5xx` responses are retried only before a stream begins. `maxRetries`,
 `maxRetryDelayMs`, and `catalogTtlMs` are configurable. Provider request IDs and retry hints are

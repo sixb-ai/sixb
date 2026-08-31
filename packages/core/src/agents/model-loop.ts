@@ -11,10 +11,9 @@ import type {
 } from "../models/events"
 import type {
   LanguageModel,
-  ModelReasoningLevel,
+  ModelReasoning,
   ModelToolSpecification,
 } from "../models/language-model"
-import { resolveLanguageModelDefinition } from "../models/language-model"
 import type {
   ModelAssistantPart,
   ModelMessage,
@@ -25,7 +24,7 @@ import type {
   ModelToolResultPart,
   ProviderData,
 } from "../models/messages"
-import { type ModelReportedCost, priceModelCall } from "../models/pricing"
+import { type ModelReportedCost, rateModelCall } from "../models/pricing"
 import type { ModelOutput, ModelTool } from "../models/tools"
 
 const OUTPUT_TOOL_NAME = "__sixb_submit_output"
@@ -36,7 +35,7 @@ export interface RunModelLoopInput<TOutput = string> {
   readonly messages: readonly ModelMessage[]
   readonly tools?: readonly ModelTool[]
   readonly output?: ModelOutput<TOutput>
-  readonly reasoning?: ModelReasoningLevel
+  readonly reasoning?: ModelReasoning
   readonly maxSteps: number
   readonly signal: AbortSignal
   /** Reserve the final provider call for a tool-free synthesis response. */
@@ -114,7 +113,7 @@ export async function runModelLoop<TOutput = string>(
   }))
   const messages: ModelMessage[] = [...input.messages]
   const steps: ModelStep[] = []
-  const modelDefinition = await resolveLanguageModelDefinition(input.model)
+  const modelDefinition = input.model.definition
   const nativeStructuredOutput =
     input.output !== undefined && modelDefinition.capabilities.nativeStructuredOutput === true
   const outputToolSpecification: ModelToolSpecification | undefined =
@@ -203,9 +202,9 @@ export async function runModelLoop<TOutput = string>(
     }
     const response = accumulator.complete()
     const responseId = response.responseId ?? `${callId}:response`
-    const cost = priceModelCall({
+    const cost = rateModelCall({
       usage: response.usage,
-      ...(modelDefinition.pricing === undefined ? {} : { pricing: modelDefinition.pricing }),
+      ...(modelDefinition.rateCard === undefined ? {} : { rateCard: modelDefinition.rateCard }),
       reported: response.reportedCost,
     })
     await input.onModelCallEnd?.({
@@ -217,8 +216,8 @@ export async function runModelLoop<TOutput = string>(
         ? {}
         : { responseModelId: response.responseModelId }),
       usage: response.usage,
-      definition: modelDefinition,
       cost,
+      ...(input.reasoning === undefined ? {} : { requestedReasoning: input.reasoning }),
       ...(response.route === undefined ? {} : { route: response.route }),
     })
     if (terminalStreamError) throw terminalStreamError.error
@@ -367,6 +366,14 @@ function assertLoopInput(input: RunModelLoopInput<unknown>): void {
   }
   if (!input.model.providerId.trim() || !input.model.modelId.trim()) {
     throw new TypeError("[SixbModels] Model providerId and modelId must not be empty.")
+  }
+  if (
+    input.model.definition.providerId !== input.model.providerId ||
+    input.model.definition.modelId !== input.model.modelId
+  ) {
+    throw new TypeError(
+      `[SixbModels] Model definition for '${input.model.providerId}/${input.model.modelId}' has a different identity.`
+    )
   }
   if (input.output) {
     if (!input.output.name.trim()) {

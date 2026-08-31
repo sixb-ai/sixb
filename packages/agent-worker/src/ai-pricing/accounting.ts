@@ -45,17 +45,6 @@ function modelCostRecord(
     ...(input.route?.providerId === undefined ? {} : { routedProviderId: input.route.providerId }),
     ...(input.route?.modelId === undefined ? {} : { routedModelId: input.route.modelId }),
   }
-  const priceSource =
-    input.cost.status === "reported"
-      ? {
-          sourceId: "provider-reported",
-          sourceEntryId: `${input.usage.providerId}/${input.usage.responseId}`,
-          sourceVersion: "response-v1",
-          sourceUrl: "https://sixb.ai/models/provider-reported",
-          observedAt: new Date(input.usage.occurredAt),
-        }
-      : definitionPriceSource(input)
-
   if (input.cost.status === "reported" || input.cost.status === "rated") {
     return {
       projectId: input.usage.projectId,
@@ -63,7 +52,7 @@ function modelCostRecord(
       status: "rated",
       billingIdentity,
       pricingContext,
-      priceSource,
+      priceSource: costPriceSource(input.usage, input.cost),
       money: input.cost.money,
       components: input.cost.status === "rated" ? input.cost.components : [],
       ratedAt: new Date(input.ratedAt),
@@ -71,8 +60,8 @@ function modelCostRecord(
   }
 
   const reason =
-    input.cost.reason === "missing-pricing"
-      ? "missingCatalogEntry"
+    input.cost.reason === "missing-rate-card"
+      ? "missingRateCard"
       : input.cost.reason === "missing-usage"
         ? "missingUsageMeter"
         : "invalidUsageForFormula"
@@ -84,22 +73,34 @@ function modelCostRecord(
     status: "unpriceable",
     billingIdentity,
     pricingContext,
-    priceSource,
     reason,
     ...(missingMeters === undefined ? {} : { missingMeters }),
     ratedAt: new Date(input.ratedAt),
   }
 }
 
-function definitionPriceSource(input: RecoverAiModelCallInput) {
-  const serialized = JSON.stringify(input.definition.pricing ?? null)
-  const version = createHash("sha256").update(serialized).digest("hex")
+function costPriceSource(
+  usage: RecoverAiModelCallInput["usage"],
+  cost: Extract<RecoverAiModelCallInput["cost"], { status: "reported" | "rated" }>
+) {
+  if (cost.status === "reported") {
+    return {
+      sourceId: "provider-reported",
+      sourceEntryId: `${usage.providerId}/${usage.responseId}`,
+      sourceVersion: "response-v1",
+      observedAt: new Date(usage.occurredAt),
+    }
+  }
+  const rates = cost.components.map(({ meter, rateAmountNanosPerMillion }) => ({
+    meter,
+    rateAmountNanosPerMillion,
+  }))
+  const version = createHash("sha256").update(JSON.stringify(rates)).digest("hex")
   return {
-    sourceId: "model-definition",
-    sourceEntryId: `${input.definition.providerId}/${input.definition.modelId}`,
+    sourceId: "model-rate-card",
+    sourceEntryId: `${usage.providerId}/${usage.requestedModelId}`,
     sourceVersion: `sha256:${version}`,
-    sourceUrl: "https://sixb.ai/models",
-    observedAt: new Date(input.usage.occurredAt),
+    observedAt: new Date(usage.occurredAt),
   }
 }
 

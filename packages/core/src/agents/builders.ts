@@ -13,11 +13,11 @@ import type {
 } from "./types"
 import {
   assertNonEmpty,
+  assertValidAgentReasoning,
   assertValidAgentToolDescription,
   assertValidAgentToolInput,
   assertValidAgentToolName,
   assertValidLoopConfig,
-  assertValidReasoningLevel,
   groupIdsFromDefinitions,
 } from "./validation"
 
@@ -73,7 +73,7 @@ export function defineAgent<const TId extends string>(
   if (config.model === undefined || config.model === null) {
     throw new AgentDefinitionError("[Sixb] Agent model is required.")
   }
-  assertValidReasoningLevel(config.reasoning)
+  assertValidAgentReasoning(config.reasoning)
   assertValidLoopConfig(config.loop)
   const groupIds = groupIdsFromDefinitions(id, config.groups)
   const tools = toolsFromDefinitions(id, config.tools)
@@ -83,7 +83,14 @@ export function defineAgent<const TId extends string>(
     id,
     name: config.name,
     model: config.model,
-    ...(config.reasoning !== undefined ? { reasoning: config.reasoning } : {}),
+    ...(config.reasoning === undefined
+      ? {}
+      : {
+          reasoning:
+            typeof config.reasoning === "string"
+              ? config.reasoning
+              : Object.freeze({ budgetTokens: config.reasoning.budgetTokens }),
+        }),
     instructions: config.instructions,
     groupIds,
     tools,

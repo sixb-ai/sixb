@@ -1,5 +1,5 @@
 import type { JsonObject, JsonValue } from "../json"
-import type { LanguageModelDefinition } from "./definitions"
+import type { ModelReasoning } from "./language-model"
 import type {
   ModelAssistantPart,
   ModelToolCallPart,
@@ -152,8 +152,8 @@ export interface ModelCallEndEvent {
   readonly responseId: string
   readonly responseModelId?: string
   readonly usage: ModelUsage
-  readonly definition: LanguageModelDefinition
   readonly cost: ModelCallCost
+  readonly requestedReasoning?: ModelReasoning
   readonly route?: ModelRoute
 }
 

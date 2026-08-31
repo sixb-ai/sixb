@@ -1,4 +1,4 @@
-import type { JsonObject, LanguageModelPricing } from "@sixb/core/models"
+import type { JsonObject, LanguageModelRateCard } from "@sixb/core/models"
 
 interface PriceRule {
   readonly match: RegExp
@@ -18,13 +18,13 @@ const PRICES: readonly PriceRule[] = [
   { match: /^claude-(?:3-5-haiku|haiku-3-5)(?:-|$)/, input: "0.8", output: "4" },
 ]
 
-export function anthropicPricing(
+export function anthropicRateCard(
   modelId: string,
   request: JsonObject | undefined
-): LanguageModelPricing | undefined {
+): LanguageModelRateCard | undefined {
   const rule = PRICES.find((candidate) => candidate.match.test(modelId))
   if (!rule) return undefined
-  return applyAnthropicPricingModifiers(
+  return applyAnthropicRateCardModifiers(
     {
       currency: "USD",
       unit: "million-tokens",
@@ -39,19 +39,19 @@ export function anthropicPricing(
   )
 }
 
-export function applyAnthropicPricingModifiers(
-  pricing: LanguageModelPricing,
+export function applyAnthropicRateCardModifiers(
+  rateCard: LanguageModelRateCard,
   modelId: string,
   request: JsonObject | undefined
-): LanguageModelPricing {
+): LanguageModelRateCard {
   const speed = request?.speed
   const fast = speed === "fast" && /^claude-opus-(?:5|4-8)(?:-|$)/.test(modelId)
   const residency = request?.inference_geo === "us"
-  const baseInput = fast ? "10" : scalarPrice(pricing.input)
-  const baseOutput = fast ? "50" : scalarPrice(pricing.output)
+  const baseInput = fast ? "10" : scalarPrice(rateCard.input)
+  const baseOutput = fast ? "50" : scalarPrice(rateCard.output)
   // Custom tiered definitions remain authoritative; request modifiers cannot be represented
   // honestly without transforming every tier.
-  if (!baseInput || !baseOutput) return pricing
+  if (!baseInput || !baseOutput) return rateCard
   const input = scale(baseInput, residency ? 11n : 1n, residency ? 10n : 1n)
   const output = scale(baseOutput, residency ? 11n : 1n, residency ? 10n : 1n)
   return {
@@ -76,6 +76,6 @@ function scale(value: string, numerator: bigint, denominator: bigint): string {
   return remainder ? `${scaledWhole}.${remainder}` : scaledWhole.toString()
 }
 
-function scalarPrice(price: LanguageModelPricing["input"]): string | undefined {
+function scalarPrice(price: LanguageModelRateCard["input"]): string | undefined {
   return typeof price === "string" ? price : undefined
 }

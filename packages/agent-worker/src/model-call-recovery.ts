@@ -1,5 +1,4 @@
 import { createSixbError } from "@sixb/core/internal/errors"
-import { defineLanguageModel } from "@sixb/core/models"
 import type {
   AgentAiUsageAccountingPayload,
   AgentAiUsageRecordPayload,
@@ -101,6 +100,9 @@ function toQueuePayload(record: RecordAiModelCallInput): AgentAiUsageRecordPaylo
     requesterGroupIds: [...record.requesterGroupIds],
     providerId: record.providerId,
     requestedModelId: record.requestedModelId,
+    ...(record.requestedReasoning === undefined
+      ? {}
+      : { requestedReasoning: structuredClone(record.requestedReasoning) }),
     ...(record.responseModelId === undefined ? {} : { responseModelId: record.responseModelId }),
     responseId: record.responseId,
     usage: toQueueUsage(record.usage),
@@ -111,7 +113,6 @@ function toQueuePayload(record: RecordAiModelCallInput): AgentAiUsageRecordPaylo
 
 function toAccountingPayload(input: RecoverAiModelCallInput): AgentAiUsageAccountingPayload {
   return {
-    definition: structuredClone(input.definition),
     cost: structuredClone(input.cost),
     ...(input.route === undefined ? {} : { route: structuredClone(input.route) }),
     ratedAt: input.ratedAt.toISOString(),
@@ -149,7 +150,6 @@ function accountingFromQueuePayload(
   const accounting = job.payload.accounting
   if (!accounting) return undefined
   return {
-    definition: defineLanguageModel(accounting.definition),
     cost: structuredClone(accounting.cost),
     ...(accounting.route === undefined ? {} : { route: structuredClone(accounting.route) }),
     ratedAt: parseDate(accounting.ratedAt, job.id, "ratedAt"),

@@ -21,7 +21,7 @@ test("PgAiCostStorage deserializes only the requested model-call page", async ()
         currency, amount_nanos, reason, details, rated_at
       ) VALUES (
         'cost-contract-project', 'usage_2', 'unpriceable', 'vercel', 'unpriced/model',
-        NULL, NULL, 'missingCatalogEntry', '{}'::jsonb, '2026-08-01T12:00:00.200Z'
+        NULL, NULL, 'missingRateCard', '{}'::jsonb, '2026-08-01T12:00:00.200Z'
       )
     `
 

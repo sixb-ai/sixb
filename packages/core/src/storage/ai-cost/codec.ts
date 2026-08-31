@@ -1,9 +1,14 @@
-import type { AiBillableMeter, AiModelCallCostRecord, AiPricingContext } from "./types"
+import type {
+  AiBillableMeter,
+  AiModelCallCostRecord,
+  AiPriceSource,
+  AiPricingContext,
+} from "./types"
 import { normalizeAiPricingContext } from "./validation"
 
 export interface AiModelCallCostDetails {
   readonly pricingContext: AiPricingContext
-  readonly priceSource: Omit<AiModelCallCostRecord["priceSource"], "observedAt"> & {
+  readonly priceSource?: Omit<AiPriceSource, "observedAt"> & {
     readonly observedAt: string
   }
   readonly components?: Extract<AiModelCallCostRecord, { status: "rated" }>["components"]
@@ -13,7 +18,14 @@ export interface AiModelCallCostDetails {
 export function aiModelCallCostDetails(record: AiModelCallCostRecord): AiModelCallCostDetails {
   return {
     pricingContext: record.pricingContext,
-    priceSource: { ...record.priceSource, observedAt: record.priceSource.observedAt.toISOString() },
+    ...(record.priceSource === undefined
+      ? {}
+      : {
+          priceSource: {
+            ...record.priceSource,
+            observedAt: record.priceSource.observedAt.toISOString(),
+          },
+        }),
     ...(record.status === "rated" ? { components: record.components } : {}),
     ...(record.status === "unpriceable" && record.missingMeters
       ? { missingMeters: record.missingMeters }
@@ -25,18 +37,22 @@ export function parseAiModelCallCostDetails(value: unknown): AiModelCallCostDeta
   const parsed: unknown = typeof value === "string" ? JSON.parse(value) : value
   if (!isRecord(parsed)) throw invalidDetails()
   const priceSource = parsed.priceSource
-  if (!isRecord(priceSource)) throw invalidDetails()
+  if (priceSource !== undefined && !isRecord(priceSource)) throw invalidDetails()
   const components = parsed.components
   const missingMeters = parsed.missingMeters
   return {
     pricingContext: pricingContextFromUnknown(parsed.pricingContext),
-    priceSource: {
-      sourceId: requiredString(priceSource.sourceId),
-      sourceEntryId: requiredString(priceSource.sourceEntryId),
-      sourceVersion: requiredString(priceSource.sourceVersion),
-      sourceUrl: requiredString(priceSource.sourceUrl),
-      observedAt: requiredString(priceSource.observedAt),
-    },
+    ...(priceSource === undefined
+      ? {}
+      : {
+          priceSource: {
+            sourceId: requiredString(priceSource.sourceId),
+            sourceEntryId: requiredString(priceSource.sourceEntryId),
+            sourceVersion: requiredString(priceSource.sourceVersion),
+            ...optionalStringProperty(priceSource, "sourceUrl"),
+            observedAt: requiredString(priceSource.observedAt),
+          },
+        }),
     ...(components === undefined ? {} : { components: costComponentsFromUnknown(components) }),
     ...(missingMeters === undefined ? {} : { missingMeters: metersFromUnknown(missingMeters) }),
   }

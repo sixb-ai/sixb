@@ -43,7 +43,7 @@ export const supportAgent = defineAgent("support-agent", {
 | `model` | `LanguageModel` | Yes | A provider-neutral Sixb language model (see below). |
 | `instructions` | `string` | Yes | The system prompt. |
 | `description` | `string` | No | Short summary for catalogs. |
-| `reasoning` | reasoning level | No | `provider-default`, `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. |
+| `reasoning` | reasoning preference | No | `provider-default`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `{ budgetTokens }`. |
 | `groups` | `GroupDefinition[]` | No | Gate who can use the agent and what it can reach. See [Authorization](./authorization.md). |
 | `tools` | `AgentToolDefinition[]` | No | Worker-side tools this agent is explicitly allowed to call. Defaults to none. |
 | `loop` | `{ stopWhen?: { maxSteps?: number } }` | No | Step cap per turn. Defaults to **25**. |
@@ -68,12 +68,13 @@ A project can declare the models Sixb is allowed to use. The catalog is optional
 present, every agent's `model` must be in it, and `createSixb()` fails at startup otherwise.
 
 ```ts
-import { gateway } from "ai"
-
 export const sixb = createSixb({
   // ...
   models: {
-    language: [gateway("openai/gpt-5.5"), gateway("anthropic/claude-sonnet-4.6")],
+    language: [
+      vercelGateway("openai/gpt-5.5"),
+      vercelGateway("anthropic/claude-sonnet-4.6"),
+    ],
   },
 })
 ```
@@ -81,9 +82,28 @@ export const sixb = createSixb({
 The first entry of each kind is the project default. Sixb identifies each entry by the model you
 configured — you never author an id or an alias. Configure the same model twice and startup fails.
 
-An entry is the binding, not the vendor's model: `gateway("openai/gpt-5.5")` and
-`openai("gpt-5.5")` are two entries, because they route and bill differently. An agent's `model`
-has to match one of them.
+An entry is the binding, not only the vendor model: the same vendor model reached through Vercel AI
+Gateway and through a direct provider are distinct entries because they route and bill differently.
+An agent's `model` has to match one of the configured entries.
+
+Reasoning is one normalized preference, not a boolean. Named efforts are the portable default:
+
+```ts
+reasoning: "high"
+```
+
+Providers that expose an exact native budget can also accept a token budget:
+
+```ts
+model: anthropic("claude-sonnet-4", { maxOutputTokens: 16_384 })
+reasoning: { budgetTokens: 8_192 }
+```
+
+`model.definition.capabilities.reasoning` describes the controls known for that concrete provider
+offering: whether reasoning can be disabled, its supported named efforts, and any exact token-budget
+bounds. `undefined` means the synchronous model definition does not know; `false` means the catalog
+knows reasoning is unsupported. Providers reject a known unsupported preference before making the
+network request rather than silently approximating it.
 
 ## Instructions vs Agent Skills
 

@@ -71,7 +71,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
           messages: threadContext.retainedMessages,
           blobStorage: context.blobStorage,
           apiBaseUrl: context.apiBaseUrl,
-          inlineImages: await modelSupportsInlineImages(agent.model, signal),
+          inlineImages: modelSupportsInlineImages(agent.model),
           signal,
         })
       : undefined)

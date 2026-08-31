@@ -14,12 +14,7 @@ function callEndEvent(): ModelCallEndEvent {
     callId: "call_1",
     providerId: "gateway",
     modelId: "openai/gpt-5",
-    definition: {
-      kind: "language",
-      providerId: "gateway",
-      modelId: "openai/gpt-5",
-      capabilities: {},
-    },
+    requestedReasoning: "high",
     responseModelId: "openai/gpt-5-2026-08-01",
     usage: {
       inputTokens: 12,
@@ -119,6 +114,7 @@ describe("AiModelCallRecorder", () => {
         requesterGroupIds: ["support", "engineering"],
         providerId: "gateway",
         requestedModelId: "openai/gpt-5",
+        requestedReasoning: "high",
         responseModelId: "openai/gpt-5-2026-08-01",
         responseId: "response_1",
         usage: {
@@ -132,12 +128,6 @@ describe("AiModelCallRecorder", () => {
         },
         rawUsage: { input_tokens: 12, output_tokens: 8, provider_meter: 4 },
         occurredAt,
-      },
-      definition: {
-        kind: "language",
-        providerId: "gateway",
-        modelId: "openai/gpt-5",
-        capabilities: {},
       },
       cost: {
         status: "reported",

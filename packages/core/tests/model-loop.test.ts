@@ -23,7 +23,11 @@ const MOCK_DEFINITION = {
   modelId: "mock-model",
   capabilities: {
     inputMediaTypes: ["image/*"],
-    reasoning: true,
+    reasoning: {
+      canDisable: true,
+      efforts: ["minimal", "low", "medium", "high", "xhigh", "max"],
+      budgetTokens: {},
+    },
     localTools: true,
     parallelToolCalls: true,
     nativeStructuredOutput: true,
@@ -84,6 +88,7 @@ describe("runModelLoop", () => {
         ],
       ]),
       messages: [{ role: "user", content: [{ type: "text", text: "Hi" }] }],
+      reasoning: "high",
       maxSteps: 4,
       signal: new AbortController().signal,
       onEvent(event) {
@@ -114,8 +119,8 @@ describe("runModelLoop", () => {
         responseId: "response-1",
         responseModelId: "resolved-model",
         usage: USAGE,
-        definition: MOCK_DEFINITION,
-        cost: { status: "unpriceable", reason: "missing-pricing" },
+        cost: { status: "unpriceable", reason: "missing-rate-card" },
+        requestedReasoning: "high",
       },
     ])
   })
@@ -151,8 +156,7 @@ describe("runModelLoop", () => {
         modelId: "mock-model",
         responseId: "call-invalid-projection:response",
         usage: USAGE,
-        definition: MOCK_DEFINITION,
-        cost: { status: "unpriceable", reason: "missing-pricing" },
+        cost: { status: "unpriceable", reason: "missing-rate-card" },
       },
     ])
   })
@@ -546,5 +550,26 @@ describe("runModelLoop", () => {
         signal: new AbortController().signal,
       })
     ).rejects.toBeInstanceOf(StructuredOutputError)
+  })
+
+  test("rejects a model whose synchronous definition has a different identity", async () => {
+    await expect(
+      runModelLoop({
+        model: {
+          providerId: "mock",
+          modelId: "requested",
+          definition: {
+            kind: "language",
+            providerId: "mock",
+            modelId: "different",
+            capabilities: {},
+          },
+          stream: async () => streamFromArray([]),
+        },
+        messages: [],
+        maxSteps: 1,
+        signal: new AbortController().signal,
+      })
+    ).rejects.toThrow("different identity")
   })
 })

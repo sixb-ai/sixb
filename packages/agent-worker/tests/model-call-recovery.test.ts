@@ -23,6 +23,7 @@ function modelCall(): RecordAiModelCallInput {
     requesterGroupIds: ["support", "engineering"],
     providerId: "gateway",
     requestedModelId: "openai/gpt-5",
+    requestedReasoning: { budgetTokens: 4_096 },
     responseId: "response_1",
     usage: {
       inputTokens: 12,
@@ -66,6 +67,7 @@ describe("AI usage recovery", () => {
     expect(claimed.job.payload.record).toMatchObject({
       id: "usage_1",
       executionId,
+      requestedReasoning: { budgetTokens: 4_096 },
       occurredAt: "2026-07-01T12:00:00.000Z",
     })
     expect(claimed.job.payload.record).not.toHaveProperty("projectId")
@@ -86,7 +88,7 @@ describe("AI usage recovery", () => {
     })
   })
 
-  test("recovers the model definition, route, and valuation atomically for current jobs", async () => {
+  test("recovers route and completed-call valuation atomically for current jobs", async () => {
     const queues = new InMemoryQueues()
     const storage = new InMemoryStorage()
     await createTestAgentExecution(storage, {
@@ -97,18 +99,6 @@ describe("AI usage recovery", () => {
     })
     await enqueueAiModelCallRecovery(queues.agents, {
       usage: modelCall(),
-      definition: {
-        kind: "language",
-        providerId: "gateway",
-        modelId: "openai/gpt-5",
-        capabilities: {},
-        pricing: {
-          currency: "USD",
-          unit: "million-tokens",
-          input: "1.25",
-          output: "10",
-        },
-      },
       cost: {
         status: "rated",
         money: { currency: "USD", amountNanos: "95000" },
@@ -139,18 +129,6 @@ describe("AI usage recovery", () => {
       throw new Error("Expected an AI usage recovery job.")
     }
     expect(claimed.job.payload.accounting).toEqual({
-      definition: {
-        kind: "language",
-        providerId: "gateway",
-        modelId: "openai/gpt-5",
-        capabilities: {},
-        pricing: {
-          currency: "USD",
-          unit: "million-tokens",
-          input: "1.25",
-          output: "10",
-        },
-      },
       cost: {
         status: "rated",
         money: { currency: "USD", amountNanos: "95000" },
@@ -193,7 +171,7 @@ describe("AI usage recovery", () => {
               routedModelId: "gpt-5-2026-08-01",
             },
             priceSource: {
-              sourceId: "model-definition",
+              sourceId: "model-rate-card",
               sourceEntryId: "gateway/openai/gpt-5",
             },
             money: { currency: "USD", amountNanos: "95000" },

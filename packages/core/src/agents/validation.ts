@@ -1,4 +1,5 @@
 import { getInvalidJsonValueReason, isPlainRecord, type JsonValue } from "../json"
+import { isModelReasoning } from "../models"
 import {
   normalizeSchemaValue,
   type ObjectSchema,
@@ -12,7 +13,7 @@ import {
   AGENT_REASONING_LEVELS,
   type AgentDefinition,
   type AgentLoopConfig,
-  type AgentReasoningLevel,
+  type AgentReasoning,
   type AgentToolDefinition,
   type AgentToolInputSchema,
 } from "./types"
@@ -45,7 +46,7 @@ export function isAgentDefinition(value: unknown): value is AgentDefinition {
     typeof value.id === "string" &&
     typeof value.name === "string" &&
     typeof value.instructions === "string" &&
-    (value.reasoning === undefined || isAgentReasoningLevel(value.reasoning)) &&
+    (value.reasoning === undefined || isModelReasoning(value.reasoning)) &&
     Array.isArray(value.groupIds) &&
     isAgentToolDefinitionArray(value.tools)
   )
@@ -169,13 +170,13 @@ export function assertValidLoopConfig(loop: AgentLoopConfig | undefined): void {
   }
 }
 
-export function assertValidReasoningLevel(reasoning: AgentReasoningLevel | undefined): void {
+export function assertValidAgentReasoning(reasoning: AgentReasoning | undefined): void {
   if (reasoning === undefined) {
     return
   }
-  if (!isAgentReasoningLevel(reasoning)) {
+  if (!isModelReasoning(reasoning)) {
     throw new AgentDefinitionError(
-      `[Sixb] Agent reasoning must be one of: ${AGENT_REASONING_LEVELS.join(", ")}.`
+      `[Sixb] Agent reasoning must be one of: ${AGENT_REASONING_LEVELS.join(", ")}, or a nonnegative budgetTokens object.`
     )
   }
 }
@@ -226,10 +227,6 @@ function assertNoDuplicateGroupIds(agentId: string, groupIds: readonly string[])
     }
     seen.add(groupId)
   }
-}
-
-function isAgentReasoningLevel(value: unknown): value is AgentReasoningLevel {
-  return typeof value === "string" && (AGENT_REASONING_LEVELS as readonly string[]).includes(value)
 }
 
 function assertValidAgentToolSchema(

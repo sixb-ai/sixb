@@ -7,18 +7,22 @@ import {
   type LanguageModel,
   type LanguageModelCatalog,
   type LanguageModelDefinition,
-  type LanguageModelPricing,
   type LanguageModelProvider,
+  type LanguageModelRateCard,
   type LanguageModelRequest,
   type LanguageModelStreamEvent,
+  MODEL_REASONING_EFFORTS,
   type ModelCapabilities,
   type ModelFinishReason,
   type ModelMessage,
   ModelProviderError,
+  type ModelReasoningCapabilities,
   type ModelReportedCost,
   type ModelToolOutput,
   type ModelUsage,
+  modelReasoningSupportIssue,
   type ProviderData,
+  UnsupportedModelFeatureError,
 } from "@sixb/core/models"
 import { decodeServerSentEvents } from "./sse"
 
@@ -71,12 +75,18 @@ export function createVercelGateway(options: VercelGatewayOptions = {}): VercelG
   assertNonnegativeInteger(options.maxRetries, "maxRetries")
   assertPositiveIntegerOption(options.maxRetryDelayMs, "maxRetryDelayMs")
   const transport: GatewayTransport = { ...options, baseUrl }
-  const catalog = new RemoteVercelGatewayCatalog(transport, options.models ?? [])
+  const configuredModels = configuredModelDefinitions(options.models ?? [])
+  const catalog = new RemoteVercelGatewayCatalog(transport, configuredModels)
   const model = (modelId: string, modelOptions: VercelGatewayModelOptions = {}) => {
     if (!modelId.trim()) {
       throw new TypeError("[SixbVercelGateway] Model id must not be empty.")
     }
-    return new VercelGatewayLanguageModel(transport, catalog, modelId, modelOptions)
+    return new VercelGatewayLanguageModel(
+      transport,
+      modelId,
+      modelOptions,
+      configuredModels.get(modelId)
+    )
   }
   return Object.assign(model, { providerId: PROVIDER_ID as typeof PROVIDER_ID, catalog })
 }
@@ -85,33 +95,38 @@ interface GatewayTransport extends VercelGatewayOptions {
   readonly baseUrl: string
 }
 
+function configuredModelDefinitions(
+  definitions: readonly LanguageModelDefinition[]
+): ReadonlyMap<string, LanguageModelDefinition> {
+  const configured = new Map<string, LanguageModelDefinition>()
+  for (const input of definitions) {
+    const definition = defineLanguageModel(input)
+    if (definition.providerId !== PROVIDER_ID) {
+      throw new TypeError(
+        `[SixbVercelGateway] Supplied model '${definition.modelId}' must use providerId '${PROVIDER_ID}'.`
+      )
+    }
+    if (configured.has(definition.modelId)) {
+      throw new TypeError(`[SixbVercelGateway] Duplicate model '${definition.modelId}'.`)
+    }
+    configured.set(definition.modelId, definition)
+  }
+  return configured
+}
+
 /** Shared zero-configuration gateway with the callable provider DX used across Sixb models. */
 export const vercelGateway = createVercelGateway({
   apiKey: () => process.env.AI_GATEWAY_API_KEY ?? process.env.VERCEL_OIDC_TOKEN,
 })
 
 class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
-  private readonly supplied = new Map<string, LanguageModelDefinition>()
   private loadPromise: Promise<readonly LanguageModelDefinition[]> | undefined
   private loadedAt = 0
 
   constructor(
     private readonly transport: GatewayTransport,
-    definitions: readonly LanguageModelDefinition[]
-  ) {
-    for (const input of definitions) {
-      const definition = defineLanguageModel(input)
-      if (definition.providerId !== PROVIDER_ID) {
-        throw new TypeError(
-          `[SixbVercelGateway] Supplied model '${definition.modelId}' must use providerId '${PROVIDER_ID}'.`
-        )
-      }
-      if (this.supplied.has(definition.modelId)) {
-        throw new TypeError(`[SixbVercelGateway] Duplicate model '${definition.modelId}'.`)
-      }
-      this.supplied.set(definition.modelId, definition)
-    }
-  }
+    private readonly supplied: ReadonlyMap<string, LanguageModelDefinition>
+  ) {}
 
   async get(modelId: string): Promise<LanguageModelDefinition | undefined> {
     return (
@@ -177,7 +192,7 @@ function catalogDefinition(value: unknown): LanguageModelDefinition | undefined 
   const tags = stringArray(model.tags)
   const parameters = stringArray(model.supported_parameters)
   const inputModalities = stringArray(object(model.modalities)?.input)
-  const pricing = modelPricing(object(model.pricing))
+  const rateCard = modelRateCard(object(model.pricing))
   const released = integer(model.released)
   const description = string(model.description)
   const name = string(model.name)
@@ -191,6 +206,7 @@ function catalogDefinition(value: unknown): LanguageModelDefinition | undefined 
     return []
   })
   const tools = tags.includes("tool-use") || parameters.includes("tools")
+  const reasoning = gatewayReasoningCapabilities(tags, model.reasoning_options)
   return defineLanguageModel({
     kind: "language",
     providerId: PROVIDER_ID,
@@ -207,15 +223,57 @@ function catalogDefinition(value: unknown): LanguageModelDefinition | undefined 
     ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
     capabilities: {
       ...(inputMediaTypes.length === 0 ? {} : { inputMediaTypes }),
-      ...(tags.includes("reasoning") ? { reasoning: true } : {}),
+      reasoning,
       ...(tools ? { localTools: true, parallelToolCalls: true } : {}),
       ...(parameters.includes("response_format") ? { nativeStructuredOutput: true } : {}),
     },
-    ...(pricing === undefined ? {} : { pricing }),
+    ...(rateCard === undefined ? {} : { rateCard }),
   })
 }
 
-function modelPricing(raw: JsonObject | undefined): LanguageModelPricing | undefined {
+function gatewayReasoningCapabilities(
+  tags: readonly string[],
+  rawOptions: unknown
+): false | ModelReasoningCapabilities {
+  const options = Array.isArray(rawOptions)
+    ? rawOptions.flatMap((value) => {
+        const option = object(value)
+        return option ? [option] : []
+      })
+    : []
+  if (!tags.includes("reasoning") && options.length === 0) return false
+
+  let canDisable = false
+  let translatesBudgetToEffort = false
+  const effortSet = new Set<(typeof MODEL_REASONING_EFFORTS)[number]>()
+  for (const option of options) {
+    const type = string(option.type)
+    if (type === "toggle") canDisable = true
+    if (type === "budget_tokens") translatesBudgetToEffort = true
+    if (type !== "effort") continue
+    for (const effort of stringArray(option.values)) {
+      if (effort === "none") {
+        canDisable = true
+      } else if ((MODEL_REASONING_EFFORTS as readonly string[]).includes(effort)) {
+        effortSet.add(effort as (typeof MODEL_REASONING_EFFORTS)[number])
+      }
+    }
+  }
+
+  // Gateway's public reasoning contract translates named efforts to native token budgets.
+  if (translatesBudgetToEffort && effortSet.size === 0) {
+    for (const effort of MODEL_REASONING_EFFORTS) {
+      if (effort !== "max") effortSet.add(effort)
+    }
+  }
+  const efforts = MODEL_REASONING_EFFORTS.filter((effort) => effortSet.has(effort))
+  return {
+    ...(canDisable ? { canDisable: true } : {}),
+    ...(efforts.length === 0 ? {} : { efforts }),
+  }
+}
+
+function modelRateCard(raw: JsonObject | undefined): LanguageModelRateCard | undefined {
   if (!raw || raw.varies_by_provider === true) return undefined
   const input = tokenPrice(raw.input, raw.input_tiers)
   const output = tokenPrice(raw.output, raw.output_tiers)
@@ -232,7 +290,7 @@ function modelPricing(raw: JsonObject | undefined): LanguageModelPricing | undef
   }
 }
 
-function tokenPrice(base: unknown, rawTiers: unknown): LanguageModelPricing["input"] | undefined {
+function tokenPrice(base: unknown, rawTiers: unknown): LanguageModelRateCard["input"] | undefined {
   if (typeof base !== "string" || !decimal(base)) return undefined
   const defaultPrice = perTokenToPerMillion(base)
   if (!Array.isArray(rawTiers)) return defaultPrice
@@ -279,13 +337,13 @@ function fallbackDefinition(modelId: string): LanguageModelDefinition {
 class VercelGatewayLanguageModel implements LanguageModel {
   readonly providerId = PROVIDER_ID
   readonly modelId: string
-  readonly definition: () => Promise<LanguageModelDefinition>
+  readonly definition: LanguageModelDefinition
 
   constructor(
     private readonly transport: GatewayTransport,
-    catalog: RemoteVercelGatewayCatalog,
     modelId: string,
-    private readonly options: VercelGatewayModelOptions
+    private readonly options: VercelGatewayModelOptions,
+    configuredDefinition: LanguageModelDefinition | undefined
   ) {
     this.modelId = modelId
     if (options.request !== undefined) {
@@ -297,18 +355,10 @@ class VercelGatewayLanguageModel implements LanguageModel {
     for (const [index, tool] of (options.providerTools ?? []).entries()) {
       assertJsonObject(tool, `providerTools[${index}]`)
     }
-    this.definition = async () => {
-      let resolved: LanguageModelDefinition | undefined
-      try {
-        resolved = await catalog.get(modelId)
-      } catch {
-        // Catalog enrichment must never make a healthy inference endpoint unavailable.
-      }
-      return defineLanguageModel({
-        ...(resolved ?? fallbackDefinition(modelId)),
-        ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
-      })
-    }
+    this.definition = defineLanguageModel({
+      ...(configuredDefinition ?? fallbackDefinition(modelId)),
+      ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
+    })
   }
 
   async stream(request: LanguageModelRequest) {
@@ -393,9 +443,11 @@ class VercelGatewayLanguageModel implements LanguageModel {
             tool_choice: "auto",
             parallel_tool_calls: true,
           }),
-      ...(request.reasoning === undefined || request.reasoning === "provider-default"
-        ? {}
-        : { reasoning: { effort: request.reasoning } }),
+      ...(gatewayReasoningRequest(
+        request.reasoning,
+        this.definition.capabilities.reasoning,
+        this.modelId
+      ) ?? {}),
       ...(request.responseFormat === undefined
         ? {}
         : {
@@ -769,6 +821,24 @@ function toolOutputText(output: ModelToolOutput): string {
   return output.type === "text" || output.type === "error-text"
     ? output.value
     : JSON.stringify(output.value)
+}
+
+function gatewayReasoningRequest(
+  reasoning: LanguageModelRequest["reasoning"],
+  capabilities: ModelCapabilities["reasoning"],
+  modelId: string
+): { readonly reasoning: JsonObject } | undefined {
+  const issue = modelReasoningSupportIssue(capabilities, reasoning)
+  if (issue) {
+    throw new UnsupportedModelFeatureError(`[SixbVercelGateway] Model '${modelId}' ${issue}.`)
+  }
+  if (reasoning === undefined || reasoning === "provider-default") return undefined
+  if (typeof reasoning !== "string") {
+    throw new UnsupportedModelFeatureError(
+      "[SixbVercelGateway] Exact reasoning token budgets are not supported by the Gateway Responses API; use a named effort or providerOptions."
+    )
+  }
+  return { reasoning: { effort: reasoning } }
 }
 
 function normalizeUsage(raw: JsonObject | undefined): ModelUsage {

@@ -66,7 +66,7 @@ export async function createConversationAgentEnvironment(
       threadId: run.threadId,
       order: "asc",
     }),
-    modelSupportsInlineImages(agent.model, input.signal),
+    modelSupportsInlineImages(agent.model),
   ])
   const attachmentContext = await prepareAgentAttachments({
     projectId: context.id,

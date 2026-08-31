@@ -151,7 +151,7 @@ describe("owned model adapters", () => {
         responseId: "response-1",
         finishReason: "tool-calls",
         usage: {},
-        cost: { status: "unpriceable", reason: "missing-pricing" },
+        cost: { status: "unpriceable", reason: "missing-rate-card" },
         content: [
           { type: "reasoning", text: "think", providerData: { signature: "signed" } },
           {
@@ -173,7 +173,7 @@ describe("owned model adapters", () => {
         responseId: "response-2",
         finishReason: "stop",
         usage: {},
-        cost: { status: "unpriceable", reason: "missing-pricing" },
+        cost: { status: "unpriceable", reason: "missing-rate-card" },
         content: [{ type: "text", text: "done" }],
       },
     ]

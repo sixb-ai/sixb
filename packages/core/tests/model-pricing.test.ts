@@ -1,16 +1,16 @@
 import { describe, expect, test } from "bun:test"
-import { defineLanguageModel, priceModelCall } from "../src/models"
+import { defineLanguageModel, modelReasoningSupportIssue, rateModelCall } from "../src/models"
 
-describe("model definitions and pricing", () => {
+describe("model definitions and rate cards", () => {
   test("rates token, cache, and tier meters in exact nanodollars", () => {
-    const cost = priceModelCall({
+    const cost = rateModelCall({
       usage: {
         inputTokens: 1_000,
         outputTokens: 100,
         uncachedInputTokens: 750,
         cacheReadInputTokens: 250,
       },
-      pricing: {
+      rateCard: {
         currency: "USD",
         unit: "million-tokens",
         input: "2.5",
@@ -48,9 +48,9 @@ describe("model definitions and pricing", () => {
     })
   })
 
-  test("prefers provider-reported billing and never converts unknown pricing to zero", () => {
+  test("prefers provider-reported billing and never converts unknown rates to zero", () => {
     expect(
-      priceModelCall({
+      rateModelCall({
         usage: {},
         reported: {
           money: { currency: "USD", amountNanos: "12345" },
@@ -62,34 +62,39 @@ describe("model definitions and pricing", () => {
       money: { currency: "USD", amountNanos: "12345" },
       providerId: "gateway",
     })
-    expect(priceModelCall({ usage: { inputTokens: 1, outputTokens: 1 } })).toEqual({
+    expect(rateModelCall({ usage: { inputTokens: 1, outputTokens: 1 } })).toEqual({
       status: "unpriceable",
-      reason: "missing-pricing",
+      reason: "missing-rate-card",
     })
     expect(
-      priceModelCall({
+      rateModelCall({
         usage: {
           inputTokens: 10,
           outputTokens: 1,
           cacheReadInputTokens: 11,
         },
-        pricing: { currency: "USD", unit: "million-tokens", input: "1", output: "1" },
+        rateCard: { currency: "USD", unit: "million-tokens", input: "1", output: "1" },
       })
     ).toEqual({ status: "unpriceable", reason: "inconsistent-usage" })
   })
 
   test("validates and snapshots inline definitions", () => {
-    const capabilities = { reasoning: true }
+    const capabilities = {
+      reasoning: { canDisable: true, efforts: ["low", "high"] as const },
+    }
     const definition = defineLanguageModel({
       kind: "language",
       providerId: "test",
       modelId: "test/model",
       capabilities,
-      pricing: { currency: "USD", unit: "million-tokens", input: "1", output: "2" },
+      rateCard: { currency: "USD", unit: "million-tokens", input: "1", output: "2" },
     })
-    capabilities.reasoning = false
+    capabilities.reasoning.canDisable = false
 
-    expect(definition.capabilities.reasoning).toBe(true)
+    expect(definition.capabilities.reasoning).toEqual({
+      canDisable: true,
+      efforts: ["low", "high"],
+    })
     expect(
       defineLanguageModel({
         kind: "language",
@@ -110,8 +115,29 @@ describe("model definitions and pricing", () => {
         providerId: "test",
         modelId: "bad",
         capabilities: {},
-        pricing: { currency: "USD", unit: "million-tokens", input: "free", output: "2" },
+        rateCard: { currency: "USD", unit: "million-tokens", input: "free", output: "2" },
       })
     ).toThrow("nonnegative decimal")
+  })
+
+  test("validates reasoning preferences against known provider controls", () => {
+    const capabilities = {
+      canDisable: true,
+      efforts: ["low", "high"] as const,
+      budgetTokens: { min: 1_024, max: 16_384 },
+    }
+
+    expect(modelReasoningSupportIssue(false, "provider-default")).toBeUndefined()
+    expect(modelReasoningSupportIssue(false, "low")).toBe("reasoning is not supported")
+    expect(modelReasoningSupportIssue(capabilities, "none")).toBeUndefined()
+    expect(modelReasoningSupportIssue(capabilities, "medium")).toBe(
+      "reasoning effort 'medium' is not supported"
+    )
+    expect(modelReasoningSupportIssue(capabilities, { budgetTokens: 512 })).toBe(
+      "reasoning token budget must be at least 1024"
+    )
+    expect(modelReasoningSupportIssue(capabilities, { budgetTokens: 32_768 })).toBe(
+      "reasoning token budget must not exceed 16384"
+    )
   })
 })

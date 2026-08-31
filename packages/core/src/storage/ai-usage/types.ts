@@ -1,4 +1,5 @@
 import type { ReadonlyJsonObject } from "../../json"
+import type { ModelReasoning } from "../../models/language-model"
 
 /** How much normalized token usage a provider reported for one model call. */
 export type AiUsageReportingStatus = "complete" | "partial" | "unavailable"
@@ -47,6 +48,8 @@ export interface RecordAiModelCallInput {
   /** Provider contract that handled the call, such as `anthropic` or `vercel-ai-gateway`. */
   readonly providerId: string
   readonly requestedModelId: string
+  /** Provider-neutral reasoning preference used for this call, when explicitly configured. */
+  readonly requestedReasoning?: ModelReasoning
   /** Provider-returned model identity when the capture path exposes it. */
   readonly responseModelId?: string
   /** Provider-returned response ID used for later usage and cost reconciliation. */
