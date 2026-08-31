@@ -231,6 +231,20 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 29,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "030-share-sessions",
+    status: "applied",
+    version: 30,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "031-delegated-executions",
+    status: "applied",
+    version: 31,
+  },
 ]
 
 afterEach(async () => {
@@ -281,6 +295,126 @@ describe("SQLite storage migrations", () => {
         "created_at",
         "id",
       ])
+    } finally {
+      db.close()
+    }
+  })
+
+  test("installs Share sessions with grant identity and expiry indexes", () => {
+    const db = new Database(":memory:")
+    try {
+      for (const migration of sqliteStorageMigrations.steps.slice(0, 30)) migration.up(db)
+      expect(readMemoryIndexColumns(db, "idx_share_sessions_grant")).toEqual([
+        "project_id",
+        "grant_id",
+        "created_at",
+        "id",
+      ])
+      expect(readMemoryIndexColumns(db, "idx_share_sessions_expiry")).toEqual([
+        "project_id",
+        "expires_at",
+      ])
+    } finally {
+      db.close()
+    }
+  })
+
+  test("preserves existing parent and child executions when adding delegated authority", () => {
+    const db = new Database(":memory:")
+    try {
+      const migrationIndex = sqliteStorageMigrations.steps.findIndex(
+        (migration) => migration.id === "031-delegated-executions"
+      )
+      const migration = sqliteStorageMigrations.steps[migrationIndex]
+      if (!migration || migrationIndex < 0) {
+        throw new Error("Expected the delegated executions migration.")
+      }
+      for (const previous of sqliteStorageMigrations.steps.slice(0, migrationIndex)) {
+        previous.up(db)
+      }
+
+      db.run(`
+        INSERT INTO executions (
+          project_id, id, executor_kind, executor_id, source_kind, source_id,
+          correlation_id, authority_kind, created_at
+        ) VALUES (
+          'project-a', 'request-parent', 'request', 'request-1', 'http', 'request-1',
+          'correlation-1', 'disabled', '2026-08-01T12:00:00.000Z'
+        );
+
+        INSERT INTO executions (
+          project_id, id, executor_kind, executor_id, source_kind, source_id,
+          correlation_id, parent_execution_id, authority_kind, authority_primitive_kind,
+          authority_primitive_id, created_at
+        ) VALUES (
+          'project-a', 'action-child', 'action', 'run-1', 'execution', 'request-parent',
+          'correlation-1', 'request-parent', 'trustedPrimitive', 'action', 'approve',
+          '2026-08-01T12:00:01.000Z'
+        );
+      `)
+
+      migration.up(db)
+
+      expect(
+        db
+          .query(`
+            SELECT id, parent_execution_id, authority_kind
+            FROM executions
+            ORDER BY created_at
+          `)
+          .all()
+      ).toEqual([
+        { id: "request-parent", parent_execution_id: null, authority_kind: "disabled" },
+        {
+          id: "action-child",
+          parent_execution_id: "request-parent",
+          authority_kind: "trustedPrimitive",
+        },
+      ])
+      expect(readMemoryForeignKeyTables(db, "executions")).toContain("executions")
+      expect(readMemoryForeignKeyTables(db, "executions")).not.toContain("executions_v2")
+    } finally {
+      db.close()
+    }
+  })
+
+  test("rejects delegated executions without a delegation kind", () => {
+    const db = new Database(":memory:")
+    try {
+      for (const migration of sqliteStorageMigrations.steps) migration.up(db)
+      db.run(`
+        INSERT INTO share_grants (
+          project_id, id, definition_id, target_object_type_id, target_primary_id,
+          issued_by_type, issued_by_id, authority_version, authority_snapshot,
+          authority_digest, token_hash, destination_path, created_at, expires_at
+        ) VALUES (
+          'project-a', 'grant-1', 'share-report', 'Report', 'report-1',
+          'user', 'user-1', 1, '{"version":1,"access":{"grants":[]}}',
+          '${"a".repeat(64)}', '${"b".repeat(64)}', '/reports/report-1',
+          '2026-08-01T12:00:00.000Z', '2026-08-02T12:00:00.000Z'
+        );
+        INSERT INTO share_sessions (
+          project_id, id, grant_id, token_hash, created_at, expires_at, absolute_expires_at
+        ) VALUES (
+          'project-a', 'session-1', 'grant-1', '${"c".repeat(64)}',
+          '2026-08-01T12:00:00.000Z', '2026-08-01T12:15:00.000Z',
+          '2026-08-02T12:00:00.000Z'
+        );
+      `)
+
+      expect(() =>
+        db.run(`
+          INSERT INTO executions (
+            project_id, id, executor_kind, executor_id, source_kind, source_id,
+            correlation_id, authority_kind, authority_delegation_id,
+            authority_delegation_session_id, created_at
+          ) VALUES (
+            'project-a', 'invalid-delegated', 'request', 'request-1', 'http', 'request-1',
+            'correlation-1', 'delegated', 'grant-1', 'session-1',
+            '2026-08-01T12:01:00.000Z'
+          )
+        `)
+      ).toThrow("CHECK constraint failed")
     } finally {
       db.close()
     }

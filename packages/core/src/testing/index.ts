@@ -115,6 +115,11 @@ export {
   type ShareGrantStorageContractSuiteOptions,
 } from "./share-grant-storage-contract"
 export {
+  createShareSessionStorageContractInput,
+  runShareSessionStorageContractSuite,
+  type ShareSessionStorageContractSuiteOptions,
+} from "./share-session-storage-contract"
+export {
   createTestSyncExecution,
   queueTestSyncRun,
   startTestSyncRun,

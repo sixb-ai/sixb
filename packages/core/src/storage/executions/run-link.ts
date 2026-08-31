@@ -41,6 +41,35 @@ export async function findPrimitiveRunExecution(input: {
   return execution
 }
 
+/** Resolve the request execution that directly initiated one provider-validated primitive run. */
+export async function findPrimitiveParentRequestExecution(input: {
+  readonly executions: ExecutionStorage
+  readonly projectId: string
+  readonly executionId: string
+  readonly primitive: TrustedPrimitiveRef
+}): Promise<ExecutionRecord | null> {
+  const child = await findPrimitiveRunExecution({
+    ...input,
+    sourceTypes: ["execution"],
+  })
+  if (!child || child.source.type !== "execution") return null
+
+  const parent = await input.executions.getById({
+    projectId: input.projectId,
+    id: child.source.executionId,
+  })
+  if (
+    !parent ||
+    parent.executor.type !== "request" ||
+    parent.source.type !== "http" ||
+    parent.executor.requestId !== parent.source.requestId ||
+    parent.correlationId !== child.correlationId
+  ) {
+    return null
+  }
+  return parent
+}
+
 /** Find the immutable execution and service-account authority owned by one Agent run. */
 export async function findAgentRunExecution(input: {
   readonly executions: ExecutionStorage

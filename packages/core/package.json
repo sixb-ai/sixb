@@ -257,6 +257,18 @@
       "import": "./dist/storage/share-grants/provider.js",
       "default": "./dist/storage/share-grants/provider.js"
     },
+    "./internal/shares": {
+      "types": "./dist/shares/internal.d.ts",
+      "bun": "./src/shares/internal.ts",
+      "import": "./dist/shares/internal.js",
+      "default": "./dist/shares/internal.js"
+    },
+    "./internal/share-session-storage-provider": {
+      "types": "./dist/storage/share-sessions/provider.d.ts",
+      "bun": "./src/storage/share-sessions/provider.ts",
+      "import": "./dist/storage/share-sessions/provider.js",
+      "default": "./dist/storage/share-sessions/provider.js"
+    },
     "./internal/projections": {
       "types": "./dist/projections/internal.d.ts",
       "bun": "./src/projections/internal.ts",

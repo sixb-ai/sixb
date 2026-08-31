@@ -19,6 +19,8 @@ export interface SixbApiRoute {
   readonly accessToken: boolean
   /** The route is proxied by the agent API gateway (a strict subset of the accessToken routes). */
   readonly agentApi: boolean
+  /** The canonical handler may run under an explicitly selected shared session. */
+  readonly sharedSession?: boolean
 }
 
 export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
@@ -133,6 +135,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/object-types",
     accessToken: true,
     agentApi: true,
+    sharedSession: true,
   },
   {
     operationId: "getObjectType",
@@ -140,6 +143,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/object-types/:objectTypeId",
     accessToken: true,
     agentApi: true,
+    sharedSession: true,
   },
   {
     operationId: "listObjects",
@@ -147,6 +151,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/objects",
     accessToken: true,
     agentApi: true,
+    sharedSession: true,
   },
   {
     operationId: "queryObjects",
@@ -154,6 +159,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/objects/query",
     accessToken: true,
     agentApi: true,
+    sharedSession: true,
   },
   {
     operationId: "countObjects",
@@ -161,6 +167,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/objects/query/count",
     accessToken: true,
     agentApi: true,
+    sharedSession: true,
   },
   {
     operationId: "existsObjects",
@@ -168,6 +175,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/objects/query/exists",
     accessToken: true,
     agentApi: true,
+    sharedSession: true,
   },
   {
     operationId: "facetObjects",
@@ -175,6 +183,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/objects/query/facets",
     accessToken: true,
     agentApi: true,
+    sharedSession: true,
   },
   {
     operationId: "getObject",
@@ -182,6 +191,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/objects/:objectTypeId/:objectId",
     accessToken: true,
     agentApi: true,
+    sharedSession: true,
   },
   {
     operationId: "listObjectLinks",
@@ -189,6 +199,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/objects/:objectTypeId/:objectId/links",
     accessToken: true,
     agentApi: true,
+    sharedSession: true,
   },
   // The four write routes. Bearer-capable because their execution facade enforces authorization
   // (`edit:object` / `append:telemetry`), which is exactly the precondition this table requires.
@@ -229,6 +240,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/telemetry/history",
     accessToken: true,
     agentApi: true,
+    sharedSession: true,
   },
   {
     operationId: "getTelemetryHistory",
@@ -236,6 +248,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/objects/:objectTypeId/:objectId/telemetry/:propertyId/history",
     accessToken: true,
     agentApi: true,
+    sharedSession: true,
   },
   {
     operationId: "getLatestTelemetry",
@@ -243,6 +256,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/objects/:objectTypeId/:objectId/telemetry/:propertyId/latest",
     accessToken: true,
     agentApi: true,
+    sharedSession: true,
   },
   {
     operationId: "getObjectFileContent",
@@ -250,6 +264,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/objects/:objectTypeId/:objectId/files/content",
     accessToken: true,
     agentApi: true,
+    sharedSession: true,
   },
   {
     // Bearer-capable (CLI/programmatic existence + range probes) but NOT agent-proxied: the agent
@@ -261,6 +276,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/objects/:objectTypeId/:objectId/files/content",
     accessToken: true,
     agentApi: false,
+    sharedSession: true,
   },
   {
     operationId: "listActions",
@@ -268,6 +284,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/actions",
     accessToken: true,
     agentApi: true,
+    sharedSession: true,
   },
   {
     operationId: "getAction",
@@ -275,6 +292,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/actions/:actionId",
     accessToken: true,
     agentApi: true,
+    sharedSession: true,
   },
   {
     operationId: "requestAction",
@@ -282,6 +300,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/actions/:actionId",
     accessToken: true,
     agentApi: true,
+    sharedSession: true,
   },
   {
     operationId: "uploadFileRaw",
@@ -303,6 +322,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/action-runs/:runId",
     accessToken: true,
     agentApi: true,
+    sharedSession: true,
   },
   {
     operationId: "getActionRunFileContent",
@@ -415,6 +435,7 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     path: "/api/objects/search",
     accessToken: true,
     agentApi: true,
+    sharedSession: true,
   },
   {
     operationId: "listEvents",

@@ -598,6 +598,16 @@ export type {
 } from "./share-grants"
 export { InMemoryShareGrantStorage, ShareGrantStorageError } from "./share-grants"
 export type {
+  CreateShareSessionInput,
+  GetShareSessionByIdInput,
+  RenewShareSessionIfValidInput,
+  RevokeShareSessionInput,
+  ShareSessionRecord,
+  ShareSessionStorage,
+  ShareSessionStorageErrorCode,
+} from "./share-sessions"
+export { InMemoryShareSessionStorage, ShareSessionStorageError } from "./share-sessions"
+export type {
   FinishSyncRunInput,
   ListLatestSyncRunsInput,
   ListLatestSyncRunsResult,

@@ -5,11 +5,15 @@ import type {
   ExecutionStorage,
   TrustedPrimitiveKind,
 } from "../storage/executions"
+import type { ShareGrantStorage } from "../storage/share-grants"
+import type { ShareSessionStorage } from "../storage/share-sessions"
 import type { Storage } from "../storage/types"
 
 export type ExecutionStorageContractStorage = Storage & {
   readonly auth: AuthStorage
   readonly executions: ExecutionStorage
+  readonly shareGrants: ShareGrantStorage
+  readonly shareSessions: ShareSessionStorage
 }
 
 export interface ExecutionStorageContractSuiteOptions<
@@ -42,6 +46,7 @@ export function runExecutionStorageContractSuite<TStorage extends ExecutionStora
     test("round-trips every durable executor and authority shape", async () => {
       await withStorage(async (storage) => {
         await seedAuth(storage.auth)
+        await seedSharedSession(storage)
 
         const records = [
           principalRequest({
@@ -54,6 +59,7 @@ export function runExecutionStorageContractSuite<TStorage extends ExecutionStora
             credential: { type: "accessToken", id: "token-service" },
           }),
           disabledRequest("disabled-request"),
+          delegatedRequest("delegated-request"),
           ...trustedPrimitiveKinds.map((kind) => trustedPrimitive(`${kind}-execution`, {}, kind)),
           agentExecution("agent-execution"),
           kernelExecution("kernel-execution"),
@@ -169,6 +175,7 @@ export function runExecutionStorageContractSuite<TStorage extends ExecutionStora
     test("requires every principal and verifies credential ownership", async () => {
       await withStorage(async (storage) => {
         await seedAuth(storage.auth)
+        await seedSharedSession(storage)
 
         await expect(
           storage.executions.create(
@@ -178,6 +185,34 @@ export function runExecutionStorageContractSuite<TStorage extends ExecutionStora
             })
           )
         ).rejects.toMatchObject({ code: "missing_principal" })
+
+        await expect(
+          storage.executions.create({
+            ...delegatedRequest("missing-shared-session"),
+            authorizationRef: {
+              type: "delegated",
+              delegation: {
+                kind: "share",
+                grantId: "grant-one",
+                sessionId: "missing-shared-session",
+              },
+            },
+          })
+        ).rejects.toMatchObject({ code: "missing_credential" })
+
+        await expect(
+          storage.executions.create({
+            ...delegatedRequest("wrong-shared-grant"),
+            authorizationRef: {
+              type: "delegated",
+              delegation: {
+                kind: "share",
+                grantId: "grant-two",
+                sessionId: "share-session-one",
+              },
+            },
+          })
+        ).rejects.toMatchObject({ code: "invalid_credential" })
 
         await expect(
           storage.executions.create(
@@ -322,6 +357,32 @@ async function seedAuth(auth: AuthStorage): Promise<void> {
   })
 }
 
+async function seedSharedSession(storage: ExecutionStorageContractStorage): Promise<void> {
+  for (const id of ["grant-one", "grant-two"] as const) {
+    await storage.shareGrants.create({
+      id,
+      projectId,
+      definitionId: "contract-share",
+      target: { objectTypeId: "ContractObject", primaryId: id },
+      issuedBy: { type: "user", id: "user-one" },
+      authoritySnapshot: { version: 1, access: { grants: [] } },
+      tokenHash: id === "grant-one" ? "a".repeat(64) : "b".repeat(64),
+      destinationPath: `/contract/${id}`,
+      createdAt,
+      expiresAt,
+    })
+  }
+  await storage.shareSessions.create({
+    id: "share-session-one",
+    projectId,
+    grantId: "grant-one",
+    tokenHash: "c".repeat(64),
+    createdAt,
+    expiresAt,
+    absoluteExpiresAt: expiresAt,
+  })
+}
+
 function principalRequest(input: {
   readonly id: string
   readonly principal?: { readonly type: "user" | "serviceAccount"; readonly id: string }
@@ -353,6 +414,24 @@ function disabledRequest(id: string, inputProjectId = projectId): CreateExecutio
     source: { type: "http", requestId: `request-${id}` },
     correlationId: `correlation-${id}`,
     authorizationRef: { type: "disabled" },
+  }
+}
+
+function delegatedRequest(id: string): CreateExecutionInput {
+  return {
+    id,
+    projectId,
+    executor: { type: "request", requestId: `request-${id}` },
+    source: { type: "http", requestId: `request-${id}` },
+    correlationId: `correlation-${id}`,
+    authorizationRef: {
+      type: "delegated",
+      delegation: {
+        kind: "share",
+        grantId: "grant-one",
+        sessionId: "share-session-one",
+      },
+    },
   }
 }
 

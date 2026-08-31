@@ -27,6 +27,8 @@ import {
   type ActionRunStorage,
   isTerminalActionRun,
 } from "../storage"
+import { assertVisibleJsonWithinLimit } from "../storage/objects/execution-limits"
+import { actionRunBelongsToShareGrant, canDelegationAccessActionRun } from "./run-authorization"
 import { dispatchActionRun } from "./run-dispatch"
 import { createActionRunId } from "./run-id"
 import type { ActionDefinition, ActionSubject } from "./types"
@@ -148,10 +150,9 @@ export async function requestAction(
 
   const actionParams = normalizeActionParams(runtime, action.params, rawParams, pathPrefix)
 
-  // This must precede dispatch: dispatch checks run-id idempotency before it creates an execution.
-  // A delegated request must not use that lookup as an oracle or requeue an existing run until
-  // durable delegation provenance exists.
+  // This must precede dispatch so unsupported delegation kinds cannot inspect run idempotency.
   assertRuntimeAuthorizationCanCrossDurableBoundary(runtime.runtimeAuthorization)
+  const authority = resolveRuntimeAuthorizationForProject(runtime)
 
   return dispatchActionRun({
     errorReporterHost: runtime,
@@ -163,6 +164,29 @@ export async function requestAction(
     subject,
     params: actionParams,
     runId: request.runId,
+    ...(authority.type === "delegated"
+      ? {
+          assertCanReuseExisting: async (
+            storage: SixbRuntimeContext["storage"],
+            existing: ActionRunRecord
+          ) => {
+            if (
+              authority.ref.kind !== "share" ||
+              !(await actionRunBelongsToShareGrant({
+                storage,
+                projectId: runtime.projectId,
+                run: existing,
+                grantId: authority.ref.id,
+              }))
+            ) {
+              throw new AuthorizationError(
+                `apply:action:${actionId}`,
+                "[Sixb] Delegated authority cannot reuse this Action run."
+              )
+            }
+          },
+        }
+      : {}),
     createExecution: async (executionId, runId) => {
       const caller = await ensureExecutionRecord(
         runtime.storage.executions,
@@ -222,10 +246,7 @@ export async function waitForActionRun(
   runtime: SixbRuntimeContext,
   input: WaitForActionRunInput
 ): Promise<ActionRunRecord> {
-  // Waiting observes durable run params and results just like `actions.runs.getById`. Keep the
-  // guard ahead of storage lookup and broker subscription so unsupported delegations cannot use
-  // either dependency as an existence oracle. M03 replaces this blanket delegated denial with
-  // same-grant/session run attribution.
+  // Keep unsupported delegation kinds ahead of storage and broker dependencies.
   assertRuntimeAuthorizationCanCrossDurableBoundary(runtime.runtimeAuthorization)
   const authority = resolveRuntimeAuthorizationForProject(runtime)
   if (authority.type === "denied") {
@@ -295,8 +316,18 @@ export async function waitForActionRun(
         const visible =
           record &&
           (authority.type === "unrestricted" ||
-            (authority.type === "principal" && canViewActionRun(authority.context, record)))
+            (authority.type === "principal" && canViewActionRun(authority.context, record)) ||
+            (authority.type === "delegated" &&
+              (await canDelegationAccessActionRun({
+                storage: runtime.storage,
+                projectId: runtime.projectId,
+                authority,
+                run: record,
+              }))))
         if (visible && isTerminalActionRun(record)) {
+          if (authority.type === "delegated") {
+            assertVisibleJsonWithinLimit(record, authority.limits)
+          }
           cleanup()
           resolve(record)
           return

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { createSixbClient } from "../src/api"
 import type { Client } from "../src/generated/client"
 import { logs, type SixbLogLine } from "../src/logs"
 import { parseLogStreamMessage } from "../src/logs-transport"
@@ -108,6 +109,46 @@ describe("log transport", () => {
 
   afterEach(() => {
     globalThis.WebSocket = originalWebSocket
+  })
+
+  test("does not construct a websocket for an injected shared client", () => {
+    const sharedClient = createSixbClient({
+      baseUrl: "https://shared.example.test",
+      auth: { kind: "shared", grantId: "shr_1" },
+      fetch: Object.assign(async () => Response.json({}), { preconnect: fetch.preconnect }),
+    })
+    const errors: string[] = []
+    const states: Array<{ connected: boolean; reconnecting: boolean; error: string | null }> = []
+
+    const unsubscribe = logs.actions({ client: sharedClient }).subscribe(() => undefined, {
+      onError: (error) => errors.push(error),
+      onStateChange: (state) => states.push(state),
+    })
+
+    expect(FakeWebSocket.instances).toHaveLength(0)
+    expect(errors).toEqual(["Live updates are unavailable during shared access."])
+    expect(states).toEqual([
+      {
+        connected: false,
+        reconnecting: false,
+        error: "Live updates are unavailable during shared access.",
+      },
+    ])
+    unsubscribe()
+  })
+
+  test("still constructs a websocket for an injected ordinary client", () => {
+    const ordinaryClient = createSixbClient({
+      baseUrl: "https://ordinary.example.test",
+      auth: { kind: "cookie" },
+      fetch: Object.assign(async () => Response.json({}), { preconnect: fetch.preconnect }),
+    })
+
+    const unsubscribe = logs.actions({ client: ordinaryClient }).subscribe(() => undefined)
+
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(FakeWebSocket.instances[0]?.url).toBe("wss://ordinary.example.test/ws/logs")
+    unsubscribe()
   })
 
   test("uses the configured API origin and resumes batched frames with cookie auth", async () => {

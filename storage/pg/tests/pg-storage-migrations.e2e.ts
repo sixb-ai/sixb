@@ -81,6 +81,8 @@ describe("Postgres storage migrations", () => {
             "027-agent-context-checkpoints",
             "028-object-override-edit-times",
             "029-share-grants",
+            "030-share-sessions",
+            "031-delegated-executions",
           ],
         },
       ])
@@ -288,6 +290,20 @@ describe("Postgres storage migrations", () => {
           status: "applied",
           version: 29,
         },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "030-share-sessions",
+          status: "applied",
+          version: 30,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "031-delegated-executions",
+          status: "applied",
+          version: 31,
+        },
       ])
     })
   })
@@ -296,6 +312,138 @@ describe("Postgres storage migrations", () => {
     await withStorage(false, async (storage) => {
       await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
       await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "current" })
+    })
+  })
+
+  test("delegated execution migration preserves ancestry and rejects a missing kind", async () => {
+    await withStorage(false, async (_storage, schemaName) => {
+      const connectionString = process.env.DATABASE_URL
+      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
+      const migrationSql = createPgClient({ connectionString, schemaName, max: 1 })
+      const context = {
+        exec: (sqlText: string) => migrationSql.unsafe(sqlText).then(() => undefined),
+      }
+      try {
+        const migration = postgresStorageMigrations.steps.find(
+          (candidate) => candidate.id === "031-delegated-executions"
+        )
+        if (!migration) {
+          throw new Error("PostgreSQL delegated-executions migration is missing.")
+        }
+
+        await migrationSql.unsafe(`CREATE SCHEMA ${quoteIdent(schemaName)}`)
+        // These are every migration that defines or rebuilds the tables touched by 031. Applying
+        // the unrelated run/ontology migrations makes this focused upgrade test exceed Bun's e2e
+        // test bound without changing the version-30 execution/share shape under test.
+        const version30TableMigrations = postgresStorageMigrations.steps.filter((candidate) =>
+          [
+            "001-initial-schema",
+            "004-executions",
+            "022-projection-executions",
+            "029-share-grants",
+            "030-share-sessions",
+          ].includes(candidate.id)
+        )
+        expect(version30TableMigrations).toHaveLength(5)
+        for (const previous of version30TableMigrations) {
+          await previous.up(context)
+        }
+
+        await migrationSql.unsafe(`
+          INSERT INTO executions (
+            project_id, id, executor_kind, executor_id, source_kind, source_id,
+            correlation_id, parent_execution_id, authority_kind, authority_primitive_kind,
+            authority_primitive_id, created_at
+          ) VALUES
+            (
+              'project-a', 'legacy-parent', 'request', 'request-1', 'http', 'request-1',
+              'correlation-1', NULL, 'disabled', NULL, NULL, '2026-08-20T12:00:00.000Z'
+            ),
+            (
+              'project-a', 'legacy-child', 'action', 'action-run-1', 'execution',
+              'legacy-parent', 'correlation-1', 'legacy-parent', 'trustedPrimitive', 'action',
+              'send-email', '2026-08-20T12:00:01.000Z'
+            );
+
+          INSERT INTO share_grants (
+            project_id, id, definition_id, target_object_type_id, target_primary_id,
+            issued_by_type, issued_by_id, authority_version, authority_snapshot,
+            authority_digest, token_hash, destination_path, created_at, expires_at
+          ) VALUES (
+            'project-a', 'grant-1', 'share-definition', 'Report', 'report-1',
+            'user', 'user-1', 1, '{"version":1,"access":{"grants":[]}}'::jsonb,
+            repeat('a', 64), repeat('b', 64), '/reports/report-1',
+            '2026-08-20T12:00:00.000Z', '2026-08-20T13:00:00.000Z'
+          );
+
+          INSERT INTO share_sessions (
+            project_id, id, grant_id, token_hash, created_at, expires_at, absolute_expires_at
+          ) VALUES (
+            'project-a', 'session-1', 'grant-1', repeat('c', 64),
+            '2026-08-20T12:00:00.000Z', '2026-08-20T12:10:00.000Z',
+            '2026-08-20T13:00:00.000Z'
+          );
+        `)
+
+        await migration.up(context)
+      } finally {
+        await migrationSql.end()
+      }
+
+      const sql = createPgClient({ connectionString, schemaName, max: 1 })
+      try {
+        const preserved = await sql.unsafe<
+          {
+            readonly authority_delegation_kind: string | null
+            readonly authority_kind: string
+            readonly id: string
+            readonly parent_execution_id: string | null
+            readonly source_id: string
+          }[]
+        >(`
+          SELECT id, source_id, parent_execution_id, authority_kind, authority_delegation_kind
+          FROM executions
+          ORDER BY id
+        `)
+        expect([...preserved]).toEqual([
+          {
+            authority_delegation_kind: null,
+            authority_kind: "trustedPrimitive",
+            id: "legacy-child",
+            parent_execution_id: "legacy-parent",
+            source_id: "legacy-parent",
+          },
+          {
+            authority_delegation_kind: null,
+            authority_kind: "disabled",
+            id: "legacy-parent",
+            parent_execution_id: null,
+            source_id: "request-1",
+          },
+        ])
+
+        // Regression proof: without the explicit NOT NULL term PostgreSQL treats the delegated
+        // shape CHECK as unknown, which satisfies a CHECK and lets this malformed row through.
+        // postgres.js queries are lazy Promise subclasses. Bun 1.3.14's rejects matcher does not
+        // assimilate them, so normalize the query to a native Promise to ensure it is dispatched.
+        await expect(
+          Promise.resolve(
+            sql.unsafe(`
+              INSERT INTO executions (
+                project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
+                authority_kind, authority_delegation_kind, authority_delegation_id,
+                authority_delegation_session_id, created_at
+              ) VALUES (
+                'project-a', 'invalid-delegated', 'request', 'request-2', 'http', 'request-2',
+                'correlation-2', 'delegated', NULL, 'grant-1', 'session-1',
+                '2026-08-20T12:01:00.000Z'
+              )
+            `)
+          )
+        ).rejects.toMatchObject({ code: "23514" })
+      } finally {
+        await sql.end()
+      }
     })
   })
 
@@ -1773,6 +1921,20 @@ describe("Postgres storage migrations", () => {
           id: "029-share-grants",
           status: "applied",
           version: 29,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "030-share-sessions",
+          status: "applied",
+          version: 30,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "031-delegated-executions",
+          status: "applied",
+          version: 31,
         },
       ])
     } finally {

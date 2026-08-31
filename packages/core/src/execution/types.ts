@@ -19,6 +19,13 @@ export interface TrustedPrimitiveRef {
   readonly runId: string
 }
 
+/** Durable provenance for authority delegated by one shared-access browser session. */
+export interface SharedAccessDelegationRef {
+  readonly kind: "share"
+  readonly grantId: string
+  readonly sessionId: string
+}
+
 export type KernelOperation = {
   readonly type: "ontology.recover"
   readonly recoveryId: string
@@ -69,6 +76,7 @@ export type AuthorizationRef =
         | { readonly type: "accessToken"; readonly id: string }
     }
   | { readonly type: "trustedPrimitive"; readonly primitive: TrustedPrimitiveRef }
+  | { readonly type: "delegated"; readonly delegation: SharedAccessDelegationRef }
   | { readonly type: "kernel"; readonly operation: KernelOperation }
   | { readonly type: "disabled" }
 

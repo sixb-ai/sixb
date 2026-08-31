@@ -1,5 +1,6 @@
 import type { SixbHostView } from "@sixb/core"
 import type { Elysia } from "elysia"
+import type { SharedAccessBoundary } from "./auth/shared-access"
 import { registerActionRunRoutes } from "./routes/action-runs"
 import { registerActionRoutes } from "./routes/actions"
 import { registerAgentApiGatewayRoutes } from "./routes/agent-api-gateway"
@@ -23,6 +24,7 @@ import { registerProjectRoutes } from "./routes/project"
 import { registerProjectionRoutes } from "./routes/projections"
 import { registerRuleRoutes } from "./routes/rules"
 import { registerShareGrantRoutes } from "./routes/share-grants"
+import { registerSharedAccessRoutes } from "./routes/shared-access"
 import { registerStatusRoutes } from "./routes/status"
 import { registerSyncRoutes } from "./routes/syncs"
 import { registerTelemetryRoutes } from "./routes/telemetry"
@@ -31,6 +33,7 @@ import { registerWorkflowRoutes } from "./routes/workflows"
 
 export interface HttpRouteOptions {
   readonly connectorConnections: ConnectorConnectionRouteOptions
+  readonly sharedAccess: SharedAccessBoundary
 }
 
 export function registerHttpRoutes(app: Elysia, host: SixbHostView, options: HttpRouteOptions) {
@@ -47,6 +50,7 @@ export function registerHttpRoutes(app: Elysia, host: SixbHostView, options: Htt
   registerWorkflowRoutes(app, host)
   registerRuleRoutes(app, host)
   registerShareGrantRoutes(app, host)
+  registerSharedAccessRoutes(app, options.sharedAccess)
   registerOntologyRoutes(app, host)
   registerObjectRoutes(app, host)
   registerActionRoutes(app, host)

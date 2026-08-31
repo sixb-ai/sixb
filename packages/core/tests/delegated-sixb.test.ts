@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { createHash } from "node:crypto"
 import {
   type ActionDefinition,
   AuthorizationError,
@@ -6,12 +7,14 @@ import {
   defineObjectType,
   link,
   type OntologySource,
+  optional,
+  param,
   prop,
   SixbHost,
 } from "../src"
 import type { RuntimeAccessPlan } from "../src/authorization/access-plan"
 import { createDelegatedRequestScope } from "../src/execution/scopes"
-import type { SelectedObjectReadScope } from "../src/storage"
+import { ActionRunError, type SelectedObjectReadScope } from "../src/storage"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -46,7 +49,7 @@ const ArchivedProposal = defineObjectType({
 
 const approveProposal: ActionDefinition = defineAction("approve-proposal")
   .on(Proposal)
-  .params({})
+  .params({ note: optional(param("string")) })
   .edits(() => {})
 
 const rejectProposal: ActionDefinition = defineAction("reject-proposal")
@@ -73,7 +76,12 @@ interface TestProposalSet {
   byId(id: string): {
     listLinks(link?: unknown): Promise<readonly unknown[]>
   }
-  requestAction(input: { id: string; actionId: string; runId?: string }): Promise<unknown>
+  requestAction(input: {
+    id: string
+    actionId: string
+    params?: Record<string, unknown>
+    runId?: string
+  }): Promise<unknown>
 }
 
 interface TestObjectRuntime {
@@ -280,17 +288,163 @@ describe("delegated Sixb runtime", () => {
         actionId: approveProposal.id,
         runId: "preexisting-run",
       })
-    ).rejects.toThrow("cannot cross a durable execution boundary yet")
+    ).rejects.toThrow("cannot reuse this Action run")
+  })
 
-    // M01 deliberately cannot serialize delegated authority yet. A valid pair reaches that
-    // fail-closed boundary; the shared-session milestone replaces this temporary assertion.
+  test("owns Action runs by Share grant across session rotation", async () => {
+    const host = createRuntime()
+    const sixb = createTestSixb(host)
+    await sixb.objects(Proposal).upsert({
+      properties: { id: "proposal-1", title: "One", status: "shared", secret: "one" },
+    })
+
+    const access: RuntimeAccessPlan = {
+      grants: [
+        { kind: "object.view", selection: proposalSelection(["proposal-1"]) },
+        {
+          kind: "action.apply",
+          actionId: approveProposal.id,
+          subjects: [{ objectTypeId: Proposal.id, primaryId: "proposal-1" }],
+        },
+      ],
+    }
+    await seedShareAuthority(host, {
+      grantId: "grant-owner",
+      sessionIds: ["session-original", "session-rotated", "session-budgeted"],
+      access,
+    })
+    await seedShareAuthority(host, {
+      grantId: "grant-other",
+      sessionIds: ["session-other"],
+      access,
+    })
+
+    const original = host.withScope(
+      delegatedScope(host.id, access, {
+        grantId: "grant-owner",
+        sessionId: "session-original",
+      })
+    )
+    const rotated = host.withScope(
+      delegatedScope(host.id, access, {
+        grantId: "grant-owner",
+        sessionId: "session-rotated",
+      })
+    )
+    const other = host.withScope(
+      delegatedScope(host.id, access, {
+        grantId: "grant-other",
+        sessionId: "session-other",
+      })
+    )
+    const originalProposals = original.objects(Proposal) as unknown as TestProposalSet
+    const rotatedProposals = rotated.objects(Proposal) as unknown as TestProposalSet
+    const otherProposals = other.objects(Proposal) as unknown as TestProposalSet
+
+    const first = await originalProposals.requestAction({
+      id: "proposal-1",
+      actionId: approveProposal.id,
+      params: { note: "stable payload" },
+      runId: "grant-owned-run",
+    })
+    expect(first).toMatchObject({ created: true, runId: "grant-owned-run" })
+
+    const run = await host.storage.actionRuns?.getById({
+      projectId: host.id,
+      id: "grant-owned-run",
+    })
+    expect(run).not.toBeNull()
+    if (!run) throw new Error("Expected the Share-owned Action run to be stored.")
+    const actionExecution = await host.storage.executions.getById({
+      projectId: host.id,
+      id: run.executionId,
+    })
+    expect(actionExecution?.source.type).toBe("execution")
+    const requestExecution =
+      actionExecution?.source.type === "execution"
+        ? await host.storage.executions.getById({
+            projectId: host.id,
+            id: actionExecution.source.executionId,
+          })
+        : null
+    expect(requestExecution).toMatchObject({
+      authorizationRef: {
+        type: "delegated",
+        delegation: {
+          kind: "share",
+          grantId: "grant-owner",
+          sessionId: "session-original",
+        },
+      },
+    })
+    expect(requestExecution).not.toHaveProperty("requestedBy")
+
+    expect(await rotated.actions.runs.getById("grant-owned-run")).toEqual(run)
+    const budgeted = host.withScope(
+      createDelegatedRequestScope({
+        projectId: host.id,
+        requestId: "shared-request-session-budgeted",
+        correlationId: "shared-correlation-session-budgeted",
+        access,
+        limits: {
+          maxTraversalFacts: 100,
+          maxMaterializedObjects: 100,
+          maxTelemetrySeries: 10,
+          maxTelemetryPoints: 100,
+          maxVisibleJsonBytes: 64,
+        },
+        delegation: {
+          kind: "share",
+          id: "grant-owner",
+          sessionId: "session-budgeted",
+        },
+      })
+    )
+    await expect(budgeted.actions.runs.getById("grant-owned-run")).rejects.toMatchObject({
+      code: "delegated_execution_limit_exceeded",
+      metric: "visibleJsonBytes",
+      limit: 64,
+    })
     await expect(
-      sharedProposals.requestAction({
+      rotatedProposals.requestAction({
         id: "proposal-1",
         actionId: approveProposal.id,
-        runId: "allowed-before-durable-boundary",
+        params: { note: "stable payload" },
+        runId: "grant-owned-run",
       })
-    ).rejects.toThrow("cannot cross a durable execution boundary yet")
+    ).resolves.toMatchObject({ created: false, runId: "grant-owned-run" })
+
+    expect(await other.actions.runs.getById("grant-owned-run")).toBeNull()
+    await expect(
+      otherProposals.requestAction({
+        id: "proposal-1",
+        actionId: approveProposal.id,
+        params: { note: "different payload" },
+        runId: "grant-owned-run",
+      })
+    ).rejects.toMatchObject({
+      name: "AuthorizationError",
+      message: expect.stringContaining("cannot reuse this Action run"),
+    })
+
+    // A same-owner payload mismatch reaches the idempotency check. This distinguishes the other
+    // grant rejection above and proves ownership is checked before payload comparison.
+    await expect(
+      rotatedProposals.requestAction({
+        id: "proposal-1",
+        actionId: approveProposal.id,
+        params: { note: "different payload" },
+        runId: "grant-owned-run",
+      })
+    ).rejects.toBeInstanceOf(ActionRunError)
+
+    for (const delegated of [original, rotated, other]) {
+      await expect(delegated.actions.runs.list()).resolves.toEqual({
+        runs: [],
+        hasMore: false,
+        total: 0,
+      })
+    }
   })
 
   test("validates and budgets object list windows before storage", async () => {
@@ -490,14 +644,67 @@ describe("delegated Sixb runtime", () => {
   })
 })
 
-function delegatedScope(projectId: string, access: RuntimeAccessPlan) {
+function delegatedScope(
+  projectId: string,
+  access: RuntimeAccessPlan,
+  delegation: { readonly grantId: string; readonly sessionId: string } = {
+    grantId: "share-grant",
+    sessionId: "share-session",
+  }
+) {
   return createDelegatedRequestScope({
     projectId,
-    requestId: "shared-request",
-    correlationId: "shared-correlation",
+    requestId: `shared-request-${delegation.sessionId}`,
+    correlationId: `shared-correlation-${delegation.sessionId}`,
     access,
-    delegation: { kind: "share", id: "share-grant", sessionId: "share-session" },
+    delegation: {
+      kind: "share",
+      id: delegation.grantId,
+      sessionId: delegation.sessionId,
+    },
   })
+}
+
+async function seedShareAuthority(
+  host: ReturnType<typeof createRuntime>,
+  input: {
+    readonly grantId: string
+    readonly sessionIds: readonly string[]
+    readonly access: RuntimeAccessPlan
+  }
+): Promise<void> {
+  const createdAt = new Date("2026-01-01T00:00:00.000Z")
+  const expiresAt = new Date("2099-01-01T00:00:00.000Z")
+  const grants = host.storage.shareGrants
+  const sessions = host.storage.shareSessions
+  if (!grants || !sessions) throw new Error("Test runtime requires Share grant/session storage.")
+  await grants.create({
+    id: input.grantId,
+    projectId: host.id,
+    definitionId: "proposal-test-share",
+    target: { objectTypeId: Proposal.id, primaryId: "proposal-1" },
+    issuedBy: { type: "user", id: `issuer-${input.grantId}` },
+    authoritySnapshot: { version: 1, access: input.access },
+    tokenHash: sha256(`grant:${input.grantId}`),
+    destinationPath: "/proposals/proposal-1",
+    createdAt,
+    expiresAt,
+  })
+  for (const sessionId of input.sessionIds) {
+    await sessions.create({
+      id: sessionId,
+      projectId: host.id,
+      grantId: input.grantId,
+      tokenHash: sha256(`session:${sessionId}`),
+      createdAt,
+      expiresAt: new Date("2098-01-01T00:00:00.000Z"),
+      absoluteExpiresAt: expiresAt,
+    })
+  }
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex")
 }
 
 function proposalSelection(

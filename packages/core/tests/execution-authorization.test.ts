@@ -19,6 +19,7 @@ import {
   restoreTrustedPrimitiveExecutionScope,
 } from "../src/execution/durable"
 import {
+  createDelegatedRequestScope,
   createDisabledRequestScope,
   createKernelScope,
   createPrincipalRequestScope,
@@ -187,6 +188,42 @@ describe("runtime authorization capabilities", () => {
 })
 
 describe("execution scopes", () => {
+  test("serializes shared-session authority without fabricating a principal", () => {
+    const scope = createDelegatedRequestScope({
+      projectId: "project-1",
+      requestId: "shared-request-1",
+      correlationId: "shared-correlation-1",
+      access: { grants: [] },
+      delegation: {
+        kind: "share",
+        id: "share-grant-1",
+        sessionId: "share-session-1",
+      },
+    })
+
+    const record = executionRecordInputFromRuntime({
+      execution: scope.execution,
+      runtimeAuthorization: scope.authorization,
+    })
+
+    expect(record).toEqual({
+      id: scope.execution.id,
+      projectId: "project-1",
+      executor: { type: "request", requestId: "shared-request-1" },
+      source: { type: "http", requestId: "shared-request-1" },
+      correlationId: "shared-correlation-1",
+      authorizationRef: {
+        type: "delegated",
+        delegation: {
+          kind: "share",
+          grantId: "share-grant-1",
+          sessionId: "share-session-1",
+        },
+      },
+    })
+    expect(record).not.toHaveProperty("requestedBy")
+  })
+
   test("durable serialization rejects a mismatched execution and authority pair", () => {
     const projectOne = createTestingScope({ projectId: "project-1" })
     const projectTwo = createTestingScope({ projectId: "project-2" })

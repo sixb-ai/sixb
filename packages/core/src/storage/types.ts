@@ -12,6 +12,7 @@ import type { PipelineRunStorage } from "./pipeline-runs"
 import type { ProjectionRunStorage } from "./projection-runs"
 import type { RulesStorage } from "./rules"
 import type { ShareGrantStorage } from "./share-grants"
+import type { ShareSessionStorage } from "./share-sessions"
 import type { SyncRunStorage } from "./sync-runs"
 import type { TimeseriesStorage } from "./timeseries/types"
 import type { WebhookRunStorage } from "./webhook-runs"
@@ -210,6 +211,16 @@ export type {
 } from "./share-grants"
 export { ShareGrantStorageError } from "./share-grants"
 export type {
+  CreateShareSessionInput,
+  GetShareSessionByIdInput,
+  RenewShareSessionIfValidInput,
+  RevokeShareSessionInput,
+  ShareSessionRecord,
+  ShareSessionStorage,
+  ShareSessionStorageErrorCode,
+} from "./share-sessions"
+export { ShareSessionStorageError } from "./share-sessions"
+export type {
   FinishSyncRunInput,
   ListSyncRunsInput,
   ListSyncRunsResult,
@@ -318,6 +329,7 @@ export interface Storage {
   webhookRuns?: WebhookRunStorage
   rules?: RulesStorage
   shareGrants?: ShareGrantStorage
+  shareSessions?: ShareSessionStorage
   fileUploadSessions?: FileUploadSessionStore
   connectorConnections?: ConnectorConnectionStorage
 

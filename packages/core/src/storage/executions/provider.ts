@@ -22,7 +22,7 @@ export interface ExecutionStorageRow {
   readonly correlationId: string
   /** SQL-only projection of an execution source, used to enforce the parent foreign key. */
   readonly parentExecutionId: string | null
-  readonly authorityKind: "disabled" | "kernel" | "principal" | "trustedPrimitive"
+  readonly authorityKind: "delegated" | "disabled" | "kernel" | "principal" | "trustedPrimitive"
   readonly authorityUserId: string | null
   readonly authorityServiceAccountId: string | null
   readonly authoritySessionId: string | null
@@ -30,6 +30,9 @@ export interface ExecutionStorageRow {
   readonly authorityPrimitiveKind: TrustedPrimitiveKind | null
   readonly authorityPrimitiveId: string | null
   readonly authorityKernelOperation: "ontology.recover" | null
+  readonly authorityDelegationKind: "share" | null
+  readonly authorityDelegationId: string | null
+  readonly authorityDelegationSessionId: string | null
   readonly createdAt: Date
 }
 
@@ -132,6 +135,9 @@ function flattenAuthority(
   ExecutionStorageRow,
   | "authorityAccessTokenId"
   | "authorityKernelOperation"
+  | "authorityDelegationKind"
+  | "authorityDelegationId"
+  | "authorityDelegationSessionId"
   | "authorityKind"
   | "authorityPrimitiveId"
   | "authorityPrimitiveKind"
@@ -147,6 +153,9 @@ function flattenAuthority(
     authorityPrimitiveKind: null,
     authorityPrimitiveId: null,
     authorityKernelOperation: null,
+    authorityDelegationKind: null,
+    authorityDelegationId: null,
+    authorityDelegationSessionId: null,
   }
 
   switch (record.authorizationRef.type) {
@@ -177,6 +186,14 @@ function flattenAuthority(
         authorityKind: "trustedPrimitive",
         authorityPrimitiveKind: record.authorizationRef.primitive.kind,
         authorityPrimitiveId: record.authorizationRef.primitive.id,
+      }
+    case "delegated":
+      return {
+        ...empty,
+        authorityKind: "delegated",
+        authorityDelegationKind: record.authorizationRef.delegation.kind,
+        authorityDelegationId: record.authorizationRef.delegation.grantId,
+        authorityDelegationSessionId: record.authorizationRef.delegation.sessionId,
       }
     case "kernel":
       return {
@@ -269,6 +286,18 @@ function inflateAuthority(row: ExecutionStorageRow): CreateExecutionInput["autho
           kind: requireValue(row.authorityPrimitiveKind, "authority primitive kind"),
           id: requireValue(row.authorityPrimitiveId, "authority primitive id"),
           runId: row.executorId,
+        },
+      }
+    case "delegated":
+      return {
+        type: "delegated",
+        delegation: {
+          kind: requireValue(row.authorityDelegationKind, "authority delegation kind"),
+          grantId: requireValue(row.authorityDelegationId, "authority delegation id"),
+          sessionId: requireValue(
+            row.authorityDelegationSessionId,
+            "authority delegation session id"
+          ),
         },
       }
     case "kernel":
