@@ -224,6 +224,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 28,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "029-ai-usage-requested-reasoning",
+    status: "applied",
+    version: 29,
+  },
 ]
 
 afterEach(async () => {

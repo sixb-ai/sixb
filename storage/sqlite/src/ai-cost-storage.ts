@@ -610,14 +610,14 @@ function costRecord(input: {
   ratedAt: string
 }): AiModelCallCostRecord {
   const details = parseAiModelCallCostDetails(input.details)
+  const priceSource =
+    details.priceSource === undefined
+      ? undefined
+      : { ...details.priceSource, observedAt: new Date(details.priceSource.observedAt) }
   const base = {
     projectId: input.projectId,
     usageRecordId: input.usageId,
     pricingContext: details.pricingContext,
-    priceSource: {
-      ...details.priceSource,
-      observedAt: new Date(details.priceSource.observedAt),
-    },
     ratedAt: new Date(input.ratedAt),
   }
   if (input.status === "rated") {
@@ -625,6 +625,7 @@ function costRecord(input: {
       ...base,
       status: "rated",
       billingIdentity: { providerId: required(input.providerId), modelId: required(input.modelId) },
+      priceSource: required(priceSource),
       money: { currency: required(input.currency), amountNanos: required(input.amountNanos) },
       components: required(details.components),
     })
@@ -635,6 +636,7 @@ function costRecord(input: {
     ...(input.providerId && input.modelId
       ? { billingIdentity: { providerId: input.providerId, modelId: input.modelId } }
       : {}),
+    ...(priceSource === undefined ? {} : { priceSource }),
     reason: required(input.reason) as Extract<
       AiModelCallCostRecord,
       { status: "unpriceable" }

@@ -1,4 +1,9 @@
-import type { ModelCapabilities } from "./language-model"
+import {
+  MODEL_REASONING_EFFORTS,
+  type ModelCapabilities,
+  type ModelReasoningBudgetCapabilities,
+  type ModelReasoningCapabilities,
+} from "./language-model"
 
 export type ModelKind = "language" | "image" | "video" | "embedding"
 
@@ -30,7 +35,7 @@ export type ModelTokenPrice =
       readonly tiers: readonly ModelPricingTier[]
     }
 
-export interface LanguageModelPricing {
+export interface LanguageModelRateCard {
   readonly currency: "USD"
   readonly unit: "million-tokens"
   readonly input: ModelTokenPrice
@@ -48,7 +53,7 @@ export interface LanguageModelDefinition extends ModelDefinition {
   readonly contextWindow?: number
   readonly maxOutputTokens?: number
   readonly capabilities: ModelCapabilities
-  readonly pricing?: LanguageModelPricing
+  readonly rateCard?: LanguageModelRateCard
 }
 
 export function defineLanguageModel(definition: LanguageModelDefinition): LanguageModelDefinition {
@@ -66,7 +71,7 @@ export function defineLanguageModel(definition: LanguageModelDefinition): Langua
   const capabilities = freezeCapabilities(definition.capabilities)
   assertOptionalPositiveInteger(definition.contextWindow, "contextWindow")
   assertOptionalPositiveInteger(definition.maxOutputTokens, "maxOutputTokens")
-  if (definition.pricing) assertLanguageModelPricing(definition.pricing)
+  if (definition.rateCard) assertLanguageModelRateCard(definition.rateCard)
   return Object.freeze({
     kind: "language",
     providerId: definition.providerId,
@@ -84,7 +89,7 @@ export function defineLanguageModel(definition: LanguageModelDefinition): Langua
       ? {}
       : { maxOutputTokens: definition.maxOutputTokens }),
     capabilities,
-    ...(definition.pricing === undefined ? {} : { pricing: freezePricing(definition.pricing) }),
+    ...(definition.rateCard === undefined ? {} : { rateCard: freezeRateCard(definition.rateCard) }),
   })
 }
 
@@ -97,14 +102,15 @@ function freezeCapabilities(capabilities: ModelCapabilities): ModelCapabilities 
       ? "any"
       : freezeStrings(capabilities.inputMediaTypes, "capabilities.inputMediaTypes")
   for (const [field, value] of Object.entries(capabilities)) {
-    if (field === "inputMediaTypes") continue
+    if (field === "inputMediaTypes" || field === "reasoning") continue
     if (value !== undefined && typeof value !== "boolean") {
       throw new TypeError(`[Sixb] Model capability '${field}' must be boolean.`)
     }
   }
+  const reasoning = freezeReasoningCapabilities(capabilities.reasoning)
   return Object.freeze({
     ...(inputMediaTypes === undefined ? {} : { inputMediaTypes }),
-    ...(capabilities.reasoning === undefined ? {} : { reasoning: capabilities.reasoning }),
+    ...(reasoning === undefined ? {} : { reasoning }),
     ...(capabilities.localTools === undefined ? {} : { localTools: capabilities.localTools }),
     ...(capabilities.parallelToolCalls === undefined
       ? {}
@@ -118,24 +124,84 @@ function freezeCapabilities(capabilities: ModelCapabilities): ModelCapabilities 
   })
 }
 
-function freezePricing(pricing: LanguageModelPricing): LanguageModelPricing {
+function freezeReasoningCapabilities(
+  reasoning: ModelCapabilities["reasoning"]
+): ModelCapabilities["reasoning"] {
+  if (reasoning === undefined || reasoning === false) return reasoning
+  if (!reasoning || typeof reasoning !== "object" || Array.isArray(reasoning)) {
+    throw new TypeError("[Sixb] Model capability 'reasoning' must be false or an object.")
+  }
+  if (reasoning.canDisable !== undefined && typeof reasoning.canDisable !== "boolean") {
+    throw new TypeError("[Sixb] Model reasoning capability 'canDisable' must be boolean.")
+  }
+  const efforts = freezeReasoningEfforts(reasoning.efforts)
+  const budgetTokens = freezeReasoningBudgetCapabilities(reasoning.budgetTokens)
+  return Object.freeze({
+    ...(reasoning.canDisable === undefined ? {} : { canDisable: reasoning.canDisable }),
+    ...(efforts === undefined ? {} : { efforts }),
+    ...(budgetTokens === undefined ? {} : { budgetTokens }),
+  } satisfies ModelReasoningCapabilities)
+}
+
+function freezeReasoningEfforts(
+  efforts: ModelReasoningCapabilities["efforts"]
+): readonly (typeof MODEL_REASONING_EFFORTS)[number][] | undefined {
+  if (efforts === undefined) return undefined
+  if (!Array.isArray(efforts)) {
+    throw new TypeError("[Sixb] Model reasoning capability 'efforts' must be an array.")
+  }
+  const allowed = MODEL_REASONING_EFFORTS as readonly string[]
+  const seen = new Set<string>()
+  for (const effort of efforts) {
+    if (!allowed.includes(effort)) {
+      throw new TypeError(`[Sixb] Model reasoning effort '${String(effort)}' is invalid.`)
+    }
+    if (seen.has(effort)) {
+      throw new TypeError(`[Sixb] Model reasoning effort '${effort}' is duplicated.`)
+    }
+    seen.add(effort)
+  }
+  return Object.freeze([...efforts])
+}
+
+function freezeReasoningBudgetCapabilities(
+  budget: ModelReasoningCapabilities["budgetTokens"]
+): ModelReasoningBudgetCapabilities | undefined {
+  if (budget === undefined) return undefined
+  if (!budget || typeof budget !== "object" || Array.isArray(budget)) {
+    throw new TypeError("[Sixb] Model reasoning capability 'budgetTokens' must be an object.")
+  }
+  assertOptionalNonnegativeInteger(budget.min, "capabilities.reasoning.budgetTokens.min")
+  assertOptionalNonnegativeInteger(budget.max, "capabilities.reasoning.budgetTokens.max")
+  if (budget.min !== undefined && budget.max !== undefined && budget.max < budget.min) {
+    throw new TypeError(
+      "[Sixb] Model reasoning token budget maximum must not be below its minimum."
+    )
+  }
+  return Object.freeze({
+    ...(budget.min === undefined ? {} : { min: budget.min }),
+    ...(budget.max === undefined ? {} : { max: budget.max }),
+  })
+}
+
+function freezeRateCard(rateCard: LanguageModelRateCard): LanguageModelRateCard {
   return Object.freeze({
     currency: "USD",
     unit: "million-tokens",
-    input: freezeTokenPrice(pricing.input),
-    output: freezeTokenPrice(pricing.output),
-    ...(pricing.cacheReadInput === undefined
+    input: freezeTokenPrice(rateCard.input),
+    output: freezeTokenPrice(rateCard.output),
+    ...(rateCard.cacheReadInput === undefined
       ? {}
-      : { cacheReadInput: freezeTokenPrice(pricing.cacheReadInput) }),
-    ...(pricing.cacheWriteInput === undefined
+      : { cacheReadInput: freezeTokenPrice(rateCard.cacheReadInput) }),
+    ...(rateCard.cacheWriteInput === undefined
       ? {}
-      : { cacheWriteInput: freezeTokenPrice(pricing.cacheWriteInput) }),
-    ...(pricing.cacheWriteInput5m === undefined
+      : { cacheWriteInput: freezeTokenPrice(rateCard.cacheWriteInput) }),
+    ...(rateCard.cacheWriteInput5m === undefined
       ? {}
-      : { cacheWriteInput5m: freezeTokenPrice(pricing.cacheWriteInput5m) }),
-    ...(pricing.cacheWriteInput1h === undefined
+      : { cacheWriteInput5m: freezeTokenPrice(rateCard.cacheWriteInput5m) }),
+    ...(rateCard.cacheWriteInput1h === undefined
       ? {}
-      : { cacheWriteInput1h: freezeTokenPrice(pricing.cacheWriteInput1h) }),
+      : { cacheWriteInput1h: freezeTokenPrice(rateCard.cacheWriteInput1h) }),
   })
 }
 
@@ -156,11 +222,11 @@ function freezeTokenPrice(price: ModelTokenPrice): ModelTokenPrice {
       })
 }
 
-function assertLanguageModelPricing(pricing: LanguageModelPricing): void {
-  if (pricing.currency !== "USD" || pricing.unit !== "million-tokens") {
-    throw new TypeError("[Sixb] Model pricing must use USD per million tokens.")
+function assertLanguageModelRateCard(rateCard: LanguageModelRateCard): void {
+  if (rateCard.currency !== "USD" || rateCard.unit !== "million-tokens") {
+    throw new TypeError("[Sixb] Model rate cards must use USD per million tokens.")
   }
-  for (const [meter, value] of Object.entries(pricing)) {
+  for (const [meter, value] of Object.entries(rateCard)) {
     if (meter === "currency" || meter === "unit") continue
     if (typeof value === "string") {
       assertPrice(value, meter)
@@ -202,6 +268,12 @@ function assertModelId(value: string, field: string): void {
 function assertOptionalPositiveInteger(value: number | undefined, field: string): void {
   if (value !== undefined && (!Number.isSafeInteger(value) || value <= 0)) {
     throw new TypeError(`[Sixb] Model ${field} must be a positive safe integer.`)
+  }
+}
+
+function assertOptionalNonnegativeInteger(value: number | undefined, field: string): void {
+  if (value !== undefined && (!Number.isSafeInteger(value) || value < 0)) {
+    throw new TypeError(`[Sixb] Model ${field} must be a nonnegative safe integer.`)
   }
 }
 

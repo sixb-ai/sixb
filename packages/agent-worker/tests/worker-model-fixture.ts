@@ -49,7 +49,11 @@ export class WorkerTestModel implements LanguageModel {
     const capabilities = options.capabilities ??
       options.definition?.capabilities ?? {
         inputMediaTypes: [],
-        reasoning: true,
+        reasoning: {
+          canDisable: true,
+          efforts: ["minimal", "low", "medium", "high", "xhigh", "max"],
+          budgetTokens: {},
+        },
         localTools: true,
         parallelToolCalls: true,
         nativeStructuredOutput: true,

@@ -1,10 +1,9 @@
 export type { JsonObject, JsonPrimitive, JsonValue } from "../json"
 export { assertJsonObject, assertJsonValue, isJsonObject, isJsonValue } from "../json"
 export type { LanguageModelCatalog, ModelCatalog } from "./catalog"
-export { createLanguageModelCatalog } from "./catalog"
 export type {
   LanguageModelDefinition,
-  LanguageModelPricing,
+  LanguageModelRateCard,
   ModelDefinition,
   ModelKind,
   ModelPricingTier,
@@ -35,11 +34,21 @@ export type {
   LanguageModelStream,
   ModelCapabilities,
   ModelProvider,
+  ModelReasoning,
+  ModelReasoningBudget,
+  ModelReasoningBudgetCapabilities,
+  ModelReasoningCapabilities,
+  ModelReasoningEffort,
   ModelReasoningLevel,
   ModelResponseFormat,
   ModelToolSpecification,
 } from "./language-model"
-export { resolveLanguageModelDefinition, resolveModelCapabilities } from "./language-model"
+export {
+  isModelReasoning,
+  MODEL_REASONING_EFFORTS,
+  MODEL_REASONING_LEVELS,
+  modelReasoningSupportIssue,
+} from "./language-model"
 export type {
   ModelAssistantPart,
   ModelFilePart,
@@ -59,5 +68,5 @@ export type {
   ModelMoney,
   ModelReportedCost,
 } from "./pricing"
-export { priceModelCall } from "./pricing"
+export { rateModelCall } from "./pricing"
 export type { ModelOutput, ModelTool, ModelToolExecutionContext } from "./tools"

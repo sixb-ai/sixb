@@ -67,6 +67,9 @@ export class AiModelCallRecorder {
         requesterGroupIds: this.input.requesterGroupIds,
         providerId: event.providerId,
         requestedModelId: event.modelId,
+        ...(event.requestedReasoning === undefined
+          ? {}
+          : { requestedReasoning: event.requestedReasoning }),
         ...(event.responseModelId === undefined ? {} : { responseModelId: event.responseModelId }),
         responseId: event.responseId,
         usage: aiModelCallUsageFromModel(event.usage),
@@ -76,7 +79,6 @@ export class AiModelCallRecorder {
       normalizeAiModelCallRecord(record)
       const recoveryInput: RecoverAiModelCallInput = {
         usage: record,
-        definition: event.definition,
         cost: event.cost,
         ...(event.route === undefined ? {} : { route: event.route }),
         ratedAt: new Date(occurredAt),

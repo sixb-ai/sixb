@@ -67,7 +67,7 @@ export class AgentToolResultMediaBridge {
     const pending = this.#pending.slice()
     const signal = combinedSignal(pending, stepSignal)
     signal.throwIfAborted()
-    const supportsImages = await modelSupportsInlineImages(model, signal)
+    const supportsImages = modelSupportsInlineImages(model)
     if (!supportsImages) {
       this.#pending.splice(0, pending.length)
       return undefined

@@ -5459,6 +5459,34 @@
                               "requestedModelId": {
                                 "type": "string"
                               },
+                              "requestedReasoning": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "enum": [
+                                      "provider-default",
+                                      "none",
+                                      "minimal",
+                                      "low",
+                                      "medium",
+                                      "high",
+                                      "xhigh",
+                                      "max"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "budgetTokens": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      }
+                                    },
+                                    "required": ["budgetTokens"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
                               "responseModelId": {
                                 "type": "string"
                               },
@@ -5669,7 +5697,6 @@
                                       "sourceId",
                                       "sourceEntryId",
                                       "sourceVersion",
-                                      "sourceUrl",
                                       "observedAt"
                                     ],
                                     "additionalProperties": false
@@ -5829,7 +5856,6 @@
                                       "sourceId",
                                       "sourceEntryId",
                                       "sourceVersion",
-                                      "sourceUrl",
                                       "observedAt"
                                     ],
                                     "additionalProperties": false
@@ -5838,7 +5864,7 @@
                                     "type": "string",
                                     "enum": [
                                       "missingBillingIdentity",
-                                      "missingCatalogEntry",
+                                      "missingRateCard",
                                       "missingUsageMeter",
                                       "unsupportedPricingDimension",
                                       "invalidUsageForFormula"
@@ -5866,13 +5892,7 @@
                                     "format": "date-time"
                                   }
                                 },
-                                "required": [
-                                  "status",
-                                  "pricingContext",
-                                  "priceSource",
-                                  "reason",
-                                  "ratedAt"
-                                ],
+                                "required": ["status", "pricingContext", "reason", "ratedAt"],
                                 "additionalProperties": false
                               }
                             ]
@@ -22929,15 +22949,31 @@
                         "type": "string"
                       },
                       "reasoning": {
-                        "type": "string",
-                        "enum": [
-                          "provider-default",
-                          "none",
-                          "minimal",
-                          "low",
-                          "medium",
-                          "high",
-                          "xhigh"
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "provider-default",
+                              "none",
+                              "minimal",
+                              "low",
+                              "medium",
+                              "high",
+                              "xhigh",
+                              "max"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "budgetTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            },
+                            "required": ["budgetTokens"],
+                            "additionalProperties": false
+                          }
                         ]
                       },
                       "groupIds": {
@@ -23011,15 +23047,31 @@
                       "type": "string"
                     },
                     "reasoning": {
-                      "type": "string",
-                      "enum": [
-                        "provider-default",
-                        "none",
-                        "minimal",
-                        "low",
-                        "medium",
-                        "high",
-                        "xhigh"
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "provider-default",
+                            "none",
+                            "minimal",
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "budgetTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": ["budgetTokens"],
+                          "additionalProperties": false
+                        }
                       ]
                     },
                     "groupIds": {

@@ -30,7 +30,7 @@ const METER_ORDER: Readonly<Record<AiBillableMeter, number>> = {
 const METERS = new Set(Object.keys(METER_ORDER))
 const UNPRICEABLE_REASONS = new Set<AiUnpriceableReason>([
   "missingBillingIdentity",
-  "missingCatalogEntry",
+  "missingRateCard",
   "missingUsageMeter",
   "unsupportedPricingDimension",
   "invalidUsageForFormula",
@@ -84,12 +84,23 @@ export function normalizeAiModelCallCostRecord(
     projectId: input.projectId,
     usageRecordId: input.usageRecordId,
     pricingContext: normalizeAiPricingContext(input.pricingContext),
-    priceSource: normalizePriceSource(input.priceSource),
     ratedAt: cloneDate(input.ratedAt, "cost record ratedAt"),
   }
 
-  if (input.status === "rated") return normalizeRatedCost(input, base)
-  if (input.status === "unpriceable") return normalizeUnpriceableCost(input, base)
+  if (input.status === "rated") {
+    return normalizeRatedCost(input, {
+      ...base,
+      priceSource: normalizePriceSource(input.priceSource),
+    })
+  }
+  if (input.status === "unpriceable") {
+    return normalizeUnpriceableCost(input, {
+      ...base,
+      ...(input.priceSource === undefined
+        ? {}
+        : { priceSource: normalizePriceSource(input.priceSource) }),
+    })
+  }
   throw new TypeError("[Sixb] AI cost status is invalid.")
 }
 
@@ -282,8 +293,14 @@ function normalizePriceSource(input: AiPriceSource): AiPriceSource {
   assertNonBlank(input.sourceId, "price sourceId")
   assertNonBlank(input.sourceEntryId, "price sourceEntryId")
   assertNonBlank(input.sourceVersion, "price sourceVersion")
-  assertNonBlank(input.sourceUrl, "price sourceUrl")
-  return { ...input, observedAt: cloneDate(input.observedAt, "price source observedAt") }
+  if (input.sourceUrl !== undefined) assertNonBlank(input.sourceUrl, "price sourceUrl")
+  return {
+    sourceId: input.sourceId,
+    sourceEntryId: input.sourceEntryId,
+    sourceVersion: input.sourceVersion,
+    ...(input.sourceUrl === undefined ? {} : { sourceUrl: input.sourceUrl }),
+    observedAt: cloneDate(input.observedAt, "price source observedAt"),
+  }
 }
 
 function normalizeBillingIdentity(input: AiBillingIdentity): AiBillingIdentity {

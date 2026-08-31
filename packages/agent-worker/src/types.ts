@@ -13,12 +13,7 @@ import type {
 import type { AgentExecutionHost } from "@sixb/core/internal/agent-execution"
 import type { RunModelLoopInput } from "@sixb/core/internal/agents"
 import type { LoggingService } from "@sixb/core/internal/logging"
-import type {
-  LanguageModelDefinition,
-  ModelCallCost,
-  ModelRoute,
-  ModelTool,
-} from "@sixb/core/models"
+import type { ModelCallCost, ModelRoute, ModelTool } from "@sixb/core/models"
 import type {
   AgentStorage,
   AiCostStorage,
@@ -41,7 +36,6 @@ export type AgentWorkerStorage = Storage & {
 
 export interface RecoverAiModelCallInput {
   readonly usage: RecordAiModelCallInput
-  readonly definition: LanguageModelDefinition
   readonly cost: ModelCallCost
   readonly route?: ModelRoute
   readonly ratedAt: Date

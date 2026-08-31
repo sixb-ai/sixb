@@ -1,6 +1,6 @@
 import type { AiModelCallUsageRecord } from "../ai-usage"
 
-/** Token meters supported by the deterministic local catalog rater. */
+/** Token meters supported by deterministic local rate cards. */
 export type AiBillableMeter =
   | "tokens.input.total"
   | "tokens.input.uncached"
@@ -19,7 +19,7 @@ export interface AiMoney {
   readonly amountNanos: string
 }
 
-/** Provider and model key in a pricing catalog. */
+/** Provider and model identity used for billing. */
 export interface AiBillingIdentity {
   readonly providerId: string
   readonly modelId: string
@@ -39,12 +39,12 @@ export interface AiPricingContext {
   readonly mode?: string
 }
 
-/** Immutable provenance of the compact catalog entry applied to a valuation. */
+/** Immutable provenance of the provider report or rate card applied to a valuation. */
 export interface AiPriceSource {
   readonly sourceId: string
   readonly sourceEntryId: string
   readonly sourceVersion: string
-  readonly sourceUrl: string
+  readonly sourceUrl?: string
   readonly observedAt: Date
 }
 
@@ -57,7 +57,7 @@ export interface AiCostComponent {
 
 export type AiUnpriceableReason =
   | "missingBillingIdentity"
-  | "missingCatalogEntry"
+  | "missingRateCard"
   | "missingUsageMeter"
   | "unsupportedPricingDimension"
   | "invalidUsageForFormula"
@@ -66,7 +66,6 @@ interface AiModelCallCostRecordBase {
   readonly projectId: string
   readonly usageRecordId: string
   readonly pricingContext: AiPricingContext
-  readonly priceSource: AiPriceSource
   readonly ratedAt: Date
 }
 
@@ -74,14 +73,16 @@ interface AiModelCallCostRecordBase {
 export interface AiRatedModelCallCostRecord extends AiModelCallCostRecordBase {
   readonly status: "rated"
   readonly billingIdentity: AiBillingIdentity
+  readonly priceSource: AiPriceSource
   readonly money: AiMoney
   readonly components: readonly AiCostComponent[]
 }
 
-/** Explicit result when the compact catalog cannot completely and safely value a call. */
+/** Explicit result when a call cannot be completely and safely valued. */
 export interface AiUnpriceableModelCallCostRecord extends AiModelCallCostRecordBase {
   readonly status: "unpriceable"
   readonly billingIdentity?: AiBillingIdentity
+  readonly priceSource?: AiPriceSource
   readonly reason: AiUnpriceableReason
   readonly missingMeters?: readonly AiBillableMeter[]
 }

@@ -1,6 +1,6 @@
 import type { SixbErrorCode, SixbFailure } from "../errors/types"
 import type { JsonValue } from "../json"
-import type { LanguageModelDefinition, ModelCallCost, ModelRoute } from "../models"
+import type { ModelCallCost, ModelRoute } from "../models"
 import type { ProjectionRunFailureCode } from "../projections/types"
 import type { ProviderScope } from "../provider-scope"
 import type { ActionRunFailureCode } from "../storage/action-runs/types"
@@ -211,7 +211,6 @@ export type AgentAiUsageRecordPayload = Omit<
 }
 
 export interface AgentAiUsageAccountingPayload {
-  readonly definition: LanguageModelDefinition
   readonly cost: ModelCallCost
   readonly route?: ModelRoute
   readonly ratedAt: string

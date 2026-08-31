@@ -1,4 +1,4 @@
-import type { LanguageModelPricing, ModelTokenPrice } from "./definitions"
+import type { LanguageModelRateCard, ModelTokenPrice } from "./definitions"
 import type { ModelUsage } from "./events"
 
 export interface ModelMoney {
@@ -37,14 +37,14 @@ export type ModelCallCost =
     }
   | {
       readonly status: "unpriceable"
-      readonly reason: "missing-pricing" | "missing-usage" | "inconsistent-usage"
+      readonly reason: "missing-rate-card" | "missing-usage" | "inconsistent-usage"
       readonly missingMeters?: readonly ModelCostMeter[]
     }
 
-/** Prefer the provider's bill over catalog estimates, then rate complete token meters locally. */
-export function priceModelCall(input: {
+/** Prefer the provider's bill over rate-card estimates, then rate complete token meters locally. */
+export function rateModelCall(input: {
   readonly usage: ModelUsage
-  readonly pricing?: LanguageModelPricing
+  readonly rateCard?: LanguageModelRateCard
   readonly reported?: ModelReportedCost
 }): ModelCallCost {
   if (input.reported) {
@@ -55,8 +55,8 @@ export function priceModelCall(input: {
       ...(input.reported.providerId === undefined ? {} : { providerId: input.reported.providerId }),
     }
   }
-  if (!input.pricing) return { status: "unpriceable", reason: "missing-pricing" }
-  const { usage, pricing } = input
+  if (!input.rateCard) return { status: "unpriceable", reason: "missing-rate-card" }
+  const { usage, rateCard } = input
   if (!validUsageCounters(usage)) {
     return { status: "unpriceable", reason: "inconsistent-usage" }
   }
@@ -71,24 +71,24 @@ export function priceModelCall(input: {
     }
   }
 
-  const partitioned = partitionInputUsage(usage, pricing)
+  const partitioned = partitionInputUsage(usage, rateCard)
   if (partitioned.status !== "rated") return partitioned
 
   const components: ModelCostComponent[] = []
   if (!partitioned.partitioned) {
     components.push(
-      component("tokens.input.total", usage.inputTokens, pricing.input, usage.inputTokens)
+      component("tokens.input.total", usage.inputTokens, rateCard.input, usage.inputTokens)
     )
   } else {
     components.push(
-      component("tokens.input.uncached", partitioned.uncached, pricing.input, usage.inputTokens)
+      component("tokens.input.uncached", partitioned.uncached, rateCard.input, usage.inputTokens)
     )
     if (partitioned.cacheRead !== undefined) {
       components.push(
         component(
           "tokens.input.cacheRead",
           partitioned.cacheRead,
-          pricing.cacheReadInput!,
+          rateCard.cacheReadInput!,
           usage.inputTokens
         )
       )
@@ -98,7 +98,7 @@ export function priceModelCall(input: {
         component(
           "tokens.input.cacheWrite",
           partitioned.cacheWrite,
-          pricing.cacheWriteInput!,
+          rateCard.cacheWriteInput!,
           usage.inputTokens
         )
       )
@@ -108,7 +108,7 @@ export function priceModelCall(input: {
         component(
           "tokens.input.cacheWrite5m",
           partitioned.cacheWrite5m,
-          pricing.cacheWriteInput5m ?? pricing.cacheWriteInput!,
+          rateCard.cacheWriteInput5m ?? rateCard.cacheWriteInput!,
           usage.inputTokens
         )
       )
@@ -118,19 +118,19 @@ export function priceModelCall(input: {
         component(
           "tokens.input.cacheWrite1h",
           partitioned.cacheWrite1h,
-          pricing.cacheWriteInput1h ?? pricing.cacheWriteInput!,
+          rateCard.cacheWriteInput1h ?? rateCard.cacheWriteInput!,
           usage.inputTokens
         )
       )
     }
   }
   components.push(
-    component("tokens.output.total", usage.outputTokens, pricing.output, usage.inputTokens)
+    component("tokens.output.total", usage.outputTokens, rateCard.output, usage.inputTokens)
   )
   const total = components.reduce((sum, entry) => sum + BigInt(entry.chargeAmountNanos), 0n)
   return {
     status: "rated",
-    money: { currency: pricing.currency, amountNanos: total.toString() },
+    money: { currency: rateCard.currency, amountNanos: total.toString() },
     components,
   }
 }
@@ -148,7 +148,7 @@ type PartitionResult =
     }
   | Extract<ModelCallCost, { status: "unpriceable" }>
 
-function partitionInputUsage(usage: ModelUsage, pricing: LanguageModelPricing): PartitionResult {
+function partitionInputUsage(usage: ModelUsage, rateCard: LanguageModelRateCard): PartitionResult {
   const hasSpecificWrites =
     usage.cacheWrite5mInputTokens !== undefined || usage.cacheWrite1hInputTokens !== undefined
   const cacheWriteSpecific =
@@ -166,10 +166,10 @@ function partitionInputUsage(usage: ModelUsage, pricing: LanguageModelPricing): 
     usage.cacheReadInputTokens !== undefined ||
     usage.cacheWriteInputTokens !== undefined ||
     hasSpecificWrites ||
-    pricing.cacheReadInput !== undefined ||
-    pricing.cacheWriteInput !== undefined ||
-    pricing.cacheWriteInput5m !== undefined ||
-    pricing.cacheWriteInput1h !== undefined
+    rateCard.cacheReadInput !== undefined ||
+    rateCard.cacheWriteInput !== undefined ||
+    rateCard.cacheWriteInput5m !== undefined ||
+    rateCard.cacheWriteInput1h !== undefined
   if (!partitioned) return { status: "rated", partitioned: false }
 
   const cacheRead = usage.cacheReadInputTokens ?? 0
@@ -180,59 +180,59 @@ function partitionInputUsage(usage: ModelUsage, pricing: LanguageModelPricing): 
 
   const missing: ModelCostMeter[] = []
   if (usage.uncachedInputTokens === undefined) missing.push("tokens.input.uncached")
-  if (pricing.cacheReadInput !== undefined && usage.cacheReadInputTokens === undefined) {
+  if (rateCard.cacheReadInput !== undefined && usage.cacheReadInputTokens === undefined) {
     missing.push("tokens.input.cacheRead")
   }
   if (
-    pricing.cacheWriteInput !== undefined &&
-    pricing.cacheWriteInput5m === undefined &&
-    pricing.cacheWriteInput1h === undefined &&
+    rateCard.cacheWriteInput !== undefined &&
+    rateCard.cacheWriteInput5m === undefined &&
+    rateCard.cacheWriteInput1h === undefined &&
     usage.cacheWriteInputTokens === undefined
   ) {
     missing.push("tokens.input.cacheWrite")
   }
-  if (pricing.cacheWriteInput5m !== undefined && usage.cacheWrite5mInputTokens === undefined) {
+  if (rateCard.cacheWriteInput5m !== undefined && usage.cacheWrite5mInputTokens === undefined) {
     missing.push("tokens.input.cacheWrite5m")
   }
-  if (pricing.cacheWriteInput1h !== undefined && usage.cacheWrite1hInputTokens === undefined) {
+  if (rateCard.cacheWriteInput1h !== undefined && usage.cacheWrite1hInputTokens === undefined) {
     missing.push("tokens.input.cacheWrite1h")
   }
   if (missing.length > 0) {
     return { status: "unpriceable", reason: "missing-usage", missingMeters: missing }
   }
-  if (cacheRead > 0 && pricing.cacheReadInput === undefined) {
+  if (cacheRead > 0 && rateCard.cacheReadInput === undefined) {
     return {
       status: "unpriceable",
-      reason: "missing-pricing",
+      reason: "missing-rate-card",
       missingMeters: ["tokens.input.cacheRead"],
     }
   }
-  if (!hasSpecificWrites && totalWrite > 0 && pricing.cacheWriteInput === undefined) {
+  if (!hasSpecificWrites && totalWrite > 0 && rateCard.cacheWriteInput === undefined) {
     return {
       status: "unpriceable",
-      reason: "missing-pricing",
+      reason: "missing-rate-card",
       missingMeters: ["tokens.input.cacheWrite"],
     }
   }
   if (
     (usage.cacheWrite5mInputTokens ?? 0) > 0 &&
-    pricing.cacheWriteInput5m === undefined &&
-    pricing.cacheWriteInput === undefined
+    rateCard.cacheWriteInput5m === undefined &&
+    rateCard.cacheWriteInput === undefined
   ) {
     return {
       status: "unpriceable",
-      reason: "missing-pricing",
+      reason: "missing-rate-card",
       missingMeters: ["tokens.input.cacheWrite5m"],
     }
   }
   if (
     (usage.cacheWrite1hInputTokens ?? 0) > 0 &&
-    pricing.cacheWriteInput1h === undefined &&
-    pricing.cacheWriteInput === undefined
+    rateCard.cacheWriteInput1h === undefined &&
+    rateCard.cacheWriteInput === undefined
   ) {
     return {
       status: "unpriceable",
-      reason: "missing-pricing",
+      reason: "missing-rate-card",
       missingMeters: ["tokens.input.cacheWrite1h"],
     }
   }
@@ -245,13 +245,13 @@ function partitionInputUsage(usage: ModelUsage, pricing: LanguageModelPricing): 
     status: "rated",
     partitioned: true,
     uncached,
-    ...(pricing.cacheReadInput === undefined ? {} : { cacheRead }),
+    ...(rateCard.cacheReadInput === undefined ? {} : { cacheRead }),
     ...(hasSpecificWrites
       ? {
           cacheWrite5m: usage.cacheWrite5mInputTokens ?? 0,
           cacheWrite1h: usage.cacheWrite1hInputTokens ?? 0,
         }
-      : pricing.cacheWriteInput === undefined
+      : rateCard.cacheWriteInput === undefined
         ? {}
         : { cacheWrite: totalWrite }),
   }

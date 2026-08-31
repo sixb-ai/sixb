@@ -56,9 +56,10 @@ silently losing usage. This local path cannot close a process-crash window befor
 is observed; provider-side reconciliation is the appropriate later layer for that guarantee.
 
 Valuation is captured at call completion. Provider-reported totals are authoritative when present;
-otherwise the core model runtime rates exact token meters against the immutable pricing attached to
-the resolved model definition. Missing pricing or incomplete cache/token meters remain explicitly
-unpriceable. Routed provider and model identities are stored separately from the gateway identity.
+otherwise the core model runtime rates exact token meters against the model's immutable rate card.
+Missing rate cards or incomplete cache/token meters remain explicitly unpriceable. Routed provider
+and model identities are stored separately from the gateway identity. Catalog discovery is never on
+the inference or accounting path.
 
 ## Live Stream
 

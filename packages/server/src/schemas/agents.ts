@@ -1,4 +1,4 @@
-import { AGENT_REASONING_LEVELS, MAX_AGENT_CONTEXT_ENTRIES } from "@sixb/core"
+import { MAX_AGENT_CONTEXT_ENTRIES } from "@sixb/core"
 import {
   AGENT_RUN_DIAGNOSTIC_CODES,
   AGENT_RUN_FAILURE_CODES,
@@ -11,6 +11,7 @@ import { AiCostSummarySchema } from "./ai-accounting"
 import { AiUsageSummarySchema } from "./ai-usage"
 import { JsonValueSchema, sixbFailureSchema } from "./common"
 import { FileRefSchema } from "./files"
+import { ModelReasoningLevelSchema, ModelReasoningSchema } from "./models"
 
 export const AgentRunFailureSchema: z.ZodType<SixbFailure<AgentRunFailureCode>> =
   sixbFailureSchema(AGENT_RUN_FAILURE_CODES)
@@ -81,14 +82,15 @@ export const AgentLoopConfigSchema = z.object({
     .optional(),
 })
 
-export const AgentReasoningLevelSchema = z.enum(AGENT_REASONING_LEVELS)
+export const AgentReasoningLevelSchema = ModelReasoningLevelSchema
+export const AgentReasoningSchema = ModelReasoningSchema
 
 export const AgentCatalogItemSchema = z.object({
   id: z.string(),
   name: z.string(),
   description: z.string().optional(),
   modelId: z.string().optional(),
-  reasoning: AgentReasoningLevelSchema.optional(),
+  reasoning: AgentReasoningSchema.optional(),
   groupIds: z.array(z.string()),
   loop: AgentLoopConfigSchema.optional(),
 })

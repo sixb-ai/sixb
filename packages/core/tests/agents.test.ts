@@ -342,6 +342,28 @@ describe("defineAgent", () => {
     }).toThrow(TypeError)
   })
 
+  test("validates and snapshots exact reasoning budgets", () => {
+    const reasoning = { budgetTokens: 4_096 }
+    const agent = defineAgent("research", {
+      name: "Research Assistant",
+      model,
+      reasoning,
+      instructions: "Research.",
+    })
+    reasoning.budgetTokens = 8_192
+
+    expect(agent.reasoning).toEqual({ budgetTokens: 4_096 })
+    expect(Object.isFrozen(agent.reasoning)).toBe(true)
+    expect(() =>
+      defineAgent("invalid", {
+        name: "Invalid",
+        model,
+        reasoning: { budgetTokens: -1 },
+        instructions: "Invalid.",
+      })
+    ).toThrow("reasoning must be one of")
+  })
+
   test("normalizes manually constructed tools before selecting them", async () => {
     const input = { query: "string" } as { query: string }
     const handlerResult = { results: ["sixb"] }

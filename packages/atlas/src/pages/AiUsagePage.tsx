@@ -125,9 +125,8 @@ export function AiUsagePage() {
   }
 
   const totals = overview.totals
-  const catalogValuedCalls = totals.costs.ratedCallCount
-  const coverage =
-    totals.modelCallCount === 0 ? 0 : (catalogValuedCalls / totals.modelCallCount) * 100
+  const ratedCalls = totals.costs.ratedCallCount
+  const coverage = totals.modelCallCount === 0 ? 0 : (ratedCalls / totals.modelCallCount) * 100
   const selectedAmount = amountForCurrency(totals.costs.amounts, currency)
   const tokenSeries = overview.series.map((period) => ({
     at: period.start,
@@ -314,7 +313,7 @@ export function AiUsagePage() {
             <AiUsageMetricCard
               label="Pricing coverage"
               value={`${coverage.toFixed(coverage >= 99.95 ? 0 : 1)}%`}
-              description={`${catalogValuedCalls.toLocaleString()} of ${totals.modelCallCount.toLocaleString()} calls catalog-valued`}
+              description={`${ratedCalls.toLocaleString()} of ${totals.modelCallCount.toLocaleString()} calls valued`}
               icon={<Coins className="size-4" />}
             />
           </div>
@@ -548,7 +547,12 @@ function ModelCallsTable({
                     </TableCell>
                     <TableCell>
                       <p className="font-medium">{call.usage.requestedModelId}</p>
-                      <p className="text-xs text-muted-foreground">{call.usage.providerId}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {call.usage.providerId}
+                        {call.usage.requestedReasoning === undefined
+                          ? ""
+                          : ` · ${formatReasoning(call.usage.requestedReasoning)}`}
+                      </p>
                     </TableCell>
                     <TableCell className="text-right font-mono text-xs tabular-nums">
                       {formatOptionalTokens(call.usage.usage.totalTokens)}
@@ -944,6 +948,12 @@ function formatOptionalTokens(value: number | undefined): string {
   return value === undefined ? "—" : formatCompactNumber(value)
 }
 
+function formatReasoning(reasoning: string | { budgetTokens: number }): string {
+  return typeof reasoning === "string"
+    ? `${reasoning} reasoning`
+    : `${reasoning.budgetTokens.toLocaleString()}-token reasoning budget`
+}
+
 function formatCompactNumber(value: number): string {
   return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(
     value
@@ -1018,8 +1028,8 @@ function unpriceableReasonLabel(
   switch (reason) {
     case "missingBillingIdentity":
       return "Missing billing identity"
-    case "missingCatalogEntry":
-      return "Missing Models.dev entry"
+    case "missingRateCard":
+      return "Missing rate card"
     case "missingUsageMeter":
       return "Missing usage meter"
     case "unsupportedPricingDimension":

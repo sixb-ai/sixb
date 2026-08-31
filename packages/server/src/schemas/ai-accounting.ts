@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { AiUsageSummarySchema } from "./ai-usage"
+import { ModelReasoningSchema } from "./models"
 
 const IntegerStringSchema = z.string().regex(/^\d+$/)
 const IsoDateSchema = z.string().datetime({ offset: true })
@@ -110,7 +111,7 @@ const AiPriceSourceSchema = z.object({
   sourceId: z.string(),
   sourceEntryId: z.string(),
   sourceVersion: z.string(),
-  sourceUrl: z.string().url(),
+  sourceUrl: z.string().url().optional(),
   observedAt: IsoDateSchema,
 })
 
@@ -128,10 +129,10 @@ const AiModelCallCostSchema = z.discriminatedUnion("status", [
     status: z.literal("unpriceable"),
     billingIdentity: AiBillingIdentitySchema.optional(),
     pricingContext: AiPricingContextSchema,
-    priceSource: AiPriceSourceSchema,
+    priceSource: AiPriceSourceSchema.optional(),
     reason: z.enum([
       "missingBillingIdentity",
-      "missingCatalogEntry",
+      "missingRateCard",
       "missingUsageMeter",
       "unsupportedPricingDimension",
       "invalidUsageForFormula",
@@ -148,6 +149,7 @@ const AiModelCallUsageRecordSchema = z.object({
   callId: z.string(),
   providerId: z.string(),
   requestedModelId: z.string(),
+  requestedReasoning: ModelReasoningSchema.optional(),
   responseModelId: z.string().optional(),
   responseId: z.string(),
   usage: AiUsageSummarySchema,

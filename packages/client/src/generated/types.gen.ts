@@ -1849,6 +1849,18 @@ export type ListAiModelCallsResponses = {
         callId: string
         providerId: string
         requestedModelId: string
+        requestedReasoning?:
+          | "provider-default"
+          | "none"
+          | "minimal"
+          | "low"
+          | "medium"
+          | "high"
+          | "xhigh"
+          | "max"
+          | {
+              budgetTokens: number
+            }
         responseModelId?: string
         responseId: string
         usage: {
@@ -1902,7 +1914,7 @@ export type ListAiModelCallsResponses = {
               sourceId: string
               sourceEntryId: string
               sourceVersion: string
-              sourceUrl: string
+              sourceUrl?: string
               observedAt: string
             }
             money: {
@@ -1944,16 +1956,16 @@ export type ListAiModelCallsResponses = {
               cacheWriteTtlSeconds?: number
               mode?: string
             }
-            priceSource: {
+            priceSource?: {
               sourceId: string
               sourceEntryId: string
               sourceVersion: string
-              sourceUrl: string
+              sourceUrl?: string
               observedAt: string
             }
             reason:
               | "missingBillingIdentity"
-              | "missingCatalogEntry"
+              | "missingRateCard"
               | "missingUsageMeter"
               | "unsupportedPricingDimension"
               | "invalidUsageForFormula"
@@ -7985,7 +7997,18 @@ export type ListAgentsResponses = {
     name: string
     description?: string
     modelId?: string
-    reasoning?: "provider-default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
+    reasoning?:
+      | "provider-default"
+      | "none"
+      | "minimal"
+      | "low"
+      | "medium"
+      | "high"
+      | "xhigh"
+      | "max"
+      | {
+          budgetTokens: number
+        }
     groupIds: Array<string>
     loop?: {
       stopWhen?: {
@@ -8026,7 +8049,18 @@ export type GetAgentResponses = {
     name: string
     description?: string
     modelId?: string
-    reasoning?: "provider-default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
+    reasoning?:
+      | "provider-default"
+      | "none"
+      | "minimal"
+      | "low"
+      | "medium"
+      | "high"
+      | "xhigh"
+      | "max"
+      | {
+          budgetTokens: number
+        }
     groupIds: Array<string>
     loop?: {
       stopWhen?: {

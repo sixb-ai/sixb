@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { LanguageModelRequest, LanguageModelStreamEvent } from "@sixb/core/models"
-import { ModelProviderError, resolveLanguageModelDefinition } from "@sixb/core/models"
+import { ModelProviderError } from "@sixb/core/models"
 import { anthropic, createAnthropic } from "../src"
 import { decodeServerSentEvents } from "../src/sse"
 
@@ -229,6 +229,30 @@ describe("Anthropic provider", () => {
     ])
   })
 
+  test("maps exact reasoning budgets and rejects unsupported effort without approximation", async () => {
+    let capturedBody: Record<string, unknown> | undefined
+    let requests = 0
+    const provider = createAnthropic({
+      apiKey: "secret-key",
+      fetch: async (_input, init) => {
+        requests += 1
+        capturedBody = JSON.parse(String(init?.body))
+        return sseResponse([])
+      },
+    })
+    await provider("claude-sonnet-4", { maxOutputTokens: 8_192 }).stream(
+      request({ reasoning: { budgetTokens: 4_096 } })
+    )
+
+    expect(capturedBody).toMatchObject({
+      thinking: { type: "enabled", budget_tokens: 4_096 },
+    })
+    await expect(
+      provider("claude-sonnet-4").stream(request({ reasoning: "minimal" }))
+    ).rejects.toThrow("does not support reasoning effort 'minimal'")
+    expect(requests).toBe(1)
+  })
+
   test("streams tool JSON and replays signed provider blocks exactly", async () => {
     let capturedBody: Record<string, unknown> | undefined
     let call = 0
@@ -448,7 +472,7 @@ describe("Anthropic provider", () => {
     ])
   })
 
-  test("loads paged model metadata, capabilities, and exact family pricing", async () => {
+  test("loads paged model metadata, capabilities, and family rate cards", async () => {
     const requested: string[] = []
     const provider = createAnthropic({
       apiKey: "catalog-key",
@@ -469,7 +493,20 @@ describe("Anthropic provider", () => {
                 capabilities: {
                   image_input: { supported: true },
                   pdf_input: { supported: true },
-                  thinking: { supported: true },
+                  thinking: {
+                    supported: true,
+                    types: {
+                      adaptive: { supported: true },
+                      enabled: { supported: false },
+                    },
+                  },
+                  effort: {
+                    low: { supported: true },
+                    medium: { supported: true },
+                    high: { supported: true },
+                    xhigh: { supported: true },
+                    max: { supported: true },
+                  },
                   structured_outputs: { supported: true },
                   code_execution: { supported: true },
                 },
@@ -506,13 +543,16 @@ describe("Anthropic provider", () => {
       maxOutputTokens: 128_000,
       capabilities: {
         inputMediaTypes: ["image/jpeg", "image/png", "image/gif", "image/webp", "application/pdf"],
-        reasoning: true,
+        reasoning: {
+          canDisable: true,
+          efforts: ["low", "medium", "high", "xhigh", "max"],
+        },
         localTools: true,
         parallelToolCalls: true,
         nativeStructuredOutput: true,
         providerExecutedTools: true,
       },
-      pricing: {
+      rateCard: {
         input: "5",
         output: "25",
         cacheReadInput: "0.5",
@@ -520,12 +560,15 @@ describe("Anthropic provider", () => {
         cacheWriteInput1h: "10",
       },
     })
-    expect(definitions[1]?.pricing).toMatchObject({ input: "2", output: "10" })
+    expect(definitions[1]?.capabilities.reasoning).toBe(false)
+    expect(definitions[1]?.rateCard).toMatchObject({ input: "2", output: "10" })
   })
 
-  test("applies first-party fast, residency, and cache TTL pricing modifiers", async () => {
+  test("builds request-specific rate cards without loading the catalog", () => {
+    let requests = 0
     const provider = createAnthropic({
       fetch: async () => {
+        requests += 1
         throw new Error("catalog unavailable")
       },
     })
@@ -537,8 +580,8 @@ describe("Anthropic provider", () => {
       },
     })
 
-    await expect(resolveLanguageModelDefinition(model)).resolves.toMatchObject({
-      pricing: {
+    expect(model.definition).toMatchObject({
+      rateCard: {
         input: "11",
         output: "55",
         cacheReadInput: "1.1",
@@ -549,7 +592,8 @@ describe("Anthropic provider", () => {
     const serverToolModel = provider("claude-opus-5", {
       providerTools: [{ type: "web_search_20260209", name: "web_search" }],
     })
-    expect((await resolveLanguageModelDefinition(serverToolModel)).pricing).toBeUndefined()
+    expect(serverToolModel.definition.rateCard).toBeUndefined()
+    expect(requests).toBe(0)
   })
 
   test("retries retryable pre-stream responses and preserves pause_turn", async () => {

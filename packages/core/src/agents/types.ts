@@ -2,7 +2,7 @@ import type { BlobBody, FileRef } from "../blob-storage"
 import type { ConnectorRuntime } from "../connectors"
 import type { JsonPrimitive, JsonValue, ReadonlyJsonValue } from "../json"
 import type { Logger } from "../logging"
-import type { LanguageModel, ModelReasoningLevel } from "../models"
+import { type LanguageModel, MODEL_REASONING_LEVELS, type ModelReasoning } from "../models"
 import type { InferSchema } from "../ontology/inference"
 import type { Schema } from "../ontology/types"
 import type { GroupDefinition } from "../security"
@@ -14,17 +14,12 @@ export type {
   AgentContextPart,
 } from "./context"
 
-export type AgentReasoningLevel = ModelReasoningLevel
+export type AgentReasoning = ModelReasoning
 
-export const AGENT_REASONING_LEVELS = [
-  "provider-default",
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-] as const satisfies readonly AgentReasoningLevel[]
+/** @deprecated Use {@link AgentReasoning}. */
+export type AgentReasoningLevel = AgentReasoning
+
+export const AGENT_REASONING_LEVELS = MODEL_REASONING_LEVELS
 
 /**
  * Loop / stop controls for an agent run.
@@ -182,7 +177,7 @@ export interface DefineAgentConfig {
   readonly name: string
   readonly description?: string
   readonly model: LanguageModel
-  readonly reasoning?: AgentReasoningLevel
+  readonly reasoning?: AgentReasoning
   readonly instructions: string
   readonly groups?: readonly GroupDefinition[]
   /** Reusable tools this agent is explicitly allowed to call. */
@@ -204,7 +199,7 @@ export interface AgentDefinition<TId extends string = string> {
   readonly name: string
   readonly description?: string
   readonly model: LanguageModel
-  readonly reasoning?: AgentReasoningLevel
+  readonly reasoning?: AgentReasoning
   readonly instructions: string
   readonly groupIds: readonly string[]
   /** Selected tool definitions, normalized to an empty array when omitted. */

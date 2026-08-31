@@ -1,8 +1,8 @@
 # @sixb/anthropic
 
-Callable Anthropic provider for Sixb's core model contract. It uses the native Messages API, loads
-current model capabilities and limits from Anthropic's model catalog, and rates token usage with
-Anthropic's published family pricing.
+Callable Anthropic provider for Sixb's core model contract. It uses the native Messages API and a
+small provider-owned rate card for Anthropic's published family prices. Current model metadata and
+limits remain available through the explicit catalog API.
 
 ```ts
 import { anthropic } from "@sixb/anthropic"
@@ -39,9 +39,22 @@ const model = anthropic("claude-sonnet-5", {
 })
 ```
 
-The model catalog is cached in memory and supports pagination. Inference still works if catalog
-enrichment is unavailable; known Claude families retain their published token pricing while
-capabilities fall back conservatively.
+Agent and model-loop reasoning uses the shared provider-neutral preference. Anthropic named efforts
+map directly to `output_config.effort`; exact budgets map to native manual thinking:
+
+```ts
+reasoning: "high"
+reasoning: { budgetTokens: 8_192 }
+```
+
+Exact budgets must be at least 1,024 tokens and below the model call's `maxOutputTokens`. Unsupported
+efforts fail locally and are never silently rounded to another level. The live catalog normalizes
+Anthropic's effort and thinking-mode flags into `definition.capabilities.reasoning`.
+
+The model definition is built synchronously from provider defaults, configured definitions, and the
+local rate card. The cached, paginated catalog is discovery-only: constructing or running a model
+never fetches it. Server tools omit the local rate card when their additional charges would make a
+token-only total incomplete.
 
 Retryable `429` and `5xx` responses are retried only before a stream begins. `maxRetries`,
 `maxRetryDelayMs`, and `catalogTtlMs` are configurable. Provider request IDs and retry hints are

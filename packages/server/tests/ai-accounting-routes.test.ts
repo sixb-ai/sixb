@@ -40,6 +40,7 @@ async function createApp() {
       requesterGroupIds: [],
       providerId: "openai",
       requestedModelId: "gpt-5",
+      requestedReasoning: "high",
       responseId: "response_1",
       usage: { inputTokens: 10, outputTokens: 5, reasoningOutputTokens: 2 },
       occurredAt: new Date("2026-09-10T12:30:00.000Z"),
@@ -51,13 +52,6 @@ async function createApp() {
       status: "unpriceable",
       billingIdentity: { providerId: "openai", modelId: "gpt-5" },
       pricingContext: { serviceTier: "priority" },
-      priceSource: {
-        sourceId: "test-catalog",
-        sourceEntryId: "openai/gpt-5",
-        sourceVersion: "test-catalog-v1",
-        sourceUrl: "https://example.test/ai-pricing.json",
-        observedAt: new Date("2026-09-10T12:00:00.000Z"),
-      },
       reason: "unsupportedPricingDimension",
       ratedAt: new Date("2026-09-10T12:30:00.200Z"),
     })
@@ -135,6 +129,7 @@ describe("AI accounting routes", () => {
             executionId: "execution_1",
             providerId: "openai",
             requestedModelId: "gpt-5",
+            requestedReasoning: "high",
           },
           attribution: {
             kind: "agent",

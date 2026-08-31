@@ -855,7 +855,7 @@ export type {
 export type {
   LanguageModel,
   LanguageModelDefinition,
-  LanguageModelPricing,
+  LanguageModelRateCard,
   ProviderData,
 } from "./models"
 export type {
@@ -974,6 +974,7 @@ export type {
   AgentModelToolOutput,
   AgentModelToolResultPart,
   AgentProviderStatePart,
+  AgentReasoning,
   AgentReasoningLevel,
   AgentReasoningPart,
   AgentRequestErrorCode,

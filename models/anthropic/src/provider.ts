@@ -9,15 +9,20 @@ import {
   type LanguageModelProvider,
   type LanguageModelRequest,
   type LanguageModelStreamEvent,
+  MODEL_REASONING_EFFORTS,
   type ModelCapabilities,
   type ModelFinishReason,
   type ModelMessage,
   ModelProviderError,
+  type ModelReasoningCapabilities,
+  type ModelReasoningEffort,
   type ModelToolOutput,
   type ModelUsage,
+  modelReasoningSupportIssue,
   type ProviderData,
+  UnsupportedModelFeatureError,
 } from "@sixb/core/models"
-import { anthropicPricing, applyAnthropicPricingModifiers } from "./model-details"
+import { anthropicRateCard, applyAnthropicRateCardModifiers } from "./model-details"
 import { decodeServerSentEvents } from "./sse"
 
 type ValueSource<T> = T | (() => T)
@@ -76,10 +81,16 @@ export function createAnthropic(options: AnthropicOptions = {}): AnthropicProvid
   assertPositiveIntegerOption(options.catalogTtlMs, "catalogTtlMs")
   assertPositiveIntegerOption(options.maxRetryDelayMs, "maxRetryDelayMs")
   const transport: AnthropicTransport = { ...options, baseUrl, apiVersion }
-  const catalog = new RemoteAnthropicCatalog(transport, options.models ?? [])
+  const configuredModels = configuredModelDefinitions(options.models ?? [])
+  const catalog = new RemoteAnthropicCatalog(transport, configuredModels)
   const model = (modelId: string, modelOptions: AnthropicModelOptions = {}) => {
     if (!modelId.trim()) throw new TypeError("[SixbAnthropic] Model id must not be empty.")
-    return new AnthropicLanguageModel(transport, catalog, modelId, modelOptions)
+    return new AnthropicLanguageModel(
+      transport,
+      modelId,
+      modelOptions,
+      configuredModels.get(modelId)
+    )
   }
   return Object.assign(model, { providerId: PROVIDER_ID as typeof PROVIDER_ID, catalog })
 }
@@ -89,33 +100,38 @@ interface AnthropicTransport extends AnthropicOptions {
   readonly apiVersion: string
 }
 
+function configuredModelDefinitions(
+  definitions: readonly LanguageModelDefinition[]
+): ReadonlyMap<string, LanguageModelDefinition> {
+  const configured = new Map<string, LanguageModelDefinition>()
+  for (const input of definitions) {
+    const definition = defineLanguageModel(input)
+    if (definition.providerId !== PROVIDER_ID) {
+      throw new TypeError(
+        `[SixbAnthropic] Supplied model '${definition.modelId}' must use providerId '${PROVIDER_ID}'.`
+      )
+    }
+    if (configured.has(definition.modelId)) {
+      throw new TypeError(`[SixbAnthropic] Duplicate model '${definition.modelId}'.`)
+    }
+    configured.set(definition.modelId, definition)
+  }
+  return configured
+}
+
 /** Shared zero-configuration Anthropic provider. */
 export const anthropic = createAnthropic({
   apiKey: () => process.env.ANTHROPIC_API_KEY,
 })
 
 class RemoteAnthropicCatalog implements AnthropicCatalog {
-  private readonly supplied = new Map<string, LanguageModelDefinition>()
   private loadPromise: Promise<readonly LanguageModelDefinition[]> | undefined
   private loadedAt = 0
 
   constructor(
     private readonly transport: AnthropicTransport,
-    definitions: readonly LanguageModelDefinition[]
-  ) {
-    for (const input of definitions) {
-      const definition = defineLanguageModel(input)
-      if (definition.providerId !== PROVIDER_ID) {
-        throw new TypeError(
-          `[SixbAnthropic] Supplied model '${definition.modelId}' must use providerId '${PROVIDER_ID}'.`
-        )
-      }
-      if (this.supplied.has(definition.modelId)) {
-        throw new TypeError(`[SixbAnthropic] Duplicate model '${definition.modelId}'.`)
-      }
-      this.supplied.set(definition.modelId, definition)
-    }
-  }
+    private readonly supplied: ReadonlyMap<string, LanguageModelDefinition>
+  ) {}
 
   async get(modelId: string): Promise<LanguageModelDefinition | undefined> {
     return (
@@ -207,7 +223,8 @@ function catalogDefinition(value: unknown): LanguageModelDefinition | undefined 
   const providerTools = ["code_execution", "web_search", "web_fetch"].some((name) =>
     supported(capabilities, name)
   )
-  const pricing = anthropicPricing(modelId, undefined)
+  const reasoning = anthropicReasoningCapabilities(capabilities)
+  const rateCard = anthropicRateCard(modelId, undefined)
   return defineLanguageModel({
     kind: "language",
     providerId: PROVIDER_ID,
@@ -219,39 +236,43 @@ function catalogDefinition(value: unknown): LanguageModelDefinition | undefined 
     ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
     capabilities: {
       ...(inputMediaTypes.length === 0 ? {} : { inputMediaTypes }),
-      ...(supported(capabilities, "thinking") ? { reasoning: true } : {}),
+      ...(reasoning === undefined ? {} : { reasoning }),
       localTools: true,
       parallelToolCalls: true,
       ...(supported(capabilities, "structured_outputs") ? { nativeStructuredOutput: true } : {}),
       ...(providerTools ? { providerExecutedTools: true } : {}),
     },
-    ...(pricing === undefined ? {} : { pricing }),
+    ...(rateCard === undefined ? {} : { rateCard }),
   })
 }
 
 function fallbackDefinition(modelId: string): LanguageModelDefinition {
-  const pricing = anthropicPricing(modelId, undefined)
+  const rateCard = anthropicRateCard(modelId, undefined)
   return defineLanguageModel({
     kind: "language",
     providerId: PROVIDER_ID,
     modelId,
     family: "Claude",
-    capabilities: {},
-    ...(pricing === undefined ? {} : { pricing }),
+    capabilities: {
+      inputMediaTypes: ANTHROPIC_IMAGE_MEDIA_TYPES,
+      localTools: true,
+      parallelToolCalls: true,
+    },
+    ...(rateCard === undefined ? {} : { rateCard }),
   })
 }
 
 class AnthropicLanguageModel implements LanguageModel {
   readonly providerId = PROVIDER_ID
   readonly modelId: string
-  readonly definition: () => Promise<LanguageModelDefinition>
+  readonly definition: LanguageModelDefinition
   private readonly maxOutputTokens: number
 
   constructor(
     private readonly transport: AnthropicTransport,
-    catalog: RemoteAnthropicCatalog,
     modelId: string,
-    private readonly options: AnthropicModelOptions
+    private readonly options: AnthropicModelOptions,
+    configuredDefinition: LanguageModelDefinition | undefined
   ) {
     this.modelId = modelId
     this.maxOutputTokens = options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS
@@ -262,29 +283,20 @@ class AnthropicLanguageModel implements LanguageModel {
     for (const [index, tool] of (options.providerTools ?? []).entries()) {
       assertJsonObject(tool, `providerTools[${index}]`)
     }
-    this.definition = async () => {
-      let resolved: LanguageModelDefinition | undefined
-      try {
-        resolved = await catalog.get(modelId)
-      } catch {
-        // Catalog enrichment must never make a healthy inference endpoint unavailable.
-      }
-      const base = resolved ?? fallbackDefinition(modelId)
-      const { pricing: basePricing, ...definition } = base
-      // Server tools may add request- or duration-based charges that the token catalog cannot
-      // represent. Preserve honest accounting by declining a partial local total.
-      const pricing =
-        (options.providerTools?.length ?? 0) > 0
-          ? undefined
-          : basePricing
-            ? applyAnthropicPricingModifiers(basePricing, modelId, options.request)
-            : anthropicPricing(modelId, options.request)
-      return defineLanguageModel({
-        ...definition,
-        ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
-        ...(pricing === undefined ? {} : { pricing }),
-      })
-    }
+    const base = configuredDefinition ?? fallbackDefinition(modelId)
+    const { rateCard: baseRateCard, ...definition } = base
+    // Server tools may add request- or duration-based charges that token rates cannot represent.
+    const rateCard =
+      (options.providerTools?.length ?? 0) > 0
+        ? undefined
+        : baseRateCard
+          ? applyAnthropicRateCardModifiers(baseRateCard, modelId, options.request)
+          : anthropicRateCard(modelId, options.request)
+    this.definition = defineLanguageModel({
+      ...definition,
+      ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
+      ...(rateCard === undefined ? {} : { rateCard }),
+    })
   }
 
   async stream(request: LanguageModelRequest) {
@@ -330,6 +342,7 @@ class AnthropicLanguageModel implements LanguageModel {
       "tool_choice",
       "stream",
       "max_tokens",
+      "thinking",
     ]) {
       if (Object.hasOwn(extra, reserved)) {
         throw new TypeError(
@@ -351,10 +364,15 @@ class AnthropicLanguageModel implements LanguageModel {
     if (extra.output_config !== undefined && !existingOutputConfig) {
       throw new TypeError("[SixbAnthropic] Model request option 'output_config' must be an object.")
     }
-    const effort = anthropicEffort(request.reasoning)
+    const reasoning = anthropicReasoningRequest(
+      request.reasoning,
+      this.definition.capabilities.reasoning,
+      this.maxOutputTokens,
+      this.modelId
+    )
     const outputConfig: JsonObject = {
       ...(existingOutputConfig ?? {}),
-      ...(effort === undefined ? {} : { effort }),
+      ...(reasoning.effort === undefined ? {} : { effort: reasoning.effort }),
       ...(request.responseFormat === undefined
         ? {}
         : {
@@ -373,7 +391,7 @@ class AnthropicLanguageModel implements LanguageModel {
       ...(mapped.system.length === 0 ? {} : { system: mapped.system }),
       ...(tools.length === 0 ? {} : { tools, tool_choice: { type: "auto" } }),
       ...(Object.keys(outputConfig).length === 0 ? {} : { output_config: outputConfig }),
-      ...(request.reasoning === "none" ? { thinking: { type: "disabled" } } : {}),
+      ...(reasoning.thinking === undefined ? {} : { thinking: reasoning.thinking }),
     }
   }
 
@@ -770,19 +788,37 @@ function toolOutputText(output: ModelToolOutput): string {
     : JSON.stringify(output.value)
 }
 
-function anthropicEffort(
-  reasoning: LanguageModelRequest["reasoning"]
-): "low" | "medium" | "high" | "xhigh" | undefined {
-  if (reasoning === "minimal") return "low"
-  if (
-    reasoning === "low" ||
-    reasoning === "medium" ||
-    reasoning === "high" ||
-    reasoning === "xhigh"
-  ) {
-    return reasoning
+function anthropicReasoningRequest(
+  reasoning: LanguageModelRequest["reasoning"],
+  capabilities: ModelCapabilities["reasoning"],
+  maxOutputTokens: number,
+  modelId: string
+): { readonly effort?: ModelReasoningEffort; readonly thinking?: JsonObject } {
+  const issue = modelReasoningSupportIssue(capabilities, reasoning)
+  if (issue) {
+    throw new UnsupportedModelFeatureError(`[SixbAnthropic] Model '${modelId}' ${issue}.`)
   }
-  return undefined
+  if (reasoning === undefined || reasoning === "provider-default") return {}
+  if (reasoning === "none") return { thinking: { type: "disabled" } }
+  if (typeof reasoning === "string") {
+    if (reasoning === "minimal") {
+      throw new UnsupportedModelFeatureError(
+        `[SixbAnthropic] Model '${modelId}' does not support reasoning effort 'minimal'.`
+      )
+    }
+    return { effort: reasoning }
+  }
+  if (reasoning.budgetTokens < 1_024) {
+    throw new UnsupportedModelFeatureError(
+      `[SixbAnthropic] Model '${modelId}' reasoning token budget must be at least 1024.`
+    )
+  }
+  if (reasoning.budgetTokens >= maxOutputTokens) {
+    throw new UnsupportedModelFeatureError(
+      `[SixbAnthropic] Model '${modelId}' reasoning token budget must be below maxOutputTokens (${maxOutputTokens}).`
+    )
+  }
+  return { thinking: { type: "enabled", budget_tokens: reasoning.budgetTokens } }
 }
 
 function normalizeUsage(raw: JsonObject): ModelUsage {
@@ -946,6 +982,23 @@ function resolve<T>(source: ValueSource<T> | undefined): T | undefined {
 
 function supported(capabilities: JsonObject | undefined, name: string): boolean {
   return object(capabilities?.[name])?.supported === true
+}
+
+function anthropicReasoningCapabilities(
+  capabilities: JsonObject | undefined
+): false | ModelReasoningCapabilities | undefined {
+  if (capabilities === undefined) return undefined
+  if (!supported(capabilities, "thinking")) return false
+
+  const effortCapabilities = object(capabilities.effort)
+  const efforts = MODEL_REASONING_EFFORTS.filter((effort) => supported(effortCapabilities, effort))
+  const thinkingTypes = object(object(capabilities.thinking)?.types)
+  const supportsManualBudget = supported(thinkingTypes, "enabled")
+  return {
+    canDisable: true,
+    ...(efforts.length === 0 ? {} : { efforts }),
+    ...(supportsManualBudget ? { budgetTokens: { min: 1_024 } } : {}),
+  }
 }
 
 function requiredIndex(value: unknown, label: string): number {

@@ -1,7 +1,7 @@
 import { posix } from "node:path"
 import type { AgentFileDataProjection, BlobInfo, BlobStorage, FileRef } from "@sixb/core"
 import { isAgentToolResult } from "@sixb/core/internal/agents"
-import { type LanguageModel, resolveModelCapabilities } from "@sixb/core/models"
+import type { LanguageModel } from "@sixb/core/models"
 import type { AgentMessageRecord } from "@sixb/core/storage"
 import { NEVER_ABORTED_SIGNAL, waitForAbort } from "./abort"
 import { fileContentKey } from "./file-ref"
@@ -684,23 +684,12 @@ async function maybeImageData(input: {
   }
 }
 
-export async function modelSupportsInlineImages(
-  model: LanguageModel,
-  signal: AbortSignal = NEVER_ABORTED_SIGNAL
-): Promise<boolean> {
-  signal.throwIfAborted()
-  try {
-    const capabilities = await waitForAbort(resolveModelCapabilities(model), signal)
-    return (
-      capabilities.inputMediaTypes === "any" ||
-      capabilities.inputMediaTypes?.some((mediaType) =>
-        mediaType.toLowerCase().startsWith("image/")
-      ) === true
-    )
-  } catch {
-    signal.throwIfAborted()
-    return false
-  }
+export function modelSupportsInlineImages(model: LanguageModel): boolean {
+  const { inputMediaTypes } = model.definition.capabilities
+  return (
+    inputMediaTypes === "any" ||
+    inputMediaTypes?.some((mediaType) => mediaType.toLowerCase().startsWith("image/")) === true
+  )
 }
 
 export function attachmentKey(messageId: string, partIndex: number): string {

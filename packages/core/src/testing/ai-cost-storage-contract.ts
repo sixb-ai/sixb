@@ -68,8 +68,7 @@ function unpriceableCost(): Extract<AiModelCallCostRecord, { status: "unpriceabl
     status: "unpriceable",
     billingIdentity: { providerId: "vercel", modelId: "unpriced/model" },
     pricingContext: {},
-    priceSource: priceSource("vercel/unpriced/model"),
-    reason: "missingCatalogEntry",
+    reason: "missingRateCard",
     ratedAt: new Date("2026-08-01T12:00:00.200Z"),
   }
 }
@@ -115,7 +114,6 @@ export function runAiCostStorageContractSuite<TStorage extends AiCostStorage>(
           status: "unpriceable",
           billingIdentity: { providerId: "openai", modelId: "gpt-5" },
           pricingContext: { deploymentId: "production" },
-          priceSource: priceSource("openai/gpt-5"),
           reason: "unsupportedPricingDimension",
           ratedAt: new Date("2026-08-03T12:00:00.200Z"),
         }

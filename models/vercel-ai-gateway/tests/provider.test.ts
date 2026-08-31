@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { LanguageModelRequest, LanguageModelStreamEvent } from "@sixb/core/models"
-import { ModelProviderError, resolveLanguageModelDefinition } from "@sixb/core/models"
+import { ModelProviderError } from "@sixb/core/models"
 import { createVercelGateway, vercelGateway } from "../src"
 import { decodeServerSentEvents } from "../src/sse"
 
@@ -189,6 +189,22 @@ describe("Vercel AI Gateway provider", () => {
         route: { providerId: "openai", modelId: "resolved-model" },
       },
     ])
+  })
+
+  test("rejects exact budgets that the Gateway Responses API cannot represent", async () => {
+    let requests = 0
+    const model = createVercelGateway({
+      apiKey: "secret-key",
+      fetch: async () => {
+        requests += 1
+        throw new Error("Unexpected fetch")
+      },
+    })("creator/reasoner")
+
+    await expect(model.stream(request({ reasoning: { budgetTokens: 4_096 } }))).rejects.toThrow(
+      "Exact reasoning token budgets are not supported"
+    )
+    expect(requests).toBe(0)
   })
 
   test("streams tool arguments and preserves exact provider replay items", async () => {
@@ -407,7 +423,7 @@ describe("Vercel AI Gateway provider", () => {
     expect(attempts).toBe(2)
   })
 
-  test("loads current model definitions and exact pricing from the gateway catalog", async () => {
+  test("keeps catalog discovery off model construction and exposes fixed gateway rates", async () => {
     let requests = 0
     const gateway = createVercelGateway({
       fetch: async () => {
@@ -426,6 +442,10 @@ describe("Vercel AI Gateway provider", () => {
               context_window: 200_000,
               max_tokens: 32_000,
               tags: ["reasoning", "tool-use", "vision", "file-input"],
+              reasoning_options: [
+                { type: "toggle" },
+                { type: "effort", values: ["low", "medium", "high", "xhigh", "max"] },
+              ],
               modalities: { input: ["text", "image", "pdf"], output: ["text"] },
               supported_parameters: ["tools", "response_format"],
               pricing: {
@@ -444,7 +464,16 @@ describe("Vercel AI Gateway provider", () => {
       },
     })
 
-    const definition = await resolveLanguageModelDefinition(gateway("creator/reasoner"))
+    const model = gateway("creator/reasoner")
+    expect(requests).toBe(0)
+    expect(model.definition).toEqual({
+      kind: "language",
+      providerId: "vercel-ai-gateway",
+      modelId: "creator/reasoner",
+      capabilities: {},
+    })
+
+    const definition = await gateway.catalog.get("creator/reasoner")
     expect(definition).toEqual({
       kind: "language",
       providerId: "vercel-ai-gateway",
@@ -459,12 +488,15 @@ describe("Vercel AI Gateway provider", () => {
       maxOutputTokens: 32_000,
       capabilities: {
         inputMediaTypes: ["image/*", "application/pdf"],
-        reasoning: true,
+        reasoning: {
+          canDisable: true,
+          efforts: ["low", "medium", "high", "xhigh", "max"],
+        },
         localTools: true,
         parallelToolCalls: true,
         nativeStructuredOutput: true,
       },
-      pricing: {
+      rateCard: {
         currency: "USD",
         unit: "million-tokens",
         input: {

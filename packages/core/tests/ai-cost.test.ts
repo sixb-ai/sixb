@@ -111,7 +111,7 @@ describe("AI cost record validation", () => {
     }
     const record = normalizeAiModelCallCostRecord({
       ...cost(),
-      priceSource: { ...cost().priceSource, sourceId: "model-definition" },
+      priceSource: { ...cost().priceSource, sourceId: "model-rate-card" },
       money: { currency: "USD", amountNanos: "20" },
       components: [
         {
@@ -172,11 +172,11 @@ describe("AI cost record validation", () => {
     ).toBe(false)
   })
 
-  test("requires component evidence for model-definition ratings", () => {
+  test("requires component evidence for model rate-card ratings", () => {
     expect(() =>
       normalizeAiModelCallCostRecord({
         ...cost(),
-        priceSource: { ...cost().priceSource, sourceId: "model-definition" },
+        priceSource: { ...cost().priceSource, sourceId: "model-rate-card" },
         components: [],
       })
     ).toThrow("requires components")
