@@ -2,6 +2,13 @@ import type { AgentSkill } from "./agent-skills"
 
 export type AgentExecutionMode = "conversation" | "workflow-task"
 
+/** Prompt appended to the final reserved model step after local tools are disabled. */
+export const DEFAULT_AGENT_FINAL_STEP_INSTRUCTION = [
+  "Provide the best possible final answer from the context available.",
+  "This is the final step, so do not call tools or defer the answer.",
+  "If the task cannot be completed from the available context, state the limitation clearly instead of inventing information.",
+].join(" ")
+
 const SIXB_RULE_PRECEDENCE =
   "The Sixb mode and runtime rules in this prompt take precedence over conflicting agent instructions."
 

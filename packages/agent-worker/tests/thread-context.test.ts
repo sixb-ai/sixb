@@ -178,6 +178,7 @@ async function runAndCaptureModelPrompt(withCheckpoint: boolean) {
       storage: requireWorkerStorage(seeded.storage),
       blobStorage: new InMemoryBlobStorage(),
       tools: [],
+      systemPrompt: "Test system prompt.",
       streamSink: NOOP_STREAM_SINK,
       recoverAiModelCall: async () => {},
       defaultMaxSteps: 4,

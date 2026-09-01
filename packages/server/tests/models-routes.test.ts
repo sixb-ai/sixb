@@ -11,14 +11,22 @@ import {
   prop,
   SixbHost,
 } from "@sixb/core"
+import { defineLanguageModel } from "@sixb/core/models"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
 type TestLanguageModel = ModelCatalogInput["language"][number]
 
-// The route only serializes catalog metadata, so a conforming stub is enough.
-function testModel(provider: string, modelId: string): TestLanguageModel {
-  return { specificationVersion: "v4", provider, modelId } as TestLanguageModel
+// The route only serializes catalog metadata, so a minimal owned-contract stub is enough.
+function testModel(providerId: string, modelId: string): TestLanguageModel {
+  return {
+    providerId,
+    modelId,
+    definition: defineLanguageModel({ kind: "language", providerId, modelId, capabilities: {} }),
+    async stream() {
+      throw new Error("Route tests do not run inference.")
+    },
+  }
 }
 
 const Invoice = defineObjectType({

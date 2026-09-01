@@ -1,11 +1,5 @@
 import type { AgentDefinition, AgentMessage, AgentMessagePart, Storage } from "@sixb/core"
-import {
-  buildAgentSystemPrompt,
-  createAgentMessageId,
-  DEFAULT_AGENT_FINAL_STEP_INSTRUCTION,
-  runModelLoop,
-  toModelMessages,
-} from "@sixb/core/internal/agents"
+import { createAgentMessageId, runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { isAbortError, QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import {
@@ -14,6 +8,7 @@ import {
   type AgentStorage,
   coerceAgentRunFinishReason,
 } from "@sixb/core/storage"
+import { DEFAULT_AGENT_FINAL_STEP_INSTRUCTION } from "./agent-prompt"
 import { assistantPartsWithAttachments } from "./assistant-attachments"
 import {
   attachmentKey,
@@ -175,10 +170,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         messages: [
           {
             role: "system",
-            content: buildAgentSystemPrompt({
-              instructions: agent.instructions,
-              addendum: context.systemAddendum,
-            }),
+            content: context.systemPrompt,
           },
           ...modelMessages,
         ],

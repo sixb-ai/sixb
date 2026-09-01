@@ -3,7 +3,8 @@ import { resolveLoggingService } from "@sixb/core/internal/logging"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type { ModelTool } from "@sixb/core/models"
 import type { AgentRunRecord, WorkflowAgentNodeRunRecord } from "@sixb/core/storage"
-import { type AgentExecutionMode, renderAgentSkillCatalog } from "./agent-skills"
+import { type AgentExecutionMode, renderAgentSystemPrompt } from "./agent-prompt"
+import { assertAgentRuntimeProfile } from "./agent-runtime/preflight"
 import { createAgentApiGatewayBaseUrl } from "./api-url"
 import {
   modelSupportsInlineImages,
@@ -235,7 +236,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
       attachmentContext,
       tools,
       prepareStep: mediaBridge.prepareStep,
-      systemAddendum: renderAgentSkillCatalog(skills, mode),
+      systemPrompt: renderAgentSystemPrompt({ mode, instructions: agent.instructions, skills }),
       sandboxReady: ready,
       sandboxWasUsed: () => sandboxWasUsed,
       streamSink: context.streamSink,
@@ -278,6 +279,11 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<BashSandb
       runId: run.id,
       attachments: input.attachmentContext,
       skills,
+    })
+    await assertAgentRuntimeProfile({
+      sandbox,
+      env: apiContext.env,
+      projectId: context.id,
     })
     return { sandbox, env: apiContext.env }
   } catch (error) {
