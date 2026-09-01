@@ -6,6 +6,7 @@ import {
   createDisabledRuntimeAuthorization,
   createKernelRuntimeAuthorization,
   createPrincipalRuntimeAuthorization,
+  type DelegatedActionApplyTarget,
 } from "./authorization"
 import type {
   AuthorizablePrincipal,
@@ -61,13 +62,16 @@ export function createDelegatedRequestScope(input: {
     readonly selection: SelectedObjectReadScope
     readonly limits: ObjectReadExecutionLimits
   }
+  readonly actionApply?: readonly DelegatedActionApplyTarget[]
 }): ExecutionScope {
   const execution = createRequestExecution(input)
+  const actionApply = input.actionApply
   return Object.freeze({
     execution,
     authorization: createDelegatedRuntimeAuthorization({
       execution,
       objectRead: input.objectRead,
+      ...(actionApply === undefined ? {} : { actionApply }),
     }),
   })
 }

@@ -10,6 +10,7 @@ import {
   createDelegatedRuntimeAuthorization,
   createPrincipalRuntimeAuthorization,
   createTrustedPrimitiveRuntimeAuthorization,
+  type DelegatedActionApplyTarget,
   getAuthorizationRef,
   resolveExecutionScopeAuthorization,
   resolveRuntimeAuthorization,
@@ -235,6 +236,117 @@ describe("execution scopes", () => {
         runtimeAuthorization: scope.authorization,
       })
     ).toThrow("cannot cross a durable execution boundary")
+  })
+
+  test("snapshots and bounds exact delegated Action targets once", () => {
+    let actionIdReads = 0
+    let subjectReads = 0
+    let objectTypeIdReads = 0
+    let primaryIdReads = 0
+    const subject = Object.defineProperties(
+      {},
+      {
+        objectTypeId: {
+          enumerable: true,
+          get: () => {
+            objectTypeIdReads += 1
+            return "Proposal"
+          },
+        },
+        primaryId: {
+          enumerable: true,
+          get: () => {
+            primaryIdReads += 1
+            return "proposal-1"
+          },
+        },
+      }
+    )
+    const authoredTarget = Object.defineProperties(
+      {},
+      {
+        actionId: {
+          enumerable: true,
+          get: () => {
+            actionIdReads += 1
+            return "approve"
+          },
+        },
+        subject: {
+          enumerable: true,
+          get: () => {
+            subjectReads += 1
+            return subject
+          },
+        },
+      }
+    ) as DelegatedActionApplyTarget
+    const targets: DelegatedActionApplyTarget[] = [authoredTarget]
+    const scope = createDelegatedRequestScope({
+      projectId: "project-1",
+      requestId: "delegated-action-request",
+      correlationId: "delegated-action-correlation",
+      objectRead: {
+        selection: delegatedSelection(),
+        limits: { maxTraversalFacts: 10, maxOutputJsonBytes: 1_024 },
+      },
+      actionApply: targets,
+    })
+
+    targets.push({
+      actionId: "late-action",
+      subject: { objectTypeId: "Proposal", primaryId: "proposal-late" },
+    })
+
+    const resolved = resolveRuntimeAuthorization(scope.authorization)
+    expect(resolved.type).toBe("delegated")
+    if (resolved.type !== "delegated") throw new Error("expected delegated authorization")
+    expect(resolved.actionApply).toEqual([
+      {
+        actionId: "approve",
+        subject: { objectTypeId: "Proposal", primaryId: "proposal-1" },
+      },
+    ])
+    expect(actionIdReads).toBe(1)
+    expect(subjectReads).toBe(1)
+    expect(objectTypeIdReads).toBe(1)
+    expect(primaryIdReads).toBe(1)
+    expect(Object.isFrozen(resolved.actionApply)).toBe(true)
+    expect(Object.isFrozen(resolved.actionApply[0])).toBe(true)
+    expect(Object.isFrozen(resolved.actionApply[0]?.subject)).toBe(true)
+
+    expect(() =>
+      createDelegatedRequestScope({
+        projectId: "project-1",
+        requestId: "too-many-action-targets",
+        correlationId: "too-many-action-targets",
+        objectRead: {
+          selection: delegatedSelection(),
+          limits: { maxTraversalFacts: 10, maxOutputJsonBytes: 1_024 },
+        },
+        actionApply: Array.from({ length: 4_097 }, () => ({
+          actionId: "approve",
+          subject: { objectTypeId: "Proposal", primaryId: "proposal-1" },
+        })),
+      })
+    ).toThrow("maximum of 4096 Action targets")
+    expect(() =>
+      createDelegatedRequestScope({
+        projectId: "project-1",
+        requestId: "oversized-action-target",
+        correlationId: "oversized-action-target",
+        objectRead: {
+          selection: delegatedSelection(),
+          limits: { maxTraversalFacts: 10, maxOutputJsonBytes: 1_024 },
+        },
+        actionApply: [
+          {
+            actionId: "a".repeat(1_000_001),
+            subject: { objectTypeId: "Proposal", primaryId: "proposal-1" },
+          },
+        ],
+      })
+    ).toThrow("maximum of 1000000 Action identifier characters")
   })
 
   test("binds delegated authority only to its exact principal-free request", () => {
