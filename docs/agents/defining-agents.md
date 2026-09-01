@@ -314,6 +314,13 @@ The model integration's optional `costEstimator` prices **returned token usage**
 context limits and preflight token estimates. It runs for completed calls even when a provider
 charge is available. Local rates require no administrative credentials or financial API requests.
 
+The optional `costEstimator.estimateReservation({ inputTokens, outputTokens })` estimates token
+cost before a provider call. It returns USD nanounits, or `undefined` when the configured model
+cannot be priced safely. Built-in providers use the highest applicable cache and tier rates.
+Custom integrations can reuse `estimateModelReservation` with their rate card. A cost limit
+requires this capability; token limits do not. Input tokens and the output allowance remain
+estimates, so this admission check is not a hard ceiling on the final provider charge.
+
 ### What gets stored
 
 | Selected cost | Stored status | `priceSource.sourceId` | Detail |

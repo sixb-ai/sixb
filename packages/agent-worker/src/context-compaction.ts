@@ -293,7 +293,7 @@ async function generateCheckpointSummary(input: {
   let result: Awaited<ReturnType<typeof runModelLoop<string>>>
   try {
     result = await runModelLoop({
-      model: input.agent.model,
+      model: input.runtime.usageRecorder.wrapModel(input.agent.model),
       // Hidden reasoning consumes the same bounded output budget needed for summary text.
       reasoning: "none",
       ...(input.agent.loop?.caching === undefined ? {} : { caching: input.agent.loop.caching }),

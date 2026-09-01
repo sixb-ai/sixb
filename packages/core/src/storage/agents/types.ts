@@ -64,6 +64,8 @@ export const AGENT_RUN_FAILURE_CODES = [
   "internal.unexpected",
   "runtime.cancelled",
   "agent.execution_failed",
+  "ai.usage_limit_exceeded",
+  "ai.usage_limit_unavailable",
 ] as const satisfies readonly [SixbErrorCode, ...SixbErrorCode[]]
 
 export type AgentRunFailureCode = (typeof AGENT_RUN_FAILURE_CODES)[number]

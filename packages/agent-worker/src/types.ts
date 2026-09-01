@@ -17,6 +17,7 @@ import type { ModelCallCost, ModelCostEstimate, ModelRoute, ModelTool } from "@s
 import type {
   AgentStorage,
   AiCostStorage,
+  AiLimitStorage,
   AiUsageStorage,
   AuthStorage,
   RecordAiModelCallInput,
@@ -31,6 +32,7 @@ export type AgentWorkerStorage = Storage & {
   readonly agents: AgentStorage
   readonly aiUsage: AiUsageStorage
   readonly aiCosts: AiCostStorage
+  readonly aiLimits: AiLimitStorage
   readonly auth: AuthStorage
 }
 
@@ -40,6 +42,8 @@ export interface RecoverAiModelCallInput {
   readonly estimate?: ModelCostEstimate
   readonly route?: ModelRoute
   readonly ratedAt: Date
+  /** True only when admission created an aggregate-budget reservation for this provider attempt. */
+  readonly reconcileLimitReservation?: boolean
 }
 
 export type RecoverAiModelCall = (input: RecoverAiModelCallInput) => Promise<void>

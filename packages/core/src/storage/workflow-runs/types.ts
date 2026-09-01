@@ -21,6 +21,8 @@ export const WORKFLOW_RUN_FAILURE_CODES = [
   "internal.unexpected",
   "runtime.cancelled",
   "workflow.node_failed",
+  "ai.usage_limit_exceeded",
+  "ai.usage_limit_unavailable",
 ] as const satisfies readonly [SixbErrorCode, ...SixbErrorCode[]]
 
 export type WorkflowRunFailureCode = (typeof WORKFLOW_RUN_FAILURE_CODES)[number]

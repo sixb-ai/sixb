@@ -2,11 +2,44 @@ import { describe, expect, test } from "bun:test"
 import {
   defineLanguageModel,
   defineModelRateCard,
+  estimateModelReservation,
   modelReasoningSupportIssue,
   rateModelCall,
 } from "../src/models"
 
 describe("model definitions and rate cards", () => {
+  test("reserves cache writes and expensive tiers before their usage is known", () => {
+    // Removal proof: ignore cache/tier prices in estimateModelReservation; this amount decreases.
+    expect(
+      estimateModelReservation({
+        inputTokens: 1000,
+        outputTokens: 100,
+        rateCard: {
+          currency: "USD",
+          unit: "million-tokens",
+          input: "2",
+          cacheReadInput: "0.2",
+          cacheWriteInput5m: "2.5",
+          cacheWriteInput1h: "4",
+          output: { default: "10", tiers: [{ minTokens: 2000, price: "20" }] },
+        },
+      })
+    ).toEqual({ currency: "USD", amountNanos: "6000000" })
+    expect(
+      estimateModelReservation({
+        inputTokens: 1,
+        outputTokens: 1,
+        rateCard: {
+          currency: "USD",
+          unit: "million-tokens",
+          input: "0.0000011",
+          output: "0.0000011",
+        },
+      })?.amountNanos
+    ).toBe("2")
+    expect(estimateModelReservation({ inputTokens: 100, outputTokens: 10 })).toBeUndefined()
+  })
+
   test("rates token, cache, and tier meters in exact nanodollars", () => {
     const cost = rateModelCall({
       usage: {

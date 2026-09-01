@@ -96,7 +96,7 @@ export async function runWorkflowAgentNode(
   let finishReason: AgentRunFinishReason | undefined
   try {
     const research = await runModelLoop({
-      model: input.agent.model,
+      model: input.usageRecorder.wrapModel(input.agent.model),
       messages: [
         {
           role: "system",
@@ -159,7 +159,7 @@ export async function runWorkflowAgentNode(
     for (let attempt = 1; attempt <= WORKFLOW_OUTPUT_FINALIZATION_ATTEMPTS; attempt += 1) {
       try {
         const finalization = await runModelLoop({
-          model: input.agent.model,
+          model: input.usageRecorder.wrapModel(input.agent.model),
           messages: finalizerMessages,
           output: {
             name: input.agentStep.id,

@@ -1,6 +1,7 @@
 import {
   assertJsonObject,
   defineLanguageModel,
+  estimateModelReservation,
   isJsonObject,
   isModelReasoning,
   type JsonObject,
@@ -338,6 +339,7 @@ class AnthropicLanguageModel implements LanguageModel {
       ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
     })
     this.costEstimator = {
+      estimateReservation: (tokens) => estimateModelReservation({ ...tokens, rateCard }),
       estimate: ({ usage }) => rateModelCall({ usage, rateCard }),
     }
   }

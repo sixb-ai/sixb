@@ -2,6 +2,7 @@ import {
   assertJsonObject,
   defineLanguageModel,
   defineModelRateCard,
+  estimateModelReservation,
   isJsonObject,
   isModelReasoning,
   type JsonObject,
@@ -137,6 +138,13 @@ export const vercelGateway = createVercelGateway({
 
 class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
   private readonly rateCards = new Map<string, LanguageModelRateCard>()
+
+  estimateReservation(
+    modelId: string,
+    tokens: { readonly inputTokens: number; readonly outputTokens: number }
+  ) {
+    return estimateModelReservation({ ...tokens, rateCard: this.rateCards.get(modelId) })
+  }
 
   estimate(modelId: string, usage: ModelUsage) {
     const card = this.rateCards.get(modelId)
@@ -414,6 +422,10 @@ class VercelGatewayLanguageModel implements LanguageModel {
   ) {
     this.modelId = modelId
     this.costEstimator = {
+      estimateReservation: (tokens) =>
+        !hasFixedTokenPricing(options) || options.providerTools?.length
+          ? undefined
+          : catalog.estimateReservation(modelId, tokens),
       // A model-only card cannot price routing overrides or provider-native tool charges.
       estimate: ({ usage, route, responseModelId }) =>
         !hasFixedTokenPricing(options) ||
