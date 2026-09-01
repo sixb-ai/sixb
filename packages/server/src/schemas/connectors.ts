@@ -168,9 +168,19 @@ export const ConnectorOAuthCallbackQuerySchema = z
     auth_code: z.string().min(1).optional(),
     error: z.string().min(1).optional(),
   })
-  .refine((query) => [query.code, query.auth_code, query.error].filter(Boolean).length === 1, {
-    message: "OAuth callback must contain exactly one of code, auth_code, or error.",
-  })
+  .refine(
+    (query) => {
+      const hasAuthorizationCode = query.code !== undefined || query.auth_code !== undefined
+      const hasProviderError = query.error !== undefined
+      return hasAuthorizationCode !== hasProviderError
+    },
+    { message: "OAuth callback must contain exactly one of an authorization code or error." }
+  )
+  .refine(
+    (query) =>
+      query.code === undefined || query.auth_code === undefined || query.code === query.auth_code,
+    { message: "OAuth callback code and auth_code must match when both are present." }
+  )
   .transform(({ auth_code, ...query }) => ({ ...query, code: query.code ?? auth_code }))
 
 function connectorRouteErrorResponseSchema<

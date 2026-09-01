@@ -262,6 +262,46 @@ describe("connector connection Headless API", () => {
     expect(harness.exchangeCount()).toBe(1)
   })
 
+  test("accepts matching OAuth authorization code aliases from one callback", async () => {
+    // Regression guard: restoring the three-way exact-one count in the callback schema makes this
+    // return 400 before the provider code reaches the connector.
+    const harness = await createHarness()
+    const started = await startRun(harness)
+    const callbackUrl = new URL("http://localhost/auth/connectors/callback")
+    callbackUrl.searchParams.set("state", started.state)
+    callbackUrl.searchParams.set("code", "authorization-code")
+    callbackUrl.searchParams.set("auth_code", "authorization-code")
+
+    const callback = await harness.app.handle(
+      new Request(callbackUrl, {
+        redirect: "manual",
+        headers: { cookie: started.callbackCookie },
+      })
+    )
+
+    expect(callback.status, await callback.clone().text()).toBe(302)
+    expect(harness.exchangeCount()).toBe(1)
+  })
+
+  test("rejects conflicting OAuth authorization code aliases", async () => {
+    const harness = await createHarness()
+    const started = await startRun(harness)
+    const callbackUrl = new URL("http://localhost/auth/connectors/callback")
+    callbackUrl.searchParams.set("state", started.state)
+    callbackUrl.searchParams.set("code", "standard-code")
+    callbackUrl.searchParams.set("auth_code", "provider-code")
+
+    const callback = await harness.app.handle(
+      new Request(callbackUrl, {
+        redirect: "manual",
+        headers: { cookie: started.callbackCookie },
+      })
+    )
+
+    expect(callback.status).toBe(400)
+    expect(harness.exchangeCount()).toBe(0)
+  })
+
   test("returns coded boundaries when a connector cannot have managed connections", async () => {
     const harness = await createStaticHarness()
 
