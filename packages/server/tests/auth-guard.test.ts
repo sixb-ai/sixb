@@ -323,7 +323,9 @@ describe("server auth guard", () => {
     expect(acceptedTelemetryRead.status).toBe(404)
     expect(acceptedActionRunDetail.status).toBe(404)
     expect(rejectedAuthManagement.status).toBe(403)
-    expect(rejectedRawWrite.status).toBe(403)
+    // The token crosses the bearer-capable route boundary, then the authority-scoped ontology
+    // deliberately makes an ObjectType without object.view indistinguishable from an unknown one.
+    expect(rejectedRawWrite.status).toBe(404)
   })
 
   test("returns a safe session shape", async () => {

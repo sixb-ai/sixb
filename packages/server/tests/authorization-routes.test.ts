@@ -691,11 +691,10 @@ describe("authorized object routes", () => {
       })
     )
 
-    // `listObjectTypes` shows this principal nothing, so the write route must not answer 403 for a
-    // type that exists and 404 for one that does not — that difference is the type universe. The
-    // Primary-property lookup runs on the bound SDK for exactly this reason; point it back at
-    // the privileged `sixb` in the route and the second status returns to 404.
-    expect([registered.status, unregistered.status]).toEqual([403, 403])
+    // `listObjectTypes` shows this principal nothing. The authorized catalog therefore treats a
+    // hidden type exactly like an unknown type before the write runs, so neither status reveals
+    // whether the requested id belongs to the registered type universe.
+    expect([registered.status, unregistered.status]).toEqual([404, 404])
 
     const listed = await app.fetch(
       new Request("http://localhost/api/object-types", { headers: outsider.headers })
