@@ -273,8 +273,12 @@ events
       (event.type === "workflow.run.finished" || event.type === "workflow.run.node.finished") &&
       event.payload.error
     ) {
-      const code: "internal.unexpected" | "runtime.cancelled" | "workflow.node_failed" =
-        event.payload.error.code
+      const code:
+        | "internal.unexpected"
+        | "runtime.cancelled"
+        | "workflow.node_failed"
+        | "ai.usage_limit_exceeded"
+        | "ai.usage_limit_unavailable" = event.payload.error.code
       const message: string = event.payload.error.message
       // @ts-expect-error — workflow lifecycle failures expose only their primitive's code union.
       const datasetCode: "dataset.not_found" = event.payload.error.code

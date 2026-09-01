@@ -2,6 +2,7 @@ import {
   AuthorizationError,
   OntologyNotFoundError,
   OntologyValidationError,
+  type ReadonlyJsonValue,
   type SixbErrorCode,
 } from "@sixb/core"
 import { isSixbError } from "@sixb/core/internal/errors"
@@ -28,6 +29,13 @@ const HTTP_STATUS_BY_ERROR_CODE: Partial<Record<SixbErrorCode, number>> = {
   "connector.revocation_pending": 409,
   "dataset.not_found": 404,
   "dataset.version_not_found": 404,
+  "ai.usage_limit_exceeded": 429,
+  "ai.usage_limit_unavailable": 429,
+}
+
+interface RouteResponseSet {
+  status?: number | string
+  headers?: unknown
 }
 
 export function toIsoString(value: Date): string {
@@ -79,14 +87,22 @@ export function unconfiguredStorageResponse(
 
 export function handleRouteError(
   error: unknown,
-  set: { status?: number | string }
+  set: RouteResponseSet
 ): {
   error: string
   code?: SixbErrorCode
+  details?: ReadonlyJsonValue
 } {
   if (isSixbError(error)) {
     set.status = HTTP_STATUS_BY_ERROR_CODE[error.code] ?? 500
-    return { error: error.message, code: error.code }
+    if (error.code === "ai.usage_limit_exceeded") setRetryAfterFromDetails(set, error.details)
+    const exposesDetails =
+      error.code === "ai.usage_limit_exceeded" || error.code === "ai.usage_limit_unavailable"
+    return {
+      error: error.message,
+      code: error.code,
+      ...(!exposesDetails || error.details === undefined ? {} : { details: error.details }),
+    }
   }
 
   if (error instanceof AuthorizationError) {
@@ -121,6 +137,21 @@ export function handleRouteError(
   const message = error instanceof Error ? error.message : String(error)
   set.status = 400
   return { error: message }
+}
+
+function setRetryAfterFromDetails(set: RouteResponseSet, details: ReadonlyJsonValue | undefined) {
+  if (typeof details !== "object" || details === null || Array.isArray(details)) return
+  const resetAt = (details as Readonly<Record<string, ReadonlyJsonValue>>).resetAt
+  if (typeof resetAt !== "string") return
+  const resetTime = Date.parse(resetAt)
+  if (!Number.isFinite(resetTime)) return
+  const seconds = String(Math.max(0, Math.ceil((resetTime - Date.now()) / 1_000)))
+  const headers =
+    typeof set.headers === "object" && set.headers !== null
+      ? (set.headers as Record<string, unknown>)
+      : {}
+  headers["Retry-After"] = seconds
+  set.headers = headers
 }
 
 function fileUploadSessionErrorStatus(reason: FileUploadSessionErrorReason): number {

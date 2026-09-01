@@ -1,9 +1,21 @@
 import { randomUUID } from "node:crypto"
-import type { ModelCallEndEvent, ModelUsage } from "@sixb/core/models"
+import type {
+  LanguageModel,
+  LanguageModelRequest,
+  ModelCallEndEvent,
+  ModelUsage,
+} from "@sixb/core/models"
 import type { ReadonlyJsonObject, RecordAiModelCallInput } from "@sixb/core/storage"
 import { AgentUsageRecordingError } from "./errors"
 import { aiModelCallUsageFromModel } from "./model-adapters"
 import { normalizeModelCallAccounting, recordAiModelCallAccounting } from "./model-call-accounting"
+import {
+  aiModelCallOutputTokenAllowance,
+  type BeforeAiModelCall,
+  estimateAiModelCallInputTokens,
+  estimatedAiModelCallTotalTokens,
+  type MarkAiModelCallUnknown,
+} from "./model-call-admission"
 import { isPermanentAiUsageRecoveryError } from "./model-call-recovery"
 import type { AgentWorkerStorage, RecoverAiModelCall, RecoverAiModelCallInput } from "./types"
 
@@ -15,6 +27,8 @@ export interface AiModelCallRecorderInput {
   readonly executionId: string
   readonly attempt: number
   readonly requesterGroupIds: readonly string[]
+  readonly beforeModelCall?: BeforeAiModelCall
+  readonly markModelCallUnknown?: MarkAiModelCallUnknown
   readonly recoverAiModelCall: RecoverAiModelCall
   /** Run identity used only in terminal recorder diagnostics. */
   readonly errorRunId: string
@@ -35,6 +49,8 @@ export class AiModelCallRecorder {
   private readonly retryDelaysMs: readonly number[]
   private readonly sleep: (ms: number) => Promise<void>
   private readonly recordAccounting: (input: RecoverAiModelCallInput) => Promise<void>
+  private readonly reservations = new Set<string>()
+  private admissionError: unknown
   private recordingError: AgentUsageRecordingError | undefined
 
   constructor(
@@ -50,6 +66,63 @@ export class AiModelCallRecorder {
       (async (recovery) => {
         await recordAiModelCallAccounting({ storage: this.input.storage, ...recovery })
       })
+  }
+
+  /** Wrap the resolved model so conversation, compaction, and workflow calls share admission. */
+  wrapModel(model: LanguageModel): LanguageModel {
+    return {
+      providerId: model.providerId,
+      modelId: model.modelId,
+      definition: model.definition,
+      costEstimator: model.costEstimator,
+      stream: async (request) => {
+        this.assertHealthy()
+        const inputTokens = estimateAiModelCallInputTokens({
+          prompt: request.messages,
+          tools: request.tools,
+          responseFormat: request.responseFormat,
+        })
+        const outputTokenAllowance = aiModelCallOutputTokenAllowance(request.maxOutputTokens)
+        let decision: Awaited<ReturnType<BeforeAiModelCall>> | undefined
+        try {
+          decision = await this.input.beforeModelCall?.({
+            ...this.identity(request),
+            requesterGroupIds: this.input.requesterGroupIds,
+            providerId: model.providerId,
+            modelId: model.modelId,
+            costEstimator: model.costEstimator,
+            inputTokens,
+            outputTokenAllowance,
+            estimatedTotalTokens: estimatedAiModelCallTotalTokens(
+              inputTokens,
+              outputTokenAllowance
+            ),
+          })
+        } catch (error) {
+          // Compaction and workflow boundaries must retain the original coded admission failure.
+          this.admissionError = error
+          throw error
+        }
+        if (decision?.reservation === "active") this.reservations.add(request.callId)
+        try {
+          return await model.stream(request)
+        } catch (error) {
+          if (this.reservations.has(request.callId)) {
+            await this.input.markModelCallUnknown?.(this.identity(request))
+          }
+          throw error
+        }
+      },
+    }
+  }
+
+  private identity(request: Pick<LanguageModelRequest, "callId">) {
+    return {
+      projectId: this.input.projectId,
+      executionId: this.input.executionId,
+      attempt: this.input.attempt,
+      callId: request.callId,
+    }
   }
 
   readonly onModelCallEnd = async (event: ModelCallEndEvent): Promise<void> => {
@@ -82,6 +155,7 @@ export class AiModelCallRecorder {
         ...(event.estimate === undefined ? {} : { estimate: event.estimate }),
         ...(event.route === undefined ? {} : { route: event.route }),
         ratedAt: new Date(occurredAt),
+        ...(this.reservations.has(event.callId) ? { reconcileLimitReservation: true } : {}),
       })
 
       try {
@@ -123,6 +197,7 @@ export class AiModelCallRecorder {
   }
 
   assertHealthy(): void {
+    if (this.admissionError !== undefined) throw this.admissionError
     if (this.recordingError) throw this.recordingError
   }
 }

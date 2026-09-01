@@ -51,6 +51,28 @@ async function collect(stream: AsyncIterable<LanguageModelStreamEvent>) {
 }
 
 describe("Anthropic provider", () => {
+  test("reserves ordinary Anthropic calls without a cache TTL accounting option", () => {
+    // Removal proof: remove estimateReservation from the provider; every estimate disappears.
+    const provider = createAnthropic({
+      fetch: async () => {
+        throw new Error("No catalog I/O expected")
+      },
+    })
+    for (const request of [undefined, { cache_control: { type: "ephemeral", ttl: "1h" } }]) {
+      expect(
+        provider("claude-opus-5", { request }).costEstimator?.estimateReservation?.({
+          inputTokens: 1000,
+          outputTokens: 200,
+        })
+      ).toEqual({ currency: "USD", amountNanos: "15000000" })
+    }
+    expect(
+      provider("claude-opus-5", {
+        providerTools: [{ type: "web_search_20260209", name: "web_search" }],
+      }).costEstimator?.estimateReservation?.({ inputTokens: 1000, outputTokens: 200 })
+    ).toBeUndefined()
+  })
+
   test.each([
     "$defs",
     "definitions",

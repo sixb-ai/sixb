@@ -32,6 +32,13 @@ export interface ModelReportedCost {
 export type ModelCostEstimate = Exclude<ModelCallCost, { status: "reported" }>
 
 export interface ModelCostEstimator {
+  /** Conservative token-cost reservation, including cache writes and pricing tiers.
+   * Return undefined when routing or non-token charges prevent a safe local estimate. */
+  estimateReservation?(input: {
+    readonly inputTokens: number
+    readonly outputTokens: number
+  }): ModelMoney | undefined
+
   estimate(input: {
     readonly usage: ModelUsage
     readonly route?: ModelRoute
@@ -67,6 +74,49 @@ export type ModelCallCost =
       readonly reason: "missing-rate-card" | "missing-usage" | "inconsistent-usage"
       readonly missingMeters?: readonly ModelCostMeter[]
     }
+
+/** Reserve at the highest configured token rates, before cache usage and the final tier are known. */
+export function estimateModelReservation(input: {
+  readonly inputTokens: number
+  readonly outputTokens: number
+  readonly rateCard?: LanguageModelRateCard
+}): ModelMoney | undefined {
+  if (!input.rateCard) return undefined
+  if (![input.inputTokens, input.outputTokens].every((n) => Number.isSafeInteger(n) && n >= 0)) {
+    throw new TypeError(
+      "[Sixb] Model reservation token estimates must be nonnegative safe integers."
+    )
+  }
+  const maxRate = (prices: readonly (ModelTokenPrice | undefined)[]) => {
+    const rates = prices.flatMap((price) =>
+      price === undefined
+        ? []
+        : typeof price === "string"
+          ? [price]
+          : [price.default, ...price.tiers.map((tier) => tier.price)]
+    )
+    return rates.reduce((max, price) => {
+      const rate = decimalDollarsToNanos(price)
+      return rate > max ? rate : max
+    }, 0n)
+  }
+  const card = input.rateCard
+  const inputRate = maxRate([
+    card.input,
+    card.cacheReadInput,
+    card.cacheWriteInput,
+    card.cacheWriteInput5m,
+    card.cacheWriteInput1h,
+  ])
+  const outputRate = maxRate([card.output])
+  const charge = (tokens: number, rate: bigint) => (BigInt(tokens) * rate + 999_999n) / 1_000_000n
+  return {
+    currency: "USD",
+    amountNanos: (
+      charge(input.inputTokens, inputRate) + charge(input.outputTokens, outputRate)
+    ).toString(),
+  }
+}
 
 /** Prefer the provider's bill over rate-card estimates, then rate complete token meters locally. */
 export function rateModelCall(input: {

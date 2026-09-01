@@ -583,6 +583,13 @@ describe("Vercel AI Gateway provider", () => {
       { providerOptions: { gateway: { caching: "off" } } },
     ]
     for (const options of safeOptions) {
+      // Removal proof: remove the provider's reservation estimator; this fails before inference.
+      expect(
+        provider("test/model", options).costEstimator?.estimateReservation?.({
+          inputTokens: 1000,
+          outputTokens: 200,
+        })
+      ).toEqual({ currency: "USD", amountNanos: "6000000" })
       expect(
         provider("test/model", options).costEstimator?.estimate({
           usage: { inputTokens: 1000, outputTokens: 200 },
@@ -599,6 +606,12 @@ describe("Vercel AI Gateway provider", () => {
           usage: { inputTokens: 1000, outputTokens: 200 },
         })
       ).toMatchObject({ status: "unpriceable" })
+      expect(
+        provider("test/model", options).costEstimator?.estimateReservation?.({
+          inputTokens: 1000,
+          outputTokens: 200,
+        })
+      ).toBeUndefined()
     }
   })
   test("declines native decoding for schemas outside the strict Responses subset", () => {

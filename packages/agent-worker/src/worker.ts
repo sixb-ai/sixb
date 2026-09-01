@@ -324,6 +324,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         context: executionContext,
         run,
         signal: turnSignal,
+        requestedBy: durableExecution.requestedBy,
       })
       const prepared = await prepareAgentConversationContext({
         context: executionContext,
@@ -789,6 +790,12 @@ function assertAgentWorkerStorage(
     throw createSixbError(
       "internal.unexpected",
       "[SixbAgentWorker] Agent workers require storage.aiCosts support."
+    )
+  }
+  if (!storage.aiLimits) {
+    throw createSixbError(
+      "internal.unexpected",
+      "[SixbAgentWorker] Agent workers require storage.aiLimits support."
     )
   }
 }

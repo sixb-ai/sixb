@@ -15,6 +15,13 @@ import {
   AgentStorageError,
   type AgentThreadRecord,
 } from "../storage/agents"
+import {
+  aiLimitSubjectsFromAttribution,
+  aiUsageLimitExceededError,
+  aiUsageLimitUnavailableError,
+  applicableAiLimitPolicyStatuses,
+} from "../storage/ai-limits/enforcement"
+import type { AiLimitPolicyStatus } from "../storage/ai-limits/types"
 import type { CreateExecutionInput } from "../storage/executions"
 import { ensureAgentExecutionIdentity, resolveAgentExecutionAuthorization } from "./authority"
 import type { AgentContextEntryInput } from "./context"
@@ -79,22 +86,6 @@ export async function requestAgentRun(
   // A scoped runtime is authoritative for caller identity. `input.principal` remains available to
   // privileged server integrations that have already authenticated their request.
   const principal = runtime.authorization?.principal ?? input.principal ?? SYSTEM_PRINCIPAL
-  const { thread, createdThread } = await resolveThread(agents, {
-    projectId,
-    agentId: agent.id,
-    threadId: input.threadId,
-    title: input.title,
-    principal,
-  })
-
-  // Fast single-flight check for a clear error. `runs.create` below is the atomic authority.
-  if (thread.activeRunId !== null) {
-    throw new AgentRequestError(
-      "active_run_exists",
-      `[Sixb] Agent thread '${thread.id}' already has an active run '${thread.activeRunId}'.`
-    )
-  }
-
   const runId = createAgentRunId()
   const durableExecution = await prepareDurableAgentExecution(
     runtime,
@@ -110,6 +101,23 @@ export async function requestAgentRun(
         principal: durableExecution.requestedBy,
       })
     : []
+  await assertAiLimitPreflight(runtime, durableExecution, requesterGroupIds)
+
+  const { thread, createdThread } = await resolveThread(agents, {
+    projectId,
+    agentId: agent.id,
+    threadId: input.threadId,
+    title: input.title,
+    principal,
+  })
+
+  // Fast single-flight check for a clear error. `runs.create` below is the atomic authority.
+  if (thread.activeRunId !== null) {
+    throw new AgentRequestError(
+      "active_run_exists",
+      `[Sixb] Agent thread '${thread.id}' already has an active run '${thread.activeRunId}'.`
+    )
+  }
   const triggerMessageId = input.messageId ?? createAgentMessageId()
   let run: AgentRunRecord
   try {
@@ -200,6 +208,7 @@ export async function retryAgentRun(
         principal: durableExecution.requestedBy,
       })
     : []
+  await assertAiLimitPreflight(runtime, durableExecution, requesterGroupIds)
   const run = await runtime.storage.transaction(async (tx) => {
     const agents = tx.agents
     if (!agents) {
@@ -224,6 +233,38 @@ export async function retryAgentRun(
   await publishRunActivity(runtime, run)
   const jobId = await dispatchAgentRun(runtime, agents, runId)
   return { run, ...(jobId ? { jobId } : {}), createdThread: false }
+}
+
+async function assertAiLimitPreflight(
+  runtime: SixbRuntimeContext,
+  execution: CreateExecutionInput,
+  requesterGroupIds: readonly string[]
+): Promise<void> {
+  const limits = runtime.storage.aiLimits
+  if (!limits) throw aiUsageLimitUnavailableError(["limitStorageUnavailable"])
+
+  const subjects = aiLimitSubjectsFromAttribution(execution.requestedBy, requesterGroupIds)
+  let applicable: readonly AiLimitPolicyStatus[]
+  try {
+    applicable = applicableAiLimitPolicyStatuses(
+      await limits.listPolicyStatuses({ projectId: runtime.projectId }),
+      subjects
+    )
+  } catch {
+    throw aiUsageLimitUnavailableError(["limitStorageUnavailable"])
+  }
+
+  const unavailable = applicable.filter((status) => status.accountingStatus === "unavailable")
+  if (unavailable.length > 0) {
+    throw aiUsageLimitUnavailableError(["incompleteAccounting"])
+  }
+  const exhausted = applicable.filter((status) => status.exhausted)
+  if (exhausted.length > 0) {
+    const resetAt = new Date(
+      Math.min(...exhausted.map((status) => status.period.resetAt.getTime()))
+    )
+    throw aiUsageLimitExceededError(resetAt)
+  }
 }
 
 async function prepareDurableAgentExecution(

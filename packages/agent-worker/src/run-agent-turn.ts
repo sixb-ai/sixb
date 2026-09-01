@@ -98,7 +98,26 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   const sandboxReadiness = monitorSandboxReadiness(context.sandboxReady)
   // Preflight and the answer share accounting and one deadline. Direct callers own their runtime.
   const ownsRuntime = input.runtime === undefined
-  const runtime = input.runtime ?? createAgentTurnRuntime({ context, run, signal })
+  let runtime = input.runtime
+  if (!runtime) {
+    const durableExecution = await storage.executions.getById({
+      projectId,
+      id: run.executionId,
+    })
+    if (!durableExecution) {
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbAgentWorker] Agent run '${runId}' references missing execution '${run.executionId}'.`,
+        { details: { agentId: run.agentId, runId, executionId: run.executionId } }
+      )
+    }
+    runtime = createAgentTurnRuntime({
+      context,
+      run,
+      signal,
+      requestedBy: durableExecution.requestedBy,
+    })
+  }
   const usageRecorder = runtime.usageRecorder
   const abortSignal = AbortSignal.any([runtime.signal, sandboxReadiness.signal])
   let interruptedParts: readonly AgentMessagePart[] | undefined
@@ -154,7 +173,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     let result: Awaited<ReturnType<typeof runModelLoop>>
     try {
       result = await runModelLoop({
-        model: agent.model,
+        model: usageRecorder.wrapModel(agent.model),
         messages: [
           {
             role: "system",

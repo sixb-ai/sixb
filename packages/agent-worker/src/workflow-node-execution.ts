@@ -29,6 +29,7 @@ import type {
 import type {
   AgentRunFinishReason,
   ExecutionRecord,
+  ReadonlyJsonObject,
   WorkflowAgentNodeRunExecution,
   WorkflowAgentNodeRunRecord,
   WorkflowNodeRunRecord,
@@ -40,6 +41,7 @@ import { AGENT_RUN_FAILURE_CODES, WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/
 import { AgentUsageRecordingError } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
 import { toAgentExecutionFailure } from "./failure"
+import { createAiModelCallLimitController } from "./model-call-limits"
 import { AiModelCallRecorder } from "./model-call-recorder"
 import {
   type AgentExecutionEnvironment,
@@ -127,12 +129,20 @@ export async function executeWorkflowAgentNode(
       { details: workflowAgentErrorDetails(agent.id, nodeRun) }
     )
   }
+  const modelCallLimits = createAiModelCallLimitController({
+    storage: context.storage,
+    projectId: context.id,
+    requestedBy: durableExecution.requestedBy,
+    requesterGroupIds: workflowRun.requesterGroupIds,
+  })
   const usageRecorder = new AiModelCallRecorder({
     storage: context.storage,
     projectId: context.id,
     executionId: executionRecord.executionId,
     attempt: reserved.attempt,
     requesterGroupIds: workflowRun.requesterGroupIds,
+    beforeModelCall: modelCallLimits.beforeModelCall,
+    markModelCallUnknown: modelCallLimits.markModelCallUnknown,
     recoverAiModelCall: context.recoverAiModelCall,
     errorRunId: nodeRun.id,
   })
@@ -210,8 +220,10 @@ export async function executeWorkflowAgentNode(
     try {
       usageRecorder.assertHealthy()
     } catch (recordingError) {
+      const sameAdmissionFailure =
+        isAiUsageLimitFailure(executionError) && isAiUsageLimitFailure(recordingError)
       executionError = recordingError
-      failurePhase = undefined
+      if (!sameAdmissionFailure) failurePhase = undefined
     }
 
     if (signal.aborted) throw executionError
@@ -493,13 +505,15 @@ async function finishWorkflowAgentNodeFailed(input: {
       : attachWorkflowAgentFailureDetails(input.error, input.status, agentErrorDetails)
   const workflowFailureError =
     input.status === "failed"
-      ? createWorkflowNodeFailure(input.error, {
-          workflowId: input.nodeRun.workflowId,
-          workflowRunId: input.nodeRun.workflowRunId,
-          nodeId: input.nodeRun.nodeId,
-          nodeRunId: input.nodeRun.id,
-          child: { type: "agent", agentId: input.agent.id },
-        })
+      ? isAiUsageLimitFailure(agentExecutionError)
+        ? agentExecutionError
+        : createWorkflowNodeFailure(input.error, {
+            workflowId: input.nodeRun.workflowId,
+            workflowRunId: input.nodeRun.workflowRunId,
+            nodeId: input.nodeRun.nodeId,
+            nodeRunId: input.nodeRun.id,
+            child: { type: "agent", agentId: input.agent.id },
+          })
       : createSixbError(
           "runtime.cancelled",
           summarizeErrorMessage(input.error, "Agent workflow node execution failed."),
@@ -568,11 +582,28 @@ function attachWorkflowAgentFailureDetails(
   }
   if (
     isSixbError(error) &&
-    (error.code === "internal.unexpected" || error.code === "agent.execution_failed")
+    (error.code === "internal.unexpected" ||
+      error.code === "agent.execution_failed" ||
+      error.code === "ai.usage_limit_exceeded" ||
+      error.code === "ai.usage_limit_unavailable")
   ) {
-    return createSixbError(error.code, error.message, { cause: error, details })
+    const errorDetails =
+      (error.code === "ai.usage_limit_exceeded" || error.code === "ai.usage_limit_unavailable") &&
+      typeof error.details === "object" &&
+      error.details !== null &&
+      !Array.isArray(error.details)
+        ? { ...(error.details as ReadonlyJsonObject), ...details }
+        : details
+    return createSixbError(error.code, error.message, { cause: error, details: errorDetails })
   }
   return error
+}
+
+function isAiUsageLimitFailure(error: unknown): error is ReturnType<typeof createSixbError> {
+  return (
+    isSixbError(error) &&
+    (error.code === "ai.usage_limit_exceeded" || error.code === "ai.usage_limit_unavailable")
+  )
 }
 
 async function emitNodeSucceeded(

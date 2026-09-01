@@ -77,7 +77,7 @@ export type {
   ModelMoney,
   ModelReportedCost,
 } from "./pricing"
-export { rateModelCall } from "./pricing"
+export { estimateModelReservation, rateModelCall } from "./pricing"
 export type {
   LanguageModelRateCard,
   ModelPricingTier,

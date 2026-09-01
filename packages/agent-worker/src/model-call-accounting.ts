@@ -7,6 +7,7 @@ import { assertJsonObject, type ModelCostEstimate } from "@sixb/core/models"
 import type {
   AiBillableMeter,
   AiCostStorage,
+  AiLimitStorage,
   AiModelCallCostRecord,
   AiModelCallUsageRecord,
   AiPricingContext,
@@ -24,6 +25,7 @@ interface RecordAiModelCallAccountingInput extends RecoverAiModelCallInput {
 interface AiAccountingCapabilities {
   readonly aiUsage: AiUsageStorage
   readonly aiCosts: AiCostStorage
+  readonly aiLimits: AiLimitStorage
 }
 
 /** Atomically append one provider call's usage and the valuation captured by the model runtime. */
@@ -31,7 +33,7 @@ export async function recordAiModelCallAccounting(
   input: RecordAiModelCallAccountingInput
 ): Promise<RecordAiModelCallResult> {
   return input.storage.transaction(async (tx) => {
-    const { aiUsage, aiCosts } = requireAccountingCapabilities(tx)
+    const { aiUsage, aiCosts, aiLimits } = requireAccountingCapabilities(tx)
     const usage = await aiUsage.recordModelCall(input.usage)
     // Usage deduplicates provider lifecycle replays by execution/call identity. Always attach the
     // valuation to the canonical row it returns, not the fresh candidate ID from a replay.
@@ -62,6 +64,23 @@ export async function recordAiModelCallAccounting(
                   },
           }),
     })
+    if (usage.created) {
+      await aiLimits.recordModelCallActuals({
+        projectId: usage.record.projectId,
+        usageRecordId: usage.record.id,
+        recordedAt: input.ratedAt,
+      })
+    }
+    if (input.reconcileLimitReservation) {
+      await aiLimits.reconcileModelCall({
+        projectId: usage.record.projectId,
+        executionId: usage.record.executionId,
+        attempt: usage.record.attempt,
+        callId: usage.record.callId,
+        usageRecordId: usage.record.id,
+        reconciledAt: input.ratedAt,
+      })
+    }
     return usage
   })
 }
@@ -180,10 +199,10 @@ function normalizeMissingMeters(
 }
 
 function requireAccountingCapabilities(storage: Storage): AiAccountingCapabilities {
-  if (!storage.aiUsage || !storage.aiCosts) {
+  if (!storage.aiUsage || !storage.aiCosts || !storage.aiLimits) {
     throw new Error(
-      "[SixbAgentWorker] AI model-call accounting requires storage.aiUsage and storage.aiCosts."
+      "[SixbAgentWorker] AI model-call accounting requires storage.aiUsage, storage.aiCosts, and storage.aiLimits."
     )
   }
-  return { aiUsage: storage.aiUsage, aiCosts: storage.aiCosts }
+  return { aiUsage: storage.aiUsage, aiCosts: storage.aiCosts, aiLimits: storage.aiLimits }
 }

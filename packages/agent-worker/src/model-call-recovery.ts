@@ -14,6 +14,7 @@ import type {
 } from "@sixb/core/storage"
 import {
   AiCostStorageError,
+  AiLimitStorageError,
   AiUsageStorageError,
   normalizeAiModelCallRecord,
 } from "@sixb/core/storage"
@@ -75,9 +76,26 @@ export async function recordRecoveredAiModelCall(
 ): Promise<RecordAiModelCallResult> {
   const usage = fromQueuePayload(job)
   const accounting = accountingFromQueuePayload(job)
-  return accounting
-    ? recordAiModelCallAccounting({ storage, usage, ...accounting })
-    : storage.aiUsage.recordModelCall(usage)
+  if (accounting) return recordAiModelCallAccounting({ storage, usage, ...accounting })
+  return storage.transaction(async (tx) => {
+    if (!tx.aiUsage || !tx.aiLimits)
+      throw new Error("[SixbAgentWorker] Recovery requires usage and limit storage.")
+    const result = await tx.aiUsage.recordModelCall(usage)
+    if (result.created)
+      await tx.aiLimits.recordModelCallActuals({
+        projectId: result.record.projectId,
+        usageRecordId: result.record.id,
+      })
+    if (job.payload.accounting?.reconcileLimitReservation)
+      await tx.aiLimits.reconcileModelCall({
+        projectId: result.record.projectId,
+        executionId: result.record.executionId,
+        attempt: result.record.attempt,
+        callId: result.record.callId,
+        usageRecordId: result.record.id,
+      })
+    return result
+  })
 }
 
 /** Validation and referential-integrity failures cannot become valid through queue redelivery. */
@@ -88,7 +106,15 @@ export function isPermanentAiUsageRecoveryError(error: unknown): boolean {
     (error instanceof AiUsageStorageError &&
       (error.code === "duplicate_id" || error.code === "missing_execution")) ||
     (error instanceof AiCostStorageError &&
-      (error.code === "missing_usage" || error.code === "cost_mismatch"))
+      (error.code === "missing_usage" || error.code === "cost_mismatch")) ||
+    (error instanceof AiLimitStorageError &&
+      (error.code === "missing_execution" ||
+        error.code === "missing_reservation" ||
+        error.code === "missing_usage_record" ||
+        error.code === "usage_mismatch" ||
+        error.code === "reservation_conflict" ||
+        error.code === "reconciliation_conflict" ||
+        error.code === "invalid_reservation_state"))
   )
 }
 
@@ -121,6 +147,7 @@ function toAccountingPayload(input: RecoverAiModelCallInput): AgentAiUsageAccoun
     ...(input.estimate === undefined ? {} : { estimate: structuredClone(input.estimate) }),
     ...(input.route === undefined ? {} : { route: structuredClone(input.route) }),
     ratedAt: input.ratedAt.toISOString(),
+    ...(input.reconcileLimitReservation ? { reconcileLimitReservation: true } : {}),
   }
 }
 
@@ -170,6 +197,7 @@ function accountingFromQueuePayload(
       : { estimate: structuredClone(accounting.estimate) }),
     ...(accounting.route === undefined ? {} : { route: structuredClone(accounting.route) }),
     ratedAt: parseDate(accounting.ratedAt, job.id, "ratedAt"),
+    reconcileLimitReservation: accounting.reconcileLimitReservation === true,
   }
 }
 

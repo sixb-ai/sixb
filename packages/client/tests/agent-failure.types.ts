@@ -11,6 +11,8 @@ const cancelled: AgentRunFailureCode = "runtime.cancelled"
 const executionFailed: AgentRunFailureCode = "agent.execution_failed"
 const listedUnexpected: ListedAgentRunFailureCode = "internal.unexpected"
 const listedExecutionFailed: ListedAgentRunFailureCode = "agent.execution_failed"
+const limitExceeded: AgentRunFailureCode = "ai.usage_limit_exceeded"
+const listedLimitUnavailable: ListedAgentRunFailureCode = "ai.usage_limit_unavailable"
 
 // Dataset lookup codes belong to HTTP route failures, not persisted agent-run failures.
 // @ts-expect-error the generated agent-run failure contract must stay scoped to its producer
@@ -24,6 +26,8 @@ void [
   executionFailed,
   listedUnexpected,
   listedExecutionFailed,
+  limitExceeded,
+  listedLimitUnavailable,
   unrelatedRun,
   unrelatedListed,
 ]

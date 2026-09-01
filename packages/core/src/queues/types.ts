@@ -215,6 +215,8 @@ export interface AgentAiUsageAccountingPayload {
   readonly cost: ModelCallCost
   readonly route?: ModelRoute
   readonly ratedAt: string
+  /** Absent on pre-limit jobs; those model calls did not create a reservation. */
+  readonly reconcileLimitReservation?: boolean
 }
 
 export interface AgentAiUsageRecordRequestedQueueJob
