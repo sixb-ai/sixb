@@ -1,5 +1,9 @@
 import type { GetAiAccountingOverviewResponse, ListAiModelCallsResponse } from "@sixb/client"
-import { getAiAccountingOverviewOptions, listAiModelCallsOptions } from "@sixb/client/hooks"
+import {
+  getAiAccountingOverviewOptions,
+  getAiLimitStatusQueryKey,
+  listAiModelCallsOptions,
+} from "@sixb/client/hooks"
 import {
   Badge,
   Button,
@@ -21,7 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from "@sixb/ui/components"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Bot,
   CircleDollarSign,
@@ -33,6 +37,7 @@ import {
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
+import { AI_LIMIT_STATUS_QUERY, AiLimitPanel } from "../components/AiLimitPanel"
 import { AiUsageBreakdown, AiUsageMetricCard, AiUsageTimeSeries } from "../components/AiUsageCharts"
 import { AiUsageDateRangeControl } from "../components/AiUsageDateRangeControl"
 import { utcAccountingRangeForCalendarDays } from "../lib/aiUsageDateRange"
@@ -57,6 +62,7 @@ const RANGE_OPTIONS: readonly { value: RangePreset; label: string; milliseconds:
 ]
 
 export function AiUsagePage() {
+  const queryClient = useQueryClient()
   const [rangeSelection, setRangeSelection] = useState<RangeSelection>(() => ({
     kind: "preset",
     preset: "7d",
@@ -101,6 +107,9 @@ export function AiUsagePage() {
   }, [currencies, currency])
 
   const refresh = () => {
+    void queryClient.invalidateQueries({
+      queryKey: getAiLimitStatusQueryKey(AI_LIMIT_STATUS_QUERY),
+    })
     if (rangeSelection.kind === "preset") {
       setRangeSelection({ ...rangeSelection, end: new Date() })
       return
@@ -112,15 +121,28 @@ export function AiUsagePage() {
   const loading = unfilteredQuery.isLoading || (hasFilters && overviewQuery.isLoading)
   const error = unfilteredQuery.error ?? overviewQuery.error
 
-  if (loading) return <AiUsageLoading />
+  if (loading) {
+    return (
+      <div className="space-y-5">
+        <AiLimitPanel />
+        <AiUsageLoading />
+      </div>
+    )
+  }
   if (error || !overview) {
     return (
-      <EmptyState
-        icon={<TriangleAlert />}
-        title="AI accounting is unavailable"
-        description="Atlas could not load project token usage and pricing analytics. Check that AI accounting storage is configured and migrated."
-        action={<Button onClick={refresh}>Retry</Button>}
-      />
+      <div className="space-y-5">
+        <AiLimitPanel />
+        <EmptyState
+          icon={<TriangleAlert />}
+          title="AI accounting is unavailable"
+          description={aiUsageErrorMessage(
+            error,
+            "Atlas could not load project token usage and pricing analytics. Check that AI accounting storage is configured and migrated."
+          )}
+          action={<Button onClick={refresh}>Retry</Button>}
+        />
+      </div>
     )
   }
 
@@ -235,6 +257,15 @@ export function AiUsagePage() {
           </Button>
         </div>
       </header>
+
+      <AiLimitPanel />
+
+      <div className="space-y-1">
+        <h2 className="text-lg font-semibold">Usage analytics</h2>
+        <p className="text-sm text-muted-foreground">
+          Historical model activity for the selected date range and filters.
+        </p>
+      </div>
 
       <div className="flex flex-wrap gap-2">
         <AccountingSelect
@@ -463,6 +494,14 @@ export function AiUsagePage() {
       />
     </div>
   )
+}
+
+function aiUsageErrorMessage(error: unknown, fallback: string): string {
+  if (error && typeof error === "object") {
+    if ("error" in error && typeof error.error === "string") return error.error
+    if ("message" in error && typeof error.message === "string") return error.message
+  }
+  return fallback
 }
 
 function ModelCallsTable({
@@ -928,10 +967,16 @@ function nanosToChartValue(amountNanos: string | undefined): number {
 }
 
 function formatMoney(money: { currency: string; amountNanos: string }): string {
-  const nanos = BigInt(money.amountNanos)
-  const whole = nanos / 1_000_000_000n
-  const fraction = (nanos % 1_000_000_000n).toString().padStart(9, "0").replace(/0+$/, "")
-  return `${money.currency} ${whole.toLocaleString("en-US")}${fraction ? `.${fraction.padEnd(2, "0")}` : ".00"}`
+  const value = Number(BigInt(money.amountNanos)) / 1_000_000_000
+  const maximumFractionDigits = value === 0 ? 2 : value < 0.01 ? 6 : value < 1 ? 4 : 2
+  const formatter = new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: money.currency,
+    minimumFractionDigits: value === 0 || value >= 1 ? 2 : 0,
+    maximumFractionDigits,
+  })
+  if (value > 0 && value < 0.000001) return `<${formatter.format(0.000001)}`
+  return formatter.format(value)
 }
 
 function formatChartMoney(value: number, currency: string | undefined): string {
