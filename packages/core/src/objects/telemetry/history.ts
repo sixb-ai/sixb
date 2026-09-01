@@ -15,6 +15,10 @@ export interface TelemetryHistoryOptions {
 
 export type TelemetryHistoryBatchInput = Omit<TimeseriesHistoryBatchInput, "projectId">
 
+interface SnapshotTelemetryHistoryRequest extends TelemetryHistoryBatchInput {
+  readonly maxPointOccurrences?: number
+}
+
 /** Read only series selected for the exact object occurrence carried by the nominal reader. */
 export async function getTelemetryHistoryBatch(
   input: TelemetryHistoryBatchInput,
@@ -24,7 +28,7 @@ export async function getTelemetryHistoryBatch(
   const objectReader = options.objectReader
   const storage = options.storage
   const projectId = objectReader.projectId
-  const request = snapshotTelemetryHistoryInput(input)
+  const request = snapshotTelemetryHistoryInput(input, objectReader)
 
   const uniqueSeries = new Map<string, TimeseriesHistorySeriesInput>()
   for (const series of request.series) {
@@ -66,15 +70,9 @@ export async function getTelemetryHistoryBatch(
   const visibleSeriesKeys = new Set(visibleSeries.map(seriesKey))
   const providerResultBySeries = new Map<string, TimeseriesHistoryBatchResult>()
   for (let index = 0; index < storedCount; index += 1) {
-    const providerResult = snapshotProviderResult(stored[index]!)
+    const providerResult = snapshotProviderResult(stored[index]!, request.limitPerSeries)
     const key = seriesKey(providerResult)
     if (providerResultBySeries.has(key) || !visibleSeriesKeys.has(key)) {
-      throw invalidTimeseriesProviderResult()
-    }
-    if (
-      request.limitPerSeries !== undefined &&
-      providerResult.points.length > request.limitPerSeries
-    ) {
       throw invalidTimeseriesProviderResult()
     }
     for (const point of providerResult.points) {
@@ -97,13 +95,18 @@ export async function getTelemetryHistoryBatch(
     )
   )
 
-  const result = request.series.map((series) => ({
+  const releasedPoints = request.series.map((series) =>
+    releasableSeriesKeys.has(seriesKey(series))
+      ? (providerResultBySeries.get(seriesKey(series))?.points ?? [])
+      : []
+  )
+  const pointOccurrences = releasedPoints.reduce((total, points) => total + points.length, 0)
+  if (request.maxPointOccurrences !== undefined && pointOccurrences > request.maxPointOccurrences) {
+    throw invalidTimeseriesProviderResult()
+  }
+  const result = request.series.map((series, index) => ({
     ...series,
-    points: releasableSeriesKeys.has(seriesKey(series))
-      ? (providerResultBySeries
-          .get(seriesKey(series))
-          ?.points.map((point) => structuredClone(point)) ?? [])
-      : [],
+    points: releasedPoints[index]!.map((point) => structuredClone(point)),
   }))
   objectReader.assertVisibleOutputWithinLimit(result)
   return result
@@ -162,8 +165,9 @@ function assertTimeseriesPointMatchesSeries(
 }
 
 function snapshotTelemetryHistoryInput(
-  input: TelemetryHistoryBatchInput
-): TelemetryHistoryBatchInput {
+  input: TelemetryHistoryBatchInput,
+  objectReader: AuthorizedObjectReader
+): SnapshotTelemetryHistoryRequest {
   const authoredSeries = input.series
   const from = input.from
   const to = input.to
@@ -172,21 +176,16 @@ function snapshotTelemetryHistoryInput(
   if (!Array.isArray(authoredSeries)) {
     throw new Error("[Sixb] Telemetry history series must be an array.")
   }
-  if (
-    limitPerSeries !== undefined &&
-    (!Number.isSafeInteger(limitPerSeries) || limitPerSeries < 0)
-  ) {
-    throw new Error("[Sixb] Telemetry history limit must be a non-negative safe integer.")
-  }
   if (order !== undefined && order !== "asc" && order !== "desc") {
     throw new Error("[Sixb] Telemetry history order must be 'asc' or 'desc'.")
   }
 
   // Capture length once and walk by index so proxies cannot change the iteration shape halfway.
   const seriesCount = authoredSeries.length
-  if (!Number.isSafeInteger(seriesCount) || seriesCount < 0) {
-    throw new Error("[Sixb] Telemetry history series must have a safe integer length.")
-  }
+  const admission = objectReader.admitTelemetryHistoryRead({
+    seriesCount,
+    ...(limitPerSeries === undefined ? {} : { limitPerSeries }),
+  })
   const series: TimeseriesHistorySeriesInput[] = []
   for (let index = 0; index < seriesCount; index += 1) {
     series.push(snapshotTelemetrySeries(authoredSeries[index]!))
@@ -195,8 +194,11 @@ function snapshotTelemetryHistoryInput(
     series,
     ...(from === undefined ? {} : { from }),
     ...(to === undefined ? {} : { to }),
-    ...(limitPerSeries === undefined ? {} : { limitPerSeries }),
+    ...(admission.limitPerSeries === undefined ? {} : { limitPerSeries: admission.limitPerSeries }),
     ...(order === undefined ? {} : { order }),
+    ...(admission.maxPointOccurrences === undefined
+      ? {}
+      : { maxPointOccurrences: admission.maxPointOccurrences }),
   })
 }
 
@@ -221,14 +223,28 @@ function visibleLatestResult<T extends TimeseriesPoint | null>(
 }
 
 function snapshotProviderResult(
-  result: TimeseriesHistoryBatchResult
+  result: TimeseriesHistoryBatchResult,
+  maxPointsPerSeries: number | undefined
 ): TimeseriesHistoryBatchResult {
   try {
-    const snapshot = structuredClone(result)
-    if (!snapshot || typeof snapshot !== "object" || !Array.isArray(snapshot.points)) {
+    if (typeof result !== "object" || result === null || Array.isArray(result)) {
       throw invalidTimeseriesProviderResult()
     }
-    return snapshot
+    const series = snapshotTelemetrySeries(result)
+    const authoredPoints = result.points
+    if (!Array.isArray(authoredPoints)) throw invalidTimeseriesProviderResult()
+    const pointCount = authoredPoints.length
+    if (
+      !Number.isSafeInteger(pointCount) ||
+      (maxPointsPerSeries !== undefined && pointCount > maxPointsPerSeries)
+    ) {
+      throw invalidTimeseriesProviderResult()
+    }
+    const points: TimeseriesPoint[] = []
+    for (let index = 0; index < pointCount; index += 1) {
+      points.push(snapshotProviderPoint(authoredPoints[index]!))
+    }
+    return { ...series, points }
   } catch (error) {
     if (isInvalidTimeseriesProviderResult(error)) throw error
     throw invalidTimeseriesProviderResult(error)
