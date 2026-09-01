@@ -25,6 +25,7 @@ export type GoogleSurface =
   | "calendar"
   | "gmail"
   | "sheets"
+  | "meet"
   | "analyticsAdmin"
   | "analyticsData"
 

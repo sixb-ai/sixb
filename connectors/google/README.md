@@ -1,19 +1,19 @@
 # @sixb/connector-google
 
 A pair of typed Google clients for Sixb, built on `@sixb/connector-rest`: `google()` for Drive,
-Calendar, Gmail, Sheets, and Analytics, and `googleAds()` for read-only Google Ads manager-account
-reporting.
+Calendar, Gmail, Sheets, Meet, and Analytics, and `googleAds()` for read-only Google Ads
+manager-account reporting.
 Like every Sixb connector they are **typed bridges** to the external system — they do not store,
 sync, parse, or project data. Datasets, syncs, and projections are wired project-side by the
 consumer.
 
 One package shares Google's three explicit authentication modes. Drive, Calendar, Gmail, Sheets,
-and Analytics use one `google()` client with declarative surfaces; Google Ads has a separate
+Meet, and Analytics use one `google()` client with declarative surfaces; Google Ads has a separate
 `googleAds()` factory because its developer token, manager context, version lifecycle, and GAQL
 transport are distinct.
 
 Surfaces implemented: **`drive`** (v3), **`calendar`** (v3), **`gmail`** (v1), **`sheets`** (v4),
-and **`analytics`** with **Admin** (v1beta) plus **Data** (v1beta).
+**`meet`** (v2), and **`analytics`** with **Admin** (v1beta) plus **Data** (v1beta).
 
 ## Usage
 
@@ -201,6 +201,102 @@ await client.calendar.channels.stop({ id: channel.id, resourceId: channel.resour
 List endpoints return `nextSyncToken` on their final page; call `list` (not `listAll`) when you
 need it to poll incrementally with `syncToken`. `patch`/`insert`/`update` accept the raw Calendar
 resource shapes — the connector relays them without interpretation.
+
+### Google Meet (v2)
+
+The complete stable Meet REST v2 surface is available under `client.meet`: meeting-space creation
+and configuration, conference records, participants and sessions, recordings, transcripts and
+structured entries, and smart notes. Every list resource also has a `listAll` iterator.
+
+```ts
+const space = await client.meet.spaces.create({
+  config: {
+    accessType: "TRUSTED",
+    artifactConfig: {
+      recordingConfig: { autoRecordingGeneration: "ON" },
+      transcriptionConfig: { autoTranscriptionGeneration: "ON" },
+    },
+  },
+})
+
+const current = await client.meet.spaces.get(space.name!)
+if (current.activeConference) {
+  const participants = client.meet.conferenceRecords.participants.listAll(
+    current.activeConference.conferenceRecord!,
+  )
+  for await (const participant of participants) {
+    console.log(participant.signedinUser?.displayName)
+  }
+}
+
+for await (const conference of client.meet.conferenceRecords.listAll({
+  filter: `space.name = "${space.name}"`,
+})) {
+  for await (const transcript of client.meet.conferenceRecords.transcripts.listAll(
+    conference.name!,
+  )) {
+    for await (const entry of client.meet.conferenceRecords.transcripts.entries.listAll(
+      transcript.name!,
+    )) {
+      console.log(entry.startTime, entry.participant, entry.text)
+    }
+  }
+}
+```
+
+Meet writes (`spaces.create`, `patch`, and `endActiveConference`) are single-attempt so the
+connector never replays a mutation automatically. Reads retain the shared transient retry policy.
+Page sizes are validated against Google's endpoint-specific maxima before issuing a request.
+
+#### Calendar events with Google Meet
+
+Calendar owns scheduling and invitations; Meet owns the meeting space, live conference, attendance,
+and artifacts. To schedule a Calendar event with a unique Meet conference, use Calendar's
+`conferenceData.createRequest` and `conferenceDataVersion: 1`:
+
+```ts
+const event = await client.calendar.events.insert(
+  "primary",
+  {
+    summary: "Customer review",
+    start: { dateTime: "2026-09-10T14:00:00-04:00" },
+    end: { dateTime: "2026-09-10T15:00:00-04:00" },
+    attendees: [{ email: "customer@example.com" }],
+    conferenceData: {
+      createRequest: {
+        requestId: crypto.randomUUID(),
+        conferenceSolutionKey: { type: "hangoutsMeet" },
+      },
+    },
+  },
+  { conferenceDataVersion: 1, sendUpdates: "all" },
+)
+
+// Conference creation is asynchronous. If this is still `pending`, fetch the event again.
+const meetingCode = event.conferenceData?.conferenceId
+if (meetingCode) {
+  const space = await client.meet.spaces.get(`spaces/${meetingCode}`)
+  const conferences = client.meet.conferenceRecords.listAll({
+    filter: `space.meeting_code = "${meetingCode}"`,
+  })
+}
+```
+
+Meet doesn't expose a Calendar event id. The bridge is Calendar's
+`conferenceData.conferenceId` (the Meet meeting code), which can be passed as the `spaces/{code}`
+alias or used in a conference-record filter. Store the stable `Space.name` after resolving it;
+meeting codes can expire and be reused. Generate a new Calendar `createRequest.requestId` for each
+new conference instead of reusing conference data across unrelated events.
+
+Meet requires user authentication. A service account works only while impersonating a user through
+domain-wide delegation (`subject`). Use `meetings.space.created` for spaces created by the app,
+`meetings.space.readonly` to read any accessible space, and `meetings.space.settings` to edit or read
+settings on spaces created by other apps such as Calendar. Downloading generated Drive artifacts
+also needs `drive.meet.readonly`, `drive.readonly`, or another compatible Drive scope.
+
+Conference records and structured transcript entries expire 30 days after a conference ends. The
+generated Docs and MP4 files follow Drive retention instead. The `/v2beta` space-member methods and
+real-time Workspace Events subscriptions are separate preview/API surfaces and aren't exposed here.
 
 ### Gmail (v1)
 
@@ -500,7 +596,7 @@ ADC authenticates an identity; it does not grant that identity access to Workspa
 target Drive resources with the resolved identity and request the required OAuth scopes. Domain-wide
 delegation through `subject` remains available only in service-account-key mode.
 
-## Reading Google Meet transcripts via Drive
+## Reading Google Meet artifacts via Drive
 
 Meet transcripts are saved as Google Docs in the organizer's Drive (`Meet Recordings`). To read
 them with a service account:
@@ -511,7 +607,6 @@ them with a service account:
    them to `text/plain` or `text/markdown`.
 
 Notes: transcription must be started per meeting (or auto-configured); the Drive Doc persists
-under normal Drive retention (no 30-day window — that limit only applies to the Meet REST API);
-the Doc is prose, so there is no guaranteed per-speaker structure. If structured entries
-(speaker/timestamps) are required, that is the Meet REST API surface (not yet implemented) and a
-different auth model (per-organizer DWD or user OAuth).
+under normal Drive retention. The Doc is prose, so there is no guaranteed per-speaker structure.
+Use `client.meet.conferenceRecords.transcripts.entries` for structured speaker/timestamp entries,
+which are retained by Meet for 30 days after the conference ends.
