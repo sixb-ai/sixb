@@ -2,6 +2,7 @@ import type { AgentDefinition, AgentMessagePart, SchemaOrRef, ValueType } from "
 import {
   buildAgentSystemPrompt,
   buildWorkflowOutputFinalizerPrompt,
+  DEFAULT_AGENT_FINAL_STEP_INSTRUCTION,
   runModelLoop,
 } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
@@ -17,7 +18,6 @@ import { StructuredOutputError } from "@sixb/core/models"
 import { type AgentRunFinishReason, coerceAgentRunFinishReason } from "@sixb/core/storage"
 import { agentTraceFromModelSteps } from "./model-adapters"
 import type { AiModelCallRecorder } from "./model-call-recorder"
-import { FINAL_AGENT_LOOP_STEP_INSTRUCTION } from "./run-agent-loop"
 import type { AgentTurnContext } from "./types"
 
 const WORKFLOW_OUTPUT_FINALIZATION_ATTEMPTS = 2
@@ -110,7 +110,7 @@ export async function runWorkflowAgentNode(
       tools: input.context.tools,
       ...(input.agent.reasoning === undefined ? {} : { reasoning: input.agent.reasoning }),
       maxSteps,
-      finalStepInstruction: FINAL_AGENT_LOOP_STEP_INSTRUCTION,
+      finalStepInstruction: DEFAULT_AGENT_FINAL_STEP_INSTRUCTION,
       ...(input.context.prepareStep === undefined
         ? {}
         : { prepareStep: input.context.prepareStep }),

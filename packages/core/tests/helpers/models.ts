@@ -1,14 +1,13 @@
-import { defineLanguageModel, type LanguageModelDefinition } from "./definitions"
-import type { LanguageModelStreamEvent } from "./events"
+import { defineLanguageModel, type LanguageModelDefinition } from "../../src/models/definitions"
+import type { LanguageModelStreamEvent } from "../../src/models/events"
 import type {
   LanguageModel,
   LanguageModelRequest,
   LanguageModelStream,
   ModelCapabilities,
-} from "./language-model"
+} from "../../src/models/language-model"
 
-/** Options for a deterministic language model used by provider and runtime tests. */
-export interface MockLanguageModelOptions {
+interface MockLanguageModelOptions {
   readonly providerId?: string
   readonly modelId?: string
   readonly capabilities?: ModelCapabilities
@@ -61,7 +60,7 @@ export class MockLanguageModel implements LanguageModel {
   }
 }
 
-export async function* eventsFromArray(
+async function* eventsFromArray(
   events: readonly LanguageModelStreamEvent[]
 ): AsyncIterable<LanguageModelStreamEvent> {
   yield* events
@@ -69,25 +68,4 @@ export async function* eventsFromArray(
 
 export function streamFromArray(events: readonly LanguageModelStreamEvent[]): LanguageModelStream {
   return { events: eventsFromArray(events) }
-}
-
-export function streamFromReadable(
-  stream: ReadableStream<LanguageModelStreamEvent>
-): LanguageModelStream {
-  return { events: readableEvents(stream) }
-}
-
-async function* readableEvents(
-  stream: ReadableStream<LanguageModelStreamEvent>
-): AsyncIterable<LanguageModelStreamEvent> {
-  const reader = stream.getReader()
-  try {
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) return
-      yield value
-    }
-  } finally {
-    reader.releaseLock()
-  }
 }
