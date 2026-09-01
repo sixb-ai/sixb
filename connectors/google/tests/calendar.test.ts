@@ -122,6 +122,12 @@ describe("calendar.events", () => {
         summary: "Kickoff",
         start: { dateTime: "2026-02-01T10:00:00Z" },
         end: { dateTime: "2026-02-01T11:00:00Z" },
+        conferenceData: {
+          createRequest: {
+            requestId: "meet-request-1",
+            conferenceSolutionKey: { type: "hangoutsMeet" },
+          },
+        },
       },
       { sendUpdates: "all", conferenceDataVersion: 1 }
     )
@@ -131,7 +137,15 @@ describe("calendar.events", () => {
     expect(requests[0]?.url).toBe(
       `${BASE}calendars/primary/events?sendUpdates=all&conferenceDataVersion=1`
     )
-    expect(requests[0]?.body).toMatchObject({ summary: "Kickoff" })
+    expect(requests[0]?.body).toMatchObject({
+      summary: "Kickoff",
+      conferenceData: {
+        createRequest: {
+          requestId: "meet-request-1",
+          conferenceSolutionKey: { type: "hangoutsMeet" },
+        },
+      },
+    })
   })
 
   test("update uses PUT with a body", async () => {

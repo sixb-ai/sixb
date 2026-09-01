@@ -18,6 +18,7 @@ import { type GmailMessagesResource, gmailMessagesResource } from "./surfaces/gm
 import { type GmailSettingsResource, gmailSettingsResource } from "./surfaces/gmail/settings"
 import { type GmailThreadsResource, gmailThreadsResource } from "./surfaces/gmail/threads"
 import { type GmailUsersResource, gmailUsersResource } from "./surfaces/gmail/users"
+import { type MeetSurface, meetSurface } from "./surfaces/meet"
 import { type SheetsSurface, sheetsSurface } from "./surfaces/sheets"
 
 export interface DriveSurface {
@@ -56,6 +57,7 @@ export interface GoogleClient {
   readonly calendar: CalendarSurface
   readonly gmail: GmailSurface
   readonly sheets: SheetsSurface
+  readonly meet: MeetSurface
   readonly analytics: AnalyticsSurface
 }
 
@@ -85,6 +87,7 @@ export function createGoogleClient(http: GoogleHttp): GoogleClient {
       settings: gmailSettingsResource(http),
     },
     sheets: sheetsSurface(http),
+    meet: meetSurface(http),
     analytics: {
       admin: analyticsAdminSurface(http),
       data: analyticsDataSurface(http),
