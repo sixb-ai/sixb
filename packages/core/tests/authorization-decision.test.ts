@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { type AuthorizationContext, emptyGrantIndex, isAllowed } from "../src"
 import {
+  assertAuthorized,
   assertCanAppendTelemetry,
   assertCanEdit,
   canViewEvent,
@@ -18,7 +19,7 @@ import type {
   StoredTelemetryAppendedEvent,
   StoredWorkflowRunStartedEvent,
 } from "../src/events"
-import { createTestingScope } from "../src/execution/scopes"
+import { createDelegatedRequestScope, createTestingScope } from "../src/execution/scopes"
 
 function context(grants: {
   applications?: readonly string[]
@@ -69,6 +70,30 @@ const unrestrictedScope = createTestingScope({ projectId: "decision-test" })
 const unrestrictedRuntime = {
   projectId: "decision-test",
   runtimeAuthorization: unrestrictedScope.authorization,
+}
+const delegatedScope = createDelegatedRequestScope({
+  projectId: "decision-test",
+  requestId: "delegated-request",
+  correlationId: "delegated-correlation",
+  objectRead: {
+    selection: {
+      kind: "selected",
+      roots: [
+        {
+          anchor: { objectTypeId: "quote", primaryId: "quote-1" },
+          node: {
+            objects: [{ objectTypeId: "quote", propertyIds: ["id"] }],
+            links: [],
+          },
+        },
+      ],
+    },
+    limits: { maxTraversalFacts: 10, maxOutputJsonBytes: 1_024 },
+  },
+})
+const delegatedRuntime = {
+  projectId: "decision-test",
+  runtimeAuthorization: delegatedScope.authorization,
 }
 
 describe("evaluate", () => {
@@ -230,6 +255,22 @@ describe("evaluate", () => {
 })
 
 describe("write asserts", () => {
+  test("generic authorization denies delegated operations instead of treating them as unrestricted", () => {
+    for (const operation of [
+      () => assertAuthorized(delegatedRuntime, { kind: "object.view", objectTypeId: "quote" }),
+      () =>
+        assertAuthorized(delegatedRuntime, {
+          kind: "object.query",
+          touchedObjectTypeIds: ["quote"],
+        }),
+      () => assertAuthorized(delegatedRuntime, { kind: "action.apply", actionId: "approve" }),
+      () => assertCanEdit(delegatedRuntime, "quote"),
+      () => assertCanAppendTelemetry(delegatedRuntime, "sensor"),
+    ]) {
+      expect(operation).toThrow("not covered by delegated authorization")
+    }
+  })
+
   test("assertCanEdit demands view as well as edit, and names the missing one", () => {
     const both = principalRuntime({ view: ["quote"], edit: ["quote"] })
     expect(() => assertCanEdit(both, "quote")).not.toThrow()

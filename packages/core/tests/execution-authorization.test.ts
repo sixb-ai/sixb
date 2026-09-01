@@ -7,6 +7,7 @@ import { restoreAgentExecutionScope } from "../src/execution/agent"
 import {
   assertExecutionScopeProject,
   createAgentRuntimeAuthorization,
+  createDelegatedRuntimeAuthorization,
   createPrincipalRuntimeAuthorization,
   createTrustedPrimitiveRuntimeAuthorization,
   getAuthorizationRef,
@@ -19,6 +20,7 @@ import {
   restoreTrustedPrimitiveExecutionScope,
 } from "../src/execution/durable"
 import {
+  createDelegatedRequestScope,
   createDisabledRequestScope,
   createKernelScope,
   createPrincipalRequestScope,
@@ -30,6 +32,7 @@ import {
   type ExecutionScope,
   type RuntimeAuthorization,
 } from "../src/execution/types"
+import type { SelectedObjectReadScope } from "../src/storage"
 
 describe("runtime authorization capabilities", () => {
   test("snapshots principal authority and exposes only a defensive durable reference", () => {
@@ -175,6 +178,99 @@ describe("runtime authorization capabilities", () => {
 })
 
 describe("execution scopes", () => {
+  test("compiles and freezes process-local delegated object-read authority once", () => {
+    const propertyIds = ["id"]
+    const roots: SelectedObjectReadScope["roots"][number][] = [
+      {
+        anchor: { objectTypeId: "Proposal", primaryId: "proposal-1" },
+        node: {
+          objects: [{ objectTypeId: "Proposal", propertyIds }],
+          links: [],
+        },
+      },
+    ]
+    const scope = createDelegatedRequestScope({
+      projectId: "project-1",
+      requestId: "delegated-request-1",
+      correlationId: "delegated-correlation-1",
+      objectRead: {
+        selection: { kind: "selected", roots },
+        limits: { maxTraversalFacts: 100, maxOutputJsonBytes: 1_024 },
+      },
+    })
+
+    propertyIds.push("secret")
+    roots.push({
+      anchor: { objectTypeId: "Proposal", primaryId: "proposal-2" },
+      node: {
+        objects: [{ objectTypeId: "Proposal", propertyIds: ["id"] }],
+        links: [],
+      },
+    })
+
+    const resolved = resolveRuntimeAuthorization(scope.authorization)
+    expect(resolved.type).toBe("delegated")
+    if (resolved.type !== "delegated") throw new Error("expected delegated authorization")
+    expect(resolved.objectRead.scope.roots).toHaveLength(1)
+    expect(resolved.objectRead.scope.objects).toEqual([
+      { nodeId: 0, objectTypeId: "Proposal", propertyIds: ["id"] },
+    ])
+    expect(resolved.objectRead.limits).toEqual({
+      maxTraversalFacts: 100,
+      maxOutputJsonBytes: 1_024,
+    })
+    expect(Object.isFrozen(resolved)).toBe(true)
+    expect(Object.isFrozen(resolved.objectRead)).toBe(true)
+    expect(Object.isFrozen(resolved.objectRead.scope)).toBe(true)
+    expect(Object.isFrozen(resolved.objectRead.scope.roots)).toBe(true)
+    expect(Object.isFrozen(resolved.objectRead.scope.objects[0]?.propertyIds)).toBe(true)
+    expect(Object.isFrozen(resolved.objectRead.limits)).toBe(true)
+
+    expect(() => getAuthorizationRef(scope.authorization)).toThrow(
+      "cannot cross a durable execution boundary"
+    )
+    expect(() =>
+      executionRecordInputFromRuntime({
+        execution: scope.execution,
+        runtimeAuthorization: scope.authorization,
+      })
+    ).toThrow("cannot cross a durable execution boundary")
+  })
+
+  test("binds delegated authority only to its exact principal-free request", () => {
+    const scope = createDelegatedRequestScope({
+      projectId: "project-1",
+      requestId: "delegated-request-bound",
+      correlationId: "delegated-correlation-bound",
+      objectRead: {
+        selection: delegatedSelection(),
+        limits: { maxTraversalFacts: 10, maxOutputJsonBytes: 1_024 },
+      },
+    })
+    const other = createDisabledRequestScope({
+      projectId: "project-1",
+      requestId: "delegated-request-other",
+      correlationId: "delegated-correlation-other",
+    })
+
+    expect(() => resolveExecutionScopeAuthorization("project-1", scope)).not.toThrow()
+    expect(() =>
+      resolveExecutionScopeAuthorization("project-1", {
+        execution: other.execution,
+        authorization: scope.authorization,
+      })
+    ).toThrow("authority is bound to different execution provenance")
+    expect(() =>
+      createDelegatedRuntimeAuthorization({
+        execution: requestExecution("delegated-principal", { type: "user", id: "user-1" }),
+        objectRead: {
+          selection: delegatedSelection(),
+          limits: { maxTraversalFacts: 10, maxOutputJsonBytes: 1_024 },
+        },
+      })
+    ).toThrow("requires a request execution without a principal")
+  })
+
   test("durable serialization rejects a mismatched execution and authority pair", () => {
     const projectOne = createTestingScope({ projectId: "project-1" })
     const projectTwo = createTestingScope({ projectId: "project-2" })
@@ -532,5 +628,20 @@ function requestExecution(
     executor: { type: "request", requestId: `request-${id}` },
     source: { type: "http", requestId: `request-${id}` },
     correlationId: `correlation-${id}`,
+  }
+}
+
+function delegatedSelection(): SelectedObjectReadScope {
+  return {
+    kind: "selected",
+    roots: [
+      {
+        anchor: { objectTypeId: "Proposal", primaryId: "proposal-1" },
+        node: {
+          objects: [{ objectTypeId: "Proposal", propertyIds: ["id"] }],
+          links: [],
+        },
+      },
+    ],
   }
 }
