@@ -2,6 +2,12 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-09-01 — Google connector 0.1.4
+
+- `@sixb/connector-google` `0.1.4`: add the complete stable Google Meet REST API v2 surface for
+  meeting spaces, conference records, participants and sessions, recordings, transcripts and
+  structured entries, and smart notes, including paginated `listAll` iterators.
+
 ## 2026-09-01 — Framework 0.1.4
 
 This selective release is anchored by `@sixb/core` `0.1.4`.
