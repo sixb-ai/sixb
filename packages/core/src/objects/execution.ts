@@ -36,7 +36,7 @@ import type {
 import { createObjectSet } from "./sdk"
 import type { ListObjectsParams } from "./service"
 import * as objectService from "./service"
-import { getTelemetryHistoryBatch } from "./telemetry"
+import { getLatestTelemetryPoint, getTelemetryHistoryBatch } from "./telemetry"
 
 export interface ExecutionObjectOperations {
   listTypes(): readonly ObjectTypeWithPropertyTokens[]
@@ -225,16 +225,12 @@ export function createObjectsRuntime<TOntologySources extends readonly OntologyS
       }) => {
         return runtime.objectReader.listLinks(input)
       },
-      getTelemetryHistoryBatch: (input: Omit<TimeseriesHistoryBatchInput, "projectId">) =>
-        getTelemetryHistoryBatch(
-          { projectId: runtime.projectId, ...input },
-          {
-            storage: runtime.storage.timeseries,
-            runtimeAuthorization: runtime.runtimeAuthorization,
-            authorization: runtime.authorization,
-          }
-        ),
-      getTelemetryHistory: (input: {
+      getTelemetryHistoryBatch: (input: Omit<TimeseriesHistoryBatchInput, "projectId">) => {
+        const objectReader = runtime.objectReader
+        const timeseries = runtime.storage.timeseries
+        return getTelemetryHistoryBatch(input, { storage: timeseries, objectReader })
+      },
+      getTelemetryHistory: async (input: {
         objectTypeId: string
         objectId: string
         propertyId: string
@@ -243,22 +239,41 @@ export function createObjectsRuntime<TOntologySources extends readonly OntologyS
         limit?: number
         order?: "asc" | "desc"
       }) => {
-        assertAuthorized(runtime, { kind: "object.view", objectTypeId: input.objectTypeId })
-        return runtime.storage.timeseries.getHistory({
-          projectId: runtime.projectId,
-          ...input,
-        })
+        const objectReader = runtime.objectReader
+        const timeseries = runtime.storage.timeseries
+        const objectTypeId = input.objectTypeId
+        const objectId = input.objectId
+        const propertyId = input.propertyId
+        const from = input.from
+        const to = input.to
+        const limit = input.limit
+        const order = input.order
+        const [result] = await getTelemetryHistoryBatch(
+          {
+            series: [{ objectTypeId, objectId, propertyId }],
+            ...(from === undefined ? {} : { from }),
+            ...(to === undefined ? {} : { to }),
+            ...(limit === undefined ? {} : { limitPerSeries: limit }),
+            ...(order === undefined ? {} : { order }),
+          },
+          { storage: timeseries, objectReader }
+        )
+        return result?.points ?? []
       },
-      getLatestTelemetry: (input: {
+      getLatestTelemetry: async (input: {
         objectTypeId: string
         objectId: string
         propertyId: string
       }) => {
-        assertAuthorized(runtime, { kind: "object.view", objectTypeId: input.objectTypeId })
-        return runtime.storage.timeseries.getLatest({
-          projectId: runtime.projectId,
-          ...input,
-        })
+        const objectReader = runtime.objectReader
+        const timeseries = runtime.storage.timeseries
+        const objectTypeId = input.objectTypeId
+        const objectId = input.objectId
+        const propertyId = input.propertyId
+        return getLatestTelemetryPoint(
+          { objectTypeId, objectId, propertyId },
+          { storage: timeseries, objectReader }
+        )
       },
       list: (params: ListObjectsParams) => objectService.listObjects(runtime, params),
       get: (objectTypeId: string, primaryId: string) =>

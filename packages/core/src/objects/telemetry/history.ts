@@ -1,39 +1,277 @@
-import { type AuthorizationContext, assertAuthorized } from "../../authorization"
-import type { RuntimeAuthorization } from "../../execution"
+import { createSixbError } from "../../errors/internal"
+import type { AuthorizedObjectReader } from "../../execution/authorized-object-reader"
 import type {
   TimeseriesHistoryBatchInput,
   TimeseriesHistoryBatchResult,
   TimeseriesHistorySeriesInput,
+  TimeseriesPoint,
   TimeseriesStorage,
 } from "../../storage"
 
 export interface TelemetryHistoryOptions {
   readonly storage: TimeseriesStorage
-  readonly runtimeAuthorization?: RuntimeAuthorization
-  readonly authorization?: AuthorizationContext | null
+  readonly objectReader: AuthorizedObjectReader
 }
 
+export type TelemetryHistoryBatchInput = Omit<TimeseriesHistoryBatchInput, "projectId">
+
+/** Read only series selected for the exact object occurrence carried by the nominal reader. */
 export async function getTelemetryHistoryBatch(
-  input: TimeseriesHistoryBatchInput,
+  input: TelemetryHistoryBatchInput,
   options: TelemetryHistoryOptions
 ): Promise<readonly TimeseriesHistoryBatchResult[]> {
-  assertTelemetrySeriesViewable(input.projectId, input.series, options)
-  return options.storage.getHistoryBatch(input)
+  // Capture both provider capabilities before reading caller-owned request fields.
+  const objectReader = options.objectReader
+  const storage = options.storage
+  const projectId = objectReader.projectId
+  const request = snapshotTelemetryHistoryInput(input)
+
+  const uniqueSeries = new Map<string, TimeseriesHistorySeriesInput>()
+  for (const series of request.series) {
+    const key = seriesKey(series)
+    if (!uniqueSeries.has(key)) uniqueSeries.set(key, series)
+  }
+  const deduplicatedSeries = [...uniqueSeries.values()]
+  const readable = await objectReader.canReadObjectPropertiesBatch({
+    items: deduplicatedSeries.map(objectPropertySelection),
+  })
+  const visibility = new Map(
+    deduplicatedSeries.map(
+      (series, index) => [seriesKey(series), readable[index] === true] as const
+    )
+  )
+  const visibleSeries = deduplicatedSeries.filter(
+    (series) => visibility.get(seriesKey(series)) === true
+  )
+
+  // The provider receives its own detached request. It must never retain or mutate the canonical
+  // series snapshot that admission and the final release check rely on.
+  const providerRequest = structuredClone({
+    projectId,
+    series: visibleSeries,
+    ...(request.from === undefined ? {} : { from: request.from }),
+    ...(request.to === undefined ? {} : { to: request.to }),
+    ...(request.limitPerSeries === undefined ? {} : { limitPerSeries: request.limitPerSeries }),
+    ...(request.order === undefined ? {} : { order: request.order }),
+  })
+  const stored = visibleSeries.length === 0 ? [] : await storage.getHistoryBatch(providerRequest)
+
+  // Fully detach and validate provider-owned data before the final live check. A provider result
+  // may contain accessors or a custom iterator; none of that code may run after release admission.
+  if (!Array.isArray(stored)) throw invalidTimeseriesProviderResult()
+  const storedCount = stored.length
+  if (!Number.isSafeInteger(storedCount) || storedCount > visibleSeries.length) {
+    throw invalidTimeseriesProviderResult()
+  }
+  const visibleSeriesKeys = new Set(visibleSeries.map(seriesKey))
+  const providerResultBySeries = new Map<string, TimeseriesHistoryBatchResult>()
+  for (let index = 0; index < storedCount; index += 1) {
+    const providerResult = snapshotProviderResult(stored[index]!)
+    const key = seriesKey(providerResult)
+    if (providerResultBySeries.has(key) || !visibleSeriesKeys.has(key)) {
+      throw invalidTimeseriesProviderResult()
+    }
+    if (
+      request.limitPerSeries !== undefined &&
+      providerResult.points.length > request.limitPerSeries
+    ) {
+      throw invalidTimeseriesProviderResult()
+    }
+    for (const point of providerResult.points) {
+      assertTimeseriesPointMatchesSeries(projectId, providerResult, point)
+    }
+    providerResultBySeries.set(key, providerResult)
+  }
+
+  // Objects and telemetry do not yet share a portable read snapshot. This second exact check is
+  // the release point: a series revoked while the provider was reading is never returned.
+  const releaseReadable =
+    visibleSeries.length === 0
+      ? []
+      : await objectReader.canReadObjectPropertiesBatch({
+          items: visibleSeries.map(objectPropertySelection),
+        })
+  const releasableSeriesKeys = new Set(
+    visibleSeries.flatMap((series, index) =>
+      releaseReadable[index] === true ? [seriesKey(series)] : []
+    )
+  )
+
+  const result = request.series.map((series) => ({
+    ...series,
+    points: releasableSeriesKeys.has(seriesKey(series))
+      ? (providerResultBySeries
+          .get(seriesKey(series))
+          ?.points.map((point) => structuredClone(point)) ?? [])
+      : [],
+  }))
+  objectReader.assertVisibleOutputWithinLimit(result)
+  return result
 }
 
-function assertTelemetrySeriesViewable(
-  projectId: string,
-  series: readonly TimeseriesHistorySeriesInput[],
-  authorization: Pick<TelemetryHistoryOptions, "authorization" | "runtimeAuthorization">
-): void {
-  for (const objectTypeId of new Set(series.map((entry) => entry.objectTypeId))) {
-    assertAuthorized(
-      {
-        projectId,
-        runtimeAuthorization: authorization.runtimeAuthorization,
-        authorization: authorization.authorization ?? undefined,
-      },
-      { kind: "object.view", objectTypeId }
-    )
+/** Read the latest point only while its exact object property remains selected. */
+export async function getLatestTelemetryPoint(
+  input: TimeseriesHistorySeriesInput,
+  options: TelemetryHistoryOptions
+): Promise<TimeseriesPoint | null> {
+  const objectReader = options.objectReader
+  const storage = options.storage
+  const projectId = objectReader.projectId
+  const series = snapshotTelemetrySeries(input)
+  const readable = await objectReader.canReadObjectProperty(objectPropertySelection(series))
+  if (!readable) return visibleLatestResult(null, objectReader)
+
+  const rawResult = await storage.getLatest({ projectId, ...series })
+  const result = rawResult === null ? null : snapshotProviderPoint(rawResult)
+  if (result) assertTimeseriesPointMatchesSeries(projectId, series, result)
+
+  // See the batch release check above. Revocation during the timeseries read hides the result.
+  const releaseReadable = await objectReader.canReadObjectProperty(objectPropertySelection(series))
+  if (!releaseReadable) return visibleLatestResult(null, objectReader)
+
+  return visibleLatestResult(result, objectReader)
+}
+
+function snapshotTelemetrySeries(
+  series: TimeseriesHistorySeriesInput
+): TimeseriesHistorySeriesInput {
+  if (typeof series !== "object" || series === null || Array.isArray(series)) {
+    throw new Error("[Sixb] Telemetry history series must be an object.")
   }
+  const objectTypeId = telemetryIdentifier(series.objectTypeId, "objectTypeId")
+  const objectId = telemetryIdentifier(series.objectId, "objectId")
+  const propertyId = telemetryIdentifier(series.propertyId, "propertyId")
+  return structuredClone({ objectTypeId, objectId, propertyId })
+}
+
+function assertTimeseriesPointMatchesSeries(
+  projectId: string,
+  series: TimeseriesHistorySeriesInput,
+  point: TimeseriesPoint
+): void {
+  if (
+    typeof point !== "object" ||
+    point === null ||
+    point.projectId !== projectId ||
+    point.objectTypeId !== series.objectTypeId ||
+    point.objectId !== series.objectId ||
+    point.propertyId !== series.propertyId
+  ) {
+    throw invalidTimeseriesProviderResult()
+  }
+}
+
+function snapshotTelemetryHistoryInput(
+  input: TelemetryHistoryBatchInput
+): TelemetryHistoryBatchInput {
+  const authoredSeries = input.series
+  const from = input.from
+  const to = input.to
+  const limitPerSeries = input.limitPerSeries
+  const order = input.order
+  if (!Array.isArray(authoredSeries)) {
+    throw new Error("[Sixb] Telemetry history series must be an array.")
+  }
+  if (
+    limitPerSeries !== undefined &&
+    (!Number.isSafeInteger(limitPerSeries) || limitPerSeries < 0)
+  ) {
+    throw new Error("[Sixb] Telemetry history limit must be a non-negative safe integer.")
+  }
+  if (order !== undefined && order !== "asc" && order !== "desc") {
+    throw new Error("[Sixb] Telemetry history order must be 'asc' or 'desc'.")
+  }
+
+  // Capture length once and walk by index so proxies cannot change the iteration shape halfway.
+  const seriesCount = authoredSeries.length
+  if (!Number.isSafeInteger(seriesCount) || seriesCount < 0) {
+    throw new Error("[Sixb] Telemetry history series must have a safe integer length.")
+  }
+  const series: TimeseriesHistorySeriesInput[] = []
+  for (let index = 0; index < seriesCount; index += 1) {
+    series.push(snapshotTelemetrySeries(authoredSeries[index]!))
+  }
+  return structuredClone({
+    series,
+    ...(from === undefined ? {} : { from }),
+    ...(to === undefined ? {} : { to }),
+    ...(limitPerSeries === undefined ? {} : { limitPerSeries }),
+    ...(order === undefined ? {} : { order }),
+  })
+}
+
+function objectPropertySelection(series: TimeseriesHistorySeriesInput): {
+  readonly objectTypeId: string
+  readonly primaryId: string
+  readonly propertyId: string
+} {
+  return {
+    objectTypeId: series.objectTypeId,
+    primaryId: series.objectId,
+    propertyId: series.propertyId,
+  }
+}
+
+function visibleLatestResult<T extends TimeseriesPoint | null>(
+  result: T,
+  objectReader: AuthorizedObjectReader
+): T {
+  objectReader.assertVisibleOutputWithinLimit(result)
+  return result
+}
+
+function snapshotProviderResult(
+  result: TimeseriesHistoryBatchResult
+): TimeseriesHistoryBatchResult {
+  try {
+    const snapshot = structuredClone(result)
+    if (!snapshot || typeof snapshot !== "object" || !Array.isArray(snapshot.points)) {
+      throw invalidTimeseriesProviderResult()
+    }
+    return snapshot
+  } catch (error) {
+    if (isInvalidTimeseriesProviderResult(error)) throw error
+    throw invalidTimeseriesProviderResult(error)
+  }
+}
+
+function snapshotProviderPoint(point: TimeseriesPoint): TimeseriesPoint {
+  try {
+    const snapshot = structuredClone(point)
+    if (!snapshot || typeof snapshot !== "object") throw invalidTimeseriesProviderResult()
+    return snapshot
+  } catch (error) {
+    if (isInvalidTimeseriesProviderResult(error)) throw error
+    throw invalidTimeseriesProviderResult(error)
+  }
+}
+
+function invalidTimeseriesProviderResult(cause?: unknown): Error {
+  return createSixbError(
+    "internal.unexpected",
+    "[Sixb] Timeseries storage returned data outside the requested series.",
+    cause === undefined ? {} : { cause }
+  )
+}
+
+function isInvalidTimeseriesProviderResult(
+  error: unknown
+): error is Error & { readonly code: "internal.unexpected" } {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    error.code === "internal.unexpected" &&
+    error.message === "[Sixb] Timeseries storage returned data outside the requested series."
+  )
+}
+
+function telemetryIdentifier(value: unknown, field: string): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`[Sixb] Telemetry history ${field} must be a non-empty string.`)
+  }
+  return value
+}
+
+function seriesKey(series: TimeseriesHistorySeriesInput): string {
+  return JSON.stringify([series.objectTypeId, series.objectId, series.propertyId])
 }

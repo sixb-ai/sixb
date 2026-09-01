@@ -565,6 +565,20 @@ describe("SixbHost runtime", () => {
     expect((await temperature.history({ limit: 2 })).map((point) => point.value)).toEqual([
       21.5, 22,
     ])
+
+    const optionReads = new Map<string, number>()
+    const historyOptions = Object.defineProperties(
+      {},
+      {
+        from: { get: () => countRead(optionReads, "from", undefined) },
+        to: { get: () => countRead(optionReads, "to", undefined) },
+        limit: { get: () => countRead(optionReads, "limit", 1) },
+        order: { get: () => countRead(optionReads, "order", "desc" as const) },
+      }
+    ) as Parameters<typeof temperature.history>[0]
+    expect((await temperature.history(historyOptions)).map((point) => point.value)).toEqual([22.5])
+    expect(Object.fromEntries(optionReads)).toEqual({ from: 1, to: 1, limit: 1, order: 1 })
+
     expect(
       (
         await temperature.history({
@@ -581,6 +595,11 @@ describe("SixbHost runtime", () => {
     expect(
       await sixb.objects(Room).byId("room:102").telemetry(Room.p.currentTemperature).history()
     ).toEqual([])
+
+    // A principal grant authorizes the telemetry series by type. Historical data remains readable
+    // after the materialized object is deleted; only delegated reads depend on live selection.
+    await sixb.objects(Room).byId("room:101").delete()
+    expect((await temperature.history()).map((point) => point.value)).toEqual([21.5, 22, 22.5])
   })
 
   test("emits typed events and projects through the runtime dependencies", async () => {
@@ -1348,3 +1367,8 @@ describe("SixbHost runtime", () => {
     expect(events.length).toBeGreaterThanOrEqual(4)
   })
 })
+
+function countRead<T>(reads: Map<string, number>, field: string, value: T): T {
+  reads.set(field, (reads.get(field) ?? 0) + 1)
+  return value
+}
