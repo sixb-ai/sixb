@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { normalizeAiModelCallCostRecord } from "@sixb/core/internal/ai-cost-storage-provider"
 import type { AiModelCallUsageRecord } from "@sixb/core/storage"
 import {
+  estimateAiModelCallCost,
   MODELS_DEV_CATALOG_SOURCE,
   rateAiModelCall,
   resolveModelsDevBillingIdentity,
@@ -44,6 +45,42 @@ function rate(
 }
 
 describe("Models.dev AI cost rating", () => {
+  test("pre-prices conservatively across unknown cache and reasoning partitions", () => {
+    const estimate = estimateAiModelCallCost({
+      providerId: "anthropic.messages",
+      modelId: "claude-opus-4-8",
+      pricingContext: { cacheWriteTtlSeconds: 300 },
+      inputTokens: 1_913,
+      outputTokens: 247,
+    })
+    expect(estimate).toMatchObject({
+      status: "estimated",
+      billingIdentity: { providerId: "anthropic", modelId: "claude-opus-4-8" },
+      money: { currency: "USD" },
+    })
+    if (estimate.status !== "estimated") throw new Error("Expected a cost estimate")
+    expect(BigInt(estimate.money.amountNanos)).toBeGreaterThan(15_740_000n)
+  })
+
+  test("refuses cost admission for unsupported identities and pricing dimensions", () => {
+    expect(
+      estimateAiModelCallCost({
+        providerId: "custom",
+        modelId: "private-model",
+        inputTokens: 100,
+        outputTokens: 100,
+      })
+    ).toMatchObject({ status: "unavailable", reason: "missingBillingIdentity" })
+    expect(
+      estimateAiModelCallCost({
+        providerId: "anthropic.messages",
+        modelId: "claude-opus-4-8",
+        inputTokens: 100,
+        outputTokens: 100,
+      })
+    ).toMatchObject({ status: "unavailable", reason: "unsupportedPricingDimension" })
+  })
+
   test("rates the exact direct Anthropic AI SDK model identity", () => {
     const result = rate()
     expect(result).toMatchObject({

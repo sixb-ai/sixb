@@ -37,7 +37,7 @@ export interface RecordAiModelCallInput {
   readonly executionId: string
   /** Queue delivery attempt that made the provider call. */
   readonly attempt: number
-  /** AI SDK generation ID. Tool-loop model calls share it and are distinguished by responseId. */
+  /** Sixb-owned ID for one provider attempt within the queue delivery. */
   readonly callId: string
   /**
    * Durable group memberships snapshotted when the parent run was admitted. The requester itself

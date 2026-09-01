@@ -4574,7 +4574,12 @@ export type ListWorkflowsResponses = {
       startedAt: string
       finishedAt?: string
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "workflow.node_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "workflow.node_failed"
+          | "ai.usage_limit_exceeded"
+          | "ai.usage_limit_unavailable"
         message: string
         retryable: boolean
         at: string
@@ -4754,7 +4759,12 @@ export type GetWorkflowResponses = {
       startedAt: string
       finishedAt?: string
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "workflow.node_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "workflow.node_failed"
+          | "ai.usage_limit_exceeded"
+          | "ai.usage_limit_unavailable"
         message: string
         retryable: boolean
         at: string
@@ -5256,7 +5266,12 @@ export type ListWorkflowRunsResponses = {
       startedAt: string
       finishedAt?: string
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "workflow.node_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "workflow.node_failed"
+          | "ai.usage_limit_exceeded"
+          | "ai.usage_limit_unavailable"
         message: string
         retryable: boolean
         at: string
@@ -5332,7 +5347,12 @@ export type GetWorkflowRunResponses = {
       startedAt: string
       finishedAt?: string
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "workflow.node_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "workflow.node_failed"
+          | "ai.usage_limit_exceeded"
+          | "ai.usage_limit_unavailable"
         message: string
         retryable: boolean
         at: string
@@ -5412,7 +5432,12 @@ export type GetWorkflowRunResponses = {
           | null
       }
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "workflow.node_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "workflow.node_failed"
+          | "ai.usage_limit_exceeded"
+          | "ai.usage_limit_unavailable"
         message: string
         retryable: boolean
         at: string
@@ -5712,7 +5737,12 @@ export type GetWorkflowAgentNodeExecutionResponses = {
     >
     failurePhase?: "agent-loop" | "structured-finalizer"
     error?: {
-      code: "internal.unexpected" | "runtime.cancelled" | "agent.execution_failed"
+      code:
+        | "internal.unexpected"
+        | "runtime.cancelled"
+        | "agent.execution_failed"
+        | "ai.usage_limit_exceeded"
+        | "ai.usage_limit_unavailable"
       message: string
       retryable: boolean
       at: string
@@ -5785,7 +5815,12 @@ export type CancelWorkflowRunResponses = {
       startedAt: string
       finishedAt?: string
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "workflow.node_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "workflow.node_failed"
+          | "ai.usage_limit_exceeded"
+          | "ai.usage_limit_unavailable"
         message: string
         retryable: boolean
         at: string
@@ -5865,7 +5900,12 @@ export type CancelWorkflowRunResponses = {
           | null
       }
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "workflow.node_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "workflow.node_failed"
+          | "ai.usage_limit_exceeded"
+          | "ai.usage_limit_unavailable"
         message: string
         retryable: boolean
         at: string
@@ -8544,6 +8584,28 @@ export type PostAgentThreadMessageErrors = {
     error: string
   }
   /**
+   * Response for status 429
+   */
+  429: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "ai.usage_limit_exceeded" | "ai.usage_limit_unavailable"
+    /**
+     * Any JSON-compatible value.
+     */
+    details?:
+      | string
+      | number
+      | boolean
+      | Array<unknown>
+      | {
+          [key: string]: unknown
+        }
+      | null
+  }
+  /**
    * Response for status 501
    */
   501: {
@@ -8614,7 +8676,12 @@ export type PostAgentThreadMessageResponses = {
         message: string
       }>
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "agent.execution_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "agent.execution_failed"
+          | "ai.usage_limit_exceeded"
+          | "ai.usage_limit_unavailable"
         message: string
         retryable: boolean
         at: string
@@ -8839,7 +8906,12 @@ export type CancelAgentRunResponses = {
         message: string
       }>
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "agent.execution_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "agent.execution_failed"
+          | "ai.usage_limit_exceeded"
+          | "ai.usage_limit_unavailable"
         message: string
         retryable: boolean
         at: string
@@ -8896,6 +8968,28 @@ export type RetryAgentRunErrors = {
    */
   409: {
     error: string
+  }
+  /**
+   * Response for status 429
+   */
+  429: {
+    error: string
+    /**
+     * Stable machine-readable failure code for programmatic handling.
+     */
+    code: "ai.usage_limit_exceeded" | "ai.usage_limit_unavailable"
+    /**
+     * Any JSON-compatible value.
+     */
+    details?:
+      | string
+      | number
+      | boolean
+      | Array<unknown>
+      | {
+          [key: string]: unknown
+        }
+      | null
   }
   /**
    * Response for status 501
@@ -8967,7 +9061,12 @@ export type RetryAgentRunResponses = {
         message: string
       }>
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "agent.execution_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "agent.execution_failed"
+          | "ai.usage_limit_exceeded"
+          | "ai.usage_limit_unavailable"
         message: string
         retryable: boolean
         at: string
@@ -9093,7 +9192,12 @@ export type ListAgentThreadRunsResponses = {
         message: string
       }>
       error?: {
-        code: "internal.unexpected" | "runtime.cancelled" | "agent.execution_failed"
+        code:
+          | "internal.unexpected"
+          | "runtime.cancelled"
+          | "agent.execution_failed"
+          | "ai.usage_limit_exceeded"
+          | "ai.usage_limit_unavailable"
         message: string
         retryable: boolean
         at: string
@@ -9216,7 +9320,12 @@ export type GetAgentRunResponses = {
       message: string
     }>
     error?: {
-      code: "internal.unexpected" | "runtime.cancelled" | "agent.execution_failed"
+      code:
+        | "internal.unexpected"
+        | "runtime.cancelled"
+        | "agent.execution_failed"
+        | "ai.usage_limit_exceeded"
+        | "ai.usage_limit_unavailable"
       message: string
       retryable: boolean
       at: string

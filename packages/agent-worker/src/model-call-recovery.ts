@@ -13,6 +13,7 @@ import type {
 } from "@sixb/core/storage"
 import {
   AiCostStorageError,
+  AiLimitStorageError,
   AiUsageStorageError,
   normalizeAiModelCallRecord,
 } from "@sixb/core/storage"
@@ -85,7 +86,15 @@ export function isPermanentAiUsageRecoveryError(error: unknown): boolean {
     (error instanceof AiUsageStorageError &&
       (error.code === "duplicate_id" || error.code === "missing_execution")) ||
     (error instanceof AiCostStorageError &&
-      (error.code === "missing_usage" || error.code === "cost_mismatch"))
+      (error.code === "missing_usage" || error.code === "cost_mismatch")) ||
+    (error instanceof AiLimitStorageError &&
+      (error.code === "missing_execution" ||
+        error.code === "missing_reservation" ||
+        error.code === "missing_usage_record" ||
+        error.code === "usage_mismatch" ||
+        error.code === "reservation_conflict" ||
+        error.code === "reconciliation_conflict" ||
+        error.code === "invalid_reservation_state"))
   )
 }
 
@@ -110,6 +119,7 @@ function toAccountingPayload(input: RecoverAiModelCallInput): AgentAiUsageAccoun
   return {
     pricingContext: { ...input.pricingContext },
     ratedAt: input.ratedAt.toISOString(),
+    ...(input.reconcileLimitReservation ? { reconcileLimitReservation: true } : {}),
   }
 }
 
@@ -147,11 +157,13 @@ function accountingFromQueuePayload(
     return {
       pricingContext: {},
       ratedAt: new Date(usage.occurredAt),
+      reconcileLimitReservation: false,
     }
   }
   return {
     pricingContext: { ...accounting.pricingContext },
     ratedAt: parseDate(accounting.ratedAt, job.id, "ratedAt"),
+    reconcileLimitReservation: accounting.reconcileLimitReservation === true,
   }
 }
 

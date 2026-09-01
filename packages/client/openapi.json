@@ -13245,7 +13245,9 @@
                                 "enum": [
                                   "internal.unexpected",
                                   "runtime.cancelled",
-                                  "workflow.node_failed"
+                                  "workflow.node_failed",
+                                  "ai.usage_limit_exceeded",
+                                  "ai.usage_limit_unavailable"
                                 ]
                               },
                               "message": {
@@ -13709,7 +13711,9 @@
                               "enum": [
                                 "internal.unexpected",
                                 "runtime.cancelled",
-                                "workflow.node_failed"
+                                "workflow.node_failed",
+                                "ai.usage_limit_exceeded",
+                                "ai.usage_limit_unavailable"
                               ]
                             },
                             "message": {
@@ -15194,7 +15198,9 @@
                                 "enum": [
                                   "internal.unexpected",
                                   "runtime.cancelled",
-                                  "workflow.node_failed"
+                                  "workflow.node_failed",
+                                  "ai.usage_limit_exceeded",
+                                  "ai.usage_limit_unavailable"
                                 ]
                               },
                               "message": {
@@ -15385,7 +15391,9 @@
                               "enum": [
                                 "internal.unexpected",
                                 "runtime.cancelled",
-                                "workflow.node_failed"
+                                "workflow.node_failed",
+                                "ai.usage_limit_exceeded",
+                                "ai.usage_limit_unavailable"
                               ]
                             },
                             "message": {
@@ -15609,7 +15617,9 @@
                                 "enum": [
                                   "internal.unexpected",
                                   "runtime.cancelled",
-                                  "workflow.node_failed"
+                                  "workflow.node_failed",
+                                  "ai.usage_limit_exceeded",
+                                  "ai.usage_limit_unavailable"
                                 ]
                               },
                               "message": {
@@ -16467,7 +16477,9 @@
                           "enum": [
                             "internal.unexpected",
                             "runtime.cancelled",
-                            "agent.execution_failed"
+                            "agent.execution_failed",
+                            "ai.usage_limit_exceeded",
+                            "ai.usage_limit_unavailable"
                           ]
                         },
                         "message": {
@@ -16677,7 +16689,9 @@
                               "enum": [
                                 "internal.unexpected",
                                 "runtime.cancelled",
-                                "workflow.node_failed"
+                                "workflow.node_failed",
+                                "ai.usage_limit_exceeded",
+                                "ai.usage_limit_unavailable"
                               ]
                             },
                             "message": {
@@ -16901,7 +16915,9 @@
                                 "enum": [
                                   "internal.unexpected",
                                   "runtime.cancelled",
-                                  "workflow.node_failed"
+                                  "workflow.node_failed",
+                                  "ai.usage_limit_exceeded",
+                                  "ai.usage_limit_unavailable"
                                 ]
                               },
                               "message": {
@@ -24940,7 +24956,9 @@
                               "enum": [
                                 "internal.unexpected",
                                 "runtime.cancelled",
-                                "agent.execution_failed"
+                                "agent.execution_failed",
+                                "ai.usage_limit_exceeded",
+                                "ai.usage_limit_unavailable"
                               ]
                             },
                             "message": {
@@ -25084,6 +25102,51 @@
                     }
                   },
                   "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["ai.usage_limit_exceeded", "ai.usage_limit_unavailable"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    },
+                    "details": {
+                      "description": "Any JSON-compatible value.",
+                      "nullable": true,
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      ]
+                    }
+                  },
+                  "required": ["error", "code"],
                   "additionalProperties": false
                 }
               }
@@ -25559,7 +25622,9 @@
                               "enum": [
                                 "internal.unexpected",
                                 "runtime.cancelled",
-                                "agent.execution_failed"
+                                "agent.execution_failed",
+                                "ai.usage_limit_exceeded",
+                                "ai.usage_limit_unavailable"
                               ]
                             },
                             "message": {
@@ -25930,7 +25995,9 @@
                               "enum": [
                                 "internal.unexpected",
                                 "runtime.cancelled",
-                                "agent.execution_failed"
+                                "agent.execution_failed",
+                                "ai.usage_limit_exceeded",
+                                "ai.usage_limit_unavailable"
                               ]
                             },
                             "message": {
@@ -26057,6 +26124,51 @@
                     }
                   },
                   "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["ai.usage_limit_exceeded", "ai.usage_limit_unavailable"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    },
+                    "details": {
+                      "description": "Any JSON-compatible value.",
+                      "nullable": true,
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      ]
+                    }
+                  },
+                  "required": ["error", "code"],
                   "additionalProperties": false
                 }
               }
@@ -26323,7 +26435,9 @@
                                 "enum": [
                                   "internal.unexpected",
                                   "runtime.cancelled",
-                                  "agent.execution_failed"
+                                  "agent.execution_failed",
+                                  "ai.usage_limit_exceeded",
+                                  "ai.usage_limit_unavailable"
                                 ]
                               },
                               "message": {
@@ -26667,7 +26781,9 @@
                           "enum": [
                             "internal.unexpected",
                             "runtime.cancelled",
-                            "agent.execution_failed"
+                            "agent.execution_failed",
+                            "ai.usage_limit_exceeded",
+                            "ai.usage_limit_unavailable"
                           ]
                         },
                         "message": {

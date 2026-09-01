@@ -747,6 +747,34 @@ describe("bound Sixb operational access", () => {
     ).rejects.toThrow(AuthorizationError)
   })
 
+  test("agent run preflight rejects an exhausted project before creating a thread", async () => {
+    const host = createRuntime()
+    const _sixb = createTestSixb(host)
+    await seedPrincipal(host)
+    await seedRequesterMemberships(host, ["operations"])
+    const limits = host.storage.aiLimits
+    const agents = host.storage.agents
+    if (!limits || !agents) throw new Error("Expected AI limit and Agent storage")
+    await limits.createPolicy({
+      id: "project_tokens_exhausted",
+      projectId: host.id,
+      subject: { type: "project" },
+      limit: { meter: "tokens.total", amount: 0 },
+    })
+
+    const runner = bindPrincipal(host, contextFor(host, ["operations"]))
+    await expect(
+      runner.agents.runs.request({
+        agentId: "contract-agent",
+        text: "This must not create a conversation.",
+      })
+    ).rejects.toMatchObject({ code: "ai.usage_limit_exceeded" })
+    await expect(agents.threads.list({ projectId: host.id })).resolves.toMatchObject({
+      threads: [],
+      total: 0,
+    })
+  })
+
   test("agent run admission never reactivates a suspended managed identity", async () => {
     const host = createRuntime()
     const _sixb = createTestSixb(host)

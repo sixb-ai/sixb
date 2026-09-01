@@ -6,9 +6,15 @@ import {
   normalizeAiModelCallRecord,
 } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
-import { generateText, type LanguageModelCallEndEvent, type LanguageModelCallStartEvent } from "ai"
+import {
+  generateText,
+  type LanguageModelCallEndEvent,
+  type LanguageModelCallStartEvent,
+  streamText,
+} from "ai"
 import { MockLanguageModelV4 } from "ai/test"
 import { AgentUsageRecordingError } from "../src/errors"
+import type { AiModelCallAdmissionInput } from "../src/model-call-admission"
 import { AiModelCallRecorder } from "../src/model-call-recorder"
 import type { RecoverAiModelCall } from "../src/types"
 
@@ -99,6 +105,234 @@ async function recordedUsage(storage: InMemoryStorage, usageRecordId: string) {
 }
 
 describe("AiModelCallRecorder", () => {
+  test("admits a prepared call before the provider and records the boundary call ID", async () => {
+    const storage = await createInMemoryStorage()
+    const order: string[] = []
+    const admissions: AiModelCallAdmissionInput[] = []
+    const usage = new AiModelCallRecorder(
+      {
+        storage,
+        projectId: "project_1",
+        executionId,
+        attempt: 2,
+        requesterGroupIds: ["support", "engineering"],
+        providerOptions: { gateway: { serviceTier: "standard" } },
+        beforeModelCall: async (input) => {
+          order.push("admission")
+          admissions.push(structuredClone(input))
+          return { reservation: "none" }
+        },
+        recoverAiModelCall: async () => {
+          throw new Error("Unexpected recovery")
+        },
+        errorRunId: "run_1",
+      },
+      {
+        generateId: () => "usage_admitted",
+        generateCallId: () => "model_call_1",
+        now: () => occurredAt,
+      }
+    )
+    const model = new MockLanguageModelV4({
+      provider: "gateway",
+      modelId: "openai/gpt-5",
+      doGenerate: async () => {
+        order.push("provider")
+        return {
+          content: [{ type: "text", text: "done" }],
+          finishReason: { unified: "stop", raw: "stop" },
+          usage: {
+            inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+            outputTokens: { total: 1, text: 1, reasoning: 0 },
+          },
+          response: { id: "response_admitted", modelId: "openai/gpt-5" },
+          warnings: [],
+        }
+      },
+    })
+
+    await generateText({
+      model: usage.wrapModel(model),
+      prompt: "hello",
+      maxRetries: 0,
+      providerOptions: { gateway: { serviceTier: "standard" } },
+      onLanguageModelCallStart: usage.onLanguageModelCallStart,
+      onLanguageModelCallEnd: usage.onLanguageModelCallEnd,
+    })
+
+    expect(order).toEqual(["admission", "provider"])
+    expect(admissions).toHaveLength(1)
+    expect(admissions[0]).toMatchObject({
+      projectId: "project_1",
+      executionId,
+      attempt: 2,
+      requesterGroupIds: ["support", "engineering"],
+      callId: "model_call_1",
+      providerId: "gateway",
+      modelId: "openai/gpt-5",
+      pricingContext: { serviceTier: "standard" },
+      inputTokens: { status: "estimated", method: "utf8BytesDividedByFour" },
+      outputTokenAllowance: 4096,
+    })
+    expect(admissions[0]?.inputTokens.status).toBe("estimated")
+    if (admissions[0]?.inputTokens.status === "estimated") {
+      expect(admissions[0].inputTokens.tokens).toBeGreaterThan(0)
+      expect(admissions[0].estimatedTotalTokens).toBe(
+        admissions[0].inputTokens.tokens + admissions[0].outputTokenAllowance
+      )
+    }
+    await expect(recordedUsage(storage, "usage_admitted")).resolves.toMatchObject({
+      callId: "model_call_1",
+      responseId: "response_admitted",
+    })
+  })
+
+  test("keeps the boundary call ID when a wrapped lifecycle callback is replayed", async () => {
+    const storage = await createInMemoryStorage()
+    let nextUsageId = 0
+    let completed: LanguageModelCallEndEvent | undefined
+    const usage = new AiModelCallRecorder(
+      {
+        storage,
+        projectId: "project_1",
+        executionId,
+        attempt: 2,
+        requesterGroupIds: [],
+        recoverAiModelCall: async () => {
+          throw new Error("Unexpected recovery")
+        },
+        errorRunId: "run_1",
+      },
+      {
+        generateId: () => `usage_replayed_${++nextUsageId}`,
+        generateCallId: () => "model_call_replayed",
+        now: () => occurredAt,
+      }
+    )
+    const model = new MockLanguageModelV4({
+      doGenerate: {
+        content: [{ type: "text", text: "done" }],
+        finishReason: { unified: "stop", raw: "stop" },
+        usage: {
+          inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+          outputTokens: { total: 1, text: 1, reasoning: 0 },
+        },
+        response: { id: "response_replayed" },
+        warnings: [],
+      },
+    })
+
+    await generateText({
+      model: usage.wrapModel(model),
+      prompt: "hello",
+      maxRetries: 0,
+      onLanguageModelCallStart: usage.onLanguageModelCallStart,
+      onLanguageModelCallEnd: async (event) => {
+        completed = event
+        await usage.onLanguageModelCallEnd(event)
+      },
+    })
+    if (!completed) throw new Error("Expected a completed model-call event")
+    await usage.onLanguageModelCallEnd(completed)
+    usage.assertHealthy()
+
+    await expect(
+      storage.aiUsage.summarizeExecution({ projectId: "project_1", executionId })
+    ).resolves.toMatchObject({ modelCallCount: 1, usage: { totalTokens: 2 } })
+    await expect(recordedUsage(storage, "usage_replayed_1")).resolves.toMatchObject({
+      callId: "model_call_replayed",
+      responseId: "response_replayed",
+    })
+  })
+
+  test("stops a rejected streaming call before invoking the provider", async () => {
+    const storage = await createInMemoryStorage()
+    const rejection = new Error("AI limit exhausted")
+    let providerCalls = 0
+    let streamError: unknown
+    const usage = new AiModelCallRecorder(
+      {
+        storage,
+        projectId: "project_1",
+        executionId,
+        attempt: 2,
+        requesterGroupIds: [],
+        beforeModelCall: async () => {
+          throw rejection
+        },
+        recoverAiModelCall: async () => {
+          throw new Error("Unexpected recovery")
+        },
+        errorRunId: "run_1",
+      },
+      { generateCallId: () => "model_call_denied" }
+    )
+    const model = new MockLanguageModelV4({
+      doStream: async () => {
+        providerCalls += 1
+        throw new Error("Provider must not be called")
+      },
+    })
+
+    const result = streamText({
+      model: usage.wrapModel(model),
+      prompt: "hello",
+      maxRetries: 0,
+      onLanguageModelCallStart: usage.onLanguageModelCallStart,
+      onLanguageModelCallEnd: usage.onLanguageModelCallEnd,
+      onError({ error }) {
+        streamError = error
+      },
+    })
+    await result.consumeStream()
+
+    expect(providerCalls).toBe(0)
+    expect(streamError).toBe(rejection)
+    await expect(
+      storage.aiUsage.summarizeExecution({ projectId: "project_1", executionId })
+    ).resolves.toMatchObject({ modelCallCount: 0 })
+  })
+
+  test("marks a reserved provider attempt unknown when the provider fails", async () => {
+    const storage = await createInMemoryStorage()
+    const unknown: unknown[] = []
+    const usage = new AiModelCallRecorder(
+      {
+        storage,
+        projectId: "project_1",
+        executionId,
+        attempt: 2,
+        requesterGroupIds: [],
+        beforeModelCall: async () => ({ reservation: "active" }),
+        markModelCallUnknown: async (identity) => {
+          unknown.push(structuredClone(identity))
+        },
+        recoverAiModelCall: async () => {
+          throw new Error("Unexpected recovery")
+        },
+        errorRunId: "run_1",
+      },
+      { generateCallId: () => "model_call_failed" }
+    )
+    const model = new MockLanguageModelV4({
+      doGenerate: async () => {
+        throw new Error("provider failed after accepting the request")
+      },
+    })
+
+    await expect(
+      generateText({ model: usage.wrapModel(model), prompt: "hello", maxRetries: 0 })
+    ).rejects.toThrow("provider failed after accepting the request")
+    expect(unknown).toEqual([
+      {
+        projectId: "project_1",
+        executionId,
+        attempt: 2,
+        callId: "model_call_failed",
+      },
+    ])
+  })
+
   test("captures the provider response model identity through middleware", async () => {
     const storage = await createInMemoryStorage()
     const usage = recorder(storage, {
