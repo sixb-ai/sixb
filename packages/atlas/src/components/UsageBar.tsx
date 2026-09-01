@@ -6,6 +6,8 @@ interface UsageBarProps {
   color?: "blue" | "green" | "amber" | "red" | "auto"
   showLabel?: boolean
   size?: "sm" | "md"
+  ariaLabel?: string
+  valueText?: string
 }
 
 function getAutoColor(percentage: number): string {
@@ -27,6 +29,8 @@ export function UsageBar({
   color = "auto",
   showLabel = false,
   size = "sm",
+  ariaLabel,
+  valueText,
 }: UsageBarProps) {
   const percentage = Math.min(100, Math.max(0, (value / max) * 100))
   const barColor = color === "auto" ? getAutoColor(percentage) : colorMap[color]
@@ -34,14 +38,22 @@ export function UsageBar({
 
   return (
     <div className="w-full">
-      <div className={cn("w-full rounded-full overflow-hidden bg-muted", heightClass)}>
+      <div
+        className={cn("w-full overflow-hidden rounded-full bg-muted", heightClass)}
+        role="progressbar"
+        aria-label={ariaLabel}
+        aria-valuemin={0}
+        aria-valuemax={max}
+        aria-valuenow={value}
+        aria-valuetext={valueText}
+      >
         <div
           className={cn(
             "rounded-full transition-all duration-500 shadow-[inset_0_-1px_0_rgba(255,255,255,0.2)]",
             heightClass,
             barColor
           )}
-          style={{ width: `${percentage}%` }}
+          style={{ width: `${percentage}%`, minWidth: percentage > 0 ? "2px" : undefined }}
         />
       </div>
       {showLabel && (
