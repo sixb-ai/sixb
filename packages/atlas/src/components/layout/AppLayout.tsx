@@ -8,11 +8,13 @@ import { AppShell } from "./AppShell"
 import { Sidebar, type ViewMode } from "./Sidebar"
 import { type ProjectSidebarData, SidebarDataContext } from "./sidebarData"
 import { getViewModeFromPath } from "./viewMode"
+import { WorkspaceCommandMenu } from "./WorkspaceCommandMenu"
 
 export function AppLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const [sidebarData, setSidebarData] = useState<ProjectSidebarData | null>(null)
+  const [commandMenuOpen, setCommandMenuOpen] = useState(false)
 
   const { data: projectInfo } = useQuery({
     ...getProjectInfoOptions(),
@@ -40,17 +42,10 @@ export function AppLayout() {
       viewMode={viewMode}
       onViewChange={handleViewChange}
       onViewIntent={preloadWorkspaceView}
+      onOpenCommand={() => setCommandMenuOpen(true)}
       objectCount={sidebarData?.objectCount}
-      connectorCount={sidebarData?.connectorCount}
-      datasetCount={sidebarData?.datasetCount}
-      syncCount={sidebarData?.syncCount}
-      pipelineCount={sidebarData?.pipelineCount}
-      projectionCount={sidebarData?.projectionCount}
       workflowCount={sidebarData?.workflowCount}
       actionCount={sidebarData?.actionCount}
-      agentCount={sidebarData?.agentCount}
-      ruleCount={sidebarData?.ruleCount}
-      ontologyCount={sidebarData?.ontologyCount}
     />
   )
 
@@ -59,6 +54,7 @@ export function AppLayout() {
       <AppShell sidebar={sidebar} currentProjectName={selectedProject?.name ?? null}>
         <Outlet />
       </AppShell>
+      <WorkspaceCommandMenu open={commandMenuOpen} onOpenChange={setCommandMenuOpen} />
       <Toaster position="bottom-right" />
     </SidebarDataContext.Provider>
   )

@@ -11,7 +11,6 @@ import {
   Card,
   CollectionCardButton,
   CollectionCardGrid,
-  CollectionHeader,
   CollectionViewToggle,
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -50,6 +49,7 @@ import {
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import { CollectionPageHeader } from "../components/CollectionPageHeader"
 import { DatasetDetails } from "../features/datasets/DatasetDetails"
 import { type DatasetGridColumnMeta, DatasetTableGrid } from "../features/datasets/DatasetTableGrid"
 import { useDatasetLiveUpdates } from "../features/datasets/hooks/useDatasetLiveUpdates"
@@ -225,10 +225,20 @@ export function DatasetsPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-5xl">
-      <CollectionHeader
+    <div className="mx-auto w-full max-w-6xl">
+      <CollectionPageHeader
         title="Datasets"
-        count={filteredDatasets.length}
+        count={datasets.length}
+        singularLabel="dataset"
+        search={
+          datasets.length > 0
+            ? {
+                value: searchQuery,
+                placeholder: "Search datasets, columns, syncs, or pipelines…",
+                onChange: setSearchQuery,
+              }
+            : undefined
+        }
         actions={
           datasets.length > 0 ? (
             <CollectionViewToggle
@@ -242,19 +252,6 @@ export function DatasetsPage() {
           ) : null
         }
       />
-
-      {datasets.length > 0 && (
-        <div className="relative mt-2">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            type="text"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Search datasets, columns, syncs, or pipelines..."
-            className="pl-9"
-          />
-        </div>
-      )}
 
       <div className="mt-4">
         {datasets.length === 0 ? (

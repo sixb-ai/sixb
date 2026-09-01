@@ -17,6 +17,7 @@ import {
   type Node,
   type NodeProps,
   type NodeTypes,
+  Panel,
   Position,
   ReactFlow,
   ReactFlowProvider,
@@ -25,7 +26,7 @@ import {
   useReactFlow,
   type Edge as XYEdge,
 } from "@xyflow/react"
-import { CornerDownRight, Link2, Rows3, Search, X, Zap } from "lucide-react"
+import { CornerDownRight, Link2, Maximize2, Rows3, Search, X, Zap } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { LetterAvatar } from "../components/common"
 import { humanizeIdentifier } from "../lib/labels"
@@ -199,7 +200,7 @@ export function OntologyExplorer({
                 if (detailsOpen && selectedType) onSelectedTypeChange(selectedType.id)
               }}
             />
-            {view !== "details" ? (
+            {view === "list" ? (
               <div className="relative min-w-0 flex-1 xl:w-64 xl:flex-none">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -224,6 +225,7 @@ export function OntologyExplorer({
                   objectTypes={objectTypes}
                   objectTypeCounts={objectTypeCounts}
                   search={search}
+                  onSearchChange={setSearch}
                   selectedTypeId={selectedTypeId}
                   onSelectType={onSelectedTypeChange}
                   savedViewport={graphViewport}
@@ -320,6 +322,7 @@ function OntologyGraph({
   objectTypes,
   objectTypeCounts,
   search,
+  onSearchChange,
   selectedTypeId,
   onSelectType,
   savedViewport,
@@ -328,6 +331,7 @@ function OntologyGraph({
   objectTypes: ObjectTypeSummary[]
   objectTypeCounts: ReadonlyMap<string, number>
   search: string
+  onSearchChange: (query: string) => void
   selectedTypeId: string | null
   onSelectType: (typeId: string | null) => void
   savedViewport: OntologyGraphViewport | null
@@ -514,6 +518,38 @@ function OntologyGraph({
       >
         <Background variant={BackgroundVariant.Dots} gap={22} size={1} />
         <Controls position="bottom-left" showInteractive={false} />
+        <Panel position="bottom-center" className="!m-3 w-[calc(100%-1.5rem)] max-w-[720px]">
+          <div className="flex items-center gap-1.5 rounded-2xl border border-border/80 bg-card/95 p-1.5 shadow-xl transition-colors focus-within:border-ring/50 backdrop-blur-xl supports-[backdrop-filter]:bg-card/88">
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                type="search"
+                value={search}
+                onChange={(event) => onSearchChange(event.target.value)}
+                placeholder="Search graph..."
+                aria-label="Search ontology graph"
+                className="h-8 border-0 bg-transparent pl-8 text-xs shadow-none focus-visible:ring-0 dark:bg-transparent"
+              />
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Fit visible graph"
+              title="Fit visible graph"
+              onClick={() => {
+                const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+                void fitBounds(layout.bounds, {
+                  padding: 0.1,
+                  duration: reduceMotion ? 0 : GRAPH_LAYOUT_DURATION,
+                })
+              }}
+              className="shrink-0"
+            >
+              <Maximize2 />
+            </Button>
+          </div>
+        </Panel>
       </ReactFlow>
     </div>
   )
