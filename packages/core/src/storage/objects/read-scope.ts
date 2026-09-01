@@ -4,8 +4,10 @@ import type {
   CompiledObjectReadStep,
   CompiledSelectedObjectReadScope,
   ObjectReadLinkDefinitionSelection,
+  ObjectReadLinkSelection,
   ObjectReadNode,
   ObjectReadObjectSelection,
+  ObjectReadRoot,
   SelectedObjectReadScope,
 } from "./types"
 
@@ -26,8 +28,9 @@ export const OBJECT_READ_SCOPE_LIMITS = Object.freeze({
  * provenance and let an object reached through one branch borrow nested authority from another.
  */
 export function compileSelectedObjectReadScope(
-  scope: SelectedObjectReadScope
+  rawScope: SelectedObjectReadScope
 ): CompiledSelectedObjectReadScope {
+  const scope = captureSelectedObjectReadScope(rawScope)
   if (!isRecord(scope) || scope.kind !== "selected" || !Array.isArray(scope.roots)) {
     throw invalidScope("scope must be a selected scope with a roots array")
   }
@@ -223,6 +226,276 @@ export function compileSelectedObjectReadScope(
     objects: Object.freeze(objects),
     steps: Object.freeze(steps),
   })
+}
+
+interface ScopeCaptureState {
+  readonly visiting: Set<object>
+  nodeCount: number
+  objectSelectionCount: number
+  concreteStepCount: number
+  propertyOccurrenceCount: number
+  identifierCharacterCount: number
+}
+
+interface CapturedArray {
+  readonly value: readonly unknown[]
+  readonly length: number
+}
+
+/**
+ * Read every caller-controlled property once and detach it before another getter can mutate it.
+ * The compiler only ever observes the resulting plain, deeply frozen snapshot.
+ */
+function captureSelectedObjectReadScope(value: unknown): SelectedObjectReadScope {
+  if (!isRecord(value)) {
+    throw invalidScope("scope must be a selected scope with a roots array")
+  }
+
+  const kind = value.kind
+  if (kind !== "selected") {
+    throw invalidScope("scope must be a selected scope with a roots array")
+  }
+
+  const rootsValue = value.roots
+  const rootsSource = captureArray(rootsValue, "roots")
+  if (rootsSource.length > OBJECT_READ_SCOPE_LIMITS.maxNodes) {
+    throw invalidScope(
+      `scope exceeds the maximum of ${OBJECT_READ_SCOPE_LIMITS.maxNodes} selection nodes`
+    )
+  }
+
+  const state: ScopeCaptureState = {
+    visiting: new Set<object>(),
+    nodeCount: 0,
+    objectSelectionCount: 0,
+    concreteStepCount: 0,
+    propertyOccurrenceCount: 0,
+    identifierCharacterCount: 0,
+  }
+  const roots: ObjectReadRoot[] = []
+  for (let rootIndex = 0; rootIndex < rootsSource.length; rootIndex += 1) {
+    const path = `roots[${rootIndex}]`
+    const rootValue = rootsSource.value[rootIndex]
+    if (!isRecord(rootValue)) {
+      throw invalidScope(`${path} must contain an exact anchor and a selection node`)
+    }
+
+    const anchorValue = rootValue.anchor
+    if (!isRecord(anchorValue)) {
+      throw invalidScope(`${path} must contain an exact anchor and a selection node`)
+    }
+    const objectTypeId = captureIdentifier(
+      state,
+      anchorValue.objectTypeId,
+      `${path}.anchor.objectTypeId`
+    )
+    const primaryId = captureIdentifier(state, anchorValue.primaryId, `${path}.anchor.primaryId`)
+    const anchor = Object.freeze({ objectTypeId, primaryId })
+
+    const nodeValue = rootValue.node
+    if (!isRecord(nodeValue)) {
+      throw invalidScope(`${path} must contain an exact anchor and a selection node`)
+    }
+    const node = captureNode(state, nodeValue, `${path}.node`, 0)
+    roots.push(Object.freeze({ anchor, node }))
+  }
+
+  return Object.freeze({ kind, roots: Object.freeze(roots) })
+}
+
+function captureNode(
+  state: ScopeCaptureState,
+  value: Record<string, unknown>,
+  path: string,
+  depth: number
+): ObjectReadNode {
+  if (depth > OBJECT_READ_SCOPE_LIMITS.maxDepth) {
+    throw invalidScope(
+      `${path} exceeds the maximum link depth of ${OBJECT_READ_SCOPE_LIMITS.maxDepth}`
+    )
+  }
+  if (state.nodeCount >= OBJECT_READ_SCOPE_LIMITS.maxNodes) {
+    throw invalidScope(
+      `scope exceeds the maximum of ${OBJECT_READ_SCOPE_LIMITS.maxNodes} selection nodes`
+    )
+  }
+  if (state.visiting.has(value)) {
+    throw invalidScope(`${path} contains a cyclic selection node`)
+  }
+  state.visiting.add(value)
+  state.nodeCount += 1
+
+  try {
+    const objectsValue = value.objects
+    const objectsSource = captureArray(objectsValue, `${path}.objects`)
+    state.objectSelectionCount = reserveCount(
+      state.objectSelectionCount,
+      objectsSource.length,
+      OBJECT_READ_SCOPE_LIMITS.maxObjectSelections,
+      `scope exceeds the maximum of ${OBJECT_READ_SCOPE_LIMITS.maxObjectSelections} object selections`
+    )
+    const objects: ObjectReadObjectSelection[] = []
+    for (let objectIndex = 0; objectIndex < objectsSource.length; objectIndex += 1) {
+      const objectPath = `${path}.objects[${objectIndex}]`
+      const objectValue = objectsSource.value[objectIndex]
+      if (!isRecord(objectValue)) {
+        throw invalidScope(`${objectPath} must contain an object type and property ids`)
+      }
+
+      const objectTypeId = captureIdentifier(
+        state,
+        objectValue.objectTypeId,
+        `${objectPath}.objectTypeId`
+      )
+      const propertyIdsValue = objectValue.propertyIds
+      const propertyIds = capturePropertyIds(state, propertyIdsValue, `${objectPath}.propertyIds`)
+      objects.push(Object.freeze({ objectTypeId, propertyIds }))
+    }
+
+    const linksValue = value.links
+    const linksSource = captureArray(linksValue, `${path}.links`)
+    if (linksSource.length > OBJECT_READ_SCOPE_LIMITS.maxNodes - state.nodeCount) {
+      throw invalidScope(
+        `scope exceeds the maximum of ${OBJECT_READ_SCOPE_LIMITS.maxNodes} selection nodes`
+      )
+    }
+    const links: ObjectReadLinkSelection[] = []
+    for (let linkIndex = 0; linkIndex < linksSource.length; linkIndex += 1) {
+      const linkPath = `${path}.links[${linkIndex}]`
+      const linkValue = linksSource.value[linkIndex]
+      if (!isRecord(linkValue)) {
+        throw invalidScope(`${linkPath} must contain definitions and a target node`)
+      }
+
+      const definitionsValue = linkValue.definitions
+      const definitionsSource = captureArray(definitionsValue, `${linkPath}.definitions`)
+      if (definitionsSource.length === 0) {
+        throw invalidScope(`${linkPath}.definitions must not be empty`)
+      }
+      if (definitionsSource.length > OBJECT_READ_SCOPE_LIMITS.maxSteps - state.concreteStepCount) {
+        throw invalidScope(
+          `scope exceeds the maximum of ${OBJECT_READ_SCOPE_LIMITS.maxSteps} concrete link steps`
+        )
+      }
+      const definitions: ObjectReadLinkDefinitionSelection[] = []
+      for (
+        let definitionIndex = 0;
+        definitionIndex < definitionsSource.length;
+        definitionIndex += 1
+      ) {
+        const definitionPath = `${linkPath}.definitions[${definitionIndex}]`
+        const definitionValue = definitionsSource.value[definitionIndex]
+        definitions.push(captureDefinition(state, definitionValue, definitionPath))
+      }
+
+      const targetValue = linkValue.target
+      if (!isRecord(targetValue)) {
+        throw invalidScope(`${linkPath} must contain definitions and a target node`)
+      }
+      const target = captureNode(state, targetValue, `${linkPath}.target`, depth + 1)
+      links.push(Object.freeze({ definitions: Object.freeze(definitions), target }))
+    }
+
+    return Object.freeze({ objects: Object.freeze(objects), links: Object.freeze(links) })
+  } finally {
+    state.visiting.delete(value)
+  }
+}
+
+function captureDefinition(
+  state: ScopeCaptureState,
+  value: unknown,
+  path: string
+): ObjectReadLinkDefinitionSelection {
+  if (!isRecord(value)) {
+    throw invalidScope(`${path} must contain a concrete link definition`)
+  }
+
+  const sourceObjectTypeId = captureIdentifier(
+    state,
+    value.sourceObjectTypeId,
+    `${path}.sourceObjectTypeId`
+  )
+  const linkId = captureIdentifier(state, value.linkId, `${path}.linkId`)
+
+  const targetObjectTypeIdsValue = value.targetObjectTypeIds
+  const targetObjectTypeIdsSource = captureArray(
+    targetObjectTypeIdsValue,
+    `${path}.targetObjectTypeIds`
+  )
+  if (targetObjectTypeIdsSource.length === 0) {
+    throw invalidScope(`${path}.targetObjectTypeIds must not be empty`)
+  }
+  state.concreteStepCount = reserveCount(
+    state.concreteStepCount,
+    targetObjectTypeIdsSource.length,
+    OBJECT_READ_SCOPE_LIMITS.maxSteps,
+    `scope exceeds the maximum of ${OBJECT_READ_SCOPE_LIMITS.maxSteps} concrete link steps`
+  )
+  const targetObjectTypeIds = captureIdentifiers(
+    state,
+    targetObjectTypeIdsSource,
+    `${path}.targetObjectTypeIds`
+  )
+
+  const propertyIdsValue = value.propertyIds
+  const propertyIds = capturePropertyIds(state, propertyIdsValue, `${path}.propertyIds`)
+  return Object.freeze({ sourceObjectTypeId, linkId, targetObjectTypeIds, propertyIds })
+}
+
+function capturePropertyIds(
+  state: ScopeCaptureState,
+  value: unknown,
+  path: string
+): readonly string[] {
+  const source = captureArray(value, path)
+  state.propertyOccurrenceCount = reserveCount(
+    state.propertyOccurrenceCount,
+    source.length,
+    OBJECT_READ_SCOPE_LIMITS.maxPropertyOccurrences,
+    `scope exceeds the maximum of ${OBJECT_READ_SCOPE_LIMITS.maxPropertyOccurrences} selected property occurrences`
+  )
+  return captureIdentifiers(state, source, path)
+}
+
+function captureIdentifiers(
+  state: ScopeCaptureState,
+  source: CapturedArray,
+  path: string
+): readonly string[] {
+  const identifiers: string[] = []
+  for (let index = 0; index < source.length; index += 1) {
+    identifiers.push(captureIdentifier(state, source.value[index], `${path}[${index}]`))
+  }
+  return Object.freeze(identifiers)
+}
+
+function captureIdentifier(state: ScopeCaptureState, value: unknown, path: string): string {
+  const identifier = nonEmptyString(value, path)
+  state.identifierCharacterCount = reserveCount(
+    state.identifierCharacterCount,
+    identifier.length,
+    OBJECT_READ_SCOPE_LIMITS.maxIdentifierCharacters,
+    `scope exceeds the maximum of ${OBJECT_READ_SCOPE_LIMITS.maxIdentifierCharacters} identifier characters`
+  )
+  return identifier
+}
+
+function captureArray(value: unknown, path: string): CapturedArray {
+  if (!Array.isArray(value)) {
+    throw invalidScope(`${path} must be an array`)
+  }
+  const array = value as readonly unknown[]
+  const length = array.length
+  if (!Number.isSafeInteger(length) || length < 0) {
+    throw invalidScope(`${path}.length must be a non-negative safe integer`)
+  }
+  return { value: array, length }
+}
+
+function reserveCount(current: number, count: number, limit: number, message: string): number {
+  if (count > limit - current) throw invalidScope(message)
+  return current + count
 }
 
 /** Fail closed when a project-bound selected reader is accidentally reused across projects. */
