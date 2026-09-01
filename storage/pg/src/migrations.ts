@@ -74,6 +74,7 @@ import objectOverrideEditTimesSql from "./migrations/028-object-override-edit-ti
   type: "text",
 }
 import modelAccountingSql from "./migrations/029-model-accounting.sql" with { type: "text" }
+import aiUsageLimitsSql from "./migrations/030-ai-usage-limits.sql" with { type: "text" }
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -356,6 +357,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("027-agent-context-checkpoints", agentContextCheckpointsSql),
     pgSql("028-object-override-edit-times", objectOverrideEditTimesSql),
     pgSql("029-model-accounting", modelAccountingSql),
+    pgSql("030-ai-usage-limits", aiUsageLimitsSql),
   ],
 })
 
