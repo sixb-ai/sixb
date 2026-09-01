@@ -15,6 +15,7 @@ import type { AuthorizationContext } from "../authorization"
 import type { Broker } from "../broker"
 import type { DomainEventLog } from "../events"
 import type { RuntimeAuthorization } from "../execution"
+import type { AuthorizedObjectReader } from "../execution/authorized-object-reader"
 import type {
   ObjectQuery,
   ObjectQueryExplanation,
@@ -60,6 +61,8 @@ export interface SixbHostContext {
 /** Host dependencies paired with the process-local authority of one bound execution. */
 export interface SixbRuntimeContext extends SixbHostContext {
   readonly runtimeAuthorization: RuntimeAuthorization
+  /** Core-owned read boundary carrying this exact execution authority. */
+  readonly objectReader: AuthorizedObjectReader
   /**
    * Resolved principal grants. Absent for trusted primitive and explicitly disabled executions.
    * The opaque `runtimeAuthorization` remains the source of authority.

@@ -36,7 +36,11 @@ import {
   type DomainEventService,
   OntologyOutboxDispatcher,
 } from "../events"
-import { resolveExecutionScopeAuthorization } from "../execution/authorization"
+import {
+  captureExecutionScope,
+  resolveExecutionScopeAuthorization,
+} from "../execution/authorization"
+import { createAuthorizedObjectReader } from "../execution/authorized-object-reader"
 import type { ExecutionScope } from "../execution/types"
 import type { LakeStorage } from "../lake-storage"
 import { type LoggerProvider, LoggingService, type ObservabilityOptions } from "../logging"
@@ -238,24 +242,36 @@ export class SixbHost<
 
   /** Bind an existing opaque scope. This method never creates or escalates authority. */
   withScope(scope: ExecutionScope): Sixb<TOntologySources> {
-    const authorization = resolveExecutionScopeAuthorization(this.projectId, scope)
+    const capturedScope = captureExecutionScope(scope)
+    const authorization = resolveExecutionScopeAuthorization(this.projectId, capturedScope)
     if (authorization.ref.type === "kernel") {
       throw new Error("[Sixb] Kernel authority cannot be bound to the domain SDK.")
     }
 
+    const objectReader = createAuthorizedObjectReader({
+      scope: capturedScope,
+      ontology: this.hostContext.ontology,
+      objectStorage: this.storage.objects,
+    })
+
     const runtime: SixbRuntimeContext = {
       ...this.hostContext,
-      runtimeAuthorization: scope.authorization,
+      runtimeAuthorization: capturedScope.authorization,
+      objectReader,
       ...(authorization.type === "principal" ? { authorization: authorization.context } : {}),
     }
     registerOntologyMutationRuntime(
       runtime,
       createOntologyMutationRuntime({
-        materializer: this.materializer.withScope(scope),
+        materializer: this.materializer.withScope(capturedScope),
         notifyCommittedFacts: () => this.committedFacts.notify(),
       })
     )
-    return createBoundSixb<TOntologySources>(runtime, this.sixbDependencies(), scope.execution)
+    return createBoundSixb<TOntologySources>(
+      runtime,
+      this.sixbDependencies(),
+      capturedScope.execution
+    )
   }
 
   get id(): string {

@@ -211,30 +211,44 @@ export function assertExecutionScopeProject(projectId: string, scope: ExecutionS
   }
 }
 
+/**
+ * Capture the two opaque capabilities carried by a scope exactly once.
+ *
+ * Security-sensitive boundaries must not resolve a caller-owned wrapper and then read it again:
+ * accessor-backed inputs could otherwise substitute a different execution or authority between
+ * those operations.
+ */
+export function captureExecutionScope(scope: ExecutionScope): ExecutionScope {
+  const execution = scope.execution
+  const authorization = scope.authorization
+  return Object.freeze({ execution, authorization })
+}
+
 /** Validate that one registered authority belongs to the exact execution it accompanies. */
 export function resolveExecutionScopeAuthorization(
   projectId: string,
   scope: ExecutionScope
 ): RegisteredRuntimeAuthorization {
-  assertExecutionScopeProject(projectId, scope)
-  const resolved = resolveRuntimeAuthorization(scope.authorization)
+  const capturedScope = captureExecutionScope(scope)
+  assertExecutionScopeProject(projectId, capturedScope)
+  const resolved = resolveRuntimeAuthorization(capturedScope.authorization)
   if (resolved.type === "denied") {
     throw createSixbError(
       "internal.unexpected",
       "[Sixb] Execution scope carries unregistered runtime authorization.",
-      { details: { executionId: scope.execution.id, projectId } }
+      { details: { executionId: capturedScope.execution.id, projectId } }
     )
   }
 
-  const registration = registeredAuthorizations.get(scope.authorization)
-  if (!registration || !executionMatchesBinding(registration.execution, scope.execution)) {
+  const registration = registeredAuthorizations.get(capturedScope.authorization)
+  if (!registration || !executionMatchesBinding(registration.execution, capturedScope.execution)) {
     throw invalidExecutionAuthority(
-      scope.execution.id,
+      capturedScope.execution.id,
       "authority is bound to different execution provenance"
     )
   }
 
-  assertResolvedAuthorizationMatchesExecution(resolved, scope.execution)
+  assertResolvedAuthorizationMatchesExecution(resolved, capturedScope.execution)
   return resolved
 }
 
