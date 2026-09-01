@@ -83,7 +83,7 @@ are the union of every role whose `grantedTo` group it belongs to.
 
 A grant pairs a capability with the definitions it covers. Eight capability builders —
 `can.access`, `can.view`, `can.edit`, `can.append`, `can.apply`, `can.run`, `can.manage`, and
-`can.observe` — resolve to **twelve grant kinds**, one per protected target family.
+`can.observe` — resolve to **fourteen grant kinds**, one per protected target family.
 
 | Grant kind | Builder | Allows | Targets |
 | --- | --- | --- | --- |
@@ -98,14 +98,17 @@ A grant pairs a capability with the definitions it covers. Eight capability buil
 | `run:pipeline` | `can.run(...)` | Run pipelines | [Pipelines](../data/pipelines.md) |
 | `run:agent` | `can.run(...)` | Run agents and read their threads | [Agents](../agents/overview.md) |
 | `manage:connector` | `can.manage(...)` | Authorize, select, disconnect, and revoke OAuth connector accounts | [Connectors](../data/connectors.md) |
+| `manage:aiUsage` | `can.manage("aiUsage")` | Create, edit, disable, and delete AI usage limits | [AI usage limits](../agents/usage-limits.md) |
 | `observe:logs` | `can.observe("logs")` | Read captured run logs | [Logging](../logging/overview.md) |
+| `observe:aiUsage` | `can.observe("aiUsage")` | Read project AI accounting and limit status | [AI usage limits](../agents/usage-limits.md) |
 
 `can.access` accepts the built-in `applications.atlas` and `applications.app` definitions.
 `can.view` resolves to `view:object` or `view:dataset` from the definition you pass; `can.run`
 picks between `run:workflow`, `run:sync`, `run:pipeline`, and `run:agent` the same way. Each is
 type-checked, so mixing target families in one call does not compile. `can.manage` accepts connector
-definitions. `can.observe` takes the `"logs"` target literal and grants `observe:logs`, which gates
-reading captured [logs](../logging/overview.md).
+definitions or the `"aiUsage"` project surface. `can.observe` accepts `"logs"` or `"aiUsage"`;
+these independently gate captured [logs](../logging/overview.md) and
+[AI accounting](../agents/usage-limits.md).
 
 > **Only `can.view(Type)` reaches subtypes.** `can.edit` and `can.append` cover exactly the types
 > you name, so adding a type under one you granted never makes it writable on its own.
@@ -131,6 +134,8 @@ Each builder takes one definition, a list, or a breadth selector.
 | Every pipeline | `can.run(every.pipeline())` |
 | Every agent | `can.run(every.agent())` |
 | Every connector | `can.manage(every.connector())` |
+| Observe AI usage | `can.observe("aiUsage")` |
+| Manage AI limits | `can.manage("aiUsage")` |
 | Every application | `can.access(every.application())` |
 | Everything but a few | `can.view(every.object().except([Customer]))` |
 
