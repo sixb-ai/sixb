@@ -144,6 +144,19 @@ export class InMemoryAiUsageStorage implements AiUsageStorage {
     replaceMap(this.groupRows, snapshot.groupRows)
   }
 
+  /** @internal Immutable accounting source used by in-memory AI limit enforcement. */
+  getRecord(projectId: string, id: string): AiModelCallUsageRecord | null {
+    const record = this.records.get(modelCallRecordKey(projectId, id))
+    return record ? structuredClone(record) : null
+  }
+
+  /** @internal Immutable accounting source used by in-memory AI limit status reads. */
+  listRecords(projectId: string): readonly AiModelCallUsageRecord[] {
+    return [...this.records.values()]
+      .filter((record) => record.projectId === projectId)
+      .map((record) => structuredClone(record))
+  }
+
   private async assertExecutionExists(projectId: string, executionId: string): Promise<void> {
     const execution = await this.executions.getById({ projectId, id: executionId })
     if (execution) return
