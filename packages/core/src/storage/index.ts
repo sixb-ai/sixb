@@ -131,6 +131,36 @@ export type {
 } from "./ai-cost"
 export { AiCostStorageError, InMemoryAiCostStorage } from "./ai-cost"
 export type {
+  AiLimitConsumption,
+  AiLimitMeter,
+  AiLimitPeriod,
+  AiLimitPeriodKind,
+  AiLimitPolicy,
+  AiLimitPolicyStatus,
+  AiLimitQuantity,
+  AiLimitReservationBucket,
+  AiLimitStorage,
+  AiLimitStorageErrorCode,
+  AiLimitSubject,
+  AiModelCallReservation,
+  AiModelCallReservationIdentity,
+  AiModelCallReservationState,
+  CreateAiLimitPolicyInput,
+  DeleteAiLimitPolicyInput,
+  GetAiLimitPolicyInput,
+  InMemoryAiLimitStorageOptions,
+  InMemoryAiLimitStorageSnapshot,
+  ListAiLimitPoliciesInput,
+  ListAiLimitPolicyStatusesInput,
+  MarkAiModelCallReservationUnknownInput,
+  ReconcileAiModelCallInput,
+  RecordAiModelCallLimitActualsInput,
+  ReserveAiModelCallInput,
+  ReserveAiModelCallResult,
+  UpdateAiLimitPolicyInput,
+} from "./ai-limits"
+export { AiLimitStorageError, aiLimitCalendarMonth, InMemoryAiLimitStorage } from "./ai-limits"
+export type {
   AiModelCallUsage,
   AiModelCallUsageInput,
   AiModelCallUsageRecord,

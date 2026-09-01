@@ -89,6 +89,12 @@ export class InMemoryAiCostStorage implements AiCostStorage {
     replaceMap(this.recordsByUsage, snapshot.recordsByUsage)
   }
 
+  /** @internal Immutable accounting source used by in-memory AI limit enforcement. */
+  getRecord(projectId: string, usageRecordId: string): AiModelCallCostRecord | null {
+    const record = this.recordsByUsage.get(usageRecordKey(projectId, usageRecordId))
+    return record ? structuredClone(record) : null
+  }
+
   private usageRecord(projectId: string, id: string): AiModelCallUsageRecord | undefined {
     return [...this.usage.snapshot().records.values()].find(
       (record) => record.projectId === projectId && record.id === id
