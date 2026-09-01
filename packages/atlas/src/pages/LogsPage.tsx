@@ -67,7 +67,7 @@ export function LogsPage() {
   }, [kind, level])
 
   return (
-    <PageFrame title="Logs" headerVariant="collection" contentClassName="max-w-6xl">
+    <PageFrame title="Logs" headerDivider={false}>
       <LogConsole
         builder={builder}
         showKind

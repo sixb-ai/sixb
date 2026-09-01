@@ -11,10 +11,8 @@ import {
   Card,
   CollectionCardButton,
   CollectionCardGrid,
-  CollectionHeader,
   CollectionViewToggle,
   EmptyState,
-  Input,
   Table,
   TableBody,
   TableCell,
@@ -27,6 +25,7 @@ import { useQuery } from "@tanstack/react-query"
 import { BellRing, ChevronLeft, ChevronRight, ListChecks, Loader2, Search } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import { CollectionPageHeader } from "../components/CollectionPageHeader"
 import {
   isUnconfiguredStorageError,
   UnrecordedHistoryState,
@@ -664,10 +663,20 @@ export function RulesPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-5xl">
-      <CollectionHeader
+    <div className="mx-auto w-full max-w-6xl">
+      <CollectionPageHeader
         title="Rules"
-        count={filteredRules.length}
+        count={rules.length}
+        singularLabel="rule"
+        search={
+          rules.length > 0
+            ? {
+                value: searchQuery,
+                placeholder: "Search rules, subjects, or predicates…",
+                onChange: setSearchQuery,
+              }
+            : undefined
+        }
         actions={
           rules.length > 0 ? (
             <CollectionViewToggle
@@ -681,19 +690,6 @@ export function RulesPage() {
           ) : null
         }
       />
-
-      {rules.length > 0 && (
-        <div className="relative mt-2">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            type="text"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Search rules, subjects, or predicates..."
-            className="pl-9"
-          />
-        </div>
-      )}
 
       <div className="mt-4">
         <RulesContent

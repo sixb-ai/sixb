@@ -9,22 +9,23 @@
 
 :root {
   /* Atlas follows the Sixb website's paper, ink, ledger-line, and signal-blue palette. */
-  --background: #fafafa;
-  --foreground: #17181c;
+  color-scheme: light;
+  --background: #f8f8f7;
+  --foreground: #18191c;
   --card: #ffffff;
-  --card-foreground: #17181c;
+  --card-foreground: #18191c;
   --popover: #ffffff;
   --popover-foreground: #17181c;
-  --primary: #17181c;
+  --primary: #18191c;
   --primary-foreground: #ffffff;
-  --secondary: #f3f3f3;
-  --secondary-foreground: #17181c;
-  --accent: #f3f3f3;
-  --accent-foreground: #17181c;
-  --muted: #f5f5f5;
-  --muted-foreground: #63666d;
-  --border: #e1e1e1;
-  --input: #d6d6d6;
+  --secondary: #f0f1f2;
+  --secondary-foreground: #18191c;
+  --accent: #eef4ff;
+  --accent-foreground: #18191c;
+  --muted: #f1f2f3;
+  --muted-foreground: #666970;
+  --border: #dedfe2;
+  --input: #d4d6da;
   --ring: #007aff;
   --info: #007aff;
   --chart-1: #007aff;
@@ -32,17 +33,17 @@
   --chart-3: #5799df;
   --chart-4: #9ec3ee;
   --chart-5: #d4e6ff;
-  --sidebar: #ffffff;
+  --sidebar: #fbfbfa;
   --sidebar-foreground: #63666d;
   --sidebar-primary: #17181c;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #f3f3f3;
-  --sidebar-accent-foreground: #17181c;
-  --sidebar-border: #e1e1e1;
+  --sidebar-accent: #f0f1f2;
+  --sidebar-accent-foreground: #18191c;
+  --sidebar-border: #dedfe2;
   --sidebar-ring: #007aff;
   --font-sans: "ABC Diatype", "SF Pro Text", "SF Pro Display", "Segoe UI Variable Text",
     "Segoe UI", system-ui, sans-serif;
-  --radius: 0.25rem;
+  --radius: 0.5rem;
   --shadow-2xs: none;
   --shadow-xs: none;
   --shadow-sm: none;
@@ -56,13 +57,15 @@
   --atlas-blue-soft: #9ec3ee;
   --atlas-blue-line: #d4e6ff;
   --atlas-blue-fill: #eef4ff;
-  --atlas-rail: #ffffff;
-  --atlas-sidebar-active: #17181c;
-  --atlas-sidebar-active-foreground: #ffffff;
-  --atlas-sidebar-count: #f1f1f1;
-  --atlas-surface-hover: #fafafa;
-  --atlas-row-hover: #f7f7f7;
-  --atlas-border-hover: #c6c6c6;
+  --atlas-rail: #fbfbfa;
+  --atlas-sidebar-active: #dfeaff;
+  --atlas-sidebar-active-foreground: #18191c;
+  --atlas-sidebar-count: #e9eaec;
+  --atlas-surface-hover: #f7f8f9;
+  --atlas-row-hover: #f3f5f7;
+  --atlas-border-hover: #c2c5ca;
+  --atlas-panel-subtle: #f4f5f6;
+  --atlas-shadow-float: 0 16px 48px rgb(23 24 28 / 10%), 0 2px 8px rgb(23 24 28 / 6%);
 
   font-family: var(--font-sans);
   line-height: 1.5;
@@ -73,22 +76,23 @@
 }
 
 .dark {
-  --background: #0b0b0b;
-  --foreground: #f5f5f5;
-  --card: #101010;
+  color-scheme: dark;
+  --background: #101112;
+  --foreground: #f1f2f3;
+  --card: #151617;
   --card-foreground: #f5f5f5;
-  --popover: #151515;
+  --popover: #191a1c;
   --popover-foreground: #f5f5f5;
   --primary: #f5f5f5;
-  --primary-foreground: #0b0b0b;
-  --secondary: #1a1a1a;
+  --primary-foreground: #101112;
+  --secondary: #202225;
   --secondary-foreground: #f5f5f5;
-  --accent: #202020;
+  --accent: #1b2a3e;
   --accent-foreground: #f5f5f5;
-  --muted: #181818;
-  --muted-foreground: #a1a1a1;
-  --border: #2b2b2b;
-  --input: #363636;
+  --muted: #202225;
+  --muted-foreground: #9a9da3;
+  --border: #2b2d31;
+  --input: #3a3d42;
   --ring: #007aff;
   --info: #007aff;
   --chart-1: #007aff;
@@ -96,26 +100,28 @@
   --chart-3: #68aef8;
   --chart-4: #3f7fbd;
   --chart-5: #23527f;
-  --sidebar: #0f0f0f;
-  --sidebar-foreground: #a1a1a1;
+  --sidebar: #131415;
+  --sidebar-foreground: #9a9da3;
   --sidebar-primary: #f5f5f5;
-  --sidebar-primary-foreground: #0b0b0b;
-  --sidebar-accent: #202020;
+  --sidebar-primary-foreground: #101112;
+  --sidebar-accent: #202225;
   --sidebar-accent-foreground: #f5f5f5;
-  --sidebar-border: #2b2b2b;
+  --sidebar-border: #2b2d31;
   --sidebar-ring: #007aff;
   --atlas-blue: #007aff;
   --atlas-blue-deep: #68aef8;
   --atlas-blue-soft: #3f7fbd;
   --atlas-blue-line: #23527f;
-  --atlas-blue-fill: #151515;
-  --atlas-rail: #0f0f0f;
-  --atlas-sidebar-active: #f5f5f5;
-  --atlas-sidebar-active-foreground: #0b0b0b;
-  --atlas-sidebar-count: #1c1c1c;
-  --atlas-surface-hover: #171717;
-  --atlas-row-hover: #151515;
-  --atlas-border-hover: #484848;
+  --atlas-blue-fill: #16243a;
+  --atlas-rail: #131415;
+  --atlas-sidebar-active: #19283b;
+  --atlas-sidebar-active-foreground: #f1f2f3;
+  --atlas-sidebar-count: #292b2f;
+  --atlas-surface-hover: #1b1c1f;
+  --atlas-row-hover: #1c1e21;
+  --atlas-border-hover: #4b4e54;
+  --atlas-panel-subtle: #191a1c;
+  --atlas-shadow-float: 0 18px 56px rgb(0 0 0 / 38%), 0 2px 10px rgb(0 0 0 / 28%);
   --shadow-2xs: none;
   --shadow-xs: none;
   --shadow-sm: none;
@@ -136,6 +142,11 @@ body {
 
 body {
   margin: 0;
+}
+
+::selection {
+  background: var(--atlas-blue-line);
+  color: var(--foreground);
 }
 
 h1,
@@ -182,13 +193,24 @@ a:focus-visible {
 
 [data-sidebar="menu-button"] {
   position: relative;
-  border-radius: 2px;
+  border-radius: calc(var(--radius) - 2px);
   font-weight: 500;
 }
 
 [data-sidebar="menu-button"][data-active="true"] {
   background: var(--atlas-sidebar-active);
   color: var(--atlas-sidebar-active-foreground);
+}
+
+[data-sidebar="menu-button"][data-active="true"]::before {
+  position: absolute;
+  top: 0.45rem;
+  bottom: 0.45rem;
+  left: -0.5rem;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--atlas-blue);
+  content: "";
 }
 
 [data-sidebar="menu-button"][data-active="true"]:hover {
@@ -198,13 +220,13 @@ a:focus-visible {
 
 [data-sidebar="menu-badge"] {
   min-width: 1.25rem;
-  border-radius: 2px;
-  background: var(--atlas-sidebar-count);
+  border-radius: 999px;
+  background: transparent;
   font-size: 0.6875rem;
 }
 
 [data-sidebar="menu-button"][data-active="true"] + [data-sidebar="menu-badge"] {
-  background: rgb(255 255 255 / 14%);
+  background: color-mix(in srgb, var(--atlas-blue) 12%, transparent);
   color: var(--atlas-sidebar-active-foreground);
 }
 
@@ -246,9 +268,17 @@ a:focus-visible {
   box-shadow: none;
 }
 
+[data-slot="dialog-content"],
+[data-slot="popover-content"],
+[data-slot="dropdown-menu-content"],
+[data-slot="select-content"] {
+  border-color: color-mix(in srgb, var(--border) 80%, var(--foreground));
+  box-shadow: var(--atlas-shadow-float);
+}
+
 .atlas-page-header {
   border-bottom: 1px solid var(--border);
-  padding-bottom: 1.25rem;
+  padding-bottom: 1.5rem;
 }
 
 .atlas-eyebrow {
