@@ -358,6 +358,25 @@ describe("bound Sixb object reads", () => {
 
     expect(query.list()).rejects.toThrow(AuthorizationError)
   })
+
+  test("typed and dynamic listLinks share endpoint filtering", async () => {
+    const host = createRuntime()
+    const sixb = createTestSixb(host)
+    await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
+    await sixb.objects(Invoice).upsert({ properties: { id: "i1" } })
+    await sixb.objects(Invoice).upsertLink({
+      sourceId: "i1",
+      linkId: "contract",
+      targetTypeId: "contract",
+      targetId: "c1",
+    })
+    const principalSixb = bindPrincipal(host, contextFor(host, ["finance"]))
+
+    expect(await principalSixb.objects(Invoice).byId("i1").listLinks()).toEqual([])
+    expect(
+      await principalSixb.objects.listLinks({ objectTypeId: "invoice", objectId: "i1" })
+    ).toEqual([])
+  })
 })
 
 describe("bound Sixb cross-type list", () => {
@@ -1055,20 +1074,6 @@ describe("direct writes are attributable", () => {
 })
 
 describe("bound Sixb fails closed on ungranted surfaces", () => {
-  test("listLinks denies even when reached at runtime", async () => {
-    const host = createRuntime()
-    const sixb = createTestSixb(host)
-    await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
-    const principalSixb = bindPrincipal(host, contextFor(host, ["editors"]))
-
-    // Trusted executions need this method on the shared Sixb surface. A principal can reach it too,
-    // but link rows name target types no read grant covers, so the protected leaf fails closed even
-    // when the principal may edit the source type.
-    expect(principalSixb.objects(Contract).byId("c1").listLinks()).rejects.toThrow(
-      AuthorizationError
-    )
-  })
-
   test("an explicit auth-disabled execution remains unrestricted", async () => {
     const host = createRuntime()
     const sixb = createTestSixb(host)

@@ -1,4 +1,3 @@
-import { assertAuthorized } from "../authorization"
 import type { SixbRuntimeContext } from "../runtime/types"
 import {
   type AgentContextEntryInput,
@@ -24,9 +23,7 @@ export async function resolveAgentContextParts(
       invalidContext(`context references an unknown object type '${objectTypeId}'`)
     }
 
-    assertAuthorized(runtime, { kind: "object.view", objectTypeId })
-    const object = await runtime.storage.objects.getByPrimaryId({
-      projectId: runtime.projectId,
+    const object = await runtime.objectReader.getByPrimaryId({
       objectTypeId,
       primaryId,
     })
