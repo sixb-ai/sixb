@@ -4,6 +4,7 @@ import type { Principal } from "../auth"
 import { GRANT_KIND_KEYS, type GrantKind } from "../authorization/grant-kinds"
 import type { AuthorizationContext, GrantIndex } from "../authorization/types"
 import { createSixbError } from "../errors/internal"
+import type { ObjectRef } from "../ontology"
 import {
   type ObjectReadExecutionLimits,
   snapshotObjectReadExecutionLimits,
@@ -42,6 +43,7 @@ export type ResolvedRuntimeAuthorization =
       readonly type: "delegated"
       readonly projectId: string
       readonly objectRead: DelegatedObjectReadAuthorization
+      readonly actionApply: readonly DelegatedActionApplyTarget[]
     }
   | { readonly type: "denied" }
 
@@ -49,6 +51,12 @@ export type ResolvedRuntimeAuthorization =
 export interface DelegatedObjectReadAuthorization {
   readonly scope: CompiledSelectedObjectReadScope
   readonly limits: ObjectReadExecutionLimits
+}
+
+/** One exact object-bound Action target carried by process-local delegated authority. */
+export interface DelegatedActionApplyTarget {
+  readonly actionId: string
+  readonly subject: ObjectRef
 }
 
 type RegisteredRuntimeAuthorization = Exclude<
@@ -69,6 +77,9 @@ const registeredAuthorizations = new WeakMap<
   RuntimeAuthorization,
   RuntimeAuthorizationRegistration
 >()
+
+const MAX_DELEGATED_ACTION_APPLY_TARGETS = 4_096
+const MAX_DELEGATED_ACTION_IDENTIFIER_CHARACTERS = 1_000_000
 
 export function createPrincipalRuntimeAuthorization(input: {
   readonly execution: ExecutionContext
@@ -139,9 +150,11 @@ export function createDelegatedRuntimeAuthorization(input: {
     readonly selection: SelectedObjectReadScope
     readonly limits: ObjectReadExecutionLimits
   }
+  readonly actionApply?: readonly DelegatedActionApplyTarget[]
 }): RuntimeAuthorization {
   const execution = input.execution
   const objectReadInput = input.objectRead
+  const actionApplyInput = input.actionApply
   if (execution.executor.type !== "request" || execution.requestedBy !== undefined) {
     throw new Error(
       "[Sixb] Delegated runtime authorization requires a request execution without a principal."
@@ -156,6 +169,7 @@ export function createDelegatedRuntimeAuthorization(input: {
     type: "delegated",
     projectId: execution.projectId,
     objectRead,
+    actionApply: snapshotDelegatedActionApply(actionApplyInput ?? []),
   })
 }
 
@@ -632,6 +646,76 @@ function snapshotKernelOperation(operation: KernelOperation): KernelOperation {
   }
   assertNonEmpty(operation.recoveryId, "Kernel recovery id")
   return Object.freeze({ type: operation.type, recoveryId: operation.recoveryId })
+}
+
+/** Validate, bound, and detach exact delegated Action targets before registering authority. */
+function snapshotDelegatedActionApply(
+  input: readonly DelegatedActionApplyTarget[]
+): readonly DelegatedActionApplyTarget[] {
+  if (!Array.isArray(input)) {
+    throw new Error("[Sixb] Delegated Action targets must be an array.")
+  }
+
+  const targetCount = input.length
+  if (targetCount > MAX_DELEGATED_ACTION_APPLY_TARGETS) {
+    throw new Error(
+      `[Sixb] Delegated authority exceeds the maximum of ${MAX_DELEGATED_ACTION_APPLY_TARGETS} Action targets.`
+    )
+  }
+
+  let identifierCharacters = 0
+  const targets: DelegatedActionApplyTarget[] = []
+  for (let index = 0; index < targetCount; index += 1) {
+    const authoredTarget = input[index]
+    if (!isRecord(authoredTarget)) {
+      throw new Error(`[Sixb] Delegated Action target ${index} must be an object.`)
+    }
+
+    const authoredActionId = authoredTarget.actionId
+    const authoredSubject = authoredTarget.subject
+    if (!isRecord(authoredSubject)) {
+      throw new Error(`[Sixb] Delegated Action target ${index} subject must be an ObjectRef.`)
+    }
+
+    const actionId = delegatedActionIdentifier(
+      authoredActionId,
+      `Delegated Action target ${index} action id`
+    )
+    const objectTypeId = delegatedActionIdentifier(
+      authoredSubject.objectTypeId,
+      `Delegated Action target ${index} subject object type id`
+    )
+    const primaryId = delegatedActionIdentifier(
+      authoredSubject.primaryId,
+      `Delegated Action target ${index} subject primary id`
+    )
+    identifierCharacters += actionId.length + objectTypeId.length + primaryId.length
+    if (identifierCharacters > MAX_DELEGATED_ACTION_IDENTIFIER_CHARACTERS) {
+      throw new Error(
+        `[Sixb] Delegated authority exceeds the maximum of ${MAX_DELEGATED_ACTION_IDENTIFIER_CHARACTERS} Action identifier characters.`
+      )
+    }
+
+    targets.push(
+      Object.freeze({
+        actionId,
+        subject: Object.freeze({ objectTypeId, primaryId }),
+      })
+    )
+  }
+
+  return Object.freeze(targets)
+}
+
+function delegatedActionIdentifier(value: unknown, label: string): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`[Sixb] ${label} must not be empty.`)
+  }
+  return value
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 function cloneAuthorizationRef(ref: AuthorizationRef): AuthorizationRef {
