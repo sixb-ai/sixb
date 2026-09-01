@@ -20,6 +20,7 @@
  * whole thing with no credentials and no public side effects, point `--registry` at a local registry.
  */
 import { join } from "node:path"
+import { publicNpmRegistry, readRegistryState } from "./npm-registry"
 import { parsePublishOptions } from "./publish-options"
 import {
   discoverPublishablePackages,
@@ -28,9 +29,7 @@ import {
 } from "./publishable-packages"
 import {
   createPackageReleasePlan,
-  type PackageRegistryState,
   type PlannedPackageRelease,
-  type PublishedPackageManifest,
   packageReleaseId,
 } from "./release-plan"
 import { assertReleaseTagAllowed, isPreviewRelease } from "./release-policy"
@@ -42,7 +41,7 @@ const registryByName = new Map(
   await Promise.all(
     ordered.map(async (packageInfo) => {
       const name = packageName(packageInfo)
-      return [name, await readRegistryState(name)] as const
+      return [name, await readRegistryState(name, options.registry ?? publicNpmRegistry)] as const
     })
   )
 )
@@ -101,8 +100,9 @@ if (options.tag !== "latest" && !options.dryRun && !options.planOnly) {
   }
   if (stable.length > 0) {
     console.log(
-      `[SixbPublish] Promote once you have verified the tag:\n` +
-        stable.map((release) => `  npm dist-tag add ${packageReleaseId(release)} latest`).join("\n")
+      `[SixbPublish] ${stable.length} stable ${stable.length === 1 ? "package is" : "packages are"} ` +
+        `ready for promotion. Verify with \`bun run release:promote -- --plan\`, then run ` +
+        "`bun run release:promote`."
     )
   }
 }
@@ -162,61 +162,6 @@ async function publishPackage(release: PlannedPackageRelease): Promise<void> {
       `Published so far: ${published.length > 0 ? published.join(", ") : "nothing"}\n` +
       "Fix the cause and re-run; packages already on the registry are skipped."
   )
-}
-
-/**
- * Read registry state before any write so a network or authentication-adjacent lookup failure
- * cannot leave a release half-published. A 404 is a new package with no versions or tags yet.
- */
-async function readRegistryState(name: string): Promise<PackageRegistryState> {
-  const registry = (options.registry ?? "https://registry.npmjs.org").replace(/\/+$/, "")
-  const response = await fetch(`${registry}/${encodeURIComponent(name)}`, {
-    headers: { accept: "application/vnd.npm.install-v1+json" },
-  })
-
-  if (response.status === 404) return { versions: new Map(), tags: {} }
-  if (!response.ok) {
-    throw new Error(`[SixbPublish] Could not query the registry for ${name}: ${response.status}`)
-  }
-
-  const body = (await response.json()) as {
-    versions?: Record<string, unknown>
-    "dist-tags"?: Record<string, string>
-  }
-  return {
-    versions: new Map(
-      Object.entries(body.versions ?? {}).map(([version, manifest]) => [
-        version,
-        publishedPackageManifest(manifest),
-      ])
-    ),
-    tags: body["dist-tags"] ?? {},
-  }
-}
-
-function publishedPackageManifest(value: unknown): PublishedPackageManifest {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {}
-
-  const manifest = value as Record<string, unknown>
-  const dependencies = dependencyRecord(manifest.dependencies)
-  const peerDependencies = dependencyRecord(manifest.peerDependencies)
-  const optionalDependencies = dependencyRecord(manifest.optionalDependencies)
-
-  return {
-    ...(dependencies ? { dependencies } : {}),
-    ...(peerDependencies ? { peerDependencies } : {}),
-    ...(optionalDependencies ? { optionalDependencies } : {}),
-  }
-}
-
-function dependencyRecord(value: unknown): Record<string, string> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
-
-  const entries = Object.entries(value)
-  if (!entries.every((entry): entry is [string, string] => typeof entry[1] === "string")) {
-    return undefined
-  }
-  return Object.fromEntries(entries)
 }
 
 function uniqueReleases(releases: readonly PlannedPackageRelease[]): PlannedPackageRelease[] {

@@ -1,6 +1,6 @@
 {
   "name": "@sixb/orchestrator",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Bridges Sixb runtime events to queue job lanes",
   "keywords": [
     "sixb",

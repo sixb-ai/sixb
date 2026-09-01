@@ -21,6 +21,7 @@
     "release": "bun install --frozen-lockfile && bun run build && bun run test:publish",
     "release:plan": "bun scripts/publish.ts --plan",
     "release:publish": "bun scripts/publish.ts",
+    "release:promote": "bun scripts/promote.ts",
     "dev": "bun sixb dev",
     "test": "bun test --parallel=2",
     "test:ci": "bun scripts/ci-guard.ts --stall 60 --max 420 bun test --parallel=2",

@@ -252,9 +252,21 @@ with `bun add @sixb/core@next` or `bunx create-sixb@next my-app`. Publishing ano
 `next` forward without making it the default install.
 
 For `0.1.0` and later, publish to `next` first, verify it, then move those immutable package versions
-to `latest`. The publish script prints promotion commands only for packages in the release, including
-packages staged by an interrupted earlier run, and refuses to publish a `0.0.x` version directly to
-`latest`. It also refuses any plan that would move `next` or `latest` to an older SemVer.
+to `latest`. Authenticate once through npm's web flow, inspect the complete promotion plan, then run
+the promotion:
+
+```bash
+bunx npm login --auth-type=web
+bun run release:promote -- --plan
+bun run release:promote
+```
+
+npm exposes one dist-tag write per package rather than an atomic workspace promotion. The command
+performs those writes in series using the existing npm login, but validates the entire workspace
+before the first write. It promotes only local versions staged under `next`, verifies every resulting
+`latest` tag, skips packages already promoted, and is therefore safe to resume after an interruption.
+The release tooling refuses to publish a `0.0.x` version directly to `latest` or to move `next` or
+`latest` to an older SemVer.
 
 Bun assigns `latest` on a package's first publication even when `--tag next` is requested. The
 publisher therefore lists but defers packages that do not exist on the registry yet, while staging

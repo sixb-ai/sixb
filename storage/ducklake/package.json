@@ -1,6 +1,6 @@
 {
   "name": "@sixb/ducklake",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "DuckDB/DuckLake lake storage provider for Sixb",
   "keywords": [
     "sixb",
