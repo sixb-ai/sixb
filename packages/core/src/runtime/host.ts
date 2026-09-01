@@ -244,7 +244,12 @@ export class SixbHost<
   withScope(scope: ExecutionScope): Sixb<TOntologySources> {
     const capturedScope = captureExecutionScope(scope)
     const authorization = resolveExecutionScopeAuthorization(this.projectId, capturedScope)
-    if (authorization.ref.type === "kernel") {
+    if (authorization.type === "delegated") {
+      throw new Error(
+        "[Sixb] Delegated runtime authorization cannot be bound to the domain SDK until every delegated surface is activated."
+      )
+    }
+    if (authorization.type === "unrestricted" && authorization.ref.type === "kernel") {
       throw new Error("[Sixb] Kernel authority cannot be bound to the domain SDK.")
     }
 
