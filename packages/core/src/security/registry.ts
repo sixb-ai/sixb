@@ -50,7 +50,8 @@ export class SecurityRegistry implements SecurityDefinitionCatalog {
       pipelineIds: input.pipelineIds,
       agentIds: input.agentIds,
       connectorIds: input.connectorIds,
-      observableIds: new Set(["logs"]),
+      observableIds: new Set(["logs", "aiUsage"]),
+      manageableIds: new Set(["aiUsage"]),
     })
 
     const universe = {
@@ -63,7 +64,8 @@ export class SecurityRegistry implements SecurityDefinitionCatalog {
       pipelineIds: input.pipelineIds ?? new Set<string>(),
       agentIds: input.agentIds ?? new Set<string>(),
       connectorIds: input.connectorIds ?? new Set<string>(),
-      observableIds: new Set(["logs"]),
+      observableIds: new Set(["logs", "aiUsage"]),
+      manageableIds: new Set(["aiUsage"]),
       getSubTypes: input.getSubTypes ?? (() => []),
     }
 

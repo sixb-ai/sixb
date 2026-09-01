@@ -22,7 +22,9 @@ export type GrantKind =
   | "run:pipeline"
   | "run:agent"
   | "observe:logs"
+  | "observe:aiUsage"
   | "manage:connector"
+  | "manage:aiUsage"
 
 /** Registered id universes a grant kind ranges over, plus subtype expansion. */
 export interface GrantUniverse {
@@ -36,6 +38,7 @@ export interface GrantUniverse {
   readonly agentIds: ReadonlySet<string>
   readonly observableIds: ReadonlySet<string>
   readonly connectorIds: ReadonlySet<string>
+  readonly manageableIds: ReadonlySet<string>
   readonly getSubTypes: (objectTypeId: string) => readonly string[]
 }
 
@@ -117,10 +120,20 @@ export const GRANT_KINDS: Record<GrantKind, GrantKindSpec> = {
     subject: "observability surface",
     fix: 'Use can.observe("logs").',
   },
+  "observe:aiUsage": {
+    universeKey: "observableIds",
+    subject: "observability surface",
+    fix: 'Use can.observe("aiUsage").',
+  },
   "manage:connector": {
     universeKey: "connectorIds",
     subject: "connector",
     fix: "Add it to 'connectors/' or pass it to createSixb({ connectors }).",
+  },
+  "manage:aiUsage": {
+    universeKey: "manageableIds",
+    subject: "management surface",
+    fix: 'Use can.manage("aiUsage").',
   },
 }
 
@@ -142,9 +155,9 @@ export function grantKindOf(grant: GrantDefinition): GrantKind {
     case "run":
       return `run:${grant.target}`
     case "observe":
-      return "observe:logs"
+      return `observe:${grant.target}`
     case "manage":
-      return "manage:connector"
+      return `manage:${grant.target}`
   }
 }
 

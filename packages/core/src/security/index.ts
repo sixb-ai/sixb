@@ -29,6 +29,7 @@ export type {
   GroupDefinition,
   GroupReference,
   ManageGrant,
+  ManageGrantTarget,
   MembershipOperation,
   MembershipPolicyDefinition,
   ObserveGrant,

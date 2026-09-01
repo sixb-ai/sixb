@@ -220,12 +220,12 @@ export function assertGrantDefinition(
     )
   }
 
-  if (value.capability === "observe" && value.target !== "logs") {
-    throw createError(`[Sixb] ${field} observe grant target must be 'logs'.`)
+  if (value.capability === "observe" && value.target !== "logs" && value.target !== "aiUsage") {
+    throw createError(`[Sixb] ${field} observe grant target must be 'logs' or 'aiUsage'.`)
   }
 
-  if (value.capability === "manage" && value.target !== undefined) {
-    throw createError(`[Sixb] ${field} manage grant must not declare a target.`)
+  if (value.capability === "manage" && value.target !== "connector" && value.target !== "aiUsage") {
+    throw createError(`[Sixb] ${field} manage grant target must be 'connector' or 'aiUsage'.`)
   }
 
   assertSelection(value.selection, field, createError)
@@ -307,6 +307,8 @@ export function validateSecurityDefinitionsAtStartup(input: {
   readonly agentIds?: ReadonlySet<string>
   /** Registered observability surfaces. */
   readonly observableIds?: ReadonlySet<string>
+  /** Registered singleton management surfaces. */
+  readonly manageableIds?: ReadonlySet<string>
   /** Registered connector ids — when provided, manage grants must reference them. */
   readonly connectorIds?: ReadonlySet<string>
 }): RegisteredSecurityDefinitions {
