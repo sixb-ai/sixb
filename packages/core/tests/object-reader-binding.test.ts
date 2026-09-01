@@ -331,6 +331,7 @@ describe("AuthorizedObjectReader", () => {
     })
 
     expect(backend.selectedScopeCalls).toBe(0)
+    expect(backend.calls.filter((call) => call.operation === "selectsObjectProperties")).toEqual([])
     for (const call of backend.calls) {
       if (call.operation === "queryCapabilities") continue
       expect(call.input).toMatchObject({ projectId })
