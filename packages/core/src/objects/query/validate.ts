@@ -14,8 +14,10 @@ import { ObjectQueryValidationError } from "./errors"
 import type {
   ObjectExpansion,
   ObjectQuery,
+  ObjectQueryDirection,
   ObjectQueryPredicate,
   ObjectQueryResultShape,
+  ObjectQuerySetOperation,
   ObjectQuerySortField,
   QueryScalarKind,
 } from "./ir"
@@ -42,6 +44,71 @@ export interface ObjectQueryValidationOptions {
   normalize?: boolean
 }
 
+/** Opaque semantic state carried by the canonical query validator for an internal admission. */
+export type ObjectQueryAdmissionState = object
+
+export type ObjectQueryPropertyUse =
+  | "filter"
+  | "text"
+  | "vector"
+  | "sort"
+  | "project"
+  | "expand.orderBy"
+  | "facet"
+
+export type ObjectQueryEdgeUse = "traverse" | "expand" | "queryLinks"
+
+export interface ObjectQueryAdmissionTransition {
+  readonly state: ObjectQueryAdmissionState
+  /** Recorded during the walk and raised only after ordinary validation succeeds. */
+  readonly denial?: Error
+}
+
+/**
+ * Internal semantic admission reducer driven by the canonical query validator.
+ *
+ * It deliberately has no AST visitor: validation owns recursion through query nodes, predicates,
+ * and expansions, while an admission only reduces the semantic sources, properties, edges, and
+ * set operations it observes.
+ */
+export interface ObjectQuerySemanticAdmission {
+  empty(): ObjectQueryAdmissionState
+  source(input: {
+    readonly kind: "start" | "refs"
+    readonly result: ObjectQueryResultShape
+    readonly objectTypeId?: string
+    readonly refs?: readonly ObjectRef[]
+    readonly path: string
+  }): ObjectQueryAdmissionTransition
+  property(input: {
+    readonly state: ObjectQueryAdmissionState
+    readonly propertyId: string
+    readonly objectTypeId?: string
+    readonly use: ObjectQueryPropertyUse
+    readonly path: string
+  }): Error | undefined
+  edge(input: {
+    readonly state: ObjectQueryAdmissionState
+    /** Ontology-resolved shape after following this edge. */
+    readonly result: ObjectQueryResultShape
+    readonly linkId: string
+    readonly direction: ObjectQueryDirection
+    readonly sourceObjectTypeId?: string
+    readonly use: ObjectQueryEdgeUse
+    readonly path: string
+  }): ObjectQueryAdmissionTransition
+  set(input: {
+    readonly op: ObjectQuerySetOperation
+    readonly states: readonly ObjectQueryAdmissionState[]
+    readonly path: string
+  }): ObjectQueryAdmissionState
+}
+
+export interface AdmittedObjectQuery extends ValidatedObjectQuery {
+  /** Root provenance for terminal-specific checks such as facets and physical link queries. */
+  admissionState: ObjectQueryAdmissionState
+}
+
 type QueryValidationContext = Required<
   Pick<ObjectQueryValidationOptions, "maxLimit" | "maxPageSize" | "maxRefs">
 > & {
@@ -49,11 +116,17 @@ type QueryValidationContext = Required<
   valueTypesById: ReadonlyMap<string, ValueType>
   issues: ObjectQueryValidationIssue[]
   touchedObjectTypeIds: Set<string>
+  admission: ObjectQuerySemanticAdmission
+  admissionDenials: Error[]
 }
 
-interface QueryValidationResult {
+interface QueryNodeValidation {
   result: ObjectQueryResultShape
   query: ObjectQuery
+}
+
+interface QueryValidationResult extends QueryNodeValidation {
+  admissionState: ObjectQueryAdmissionState
 }
 
 interface TextFieldResolution {
@@ -64,23 +137,56 @@ const DEFAULT_MAX_LIMIT = 1_000
 const DEFAULT_MAX_PAGE_SIZE = 1_000
 const DEFAULT_MAX_REFS = 1_000
 
+const NOOP_ADMISSION_STATE = Object.freeze({})
+const NOOP_QUERY_ADMISSION: ObjectQuerySemanticAdmission = Object.freeze({
+  empty: () => NOOP_ADMISSION_STATE,
+  source: () => ({ state: NOOP_ADMISSION_STATE }),
+  property: () => undefined,
+  edge: (input: Parameters<ObjectQuerySemanticAdmission["edge"]>[0]) => ({
+    state: input.state,
+  }),
+  set: (input: Parameters<ObjectQuerySemanticAdmission["set"]>[0]) =>
+    input.states[0] ?? NOOP_ADMISSION_STATE,
+})
+
 export function validateObjectQuery(
   query: ObjectQuery,
   options: ObjectQueryValidationOptions
 ): ValidatedObjectQuery {
+  const admitted = validateObjectQueryWithAdmission(query, options, NOOP_QUERY_ADMISSION)
+  return {
+    query: admitted.query,
+    result: admitted.result,
+    touchedObjectTypeIds: admitted.touchedObjectTypeIds,
+  }
+}
+
+/**
+ * Validate and semantically admit one query in the same canonical walk.
+ *
+ * This is an internal direct-file API. It is intentionally absent from public query barrels.
+ */
+export function validateObjectQueryWithAdmission(
+  query: ObjectQuery,
+  options: ObjectQueryValidationOptions,
+  admission: ObjectQuerySemanticAdmission
+): AdmittedObjectQuery {
   if (options.normalize === false) assertObjectQueryComplexity(query)
   const normalized = options.normalize === false ? query : normalizeObjectQuery(query)
-  const ctx = createValidationContext(options)
+  const ctx = createValidationContext(options, admission)
   const validation = validateQueryNode(normalized, "$", ctx)
 
   if (ctx.issues.length > 0) {
     throw new ObjectQueryValidationError(ctx.issues)
   }
+  const denial = ctx.admissionDenials[0]
+  if (denial) throw denial
 
   return {
     query: validation.query,
     result: validation.result,
     touchedObjectTypeIds: [...ctx.touchedObjectTypeIds],
+    admissionState: validation.admissionState,
   }
 }
 
@@ -96,7 +202,7 @@ export function collectObjectQueryValidationIssues(
     if (error instanceof ObjectQueryValidationError) return error.issues
     throw error
   }
-  const ctx = createValidationContext(options)
+  const ctx = createValidationContext(options, NOOP_QUERY_ADMISSION)
   validateQueryNode(normalized, "$", ctx)
   return ctx.issues
 }
@@ -108,7 +214,10 @@ export function resolveObjectQueryResultShape(
   return validateObjectQuery(query, options).result
 }
 
-function createValidationContext(options: ObjectQueryValidationOptions): QueryValidationContext {
+function createValidationContext(
+  options: ObjectQueryValidationOptions,
+  admission: ObjectQuerySemanticAdmission
+): QueryValidationContext {
   return {
     ontology: options.ontology,
     valueTypesById: options.ontology.getValueTypesById(),
@@ -117,6 +226,8 @@ function createValidationContext(options: ObjectQueryValidationOptions): QueryVa
     maxRefs: options.maxRefs ?? DEFAULT_MAX_REFS,
     issues: [],
     touchedObjectTypeIds: new Set<string>(),
+    admission,
+    admissionDenials: [],
   }
 }
 
@@ -142,18 +253,61 @@ function dispatchQueryNode(
   ctx: QueryValidationContext
 ): QueryValidationResult {
   switch (query.kind) {
-    case "start":
-      return validateStart(query.objectTypeId, query.includeSubtypes, path, ctx)
-    case "refs":
-      return validateRefs(query.refs, path, ctx)
+    case "start": {
+      const validation = validateStart(query.objectTypeId, query.includeSubtypes, path, ctx)
+      return {
+        ...validation,
+        admissionState: admitTransition(
+          ctx,
+          ctx.admission.source({
+            kind: "start",
+            result: validation.result,
+            objectTypeId: query.objectTypeId,
+            path,
+          })
+        ),
+      }
+    }
+    case "refs": {
+      const validation = validateRefs(query.refs, path, ctx)
+      return {
+        ...validation,
+        admissionState: admitTransition(
+          ctx,
+          ctx.admission.source({
+            kind: "refs",
+            result: validation.result,
+            refs: validation.query.kind === "refs" ? validation.query.refs : query.refs,
+            path,
+          })
+        ),
+      }
+    }
     case "filter": {
       const input = validateQueryNode(query.input, `${path}.input`, ctx)
-      const predicate = validatePredicate(query.predicate, input.result, `${path}.predicate`, ctx)
-      return { result: input.result, query: { ...query, input: input.query, predicate } }
+      const predicate = validatePredicate(
+        query.predicate,
+        input.result,
+        input.admissionState,
+        `${path}.predicate`,
+        ctx
+      )
+      return {
+        result: input.result,
+        query: { ...query, input: input.query, predicate },
+        admissionState: input.admissionState,
+      }
     }
     case "text": {
       const input = validateQueryNode(query.input, `${path}.input`, ctx)
-      const textFields = validateTextQuery(query.query, query.fields, input.result, path, ctx)
+      const textFields = validateTextQuery(
+        query.query,
+        query.fields,
+        input.result,
+        input.admissionState,
+        path,
+        ctx
+      )
       return {
         result: input.result,
         query: {
@@ -162,48 +316,97 @@ function dispatchQueryNode(
           fields: query.fields,
           fieldsByObjectType: query.fields ? undefined : textFields.fieldsByObjectType,
         },
+        admissionState: input.admissionState,
       }
     }
     case "vector": {
       const input = validateQueryNode(query.input, `${path}.input`, ctx)
-      validateVectorQuery(query.vector, query.propertyId, query.k, input.result, path, ctx)
-      return { result: input.result, query: { ...query, input: input.query } }
+      validateVectorQuery(
+        query.vector,
+        query.propertyId,
+        query.k,
+        input.result,
+        input.admissionState,
+        path,
+        ctx
+      )
+      return {
+        result: input.result,
+        query: { ...query, input: input.query },
+        admissionState: input.admissionState,
+      }
     }
     case "traverse": {
       const input = validateQueryNode(query.input, `${path}.input`, ctx)
+      const result = validateTraverse(
+        query.linkId,
+        query.direction,
+        query.sourceObjectTypeId,
+        input.result,
+        path,
+        ctx
+      )
       return {
-        result: validateTraverse(
-          query.linkId,
-          query.direction,
-          query.sourceObjectTypeId,
-          input.result,
-          path,
-          ctx
-        ),
+        result,
         query: { ...query, input: input.query },
+        admissionState: admitTransition(
+          ctx,
+          ctx.admission.edge({
+            state: input.admissionState,
+            result,
+            linkId: query.linkId,
+            direction: query.direction,
+            sourceObjectTypeId: query.sourceObjectTypeId,
+            use: "traverse",
+            path,
+          })
+        ),
       }
     }
     case "set":
       return validateSet(query.inputs, query.op, path, ctx)
     case "sort": {
       const input = validateQueryNode(query.input, `${path}.input`, ctx)
-      const fields = validateSortFields(query.fields, input.result, path, ctx)
-      return { result: input.result, query: { ...query, input: input.query, fields } }
+      const fields = validateSortFields(
+        query.fields,
+        input.result,
+        input.admissionState,
+        "sort",
+        path,
+        ctx
+      )
+      return {
+        result: input.result,
+        query: { ...query, input: input.query, fields },
+        admissionState: input.admissionState,
+      }
     }
     case "limit": {
       const input = validateQueryNode(query.input, `${path}.input`, ctx)
       validateLimit(query.limit, path, ctx)
-      return { result: input.result, query: { ...query, input: input.query } }
+      return {
+        result: input.result,
+        query: { ...query, input: input.query },
+        admissionState: input.admissionState,
+      }
     }
     case "page": {
       const input = validateQueryNode(query.input, `${path}.input`, ctx)
       validatePage(query.pageSize, query.pageToken, path, ctx)
-      return { result: input.result, query: { ...query, input: input.query } }
+      return {
+        result: input.result,
+        query: { ...query, input: input.query },
+        admissionState: input.admissionState,
+      }
     }
     case "project": {
       const input = validateQueryNode(query.input, `${path}.input`, ctx)
-      validateProjection(query.properties, input.result, path, ctx)
-      return { result: input.result, query: { ...query, input: input.query } }
+      validateProjection(query.properties, input.result, input.admissionState, path, ctx)
+      return {
+        result: input.result,
+        query: { ...query, input: input.query },
+        admissionState: input.admissionState,
+      }
     }
     case "expand": {
       const input = validateQueryNode(query.input, `${path}.input`, ctx)
@@ -212,10 +415,15 @@ function dispatchQueryNode(
       const expansions = validateExpansions(
         query.expansions,
         input.result,
+        input.admissionState,
         `${path}.expansions`,
         ctx
       )
-      return { result: input.result, query: { ...query, input: input.query, expansions } }
+      return {
+        result: input.result,
+        query: { ...query, input: input.query, expansions },
+        admissionState: input.admissionState,
+      }
     }
   }
 }
@@ -224,7 +432,7 @@ function validateRefs(
   refs: readonly ObjectRef[],
   path: string,
   ctx: QueryValidationContext
-): QueryValidationResult {
+): QueryNodeValidation {
   if (refs.length === 0) {
     addIssue(ctx, `${path}.refs`, "empty_refs", "refs must include at least one object reference")
   }
@@ -269,7 +477,7 @@ function validateStart(
   includeSubtypes: boolean | undefined,
   path: string,
   ctx: QueryValidationContext
-): QueryValidationResult {
+): QueryNodeValidation {
   if (!objectTypeId) {
     addIssue(ctx, path, "missing_object_type", "start.objectTypeId is required")
     return { result: { objectTypeIds: [] }, query: { kind: "start", objectTypeId } }
@@ -290,6 +498,7 @@ function validateStart(
 function validatePredicate(
   predicate: ObjectQueryPredicate,
   shape: ObjectQueryResultShape,
+  admissionState: ObjectQueryAdmissionState,
   path: string,
   ctx: QueryValidationContext
 ): ObjectQueryPredicate {
@@ -307,13 +516,13 @@ function validatePredicate(
       return {
         ...predicate,
         items: predicate.items.map((item, index) =>
-          validatePredicate(item, shape, `${path}.items[${index}]`, ctx)
+          validatePredicate(item, shape, admissionState, `${path}.items[${index}]`, ctx)
         ),
       }
     case "not":
       return {
         ...predicate,
-        item: validatePredicate(predicate.item, shape, `${path}.item`, ctx),
+        item: validatePredicate(predicate.item, shape, admissionState, `${path}.item`, ctx),
       }
     case "eq":
     case "neq":
@@ -330,6 +539,12 @@ function validatePredicate(
         ctx
       )
       validatePredicateValue(predicate.propertyId, predicate.value, shape, path, ctx)
+      admitProperty(ctx, {
+        state: admissionState,
+        propertyId: predicate.propertyId,
+        use: "filter",
+        path,
+      })
       return {
         ...authoredPredicate,
         value: normalizeObjectQueryValue(predicate.value, scalarKind),
@@ -351,6 +566,12 @@ function validatePredicate(
       predicate.values.forEach((value, index) => {
         validatePredicateValue(predicate.propertyId, value, shape, `${path}.values[${index}]`, ctx)
       })
+      admitProperty(ctx, {
+        state: admissionState,
+        propertyId: predicate.propertyId,
+        use: "filter",
+        path,
+      })
       return {
         ...authoredPredicate,
         values: predicate.values.map((value) => normalizeObjectQueryValue(value, scalarKind)),
@@ -359,6 +580,12 @@ function validatePredicate(
     }
     case "exists":
       resolveAndValidatePredicateProperty(predicate.propertyId, predicate.op, shape, path, ctx)
+      admitProperty(ctx, {
+        state: admissionState,
+        propertyId: predicate.propertyId,
+        use: "filter",
+        path,
+      })
       if (typeof predicate.value !== "boolean") {
         addIssue(ctx, path, "invalid_exists_value", "Predicate 'exists' value must be boolean")
       }
@@ -366,6 +593,12 @@ function validatePredicate(
     case "contains":
       resolveAndValidatePredicateProperty(predicate.propertyId, predicate.op, shape, path, ctx)
       validateContainsValue(predicate.propertyId, predicate.value, shape, path, ctx)
+      admitProperty(ctx, {
+        state: admissionState,
+        propertyId: predicate.propertyId,
+        use: "filter",
+        path,
+      })
       return predicate
   }
 }
@@ -561,6 +794,7 @@ function validateTextQuery(
   query: string,
   fields: readonly string[] | undefined,
   shape: ObjectQueryResultShape,
+  admissionState: ObjectQueryAdmissionState,
   path: string,
   ctx: QueryValidationContext
 ): TextFieldResolution {
@@ -585,6 +819,13 @@ function validateTextQuery(
     if (fieldsByObjectType) fieldsByObjectType[objectType.id] = uniqueStrings(fieldIds)
 
     for (const fieldId of fieldIds) {
+      admitProperty(ctx, {
+        state: admissionState,
+        propertyId: fieldId,
+        objectTypeId: objectType.id,
+        use: "text",
+        path: `${path}.fields`,
+      })
       const property = getProperty(objectType, fieldId)
       if (!property) {
         addIssue(
@@ -618,6 +859,7 @@ function validateVectorQuery(
   propertyId: string,
   k: number,
   shape: ObjectQueryResultShape,
+  admissionState: ObjectQueryAdmissionState,
   path: string,
   ctx: QueryValidationContext
 ): void {
@@ -634,6 +876,13 @@ function validateVectorQuery(
   }
 
   for (const objectType of getObjectTypesForResult(shape, ctx)) {
+    admitProperty(ctx, {
+      state: admissionState,
+      propertyId,
+      objectTypeId: objectType.id,
+      use: "vector",
+      path,
+    })
     const property = getProperty(objectType, propertyId)
     if (!property) {
       addIssue(
@@ -804,17 +1053,19 @@ function validateIncomingTraverse(
 function validateExpansions(
   expansions: readonly ObjectExpansion[],
   shape: ObjectQueryResultShape,
+  admissionState: ObjectQueryAdmissionState,
   path: string,
   ctx: QueryValidationContext
 ): ObjectExpansion[] {
   return expansions.map((expansion, index) =>
-    validateExpansion(expansion, shape, `${path}[${index}]`, ctx)
+    validateExpansion(expansion, shape, admissionState, `${path}[${index}]`, ctx)
   )
 }
 
 function validateExpansion(
   expansion: ObjectExpansion,
   shape: ObjectQueryResultShape,
+  admissionState: ObjectQueryAdmissionState,
   path: string,
   ctx: QueryValidationContext
 ): ObjectExpansion {
@@ -839,6 +1090,18 @@ function validateExpansion(
           path,
           ctx
         )
+  const targetAdmissionState = admitTransition(
+    ctx,
+    ctx.admission.edge({
+      state: admissionState,
+      result: targetShape,
+      linkId: expansion.linkId,
+      direction: expansion.direction,
+      sourceObjectTypeId: expansion.sourceObjectTypeId,
+      use: "expand",
+      path,
+    })
+  )
 
   // Expansion targets are touched types: the principal must be able to `view`
   // every type a query hydrates, exactly like `start`/`traverse`. `dispatch`'s
@@ -850,10 +1113,17 @@ function validateExpansion(
 
   validateExpansionLimit(expansion.limit, path, ctx)
   const orderBy = expansion.orderBy
-    ? validateSortFields(expansion.orderBy, targetShape, `${path}.orderBy`, ctx)
+    ? validateSortFields(
+        expansion.orderBy,
+        targetShape,
+        targetAdmissionState,
+        "expand.orderBy",
+        `${path}.orderBy`,
+        ctx
+      )
     : undefined
   const expand = expansion.expand
-    ? validateExpansions(expansion.expand, targetShape, `${path}.expand`, ctx)
+    ? validateExpansions(expansion.expand, targetShape, targetAdmissionState, `${path}.expand`, ctx)
     : undefined
 
   return { ...expansion, orderBy, expand }
@@ -1005,7 +1275,11 @@ function validateSet(
 ): QueryValidationResult {
   if (inputs.length === 0) {
     addIssue(ctx, path, "empty_set", `Set operation '${op}' must include at least one input`)
-    return { result: { objectTypeIds: [] }, query: { kind: "set", op, inputs } }
+    return {
+      result: { objectTypeIds: [] },
+      query: { kind: "set", op, inputs },
+      admissionState: ctx.admission.empty(),
+    }
   }
 
   const results = inputs.map((input, index) =>
@@ -1028,12 +1302,19 @@ function validateSet(
   return {
     result: first,
     query: { kind: "set", op, inputs: results.map((result) => result.query) },
+    admissionState: ctx.admission.set({
+      op,
+      states: results.map((result) => result.admissionState),
+      path,
+    }),
   }
 }
 
 function validateSortFields(
   fields: readonly ObjectQuerySortField[],
   shape: ObjectQueryResultShape,
+  admissionState: ObjectQueryAdmissionState,
+  use: Extract<ObjectQueryPropertyUse, "sort" | "expand.orderBy">,
   path: string,
   ctx: QueryValidationContext
 ): ObjectQuerySortField[] {
@@ -1065,6 +1346,13 @@ function validateSortFields(
     seen.add(key)
 
     if (field.kind === "relevance") return field
+
+    admitProperty(ctx, {
+      state: admissionState,
+      propertyId: field.propertyId,
+      use,
+      path: `${path}.fields[${index}]`,
+    })
 
     const { scalarKind: _authoredScalarKind, ...authoredField } = field
 
@@ -1141,6 +1429,7 @@ function validatePage(
 function validateProjection(
   properties: readonly string[] | undefined,
   shape: ObjectQueryResultShape,
+  admissionState: ObjectQueryAdmissionState,
   path: string,
   ctx: QueryValidationContext
 ): void {
@@ -1151,6 +1440,12 @@ function validateProjection(
 
   const seen = new Set<string>()
   properties.forEach((propertyId, index) => {
+    admitProperty(ctx, {
+      state: admissionState,
+      propertyId,
+      use: "project",
+      path: `${path}.properties[${index}]`,
+    })
     if (seen.has(propertyId)) {
       addIssue(
         ctx,
@@ -1334,6 +1629,28 @@ function keyForTypeIds(typeIds: readonly string[]): string {
 
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values)]
+}
+
+function admitTransition(
+  ctx: QueryValidationContext,
+  transition: ObjectQueryAdmissionTransition
+): ObjectQueryAdmissionState {
+  if (transition.denial) recordAdmissionDenial(ctx, transition.denial)
+  return transition.state
+}
+
+function admitProperty(
+  ctx: QueryValidationContext,
+  input: Parameters<ObjectQuerySemanticAdmission["property"]>[0]
+): void {
+  const denial = ctx.admission.property(input)
+  if (denial) recordAdmissionDenial(ctx, denial)
+}
+
+function recordAdmissionDenial(ctx: QueryValidationContext, denial: Error): void {
+  // Only the first deterministic denial is observable. Keep walking so ordinary validation keeps
+  // priority, but do not retain attacker-controlled messages for every rejected field or edge.
+  if (ctx.admissionDenials.length === 0) ctx.admissionDenials.push(denial)
 }
 
 function addIssue(ctx: QueryValidationContext, path: string, code: string, message: string): void {
