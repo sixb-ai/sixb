@@ -4,6 +4,7 @@ import {
   type ConnectorOAuthCredentials,
   ConnectorOAuthError,
 } from "@sixb/core"
+import { createDisplayAuthentication } from "./display/oauth"
 import { assertNonEmpty, TIKTOK_API_BASE_URL } from "./http"
 import type {
   TiktokAdsConnectorOptions,
@@ -25,9 +26,9 @@ type OAuthOperation = "exchange" | "refresh" | "revoke"
 export function createTiktokAuthentication(
   options: TiktokConnectorOptions
 ): ConnectorOAuth2Authentication {
-  return options.api === "organic"
-    ? createOrganicAuthentication(options)
-    : createMarketingAuthentication(options)
+  if (options.api === "display") return createDisplayAuthentication(options)
+  if (options.api === "organic") return createOrganicAuthentication(options)
+  return createMarketingAuthentication(options)
 }
 
 export function organicRedirectUri(redirectUri: string): string {
