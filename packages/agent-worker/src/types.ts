@@ -98,7 +98,8 @@ export interface AgentTurnContext {
   readonly apiBaseUrl?: string
   readonly tools: readonly ModelTool[]
   readonly prepareStep?: RunModelLoopInput["prepareStep"]
-  readonly systemAddendum?: string
+  /** Complete worker-owned system prompt, derived from the mode and provisioned runtime. */
+  readonly systemPrompt: string
   readonly attachmentContext?: PreparedAgentAttachmentContext
   /**
    * The concurrently provisioning sandbox, exposed so the turn can fail if it rejects. Resolved

@@ -5,8 +5,8 @@ import {
   type JsonObject,
   type JsonValue,
   type LanguageModel,
-  type LanguageModelCatalog,
   type LanguageModelDefinition,
+  type LanguageModelDefinitionCatalog,
   type LanguageModelProvider,
   type LanguageModelRateCard,
   type LanguageModelRequest,
@@ -58,7 +58,7 @@ export interface VercelGatewayModelOptions {
   readonly capabilities?: ModelCapabilities
 }
 
-export interface VercelGatewayCatalog extends LanguageModelCatalog {
+export interface VercelGatewayCatalog extends LanguageModelDefinitionCatalog {
   refresh(): Promise<readonly LanguageModelDefinition[]>
 }
 

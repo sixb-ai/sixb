@@ -1,6 +1,14 @@
 export type { JsonObject, JsonPrimitive, JsonValue } from "../json"
 export { assertJsonObject, assertJsonValue, isJsonObject, isJsonValue } from "../json"
-export type { LanguageModelCatalog, ModelCatalog } from "./catalog"
+export type {
+  LanguageModelCatalog,
+  LanguageModelDefinitionCatalog,
+  LanguageModelEntry,
+  ModelCatalog,
+  ModelCatalogInput,
+  ModelDefinitionCatalog,
+} from "./catalog"
+export { createModelCatalog, modelRef } from "./catalog"
 export type {
   LanguageModelDefinition,
   LanguageModelRateCard,

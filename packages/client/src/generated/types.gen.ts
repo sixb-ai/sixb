@@ -9301,6 +9301,28 @@ export type GetAgentRunResponses = {
 
 export type GetAgentRunResponse = GetAgentRunResponses[keyof GetAgentRunResponses]
 
+export type ListModelsData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/models"
+}
+
+export type ListModelsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    language: Array<{
+      provider: string
+      modelId: string
+      isDefault: boolean
+    }>
+  }
+}
+
+export type ListModelsResponse = ListModelsResponses[keyof ListModelsResponses]
+
 export type RemoveObjectLinkData = {
   body?: never
   path: {

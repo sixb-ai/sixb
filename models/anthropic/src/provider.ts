@@ -4,8 +4,8 @@ import {
   isJsonObject,
   type JsonObject,
   type LanguageModel,
-  type LanguageModelCatalog,
   type LanguageModelDefinition,
+  type LanguageModelDefinitionCatalog,
   type LanguageModelProvider,
   type LanguageModelRequest,
   type LanguageModelStreamEvent,
@@ -65,7 +65,7 @@ export interface AnthropicModelOptions {
   readonly capabilities?: ModelCapabilities
 }
 
-export interface AnthropicCatalog extends LanguageModelCatalog {
+export interface AnthropicCatalog extends LanguageModelDefinitionCatalog {
   refresh(): Promise<readonly LanguageModelDefinition[]>
 }
 

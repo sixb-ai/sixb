@@ -1,5 +1,5 @@
 import type { JsonObject, ReadonlyJsonObject } from "../json"
-import type { LanguageModelCatalog, ModelCatalog } from "./catalog"
+import type { LanguageModelDefinitionCatalog, ModelDefinitionCatalog } from "./catalog"
 import type { LanguageModelDefinition } from "./definitions"
 import type { LanguageModelStreamEvent } from "./events"
 import type { ModelMessage } from "./messages"
@@ -80,12 +80,12 @@ export interface LanguageModel {
 }
 
 /** The common callable provider shape. Provider packages may accept additional model options. */
-export interface ModelProvider<TCatalog extends ModelCatalog = ModelCatalog> {
+export interface ModelProvider<TCatalog extends ModelDefinitionCatalog = ModelDefinitionCatalog> {
   readonly providerId: string
   readonly catalog: TCatalog
 }
 
-export interface LanguageModelProvider extends ModelProvider<LanguageModelCatalog> {
+export interface LanguageModelProvider extends ModelProvider<LanguageModelDefinitionCatalog> {
   (modelId: string): LanguageModel
 }
 

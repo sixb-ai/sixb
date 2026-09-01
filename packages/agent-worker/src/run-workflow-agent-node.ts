@@ -1,10 +1,5 @@
 import type { AgentDefinition, AgentMessagePart, SchemaOrRef, ValueType } from "@sixb/core"
-import {
-  buildAgentSystemPrompt,
-  buildWorkflowOutputFinalizerPrompt,
-  DEFAULT_AGENT_FINAL_STEP_INSTRUCTION,
-  runModelLoop,
-} from "@sixb/core/internal/agents"
+import { runModelLoop } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { schemaRecordToJsonSchema } from "@sixb/core/internal/ontology"
 import {
@@ -16,6 +11,10 @@ import {
 import type { JsonObject, ModelMessage, ModelStep } from "@sixb/core/models"
 import { StructuredOutputError } from "@sixb/core/models"
 import { type AgentRunFinishReason, coerceAgentRunFinishReason } from "@sixb/core/storage"
+import {
+  DEFAULT_AGENT_FINAL_STEP_INSTRUCTION,
+  renderWorkflowOutputFinalizerPrompt,
+} from "./agent-prompt"
 import { agentTraceFromModelSteps } from "./model-adapters"
 import type { AiModelCallRecorder } from "./model-call-recorder"
 import type { AgentTurnContext } from "./types"
@@ -99,11 +98,7 @@ export async function runWorkflowAgentNode(
       messages: [
         {
           role: "system",
-          content: buildAgentSystemPrompt({
-            instructions: input.agent.instructions,
-            addendum: input.context.systemAddendum,
-            mode: "workflow",
-          }),
+          content: input.context.systemPrompt,
         },
         { role: "user", content: [{ type: "text", text: input.prompt }] },
       ],
@@ -139,7 +134,7 @@ export async function runWorkflowAgentNode(
     let finalizerMessages: ModelMessage[] = [
       {
         role: "system",
-        content: buildWorkflowOutputFinalizerPrompt({ instructions: input.agent.instructions }),
+        content: renderWorkflowOutputFinalizerPrompt({ instructions: input.agent.instructions }),
       },
       {
         role: "user",
