@@ -2,6 +2,7 @@ import type { AgentDefinition, AgentMessage, AgentMessagePart, Storage } from "@
 import {
   buildAgentSystemPrompt,
   createAgentMessageId,
+  DEFAULT_AGENT_FINAL_STEP_INSTRUCTION,
   runModelLoop,
   toModelMessages,
 } from "@sixb/core/internal/agents"
@@ -26,7 +27,6 @@ import { appendMessageAndFinishRunOrThrow, finishRunOrThrow } from "./finalize"
 import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
 import { AiModelCallRecorder } from "./model-call-recorder"
 import { collectAgentOutputAttachments } from "./output-attachments"
-import { FINAL_AGENT_LOOP_STEP_INSTRUCTION } from "./run-agent-loop"
 import { loadAgentThreadModelContext } from "./thread-context"
 import type { AgentTurnContext } from "./types"
 
@@ -185,7 +185,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         tools,
         ...(agent.reasoning === undefined ? {} : { reasoning: agent.reasoning }),
         maxSteps,
-        finalStepInstruction: FINAL_AGENT_LOOP_STEP_INSTRUCTION,
+        finalStepInstruction: DEFAULT_AGENT_FINAL_STEP_INSTRUCTION,
         ...(context.prepareStep === undefined ? {} : { prepareStep: context.prepareStep }),
         signal: abortSignal,
         onModelCallEnd: usageRecorder.onModelCallEnd,

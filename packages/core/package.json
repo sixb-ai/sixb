@@ -353,12 +353,6 @@
       "import": "./dist/models/index.js",
       "default": "./dist/models/index.js"
     },
-    "./models/testing": {
-      "types": "./dist/models/testing.d.ts",
-      "bun": "./src/models/testing.ts",
-      "import": "./dist/models/testing.js",
-      "default": "./dist/models/testing.js"
-    },
     "./logging": {
       "types": "./dist/logging/types.d.ts",
       "bun": "./src/logging/types.ts",

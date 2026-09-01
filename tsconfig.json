@@ -129,7 +129,6 @@
       "@sixb/core/lake-storage": ["./packages/core/src/lake-storage/index.ts"],
       "@sixb/core/logging": ["./packages/core/src/logging/types.ts"],
       "@sixb/core/models": ["./packages/core/src/models/index.ts"],
-      "@sixb/core/models/testing": ["./packages/core/src/models/testing.ts"],
       "@sixb/core/ontology": ["./packages/core/src/ontology/index.ts"],
       "@sixb/core/query": ["./packages/core/src/query.ts"],
       "@sixb/core/queues": ["./packages/core/src/queues/index.ts"],

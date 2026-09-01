@@ -106,6 +106,7 @@ export {
   type BuildWorkflowOutputFinalizerPromptInput,
   buildAgentSystemPrompt,
   buildWorkflowOutputFinalizerPrompt,
+  DEFAULT_AGENT_FINAL_STEP_INSTRUCTION,
   DEFAULT_AGENT_SYSTEM_CONTEXT,
   DEFAULT_AGENT_WORKFLOW_SYSTEM_CONTEXT,
   DEFAULT_WORKFLOW_OUTPUT_FINALIZER_SYSTEM_CONTEXT,

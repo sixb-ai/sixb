@@ -7,7 +7,7 @@ import type {
   ModelUiChunk,
 } from "../src/models"
 import { ModelStreamError, StructuredOutputError } from "../src/models"
-import { MockLanguageModel, streamFromArray } from "../src/models/testing"
+import { MockLanguageModel, streamFromArray } from "./helpers/models"
 
 const USAGE = {
   inputTokens: 10,
