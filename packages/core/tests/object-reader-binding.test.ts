@@ -1,12 +1,17 @@
 import { describe, expect, test } from "bun:test"
 import { emptyGrantIndex } from "../src/authorization"
 import { AuthorizationError } from "../src/authorization/errors"
+import { resolveRuntimeAuthorization } from "../src/execution/authorization"
 import {
   type AuthorizedObjectReader,
   assertAuthorizedObjectReaderBinding,
   createAuthorizedObjectReader,
 } from "../src/execution/authorized-object-reader"
-import { createDisabledRequestScope, createPrincipalRequestScope } from "../src/execution/scopes"
+import {
+  createDelegatedRequestScope,
+  createDisabledRequestScope,
+  createPrincipalRequestScope,
+} from "../src/execution/scopes"
 import type { ExecutionScope } from "../src/execution/types"
 import type { ObjectQuery } from "../src/objects/query"
 import { defineObjectType, link, OntologyRegistry, prop } from "../src/ontology"
@@ -14,6 +19,8 @@ import {
   linkBatchKey,
   type ObjectLinkRow,
   type ObjectQueryCapabilities,
+  type ObjectReadExecutionLimits,
+  type ObjectReadStorage,
   type ObjectRow,
   type ObjectStorage,
   objectBatchKey,
@@ -357,6 +364,146 @@ describe("AuthorizedObjectReader", () => {
     expect(links.map((row) => row.targetTypeId)).toEqual([LineItem.id, Secret.id])
   })
 
+  test("creates one selected provider reader for delegated non-query terminals", async () => {
+    const selectedCalls: ReadCall[] = []
+    const selectedRows = [
+      row(Proposal.id, "proposal-1", { id: "proposal-1", title: "Proposal" }),
+      row(LineItem.id, "line-1", { id: "line-1", name: "Line" }),
+    ]
+    const selectedLinks = [
+      objectLink("items", LineItem.id, "line-1", { position: 1 }),
+      objectLink("unselected", LineItem.id, "line-1"),
+    ]
+    const backend = createReadStorage({
+      selectedReader: createSelectedReader(selectedRows, selectedLinks, selectedCalls),
+    })
+    const scope = createDelegatedRequestScope({
+      projectId,
+      requestId: "request-delegated",
+      correlationId: "correlation-delegated",
+      objectRead: {
+        selection: {
+          kind: "selected",
+          roots: [
+            {
+              anchor: { objectTypeId: Proposal.id, primaryId: "proposal-1" },
+              node: {
+                objects: [{ objectTypeId: Proposal.id, propertyIds: ["id", "title"] }],
+                links: [
+                  {
+                    definitions: [
+                      {
+                        sourceObjectTypeId: Proposal.id,
+                        linkId: "items",
+                        targetObjectTypeIds: [LineItem.id],
+                        propertyIds: ["position"],
+                      },
+                    ],
+                    target: {
+                      objects: [{ objectTypeId: LineItem.id, propertyIds: ["id", "name"] }],
+                      links: [],
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        limits: { maxTraversalFacts: 100, maxOutputJsonBytes: 4_096 },
+      },
+    })
+    const reader = createAuthorizedObjectReader({
+      scope,
+      ontology,
+      objectStorage: backend.storage,
+    })
+
+    expect(backend.selectedScopeCalls).toBe(1)
+    expect(backend.selectedScopeInputs).toHaveLength(1)
+    expect(backend.selectedScopeInputs[0]).toMatchObject({
+      projectId,
+      limits: { maxTraversalFacts: 100, maxOutputJsonBytes: 4_096 },
+    })
+    const resolved = resolveRuntimeAuthorization(scope.authorization)
+    expect(resolved.type).toBe("delegated")
+    if (resolved.type !== "delegated") throw new Error("expected delegated authorization")
+    expect(backend.selectedScopeInputs[0]?.scope).toBe(resolved.objectRead.scope)
+    expect(backend.selectedScopeInputs[0]?.limits).toBe(resolved.objectRead.limits)
+
+    await expect(
+      reader.getByPrimaryId({ objectTypeId: Proposal.id, primaryId: "proposal-1" })
+    ).resolves.toMatchObject({ primaryId: "proposal-1" })
+    await expect(
+      reader.getByPrimaryId({ objectTypeId: Proposal.id, primaryId: "proposal-2" })
+    ).resolves.toBeNull()
+    const batch = await reader.getByPrimaryIdBatch({
+      items: [
+        { objectTypeId: Proposal.id, primaryId: "proposal-1" },
+        { objectTypeId: Proposal.id, primaryId: "proposal-2" },
+      ],
+    })
+    expect(batch.size).toBe(1)
+    await expect(
+      reader.canReadObjectProperty({
+        objectTypeId: Proposal.id,
+        primaryId: "proposal-1",
+        propertyId: "title",
+      })
+    ).resolves.toBe(true)
+    await expect(
+      reader.canReadObjectPropertiesBatch({
+        items: [
+          {
+            objectTypeId: Proposal.id,
+            primaryId: "proposal-1",
+            propertyId: "title",
+          },
+          {
+            objectTypeId: Proposal.id,
+            primaryId: "proposal-1",
+            propertyId: "secret",
+          },
+        ],
+      })
+    ).resolves.toEqual([true, false])
+    await expect(reader.list({})).resolves.toMatchObject({ total: 2 })
+    await expect(
+      reader.listLinks({ objectTypeId: Proposal.id, objectId: "proposal-1" })
+    ).resolves.toHaveLength(1)
+    const linkBatch = await reader.listLinksBatch({
+      items: [{ objectTypeId: Proposal.id, objectId: "proposal-1", linkId: "items" }],
+    })
+    expect(linkBatch.size).toBe(1)
+    expect(linkBatch.get(linkBatchKey(Proposal.id, "proposal-1", "items"))).toHaveLength(1)
+    await expect(
+      reader.getByPrimaryId({ objectTypeId: Secret.id, primaryId: "secret-1" })
+    ).rejects.toThrow("does not select object type 'Secret'")
+
+    const query = { kind: "start" as const, objectTypeId: Proposal.id }
+    for (const operation of [
+      () => reader.executeQuery({ query }),
+      () => reader.queryLinks({ query }),
+      () => reader.count({ query }),
+      () => reader.exists({ query }),
+      () => reader.facet({ query, facets: [{ propertyId: "title", limit: 10 }] }),
+    ]) {
+      await expect(operation()).rejects.toThrow("require explicit selected-path admission")
+    }
+
+    expect(backend.selectedScopeCalls).toBe(1)
+    expect(backend.calls).toEqual([])
+    expect(selectedCalls.map((call) => call.operation)).toEqual([
+      "getByPrimaryId",
+      "getByPrimaryId",
+      "getByPrimaryIdBatch",
+      "selectsObjectProperties",
+      "selectsObjectProperties",
+      "list",
+      "listLinks",
+      "listLinksBatch",
+    ])
+  })
+
   test("ignores caller project extras and executes the exact query snapshot it authorized", async () => {
     let objectTypeReads = 0
     const authoredQuery = Object.defineProperties(
@@ -466,10 +613,16 @@ type ReadCall = {
 function createReadStorage(options?: {
   readonly ignoreEndpointTypeFilter?: boolean
   readonly queryLinksHasMore?: boolean
+  readonly selectedReader?: ObjectReadStorage
 }): {
   readonly storage: ObjectStorage
   readonly calls: ReadCall[]
   readonly selectedScopeCalls: number
+  readonly selectedScopeInputs: readonly {
+    readonly projectId: string
+    readonly scope: Parameters<ObjectStorage["createSelectedReadScope"]>[0]["scope"]
+    readonly limits: ObjectReadExecutionLimits
+  }[]
   readonly rows: {
     readonly proposal: ObjectRow
     readonly line: ObjectRow
@@ -489,6 +642,11 @@ function createReadStorage(options?: {
     objectLink("secret", Secret.id, "secret-1"),
   ]
   let selectedScopeCalls = 0
+  const selectedScopeInputs: {
+    projectId: string
+    scope: Parameters<ObjectStorage["createSelectedReadScope"]>[0]["scope"]
+    limits: ObjectReadExecutionLimits
+  }[] = []
   const record = (operation: string, input?: unknown): void => {
     calls.push({ operation, ...(input === undefined ? {} : { input }) })
   }
@@ -584,8 +742,10 @@ function createReadStorage(options?: {
         : allRows
       return { objects, hasMore: false, total: objects.length }
     },
-    createSelectedReadScope() {
+    createSelectedReadScope(input) {
       selectedScopeCalls += 1
+      selectedScopeInputs.push(input)
+      if (options?.selectedReader) return options.selectedReader
       throw new Error("createSelectedReadScope must not be called for existing authorities")
     },
     async listIncidentLinksBatch() {
@@ -602,8 +762,75 @@ function createReadStorage(options?: {
     get selectedScopeCalls() {
       return selectedScopeCalls
     },
+    selectedScopeInputs,
     rows,
     links,
+  }
+}
+
+function createSelectedReader(
+  rows: readonly ObjectRow[],
+  links: readonly ObjectLinkRow[],
+  calls: ReadCall[]
+): ObjectReadStorage {
+  const record = (operation: string, input?: unknown): void => {
+    calls.push({ operation, ...(input === undefined ? {} : { input }) })
+  }
+  return {
+    queryCapabilities() {
+      record("queryCapabilities")
+      return { queryObjects: false }
+    },
+    async getByPrimaryId(input) {
+      record("getByPrimaryId", input)
+      return findRow(rows, input.objectTypeId, input.primaryId)
+    },
+    async getByPrimaryIdBatch(input) {
+      record("getByPrimaryIdBatch", input)
+      const result = new Map()
+      for (const item of input.items) {
+        const found = findRow(rows, item.objectTypeId, item.primaryId)
+        if (found) result.set(objectBatchKey(item.objectTypeId, item.primaryId), found)
+      }
+      return result
+    },
+    async selectsObjectProperties(input) {
+      record("selectsObjectProperties", input)
+      return input.items.map(
+        (item) =>
+          item.objectTypeId === Proposal.id &&
+          item.primaryId === "proposal-1" &&
+          item.propertyId === "title"
+      )
+    },
+    async listLinks(input) {
+      record("listLinks", input)
+      return links
+    },
+    async listLinksBatch(input) {
+      record("listLinksBatch", input)
+      return new Map(
+        input.items.map((item) => [
+          linkBatchKey(item.objectTypeId, item.objectId, item.linkId),
+          [...links],
+        ])
+      )
+    },
+    async queryLinks(input) {
+      record("queryLinks", input)
+      return { links, hasMore: false }
+    },
+    async list(input) {
+      record("list", input)
+      const requested =
+        input.objectTypeId === undefined
+          ? undefined
+          : new Set(
+              typeof input.objectTypeId === "string" ? [input.objectTypeId] : input.objectTypeId
+            )
+      const objects = requested ? rows.filter((row) => requested.has(row.objectTypeId)) : [...rows]
+      return { objects, hasMore: false, total: objects.length }
+    },
   }
 }
 
