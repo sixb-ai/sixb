@@ -1,5 +1,6 @@
 import { canViewActionRun, isAllowed } from "../authorization"
 import type { ExecutionContext } from "../execution"
+import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
 import type { ObjectType } from "../ontology"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type {
@@ -37,13 +38,24 @@ export function createActionsRuntime(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext
 ): ActionsRuntime {
-  const canList = (action: ActionDefinition) =>
-    isAllowed(runtime.authorization, { kind: "action.apply", actionId: action.id }) &&
-    (action.binding.kind === "global" ||
-      isAllowed(runtime.authorization, {
-        kind: "object.view",
-        objectTypeId: action.binding.objectType.id,
-      }))
+  const projectId = runtime.projectId
+  const runtimeAuthorization = runtime.runtimeAuthorization
+  const authorization = resolveRuntimeAuthorizationForProject({
+    projectId,
+    runtimeAuthorization,
+  })
+  const canList = (action: ActionDefinition) => {
+    if (authorization.type === "denied" || authorization.type === "delegated") return false
+    if (authorization.type === "unrestricted") return true
+    return (
+      isAllowed(authorization.context, { kind: "action.apply", actionId: action.id }) &&
+      (action.binding.kind === "global" ||
+        isAllowed(authorization.context, {
+          kind: "object.view",
+          objectTypeId: action.binding.objectType.id,
+        }))
+    )
+  }
 
   return {
     list: () => runtime.actionRegistry.list().filter(canList),
@@ -57,25 +69,34 @@ export function createActionsRuntime(
     requestAndWait: (input) => requestActionAndWait(runtime, execution, input),
     runs: {
       getById: async (runId) => {
+        if (authorization.type === "denied" || authorization.type === "delegated") return null
         const run =
           (await runtime.storage.actionRuns?.getById({
-            projectId: runtime.projectId,
+            projectId,
             id: runId,
           })) ?? null
-        return run && canViewActionRun(runtime.authorization, run) ? run : null
+        return run &&
+          (authorization.type === "unrestricted" || canViewActionRun(authorization.context, run))
+          ? run
+          : null
       },
       list: (input = {}) => {
+        if (authorization.type === "denied" || authorization.type === "delegated") {
+          return Promise.resolve({ runs: [], hasMore: false, total: 0 })
+        }
         const storage = runtime.storage.actionRuns
         if (!storage) return Promise.resolve({ runs: [], hasMore: false, total: 0 })
         return storage.list({
-          projectId: runtime.projectId,
           ...input,
-          actionIds: runtime.authorization
-            ? [...runtime.authorization.grants["apply:action"]]
-            : undefined,
-          objectTypeIds: runtime.authorization
-            ? [...runtime.authorization.grants["view:object"]]
-            : undefined,
+          projectId,
+          actionIds:
+            authorization.type === "principal"
+              ? [...authorization.context.grants["apply:action"]]
+              : undefined,
+          objectTypeIds:
+            authorization.type === "principal"
+              ? [...authorization.context.grants["view:object"]]
+              : undefined,
         })
       },
     },
