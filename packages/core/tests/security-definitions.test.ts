@@ -406,12 +406,18 @@ describe("role definitions", () => {
     })
   })
 
-  test("can.observe exposes the explicit project log capability", () => {
+  test("can.observe exposes explicit project observability capabilities", () => {
     expect(can.observe("logs")).toEqual({
       kind: "grant",
       capability: "observe",
       target: "logs",
       selection: { all: false, ids: ["logs"] },
+    })
+    expect(can.observe("aiUsage")).toEqual({
+      kind: "grant",
+      capability: "observe",
+      target: "aiUsage",
+      selection: { all: false, ids: ["aiUsage"] },
     })
   })
 
@@ -461,11 +467,18 @@ describe("role definitions", () => {
     expect(can.manage(sourceConnector)).toEqual({
       kind: "grant",
       capability: "manage",
+      target: "connector",
       selection: { all: false, ids: ["source"] },
     })
     expect(can.manage(every.connector().except([sourceConnector])).selection).toEqual({
       all: true,
       except: ["source"],
+    })
+    expect(can.manage("aiUsage")).toEqual({
+      kind: "grant",
+      capability: "manage",
+      target: "aiUsage",
+      selection: { all: false, ids: ["aiUsage"] },
     })
   })
 
@@ -732,6 +745,7 @@ describe("role definitions", () => {
         {
           kind: "grant",
           capability: "manage",
+          target: "connector",
           selection: { all: false, ids: ["missing"] },
         },
       ],

@@ -33,6 +33,8 @@ export type AuthzRequest =
   | { readonly kind: "pipeline.run"; readonly pipelineId: string }
   | { readonly kind: "agent.run"; readonly agentId: string }
   | { readonly kind: "logs.observe" }
+  | { readonly kind: "aiUsage.observe" }
+  | { readonly kind: "aiUsage.manage" }
   | { readonly kind: "connector.manage"; readonly connectorId: string }
   | { readonly kind: "object.query"; readonly touchedObjectTypeIds: readonly string[] }
 
@@ -82,6 +84,10 @@ function atomsFor(request: AuthzRequest): readonly Atom[] {
       return [{ kind: "run:agent", id: request.agentId }]
     case "logs.observe":
       return [{ kind: "observe:logs", id: "logs" }]
+    case "aiUsage.observe":
+      return [{ kind: "observe:aiUsage", id: "aiUsage" }]
+    case "aiUsage.manage":
+      return [{ kind: "manage:aiUsage", id: "aiUsage" }]
     case "connector.manage":
       return [{ kind: "manage:connector", id: request.connectorId }]
     case "object.query":
@@ -90,7 +96,13 @@ function atomsFor(request: AuthzRequest): readonly Atom[] {
 }
 
 function atomKey(atom: Atom): string {
-  if (atom.kind === "observe:logs") return atom.kind
+  if (
+    atom.kind === "observe:logs" ||
+    atom.kind === "observe:aiUsage" ||
+    atom.kind === "manage:aiUsage"
+  ) {
+    return atom.kind
+  }
   return `${atom.kind}:${atom.id}`
 }
 
@@ -263,6 +275,10 @@ function deniedMessage(
       return `[Sixb] Principal '${principalId}' is not allowed to run agent '${request.agentId}'.`
     case "logs.observe":
       return `[Sixb] Principal '${principalId}' is not allowed to observe project logs.`
+    case "aiUsage.observe":
+      return `[Sixb] Principal '${principalId}' is not allowed to observe project AI usage.`
+    case "aiUsage.manage":
+      return `[Sixb] Principal '${principalId}' is not allowed to manage project AI usage limits.`
     case "connector.manage":
       return `[Sixb] Principal '${principalId}' is not allowed to manage connector '${request.connectorId}'.`
     case "object.query": {

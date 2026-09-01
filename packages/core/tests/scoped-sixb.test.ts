@@ -1174,6 +1174,7 @@ describe("bound Sixb surface", () => {
       [
         "actions",
         "agents",
+        "aiUsage",
         "blobs",
         "connector",
         "datasets",

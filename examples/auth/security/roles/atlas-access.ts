@@ -30,5 +30,7 @@ export const securityAdminFullAccess = defineRole("security-admin.full-access", 
     can.apply(every.action()),
     can.run(every.workflow()),
     can.observe("logs"),
+    can.observe("aiUsage"),
+    can.manage("aiUsage"),
   ],
 })

@@ -95,7 +95,7 @@ export interface RunGrant<TTarget extends RunGrantTarget = RunGrantTarget> {
   readonly selection: Selection
 }
 
-export type ObserveGrantTarget = "logs"
+export type ObserveGrantTarget = "logs" | "aiUsage"
 
 export interface ObserveGrant {
   readonly kind: "grant"
@@ -104,10 +104,13 @@ export interface ObserveGrant {
   readonly selection: Selection
 }
 
-/** Manage the OAuth connection lifecycle for selected connector definitions. */
-export interface ManageGrant {
+export type ManageGrantTarget = "connector" | "aiUsage"
+
+/** Manage a selected connector or the project's AI usage-limit policies. */
+export interface ManageGrant<TTarget extends ManageGrantTarget = ManageGrantTarget> {
   readonly kind: "grant"
   readonly capability: "manage"
+  readonly target: TTarget
   readonly selection: Selection
 }
 

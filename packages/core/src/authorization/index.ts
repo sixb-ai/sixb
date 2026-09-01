@@ -7,6 +7,7 @@ export {
   assertCanManageConnector,
   assertPrivileged,
   assertProviderAccess,
+  assertRuntimeAuthorizationBound,
   evaluate,
   isAllowed,
 } from "./decision"

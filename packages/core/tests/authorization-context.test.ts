@@ -148,7 +148,8 @@ describe("resolveAuthorizationContext", () => {
     syncIds: new Set(["sync-contracts", "sync-invoices"]),
     pipelineIds: new Set(["pipeline-contracts", "pipeline-invoices"]),
     agentIds: new Set(["contract-agent", "invoice-agent"]),
-    observableIds: new Set(["logs"]),
+    observableIds: new Set(["logs", "aiUsage"]),
+    manageableIds: new Set(["aiUsage"]),
     getSubTypes: (objectTypeId: string) => (objectTypeId === "contract" ? ["signed-contract"] : []),
   }
 

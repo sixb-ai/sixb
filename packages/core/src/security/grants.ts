@@ -198,7 +198,7 @@ function run(
   return { kind: "grant", capability: "run", target, selection }
 }
 
-function observe(target: "logs"): ObserveGrant {
+function observe(target: "logs" | "aiUsage"): ObserveGrant {
   return {
     kind: "grant",
     capability: "observe",
@@ -207,10 +207,21 @@ function observe(target: "logs"): ObserveGrant {
   }
 }
 
-function manage(input: GrantInput<ConnectorDefinition, "connector">): ManageGrant {
+function manage(input: GrantInput<ConnectorDefinition, "connector">): ManageGrant<"connector">
+function manage(input: "aiUsage"): ManageGrant<"aiUsage">
+function manage(input: GrantInput<ConnectorDefinition, "connector"> | "aiUsage"): ManageGrant {
+  if (input === "aiUsage") {
+    return {
+      kind: "grant",
+      capability: "manage",
+      target: "aiUsage",
+      selection: { all: false, ids: [input] },
+    }
+  }
   return {
     kind: "grant",
     capability: "manage",
+    target: "connector",
     selection: resolveGrant(input, "can.manage", ["connector"]).selection,
   }
 }
