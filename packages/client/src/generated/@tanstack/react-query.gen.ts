@@ -19,11 +19,13 @@ import {
   completeFileUpload,
   countObjects,
   createAgentThread,
+  createAiLimitPolicy,
   createAuthInvitation,
   createAuthPersonalAccessToken,
   createAuthServiceAccount,
   createAuthServiceAccountAccessToken,
   createFileUpload,
+  deleteAiLimitPolicy,
   disableAuthServiceAccount,
   disconnectConnectorConnection,
   existsObjects,
@@ -36,6 +38,8 @@ import {
   getAgentRun,
   getAgentThread,
   getAiAccountingOverview,
+  getAiLimitStatus,
+  getAiLimitSubjectOptions,
   getAuthAccessManagementOptions,
   getAuthInvitationOptions,
   getAuthMembershipOptions,
@@ -70,6 +74,7 @@ import {
   listAgentThreadMessages,
   listAgentThreadRuns,
   listAgentThreads,
+  listAiLimitPolicies,
   listAiModelCalls,
   listAuthAccessTokens,
   listAuthInvitations,
@@ -124,6 +129,7 @@ import {
   startConnectorConnectionRun,
   submitWorkflowIntervention,
   suspendAuthMember,
+  updateAiLimitPolicy,
   updateAuthMemberGroups,
   uploadFileContent,
   uploadFileRaw,
@@ -158,6 +164,9 @@ import type {
   CreateAgentThreadData,
   CreateAgentThreadError,
   CreateAgentThreadResponse,
+  CreateAiLimitPolicyData,
+  CreateAiLimitPolicyError,
+  CreateAiLimitPolicyResponse,
   CreateAuthInvitationData,
   CreateAuthInvitationError,
   CreateAuthInvitationResponse,
@@ -173,6 +182,9 @@ import type {
   CreateFileUploadData,
   CreateFileUploadError,
   CreateFileUploadResponse,
+  DeleteAiLimitPolicyData,
+  DeleteAiLimitPolicyError,
+  DeleteAiLimitPolicyResponse,
   DisableAuthServiceAccountData,
   DisableAuthServiceAccountError,
   DisableAuthServiceAccountResponse,
@@ -209,6 +221,12 @@ import type {
   GetAiAccountingOverviewData,
   GetAiAccountingOverviewError,
   GetAiAccountingOverviewResponse,
+  GetAiLimitStatusData,
+  GetAiLimitStatusError,
+  GetAiLimitStatusResponse,
+  GetAiLimitSubjectOptionsData,
+  GetAiLimitSubjectOptionsError,
+  GetAiLimitSubjectOptionsResponse,
   GetAuthAccessManagementOptionsData,
   GetAuthAccessManagementOptionsError,
   GetAuthAccessManagementOptionsResponse,
@@ -306,6 +324,9 @@ import type {
   ListAgentThreadsData,
   ListAgentThreadsError,
   ListAgentThreadsResponse,
+  ListAiLimitPoliciesData,
+  ListAiLimitPoliciesError,
+  ListAiLimitPoliciesResponse,
   ListAiModelCallsData,
   ListAiModelCallsError,
   ListAiModelCallsResponse,
@@ -457,6 +478,9 @@ import type {
   SuspendAuthMemberData,
   SuspendAuthMemberError,
   SuspendAuthMemberResponse,
+  UpdateAiLimitPolicyData,
+  UpdateAiLimitPolicyError,
+  UpdateAiLimitPolicyResponse,
   UpdateAuthMemberGroupsData,
   UpdateAuthMemberGroupsError,
   UpdateAuthMemberGroupsResponse,
@@ -1349,6 +1373,164 @@ export const listAiModelCallsInfiniteOptions = (options: Options<ListAiModelCall
       queryKey: listAiModelCallsInfiniteQueryKey(options),
     }
   )
+
+export const listAiLimitPoliciesQueryKey = (options?: Options<ListAiLimitPoliciesData>) =>
+  createQueryKey("listAiLimitPolicies", options)
+
+/**
+ * List project AI usage-limit policies
+ */
+export const listAiLimitPoliciesOptions = (options?: Options<ListAiLimitPoliciesData>) =>
+  queryOptions<
+    ListAiLimitPoliciesResponse,
+    ListAiLimitPoliciesError,
+    ListAiLimitPoliciesResponse,
+    ReturnType<typeof listAiLimitPoliciesQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listAiLimitPolicies({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listAiLimitPoliciesQueryKey(options),
+  })
+
+/**
+ * Create an AI usage-limit policy
+ */
+export const createAiLimitPolicyMutation = (
+  options?: Partial<Options<CreateAiLimitPolicyData>>
+): UseMutationOptions<
+  CreateAiLimitPolicyResponse,
+  CreateAiLimitPolicyError,
+  Options<CreateAiLimitPolicyData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    CreateAiLimitPolicyResponse,
+    CreateAiLimitPolicyError,
+    Options<CreateAiLimitPolicyData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await createAiLimitPolicy({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const getAiLimitStatusQueryKey = (options?: Options<GetAiLimitStatusData>) =>
+  createQueryKey("getAiLimitStatus", options)
+
+/**
+ * Get current project AI usage-limit status
+ */
+export const getAiLimitStatusOptions = (options?: Options<GetAiLimitStatusData>) =>
+  queryOptions<
+    GetAiLimitStatusResponse,
+    GetAiLimitStatusError,
+    GetAiLimitStatusResponse,
+    ReturnType<typeof getAiLimitStatusQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getAiLimitStatus({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getAiLimitStatusQueryKey(options),
+  })
+
+export const getAiLimitSubjectOptionsQueryKey = (options?: Options<GetAiLimitSubjectOptionsData>) =>
+  createQueryKey("getAiLimitSubjectOptions", options)
+
+/**
+ * Get selectable AI usage-limit subjects
+ *
+ * Lists registered groups and auth principals available for AI usage-limit policies.
+ */
+export const getAiLimitSubjectOptionsOptions = (options?: Options<GetAiLimitSubjectOptionsData>) =>
+  queryOptions<
+    GetAiLimitSubjectOptionsResponse,
+    GetAiLimitSubjectOptionsError,
+    GetAiLimitSubjectOptionsResponse,
+    ReturnType<typeof getAiLimitSubjectOptionsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getAiLimitSubjectOptions({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getAiLimitSubjectOptionsQueryKey(options),
+  })
+
+/**
+ * Delete an AI usage-limit policy
+ */
+export const deleteAiLimitPolicyMutation = (
+  options?: Partial<Options<DeleteAiLimitPolicyData>>
+): UseMutationOptions<
+  DeleteAiLimitPolicyResponse,
+  DeleteAiLimitPolicyError,
+  Options<DeleteAiLimitPolicyData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    DeleteAiLimitPolicyResponse,
+    DeleteAiLimitPolicyError,
+    Options<DeleteAiLimitPolicyData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await deleteAiLimitPolicy({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Update an AI usage-limit policy
+ */
+export const updateAiLimitPolicyMutation = (
+  options?: Partial<Options<UpdateAiLimitPolicyData>>
+): UseMutationOptions<
+  UpdateAiLimitPolicyResponse,
+  UpdateAiLimitPolicyError,
+  Options<UpdateAiLimitPolicyData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    UpdateAiLimitPolicyResponse,
+    UpdateAiLimitPolicyError,
+    Options<UpdateAiLimitPolicyData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await updateAiLimitPolicy({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
 
 export const getProjectInfoQueryKey = (options?: Options<GetProjectInfoData>) =>
   createQueryKey("getProjectInfo", options)

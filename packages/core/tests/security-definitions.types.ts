@@ -9,8 +9,12 @@ const securityAdmins = defineGroup("security-admins")
 const commercial = defineGroup("commercial")
 
 can.observe("logs")
+can.observe("aiUsage")
+can.manage("aiUsage")
 // @ts-expect-error observe only accepts registered observability surfaces.
 can.observe("events")
+// @ts-expect-error manage only accepts connectors or the AI usage management surface.
+can.manage("logs")
 
 type _groupId = Expect<Equal<typeof commercial.id, "commercial">>
 
