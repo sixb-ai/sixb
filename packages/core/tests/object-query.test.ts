@@ -37,6 +37,7 @@ import type {
   QueryObjectsInput,
   QueryObjectsResult,
 } from "../src/storage"
+import { MAX_OBJECT_READ_FACETS } from "../src/storage"
 import { createMaterializerTestFixture, type MaterializerTestFixture } from "../src/testing"
 
 const Order = defineObjectType({
@@ -1121,6 +1122,33 @@ describe("object query planner and executor", () => {
     })
   })
 
+  test("validates physical-link terminal scalars before storage", async () => {
+    const { objects: storage } = createTestStorage()
+    const query = { kind: "start" as const, objectTypeId: "Customer" }
+
+    await expect(
+      executeObjectQueryLinks(
+        { projectId: "p1", query, linkId: 42 as unknown as string },
+        { ontology, storage }
+      )
+    ).rejects.toMatchObject({ code: "invalid_link_id", path: "$.linkId" })
+    await expect(
+      executeObjectQueryLinks(
+        { projectId: "p1", query, includeObjects: "yes" as unknown as boolean },
+        { ontology, storage }
+      )
+    ).rejects.toMatchObject({
+      code: "invalid_link_include_objects",
+      path: "$.includeObjects",
+    })
+    await expect(
+      executeObjectQueryLinks(
+        { projectId: "p1", query, pageToken: 42 as unknown as string },
+        { ontology, storage }
+      )
+    ).rejects.toMatchObject({ code: "invalid_link_page_token", path: "$.pageToken" })
+  })
+
   test("hydrates delimiter-bearing endpoint identities without collisions", async () => {
     const { objects: storage, fixture } = createTestStorage()
     await fixture.seed({
@@ -1520,6 +1548,31 @@ describe("object query planner and executor", () => {
         expect(error.issues.map((issue) => issue.code)).toContain("property_not_facetable")
       }
     }
+  })
+
+  test("bounds facet fan-out before consulting storage", async () => {
+    const testStorage = createTestStorage()
+    const { storage, calls } = countQueryCalls(testStorage.objects)
+
+    await expect(
+      facetObjects(
+        {
+          projectId: "p1",
+          query: { kind: "start", objectTypeId: "Customer" },
+          facets: Array.from({ length: MAX_OBJECT_READ_FACETS + 1 }, () => ({
+            propertyId: "status",
+            limit: 1,
+          })),
+        },
+        { ontology, storage }
+      )
+    ).rejects.toMatchObject({
+      issues: [expect.objectContaining({ code: "too_many_facets", path: "$.facets" })],
+    })
+    expect(calls.facetObjects).toBe(0)
+    expect(calls.queryObjects).toBe(0)
+    expect(calls.countObjects).toBe(0)
+    expect(calls.existsObjects).toBe(0)
   })
 
   test("falls back when provider capabilities are incomplete but fallback is safe", () => {

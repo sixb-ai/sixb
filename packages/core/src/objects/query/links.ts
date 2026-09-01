@@ -15,7 +15,7 @@ import { ObjectQueryExecutionError } from "./errors"
 import { executeObjectQuery, type QueryExecutorOptions } from "./executor"
 import type { ObjectQuery } from "./ir"
 import { normalizeObjectQuery } from "./normalize"
-import { validateObjectQuery } from "./validate"
+import { type ValidatedObjectQuery, validateObjectQuery } from "./validate"
 
 export interface ExecuteObjectQueryLinksInput {
   projectId: string
@@ -34,10 +34,98 @@ export interface ExecuteObjectQueryLinksResult {
   nextPageToken?: string
 }
 
+export interface PreflightObjectQueryLinksResult {
+  projectId: string
+  validated: ValidatedObjectQuery
+  direction: LinkDirection
+  linkId?: string
+  includeObjects: boolean
+  pageSize: number
+  cursor?: ObjectLinkCursor
+  pageScope: string
+}
+
 const MAX_LINK_QUERY_OBJECTS = 1_000
 const MAX_LINK_PAGE_SIZE = 1_000
 const DEFAULT_LINK_PAGE_SIZE = 100
 const LINK_PAGE_TOKEN_PREFIX = "link:v1:"
+
+/**
+ * Canonicalize and validate a physical-link query without reading storage.
+ *
+ * This direct-file-only boundary lets higher-level readers complete ordinary request validation
+ * before applying terminal-specific authorization, while the executor consumes the exact same
+ * preflight contract.
+ *
+ * @internal Intentionally absent from query barrels.
+ */
+export function preflightObjectQueryLinks(
+  input: ExecuteObjectQueryLinksInput,
+  options: Pick<QueryExecutorOptions, "ontology" | "maxLimit" | "maxPageSize" | "maxRefs">
+): PreflightObjectQueryLinksResult {
+  // Capture caller-owned scalar fields once so validation, token scoping, and execution agree on
+  // one request even when this internal API is reached without an AuthorizedObjectReader snapshot.
+  const projectId = input.projectId
+  const query = input.query
+  const requestedDirection = input.direction
+  const linkId = input.linkId
+  const requestedIncludeObjects = input.includeObjects
+  const requestedPageSize = input.pageSize
+  const pageToken = input.pageToken
+
+  const direction = requestedDirection ?? "both"
+  if (direction !== "outgoing" && direction !== "incoming" && direction !== "both") {
+    throw new ObjectQueryExecutionError(
+      "invalid_link_direction",
+      "direction must be 'outgoing', 'incoming', or 'both'",
+      "$.direction"
+    )
+  }
+  if (linkId !== undefined && typeof linkId !== "string") {
+    throw new ObjectQueryExecutionError("invalid_link_id", "linkId must be a string", "$.linkId")
+  }
+  if (linkId !== undefined && linkId.length === 0) {
+    throw new ObjectQueryExecutionError("invalid_link_id", "linkId must not be empty", "$.linkId")
+  }
+  if (requestedIncludeObjects !== undefined && typeof requestedIncludeObjects !== "boolean") {
+    throw new ObjectQueryExecutionError(
+      "invalid_link_include_objects",
+      "includeObjects must be a boolean",
+      "$.includeObjects"
+    )
+  }
+
+  const pageSize = requestedPageSize ?? DEFAULT_LINK_PAGE_SIZE
+  if (!Number.isInteger(pageSize) || pageSize <= 0 || pageSize > MAX_LINK_PAGE_SIZE) {
+    throw new ObjectQueryExecutionError(
+      "invalid_link_page_size",
+      `pageSize must be an integer between 1 and ${MAX_LINK_PAGE_SIZE}`,
+      "$.pageSize"
+    )
+  }
+
+  const validated = validateObjectQuery(normalizeObjectQuery(query), {
+    ontology: options.ontology,
+    maxLimit: options.maxLimit,
+    maxPageSize: options.maxPageSize,
+    maxRefs: options.maxRefs,
+    normalize: false,
+  })
+  assertLinkSelectorShape(validated.query)
+  const pageScope = linkPageScope(projectId, validated.query, direction, linkId)
+  const cursor = decodeLinkPageToken(pageToken, pageScope)
+
+  return {
+    projectId,
+    validated,
+    direction,
+    ...(linkId === undefined ? {} : { linkId }),
+    includeObjects: requestedIncludeObjects ?? false,
+    pageSize,
+    ...(cursor === undefined ? {} : { cursor }),
+    pageScope,
+  }
+}
 
 /**
  * Select a bounded object set with the query IR, then return physical links
@@ -48,37 +136,8 @@ export async function executeObjectQueryLinks(
   input: ExecuteObjectQueryLinksInput,
   options: QueryExecutorOptions
 ): Promise<ExecuteObjectQueryLinksResult> {
-  const direction = input.direction ?? "both"
-  if (direction !== "outgoing" && direction !== "incoming" && direction !== "both") {
-    throw new ObjectQueryExecutionError(
-      "invalid_link_direction",
-      "direction must be 'outgoing', 'incoming', or 'both'",
-      "$.direction"
-    )
-  }
-  if (input.linkId !== undefined && input.linkId.length === 0) {
-    throw new ObjectQueryExecutionError("invalid_link_id", "linkId must not be empty", "$.linkId")
-  }
-
-  const pageSize = input.pageSize ?? DEFAULT_LINK_PAGE_SIZE
-  if (!Number.isInteger(pageSize) || pageSize <= 0 || pageSize > MAX_LINK_PAGE_SIZE) {
-    throw new ObjectQueryExecutionError(
-      "invalid_link_page_size",
-      `pageSize must be an integer between 1 and ${MAX_LINK_PAGE_SIZE}`,
-      "$.pageSize"
-    )
-  }
-  const validated = validateObjectQuery(normalizeObjectQuery(input.query), {
-    ontology: options.ontology,
-    maxLimit: options.maxLimit,
-    maxPageSize: options.maxPageSize,
-    maxRefs: options.maxRefs,
-    normalize: false,
-  })
-  assertLinkSelectorShape(validated.query)
-  const selectorQuery = validated.query
-  const pageScope = linkPageScope(input.projectId, selectorQuery, direction, input.linkId)
-  const cursor = decodeLinkPageToken(input.pageToken, pageScope)
+  const preflight = preflightObjectQueryLinks(input, options)
+  const selectorQuery = preflight.validated.query
 
   // A root page already has an explicit result bound and must execute directly: nesting it under a
   // probe limit would expose the provider's internal pageSize+1 row. All other selector shapes are
@@ -89,7 +148,7 @@ export async function executeObjectQueryLinks(
       : { kind: "limit" as const, limit: MAX_LINK_QUERY_OBJECTS + 1, input: selectorQuery }
   const selection = await executeObjectQuery(
     {
-      projectId: input.projectId,
+      projectId: preflight.projectId,
       query: boundedSelector,
       includeTotal: false,
     },
@@ -113,16 +172,16 @@ export async function executeObjectQueryLinks(
 
   const endpointObjectTypeIds = visibleEndpointTypeIds(options)
   const page = await options.storage.queryLinks({
-    projectId: input.projectId,
+    projectId: preflight.projectId,
     objectRefs: selected.map((row) => ({
       objectTypeId: row.objectTypeId,
       primaryId: row.primaryId,
     })),
-    direction,
-    ...(input.linkId === undefined ? {} : { linkId: input.linkId }),
+    direction: preflight.direction,
+    ...(preflight.linkId === undefined ? {} : { linkId: preflight.linkId }),
     ...(endpointObjectTypeIds === undefined ? {} : { endpointObjectTypeIds }),
-    ...(cursor === undefined ? {} : { after: cursor }),
-    limit: pageSize,
+    ...(preflight.cursor === undefined ? {} : { after: preflight.cursor }),
+    limit: preflight.pageSize,
   })
   const lastLink = page.links.at(-1)
   let nextPageToken: string | undefined
@@ -130,10 +189,10 @@ export async function executeObjectQueryLinks(
     if (!lastLink) {
       throw new Error("[Sixb] Object storage returned hasMore for an empty link page.")
     }
-    nextPageToken = encodeLinkPageToken(objectLinkCursor(lastLink), pageScope)
+    nextPageToken = encodeLinkPageToken(objectLinkCursor(lastLink), preflight.pageScope)
   }
-  const objects = input.includeObjects
-    ? await hydrateLinkQueryObjects(input.projectId, selected, page.links, options.storage)
+  const objects = preflight.includeObjects
+    ? await hydrateLinkQueryObjects(preflight.projectId, selected, page.links, options.storage)
     : []
 
   return {
