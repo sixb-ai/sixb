@@ -23,7 +23,7 @@ export class TiktokApiError extends Error {
 
   constructor(
     readonly status: number,
-    readonly code: number | undefined,
+    readonly code: number | string | undefined,
     readonly providerMessage: string | undefined,
     readonly requestId: string | undefined,
     readonly rawBody: string,
@@ -129,7 +129,10 @@ export function withTiktokQuery(path: string, query: TiktokQuery): string {
   return search ? `${path}?${search}` : path
 }
 
-export function assertNonEmpty(value: string, field: string): void {
+export function assertNonEmpty(
+  value: string | null | undefined,
+  field: string
+): asserts value is string {
   if (!value?.trim()) {
     throw new Error(`[SixbTikTok] ${field} must not be empty.`)
   }
@@ -246,7 +249,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function formatApiError(
   status: number,
-  code: number | undefined,
+  code: number | string | undefined,
   providerMessage: string | undefined,
   requestId: string | undefined
 ): string {

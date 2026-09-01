@@ -1,4 +1,4 @@
-export type TiktokApi = "organic" | "marketing"
+export type TiktokApi = "display" | "organic" | "marketing"
 
 export type TiktokAccountType = "tiktok-account" | "ad-account"
 

@@ -1,7 +1,7 @@
 {
   "name": "@sixb/connector-tiktok",
   "version": "0.1.0",
-  "description": "TikTok organic account and Ads reporting connector for Sixb",
+  "description": "TikTok Display, business organic, and Ads reporting connector for Sixb",
   "keywords": [
     "sixb",
     "bun",

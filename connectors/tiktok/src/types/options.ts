@@ -1,11 +1,23 @@
 import type { TiktokResponseMetadata, TiktokRetryOptions } from "./common"
+import type { TiktokDisplayScope } from "./display"
 
 interface TiktokConnectorOptionsBase {
-  /** TikTok Business API base URL. Override only for compatible proxies and tests. */
+  /** API base URL for the selected TikTok API. Override only for compatible proxies and tests. */
   readonly baseUrl?: string
   readonly timeoutMs?: number
   readonly retry?: TiktokRetryOptions
   readonly onResponse?: (metadata: TiktokResponseMetadata) => Promise<void> | void
+}
+
+export interface TiktokDisplayConnectorOptions extends TiktokConnectorOptionsBase {
+  readonly api: "display"
+  /** Client key from the TikTok for Developers app. */
+  readonly clientKey: string
+  readonly clientSecret: string
+  /** Defaults to `user.info.basic` and `video.list`. */
+  readonly scopes?: readonly TiktokDisplayScope[]
+  /** Add `disable_auto_auth=1` to always show the Login Kit authorization page. */
+  readonly disableAutoAuth?: boolean
 }
 
 export interface TiktokOrganicConnectorOptions extends TiktokConnectorOptionsBase {
@@ -27,4 +39,7 @@ export interface TiktokAdsConnectorOptions extends TiktokConnectorOptionsBase {
   readonly scope?: string
 }
 
-export type TiktokConnectorOptions = TiktokOrganicConnectorOptions | TiktokAdsConnectorOptions
+export type TiktokConnectorOptions =
+  | TiktokDisplayConnectorOptions
+  | TiktokOrganicConnectorOptions
+  | TiktokAdsConnectorOptions

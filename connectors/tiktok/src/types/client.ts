@@ -6,6 +6,7 @@ import type {
   TiktokReportsApi,
 } from "./ads"
 import type { TiktokConnectedAccount } from "./common"
+import type { TiktokDisplayProfileApi, TiktokDisplayVideosApi } from "./display"
 import type {
   TiktokOrganicCommentsApi,
   TiktokOrganicPostsApi,
@@ -19,6 +20,12 @@ export interface TiktokOrganicClient {
   readonly comments: TiktokOrganicCommentsApi
 }
 
+export interface TiktokDisplayClient {
+  readonly account: TiktokConnectedAccount<"tiktok-account">
+  readonly profile: TiktokDisplayProfileApi
+  readonly videos: TiktokDisplayVideosApi
+}
+
 export interface TiktokAdsClient {
   readonly account: TiktokConnectedAccount<"ad-account">
   readonly adAccount: TiktokAdAccountApi
@@ -28,4 +35,4 @@ export interface TiktokAdsClient {
   readonly reports: TiktokReportsApi
 }
 
-export type TiktokClient = TiktokOrganicClient | TiktokAdsClient
+export type TiktokClient = TiktokDisplayClient | TiktokOrganicClient | TiktokAdsClient

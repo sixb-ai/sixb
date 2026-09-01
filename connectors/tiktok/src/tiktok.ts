@@ -5,20 +5,26 @@ import type {
   OAuthConnectorAdapter,
 } from "@sixb/core"
 import { createAdsClient } from "./ads/client"
+import { createDisplayClient } from "./display/client"
+import { createTiktokDisplayHttp } from "./display/http"
+import { getDisplayProfile } from "./display/resources"
 import { assertNonEmpty, createTiktokHttp, fixedTokenSource } from "./http"
 import { createTiktokAuthentication } from "./oauth"
 import { createOrganicClient } from "./organic/client"
-import type { TiktokAdsClient, TiktokOrganicClient } from "./types/client"
+import type { TiktokAdsClient, TiktokDisplayClient, TiktokOrganicClient } from "./types/client"
+import type { TiktokDisplayUser } from "./types/display"
 import type {
   TiktokAdsConnectorOptions,
   TiktokConnectorOptions,
+  TiktokDisplayConnectorOptions,
   TiktokOrganicConnectorOptions,
 } from "./types/options"
 import type { TiktokOrganicProfile } from "./types/organic"
 
 export type TiktokOrganicConnector = OAuthConnectorAdapter<"tiktok", TiktokOrganicClient>
+export type TiktokDisplayConnector = OAuthConnectorAdapter<"tiktok", TiktokDisplayClient>
 export type TiktokAdsConnector = OAuthConnectorAdapter<"tiktok", TiktokAdsClient>
-export type TiktokConnector = TiktokOrganicConnector | TiktokAdsConnector
+export type TiktokConnector = TiktokDisplayConnector | TiktokOrganicConnector | TiktokAdsConnector
 
 interface OrganicTokenInfo {
   readonly app_id?: string
@@ -33,12 +39,29 @@ interface AdvertiserListData {
   }[]
 }
 
-/** Create a managed TikTok connector for one of TikTok's two distinct OAuth grants. */
+/** Create a managed TikTok connector for one of TikTok's three distinct OAuth grants. */
+export function tiktok(options: TiktokDisplayConnectorOptions): TiktokDisplayConnector
 export function tiktok(options: TiktokOrganicConnectorOptions): TiktokOrganicConnector
 export function tiktok(options: TiktokAdsConnectorOptions): TiktokAdsConnector
 export function tiktok(options: TiktokConnectorOptions): TiktokConnector {
   validateOptions(options)
   const authentication = createTiktokAuthentication(options)
+
+  if (options.api === "display") {
+    return {
+      type: "tiktok",
+      authentication,
+      discoverAccounts: (context, credentials) =>
+        discoverDisplayAccount(context, options, credentials),
+      async connect(context) {
+        const http = await createTiktokDisplayHttp(context, options, context.tokenSource)
+        return createDisplayClient(http, {
+          type: "tiktok-account",
+          ...context.account,
+        })
+      },
+    }
+  }
 
   if (options.api === "organic") {
     return {
@@ -68,6 +91,29 @@ export function tiktok(options: TiktokConnectorOptions): TiktokConnector {
       })
     },
   }
+}
+
+async function discoverDisplayAccount(
+  context: ConnectorContext,
+  options: TiktokDisplayConnectorOptions,
+  credentials: ConnectorOAuthCredentials
+): Promise<readonly ConnectorAccountCandidate[]> {
+  const http = await createTiktokDisplayHttp(
+    context,
+    options,
+    fixedTokenSource(credentials.accessToken)
+  )
+  const profile: TiktokDisplayUser = await getDisplayProfile(http)
+  const id = profile.open_id
+  assertNonEmpty(id, "open_id")
+  return [
+    {
+      id,
+      label: profile.display_name || profile.username || id,
+      description: profile.username ? `@${profile.username}` : profile.bio_description,
+      avatarUrl: profile.avatar_url,
+    },
+  ]
 }
 
 async function discoverOrganicAccount(
@@ -128,6 +174,17 @@ function validateOptions(options: TiktokConnectorOptions): void {
     assertNonEmpty(options.clientId, "clientId")
     assertNonEmpty(options.clientSecret, "clientSecret")
     assertNonEmpty(options.authorizationUrl, "authorizationUrl")
+    return
+  }
+
+  if (options.api === "display") {
+    assertNonEmpty(options.clientKey, "clientKey")
+    assertNonEmpty(options.clientSecret, "clientSecret")
+    const scopes = options.scopes
+    if (scopes?.length === 0) {
+      throw new Error("[SixbTikTok] scopes must contain at least one scope.")
+    }
+    for (const scope of scopes ?? []) assertNonEmpty(scope, "scopes")
     return
   }
 
