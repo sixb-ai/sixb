@@ -51,23 +51,27 @@ export function createTelemetryChannel<
 
       history: async (input: TelemetryHistoryInput = {}) => {
         const timeseries = ctx.storage.timeseries
+        const objectReader = ctx.objectReader
         if (!timeseries) {
           throw new RuntimeError("[Sixb] Reading telemetry requires storage.timeseries support.")
         }
 
+        const from = input.from
+        const to = input.to
+        const limit = input.limit
+        const order = input.order
+
         const [result] = await getTelemetryHistoryBatch(
           {
-            projectId: ctx.projectId,
             series: [series],
-            ...(input.from !== undefined ? { from: input.from } : {}),
-            ...(input.to !== undefined ? { to: input.to } : {}),
-            ...(input.limit !== undefined ? { limitPerSeries: input.limit } : {}),
-            ...(input.order !== undefined ? { order: input.order } : {}),
+            ...(from !== undefined ? { from } : {}),
+            ...(to !== undefined ? { to } : {}),
+            ...(limit !== undefined ? { limitPerSeries: limit } : {}),
+            ...(order !== undefined ? { order } : {}),
           },
           {
             storage: timeseries,
-            runtimeAuthorization: ctx.runtimeAuthorization,
-            authorization: ctx.authorization,
+            objectReader,
           }
         )
 
