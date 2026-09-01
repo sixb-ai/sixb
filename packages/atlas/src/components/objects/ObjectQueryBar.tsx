@@ -1,11 +1,9 @@
 import type { ObjectQueryFacetResult } from "@sixb/client"
-import { Alert, AlertDescription, Badge, Button, Input } from "@sixb/ui/components"
+import { Alert, AlertDescription, Badge, Button } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { AlertCircle, Search, X } from "lucide-react"
+import { AlertCircle, X } from "lucide-react"
 import { formatCount, formatValue } from "../../lib/formatValue"
-import { humanizeIdentifier } from "../../lib/labels"
 import {
-  type AtlasObjectType,
   createFilterId,
   describeFilter,
   filterHasValue,
@@ -15,90 +13,30 @@ import {
   type QueryMatchMode,
   type QueryProperty,
 } from "../../lib/objects/objectQuery"
-import { ObjectFilterPopover } from "./ObjectFilterPopover"
 
 export function ObjectQueryBar({
-  objectType,
-  searchQuery,
-  textSearchEnabled,
   filters,
   matchMode,
-  filterableProperties,
   propertiesById,
   facetResults,
   facetsLoading,
   queryError,
-  onSearchQueryChange,
   onAddFilter,
   onRemoveFilter,
-  onClear,
   onMatchModeChange,
 }: {
-  objectType: AtlasObjectType
-  searchQuery: string
-  textSearchEnabled: boolean
   filters: QueryFilter[]
   matchMode: QueryMatchMode
-  filterableProperties: QueryProperty[]
   propertiesById: ReadonlyMap<string, QueryProperty>
   facetResults: ObjectQueryFacetResult[]
   facetsLoading: boolean
   queryError: unknown
-  onSearchQueryChange: (value: string) => void
   onAddFilter: (filter: QueryFilter) => void
   onRemoveFilter: (filterId: string) => void
-  onClear: () => void
   onMatchModeChange: (mode: QueryMatchMode) => void
 }) {
-  const active = searchQuery.trim().length > 0 || filters.length > 0
-  const objectTypeLabel = humanizeIdentifier(objectType.name || objectType.id)
-  const addFilterLabel = textSearchEnabled || active ? "Filter" : `Filter ${objectTypeLabel}`
-
   return (
     <div className="mt-3 space-y-3">
-      {textSearchEnabled ? (
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <div className="relative min-w-0 flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              type="text"
-              value={searchQuery}
-              onChange={(event) => onSearchQueryChange(event.target.value)}
-              placeholder={`Search ${objectTypeLabel}...`}
-              className="h-10 rounded-xl bg-card pl-9 shadow-none"
-            />
-          </div>
-          <QueryToolbarActions
-            active={active}
-            filters={filters}
-            facetResults={facetResults}
-            filterLabel={addFilterLabel}
-            filterableProperties={filterableProperties}
-            onAddFilter={onAddFilter}
-            onClear={onClear}
-          />
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2 rounded-xl bg-muted/35 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0 space-y-0.5">
-            <p className="text-sm font-medium text-foreground">Filter {objectTypeLabel}</p>
-            <p className="text-xs text-muted-foreground">
-              Text search is not configured for this type. Use fields to narrow the set.
-            </p>
-          </div>
-          <QueryToolbarActions
-            active={active}
-            filters={filters}
-            facetResults={facetResults}
-            filterLabel={addFilterLabel}
-            filterableProperties={filterableProperties}
-            prominent={!active}
-            onAddFilter={onAddFilter}
-            onClear={onClear}
-          />
-        </div>
-      )}
-
       {filters.length > 0 ? (
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="mr-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
@@ -158,45 +96,6 @@ export function ObjectQueryBar({
       />
 
       <ObjectQueryErrorAlert error={queryError} />
-    </div>
-  )
-}
-
-function QueryToolbarActions({
-  active,
-  filters,
-  facetResults,
-  filterLabel,
-  filterableProperties,
-  prominent = false,
-  onAddFilter,
-  onClear,
-}: {
-  active: boolean
-  filters: QueryFilter[]
-  facetResults: ObjectQueryFacetResult[]
-  filterLabel: string
-  filterableProperties: QueryProperty[]
-  prominent?: boolean
-  onAddFilter: (filter: QueryFilter) => void
-  onClear: () => void
-}) {
-  return (
-    <div className="flex shrink-0 items-center gap-2">
-      <ObjectFilterPopover
-        properties={filterableProperties}
-        filters={filters}
-        facetResults={facetResults}
-        label={filterLabel}
-        prominent={prominent}
-        onAddFilter={onAddFilter}
-      />
-      {active ? (
-        <Button type="button" variant="ghost" size="sm" className="h-10 px-2.5" onClick={onClear}>
-          <X />
-          Clear
-        </Button>
-      ) : null}
     </div>
   )
 }

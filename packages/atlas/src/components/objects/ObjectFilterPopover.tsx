@@ -39,15 +39,11 @@ export function ObjectFilterPopover({
   properties,
   filters,
   facetResults,
-  label = "Filter",
-  prominent = false,
   onAddFilter,
 }: {
   properties: QueryProperty[]
   filters: QueryFilter[]
   facetResults: ObjectQueryFacetResult[]
-  label?: string
-  prominent?: boolean
   onAddFilter: (filter: QueryFilter) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -120,13 +116,13 @@ export function ObjectFilterPopover({
       <PopoverTrigger asChild>
         <Button
           type="button"
-          variant={prominent ? "default" : "outline"}
+          variant="outline"
           size="sm"
-          className="h-10 rounded-xl"
+          className="h-9 rounded-md"
           disabled={properties.length === 0}
         >
           <Plus />
-          {label}
+          Filter
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-80 space-y-3">

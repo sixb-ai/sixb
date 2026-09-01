@@ -14,10 +14,8 @@ import {
   Card,
   CollectionCardButton,
   CollectionCardGrid,
-  CollectionHeader,
   CollectionViewToggle,
   EmptyState,
-  Input,
   Table,
   TableBody,
   TableCell,
@@ -43,6 +41,7 @@ import {
 } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import { CollectionPageHeader } from "../components/CollectionPageHeader"
 import { SixbFailureSummary } from "../components/SixbFailureSummary"
 import { humanizeIdentifier } from "../lib/labels"
 import { formatRelativeTime } from "../lib/time"
@@ -316,10 +315,20 @@ export function ProjectionsPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-5xl">
-      <CollectionHeader
+    <div className="mx-auto w-full max-w-6xl">
+      <CollectionPageHeader
         title="Projections"
-        count={filteredProjections.length}
+        count={projections.length}
+        singularLabel="projection"
+        search={
+          projections.length > 0
+            ? {
+                value: searchQuery,
+                placeholder: "Search projections, kinds, or datasets…",
+                onChange: setSearchQuery,
+              }
+            : undefined
+        }
         actions={
           projections.length > 0 ? (
             <CollectionViewToggle
@@ -333,19 +342,6 @@ export function ProjectionsPage() {
           ) : null
         }
       />
-
-      {projections.length > 0 && (
-        <div className="relative mt-2">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            type="text"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Search projections, kinds, or datasets..."
-            className="pl-9"
-          />
-        </div>
-      )}
 
       <div className="mt-4">
         {projections.length === 0 ? (
