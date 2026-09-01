@@ -137,6 +137,12 @@
       "import": "./dist/storage/ai-cost/provider.js",
       "default": "./dist/storage/ai-cost/provider.js"
     },
+    "./internal/ai-limit-storage-provider": {
+      "types": "./dist/storage/ai-limits/provider.d.ts",
+      "bun": "./src/storage/ai-limits/provider.ts",
+      "import": "./dist/storage/ai-limits/provider.js",
+      "default": "./dist/storage/ai-limits/provider.js"
+    },
     "./internal/auth": {
       "types": "./dist/auth/index.d.ts",
       "bun": "./src/auth/index.ts",

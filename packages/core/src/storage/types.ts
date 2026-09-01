@@ -1,6 +1,7 @@
 import type { ActionRunStorage } from "./action-runs"
 import type { AgentStorage } from "./agents"
 import type { AiCostStorage } from "./ai-cost"
+import type { AiLimitStorage } from "./ai-limits"
 import type { AiUsageStorage } from "./ai-usage"
 import type { AuthStorage } from "./auth"
 import type { ConnectorConnectionStorage } from "./connector-connections"
@@ -62,6 +63,34 @@ export type {
   StartAgentRunInput,
 } from "./agents"
 export { AGENT_RUN_FAILURE_CODES, AgentStorageError } from "./agents"
+export type {
+  AiLimitConsumption,
+  AiLimitMeter,
+  AiLimitPeriod,
+  AiLimitPeriodKind,
+  AiLimitPolicy,
+  AiLimitPolicyStatus,
+  AiLimitQuantity,
+  AiLimitReservationBucket,
+  AiLimitStorage,
+  AiLimitStorageErrorCode,
+  AiLimitSubject,
+  AiModelCallReservation,
+  AiModelCallReservationIdentity,
+  AiModelCallReservationState,
+  CreateAiLimitPolicyInput,
+  DeleteAiLimitPolicyInput,
+  GetAiLimitPolicyInput,
+  ListAiLimitPoliciesInput,
+  ListAiLimitPolicyStatusesInput,
+  MarkAiModelCallReservationUnknownInput,
+  ReconcileAiModelCallInput,
+  RecordAiModelCallLimitActualsInput,
+  ReserveAiModelCallInput,
+  ReserveAiModelCallResult,
+  UpdateAiLimitPolicyInput,
+} from "./ai-limits"
+export { AiLimitStorageError, aiLimitCalendarMonth } from "./ai-limits"
 export type {
   AiModelCallUsage,
   AiModelCallUsageInput,
@@ -295,6 +324,7 @@ export interface Storage {
   agents?: AgentStorage
   aiUsage?: AiUsageStorage
   aiCosts?: AiCostStorage
+  aiLimits?: AiLimitStorage
   actionRuns?: ActionRunStorage
   syncRuns?: SyncRunStorage
   pipelineRuns?: PipelineRunStorage

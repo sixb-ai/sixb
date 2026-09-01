@@ -13,6 +13,12 @@ export {
   seedAiCostStorageContractUsage,
 } from "./ai-cost-storage-contract"
 export {
+  type AiLimitStorageContractStorage,
+  type AiLimitStorageContractSuiteOptions,
+  runAiLimitStorageContractSuite,
+  seedAiLimitStorageContractExecution,
+} from "./ai-limit-storage-contract"
+export {
   type AiUsageStorageContractSuiteOptions,
   runAiUsageStorageContractSuite,
   seedAiUsageStorageContractExecutions,
