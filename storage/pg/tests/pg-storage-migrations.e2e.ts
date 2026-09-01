@@ -168,6 +168,7 @@ describe("Postgres storage migrations", () => {
             "027-agent-context-checkpoints",
             "028-object-override-edit-times",
             "029-model-accounting",
+            "030-ai-usage-limits",
           ],
         },
       ])
@@ -374,6 +375,13 @@ describe("Postgres storage migrations", () => {
           id: "029-model-accounting",
           status: "applied",
           version: 29,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "030-ai-usage-limits",
+          status: "applied",
+          version: 30,
         },
       ])
     })
@@ -1860,6 +1868,13 @@ describe("Postgres storage migrations", () => {
           id: "029-model-accounting",
           status: "applied",
           version: 29,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "030-ai-usage-limits",
+          status: "applied",
+          version: 30,
         },
       ])
     } finally {

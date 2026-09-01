@@ -77,6 +77,7 @@ import objectOverrideEditTimesSql from "./migrations/028-object-override-edit-ti
   type: "text",
 }
 import modelAccountingSql from "./migrations/029-model-accounting.sql" with { type: "text" }
+import aiUsageLimitsSql from "./migrations/030-ai-usage-limits.sql" with { type: "text" }
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -161,6 +162,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("027-agent-context-checkpoints", agentContextCheckpointsSql),
     sqliteSql("028-object-override-edit-times", objectOverrideEditTimesSql),
     sqliteSql("029-model-accounting", modelAccountingSql),
+    sqliteSql("030-ai-usage-limits", aiUsageLimitsSql),
   ],
 })
 
