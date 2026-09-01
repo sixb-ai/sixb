@@ -2,6 +2,53 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-09-01 — Framework 0.1.4
+
+This selective release is anchored by `@sixb/core` `0.1.4`.
+
+### Highlights
+
+- Ship a self-documenting `sixb` CLI inside agent sandboxes, standardize the agent runtime profile,
+  and validate each provisioned environment before model-issued commands can execute.
+- Compact long agent conversations before they exceed model context limits, deriving budgets from
+  the pinned Models.dev catalog while preserving the full durable transcript and exposing
+  compaction progress in the agent UI.
+- Add an optional project model catalog, validate agent models against it at startup, and expose the
+  configured catalog through the server and generated client.
+- Add exact-reference object query sources and paginated physical-link queries for object sets,
+  with native SQLite and PostgreSQL execution and generated client support.
+- Add grouped telemetry projections so one dataset row can atomically emit several readings for an
+  object and instant; accept empty sync snapshots and safely handle DuckDB `BIGINT` sums.
+- Add feature-owned nested layouts to custom applications and preserve superclass imports in
+  production bundles.
+- Add TikTok Login Kit Display API support, tighten LinkedIn campaign and creative write contracts,
+  and accept equivalent OAuth authorization-code aliases.
+- Add resumable npm dist-tag promotion tooling for selectively published framework packages.
+
+### Upgrade notes
+
+- This release contains no SQLite or PostgreSQL schema migration.
+- Agent sandboxes are now checked against `sixb-agent-runtime/v1`. Custom images must provide Bash
+  bootstrap support, the documented core file utilities, CA certificates, and either Bun 1.3+ or
+  Node 22+. Rebuild versioned smolvm images and validate custom sandbox providers before deploying
+  the matching agent worker.
+- The project model catalog is optional. When configured, every registered agent model must appear
+  in the catalog or `createSixb()` fails during startup.
+- Deploy `@sixb/core`, its exact worker and storage consumers, and `@sixb/cli` as one coordinated
+  release so packages importing core internals remain on the same version line.
+- This pre-1.0 release has no database downgrade path.
+
+### Package versions
+
+- `0.1.4`: `@sixb/core`, `@sixb/action-worker`, `@sixb/agent-ui`, `@sixb/agent-worker`,
+  `@sixb/app`, `@sixb/atlas`, `@sixb/cli`, `@sixb/client`, `@sixb/orchestrator`, `@sixb/pg`,
+  `@sixb/pipeline-worker`, `@sixb/projection-worker`, `@sixb/rules-worker`, `@sixb/server`,
+  `@sixb/sqlite`, `@sixb/sync-worker`, and `@sixb/workflow-worker`.
+- `0.1.3`: `@sixb/connector-linkedin`, `@sixb/ducklake`,
+  `@sixb/sandboxes-apple-container`, `@sixb/sandboxes-local`, `@sixb/sandboxes-smolvm`, and
+  `@sixb/sandboxes-vercel`.
+- `0.1.1`: `@sixb/connector-tiktok`.
+
 ## 2026-08-30 — Framework 0.1.3
 
 This selective release is anchored by `@sixb/core` `0.1.3`.

@@ -105,14 +105,16 @@ async function verifyPromotions(releases: readonly PlannedPackageRelease[]): Pro
 async function verifyPromotion(release: PlannedPackageRelease): Promise<string | undefined> {
   let actual: string | undefined
 
-  for (let attempt = 0; attempt < 5; attempt++) {
+  // npm can acknowledge a dist-tag write before every public registry edge serves it. Allow up to
+  // roughly 32 seconds of propagation before reporting a promotion that may actually have failed.
+  for (let attempt = 0; attempt < 8; attempt++) {
     const state = await readRegistryState(release.name, registry)
     actual = state.tags[options.targetTag]
     if (actual === release.version) {
       console.log(`  ${options.targetTag} ${packageReleaseId(release)}`)
       return undefined
     }
-    if (attempt < 4) await Bun.sleep(250 * 2 ** attempt)
+    if (attempt < 7) await Bun.sleep(250 * 2 ** attempt)
   }
 
   return `${release.name} expected ${release.version}, found ${actual ?? "no tag"}`
