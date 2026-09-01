@@ -279,6 +279,95 @@ describe("compileSelectedObjectReadScope", () => {
     ).toThrow("maximum of 2048 concrete link steps")
   })
 
+  test("captures a getter-backed object selection once before enforcing its bound", () => {
+    const oversized = Array.from({ length: 4_097 }, () => ({
+      objectTypeId: "Node",
+      propertyIds: [] as string[],
+    }))
+    let reads = 0
+    const node = {
+      get objects() {
+        reads += 1
+        return reads === 1 ? oversized : [{ objectTypeId: "Node", propertyIds: [] }]
+      },
+      links: [],
+    } as ObjectReadNode
+
+    expect(() => compileSelectedObjectReadScope(scope(node))).toThrow(
+      "maximum of 4096 object selections"
+    )
+    expect(reads).toBe(1)
+  })
+
+  test("captures a getter-backed link target exactly once", () => {
+    let reads = 0
+    const rootNode: ObjectReadNode = {
+      objects: [{ objectTypeId: "Node", propertyIds: ["id"] }],
+      links: [
+        {
+          definitions: [definition()],
+          get target() {
+            reads += 1
+            return reads === 1
+              ? leafNode()
+              : {
+                  objects: [{ objectTypeId: "Secret", propertyIds: ["id"] }],
+                  links: [],
+                }
+          },
+        },
+      ],
+    }
+
+    const compiled = compileSelectedObjectReadScope(scope(rootNode))
+
+    expect(reads).toBe(1)
+    expect(compiled.objects.map((selection) => selection.objectTypeId)).toEqual(["Node", "Node"])
+  })
+
+  test("does not invoke caller-controlled array iteration hooks", () => {
+    let calls = 0
+    const roots = [
+      {
+        anchor: { objectTypeId: "Node", primaryId: "root" },
+        node: leafNode(),
+      },
+    ]
+    const rejectIteration = () => {
+      calls += 1
+      throw new Error("hostile iterator invoked")
+    }
+    Object.defineProperty(roots, "entries", { value: rejectIteration })
+    Object.defineProperty(roots, Symbol.iterator, { value: rejectIteration })
+
+    const compiled = compileSelectedObjectReadScope({ kind: "selected", roots })
+
+    expect(compiled.roots).toHaveLength(1)
+    expect(calls).toBe(0)
+  })
+
+  test("detaches a captured field before a later getter can mutate its source", () => {
+    const object = { objectTypeId: "Node", propertyIds: ["id"] }
+    const objects = [object]
+    let linkReads = 0
+    const node = {
+      objects,
+      get links() {
+        linkReads += 1
+        object.objectTypeId = "Secret"
+        object.propertyIds.push("secret")
+        objects.splice(0, objects.length)
+        return []
+      },
+    } as ObjectReadNode
+
+    const compiled = compileSelectedObjectReadScope(scope(node))
+    object.propertyIds.push("later")
+
+    expect(linkReads).toBe(1)
+    expect(compiled.objects).toEqual([{ nodeId: 0, objectTypeId: "Node", propertyIds: ["id"] }])
+  })
+
   test("detaches, deeply freezes, and normalizes the compiled artifact", () => {
     const raw: SelectedObjectReadScope = {
       kind: "selected",
