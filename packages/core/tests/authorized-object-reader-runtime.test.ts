@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createAuthorizedObjectReader } from "../src/execution/authorized-object-reader"
-import { createTestingScope } from "../src/execution/scopes"
+import { createDelegatedRequestScope, createTestingScope } from "../src/execution/scopes"
 import { OntologyRegistry } from "../src/ontology"
 import { SixbHost } from "../src/runtime/host"
 import { createBoundSixb, type SixbDependencies } from "../src/runtime/sixb"
@@ -46,6 +46,23 @@ describe("AuthorizedObjectReader runtime binding", () => {
     expect(host.withScope(accessorScope).execution).toBe(source.execution)
     expect(executionReads).toBe(1)
     expect(authorizationReads).toBe(1)
+  })
+
+  test("SixbHost keeps delegated authority off the domain SDK until every surface is active", () => {
+    const host = new SixbHost({ id: projectId, ontology: [], ...createTestRuntimeDeps() })
+    const scope = createDelegatedRequestScope({
+      projectId,
+      requestId: "delegated-request",
+      correlationId: "delegated-correlation",
+      objectRead: {
+        selection: { kind: "selected", roots: [] },
+        limits: { maxTraversalFacts: 10, maxOutputJsonBytes: 1_024 },
+      },
+    })
+
+    expect(() => host.withScope(scope)).toThrow(
+      "Delegated runtime authorization cannot be bound to the domain SDK"
+    )
   })
 
   test("createBoundSixb rejects a reader from another exact authority", () => {

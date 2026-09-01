@@ -1,4 +1,5 @@
 import { assertAuthorized, isAllowed } from "../authorization"
+import { AuthorizationError } from "../authorization/errors"
 import type { AuthorizationContext } from "../authorization/types"
 import {
   countObjects,
@@ -20,7 +21,13 @@ import {
 import { ObjectQueryValidationError } from "../objects/query/errors"
 import type { ObjectQuery } from "../objects/query/ir"
 import type { OntologyRegistry } from "../ontology"
-import type { LinkBatchKey, ObjectLinkRow, ObjectReadStorage, ObjectStorage } from "../storage"
+import type {
+  CompiledObjectReadStep,
+  LinkBatchKey,
+  ObjectLinkRow,
+  ObjectReadStorage,
+  ObjectStorage,
+} from "../storage"
 import { captureExecutionScope, resolveExecutionScopeAuthorization } from "./authorization"
 import type { ExecutionScope, RuntimeAuthorization } from "./types"
 
@@ -55,6 +62,8 @@ class AuthorizedObjectReaderImpl {
   readonly #runtime: RuntimeReadAuthorization
   readonly #ontology: OntologyRegistry
   readonly #storage: ObjectReadStorage
+  readonly #delegatedObjectTypeIds?: ReadonlySet<string>
+  readonly #delegatedLinkDefinitions?: ReadonlySet<string>
 
   constructor(
     key: typeof readerConstructionKey,
@@ -73,6 +82,14 @@ class AuthorizedObjectReaderImpl {
     this.#authority = input.authority
     this.#ontology = input.ontology
     this.#storage = input.storage
+    this.#delegatedObjectTypeIds =
+      input.authority.type === "delegated"
+        ? new Set(input.authority.objectRead.scope.objects.map((object) => object.objectTypeId))
+        : undefined
+    this.#delegatedLinkDefinitions =
+      input.authority.type === "delegated"
+        ? new Set(input.authority.objectRead.scope.steps.map(delegatedLinkDefinitionKey))
+        : undefined
     this.#runtime = Object.freeze({
       projectId: input.scope.execution.projectId,
       runtimeAuthorization: input.scope.authorization,
@@ -244,6 +261,7 @@ class AuthorizedObjectReaderImpl {
   async executeQuery(
     input: Omit<ExecuteObjectQueryInput, "projectId">
   ): Promise<ExecuteObjectQueryResult> {
+    this.#assertDelegatedQueriesAdmitted()
     const query = snapshotAuthoredQuery(input.query)
     const includeTotal = snapshotReadValue(input.includeTotal)
     return detachReadResult(
@@ -261,6 +279,7 @@ class AuthorizedObjectReaderImpl {
   async queryLinks(
     input: Omit<ExecuteObjectQueryLinksInput, "projectId">
   ): Promise<ExecuteObjectQueryLinksResult> {
+    this.#assertDelegatedQueriesAdmitted()
     const query = snapshotAuthoredQuery(input.query)
     const request = snapshotReadValue({
       direction: input.direction,
@@ -291,6 +310,7 @@ class AuthorizedObjectReaderImpl {
   async count(
     input: Omit<ExecuteObjectCountInput, "projectId">
   ): Promise<ExecuteObjectCountResult> {
+    this.#assertDelegatedQueriesAdmitted()
     const query = snapshotAuthoredQuery(input.query)
     return detachReadResult(
       await countObjects(
@@ -303,6 +323,7 @@ class AuthorizedObjectReaderImpl {
   async exists(
     input: Omit<ExecuteObjectExistsInput, "projectId">
   ): Promise<ExecuteObjectExistsResult> {
+    this.#assertDelegatedQueriesAdmitted()
     const query = snapshotAuthoredQuery(input.query)
     return detachReadResult(
       await existsObjects(
@@ -315,6 +336,7 @@ class AuthorizedObjectReaderImpl {
   async facet(
     input: Omit<ExecuteObjectFacetsInput, "projectId">
   ): Promise<ExecuteObjectFacetsResult> {
+    this.#assertDelegatedQueriesAdmitted()
     const query = snapshotAuthoredQuery(input.query)
     const facets = snapshotReadValue(
       input.facets.map((facet) => ({ propertyId: facet.propertyId, limit: facet.limit }))
@@ -339,6 +361,17 @@ class AuthorizedObjectReaderImpl {
   }
 
   #assertObjectTypesViewable(objectTypeIds: readonly string[]): void {
+    if (this.#authority.type === "delegated") {
+      for (const objectTypeId of new Set(objectTypeIds)) {
+        if (this.#delegatedObjectTypeIds?.has(objectTypeId)) continue
+        throw new AuthorizationError(
+          `delegated:object.view:${objectTypeId}`,
+          `[Sixb] Delegated authorization does not select object type '${objectTypeId}'.`
+        )
+      }
+      return
+    }
+
     for (const objectTypeId of new Set(objectTypeIds)) {
       assertAuthorized(this.#runtime, { kind: "object.view", objectTypeId })
     }
@@ -364,12 +397,30 @@ class AuthorizedObjectReaderImpl {
   }
 
   #isObjectTypeViewable(objectTypeId: string): boolean {
+    if (this.#authority.type === "delegated") {
+      return this.#delegatedObjectTypeIds?.has(objectTypeId) ?? false
+    }
     return isAllowed(this.#runtime.authorization, { kind: "object.view", objectTypeId })
   }
 
+  #assertDelegatedQueriesAdmitted(): void {
+    if (this.#authority.type !== "delegated") return
+    throw new AuthorizationError(
+      "delegated:object.query",
+      "[Sixb] Object Query terminals require explicit selected-path admission under delegated authorization."
+    )
+  }
+
   #isLinkViewable(link: ObjectLinkRow): boolean {
+    if (
+      !this.#isObjectTypeViewable(link.sourceTypeId) ||
+      !this.#isObjectTypeViewable(link.targetTypeId)
+    ) {
+      return false
+    }
     return (
-      this.#isObjectTypeViewable(link.sourceTypeId) && this.#isObjectTypeViewable(link.targetTypeId)
+      this.#delegatedLinkDefinitions?.has(delegatedLinkDefinitionKey(link)) ??
+      this.#authority.type !== "delegated"
     )
   }
 }
@@ -415,6 +466,12 @@ function objectStorageForAuthority(
     case "principal":
     case "unrestricted":
       return objectStorage
+    case "delegated":
+      return objectStorage.createSelectedReadScope({
+        projectId: authority.projectId,
+        scope: authority.objectRead.scope,
+        limits: authority.objectRead.limits,
+      })
   }
   return assertNever(authority)
 }
@@ -423,6 +480,16 @@ function assertNever(value: never): never {
   throw new Error(
     `[Sixb] Unsupported object reader authority '${String((value as { type?: unknown }).type)}'.`
   )
+}
+
+function delegatedLinkDefinitionKey(
+  input:
+    | Pick<CompiledObjectReadStep, "sourceObjectTypeId" | "linkId" | "targetObjectTypeId">
+    | Pick<ObjectLinkRow, "sourceTypeId" | "linkId" | "targetTypeId">
+): string {
+  return "sourceObjectTypeId" in input
+    ? JSON.stringify([input.sourceObjectTypeId, input.linkId, input.targetObjectTypeId])
+    : JSON.stringify([input.sourceTypeId, input.linkId, input.targetTypeId])
 }
 
 /**
