@@ -40,7 +40,7 @@ import type {
   ObjectReadStorage,
   ObjectStorage,
 } from "../storage"
-import { MAX_OBJECT_READ_FACETS } from "../storage"
+import { assertObjectReadOutputWithinLimit, MAX_OBJECT_READ_FACETS } from "../storage"
 import { captureExecutionScope, resolveExecutionScopeAuthorization } from "./authorization"
 import type { ExecutionScope, RuntimeAuthorization } from "./types"
 
@@ -169,6 +169,7 @@ class AuthorizedObjectReaderImpl {
       propertyId: input.propertyId,
     })
     this.#assertObjectTypesViewable([request.objectTypeId])
+    if (this.#authority.type !== "delegated") return true
     const [readable] = await this.#storage.selectsObjectProperties({
       projectId: this.#runtime.projectId,
       items: [request],
@@ -187,6 +188,7 @@ class AuthorizedObjectReaderImpl {
       })),
     })
     this.#assertObjectTypesViewable(request.items.map((item) => item.objectTypeId))
+    if (this.#authority.type !== "delegated") return request.items.map(() => true)
     return detachReadResult(
       await this.#storage.selectsObjectProperties({
         ...request,
@@ -411,6 +413,12 @@ class AuthorizedObjectReaderImpl {
         this.#queryExecutorOptions()
       )
     )
+  }
+
+  /** Enforce the delegated response budget without exposing or recombining its limits. */
+  assertVisibleOutputWithinLimit(value: unknown): void {
+    if (this.#authority.type !== "delegated") return
+    assertObjectReadOutputWithinLimit(value, this.#authority.objectRead.limits)
   }
 
   #queryExecutorOptions() {
