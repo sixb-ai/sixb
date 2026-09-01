@@ -79,6 +79,7 @@ type PublicReaderMethod =
   | "count"
   | "exists"
   | "facet"
+  | "admitTelemetryHistoryRead"
 
 type InputsWithoutProjectId = {
   [Method in PublicReaderMethod]: "projectId" extends keyof Parameters<
@@ -101,6 +102,7 @@ const inputsWithoutProjectId: InputsWithoutProjectId = {
   count: true,
   exists: true,
   facet: true,
+  admitTelemetryHistoryRead: true,
 }
 
 type FacadeIsNominal =

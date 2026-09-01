@@ -458,6 +458,173 @@ describe("telemetry history admission", () => {
       limit: 32,
     })
   })
+
+  test("preserves principal history workload semantics", async () => {
+    const reader = createAuthorizedObjectReader({
+      scope: principalScope(),
+      ontology,
+      objectStorage: new InMemoryObjectStorage(),
+    })
+    const series = sensorSeries("sensor-1", "temperature")
+    const providerInputs: TimeseriesHistoryBatchInput[] = []
+    const storage = timeseriesStorage({
+      getHistoryBatch: async (input) => {
+        providerInputs.push(input)
+        return []
+      },
+    })
+
+    await getTelemetryHistoryBatch({ series: [series] }, { storage, objectReader: reader })
+    await getTelemetryHistoryBatch(
+      { series: Array.from({ length: 101 }, () => series), limitPerSeries: 10_001 },
+      { storage, objectReader: reader }
+    )
+
+    expect(providerInputs.map((input) => input.limitPerSeries)).toEqual([undefined, 10_001])
+    expect(providerInputs[1]?.series).toEqual([series])
+  })
+
+  test("bounds delegated authored series and point occurrences before provider work", async () => {
+    const reader = createAuthorizedObjectReader({
+      scope: delegatedScope({
+        roots: [selectedRoot("sensor-1", ["id", "temperature"])],
+        maxOutputJsonBytes: 10_000_000,
+      }),
+      ontology,
+      objectStorage: seededObjectStorage(["sensor-1"]),
+    })
+    const series = sensorSeries("sensor-1", "temperature")
+    const providerInputs: TimeseriesHistoryBatchInput[] = []
+    const providerPoints = Array.from({ length: 100 }, () => point(series))
+    const storage = timeseriesStorage({
+      getHistoryBatch: async (input) => {
+        providerInputs.push(input)
+        return input.series.map((requested) => ({ ...requested, points: providerPoints }))
+      },
+    })
+
+    await expect(
+      getTelemetryHistoryBatch({ series: [series, series] }, { storage, objectReader: reader })
+    ).resolves.toHaveLength(2)
+    await expect(
+      getTelemetryHistoryBatch(
+        { series: [series], limitPerSeries: 10_000 },
+        { storage, objectReader: reader }
+      )
+    ).resolves.toHaveLength(1)
+
+    const oneHundredDuplicates = Array.from({ length: 100 }, () => series)
+    const boundary = await getTelemetryHistoryBatch(
+      { series: oneHundredDuplicates, limitPerSeries: 100 },
+      { storage, objectReader: reader }
+    )
+    expect(boundary).toHaveLength(100)
+    expect(boundary.reduce((total, result) => total + result.points.length, 0)).toBe(10_000)
+    expect(providerInputs.map((input) => input.limitPerSeries)).toEqual([100, 10_000, 100])
+    expect(providerInputs.every((input) => input.series.length === 1)).toBe(true)
+
+    const hidden = sensorSeries("sensor-2", "temperature")
+    await expect(
+      getTelemetryHistoryBatch(
+        { series: [series, hidden], limitPerSeries: 5_001 },
+        { storage, objectReader: reader }
+      )
+    ).rejects.toMatchObject({
+      code: "telemetry_history_workload_exceeded",
+      metric: "points",
+      limit: 10_000,
+    })
+    await expect(
+      getTelemetryHistoryBatch(
+        { series: oneHundredDuplicates, limitPerSeries: 101 },
+        { storage, objectReader: reader }
+      )
+    ).rejects.toMatchObject({
+      code: "telemetry_history_workload_exceeded",
+      metric: "points",
+      limit: 10_000,
+    })
+    expect(providerInputs).toHaveLength(3)
+  })
+
+  test("rejects an oversized hostile series array before reading an element", async () => {
+    // Regression proof: raising the delegated series cap to 101 makes this test read proxy
+    // elements before rejecting the request.
+    let selectionCalls = 0
+    const selectedReader = {
+      selectsObjectProperties: async (
+        input: Parameters<ObjectReadStorage["selectsObjectProperties"]>[0]
+      ) => {
+        selectionCalls += 1
+        return input.items.map(() => true)
+      },
+    } as unknown as ObjectReadStorage
+    const reader = createAuthorizedObjectReader({
+      scope: delegatedScope({ roots: [selectedRoot("sensor-1", ["id", "temperature"])] }),
+      ontology,
+      objectStorage: selectedStorageFactory(selectedReader),
+    })
+    const series = sensorSeries("sensor-1", "temperature")
+    let elementReads = 0
+    const hostileSeries = new Proxy([] as TimeseriesHistorySeriesInput[], {
+      get: (target, property, receiver) => {
+        if (property === "length") return 101
+        if (typeof property === "string" && /^\d+$/.test(property)) {
+          elementReads += 1
+          return series
+        }
+        return Reflect.get(target, property, receiver)
+      },
+    })
+    let providerCalls = 0
+    const storage = timeseriesStorage({
+      getHistoryBatch: async () => {
+        providerCalls += 1
+        return []
+      },
+    })
+
+    await expect(
+      getTelemetryHistoryBatch({ series: hostileSeries }, { storage, objectReader: reader })
+    ).rejects.toMatchObject({
+      code: "telemetry_history_workload_exceeded",
+      metric: "series",
+      limit: 100,
+    })
+    expect(elementReads).toBe(0)
+    expect(selectionCalls).toBe(0)
+    expect(providerCalls).toBe(0)
+  })
+
+  test("rejects oversized provider points before cloning an element", async () => {
+    // Regression proof: removing the provider point-count guard makes this test traverse the
+    // hostile points array before rejecting the provider result.
+    const reader = createAuthorizedObjectReader({
+      scope: delegatedScope({ roots: [selectedRoot("sensor-1", ["id", "temperature"])] }),
+      ontology,
+      objectStorage: seededObjectStorage(["sensor-1"]),
+    })
+    const series = sensorSeries("sensor-1", "temperature")
+    let pointReads = 0
+    const hostilePoints = new Proxy([] as TimeseriesPoint[], {
+      get: (target, property, receiver) => {
+        if (property === "length") return 101
+        if (typeof property === "string" && /^\d+$/.test(property)) {
+          pointReads += 1
+          return point(series)
+        }
+        return Reflect.get(target, property, receiver)
+      },
+    })
+    const storage = timeseriesStorage({
+      getHistoryBatch: async () => [{ ...series, points: hostilePoints }],
+    })
+
+    await expect(
+      getTelemetryHistoryBatch({ series: [series] }, { storage, objectReader: reader })
+    ).rejects.toMatchObject({ code: "internal.unexpected" })
+    expect(pointReads).toBe(0)
+  })
 })
 
 function principalScope(): ExecutionScope {
