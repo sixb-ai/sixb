@@ -4,44 +4,24 @@
  * HTTP executor in `@sixb/client` is the remote counterpart.
  */
 
-import type { AuthorizationContext } from "../../authorization"
-import type { RuntimeAuthorization } from "../../execution/types"
+import type { AuthorizedObjectReader } from "../../execution/authorized-object-reader"
 import type { OntologyRegistry } from "../../ontology"
-import type { Storage } from "../../storage"
-import {
-  countObjects,
-  executeObjectQuery,
-  existsObjects,
-  facetObjects,
-  ObjectQueryPlanningError,
-} from "../query"
+import { ObjectQueryPlanningError } from "../query"
 import { explainObjectQuery } from "../query/explain"
 import type { ObjectQuery } from "../query/ir"
 import { validateObjectQuery } from "../query/validate"
 import type { ObjectQueryExecutor, ObjectQueryExecutorFacetRequest } from "./query-executor"
 
 export function createRuntimeQueryExecutor(params: {
-  projectId: string
   ontology: OntologyRegistry
-  storage: Storage
-  runtimeAuthorization?: RuntimeAuthorization
-  authorization?: AuthorizationContext
+  objectReader: AuthorizedObjectReader
 }): ObjectQueryExecutor {
-  const { projectId, ontology, storage, runtimeAuthorization, authorization } = params
-  const executorOptions = {
-    ontology,
-    storage: storage.objects,
-    runtimeAuthorization,
-    authorization,
-  }
+  const { ontology, objectReader } = params
 
   return {
     async list(query: ObjectQuery, options?: { includeTotal?: boolean }) {
       try {
-        return await executeObjectQuery(
-          { projectId, query, includeTotal: options?.includeTotal },
-          executorOptions
-        )
+        return await objectReader.executeQuery({ query, includeTotal: options?.includeTotal })
       } catch (error) {
         if (error instanceof ObjectQueryPlanningError) {
           throw addSdkPlanningHints(error)
@@ -51,17 +31,17 @@ export function createRuntimeQueryExecutor(params: {
     },
 
     async count(query: ObjectQuery) {
-      const result = await countObjects({ projectId, query }, executorOptions)
+      const result = await objectReader.count({ query })
       return result.count
     },
 
     async exists(query: ObjectQuery) {
-      const result = await existsObjects({ projectId, query }, executorOptions)
+      const result = await objectReader.exists({ query })
       return result.exists
     },
 
     async facets(query: ObjectQuery, facets: readonly ObjectQueryExecutorFacetRequest[]) {
-      const result = await facetObjects({ projectId, query, facets }, executorOptions)
+      const result = await objectReader.facet({ query, facets })
       return result.facets.map((facet) => ({
         propertyId: facet.propertyId,
         buckets: [...facet.buckets],

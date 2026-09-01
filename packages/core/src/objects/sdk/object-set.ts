@@ -6,9 +6,9 @@
 
 import type { ActionDefinition } from "../../actions"
 import type { AuthorizationContext } from "../../authorization"
-import { assertAuthorized } from "../../authorization"
 import { shareSixbErrorReporter } from "../../error-reporting/capability"
 import type { ExecutionContext } from "../../execution"
+import { assertAuthorizedObjectReaderBinding } from "../../execution/authorized-object-reader"
 import type { ValueType } from "../../ontology"
 import { OntologyValidationError } from "../../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
@@ -43,6 +43,10 @@ export function createObjectSet<
     readonly authorization?: AuthorizationContext
   }
 ): ObjectSet<TObjectType, TValueTypes, TRegisteredObjectTypes> {
+  assertAuthorizedObjectReaderBinding({
+    reader: params.objectReader,
+    scope: { execution: params.execution, authorization: params.runtimeAuthorization },
+  })
   const { objectType } = params
   const primaryProp = objectType.properties.find((p) => p.primary)
   if (!primaryProp) {
@@ -58,16 +62,14 @@ export function createObjectSet<
     events,
     storage,
     queues,
+    objectReader,
     runtimeAuthorization,
     authorization,
     execution,
   } = params
   const queryExecutor = createRuntimeQueryExecutor({
-    projectId,
     ontology,
-    storage,
-    runtimeAuthorization,
-    authorization,
+    objectReader,
   })
 
   const resolvedCtx: ExecutionObjectContext = {
@@ -78,6 +80,7 @@ export function createObjectSet<
     events,
     storage,
     queues,
+    objectReader,
     runtimeAuthorization,
     authorization,
     execution,
@@ -89,9 +92,7 @@ export function createObjectSet<
 
   const objectSet = {
     get: async (id: string) => {
-      assertAuthorized(resolvedCtx, { kind: "object.view", objectTypeId: objectType.id })
-      const row = await storage.objects.getByPrimaryId({
-        projectId,
+      const row = await objectReader.getByPrimaryId({
         objectTypeId: objectType.id,
         primaryId: id,
       })
@@ -112,9 +113,7 @@ export function createObjectSet<
     byId: (id: string) => createObjectByIdHandle<TObjectType, TValueTypes>(resolvedCtx, id),
 
     list: async (input?: ObjectSetListInput) => {
-      assertAuthorized(resolvedCtx, { kind: "object.view", objectTypeId: objectType.id })
-      const result = await storage.objects.list({
-        projectId,
+      const result = await objectReader.list({
         objectTypeId: objectType.id,
         primaryIdPrefix: input?.idPrefix,
         primaryIdSuffix: input?.idSuffix,
