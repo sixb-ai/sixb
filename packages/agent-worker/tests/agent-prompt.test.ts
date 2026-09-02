@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { MAIN_HELP } from "../src/agent-cli/commands/metadata"
 import { renderAgentSystemPrompt, renderWorkflowOutputFinalizerPrompt } from "../src/agent-prompt"
 
 const SKILLS = [
@@ -65,6 +66,9 @@ describe("agent system prompt", () => {
 
     expect(prompt).toContain("inside a live Sixb project modeled as an ontology")
     expect(prompt).toContain("Use the `sixb` CLI only for the live project data")
+    expect(prompt).toContain(MAIN_HELP)
+    expect(prompt).toContain("Do not run `sixb --help`")
+    expect(prompt).toContain("use the narrowest group or command help")
     expect(prompt).toContain("start with `sixb objects get <object-type> <primary-id>...`")
     expect(prompt).toContain("preserve every `objectTypeId` and `primaryId` byte-for-byte")
     expect(prompt).toContain("its `inputSchema` is the exact JSON shape")
@@ -72,7 +76,6 @@ describe("agent system prompt", () => {
     expect(prompt).toContain("--file - --wait")
     expect(prompt).toContain("Never inspect the environment to infer identifiers")
     expect(prompt).toContain("Use `--run-id` only for a request-specific idempotency key")
-    expect(prompt).toContain("Do not begin with generic help")
     expect(prompt).not.toContain("Agent Skills are installed")
     expect(prompt).not.toContain("Available Agent Skills")
   })

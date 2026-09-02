@@ -3496,8 +3496,8 @@ describe("AgentWorker", () => {
       expect(systemPrompt).toContain(
         "Use the `sixb` CLI only for the live project data or capability needed by the task"
       )
-      expect(systemPrompt).not.toContain("`sixb --help`")
-      expect(systemPrompt).not.toContain("sixb objects inspect <type> <id>")
+      expect(systemPrompt).toContain("Do not run `sixb --help`")
+      expect(systemPrompt).toContain("sixb objects inspect <type> <id>")
       expect(systemPrompt).not.toContain("Available Agent Skills")
       expect(systemPrompt).toContain("<agent_instructions>")
       expect(systemPrompt).not.toContain("/tmp/sixb-recording-sandbox")
@@ -5744,7 +5744,8 @@ describe("AgentWorker", () => {
       expect(capturedSystem).toContain(
         "Use the `sixb` CLI only for the live project data or capability needed by the task"
       )
-      expect(capturedSystem).not.toContain("`sixb --help`")
+      expect(capturedSystem).toContain("Do not run `sixb --help`")
+      expect(capturedSystem).toContain("Sixb agent CLI")
       expect(capturedSystem).toContain("<agent_instructions>")
       expect(capturedSystem).toContain("You are a helpful test assistant.")
       expect(capturedSystem).not.toContain("Available Agent Skills")
@@ -6533,7 +6534,8 @@ describe("AgentWorker", () => {
     expect(capturedSystem).toContain(
       "Use the `sixb` CLI only for the live project data or capability needed by the task"
     )
-    expect(capturedSystem).not.toContain("`sixb --help`")
+    expect(capturedSystem).toContain("Do not run `sixb --help`")
+    expect(capturedSystem).toContain("Sixb agent CLI")
     expect(capturedSystem).toContain("<agent_instructions>")
     expect(capturedSystem).toContain("You are a helpful test assistant.")
     expect(capturedSystem.indexOf("<agent_instructions>")).toBeLessThan(
