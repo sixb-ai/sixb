@@ -11,6 +11,7 @@ import {
 } from "ai"
 import type { AiSdkTraceStep } from "./ai-sdk-adapters"
 import type { AiModelCallRecorder } from "./model-call-recorder"
+import { withAutomaticPromptCaching } from "./provider-caching"
 
 export const FINAL_AGENT_LOOP_STEP_INSTRUCTION = [
   "Provide the best possible final answer from the context available.",
@@ -41,12 +42,14 @@ export interface RunAgentLoopInput {
 export function runAgentLoop(
   input: RunAgentLoopInput
 ): StreamTextResult<ToolSet, Record<string, unknown>, ReturnType<typeof Output.text>> {
+  const providerOptions =
+    input.agent.loop?.caching === "off"
+      ? input.agent.providerOptions
+      : withAutomaticPromptCaching(input.agent.model, input.agent.providerOptions)
   return streamText({
     model: input.usageRecorder.wrapModel(input.agent.model),
     ...(input.agent.reasoning === undefined ? {} : { reasoning: input.agent.reasoning }),
-    ...(input.agent.providerOptions === undefined
-      ? {}
-      : { providerOptions: input.agent.providerOptions }),
+    ...(providerOptions === undefined ? {} : { providerOptions }),
     system: input.system,
     messages: input.messages,
     tools: input.tools,

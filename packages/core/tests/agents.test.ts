@@ -325,6 +325,7 @@ describe("defineAgent", () => {
       loop: {
         stopWhen: { maxSteps: 16 },
         context: { windowTokens: 200_000 },
+        caching: "off",
       },
     })
 
@@ -337,6 +338,7 @@ describe("defineAgent", () => {
     expect(agent.loop).toEqual({
       stopWhen: { maxSteps: 16 },
       context: { windowTokens: 200_000 },
+      caching: "off",
     })
     expect(Object.isFrozen(agent.loop)).toBe(true)
     expect(Object.isFrozen(agent.loop?.context)).toBe(true)
@@ -408,6 +410,17 @@ describe("defineAgent", () => {
         })
       ).toThrow(AgentDefinitionError)
     }
+  })
+
+  test("rejects invalid prompt caching settings", () => {
+    expect(() =>
+      defineAgent("bad", {
+        name: "Bad",
+        model,
+        instructions: "x",
+        loop: { caching: "sometimes" as never },
+      })
+    ).toThrow("Agent loop.caching must be 'auto' or 'off'")
   })
 
   test("snapshots and validates context loop overrides", () => {

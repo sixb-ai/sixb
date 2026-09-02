@@ -20789,9 +20789,13 @@
                       },
                       "required": ["validate", "writeback", "edits", "effects"],
                       "additionalProperties": false
+                    },
+                    "inputSchema": {
+                      "type": "object",
+                      "additionalProperties": {}
                     }
                   },
-                  "required": ["id", "name", "params", "phases"],
+                  "required": ["id", "name", "params", "phases", "inputSchema"],
                   "additionalProperties": false
                 }
               }

@@ -1296,6 +1296,14 @@ describe("SixbServer HTTP contract", () => {
             required: true,
           },
         ],
+        inputSchema: {
+          type: "object",
+          properties: {
+            note: { type: "string" },
+          },
+          required: ["note"],
+          additionalProperties: false,
+        },
         phases: {
           validate: false,
           writeback: true,

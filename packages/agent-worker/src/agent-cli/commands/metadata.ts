@@ -86,8 +86,9 @@ Inspect options:
   --max-links <1-${CLI_LIMITS.inspect.links.maximum}>                 Defaults to ${CLI_LIMITS.inspect.links.default}
   --full                              Include timestamps and encountered type definitions
 
-Use \`objects inspect\` first when context identifies an object. It follows both relationship
-directions to depth 2 by default and returns a bounded graph.
+Use \`objects get\` first when context provides an exact object reference. Use \`objects inspect\`
+only when related objects are needed; it follows both relationship directions to depth 2 by
+default and returns a bounded graph.
 Inspect omits materialization timestamps and ontology definitions by default. Use \`--full\` when
 storage timestamps, declared links, or available actions are needed.
 
@@ -141,9 +142,11 @@ History options:
   actions: `Usage:
   sixb actions list [--type <object-type>]
   sixb actions get <action-id>
-  sixb actions request <action-id> [--subject-type <type> --subject-id <id>] [--file <path|->] [--run-id <id>]
+  sixb actions request <action-id> [--subject-type <type> --subject-id <id>] [--file <path|->] [--run-id <id>] [--wait]
 
-The JSON file contains the action parameter object. Use - to read standard input.`,
+\`actions get\` includes inputSchema, the exact JSON shape accepted by the Action. The JSON file
+contains that parameter object; use - to read standard input. --wait returns the terminal Action
+run and waits at most 25 seconds.`,
   "action-runs": `Usage:
   sixb action-runs list [options]
   sixb action-runs get <run-id>
