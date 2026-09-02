@@ -25,7 +25,7 @@ const WORKFLOW_OUTPUT_FINALIZATION_ATTEMPTS = 2
 
 export interface RunWorkflowAgentNodeInput {
   readonly context: AgentTurnContext
-  readonly agentId: string
+  readonly agentStepId: string
   readonly plan: ResolvedAgentExecutionPlan
   readonly agentStep: AgentStepDefinition
   readonly workflowId: string
@@ -89,7 +89,7 @@ export async function runWorkflowAgentNode(
   const abortSignal = AbortSignal.any([input.signal, timeout.signal, sandboxReadiness.signal])
   const completedSteps: ModelStep[] = []
   const traceDetails = {
-    agentId: input.agentId,
+    agentStepId: input.agentStepId,
     workflowId: input.workflowId,
     workflowRunId: input.workflowRunId,
     nodeRunId: input.nodeRunId,
@@ -131,7 +131,7 @@ export async function runWorkflowAgentNode(
     if (researchText.trim().length === 0) {
       throw createSixbError(
         "agent.execution_failed",
-        `[SixbAgentWorker] Workflow agent '${input.agentId}' produced no final answer to structure.`,
+        `[SixbAgentWorker] Workflow agent step '${input.agentStepId}' produced no final answer to structure.`,
         { details: traceDetails }
       )
     }
@@ -210,7 +210,7 @@ export async function runWorkflowAgentNode(
     if (structuredValue === undefined) {
       throw createSixbError(
         "internal.unexpected",
-        `[SixbAgentWorker] Workflow output finalization for agent '${input.agentId}' ended without a value.`,
+        `[SixbAgentWorker] Workflow output finalization for agent step '${input.agentStepId}' ended without a value.`,
         { details: traceDetails }
       )
     }

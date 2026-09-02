@@ -5199,7 +5199,6 @@ export type ListWorkflowsResponses = {
           type: "agent"
           id: string
           key: string
-          agentId: string
           input: {
             [key: string]:
               | string
@@ -5384,7 +5383,6 @@ export type GetWorkflowResponses = {
           type: "agent"
           id: string
           key: string
-          agentId: string
           input: {
             [key: string]:
               | string
@@ -6115,7 +6113,6 @@ export type GetWorkflowRunResponses = {
         truncated?: true
       }
       agentExecution?: {
-        agentId: string
         status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
         attempt: number
         modelId?: string
@@ -6188,7 +6185,6 @@ export type GetWorkflowAgentNodeExecutionResponses = {
    * Response for status 200
    */
   200: {
-    agentId: string
     status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
     attempt: number
     modelId?: string
@@ -6599,7 +6595,6 @@ export type CancelWorkflowRunResponses = {
         truncated?: true
       }
       agentExecution?: {
-        agentId: string
         status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
         attempt: number
         modelId?: string

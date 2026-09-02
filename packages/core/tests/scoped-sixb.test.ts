@@ -114,7 +114,10 @@ const invoiceAgent = defineAgent("invoice-agent", {
   instructions: "Help with invoices.",
 })
 
-const reviewContractWithAgent = defineAgentStep("review-contract-with-agent", contractAgent)
+const reviewContractWithAgent = defineAgentStep("review-contract-with-agent", {
+  model: contractAgent.model,
+  instructions: "Help with contracts.",
+})
   .input({ contract: ref(Contract) })
   .output({ approved: "boolean", reason: "string" })
   .prompt(({ input }) => `Review contract '${input.contract.primaryId}'.`)

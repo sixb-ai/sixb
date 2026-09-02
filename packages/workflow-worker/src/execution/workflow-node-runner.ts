@@ -72,7 +72,7 @@ export class WorkflowNodeRunner {
             `[SixbWorkflowWorker] Workflow '${input.context.workflow.id}' agent node '${input.node.id}' parked a different node run.`,
             {
               details: {
-                agentId: outcome.agentExecution.agentId,
+                agentStepId: input.node.id,
                 workflowId: input.context.workflow.id,
                 workflowRunId: input.context.job.id,
                 nodeId: input.node.id,
@@ -199,7 +199,7 @@ function workflowNodeFailureChild(
         ...(error instanceof ActionRunFailedError ? { actionRunId: error.runId } : {}),
       }
     case "agent":
-      return { type: "agent", agentId: node.agentStep.agent.id }
+      return { type: "agent", agentStepId: node.agentStep.id }
     case "intervention":
       return { type: "intervention", interventionId: node.intervention.id }
   }

@@ -119,7 +119,6 @@ const WorkflowNodeSchema = z.union([
     type: z.literal("agent"),
     id: z.string(),
     key: z.string(),
-    agentId: z.string(),
     input: WorkflowIOSnapshotSchema,
     output: WorkflowIOSnapshotSchema,
   }),
@@ -143,7 +142,6 @@ export const WorkflowRunDetailSchema = WorkflowRunSummarySchema.extend({
 })
 
 export const WorkflowAgentNodeExecutionSummarySchema = z.object({
-  agentId: z.string(),
   status: z.enum(["queued", "running", "succeeded", "failed", "cancelled"]),
   attempt: z.number().int().nonnegative(),
   modelId: z.string().optional(),

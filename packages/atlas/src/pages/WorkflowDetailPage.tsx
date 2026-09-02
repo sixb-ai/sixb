@@ -393,7 +393,6 @@ interface AgentNodeData extends BaseNodeData {
   kind: "agent"
   index: number
   label: string
-  agentId: string
   inputCount: number
   outputCount: number
 }
@@ -435,7 +434,6 @@ function toNodeData(node: WorkflowNode, index: number): WorkflowNodeData {
       kind: "agent",
       index,
       label: node.key,
-      agentId: node.agentId,
       inputCount: fieldCount(node.input),
       outputCount: fieldCount(node.output),
     }
@@ -591,8 +589,8 @@ function NodeMetaLine({ data }: { data: WorkflowNodeData }) {
   }
   if (data.kind === "agent") {
     return (
-      <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-        {data.agentId} · {data.inputCount} in · {data.outputCount} out
+      <p className="mt-0.5 truncate text-[11px] tabular-nums text-muted-foreground">
+        {data.inputCount} in · {data.outputCount} out
       </p>
     )
   }
@@ -1004,7 +1002,7 @@ function nodeHeader(node: WorkflowNode): {
     return {
       title: node.key,
       kind: "agent",
-      description: `Runs agent ${node.agentId} with structured output.`,
+      description: "Runs an agent task with structured output.",
     }
   }
   return { title: node.key, kind: "step", description: "Transforms workflow data." }
@@ -1083,11 +1081,6 @@ function NodePanelSections({ node }: { node: WorkflowNode }) {
   if (node.type === "agent") {
     return (
       <>
-        <PanelBlock label="Agent" icon={<Bot className={SECTION_ICON} />}>
-          <span className="rounded-md bg-muted/60 px-2 py-1 font-mono text-xs text-foreground">
-            {node.agentId}
-          </span>
-        </PanelBlock>
         <PanelBlock
           label="Input"
           count={fieldCount(node.input)}

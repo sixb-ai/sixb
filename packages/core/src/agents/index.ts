@@ -35,6 +35,7 @@ export type { AgentExecutionAuthorization, AgentExecutionIdentity } from "./auth
 export {
   agentServiceAccountId,
   ensureAgentExecutionIdentity,
+  ensureManagedAgentExecutionIdentity,
   resolveAgentExecutionAuthorization,
   resolveInheritedMainAgentExecutionAuthorization,
 } from "./authority"

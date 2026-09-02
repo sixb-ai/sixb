@@ -28,16 +28,15 @@ When authentication is disabled for the runtime, requests through the Agent API 
 same unrestricted authorization behavior as normal API requests. The group restrictions below
 apply when authentication is enabled.
 
-### Groups gate use and reach
+### Run grants gate use
 
-An agent's `groups` (set on `defineAgent`) do two things:
+A principal can list and run an agent only if their grants cover it (`run:agent`).
+`GET /api/agents` returns only agents the caller may run; running one without the grant is rejected.
 
-- **Who can use it.** A principal can list and run an agent only if their grants cover it
-  (`run:agent`). `GET /api/agents` returns only agents the caller may run; running one without the
-  grant is rejected.
-- **What it can reach.** A run acts under its own identity whose memberships mirror the agent's
-  groups — so it can query the objects, read the telemetry, and request the actions its groups
-  allow, and nothing else. Its instructions can ask for anything; only its permissions get through.
+### Groups gate reach
+
+A run acts under its own identity whose memberships mirror the agent's `groups`. It can only reach
+the objects, telemetry, actions, and other capabilities those groups allow.
 
 ```ts
 import { defineAgent, defineGroup } from "@sixb/core"
@@ -55,6 +54,13 @@ export const invoiceAssistant = defineAgent("invoice-assistant", {
 
 Every referenced group must exist in your security registry (`security/groups/` or
 `createSixb({ groups })`), or startup fails.
+
+## Workflow agent tasks
+
+Starting the workflow is authorized by `run:workflow`; an agent task is not independently runnable
+and needs no `run:agent` grant. Sixb gives each workflow step a stable managed service account whose
+memberships mirror `defineAgentStep({ groups })`. The workflow requester remains the execution's
+original attribution, but the task acts only with its own declared reach.
 
 ## Threads are owner-scoped
 
