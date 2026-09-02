@@ -1,13 +1,16 @@
-import type { AuthorizationContext, SixbHostView } from "@sixb/core"
+import type { SixbHostView } from "@sixb/core"
 import { assertAgentExecutionRecord } from "@sixb/core/internal/agent-execution"
 import {
   AGENT_API_GATEWAY_PREFIX,
   AGENT_API_ROUTES,
   isAllowedAgentApiRequest,
   isValidAgentApiGatewayCapability,
+  MAIN_AGENT_ID,
   resolveAgentExecutionAuthorization,
+  resolveInheritedMainAgentExecutionAuthorization,
 } from "@sixb/core/internal/agents"
 import { normalizeRoutePath, pathSegmentsFor } from "@sixb/core/internal/http"
+import type { RequestExecutionAuthorization } from "@sixb/core/internal/request-execution"
 import type { Elysia } from "elysia"
 import { registerInternalRequestAuthState } from "../auth/scope"
 import { DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES } from "./files"
@@ -180,28 +183,48 @@ async function resolveAgentRunAuthState(
     return jsonError(403, "Agent run execution is not available.")
   }
 
-  let authz: AuthorizationContext
+  let authorization: RequestExecutionAuthorization
   try {
-    const resolved = await resolveAgentExecutionAuthorization({
-      auth,
-      projectId: host.id,
-      agentId: run.agentId,
-      authorizationRef: execution.authorizationRef,
-      security: host.definitions.security,
-    })
+    // Transitional: run kind will replace the reserved id as the authority discriminator.
+    if (run.agentId === MAIN_AGENT_ID) {
+      const inherited = await resolveInheritedMainAgentExecutionAuthorization({
+        auth,
+        projectId: host.id,
+        authorizationRef: execution.authorizationRef,
+        security: host.definitions.security,
+      })
+      authorization =
+        inherited.type === "principal" && execution.authorizationRef.type === "principal"
+          ? {
+              type: "principal",
+              context: inherited.context,
+              ...(execution.authorizationRef.credential === undefined
+                ? {}
+                : { credential: execution.authorizationRef.credential }),
+            }
+          : inherited
+    } else {
+      const resolved = await resolveAgentExecutionAuthorization({
+        auth,
+        projectId: host.id,
+        agentId: run.agentId,
+        authorizationRef: execution.authorizationRef,
+        security: host.definitions.security,
+      })
+      authorization = { type: "principal", context: resolved.context }
+    }
     assertAgentExecutionRecord({
       execution,
       agentId: run.agentId,
       runId: input.runId,
-      authorization: resolved.context,
+      authorization,
     })
-    authz = resolved.context
   } catch {
     return jsonError(403, "Agent run execution authority is not valid.")
   }
 
   return {
-    authorization: { type: "principal" as const, context: authz },
+    authorization,
     agentExecution,
     ...(conversationalRun ? { agentRun: conversationalRun } : {}),
   }

@@ -238,7 +238,9 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
   return {
     turnContext: {
       id: context.id,
-      agentPrincipal: context.agentPrincipal,
+      ...(context.authorPrincipal === undefined
+        ? {}
+        : { authorPrincipal: context.authorPrincipal }),
       storage: context.storage,
       blobStorage: context.blobStorage,
       apiBaseUrl,

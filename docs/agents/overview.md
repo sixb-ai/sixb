@@ -1,12 +1,34 @@
 # Agents
 
-An agent is a conversational assistant you define alongside your ontology. It calls a language
-model, selected worker tools, sandboxed `read` and `bash`, and an authorized Sixb API.
+Sixb provides one main conversational agent. It calls a project language model, project tools,
+sandboxed `read` and `bash`, and an authorized Sixb API.
 
-You define an agent declaratively and export it from `agents/`; `createSixb()` discovers it. A
-worker runs it, and clients drive it over HTTP and a websocket.
+Configure at least one language model to enable it. The first model is the default.
 
-## Define an agent
+```ts
+import { createSixb, defineAgentTool } from "@sixb/core"
+import { gateway } from "ai"
+
+const lookup = defineAgentTool("lookup")
+  .description("Look up project data.")
+  .input({ query: "string" })
+  .run(async ({ input }) => ({ results: await search(input.query) }))
+
+export const sixb = createSixb({
+  models: {
+    language: [gateway("openai/gpt-5.5"), gateway("anthropic/claude-sonnet-4.6")],
+  },
+  tools: [lookup],
+})
+```
+
+The agent worker runs each turn through the existing durable run, stream, and sandbox lifecycle.
+When authentication is enabled, the main agent inherits the requesting user's current authority.
+
+## Defined agents
+
+`defineAgent` remains available for existing agent workflow steps during the transition to direct
+workflow agent configuration.
 
 Put each definition in `agents/` and export it.
 
@@ -33,15 +55,16 @@ See [Defining agents](./defining-agents.md) for every config field.
 
 | Concept | What it is |
 | --- | --- |
-| **Definition** | The agent you write with `defineAgent` — model, instructions, groups, selected tools, and loop limits. |
+| **Main agent** | The framework-owned conversational entry point, enabled by the project model catalog. |
+| **Defined agent** | An existing `defineAgent` configuration used by current workflow steps. |
 | **Thread** | One conversation with an agent, owned by a principal. |
 | **Run** | One turn. Posting a user message triggers a run. |
 | **Message** | A `system`, `user`, or `assistant` message made of `text`, `reasoning`, `step-start`, and `tool-call` parts. |
-| **Tools** | Explicitly selected worker tools plus built-in `read` and `bash` in a [sandbox](../sandboxes/overview.md). |
+| **Tools** | Project tools plus built-in `read` and `bash` in a [sandbox](../sandboxes/overview.md). |
 
 ## Run an agent
 
-Defining an agent needs nothing extra. **Running** one needs two things:
+**Running** an agent needs two things:
 
 - The **agent-worker** process. `bun sixb dev` runs it for you; in production run it like the other
   workers.
@@ -59,7 +82,7 @@ export const sixb = createSixb({
 })
 ```
 
-For each turn, the worker offers that agent's selected tools plus `read` and `bash`, executes them
+For each turn, the worker offers that agent's configured tools plus `read` and `bash`, executes them
 in their respective boundaries, and persists the reply. See
 [Running and streaming](./running-and-streaming.md).
 

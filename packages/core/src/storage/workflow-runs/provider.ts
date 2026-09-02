@@ -50,7 +50,7 @@ export async function assertWorkflowAgentNodeRunExecution(input: {
     projectId: input.projectId,
     executionId: input.executionId,
     runId: input.nodeRunId,
-    serviceAccountId: agentServiceAccountId(input.agentId),
+    authority: { type: "managed", serviceAccountId: agentServiceAccountId(input.agentId) },
   })
   if (
     !execution ||

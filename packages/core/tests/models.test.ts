@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { LanguageModelV4 } from "@ai-sdk/provider"
-import { createSixb, defineAgent, defineObjectType, prop } from "../src"
+import { createSixb, defineAgent, defineAgentTool, defineObjectType, prop } from "../src"
 import { createModelCatalog } from "../src/models"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -170,17 +170,28 @@ describe("createModelCatalog", () => {
 })
 
 describe("createSixb models", () => {
-  test("registers the configured catalog", async () => {
+  test("registers the configured catalog and a framework-owned main agent", async () => {
     const projectRoot = await createTempProjectRoot()
+    const lookup = defineAgentTool("lookup")
+      .description("Look up project data.")
+      .input({ query: "string" })
+      .run(({ input }) => ({ query: input.query }))
 
     const sixb = await createSixb({
       projectRoot,
       ontologies: [Room],
       models: { language: [gpt, sonnet] },
+      tools: [lookup],
       ...createTestRuntimeDeps(),
     })
 
     expect(sixb.definitions.models?.language.default.model).toBe(gpt)
+    expect(sixb.definitions.agents.list().map((agent) => agent.id)).toEqual(["main"])
+    expect(sixb.definitions.agents.getById("main")?.model).toBe(gpt)
+    expect(sixb.definitions.agents.getById("main")?.tools.map((tool) => tool.name)).toEqual([
+      "lookup",
+    ])
+    expect(sixb.definitions.tools.getByName("lookup")?.name).toBe("lookup")
   })
 
   test("leaves the catalog absent when models are not configured", async () => {
@@ -189,6 +200,47 @@ describe("createSixb models", () => {
     const sixb = await createSixb({ projectRoot, ontologies: [Room], ...createTestRuntimeDeps() })
 
     expect(sixb.definitions.models).toBeUndefined()
+    expect(sixb.definitions.agents.list()).toEqual([])
+  })
+
+  test("reserves the main agent id for the framework", async () => {
+    const projectRoot = await createTempProjectRoot()
+    const userMain = defineAgent("main", {
+      name: "User main",
+      model: gpt,
+      instructions: "Answer questions.",
+    })
+
+    await expect(
+      createSixb({
+        projectRoot,
+        ontologies: [Room],
+        agents: [userMain],
+        ...createTestRuntimeDeps(),
+      })
+    ).rejects.toThrow(/Agent id 'main' is reserved by the framework-owned main agent/)
+  })
+
+  test("validates project tools as one catalog", async () => {
+    const projectRoot = await createTempProjectRoot()
+    const first = defineAgentTool("lookup")
+      .description("Look up one source.")
+      .input({ query: "string" })
+      .run(() => ({}))
+    const second = defineAgentTool("lookup")
+      .description("Look up another source.")
+      .input({ query: "string" })
+      .run(() => ({}))
+
+    await expect(
+      createSixb({
+        projectRoot,
+        ontologies: [Room],
+        models: { language: [gpt] },
+        tools: [first, second],
+        ...createTestRuntimeDeps(),
+      })
+    ).rejects.toThrow(/Project tools contain duplicate tool name 'lookup'/)
   })
 
   test("rejects an agent whose model is outside the configured catalog", async () => {

@@ -308,7 +308,9 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         role: assistant.role,
         parts: assistantParts,
         ...(assistant.metadata === undefined ? {} : { metadata: assistant.metadata }),
-        authorPrincipal: context.agentPrincipal,
+        ...(context.authorPrincipal === undefined
+          ? {}
+          : { authorPrincipal: context.authorPrincipal }),
       },
       finish: {
         projectId,
@@ -426,7 +428,9 @@ async function finalizeInterruptedTurn(input: {
       role: assistant.role,
       parts: assistantPartsWithAttachments(assistant.parts),
       ...(assistant.metadata === undefined ? {} : { metadata: assistant.metadata }),
-      authorPrincipal: context.agentPrincipal,
+      ...(context.authorPrincipal === undefined
+        ? {}
+        : { authorPrincipal: context.authorPrincipal }),
     },
     finish: {
       projectId,

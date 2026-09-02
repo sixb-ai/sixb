@@ -4,7 +4,11 @@ import { SYSTEM_PRINCIPAL } from "../auth"
 import { snapshotRequesterGroupIds } from "../auth/attribution"
 import { assertAuthorized } from "../authorization"
 import type { FileRef } from "../blob-storage"
-import { createAgentExecutionRecord } from "../execution/agent"
+import {
+  canInheritMainAgentRuntimeAuthorization,
+  createAgentExecutionRecord,
+  createInheritedMainAgentExecutionRecord,
+} from "../execution/agent"
 import { ensureExecutionRecord, executionRecordInputFromRuntime } from "../execution/durable"
 import type { ExecutionContext } from "../execution/types"
 import type { SixbRuntimeContext } from "../runtime/types"
@@ -22,6 +26,7 @@ import { resolveAgentContextParts } from "./context-resolution"
 import { dispatchQueuedAgentRuns } from "./dispatch"
 import { AgentRequestError } from "./errors"
 import { createAgentMessageId, createAgentRunId, createAgentThreadId } from "./ids"
+import { MAIN_AGENT_ID } from "./main"
 import { publishAgentRunActivity } from "./streams"
 import type { AgentDefinition } from "./types"
 
@@ -69,6 +74,7 @@ export async function requestAgentRun(
   input: RequestAgentRunInput
 ): Promise<RequestAgentRunResult> {
   assertAuthorized(runtime, { kind: "agent.run", agentId: agent.id })
+  assertRequestAuthorityCanRunAgent(runtime, agent)
 
   // Resolve context before creating a thread: invalid or inaccessible references must not leave an
   // empty conversation behind. The resulting parts are the exact snapshot persisted below.
@@ -171,6 +177,7 @@ export async function retryAgentRun(
   failedRun: AgentRunRecord
 ): Promise<RequestAgentRunResult> {
   assertAuthorized(runtime, { kind: "agent.run", agentId: agent.id })
+  assertRequestAuthorityCanRunAgent(runtime, agent)
   if (failedRun.agentId !== agent.id) {
     throw new AgentRequestError(
       "agent_not_found",
@@ -233,6 +240,22 @@ async function prepareDurableAgentExecution(
   agent: AgentDefinition,
   runId: string
 ): Promise<CreateExecutionInput> {
+  // Transitional: run kind will replace the reserved id as the authority discriminator.
+  if (agent.id === MAIN_AGENT_ID) {
+    const parent = await ensureExecutionRecord(
+      runtime.storage.executions,
+      executionRecordInputFromRuntime({
+        execution,
+        runtimeAuthorization: runtime.runtimeAuthorization,
+      })
+    )
+    return createInheritedMainAgentExecutionRecord({
+      id: `exec_${randomUUID()}`,
+      parent,
+      runId,
+    })
+  }
+
   const identity = await ensureAgentExecutionIdentity({
     auth: runtime.storage.auth,
     projectId: runtime.projectId,
@@ -259,6 +282,21 @@ async function prepareDurableAgentExecution(
     runId,
     principal: resolved.identity.principal,
   })
+}
+
+function assertRequestAuthorityCanRunAgent(
+  runtime: SixbRuntimeContext,
+  agent: AgentDefinition
+): void {
+  if (
+    agent.id === MAIN_AGENT_ID &&
+    !canInheritMainAgentRuntimeAuthorization(runtime.runtimeAuthorization)
+  ) {
+    throw new AgentRequestError(
+      "authority_not_inheritable",
+      "[Sixb] The main Agent requires an authenticated user request or disabled authorization."
+    )
+  }
 }
 
 async function dispatchAgentRun(

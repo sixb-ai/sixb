@@ -1,7 +1,7 @@
 # Tools and gateway
 
-Every agent run gets sandboxed `read` and `bash` tools plus scoped access to the Sixb API. Agents
-may also receive explicitly selected tools that run in the agent worker.
+Every agent run gets sandboxed `read` and `bash` tools plus scoped access to the Sixb API. The main
+agent also receives project tools that run in the agent worker.
 
 ## The read tool
 
@@ -52,10 +52,10 @@ export const sixb = createSixb({
 
 See [Sandboxes](../sandboxes/overview.md) for factory options and isolation.
 
-## Selected tools
+## Project tools
 
-Selected tools run in the agent worker, not the Bash sandbox. Connector credentials stay on the
-host and are not model input.
+Project tools run in the agent worker, not the Bash sandbox. Connector credentials stay on the host
+and are not model input. Register them once in `createSixb`; the main agent receives the full list.
 
 ### Custom tools
 
@@ -63,7 +63,8 @@ host and are not model input.
 
 ```ts
 // agent-tools/search-knowledge.ts
-import { defineAgentTool } from "@sixb/core"
+import { createSixb, defineAgentTool } from "@sixb/core"
+import { gateway } from "ai"
 import { knowledgeConnector } from "../connectors/knowledge"
 
 export const searchKnowledge = defineAgentTool("search_knowledge")
@@ -75,6 +76,16 @@ export const searchKnowledge = defineAgentTool("search_knowledge")
     return { results }
   })
 ```
+
+```ts
+export const sixb = createSixb({
+  models: { language: [gateway("openai/gpt-5.5")] },
+  tools: [searchKnowledge],
+})
+```
+
+Defined agents continue selecting their own `tools` until workflow agent configuration moves away
+from `defineAgent`.
 
 The handler receives inferred input, the provider's `toolCallId`, cancellation, run metadata,
 connector resolution, a run-scoped logger, and an artifact publisher. Ordinary results must be
@@ -142,15 +153,20 @@ attachments. Symbolic links and paths outside the workspace are rejected.
 Complete files moved there are collected as final assistant attachments; it is not used as the live
 tool-result transport.
 
-Tool definitions are not auto-discovered. Grant them through the agent definition:
+Tool definitions are not auto-discovered. Register main-agent tools in the project config:
 
 ```ts
 tools: [searchKnowledge]
 ```
 
-Names must be unique within one agent. `bash`, `read`, and `view_file` are reserved for the
-framework's built-in sandbox tools. Conversation, workflow, and CLI-managed agent runs use the same
-selected tools.
+Existing defined agents select them through their definition:
+
+```ts
+tools: [searchKnowledge]
+```
+
+Names must be unique within each list. `bash`, `read`, `view_file`, and `spawn_agent` are reserved
+for framework tools.
 
 ### Exa web tools
 

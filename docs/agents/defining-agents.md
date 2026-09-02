@@ -53,8 +53,9 @@ model: gateway("openai/gpt-5.5")
 
 ## The project model catalog
 
-A project can declare the models Sixb is allowed to use. The catalog is optional; when it is
-present, every agent's `model` must be in it, and `createSixb()` fails at startup otherwise.
+A project can declare the models Sixb is allowed to use. Configuring the catalog enables the
+framework-owned main agent, using the first language model by default. Existing defined agents must
+also use a model from the catalog.
 
 ```ts
 import { gateway } from "ai"

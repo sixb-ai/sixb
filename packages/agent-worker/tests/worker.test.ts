@@ -56,6 +56,7 @@ import {
 } from "@sixb/core/internal/agents"
 import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import { createSixbError } from "@sixb/core/internal/errors"
+import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
 import {
   type AgentMessageRecord,
@@ -1309,6 +1310,7 @@ function buildSixb(
     readonly providerOptions?: LanguageModelV4CallOptions["providerOptions"]
     readonly projectRoot?: string
     readonly agentTools?: readonly AgentToolDefinition[]
+    readonly projectTools?: readonly AgentToolDefinition[]
     readonly connectors?: readonly ConnectorDefinition[]
     readonly context?: AgentContextConfig
     readonly models?: ModelCatalogInput
@@ -1331,6 +1333,7 @@ function buildSixb(
     id: PROJECT_ID,
     ontology: [],
     agents: [agent],
+    ...(options.projectTools === undefined ? {} : { tools: options.projectTools }),
     ...(options.connectors === undefined ? {} : { connectors: options.connectors }),
     groups: [AGENT_RUNTIME_GROUP],
     broker,
@@ -1654,11 +1657,11 @@ async function buildAgentWorkerContext(
     execution,
     agentId: agent.id,
     runId,
-    authorization: resolved.context,
+    authorization: { type: "principal", context: resolved.context },
   })
   return {
     ...context,
-    agentPrincipal: resolved.identity.principal,
+    authorPrincipal: resolved.identity.principal,
     blobStorage: agentSixb.blobs,
     connector: agentSixb.connector,
   }
@@ -4995,6 +4998,144 @@ describe("AgentWorker", () => {
     }
   })
 
+  test("runs the main agent with project tools and inherited disabled authority", async () => {
+    const model = toolThenAnswerModel()
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [model] },
+      projectTools: [echoAgentTool],
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+
+    await worker.start()
+    try {
+      const requested = await requestAgent(sixb, { agentId: "main", text: "echo hi" })
+      const run = await waitFor(
+        async () => {
+          const current = await storage.runs.getById({
+            projectId: PROJECT_ID,
+            id: requested.run.id,
+          })
+          return current && current.status !== "queued" && current.status !== "running"
+            ? current
+            : null
+        },
+        { label: "main agent run terminal" }
+      )
+
+      expect(run.status).toBe("succeeded")
+      const execution = await sixb.storage.executions.getById({
+        projectId: PROJECT_ID,
+        id: run.executionId,
+      })
+      expect(execution?.authorizationRef).toEqual({ type: "disabled" })
+      await expect(
+        authStorageOf(sixb).serviceAccounts.getById({
+          projectId: PROJECT_ID,
+          id: "svc_agent_main",
+        })
+      ).resolves.toBeNull()
+
+      const assistant = (await listMessages(storage, run.threadId)).find(
+        (message) => message.role === "assistant"
+      )
+      expect(assistant?.authorPrincipal).toBeUndefined()
+      expect(
+        assistant?.parts.some(
+          (part) =>
+            part.type === "tool-call" &&
+            part.toolName === "echo" &&
+            part.state === "output-available"
+        )
+      ).toBe(true)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("revalidates a user's session before running the main agent", async () => {
+    const model = answerModel()
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [model] },
+    })
+    const auth = authStorageOf(sixb)
+    const sessionId = "session-main-agent"
+    await auth.users.create({
+      id: REQUESTER.id,
+      projectId: PROJECT_ID,
+      email: "requester@example.com",
+    })
+    await auth.sessions.create({
+      id: sessionId,
+      projectId: PROJECT_ID,
+      userId: REQUESTER.id,
+      strategyId: "test",
+      audience: "app",
+      tokenHash: "not-used-after-admission",
+      createdAt: new Date(),
+      expiresAt: new Date(Date.now() + 60_000),
+    })
+    const grants = { ...emptyGrantIndex(), "run:agent": new Set(["main"]) }
+    const scoped = bindRequestExecution(sixb, {
+      request: new Request("https://sixb.test/api/agents/main/runs"),
+      authorization: {
+        type: "principal",
+        context: {
+          principal: REQUESTER,
+          sessionId,
+          groupIds: [],
+          roleIds: [],
+          grants,
+        },
+        credential: { type: "session", id: sessionId },
+      },
+    })
+    const requested = await scoped.agents.runs.request({ agentId: "main", text: "hello" })
+    const worker = new AgentWorker(sixb, workerOptions())
+
+    await worker.start()
+    try {
+      const run = await waitFor(
+        async () => {
+          const current = await agentStorageOf(sixb).runs.getById({
+            projectId: PROJECT_ID,
+            id: requested.run.id,
+          })
+          return current && current.status !== "queued" && current.status !== "running"
+            ? current
+            : null
+        },
+        { label: "authenticated main agent run terminal" }
+      )
+      expect(run.status).toBe("succeeded")
+      const execution = await sixb.storage.executions.getById({
+        projectId: PROJECT_ID,
+        id: run.executionId,
+      })
+      expect(execution?.authorizationRef).toEqual({
+        type: "principal",
+        principal: REQUESTER,
+        credential: { type: "session", id: sessionId },
+      })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("rejects uncredentialed user authority before creating a main-agent thread", async () => {
+    const model = answerModel()
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [model] },
+    })
+
+    await expect(
+      requestAgentAs(sixb, REQUESTER, { agentId: "main", text: "hello" })
+    ).rejects.toMatchObject({ code: "authority_not_inheritable" })
+    await expect(
+      agentStorageOf(sixb).threads.list({ projectId: PROJECT_ID })
+    ).resolves.toMatchObject({ threads: [] })
+  })
+
   test("keeps completed-call usage when durable response projection fails", async () => {
     const sixb = buildSixb(invalidMetadataAnswerModel())
     const storage = agentStorageOf(sixb)
@@ -6554,7 +6695,7 @@ describe("AgentWorker", () => {
     const promise = runAgentTurn({
       context: {
         id: PROJECT_ID,
-        agentPrincipal: AGENT_PRINCIPAL,
+        authorPrincipal: AGENT_PRINCIPAL,
         storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
         tools: echoTool,
@@ -6608,7 +6749,7 @@ describe("AgentWorker", () => {
     await runAgentTurn({
       context: {
         id: PROJECT_ID,
-        agentPrincipal: AGENT_PRINCIPAL,
+        authorPrincipal: AGENT_PRINCIPAL,
         storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
         tools: {},
@@ -6667,7 +6808,7 @@ describe("AgentWorker", () => {
     await runAgentTurn({
       context: {
         id: PROJECT_ID,
-        agentPrincipal: AGENT_PRINCIPAL,
+        authorPrincipal: AGENT_PRINCIPAL,
         storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
         tools: {},
@@ -7018,7 +7159,7 @@ describe("AgentWorker", () => {
       runAgentTurn({
         context: {
           id: PROJECT_ID,
-          agentPrincipal: AGENT_PRINCIPAL,
+          authorPrincipal: AGENT_PRINCIPAL,
           storage: workerStorageOf(failingStorage),
           blobStorage: sixb.blobStorage,
           tools: echoTool,
@@ -7056,7 +7197,7 @@ describe("AgentWorker", () => {
     await runAgentTurn({
       context: {
         id: PROJECT_ID,
-        agentPrincipal: AGENT_PRINCIPAL,
+        authorPrincipal: AGENT_PRINCIPAL,
         storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
         tools: echoTool,

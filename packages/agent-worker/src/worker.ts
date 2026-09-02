@@ -3,7 +3,9 @@ import type { AgentDefinition } from "@sixb/core"
 import {
   createAgentRunExecutionToken,
   dispatchQueuedAgentRuns,
+  MAIN_AGENT_ID,
   resolveAgentExecutionAuthorization,
+  resolveInheritedMainAgentExecutionAuthorization,
   subscribeAgentRunCancel,
   workflowAgentNodeQueueJobId,
 } from "@sixb/core/internal/agents"
@@ -261,22 +263,41 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         }
       )
     }
-    const resolved = await resolveAgentExecutionAuthorization({
-      auth: context.storage.auth,
-      projectId: context.id,
-      agentId: agent.id,
-      authorizationRef: durableExecution.authorizationRef,
-      security: this.host.definitions.security,
-    })
-    const executionContext = createAgentExecutionContext({
-      context,
-      host: this.host,
-      execution: durableExecution,
-      agentId: agent.id,
-      runId: queuedRun.id,
-      authorization: resolved.context,
-      agentPrincipal: resolved.identity.principal,
-    })
+    const executionContext = await (async () => {
+      // Transitional: run kind will replace the reserved id as the authority discriminator.
+      if (agent.id === MAIN_AGENT_ID) {
+        return createAgentExecutionContext({
+          context,
+          host: this.host,
+          execution: durableExecution,
+          agentId: agent.id,
+          runId: queuedRun.id,
+          authorization: await resolveInheritedMainAgentExecutionAuthorization({
+            auth: context.storage.auth,
+            projectId: context.id,
+            authorizationRef: durableExecution.authorizationRef,
+            security: this.host.definitions.security,
+          }),
+        })
+      }
+
+      const resolved = await resolveAgentExecutionAuthorization({
+        auth: context.storage.auth,
+        projectId: context.id,
+        agentId: agent.id,
+        authorizationRef: durableExecution.authorizationRef,
+        security: this.host.definitions.security,
+      })
+      return createAgentExecutionContext({
+        context,
+        host: this.host,
+        execution: durableExecution,
+        agentId: agent.id,
+        runId: queuedRun.id,
+        authorization: { type: "principal", context: resolved.context },
+        authorPrincipal: resolved.identity.principal,
+      })
+    })()
 
     const reservation = await this.startOrReclaim(context, {
       run: queuedRun,

@@ -1,6 +1,6 @@
 import { resolve } from "node:path"
 import type { ActionDefinition } from "../actions"
-import type { AgentDefinition } from "../agents"
+import type { AgentDefinition, AgentToolDefinition } from "../agents"
 import type { SixbAuthConfig } from "../auth"
 import type { BlobStorage } from "../blob-storage"
 import { discoverOntologySources, discoverProjectDefinitions } from "../bootstrap"
@@ -48,6 +48,8 @@ export interface CreateSixbOptions {
   agents?: readonly AgentDefinition[]
   /** Models this project allows Sixb to use. The first of each kind is the default. */
   models?: ModelCatalogInput
+  /** Project tools available to the built-in main agent. */
+  tools?: readonly AgentToolDefinition[]
   datasets?: readonly DatasetDefinition[]
   /** Connector definitions to register in addition to auto-discovered `connectors/` exports. */
   connectors?: readonly ConnectorDefinition[]
@@ -122,6 +124,7 @@ export async function createSixb(
     membershipPolicies: [...(options.membershipPolicies ?? []), ...definitions.membershipPolicies],
     agents: [...(options.agents ?? []), ...definitions.agents],
     models: options.models,
+    tools: options.tools,
     auth: options.auth,
   })
 }

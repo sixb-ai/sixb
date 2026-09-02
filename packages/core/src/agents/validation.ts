@@ -32,7 +32,7 @@ const AGENT_TOOL_PRIMITIVE_SCHEMAS = new Set([
   "fileRef",
 ])
 
-export const AGENT_RESERVED_TOOL_NAMES = ["bash", "read", "view_file"] as const
+export const AGENT_RESERVED_TOOL_NAMES = ["bash", "read", "view_file", "spawn_agent"] as const
 
 export function assertNonEmpty(value: string, field: string): void {
   if (!value.trim()) {
@@ -407,22 +407,41 @@ export function assertValidAgentToolDefinitions(
   agentId: string,
   tools: readonly AgentToolDefinition[]
 ): void {
+  assertValidAgentToolDefinitionList(tools, {
+    invalidDefinitions: `[Sixb] Agent '${agentId}' tools must contain only agent tool definitions.`,
+    duplicateName: (name) =>
+      `[Sixb] Agent '${agentId}' tools contains duplicate tool name '${name}'.`,
+  })
+}
+
+export function assertValidProjectAgentToolDefinitions(
+  tools: readonly AgentToolDefinition[]
+): void {
+  assertValidAgentToolDefinitionList(tools, {
+    invalidDefinitions: "[Sixb] Project tools must contain only agent tool definitions.",
+    duplicateName: (name) => `[Sixb] Project tools contain duplicate tool name '${name}'.`,
+  })
+}
+
+function assertValidAgentToolDefinitionList(
+  tools: readonly AgentToolDefinition[],
+  messages: {
+    readonly invalidDefinitions: string
+    readonly duplicateName: (name: string) => string
+  }
+): void {
   const seen = new Set<string>()
   for (let index = 0; index < tools.length; index += 1) {
     const tool = tools[index]
     if (!Object.hasOwn(tools, index) || !isAgentToolDefinition(tool)) {
-      throw new AgentDefinitionError(
-        `[Sixb] Agent '${agentId}' tools must contain only agent tool definitions.`
-      )
+      throw new AgentDefinitionError(messages.invalidDefinitions)
     }
 
     assertValidAgentToolName(tool.name)
     assertValidAgentToolDescription(tool.name, tool.description)
     assertValidAgentToolInput(tool.name, tool.input)
     if (seen.has(tool.name)) {
-      throw new AgentDefinitionError(
-        `[Sixb] Agent '${agentId}' tools contains duplicate tool name '${tool.name}'.`
-      )
+      throw new AgentDefinitionError(messages.duplicateName(tool.name))
     }
     seen.add(tool.name)
   }
