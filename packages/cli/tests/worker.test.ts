@@ -116,8 +116,8 @@ describe("sixb worker", () => {
   test("requires a positional worker type", () => {
     const result = runWorkerFixture("valid-project")
 
-    expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("Usage: sixb worker")
+    expect(result.exitCode).toBe(2)
+    expect(result.stdout).toContain("sixb worker")
     expect(result.stdout).toContain("<sync|action|agent|pipeline|projection|workflow>")
     expect(result.stderr).toBe("")
   })
@@ -125,8 +125,8 @@ describe("sixb worker", () => {
   test("rejects removed worker selector flags", () => {
     const result = runWorkerFixture("valid-project", ["--type", "pipeline"])
 
-    expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("Use `sixb worker <type>`")
+    expect(result.exitCode).toBe(2)
+    expect(result.stdout).toContain("Unknown option '--type'")
     expect(result.stderr).toBe("")
   })
 
@@ -155,8 +155,8 @@ describe("sixb worker", () => {
   test("rejects a missing worker concurrency value", () => {
     const result = runWorkerFixture("valid-project", ["sync", "--concurrency"])
 
-    expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("Invalid worker concurrency ''")
+    expect(result.exitCode).toBe(2)
+    expect(result.stdout).toContain("--concurrency requires a value")
     expect(result.stdout).not.toContain("requires a queues provider")
     expect(result.stderr).toBe("")
   })

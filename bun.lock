@@ -592,7 +592,7 @@
     },
     "packages/cli": {
       "name": "@sixb/cli",
-      "version": "0.1.4",
+      "version": "0.1.5",
       "bin": {
         "sixb": "./src/index.tsx",
       },
@@ -601,6 +601,7 @@
         "@sixb/agent-worker": "workspace:*",
         "@sixb/app": "workspace:^",
         "@sixb/atlas": "workspace:^",
+        "@sixb/cli-core": "workspace:^",
         "@sixb/client": "workspace:^",
         "@sixb/core": "workspace:*",
         "@sixb/orchestrator": "workspace:*",

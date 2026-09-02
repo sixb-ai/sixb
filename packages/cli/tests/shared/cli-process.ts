@@ -11,6 +11,7 @@ export async function runCliToCompletion(options: {
   readonly cmd: readonly string[]
   readonly cwd: string
   readonly env?: Readonly<Record<string, string | undefined>>
+  readonly stdin?: string
   readonly timeoutMs?: number
 }): Promise<CompletedCliProcess> {
   const command = [...options.cmd]
@@ -19,9 +20,15 @@ export async function runCliToCompletion(options: {
     cmd: command,
     cwd: options.cwd,
     env: { ...process.env, ...options.env },
+    stdin: options.stdin === undefined ? undefined : "pipe",
     stdout: "pipe",
     stderr: "pipe",
   })
+
+  if (options.stdin !== undefined) {
+    proc.stdin.write(options.stdin)
+    proc.stdin.end()
+  }
 
   let timedOut = false
   const timeout = setTimeout(() => {
