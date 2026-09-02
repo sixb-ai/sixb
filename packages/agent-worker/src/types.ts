@@ -44,9 +44,9 @@ export type RecoverAiModelCall = (input: RecoverAiModelCallInput) => Promise<voi
 
 /**
  * The host surface the agent worker is constructed with. `SixbHost` satisfies it structurally, so
- * cohosting passes the host directly. Registered agents provide today's execution configuration;
- * when configured, the model catalog provides the authoritative live model binding. Models are
- * non-serialisable and never sent over the wire.
+ * cohosting passes the host directly. Registered agents and workflow Agent steps provide execution
+ * configuration; when configured, the model catalog provides the authoritative live model binding.
+ * Models are non-serialisable and never sent over the wire.
  */
 export interface AgentWorkerHost extends AgentExecutionHost {
   readonly broker: Broker
@@ -55,7 +55,7 @@ export interface AgentWorkerHost extends AgentExecutionHost {
   readonly queues: Queues
   readonly definitions: Pick<
     SixbDefinitions,
-    "agents" | "workflows" | "ontology" | "security" | "models"
+    "agents" | "workflows" | "ontology" | "security" | "models" | "tools"
   >
   readonly sandboxes?: SandboxFactory
   readonly projectRoot?: string

@@ -61,7 +61,8 @@ export type ListWorkflowRunNodesInput = Omit<
 >
 
 /** Execution-facing Agent node view derived from its run row and model-call ledger. */
-export interface WorkflowAgentNodeRunView extends Omit<WorkflowAgentNodeRunRecord, "execution"> {
+export interface WorkflowAgentNodeRunView
+  extends Omit<WorkflowAgentNodeRunRecord, "execution" | "agentId"> {
   readonly usage?: AiModelCallUsage
   /** Preferred valuation; omitted when there are no calls or cost storage is unavailable. */
   readonly cost?: AiCostSummary
@@ -274,7 +275,6 @@ function toWorkflowAgentNodeRunView(
     projectId: execution.projectId,
     nodeRunId: execution.nodeRunId,
     executionId: execution.executionId,
-    agentId: execution.agentId,
     status: execution.status,
     prompt: execution.prompt,
     modelId: execution.modelId,

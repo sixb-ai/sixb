@@ -1,14 +1,15 @@
 import type { ActionDefinition } from "../actions"
 import { isActionDefinition } from "../actions"
-import type { AgentDefinition } from "../agents"
-import { isAgentDefinition } from "../agents"
+import { AGENT_REASONING_LEVELS, isAgentToolDefinition } from "../agents"
 import type { SchemaOrRef } from "../ontology"
 import type { ScheduleDefinition, ScheduleDefinitionForEvent } from "../schedules"
 import { isScheduleDefinition } from "../schedules"
+import { isGroupDefinition } from "../security"
 import { WorkflowDefinitionError } from "./errors"
 import type {
   AgentStepBuilder,
   AgentStepDefinition,
+  DefineAgentStepConfig,
   InterventionBuilder,
   InterventionDefaultsRuntimeHandler,
   InterventionDefinition,
@@ -115,14 +116,28 @@ export function defineWorkflowStep<const TId extends string>(id: TId): StepBuild
   } as unknown as StepBuilder<TId>
 }
 
-export function defineAgentStep<const TId extends string, const TAgent extends AgentDefinition>(
+export function defineAgentStep<const TId extends string>(
   id: TId,
-  agent: TAgent
-): AgentStepBuilder<TId, TAgent> {
+  config: DefineAgentStepConfig
+): AgentStepBuilder<TId> {
   assertNonEmpty(id, "Agent step", "id")
-  if (!isAgentDefinition(agent)) {
-    throw new WorkflowDefinitionError(`Agent step "${id}" references an invalid agent.`)
+  if (!isRecord(config)) {
+    throw new WorkflowDefinitionError(`Agent step "${id}" config must be an object.`)
   }
+  if (typeof config.instructions !== "string" || !config.instructions.trim()) {
+    throw new WorkflowDefinitionError(`Agent step "${id}" instructions must not be empty.`)
+  }
+  if (
+    config.reasoning !== undefined &&
+    !(AGENT_REASONING_LEVELS as readonly string[]).includes(config.reasoning)
+  ) {
+    throw new WorkflowDefinitionError(
+      `Agent step "${id}" reasoning must be one of: ${AGENT_REASONING_LEVELS.join(", ")}.`
+    )
+  }
+  const { model, reasoning, instructions } = config
+  const groupIds = groupIdsFromAgentStepConfig(id, config)
+  const toolNames = toolNamesFromAgentStepConfig(id, config)
 
   return {
     input(input: RuntimeWorkflowInput): unknown {
@@ -133,13 +148,82 @@ export function defineAgentStep<const TId extends string, const TAgent extends A
               if (typeof prompt !== "function") {
                 throw new WorkflowDefinitionError(`Agent step "${id}" prompt must be a function.`)
               }
-              return { kind: "agentStep", id, agent, input, output, prompt }
+              return {
+                kind: "agentStep",
+                id,
+                ...(model === undefined ? {} : { model }),
+                ...(reasoning === undefined ? {} : { reasoning }),
+                instructions,
+                groupIds,
+                toolNames,
+                input,
+                output,
+                prompt,
+              }
             },
           }
         },
       }
     },
-  } as unknown as AgentStepBuilder<TId, TAgent>
+  } as unknown as AgentStepBuilder<TId>
+}
+
+function groupIdsFromAgentStepConfig(
+  stepId: string,
+  config: DefineAgentStepConfig
+): readonly string[] {
+  if (config.groups !== undefined && !Array.isArray(config.groups)) {
+    throw new WorkflowDefinitionError(
+      `Agent step "${stepId}" groups must be an array of group definitions.`
+    )
+  }
+  const groupIds = Array.from(config.groups ?? [], (group) => {
+    if (!isGroupDefinition(group)) {
+      throw new WorkflowDefinitionError(
+        `Agent step "${stepId}" groups must contain only group definitions.`
+      )
+    }
+    return group.id
+  })
+  assertUniqueAgentStepValues(stepId, "group", groupIds)
+  return Object.freeze(groupIds)
+}
+
+function toolNamesFromAgentStepConfig(
+  stepId: string,
+  config: DefineAgentStepConfig
+): readonly string[] {
+  if (config.tools !== undefined && !Array.isArray(config.tools)) {
+    throw new WorkflowDefinitionError(
+      `Agent step "${stepId}" tools must be an array of agent tool definitions.`
+    )
+  }
+  const toolNames = Array.from(config.tools ?? [], (tool) => {
+    if (!isAgentToolDefinition(tool)) {
+      throw new WorkflowDefinitionError(
+        `Agent step "${stepId}" tools must contain only agent tool definitions.`
+      )
+    }
+    return tool.name
+  })
+  assertUniqueAgentStepValues(stepId, "tool", toolNames)
+  return Object.freeze(toolNames)
+}
+
+function assertUniqueAgentStepValues(
+  stepId: string,
+  kind: "group" | "tool",
+  values: readonly string[]
+): void {
+  const seen = new Set<string>()
+  for (const value of values) {
+    if (seen.has(value)) {
+      throw new WorkflowDefinitionError(
+        `Agent step "${stepId}" ${kind}s contains duplicate ${kind} '${value}'.`
+      )
+    }
+    seen.add(value)
+  }
 }
 
 export function defineIntervention<const TId extends string>(
@@ -468,4 +552,8 @@ function isRuntimeWorkflowMapper(value: unknown): value is RuntimeWorkflowMapper
 
 function isRuntimeWorkflowScheduleMapper(value: unknown): value is RuntimeWorkflowScheduleMapper {
   return typeof value === "function"
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }

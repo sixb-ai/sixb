@@ -2098,11 +2098,11 @@ describe("SixbServer HTTP contract", () => {
         nodes: [
           {
             id: `${runId}:node:0`,
-            agentExecution: { agentId: "device-resolver", usage: { inputTokens: 10 } },
+            agentExecution: { usage: { inputTokens: 10 } },
           },
           {
             id: `${runId}:node:1`,
-            agentExecution: { agentId: "device-resolver", usage: { inputTokens: 11 } },
+            agentExecution: { usage: { inputTokens: 11 } },
           },
         ],
       })
@@ -2187,7 +2187,6 @@ describe("SixbServer HTTP contract", () => {
       const detail = (await detailResponse.json()) as Record<string, unknown>
       expect(detail).toMatchObject({
         nodeRunId,
-        agentId: "device-resolver",
         status: "running",
         prompt: "Resolve fan-1.",
         modelId: "test-model",
@@ -2205,6 +2204,7 @@ describe("SixbServer HTTP contract", () => {
           unvaluedCallCount: 1,
         },
       })
+      expect("agentId" in detail).toBe(false)
       expect(JSON.stringify(detail)).not.toContain("secret-execution-token")
 
       Object.defineProperty(sixb.storage, "aiCosts", { value: undefined })
@@ -2225,7 +2225,8 @@ describe("SixbServer HTTP contract", () => {
         body: JSON.stringify({}),
       })
       expect(cancelResponse.status).toBe(200)
-      expect(await cancelResponse.json()).toMatchObject({
+      const cancelled = (await cancelResponse.json()) as Record<string, unknown>
+      expect(cancelled).toMatchObject({
         run: { id: runId, status: "cancelled" },
         nodes: [
           {
@@ -2233,12 +2234,12 @@ describe("SixbServer HTTP contract", () => {
             status: "cancelled",
             agentExecution: {
               status: "cancelled",
-              agentId: "device-resolver",
               usage: { inputTokens: 15, outputTokens: 5 },
             },
           },
         ],
       })
+      expect(JSON.stringify(cancelled)).not.toContain("agentId")
 
       const cancelledExecutionResponse = await fetch(
         `${baseUrl}/api/workflow-runs/${runId}/nodes/resolveDevice/agent-execution`
@@ -2254,7 +2255,7 @@ describe("SixbServer HTTP contract", () => {
           code: "runtime.cancelled",
           message: "Execution was cancelled.",
           details: {
-            agentId: "device-resolver",
+            agentStepId: "resolve-device",
             workflowId: "review-device-health-workflow",
             workflowRunId: runId,
             nodeRunId,

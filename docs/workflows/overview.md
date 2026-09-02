@@ -4,8 +4,8 @@ A workflow runs a business process in a known order. Reach for one when work nee
 steps, typed data flowing between them, an object [action](../actions/overview.md) at the end, and a
 run history you can inspect.
 
-A workflow chains **nodes**: **steps** (typed functions that produce data), **action nodes** (which
-run an object action), and **interventions** (which pause for a human decision — see
+A workflow chains **nodes**: **steps** (typed functions), **agent tasks** (model-driven work with
+structured output), **action nodes**, and **interventions** (human decisions — see
 [Interventions](interventions.md)).
 
 ## When to use a workflow
@@ -58,6 +58,36 @@ const loadInvoiceContext = defineWorkflowStep("load-invoice-context")
 
 A field typed `ref(Invoice)` carries an object reference of the shape `{ objectTypeId, primaryId }`.
 
+## Define agent tasks
+
+An agent task owns its model instructions, permissions, tools, and typed input/output contract.
+
+```ts
+import { defineAgentStep, ref } from "@sixb/core"
+import { finance } from "../security/groups/finance"
+import { searchInvoices } from "../agent-tools/search-invoices"
+
+const composeReminder = defineAgentStep("compose-reminder", {
+  instructions: "Draft a concise reminder grounded in invoice data.",
+  reasoning: "medium",
+  groups: [finance],
+  tools: [searchInvoices],
+})
+  .input({ invoice: ref(Invoice) })
+  .output({ invoice: ref(Invoice), message: "string" })
+  .prompt(({ input }) => `Draft a reminder for invoice '${input.invoice.primaryId}'.`)
+```
+
+| Option | Behavior |
+| --- | --- |
+| `model` | Optional; otherwise uses the first `models.language` entry |
+| `groups` | Permissions of the task's stable, Sixb-managed service account; defaults to none |
+| `tools` | Project tools available to this task; defaults to none |
+
+Tools must also be registered in `createSixb({ tools })`. When a model catalog is configured, an
+explicit model must belong to `models.language`. Sandboxed framework tools such as `read` and
+`bash` are injected separately.
+
 ## Compose the chain
 
 `defineWorkflow(id)` declares the input, then `.then(...)` appends each node in order.
@@ -88,6 +118,7 @@ export const invoiceReminder = defineWorkflow("invoice-reminder")
 | `.input({ invoice })` | Declares the input needed to start a run |
 | `.when(schedule, mapper?)` | Auto-starts from a cron or [event schedule](../schedules/events.md) |
 | `.then(step)` | Runs a step |
+| `.then(agentTask)` | Runs an agent task and waits for its structured output |
 | `.then(action, mapper)` | Runs an object action |
 | `.then(intervention)` | Pauses for a human decision |
 | `steps.composeReminder` | Reads the output of an earlier node |
@@ -245,7 +276,7 @@ A run moves through these statuses, recorded per run and per node so you can ins
 | --- | --- |
 | `queued` | Requested; waiting for a worker |
 | `running` | A node is executing |
-| `waiting` | Suspended at an intervention, awaiting a response |
+| `waiting` | Suspended while an intervention or agent task completes |
 | `succeeded` | All nodes finished |
 | `failed` | A node threw; the run stopped |
 | `cancelled` | The run was cancelled |

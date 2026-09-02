@@ -48,7 +48,7 @@ export interface CreateSixbOptions {
   agents?: readonly AgentDefinition[]
   /** Models this project allows Sixb to use. The first of each kind is the default. */
   models?: ModelCatalogInput
-  /** Project tools available to the built-in main agent. */
+  /** Project tools available to Agent runtimes. */
   tools?: readonly AgentToolDefinition[]
   datasets?: readonly DatasetDefinition[]
   /** Connector definitions to register in addition to auto-discovered `connectors/` exports. */

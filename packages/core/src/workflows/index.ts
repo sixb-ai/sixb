@@ -1,3 +1,4 @@
+export { workflowAgentStepActorId } from "./agent-step-identity"
 export {
   defineAgentStep,
   defineIntervention,
@@ -39,6 +40,7 @@ export type {
   AgentStepPrompt,
   AgentStepPromptBuilder,
   AgentStepPromptContext,
+  DefineAgentStepConfig,
   DerivedWorkflowNodeKey,
   InferAgentStepInput,
   InferAgentStepOutput,
@@ -90,6 +92,7 @@ export {
   isInterventionDefinition,
   isStepDefinition,
   isWorkflowDefinition,
+  validateWorkflowAgentStepGroupReferences,
   validateWorkflowAgentStepInput,
   validateWorkflowAgentStepOutput,
   validateWorkflowDefinition,

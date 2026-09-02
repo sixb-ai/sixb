@@ -90,7 +90,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
   private readonly host: AgentWorkerHost
   private readonly agents: readonly AgentDefinition[]
   private readonly context: AgentWorkerContext | null
-  private readonly idleWithoutAgents: boolean
   private contextBudgets: ReadonlyMap<string, AgentContextBudget> = new Map()
   /**
    * Sandbox teardowns that outlived their run's dispose() (boot still in flight when the turn
@@ -113,8 +112,12 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
 
     this.host = host
     this.agents = host.definitions.agents.list()
-    this.idleWithoutAgents = this.agents.length === 0
-    this.context = this.idleWithoutAgents ? null : buildAgentContext(host, options, turnTimeoutMs)
+    const hasAgentWork =
+      this.agents.length > 0 ||
+      host.definitions.workflows
+        .list()
+        .some((workflow) => workflow.nodes.some((node) => node.type === "agent"))
+    this.context = hasAgentWork ? buildAgentContext(host, options, turnTimeoutMs) : null
   }
 
   override async start(): Promise<void> {
@@ -132,8 +135,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
   }
 
   protected override async run(signal: AbortSignal): Promise<void> {
-    if (!this.idleWithoutAgents) {
-      const context = this.requireContext()
+    if (this.context) {
+      const context = this.context
       const stopDispatch = new AbortController()
       const workerSignal = AbortSignal.any([signal, stopDispatch.signal])
       const dispatchLoop = this.runDispatchLoop(context, workerSignal)

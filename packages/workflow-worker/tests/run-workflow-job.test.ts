@@ -1,15 +1,15 @@
 import { describe, expect, test } from "bun:test"
 import {
   type ActionDefinition,
-  type AgentDefinition,
   type DomainEventLog,
   defineAction,
-  defineAgent,
   defineAgentStep,
+  defineGroup,
   defineIntervention,
   defineObjectType,
   defineWorkflow,
   defineWorkflowStep,
+  type GroupDefinition,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -22,8 +22,9 @@ import {
   type WorkflowDefinition,
   WorkflowValidationError,
 } from "@sixb/core"
+import { agentServiceAccountId } from "@sixb/core/internal/agents"
 import { bindDurablePrimitiveExecution } from "@sixb/core/internal/primitive-execution"
-import { snapshotWorkflowInput } from "@sixb/core/internal/workflows"
+import { snapshotWorkflowInput, workflowAgentStepActorId } from "@sixb/core/internal/workflows"
 import type {
   ActionRunFailure,
   ActionRunPhase,
@@ -77,13 +78,10 @@ const Invoice = defineObjectType({
   properties: [prop("id", "string", { required: true, primary: true })],
 })
 
-const invoiceResolverAgent = defineAgent("invoice-resolver", {
-  name: "Invoice resolver",
-  model: {} as Parameters<typeof defineAgent>[1]["model"],
+const resolveInvoiceWithAgent = defineAgentStep("resolve-invoice-with-agent", {
+  model: {} as NonNullable<Parameters<typeof defineAgentStep>[1]["model"]>,
   instructions: "Resolve the best matching invoice.",
 })
-
-const resolveInvoiceWithAgent = defineAgentStep("resolve-invoice-with-agent", invoiceResolverAgent)
   .input({ transaction: ref(Transaction) })
   .output({ invoice: ref(Invoice), confidence: "double", reason: "string" })
   .prompt(({ input }) => `Resolve transaction '${input.transaction.primaryId}'.`)
@@ -240,7 +238,7 @@ const createInvoiceFromTransaction = defineAction("create-invoice-from-transacti
 function createSixb(options: {
   readonly workflows?: readonly WorkflowDefinition[]
   readonly actions?: readonly ActionDefinition[]
-  readonly agents?: readonly AgentDefinition[]
+  readonly groups?: readonly GroupDefinition[]
 }) {
   return new SixbHost({
     id: "workflow-worker-tests",
@@ -251,7 +249,7 @@ function createSixb(options: {
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
     actions: options.actions ?? [],
-    agents: options.agents ?? [],
+    groups: options.groups ?? [],
     workflows: options.workflows ?? [],
   })
 }
@@ -819,10 +817,19 @@ describe("runWorkflowJob", () => {
   })
 
   test("parks at an agent node and resumes from its validated structured output", async () => {
+    const finance = defineGroup("finance")
+    const configuredStep = defineAgentStep("resolve-invoice-with-agent", {
+      model: {} as NonNullable<Parameters<typeof defineAgentStep>[1]["model"]>,
+      instructions: "Resolve the best matching invoice.",
+      groups: [finance],
+    })
+      .input({ transaction: ref(Transaction) })
+      .output({ invoice: ref(Invoice), confidence: "double", reason: "string" })
+      .prompt(({ input }) => `Resolve transaction '${input.transaction.primaryId}'.`)
     const workflow = defineWorkflow("agent-resolves-invoice")
       .input({ transaction: ref(Transaction) })
-      .then(resolveInvoiceWithAgent)
-    const sixb = createSixb({ workflows: [workflow], agents: [invoiceResolverAgent] })
+      .then(configuredStep)
+    const sixb = createSixb({ workflows: [workflow], groups: [finance] })
     const runtime = createRuntime(sixb)
 
     const waiting = await runWorkflowJob({
@@ -845,10 +852,32 @@ describe("runWorkflowJob", () => {
       nodeRunId: node!.id,
     })
     expect(execution).toMatchObject({
-      agentId: invoiceResolverAgent.id,
+      agentId: workflowAgentStepActorId(workflow.id, configuredStep.id),
       status: "queued",
       prompt: "Resolve transaction 'txn_1'.",
     })
+    const auth = sixb.storage.auth
+    if (!auth) throw new Error("Expected auth storage in test runtime.")
+    const actorId = workflowAgentStepActorId(workflow.id, configuredStep.id)
+    const serviceAccountId = agentServiceAccountId(actorId)
+    expect(
+      await auth.serviceAccounts.getById({ projectId: sixb.id, id: serviceAccountId })
+    ).toMatchObject({
+      id: serviceAccountId,
+      status: "active",
+    })
+    expect(
+      await auth.serviceAccountGroupMemberships.listForServiceAccount({
+        projectId: sixb.id,
+        serviceAccountId,
+      })
+    ).toEqual([
+      expect.objectContaining({
+        serviceAccountId,
+        groupId: finance.id,
+        source: "agent",
+      }),
+    ])
     const waitingEvents = await sixb.events.read({ topics: ["workflows"] })
     expect(waitingEvents.map((event) => event.type)).toEqual([
       "workflow.run.started",
@@ -917,7 +946,7 @@ describe("runWorkflowJob", () => {
     const workflow = defineWorkflow("agent-waiting-observer-fails")
       .input({ transaction: ref(Transaction) })
       .then(resolveInvoiceWithAgent)
-    const sixb = createSixb({ workflows: [workflow], agents: [invoiceResolverAgent] })
+    const sixb = createSixb({ workflows: [workflow] })
     let runWaitingNotified = false
     const observer: WorkflowRunObserver = {
       onRunStarted: async () => undefined,

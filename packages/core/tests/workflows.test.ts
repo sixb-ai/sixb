@@ -4,6 +4,8 @@ import {
   defineAction,
   defineAgent,
   defineAgentStep,
+  defineAgentTool,
+  defineGroup,
   defineIntervention,
   defineObjectType,
   defineSchedule,
@@ -16,10 +18,12 @@ import {
   isInterventionDefinition,
   isStepDefinition,
   isWorkflowDefinition,
+  type OntologySource,
   param,
   prop,
   RuntimeError,
   ref,
+  SixbHost,
   stringEnum,
   valueTypeRef,
   type WorkflowDefinition,
@@ -27,7 +31,7 @@ import {
 } from "../src"
 import { schemaFieldsToJsonSchema, schemaRecordToJsonSchema } from "../src/ontology/internal"
 import { createTestSixb } from "../src/testing"
-import { validateWorkflowDefinition } from "../src/workflows"
+import { validateWorkflowDefinition, workflowAgentStepActorId } from "../src/workflows"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Transaction = defineObjectType({
@@ -42,13 +46,27 @@ const Invoice = defineObjectType({
   properties: [prop("id", "string", { required: true, primary: true })],
 })
 
-const resolverAgent = defineAgent("invoice-resolver", {
-  name: "Invoice resolver",
-  model: {} as LanguageModelV4,
+function testModel(provider: string, modelId: string): LanguageModelV4 {
+  return {
+    specificationVersion: "v4",
+    provider,
+    modelId,
+    supportedUrls: {},
+    async doGenerate() {
+      throw new Error("Not implemented by the test model.")
+    },
+    async doStream() {
+      throw new Error("Not implemented by the test model.")
+    },
+  } as LanguageModelV4
+}
+
+const workflowModel = testModel("test", "workflow-model")
+
+const resolveInvoice = defineAgentStep("resolve-invoice", {
+  model: workflowModel,
   instructions: "Resolve invoices from transaction evidence.",
 })
-
-const resolveInvoice = defineAgentStep("resolve-invoice", resolverAgent)
   .input({ transaction: ref(Transaction) })
   .output({ invoice: ref(Invoice), confidence: "double", reason: "string" })
   .prompt(({ input }) => `Resolve transaction '${input.transaction.primaryId}'.`)
@@ -156,7 +174,10 @@ describe("defineWorkflowStep", () => {
 describe("defineAgentStep", () => {
   test("builds an inert structured agent step", () => {
     expect(resolveInvoice.kind).toBe("agentStep")
-    expect(resolveInvoice.agent).toBe(resolverAgent)
+    expect(resolveInvoice.model).toBe(workflowModel)
+    expect(resolveInvoice.instructions).toBe("Resolve invoices from transaction evidence.")
+    expect(resolveInvoice.groupIds).toEqual([])
+    expect(resolveInvoice.toolNames).toEqual([])
     expect(resolveInvoice.input).toEqual({
       transaction: { type: "objectRef", objectTypeId: "Transaction" },
     })
@@ -680,26 +701,193 @@ describe("SixbHost workflow registration", () => {
     expect(sixb.workflows.getById("review-match")).toBe(workflow)
   })
 
-  test("requires every workflow agent to be registered", () => {
+  test("registers directly configured workflow agent steps", () => {
     const workflow = defineWorkflow("agent-resolution")
       .input({ transaction: ref(Transaction) })
       .then(resolveInvoice)
 
-    expect(() => {
-      createTestSixb({
-        ontology: [Transaction, Invoice],
-        workflows: [workflow],
-        ...createTestRuntimeDeps(),
-      })
-    }).toThrow('references unknown agent "invoice-resolver"')
-
     const sixb = createTestSixb({
       ontology: [Transaction, Invoice],
-      agents: [resolverAgent],
       workflows: [workflow],
       ...createTestRuntimeDeps(),
     })
     expect(sixb.workflows.getById(workflow.id)).toBe(workflow)
+  })
+
+  test("uses the project default model when an agent step omits its model", () => {
+    const step = defineAgentStep("default-model", {
+      instructions: "Resolve invoices.",
+    })
+      .input({ transaction: ref(Transaction) })
+      .output({ invoice: ref(Invoice) })
+      .prompt(({ input }) => `Resolve '${input.transaction.primaryId}'.`)
+    const workflow: WorkflowDefinition = defineWorkflow("default-model-workflow")
+      .input({ transaction: ref(Transaction) })
+      .then(step)
+
+    const sixb = createTestSixb({
+      ontology: [Transaction, Invoice],
+      models: { language: [workflowModel] },
+      workflows: [workflow],
+      ...createTestRuntimeDeps(),
+    })
+
+    expect(sixb.workflows.getById(workflow.id)).toBe(workflow)
+  })
+
+  test("rejects an agent step without an explicit or project default model", () => {
+    const step = defineAgentStep("missing-model", {
+      instructions: "Resolve invoices.",
+    })
+      .input({ transaction: ref(Transaction) })
+      .output({ invoice: ref(Invoice) })
+      .prompt(({ input }) => `Resolve '${input.transaction.primaryId}'.`)
+    const workflow: WorkflowDefinition = defineWorkflow("missing-model-workflow")
+      .input({ transaction: ref(Transaction) })
+      .then(step)
+
+    expect(
+      () =>
+        new SixbHost<readonly OntologySource[]>({
+          ontology: [Transaction, Invoice],
+          workflows: [workflow],
+          ...createTestRuntimeDeps(),
+        })
+    ).toThrow(/needs a model/)
+  })
+
+  test("rejects an explicit agent-step model outside the project catalog", () => {
+    const unavailableModel = testModel("test", "unavailable-model")
+    const step = defineAgentStep("unknown-model", {
+      model: unavailableModel,
+      instructions: "Resolve invoices.",
+    })
+      .input({ transaction: ref(Transaction) })
+      .output({ invoice: ref(Invoice) })
+      .prompt(({ input }) => `Resolve '${input.transaction.primaryId}'.`)
+    const workflow: WorkflowDefinition = defineWorkflow("unknown-model-workflow")
+      .input({ transaction: ref(Transaction) })
+      .then(step)
+
+    expect(
+      () =>
+        new SixbHost<readonly OntologySource[]>({
+          ontology: [Transaction, Invoice],
+          models: { language: [workflowModel] },
+          workflows: [workflow],
+          ...createTestRuntimeDeps(),
+        })
+    ).toThrow(/uses unknown language model "test\/unavailable-model"/)
+  })
+
+  test("rejects an agent-step tool outside the project catalog", () => {
+    const lookup = defineAgentTool("lookup-invoice")
+      .description("Look up an invoice.")
+      .input({ invoiceId: "string" })
+      .run(({ input }) => input)
+    const step = defineAgentStep("unknown-tool", {
+      model: workflowModel,
+      instructions: "Resolve invoices.",
+      tools: [lookup],
+    })
+      .input({ transaction: ref(Transaction) })
+      .output({ invoice: ref(Invoice) })
+      .prompt(({ input }) => `Resolve '${input.transaction.primaryId}'.`)
+    const workflow: WorkflowDefinition = defineWorkflow("unknown-tool-workflow")
+      .input({ transaction: ref(Transaction) })
+      .then(step)
+
+    expect(
+      () =>
+        new SixbHost<readonly OntologySource[]>({
+          ontology: [Transaction, Invoice],
+          workflows: [workflow],
+          ...createTestRuntimeDeps(),
+        })
+    ).toThrow(/uses unknown project tool "lookup-invoice"/)
+  })
+
+  test("accepts explicitly selected registered tools and groups", () => {
+    const lookup = defineAgentTool("lookup-invoice")
+      .description("Look up an invoice.")
+      .input({ invoiceId: "string" })
+      .run(({ input }) => input)
+    const finance = defineGroup("finance")
+    const step = defineAgentStep("configured-task", {
+      model: workflowModel,
+      instructions: "Resolve invoices.",
+      groups: [finance],
+      tools: [lookup],
+    })
+      .input({ transaction: ref(Transaction) })
+      .output({ invoice: ref(Invoice) })
+      .prompt(({ input }) => `Resolve '${input.transaction.primaryId}'.`)
+    const workflow: WorkflowDefinition = defineWorkflow("configured-task-workflow")
+      .input({ transaction: ref(Transaction) })
+      .then(step)
+
+    const sixb = createTestSixb({
+      ontology: [Transaction, Invoice],
+      tools: [lookup],
+      groups: [finance],
+      workflows: [workflow],
+      ...createTestRuntimeDeps(),
+    })
+
+    expect(sixb.workflows.getById(workflow.id)).toBe(workflow)
+  })
+
+  test("rejects an agent-step group outside the security catalog", () => {
+    const finance = defineGroup("finance")
+    const step = defineAgentStep("unknown-group", {
+      model: workflowModel,
+      instructions: "Resolve invoices.",
+      groups: [finance],
+    })
+      .input({ transaction: ref(Transaction) })
+      .output({ invoice: ref(Invoice) })
+      .prompt(({ input }) => `Resolve '${input.transaction.primaryId}'.`)
+    const workflow: WorkflowDefinition = defineWorkflow("unknown-group-workflow")
+      .input({ transaction: ref(Transaction) })
+      .then(step)
+
+    expect(
+      () =>
+        new SixbHost<readonly OntologySource[]>({
+          ontology: [Transaction, Invoice],
+          workflows: [workflow],
+          ...createTestRuntimeDeps(),
+        })
+    ).toThrow(/references unknown group "finance"/)
+  })
+
+  test("rejects a registered agent that collides with a workflow task identity", () => {
+    const step = defineAgentStep("review", {
+      model: workflowModel,
+      instructions: "Review the invoice.",
+    })
+      .input({ transaction: ref(Transaction) })
+      .output({ invoice: ref(Invoice) })
+      .prompt(({ input }) => `Review '${input.transaction.primaryId}'.`)
+    const workflow: WorkflowDefinition = defineWorkflow("invoice-review")
+      .input({ transaction: ref(Transaction) })
+      .then(step)
+    const actorId = workflowAgentStepActorId(workflow.id, step.id)
+    const collidingAgent = defineAgent(actorId, {
+      name: "Colliding agent",
+      model: workflowModel,
+      instructions: "This identity is reserved by the workflow task.",
+    })
+
+    expect(
+      () =>
+        new SixbHost<readonly OntologySource[]>({
+          ontology: [Transaction, Invoice],
+          agents: [collidingAgent],
+          workflows: [workflow],
+          ...createTestRuntimeDeps(),
+        })
+    ).toThrow(/conflicts with registered agent/)
   })
 
   test("rejects duplicate workflow ids", () => {

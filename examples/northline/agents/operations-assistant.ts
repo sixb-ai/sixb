@@ -3,6 +3,10 @@ import { gateway, generateImage } from "ai"
 
 const IMAGE_MODEL = "xai/grok-imagine-image-2.0"
 
+export const operationsAssistantModel: ReturnType<typeof gateway> = gateway(
+  "deepseek/deepseek-v4-flash-vision-exp"
+)
+
 export const generateImageTool = defineAgentTool("generate_image")
   .description("Generate an image from a text prompt and return it as an attachment.")
   .input({ prompt: "string" })
@@ -68,7 +72,7 @@ const compactionDemoContext =
 export const operationsAssistant = defineAgent("operations-assistant", {
   name: "Operations Assistant",
   description: "A demo agent showing how to add an AI assistant to a Sixb app.",
-  model: gateway("deepseek/deepseek-v4-flash-vision-exp"),
+  model: operationsAssistantModel,
   reasoning: "medium",
   instructions: [
     "This is a demo agent for the Northline example.",

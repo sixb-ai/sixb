@@ -1,3 +1,4 @@
+import { SYSTEM_PRINCIPAL } from "../auth"
 import { agentServiceAccountId } from "../agents/authority"
 import type { AuthStorage } from "../storage/auth"
 import { AuthStorageError } from "../storage/auth"
@@ -30,7 +31,7 @@ export async function createTestAgentExecution(
         name: `Test Agent ${input.agentId}`,
         description: `Test service account for Agent '${input.agentId}'.`,
         status: "active",
-        createdByPrincipal: { type: "system", id: "test" },
+        createdByPrincipal: SYSTEM_PRINCIPAL,
         createdAt: now,
         updatedAt: now,
       })

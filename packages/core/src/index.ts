@@ -748,6 +748,7 @@ export type {
   AgentStepPrompt,
   AgentStepPromptBuilder,
   AgentStepPromptContext,
+  DefineAgentStepConfig,
   InferAgentStepInput,
   InferAgentStepOutput,
   InferInterventionInput,
