@@ -1,3 +1,4 @@
+import { writeJson } from "@sixb/cli-core"
 import {
   createAuthServiceAccount,
   createAuthServiceAccountAccessToken,
@@ -7,7 +8,8 @@ import {
   listAuthServiceAccounts,
   revokeAuthServiceAccountAccessToken,
 } from "@sixb/client"
-import { createCliSixbClient, resolveApiClientConfig, unwrapSixbApiResult } from "../lib/api-client"
+import { createCliSixbClient, unwrapSixbApiResult } from "../lib/api-client"
+import { resolveProfileApiClientConfig } from "../lib/profile-api-client"
 import { KeyValueResultView, renderStatic, SecretResultView, TableResultView } from "../ui"
 import {
   formatDate,
@@ -22,6 +24,7 @@ export interface ServiceAccountCommandOptions {
   readonly positionals?: readonly string[]
   readonly apiUrl?: string
   readonly token?: string
+  readonly profile?: string
   readonly id?: string
   readonly name?: string
   readonly description?: string
@@ -32,7 +35,7 @@ export interface ServiceAccountCommandOptions {
 }
 
 export async function runServiceAccount(options: ServiceAccountCommandOptions = {}) {
-  const command = options.positionals?.[0] ?? "list"
+  const command = options.positionals?.[0]
   if (command === "token") {
     await runServiceAccountToken(options)
     return
@@ -57,11 +60,11 @@ export async function runServiceAccount(options: ServiceAccountCommandOptions = 
 }
 
 async function listServiceAccounts(options: ServiceAccountCommandOptions) {
-  const client = createCliSixbClient(resolveApiClientConfig(options))
+  const client = createCliSixbClient(await resolveProfileApiClientConfig(options))
   const result = unwrapSixbApiResult(await listAuthServiceAccounts({ client }))
 
   if (options.json) {
-    console.log(JSON.stringify(result, null, 2))
+    writeJson(result)
     return
   }
 
@@ -85,7 +88,7 @@ async function createServiceAccount(options: ServiceAccountCommandOptions) {
   const id = options.id?.trim()
   const description = options.description?.trim()
   const groupIds = normalizeGroupIds(options.groupIds)
-  const client = createCliSixbClient(resolveApiClientConfig(options))
+  const client = createCliSixbClient(await resolveProfileApiClientConfig(options))
   const result = unwrapSixbApiResult(
     await createAuthServiceAccount({
       client,
@@ -99,7 +102,7 @@ async function createServiceAccount(options: ServiceAccountCommandOptions) {
   )
 
   if (options.json) {
-    console.log(JSON.stringify(result, null, 2))
+    writeJson(result)
     return
   }
 
@@ -122,7 +125,7 @@ async function disableServiceAccount(options: ServiceAccountCommandOptions) {
     throw new Error("Usage: sixb service-account disable <service-account-id>")
   }
 
-  const client = createCliSixbClient(resolveApiClientConfig(options))
+  const client = createCliSixbClient(await resolveProfileApiClientConfig(options))
   const result = unwrapSixbApiResult(
     await disableAuthServiceAccount({
       client,
@@ -131,7 +134,7 @@ async function disableServiceAccount(options: ServiceAccountCommandOptions) {
   )
 
   if (options.json) {
-    console.log(JSON.stringify(result, null, 2))
+    writeJson(result)
     return
   }
 
@@ -148,7 +151,7 @@ async function disableServiceAccount(options: ServiceAccountCommandOptions) {
 }
 
 async function runServiceAccountToken(options: ServiceAccountCommandOptions) {
-  const action = options.positionals?.[1] ?? "list"
+  const action = options.positionals?.[1]
   if (action === "list") {
     await listServiceAccountTokens(options)
     return
@@ -172,7 +175,7 @@ async function listServiceAccountTokens(options: ServiceAccountCommandOptions) {
     options,
     "Usage: sixb service-account token list <service-account-id>"
   )
-  const client = createCliSixbClient(resolveApiClientConfig(options))
+  const client = createCliSixbClient(await resolveProfileApiClientConfig(options))
   const result = unwrapSixbApiResult(
     await listAuthServiceAccountAccessTokens({
       client,
@@ -181,7 +184,7 @@ async function listServiceAccountTokens(options: ServiceAccountCommandOptions) {
   )
 
   if (options.json) {
-    console.log(JSON.stringify(result, null, 2))
+    writeJson(result)
     return
   }
 
@@ -215,7 +218,7 @@ async function createServiceAccountToken(options: ServiceAccountCommandOptions) 
 
   const expiresAt = resolveExpiration(options)
   const groupIds = normalizeGroupIds(options.groupIds)
-  const client = createCliSixbClient(resolveApiClientConfig(options))
+  const client = createCliSixbClient(await resolveProfileApiClientConfig(options))
   const result = unwrapSixbApiResult(
     await createAuthServiceAccountAccessToken({
       client,
@@ -229,7 +232,7 @@ async function createServiceAccountToken(options: ServiceAccountCommandOptions) 
   )
 
   if (options.json) {
-    console.log(JSON.stringify(result, null, 2))
+    writeJson(result)
     return
   }
 
@@ -258,7 +261,7 @@ async function revokeServiceAccountToken(options: ServiceAccountCommandOptions) 
     throw new Error("Usage: sixb service-account token revoke <service-account-id> <token-id>")
   }
 
-  const client = createCliSixbClient(resolveApiClientConfig(options))
+  const client = createCliSixbClient(await resolveProfileApiClientConfig(options))
   const result = unwrapSixbApiResult(
     await revokeAuthServiceAccountAccessToken({
       client,
@@ -267,7 +270,7 @@ async function revokeServiceAccountToken(options: ServiceAccountCommandOptions) 
   )
 
   if (options.json) {
-    console.log(JSON.stringify(result, null, 2))
+    writeJson(result)
     return
   }
 
