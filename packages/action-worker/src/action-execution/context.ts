@@ -1,6 +1,8 @@
 import type {
   ActionDefinition,
   ActionObjectSubject,
+  ActionReadFacade,
+  ActionReadObjectSetSource,
   ActionRuntimeFacade,
   ActionSubject,
   ActionTargetObject,
@@ -8,7 +10,8 @@ import type {
   ObjectTypeWithPropertyTokens,
 } from "@sixb/core"
 import { isObjectActionDefinition, ObjectNotFoundError } from "@sixb/core"
-import { coerceActionParamsToTyped } from "@sixb/core/internal/actions"
+import type { ActionReadRecorder } from "@sixb/core/internal/actions"
+import { coerceActionParamsToTyped, createActionReadFacade } from "@sixb/core/internal/actions"
 import { createSixbError } from "@sixb/core/internal/errors"
 import type { ActionRunRecord } from "@sixb/core/storage"
 import type { RunActionJobInput } from "../types"
@@ -36,6 +39,24 @@ export function toActionRuntimeFacade(runtime: RunActionJobInput["runtime"]): Ac
       }
     },
   }
+}
+
+export function toActionReadFacade(
+  runtime: RunActionJobInput["runtime"],
+  recorder: ActionReadRecorder
+): ActionReadFacade {
+  return createActionReadFacade(
+    (objectType) => runtime.sixb.objects(objectType) as ActionReadObjectSetSource,
+    {
+      recorder,
+      resolveLinkIds: (objectTypeId) =>
+        runtime.sixb.objects.resolveType(objectTypeId).links.map((definition) => definition.id),
+      telemetry: {
+        resolveObjectType: (objectTypeId) => runtime.sixb.objects.resolveType(objectTypeId),
+        getHistoryBatch: (input) => runtime.sixb.objects.getTelemetryHistoryBatch(input),
+      },
+    }
+  )
 }
 
 function toActionTargetObject(

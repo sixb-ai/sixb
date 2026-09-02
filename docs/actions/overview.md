@@ -170,7 +170,7 @@ Each handler receives a context object. Every phase gets `params` (validated), `
 | Phase | Added context fields |
 | --- | --- |
 | `validate` | `target` (object actions) |
-| `writeback` | `target` (object actions), `sixb` (connectors + telemetry + immutable blobs) |
+| `writeback` | `target` (object actions), `sixb` (connectors + telemetry writes + immutable blobs), `read` |
 | `edits` | `objects` (edit facade), `read` (read facade), `writeback` (writeback's return value) |
 | `effects` | `sixb`, `commit` (what the edits changed), `writeback` |
 
@@ -239,6 +239,40 @@ export const sendReminder = defineAction("sendReminder", {
 ```
 
 The runtime commits every staged edit in a single atomic batch once the handler returns.
+
+### Reading telemetry in Actions
+
+`read.telemetry.historyBatch(...)` reads several telemetry series through one authorized provider
+call. Series use ontology property tokens, so values and units stay typed without exposing storage
+ids or the project id:
+
+```ts
+.writeback(async ({ params, read, run }) => {
+  const histories = await read.telemetry.historyBatch({
+    series: [
+      { objectId: params.clientId, property: ClientMetric.p.value },
+      { objectId: params.clientId, property: ClientMetric.p.target },
+    ],
+    from: params.from,
+    to: params.to ?? run.startedAt,
+    order: "asc",
+  })
+
+  return buildReport(histories)
+})
+```
+
+The result contains one entry per requested series in the same order, including duplicates. Each
+entry exposes its `objectId`, the original `property` token, and typed `{ value, at, unit? }`
+points. `from` and `to` are inclusive; `limitPerSeries` applies the same intentional cap to every
+series.
+
+Telemetry history is a coherent snapshot for this batch call, not an Action edit dependency. It is
+therefore not added to the object/link revision fence. Use a stable upper bound such as
+`params.to ?? run.startedAt` to keep the report window stable across retries. This excludes newly
+dated points after the run began, but does not freeze later backfills or corrections whose `at`
+still falls inside the range. Exact object reads and link-scope reads are fenced; arbitrary object
+`query()`/`list()` results and telemetry history are snapshot reads in this release.
 
 ### Editing objects
 

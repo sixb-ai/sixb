@@ -42,6 +42,11 @@ const Room = defineObjectType({
     prop("id", "string", { required: true, primary: true }),
     prop("externalId", "string", { required: true }),
     prop("name", "string", { required: true }),
+    prop("currentTemperature", "double", {
+      mode: "telemetry",
+      semanticType: "Temperature",
+    }),
+    prop("occupied", "boolean", { mode: "telemetry" }),
   ],
   links: [link("building", Building, { cardinality: "one" })],
 })
@@ -97,7 +102,7 @@ const reboot = defineAction("reboot")
 const runtimeFacade = defineAction("runtimeFacade")
   .on(Room)
   .params({})
-  .writeback(({ sixb, read }) => {
+  .writeback(async ({ sixb, read }) => {
     sixb.blobs.put({
       body: new Uint8Array([1, 2, 3]),
       expectedSizeBytes: 3,
@@ -120,6 +125,32 @@ const runtimeFacade = defineAction("runtimeFacade")
     // writeback can enrich its external payload with side-effect-free reads
     read.objects(Room).get("room:1")
     read.objects(Room).query()
+
+    const [temperatures, occupancy] = await read.telemetry.historyBatch({
+      series: [
+        { objectId: "room:1", property: Room.p.currentTemperature },
+        { objectId: "room:1", property: Room.p.occupied },
+      ],
+      from: new Date("2026-01-01T00:00:00.000Z"),
+      to: new Date("2026-02-01T00:00:00.000Z"),
+    })
+    const temperature: number = temperatures.points[0]?.value ?? 0
+    const temperatureUnit: string | undefined = temperatures.points[0]?.unit
+    const occupied: boolean = occupancy.points[0]?.value ?? false
+
+    await read.telemetry.historyBatch({
+      series: [
+        {
+          objectId: "room:1",
+          // @ts-expect-error static properties cannot be used as telemetry series
+          property: Room.p.name,
+        },
+      ],
+    })
+
+    void temperature
+    void temperatureUnit
+    void occupied
   })
 
 defineAction("targetAlias")

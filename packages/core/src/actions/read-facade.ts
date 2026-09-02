@@ -8,12 +8,28 @@ import type {
   OntologyObjectRef,
 } from "../materializer"
 import { createLinkScopeFingerprint } from "../materializer"
+import { OntologyValidationError } from "../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { ValueType } from "../ontology/types"
+import {
+  assertPropertyTokenBelongsToObjectType,
+  assertTelemetryProperty,
+} from "../ontology/validation"
+import { RuntimeError } from "../runtime/errors"
 import type { ObjectSetListInput } from "../runtime/types"
-import type { ObjectLinkRow, ObjectRow } from "../storage"
+import type {
+  ObjectLinkRow,
+  ObjectRow,
+  TimeseriesHistoryBatchInput,
+  TimeseriesHistoryBatchResult,
+} from "../storage"
 import type { ActionReadDependencies } from "./commit-edits"
-import type { ActionReadFacade, ActionReadObjectSet } from "./types"
+import type {
+  ActionReadFacade,
+  ActionReadObjectSet,
+  ActionTelemetryHistorySeriesInput,
+  ActionTelemetryReadFacade,
+} from "./types"
 
 export type ActionReadObjectSetSource = {
   get(id: string): Promise<unknown>
@@ -25,13 +41,22 @@ export type ActionReadObjectSetSource = {
   }
 }
 
+/** Runtime leaves used by the Action telemetry read adapter. */
+export interface ActionTelemetryReadSource {
+  readonly resolveObjectType: (objectTypeId: string) => ObjectTypeWithPropertyTokens
+  readonly getHistoryBatch: (
+    input: Omit<TimeseriesHistoryBatchInput, "projectId">
+  ) => Promise<readonly TimeseriesHistoryBatchResult[]>
+}
+
 /**
  * Records the exact state an Action handler observed while reading.
  *
  * A handler that reads one dependency twice keeps the first observation: the commit must fail when
  * current state no longer matches what the decision was made against, and the later read may already
  * reflect the handler's own intent. Arbitrary query phantoms stay out of this release — `query()` and
- * `list()` results are not turned into dependencies.
+ * `list()` results are not turned into dependencies. Telemetry history is also a call-level snapshot,
+ * not an edit dependency.
  */
 export class ActionReadRecorder {
   private readonly objects = new Map<string, ExpectedObjectRevision>()
@@ -130,6 +155,8 @@ export interface ActionReadFacadeOptions {
    * recorded scopes.
    */
   readonly resolveLinkIds: (objectTypeId: string) => readonly string[]
+  /** Canonical authorized telemetry history leaf. Omitted only by isolated facade consumers. */
+  readonly telemetry?: ActionTelemetryReadSource
 }
 
 export function createActionReadFacade(
@@ -139,6 +166,7 @@ export function createActionReadFacade(
   options?: ActionReadFacadeOptions
 ): ActionReadFacade {
   const facade = {
+    telemetry: createActionTelemetryReadFacade(options?.telemetry),
     objects<const TObjectType extends ObjectTypeWithPropertyTokens>(objectType: TObjectType) {
       return createActionReadObjectSetAdapter<TObjectType>(
         objectType,
@@ -151,7 +179,101 @@ export function createActionReadFacade(
   return facade as ActionReadFacade
 }
 
-function createActionReadObjectSetAdapter<TObjectType extends ObjectTypeWithPropertyTokens>(
+function createActionTelemetryReadFacade(
+  source: ActionTelemetryReadSource | undefined
+): ActionTelemetryReadFacade<readonly ValueType[]> {
+  const facade = {
+    async historyBatch(input: {
+      readonly series: readonly ActionTelemetryHistorySeriesInput[]
+      readonly from?: Date
+      readonly to?: Date
+      readonly limitPerSeries?: number
+      readonly order?: "asc" | "desc"
+    }) {
+      if (!source) {
+        throw new RuntimeError(
+          "[Sixb] Action telemetry history requires a configured telemetry read source."
+        )
+      }
+      if (input.series.length === 0) {
+        return []
+      }
+
+      const requestedSeries = input.series.map((entry) => {
+        const objectType = source.resolveObjectType(entry.property.objectTypeId)
+        assertPropertyTokenBelongsToObjectType(objectType, entry.property)
+        const registeredProperty = objectType.properties.find(
+          (property) => property.id === entry.property.id
+        )
+        if (!registeredProperty) {
+          throw new OntologyValidationError(
+            `[Sixb] Unknown property '${entry.property.id}' for object type '${objectType.id}'`
+          )
+        }
+        assertTelemetryProperty(registeredProperty)
+        return {
+          objectTypeId: objectType.id,
+          objectId: entry.objectId,
+          propertyId: registeredProperty.id,
+        }
+      })
+
+      const results = await source.getHistoryBatch({
+        series: requestedSeries,
+        ...(input.from !== undefined ? { from: input.from } : {}),
+        ...(input.to !== undefined ? { to: input.to } : {}),
+        ...(input.limitPerSeries !== undefined ? { limitPerSeries: input.limitPerSeries } : {}),
+        ...(input.order !== undefined ? { order: input.order } : {}),
+      })
+      assertTelemetryBatchResultMatchesRequest(requestedSeries, results)
+
+      return input.series.map((entry, index) => ({
+        objectId: entry.objectId,
+        property: entry.property,
+        points: results[index].points.map((point) => ({
+          value: point.value,
+          at: point.at,
+          ...(point.unit !== undefined ? { unit: point.unit } : {}),
+        })),
+      }))
+    },
+  }
+
+  // Cast needed at the generic token boundary: the implementation deliberately manipulates raw
+  // provider values while the public facade maps every tuple position back to its property token.
+  return facade as unknown as ActionTelemetryReadFacade<readonly ValueType[]>
+}
+
+function assertTelemetryBatchResultMatchesRequest(
+  requested: readonly {
+    readonly objectTypeId: string
+    readonly objectId: string
+    readonly propertyId: string
+  }[],
+  results: readonly TimeseriesHistoryBatchResult[]
+): void {
+  if (results.length !== requested.length) {
+    throw new RuntimeError(
+      `[Sixb] Telemetry history provider returned ${results.length} batch results for ${requested.length} requested series.`
+    )
+  }
+
+  for (let index = 0; index < requested.length; index += 1) {
+    const expected = requested[index]
+    const actual = results[index]
+    if (
+      actual.objectTypeId !== expected.objectTypeId ||
+      actual.objectId !== expected.objectId ||
+      actual.propertyId !== expected.propertyId
+    ) {
+      throw new RuntimeError(
+        `[Sixb] Telemetry history provider returned an unexpected series at batch index ${index}.`
+      )
+    }
+  }
+}
+
+function <createActionReadObjectSetAdapter<TObjectType extends ObjectTypeWithPropertyTokens>(
   objectType: TObjectType,
   objectSet: ActionReadObjectSetSource,
   options: ActionReadFacadeOptions | undefined
