@@ -1,13 +1,12 @@
-import { ApiClient } from "../api-client"
+import type { ApiClient } from "../api-client"
 import { isHelp, requireExact } from "../arguments"
 import { fail, writeJson, writeText } from "../output"
 import { GROUP_HELP } from "./metadata"
 import { asRecord, asRecords } from "./shared"
 
-export async function ontology(args: string[]): Promise<void> {
+export async function ontology(api: ApiClient, args: readonly string[]): Promise<void> {
   const [sub, ...rest] = args
   if (!sub || isHelp(sub)) return writeText(GROUP_HELP.ontology)
-  const api = new ApiClient()
   if (sub === "list") {
     if (isHelp(rest[0])) return writeText("Usage: sixb ontology list [--full]")
     const full = rest.length === 1 && rest[0] === "--full"

@@ -1,4 +1,5 @@
-export const AGENT_CLI_VERSION = "1"
+/** Version of the stable JSON and command contract. */
+export const INSTANCE_CLI_VERSION = "1"
 export const EXIT_USAGE = 2
 export const EXIT_API = 3
 
