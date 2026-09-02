@@ -21,6 +21,7 @@ import {
   prop,
   SixbHost,
 } from "@sixb/core"
+import { createInheritedMainAgentExecutionRecord } from "@sixb/core/internal/agent-execution"
 import {
   createAgentApiGatewayCapability,
   createAgentRunExecutionToken,
@@ -138,6 +139,18 @@ describe("agent API gateway", () => {
     )
     expect(count.status).toBe(200)
     await expect(count.json()).resolves.toMatchObject({ count: 1 })
+  })
+
+  test("restores the main agent's inherited user authority", async () => {
+    const { app, gatewayBaseUrl } = await createGatewayRuntime({ mainAgent: true })
+
+    const response = await app.fetch(new Request(`${gatewayBaseUrl}/api/object-types`))
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual([
+      expect.objectContaining({ id: "contract" }),
+      expect.objectContaining({ id: "device" }),
+    ])
   })
 
   test("exposes files, links, action history, and authorized workflow runs", async () => {
@@ -573,6 +586,7 @@ async function createGatewayRuntime(
   options: {
     readonly auth?: boolean
     readonly executionKind?: "conversation" | "workflow"
+    readonly mainAgent?: boolean
     readonly queueLeaseExpiresAt?: Date
   } = {}
 ): Promise<{
@@ -659,22 +673,24 @@ async function createGatewayRuntime(
     finishedAt: NOW,
   })
 
-  const serviceAccountId = "svc_agent_assistant"
-  await storage.auth.serviceAccounts.create({
-    id: serviceAccountId,
-    projectId: PROJECT_ID,
-    name: "Assistant agent",
-    status: "active",
-    createdAt: NOW,
-    updatedAt: NOW,
-  })
-  await storage.auth.serviceAccountGroupMemberships.upsert({
-    projectId: PROJECT_ID,
-    serviceAccountId,
-    groupId: agentRuntime.id,
-    source: "agent",
-    createdAt: NOW,
-  })
+  if (!options.mainAgent) {
+    const serviceAccountId = "svc_agent_assistant"
+    await storage.auth.serviceAccounts.create({
+      id: serviceAccountId,
+      projectId: PROJECT_ID,
+      name: "Assistant agent",
+      status: "active",
+      createdAt: NOW,
+      updatedAt: NOW,
+    })
+    await storage.auth.serviceAccountGroupMemberships.upsert({
+      projectId: PROJECT_ID,
+      serviceAccountId,
+      groupId: agentRuntime.id,
+      source: "agent",
+      createdAt: NOW,
+    })
+  }
 
   const threadId = "thread-1"
   const runId = options.executionKind === "workflow" ? "workflow-node-1" : "run-1"
@@ -735,25 +751,28 @@ async function createGatewayRuntime(
       startedAt: NOW,
     })
   } else {
+    const agentId = options.mainAgent ? "main" : "assistant"
     await storage.agents.threads.create({
       id: threadId,
       projectId: PROJECT_ID,
-      agentId: "assistant",
+      agentId,
       ownerPrincipal: { type: "user", id: "usr_requester" },
       createdAt: NOW,
       updatedAt: NOW,
     })
-    const executionId = await createTestAgentExecution(storage, {
-      projectId: PROJECT_ID,
-      agentId: "assistant",
-      runId,
-    })
+    const executionId = options.mainAgent
+      ? await createMainAgentExecution(storage, runId)
+      : await createTestAgentExecution(storage, {
+          projectId: PROJECT_ID,
+          agentId,
+          runId,
+        })
     await storage.agents.runs.create({
       id: runId,
       projectId: PROJECT_ID,
       executionId,
       threadId,
-      agentId: "assistant",
+      agentId,
       triggerMessageId: "msg-1",
       requesterGroupIds: ["engineering"],
       createdAt: NOW,
@@ -785,4 +804,51 @@ async function createGatewayRuntime(
     storage,
     sixb,
   }
+}
+
+async function createMainAgentExecution(storage: InMemoryStorage, runId: string): Promise<string> {
+  const userId = "usr_requester"
+  const sessionId = "session-main-agent"
+  await storage.auth.users.create({
+    id: userId,
+    projectId: PROJECT_ID,
+    email: "requester@example.com",
+    createdAt: NOW,
+    updatedAt: NOW,
+  })
+  await storage.auth.groupMemberships.upsert({
+    projectId: PROJECT_ID,
+    userId,
+    groupId: agentRuntime.id,
+    source: "manual",
+    createdAt: NOW,
+  })
+  await storage.auth.sessions.create({
+    id: sessionId,
+    projectId: PROJECT_ID,
+    userId,
+    strategyId: "test",
+    audience: "app",
+    tokenHash: "not-used-after-admission",
+    createdAt: NOW,
+    expiresAt: new Date("2027-06-28T12:00:00.000Z"),
+  })
+  const parent = await storage.executions.create({
+    id: "execution-main-request",
+    projectId: PROJECT_ID,
+    requestedBy: { type: "user", id: userId },
+    executor: { type: "request", requestId: "request-main" },
+    source: { type: "http", requestId: "request-main" },
+    correlationId: "request-main",
+    authorizationRef: {
+      type: "principal",
+      principal: { type: "user", id: userId },
+      credential: { type: "session", id: sessionId },
+    },
+  })
+  const executionId = "execution-main-agent"
+  await storage.executions.create(
+    createInheritedMainAgentExecutionRecord({ id: executionId, parent, runId })
+  )
+  return executionId
 }

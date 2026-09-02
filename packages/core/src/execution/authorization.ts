@@ -27,6 +27,8 @@ export type ResolvedRuntimeAuthorization =
       readonly type: "unrestricted"
       readonly projectId: string
       readonly ref: Exclude<AuthorizationRef, { readonly type: "principal" }>
+      /** Process-local binding used by provider façades that explicitly support agent runs. */
+      readonly executionBinding?: AgentExecutionBinding
     }
   | { readonly type: "denied" }
 
@@ -56,25 +58,51 @@ export function createPrincipalRuntimeAuthorization(input: {
   return createRegisteredPrincipalAuthorization(input)
 }
 
-/** Register service-account authority bound to one exact agent run. */
+/** Register restored authority bound to one exact agent run. */
 export function createAgentRuntimeAuthorization(input: {
   readonly projectId: string
-  readonly context: AuthorizationContext
   readonly executionId: string
   readonly agentId: string
   readonly runId: string
+  readonly authority:
+    | {
+        readonly type: "principal"
+        readonly context: AuthorizationContext
+        readonly credential?: Extract<
+          AuthorizationRef,
+          { readonly type: "principal" }
+        >["credential"]
+      }
+    | { readonly type: "disabled" }
 }): RuntimeAuthorization {
-  if (input.context.principal.type !== "serviceAccount") {
-    throw new Error("[Sixb] Agent execution authority must belong to a service account.")
-  }
   assertNonEmpty(input.executionId, "Execution id")
   assertNonEmpty(input.agentId, "Agent id")
   assertNonEmpty(input.runId, "Agent run id")
-  return createRegisteredPrincipalAuthorization(input, {
+  const executionBinding: AgentExecutionBinding = {
     type: "agent",
     executionId: input.executionId,
     agentId: input.agentId,
     runId: input.runId,
+  }
+
+  if (input.authority.type === "principal") {
+    return createRegisteredPrincipalAuthorization(
+      {
+        projectId: input.projectId,
+        context: input.authority.context,
+        ...(input.authority.credential === undefined
+          ? {}
+          : { credential: input.authority.credential }),
+      },
+      executionBinding
+    )
+  }
+
+  return register({
+    type: "unrestricted",
+    projectId: input.projectId,
+    ref: Object.freeze({ type: "disabled" }),
+    executionBinding: Object.freeze(executionBinding),
   })
 }
 
@@ -246,10 +274,6 @@ export function resolveExecutionScopeAuthorization(
 
     case "agent":
       if (
-        resolved.type !== "principal" ||
-        resolved.ref.type !== "principal" ||
-        resolved.ref.principal.type !== "serviceAccount" ||
-        resolved.ref.credential !== undefined ||
         resolved.executionBinding?.type !== "agent" ||
         resolved.executionBinding.executionId !== execution.id ||
         resolved.executionBinding.agentId !== execution.executor.agentId ||
@@ -260,7 +284,12 @@ export function resolveExecutionScopeAuthorization(
           "agent authority does not match its execution binding"
         )
       }
-      return resolved
+      if (resolved.type === "principal" && resolved.ref.type === "principal") return resolved
+      if (resolved.type === "unrestricted" && resolved.ref.type === "disabled") return resolved
+      throw invalidExecutionAuthority(
+        execution.id,
+        "agent authority must be principal or explicitly disabled"
+      )
 
     case "kernel":
       if (

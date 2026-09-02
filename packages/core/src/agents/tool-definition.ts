@@ -16,6 +16,7 @@ import {
   assertValidAgentToolDefinitions,
   assertValidAgentToolDescription,
   assertValidAgentToolName,
+  assertValidProjectAgentToolDefinitions,
   validateAndSnapshotAgentToolInput,
 } from "./validation"
 
@@ -87,6 +88,28 @@ export function toolsFromDefinitions(
 
   assertValidAgentToolDefinitions(agentId, tools)
 
+  return normalizeAgentToolDefinitions(tools)
+}
+
+export function toolsFromProjectConfig(
+  tools: readonly AgentToolDefinition[] | undefined
+): readonly AgentToolDefinition[] {
+  if (tools === undefined) {
+    return EMPTY_AGENT_TOOLS
+  }
+  if (!Array.isArray(tools)) {
+    throw new AgentDefinitionError(
+      "[Sixb] Project tools must be an array of agent tool definitions."
+    )
+  }
+
+  assertValidProjectAgentToolDefinitions(tools)
+  return normalizeAgentToolDefinitions(tools)
+}
+
+function normalizeAgentToolDefinitions(
+  tools: readonly AgentToolDefinition[]
+): readonly AgentToolDefinition[] {
   const normalized: AgentToolDefinition[] = []
   for (const tool of tools) {
     normalized.push(normalizeAgentToolDefinition(tool))

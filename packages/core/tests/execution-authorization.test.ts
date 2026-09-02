@@ -3,7 +3,10 @@ import { agentServiceAccountId } from "../src/agents/authority"
 import type { Principal } from "../src/auth"
 import { type AuthorizationContext, emptyGrantIndex } from "../src/authorization"
 import { isSixbError } from "../src/errors/internal"
-import { restoreAgentExecutionScope } from "../src/execution/agent"
+import {
+  createInheritedMainAgentExecutionRecord,
+  restoreAgentExecutionScope,
+} from "../src/execution/agent"
 import {
   assertExecutionScopeProject,
   createPrincipalRuntimeAuthorization,
@@ -246,7 +249,7 @@ describe("execution scopes", () => {
     const scope = restoreAgentExecutionScope({
       agentId: "research",
       runId: "agent-run-1",
-      authorization: authorizationContext(principal),
+      authorization: { type: "principal", context: authorizationContext(principal) },
       execution: {
         id: "execution-agent-1",
         projectId: "project-1",
@@ -283,7 +286,10 @@ describe("execution scopes", () => {
       restoreAgentExecutionScope({
         agentId: "research",
         runId: "agent-run-2",
-        authorization: authorizationContext({ type: "user", id: "user-1" }),
+        authorization: {
+          type: "principal",
+          context: authorizationContext({ type: "user", id: "user-1" }),
+        },
         execution: {
           id: "execution-agent-2",
           projectId: "project-1",
@@ -318,6 +324,49 @@ describe("execution scopes", () => {
       type: "kernel",
       operation: { type: "ontology.recover", recoveryId: "recovery-1" },
     })
+  })
+
+  test("runs the main agent with its request parent's durable authority", () => {
+    const parent = {
+      id: "execution-request-1",
+      projectId: "project-1",
+      requestedBy: { type: "user", id: "user-1" } as const,
+      executor: { type: "request", requestId: "request-1" } as const,
+      source: { type: "http", requestId: "request-1" } as const,
+      correlationId: "correlation-1",
+      authorizationRef: {
+        type: "principal",
+        principal: { type: "user", id: "user-1" },
+        credential: { type: "session", id: "session-1" },
+      } as const,
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    }
+    const execution = {
+      ...createInheritedMainAgentExecutionRecord({
+        id: "execution-main-1",
+        parent,
+        runId: "main-run-1",
+      }),
+      createdAt: new Date("2026-01-01T00:00:01.000Z"),
+    }
+    const scope = restoreAgentExecutionScope({
+      agentId: "main",
+      runId: "main-run-1",
+      authorization: {
+        type: "principal",
+        context: authorizationContext({ type: "user", id: "user-1" }, "session-1"),
+      },
+      execution,
+    })
+
+    expect(execution.authorizationRef).toEqual(parent.authorizationRef)
+    expect(scope.execution).toMatchObject({
+      executor: { type: "agent", agentId: "main", runId: "main-run-1" },
+      source: { type: "execution", executionId: parent.id },
+      requestedBy: parent.requestedBy,
+      correlationId: parent.correlationId,
+    })
+    expect(getAuthorizationRef(scope.authorization)).toEqual(parent.authorizationRef)
   })
 
   test("derives nested primitive provenance from its durable parent", () => {

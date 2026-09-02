@@ -1,16 +1,32 @@
-import { agentServiceAccountId } from "../agents/authority"
-import type { AuthorizationContext } from "../authorization"
+import { type AgentExecutionAuthorization, agentServiceAccountId } from "../agents/authority"
+import { MAIN_AGENT_ID } from "../agents/main"
 import type { OntologySource } from "../ontology"
 import { isBoundSixb, type Sixb } from "../runtime/sixb"
 import type { CreateExecutionInput, ExecutionRecord } from "../storage/executions"
 import { ExecutionStorageError } from "../storage/executions"
-import { createAgentRuntimeAuthorization } from "./authorization"
-import type { AuthorizablePrincipal, ExecutionContext, ExecutionScope } from "./types"
+import { createAgentRuntimeAuthorization, getAuthorizationRef } from "./authorization"
+import type {
+  AuthorizablePrincipal,
+  ExecutionContext,
+  ExecutionScope,
+  RuntimeAuthorization,
+} from "./types"
 
 /** Minimal host boundary required by agent workers. */
 export interface AgentExecutionHost {
   readonly id: string
   withScope(scope: ExecutionScope): object
+}
+
+/** Whether a nested main-agent run can durably restore this request authority without widening it. */
+export function canInheritMainAgentRuntimeAuthorization(
+  authorization: RuntimeAuthorization
+): boolean {
+  const ref = getAuthorizationRef(authorization)
+  return (
+    ref.type === "disabled" ||
+    (ref.type === "principal" && ref.principal.type === "user" && ref.credential !== undefined)
+  )
 }
 
 /** Build the immutable child execution owned by one direct or Workflow Agent run. */
@@ -38,6 +54,40 @@ export function createAgentExecutionRecord(input: {
   }
 }
 
+/** Build a main-agent execution that carries its direct request parent's authority reference. */
+export function createInheritedMainAgentExecutionRecord(input: {
+  readonly id: string
+  readonly parent: ExecutionRecord
+  readonly runId: string
+}): CreateExecutionInput {
+  const authority = input.parent.authorizationRef
+  if (
+    authority.type !== "disabled" &&
+    !(
+      authority.type === "principal" &&
+      authority.principal.type === "user" &&
+      authority.credential !== undefined
+    )
+  ) {
+    throw new ExecutionStorageError(
+      "invalid_input",
+      `[Sixb] Main Agent run '${input.runId}' requires inheritable user or auth-disabled authority.`
+    )
+  }
+
+  return {
+    id: input.id,
+    projectId: input.parent.projectId,
+    ...(input.parent.requestedBy === undefined
+      ? {}
+      : { requestedBy: structuredClone(input.parent.requestedBy) }),
+    executor: { type: "agent", runId: input.runId },
+    source: { type: "execution", executionId: input.parent.id },
+    correlationId: input.parent.correlationId,
+    authorizationRef: structuredClone(authority),
+  }
+}
+
 /** Bind a worker to the immutable execution already owned by its durable Agent run. */
 export function bindDurableAgentExecution(
   host: AgentExecutionHost,
@@ -45,7 +95,7 @@ export function bindDurableAgentExecution(
     readonly execution: ExecutionRecord
     readonly agentId: string
     readonly runId: string
-    readonly authorization: AuthorizationContext
+    readonly authorization: AgentExecutionAuthorization
   }
 ): Sixb<readonly OntologySource[]> {
   const scope = restoreAgentExecutionScope(input)
@@ -61,7 +111,7 @@ export function restoreAgentExecutionScope(input: {
   readonly execution: ExecutionRecord
   readonly agentId: string
   readonly runId: string
-  readonly authorization: AuthorizationContext
+  readonly authorization: AgentExecutionAuthorization
 }): ExecutionScope {
   assertAgentExecutionRecord(input)
   const context: ExecutionContext = Object.freeze({
@@ -78,10 +128,20 @@ export function restoreAgentExecutionScope(input: {
     execution: context,
     authorization: createAgentRuntimeAuthorization({
       projectId: input.execution.projectId,
-      context: input.authorization,
       executionId: input.execution.id,
       agentId: input.agentId,
       runId: input.runId,
+      authority:
+        input.authorization.type === "principal"
+          ? {
+              type: "principal",
+              context: input.authorization.context,
+              ...(input.execution.authorizationRef.type === "principal" &&
+              input.execution.authorizationRef.credential !== undefined
+                ? { credential: input.execution.authorizationRef.credential }
+                : {}),
+            }
+          : { type: "disabled" },
     }),
   })
 }
@@ -91,22 +151,59 @@ export function assertAgentExecutionRecord(input: {
   readonly execution: ExecutionRecord
   readonly agentId: string
   readonly runId: string
-  readonly authorization: AuthorizationContext
+  readonly authorization: AgentExecutionAuthorization
 }): void {
   const authority = input.execution.authorizationRef
   if (
     input.execution.executor.type !== "agent" ||
     input.execution.executor.runId !== input.runId ||
-    input.execution.source.type !== "execution" ||
+    input.execution.source.type !== "execution"
+  ) {
+    invalidAgentExecution(input.execution.id, input.runId)
+  }
+
+  if (input.agentId === MAIN_AGENT_ID) {
+    assertInheritedMainAgentAuthority(input.execution, input.runId, input.authorization)
+    return
+  }
+
+  if (
+    input.authorization.type !== "principal" ||
     authority.type !== "principal" ||
     authority.principal.type !== "serviceAccount" ||
-    input.authorization.principal.type !== "serviceAccount" ||
-    authority.principal.id !== input.authorization.principal.id ||
+    input.authorization.context.principal.type !== "serviceAccount" ||
+    authority.principal.id !== input.authorization.context.principal.id ||
     authority.credential !== undefined
   ) {
     invalidAgentExecution(input.execution.id, input.runId)
   }
   assertAgentPrincipal(input.agentId, authority.principal)
+}
+
+function assertInheritedMainAgentAuthority(
+  execution: ExecutionRecord,
+  runId: string,
+  authorization: AgentExecutionAuthorization
+): void {
+  const authority = execution.authorizationRef
+  if (authorization.type === "disabled") {
+    if (authority.type !== "disabled") invalidAgentExecution(execution.id, runId)
+    return
+  }
+
+  const principal = authorization.context.principal
+  if (
+    authority.type !== "principal" ||
+    authority.principal.type !== "user" ||
+    principal.type !== "user" ||
+    authority.principal.id !== principal.id ||
+    authority.credential === undefined ||
+    (authority.credential.type === "session"
+      ? authorization.context.sessionId !== authority.credential.id
+      : authorization.context.sessionId !== undefined)
+  ) {
+    invalidAgentExecution(execution.id, runId)
+  }
 }
 
 function assertAgentPrincipal(

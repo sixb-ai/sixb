@@ -1,4 +1,5 @@
 import { agentServiceAccountId } from "../../agents/authority"
+import { MAIN_AGENT_ID } from "../../agents/main"
 import type { ExecutionStorage } from "../executions"
 import { findAgentRunExecution } from "../executions/run-link"
 import { AgentStorageError } from "./errors"
@@ -23,7 +24,11 @@ export async function assertAgentRunExecution(input: {
     projectId: input.projectId,
     executionId: input.executionId,
     runId: input.runId,
-    serviceAccountId: agentServiceAccountId(input.agentId),
+    // Transitional: run kind will replace the reserved id as the authority discriminator.
+    authority:
+      input.agentId === MAIN_AGENT_ID
+        ? { type: "inherited" }
+        : { type: "managed", serviceAccountId: agentServiceAccountId(input.agentId) },
   })
   if (!execution) {
     throw new AgentStorageError(
