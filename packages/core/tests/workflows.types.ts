@@ -1,6 +1,5 @@
 import {
   defineAction,
-  defineAgent,
   defineAgentStep,
   defineIntervention,
   defineObjectType,
@@ -34,13 +33,10 @@ const Invoice = defineObjectType({
   properties: [prop("id", "string", { required: true, primary: true })],
 })
 
-const resolverAgent = defineAgent("resolver", {
-  name: "Resolver",
-  model: {} as Parameters<typeof defineAgent>[1]["model"],
+const resolveInvoiceWithAgent = defineAgentStep("resolve-invoice", {
+  model: {} as NonNullable<Parameters<typeof defineAgentStep>[1]["model"]>,
   instructions: "Resolve invoices.",
 })
-
-const resolveInvoiceWithAgent = defineAgentStep("resolve-invoice", resolverAgent)
   .input({ transaction: ref(Transaction) })
   .output({ invoice: ref(Invoice), confidence: "double", reason: "string" })
   .prompt(({ input }) => {

@@ -61,7 +61,8 @@ See [Sandboxes](../sandboxes/overview.md) for factory options and isolation.
 ## Project tools
 
 Project tools run in the agent worker, not the Bash sandbox. Connector credentials stay on the host
-and are not model input. Register them once in `createSixb`; the main agent receives the full list.
+and are not model input. Register them once in `createSixb`; the main agent receives the full list,
+while workflow agent tasks select an explicit subset.
 
 ### Custom tools
 
@@ -90,8 +91,7 @@ export const sixb = createSixb({
 })
 ```
 
-Defined agents continue selecting their own `tools` until workflow agent configuration moves away
-from `defineAgent`.
+Workflow agent tasks select tools directly in `defineAgentStep({ tools })`.
 
 The handler receives inferred input, the provider's `toolCallId`, cancellation, run metadata,
 connector resolution, a run-scoped logger, and an artifact publisher. Ordinary results must be
@@ -168,6 +168,20 @@ attachments. Symbolic links and paths outside the workspace are rejected.
 Complete files moved there are collected as final assistant attachments; it is not used as the live
 tool-result transport.
 
+Tool definitions are not auto-discovered. Register project tools in the project config:
+
+```ts
+tools: [searchKnowledge]
+```
+
+Workflow agent tasks select only what they need:
+
+```ts
+defineAgentStep("research", {
+  instructions: "Research the request using trusted sources.",
+  tools: [searchKnowledge],
+})
+```
 Names must be unique within each list. `bash`, `read`, `view_file`, and `spawn_agent` are reserved
 for framework tools.
 ### Exa web tools

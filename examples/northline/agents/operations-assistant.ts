@@ -1,5 +1,38 @@
-import { defineAgent, defineAgentTool, stringEnum } from "@sixb/core"
+import { type AgentToolResult, defineAgent, defineAgentTool, stringEnum } from "@sixb/core"
 import { vercelGateway } from "@sixb/vercel-ai-gateway"
+import { gateway, generateImage } from "ai"
+
+const IMAGE_MODEL = "xai/grok-imagine-image-2.0"
+
+export const operationsAssistantModel: ReturnType<typeof vercelGateway> = vercelGateway(
+  "deepseek/deepseek-v4-flash-vision-exp"
+)
+
+export const generateImageTool = defineAgentTool("generate_image")
+  .description("Generate an image from a text prompt and return it as an attachment.")
+  .input({ prompt: "string" })
+  .run(async ({ input, artifacts, signal }) => {
+    // Temporary example integration: AI Gateway observes this image call, but Sixb's current usage
+    // ledger records only the worker-owned language-model calls that drive the agent loop.
+    const { image } = await generateImage({
+      model: gateway.image(IMAGE_MODEL),
+      prompt: input.prompt,
+      abortSignal: signal,
+    })
+    const { fileRef } = await artifacts.put({
+      body: image.uint8Array,
+      fileName: `generated-image.${imageFileExtension(image.mediaType)}`,
+      mediaType: image.mediaType,
+    })
+    const result: AgentToolResult = {
+      kind: "agentToolResult",
+      content: [
+        { type: "text", text: "Generated an image." },
+        { type: "file", fileRef },
+      ],
+    }
+    return result
+  })
 
 export const lookupResponsePolicy = defineAgentTool("lookup_response_policy")
   .description(
@@ -40,7 +73,7 @@ const compactionDemoContext =
 export const operationsAssistant = defineAgent("operations-assistant", {
   name: "Operations Assistant",
   description: "A demo agent showing how to add an AI assistant to a Sixb app.",
-  model: vercelGateway("zai/glm-5.3-flash"),
+  model: operationsAssistantModel,
   reasoning: "medium",
   instructions: [
     "This is a demo agent for the Northline example.",

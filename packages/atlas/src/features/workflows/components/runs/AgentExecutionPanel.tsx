@@ -53,7 +53,7 @@ export function AgentExecutionPanel({
       <div className="min-w-0 space-y-2">
         <div className="flex min-w-0 items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="break-words text-sm font-medium text-foreground">{data.agentId}</p>
+            <p className="break-words text-sm font-medium text-foreground">Agent task</p>
             <p className="mt-0.5 break-all font-mono text-[11px] text-muted-foreground">
               {data.modelId ?? "Model not reported"} · Attempt {data.attempt}
             </p>

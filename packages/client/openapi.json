@@ -15457,9 +15457,6 @@
                                 "key": {
                                   "type": "string"
                                 },
-                                "agentId": {
-                                  "type": "string"
-                                },
                                 "input": {
                                   "type": "object",
                                   "additionalProperties": {
@@ -15513,7 +15510,7 @@
                                   }
                                 }
                               },
-                              "required": ["type", "id", "key", "agentId", "input", "output"],
+                              "required": ["type", "id", "key", "input", "output"],
                               "additionalProperties": false
                             }
                           ]
@@ -15923,9 +15920,6 @@
                               "key": {
                                 "type": "string"
                               },
-                              "agentId": {
-                                "type": "string"
-                              },
                               "input": {
                                 "type": "object",
                                 "additionalProperties": {
@@ -15979,7 +15973,7 @@
                                 }
                               }
                             },
-                            "required": ["type", "id", "key", "agentId", "input", "output"],
+                            "required": ["type", "id", "key", "input", "output"],
                             "additionalProperties": false
                           }
                         ]
@@ -17981,9 +17975,6 @@
                           "agentExecution": {
                             "type": "object",
                             "properties": {
-                              "agentId": {
-                                "type": "string"
-                              },
                               "status": {
                                 "type": "string",
                                 "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
@@ -18090,7 +18081,7 @@
                                 "type": "string"
                               }
                             },
-                            "required": ["agentId", "status", "attempt"],
+                            "required": ["status", "attempt"],
                             "additionalProperties": false
                           }
                         },
@@ -18209,9 +18200,6 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "agentId": {
-                      "type": "string"
-                    },
                     "status": {
                       "type": "string",
                       "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
@@ -18879,7 +18867,7 @@
                       "type": "string"
                     }
                   },
-                  "required": ["agentId", "status", "attempt", "nodeRunId", "prompt", "createdAt"],
+                  "required": ["status", "attempt", "nodeRunId", "prompt", "createdAt"],
                   "additionalProperties": false
                 }
               }
@@ -19316,9 +19304,6 @@
                           "agentExecution": {
                             "type": "object",
                             "properties": {
-                              "agentId": {
-                                "type": "string"
-                              },
                               "status": {
                                 "type": "string",
                                 "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
@@ -19425,7 +19410,7 @@
                                 "type": "string"
                               }
                             },
-                            "required": ["agentId", "status", "attempt"],
+                            "required": ["status", "attempt"],
                             "additionalProperties": false
                           }
                         },

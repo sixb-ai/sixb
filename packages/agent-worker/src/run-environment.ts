@@ -17,7 +17,7 @@ import {
   prepareAgentAttachments,
 } from "./attachments"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
-import { modelToolsFromAgentDefinitions } from "./model-adapters"
+import { type AgentErrorDetails, modelToolsFromAgentDefinitions } from "./model-adapters"
 import { prepareAgentSandboxApiContext } from "./sandbox-api-context"
 import { AgentSandboxFileRegistry } from "./sandbox-file-registry"
 import type { AgentSandboxHandle } from "./sandbox-handle"
@@ -57,6 +57,7 @@ export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvi
 export interface CreateWorkflowAgentNodeEnvironmentInput extends CreateAgentEnvironmentInput {
   readonly run: WorkflowAgentNodeRunRecord
   readonly nodeInput: WorkflowIOSnapshot
+  readonly errorDetails: AgentErrorDetails
 }
 
 /** Prepare conversation history and attachments, then start the shared agent environment. */
@@ -141,6 +142,7 @@ export async function createWorkflowAgentNodeEnvironment(
     }),
     attachmentContext,
     skills,
+    errorDetails: input.errorDetails,
     onDetachedTeardown: input.onDetachedTeardown,
   })
 }
@@ -153,6 +155,7 @@ interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
   readonly apiBaseUrl: string
   readonly attachmentContext: PreparedAgentAttachmentContext
   readonly skills: Awaited<AgentWorkerContext["agentSkills"]>
+  readonly errorDetails?: AgentErrorDetails
 }
 
 /**
@@ -199,10 +202,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
       logger,
       artifactsForToolCall,
       toolResultToModelOutput: (output) => mediaBridge.toModelOutput(output),
-      errorDetails:
-        mode === "conversation"
-          ? { agentId: agentId, runId }
-          : { agentId: agentId, nodeRunId: runId },
+      errorDetails: input.errorDetails ?? { agentId, runId },
     }),
   ]
 

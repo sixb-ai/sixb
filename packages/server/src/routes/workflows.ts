@@ -139,7 +139,6 @@ function serializePrincipal(principal: Principal) {
 
 function serializeWorkflowAgentExecutionSummary(execution: WorkflowAgentNodeRunView) {
   return {
-    agentId: execution.agentId,
     status: execution.status,
     attempt: execution.attempt,
     modelId: execution.modelId,
@@ -205,7 +204,7 @@ function toWorkflowCancellationFailure(input: {
 function toAgentCancellationFailure(input: {
   readonly message: string
   readonly at: Date
-  readonly agentId: string
+  readonly agentStepId: string
   readonly workflowId: string
   readonly runId: string
   readonly nodeRunId: string
@@ -213,7 +212,7 @@ function toAgentCancellationFailure(input: {
   return toSixbFailure(
     createSixbError("runtime.cancelled", input.message, {
       details: {
-        agentId: input.agentId,
+        agentStepId: input.agentStepId,
         workflowId: input.workflowId,
         workflowRunId: input.runId,
         nodeRunId: input.nodeRunId,
@@ -385,7 +384,6 @@ function serializeWorkflow(
           type: "agent" as const,
           id: node.id,
           key: node.key,
-          agentId: node.agentStep.agent.id,
           input: node.agentStep.input,
           output: node.agentStep.output,
         }
@@ -1132,7 +1130,7 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
                   error: toAgentCancellationFailure({
                     message: cancellationMessage,
                     at: cancelledAt,
-                    agentId: execution.agentId,
+                    agentStepId: active.nodeId,
                     workflowId: run.workflowId,
                     runId: run.id,
                     nodeRunId: active.id,

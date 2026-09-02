@@ -14,6 +14,7 @@
     "typecheck": "bun ../../packages/cli/src/index.tsx typegen && tsc --noEmit --paths null"
   },
   "dependencies": {
+    "ai": "^7.0.4",
     "@sixb/app": "workspace:*",
     "@sixb/blob-local": "workspace:*",
     "@sixb/client": "workspace:*",

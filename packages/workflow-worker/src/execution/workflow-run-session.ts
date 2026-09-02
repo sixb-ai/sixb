@@ -452,7 +452,7 @@ export class WorkflowRunSession {
             workflowRunId: run.id,
             nodeId: nodeRun.nodeId,
             nodeRunId: nodeRun.id,
-            ...(execution ? { agentId: execution.agentId } : {}),
+            ...(execution ? { agentStepId: nodeRun.nodeId } : {}),
           },
         }
       )
@@ -474,7 +474,7 @@ export class WorkflowRunSession {
         `[SixbWorkflowWorker] Workflow run '${job.id}' and agent node '${nodeRun.id}' must be waiting/succeeded to resume.`,
         {
           details: {
-            agentId: execution.agentId,
+            agentStepId: nodeRun.nodeId,
             workflowId: workflow.id,
             workflowRunId: run.id,
             nodeId: nodeRun.nodeId,
@@ -489,7 +489,7 @@ export class WorkflowRunSession {
         `[SixbWorkflowWorker] Agent execution '${nodeRun.id}' must have a validated output to resume.`,
         {
           details: {
-            agentId: execution.agentId,
+            agentStepId: nodeRun.nodeId,
             workflowId: workflow.id,
             workflowRunId: run.id,
             nodeId: nodeRun.nodeId,

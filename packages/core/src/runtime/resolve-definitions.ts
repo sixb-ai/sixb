@@ -30,7 +30,7 @@ import {
   validateMergeSyncProjectionSafety,
 } from "../syncs/validation"
 import type { WorkflowDefinition } from "../workflows"
-import { validateWorkflowsAtStartup } from "../workflows"
+import { validateWorkflowAgentStepGroupReferences, validateWorkflowsAtStartup } from "../workflows"
 import { createDefinitionCatalog, type SixbDefinitions } from "./definitions"
 import { RuntimeError } from "./errors"
 import type { OntologySource } from "./types"
@@ -151,6 +151,8 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
     registeredSchedules: schedulesById,
     registeredActionIds,
     registeredAgentIds: new Set(agentsById.keys()),
+    ...(models === undefined ? {} : { models }),
+    tools,
   })
   const workflowsById = indexUniqueDefinitions("workflow", workflows)
 
@@ -169,6 +171,7 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
     getSubTypes: (objectTypeId) => ontology.listSubTypes(objectTypeId),
   })
   validateAgentGroupReferences(agents, security)
+  validateWorkflowAgentStepGroupReferences(workflows, security)
 
   const projectionRegistry = new ProjectionRegistry({
     projections: options.projections ?? [],
