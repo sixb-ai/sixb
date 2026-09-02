@@ -1,5 +1,5 @@
+import { INSTANCE_CLI_VERSION } from "@sixb/cli-core"
 import type { CommandResult, Sandbox } from "@sixb/core"
-import { AGENT_CLI_VERSION } from "../agent-cli/output"
 import { AgentRuntimeProfileError } from "./errors"
 import {
   AGENT_RUNTIME_MINIMUM_VERSIONS,
@@ -49,7 +49,7 @@ export async function assertAgentRuntimeProfile(
 
   const runtime = parseLocalProbe(input.sandbox, local.stdout)
   assertSupportedRuntime(input.sandbox, runtime.name, runtime.version)
-  if (runtime.cliVersion !== AGENT_CLI_VERSION) {
+  if (runtime.cliVersion !== INSTANCE_CLI_VERSION) {
     throw profileError(input.sandbox, "cli-execution", "invalid-output")
   }
 
@@ -136,7 +136,7 @@ function assertDoctorReport(
     throw profileError(sandbox, "cli-execution", "invalid-output")
   }
   if (
-    report.cli.version !== AGENT_CLI_VERSION ||
+    report.cli.version !== INSTANCE_CLI_VERSION ||
     report.javascript.name !== localRuntime.name ||
     normalizeVersion(report.javascript.version) !== normalizeVersion(localRuntime.version)
   ) {

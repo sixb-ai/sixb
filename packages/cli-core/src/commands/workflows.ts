@@ -1,13 +1,12 @@
-import { ApiClient } from "../api-client"
+import type { ApiClient } from "../api-client"
 import { isHelp, requireExact, requireValue } from "../arguments"
 import { fail, writeJson, writeText } from "../output"
 import { GROUP_HELP } from "./metadata"
 import { readJson, singleFileOption } from "./shared"
 
-export async function workflows(args: string[]): Promise<void> {
+export async function workflows(api: ApiClient, args: readonly string[]): Promise<void> {
   const [sub, ...rest] = args
   if (!sub || isHelp(sub) || isHelp(rest[0])) return writeText(GROUP_HELP.workflows)
-  const api = new ApiClient()
   if (sub === "list") {
     requireExact(rest, 0, "workflows list accepts no arguments.")
     return writeJson(await api.get("/api/workflows"))

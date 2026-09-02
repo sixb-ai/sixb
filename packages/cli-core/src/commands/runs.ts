@@ -1,4 +1,4 @@
-import { ApiClient } from "../api-client"
+import type { ApiClient } from "../api-client"
 import { enumValue, isHelp, requireExact, requireOrderedRange, rfc3339Value } from "../arguments"
 import { fail, writeJson, writeText } from "../output"
 import { CLI_LIMITS, DEFAULT_LIST_ORDER } from "../policies"
@@ -15,11 +15,14 @@ const WORKFLOW_RUN_STATUSES = [
   "cancelled",
 ] as const
 
-export async function runs(kind: "action" | "workflow", args: string[]): Promise<void> {
+export async function runs(
+  api: ApiClient,
+  kind: "action" | "workflow",
+  args: readonly string[]
+): Promise<void> {
   const [sub, ...rest] = args
   const group = `${kind}-runs` as "action-runs" | "workflow-runs"
   if (!sub || isHelp(sub) || isHelp(rest[0])) return writeText(GROUP_HELP[group])
-  const api = new ApiClient()
   if (sub === "get") {
     requireExact(rest, 1, `${group} get requires exactly one run id.`)
     return writeJson(await api.get(`/api/${group}/${encodeURIComponent(rest[0] ?? "")}`))

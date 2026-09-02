@@ -4,6 +4,8 @@ import { fail } from "../output"
 
 export type QueryOptions = Record<string, string | undefined>
 
+/** Parse flag/value pairs into API query parameters. */
+
 export function parseQueryOptions(
   args: readonly string[],
   names: Readonly<Record<string, string>>,

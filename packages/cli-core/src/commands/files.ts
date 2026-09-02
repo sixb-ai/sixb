@@ -1,14 +1,13 @@
 import { access } from "node:fs/promises"
-import { ApiClient } from "../api-client"
+import type { ApiClient } from "../api-client"
 import { isHelp, requireExact, requireValue } from "../arguments"
 import { fail, writeJson, writeText } from "../output"
 import { GROUP_HELP } from "./metadata"
 import { parseQueryOptions } from "./shared"
 
-export async function files(args: string[]): Promise<void> {
+export async function files(api: ApiClient, args: readonly string[]): Promise<void> {
   const [sub, ...rest] = args
   if (!sub || isHelp(sub) || isHelp(rest[0])) return writeText(GROUP_HELP.files)
-  const api = new ApiClient()
   if (sub === "upload") {
     const source = requireValue("files upload", rest[0])
     try {

@@ -1,4 +1,4 @@
-import { ApiClient } from "../api-client"
+import type { ApiClient } from "../api-client"
 import {
   enumValue,
   integerInRange,
@@ -12,10 +12,9 @@ import { CLI_LIMITS, DEFAULT_TELEMETRY_ORDER } from "../policies"
 import { GROUP_HELP } from "./metadata"
 import { normalizeWindowOptions, parseQueryOptions, readJson, singleFileOption } from "./shared"
 
-export async function telemetry(args: string[]): Promise<void> {
+export async function telemetry(api: ApiClient, args: readonly string[]): Promise<void> {
   const [sub, ...rest] = args
   if (!sub || isHelp(sub) || isHelp(rest[0])) return writeText(GROUP_HELP.telemetry)
-  const api = new ApiClient()
   if (sub === "latest") {
     requireExact(rest, 3, "telemetry latest requires object type, primary id, and property id.")
     return writeJson(await api.get(telemetryPath(rest, "latest")))

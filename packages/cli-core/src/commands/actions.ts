@@ -1,13 +1,12 @@
-import { ApiClient } from "../api-client"
+import type { ApiClient } from "../api-client"
 import { isHelp, requireExact, requireValue } from "../arguments"
 import { fail, writeJson, writeText } from "../output"
 import { GROUP_HELP } from "./metadata"
 import { asRecord, parseQueryOptions, readJson } from "./shared"
 
-export async function actions(args: string[]): Promise<void> {
+export async function actions(api: ApiClient, args: readonly string[]): Promise<void> {
   const [sub, ...rest] = args
   if (!sub || isHelp(sub) || isHelp(rest[0])) return writeText(GROUP_HELP.actions)
-  const api = new ApiClient()
   if (sub === "get") {
     requireExact(rest, 1, "actions get requires exactly one action id.")
     return writeJson(await api.get(`/api/actions/${encodeURIComponent(rest[0] ?? "")}`))

@@ -5,7 +5,7 @@ import {
   DEFAULT_TELEMETRY_ORDER,
 } from "../policies"
 
-export const MAIN_HELP = `Sixb agent CLI
+const SANDBOX_MAIN_HELP = `Sixb agent CLI
 
 Usage:
   sixb <command> [options]
@@ -48,6 +48,20 @@ Files:
 
 Run \`sixb <group> --help\` or \`sixb <group> <command> --help\` for exact arguments.
 For query IR, run \`sixb objects query --help\` and \`sixb objects query --example list\`.`
+
+const LOCAL_MAIN_HELP = SANDBOX_MAIN_HELP.replace("Sixb agent CLI", "Sixb instance CLI")
+  .replace(
+    "The CLI uses the run-scoped SIXB_API_BASE_URL. Do not configure authentication or another origin.",
+    "The CLI uses the selected local profile and its API credentials."
+  )
+  .replace(
+    "  sixb doctor                         Check the sandbox and API gateway\n  sixb context                        Print the current run context\n",
+    ""
+  )
+
+export function renderInstanceHelp(mode: "local" | "sandbox"): string {
+  return mode === "sandbox" ? SANDBOX_MAIN_HELP : LOCAL_MAIN_HELP
+}
 
 export const OBJECTS_HELP = `Usage:
   sixb objects inspect <object-type> <primary-id> [options]

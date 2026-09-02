@@ -1,17 +1,36 @@
 #!/usr/bin/env node
 
-import { isHelp } from "./arguments"
-import { dispatch } from "./commands"
-import { MAIN_HELP } from "./commands/metadata"
-import { AGENT_CLI_VERSION, reportError, writeText } from "./output"
+import {
+  fail,
+  INSTANCE_CLI_VERSION,
+  isHelp,
+  isInstanceCommand,
+  renderInstanceHelp,
+  reportError,
+  runInstanceCli,
+  writeText,
+} from "@sixb/cli-core"
+import { context, doctor } from "./commands/system"
 
-async function main(args: string[]): Promise<void> {
+async function main(args: readonly string[]): Promise<void> {
   const [command, ...rest] = args
-  if (!command || isHelp(command)) return writeText(MAIN_HELP)
+  if (!command || isHelp(command)) return writeText(renderInstanceHelp("sandbox"))
   if (command === "--version" || command === "version") {
-    return writeText(`sixb agent CLI ${AGENT_CLI_VERSION}`)
+    return writeText(`sixb agent CLI ${INSTANCE_CLI_VERSION}`)
   }
-  await dispatch(command, rest)
+  if (command === "doctor") return doctor(rest, sandboxMode())
+  if (command === "context") return context(rest)
+  if (!isInstanceCommand(command)) fail(`Unknown command '${command}'. Run 'sixb --help'.`)
+
+  await runInstanceCli({ args, mode: sandboxMode() })
+}
+
+function sandboxMode() {
+  return {
+    kind: "sandbox" as const,
+    baseUrl: process.env.SIXB_API_BASE_URL ?? "",
+    runContextPath: process.env.SIXB_RUN_CONTEXT ?? "",
+  }
 }
 
 try {

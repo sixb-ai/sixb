@@ -2,6 +2,8 @@ import type { ApiClient } from "./api-client"
 import { CliError, EXIT_API } from "./output"
 import { CLI_LIMITS } from "./policies"
 
+/** Build the bounded object graph returned by `objects inspect`. */
+
 interface ObjectRef {
   readonly objectTypeId: string
   readonly primaryId: string

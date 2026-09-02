@@ -1,7 +1,15 @@
 #!/usr/bin/env node
 
-// src/agent-cli/output.ts
-var AGENT_CLI_VERSION = "1";
+// ../cli-core/src/api-client.ts
+import { randomUUID } from "node:crypto";
+import { createWriteStream } from "node:fs";
+import { readFile, rename, rm } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+
+// ../cli-core/src/output.ts
+var INSTANCE_CLI_VERSION = "1";
 var EXIT_USAGE = 2;
 var EXIT_API = 3;
 
@@ -37,7 +45,134 @@ function reportError(error) {
   return cliError.exitCode;
 }
 
-// src/agent-cli/arguments.ts
+// ../cli-core/src/api-client.ts
+class ApiClient {
+  baseUrl;
+  authorization;
+  missingBaseUrlMessage;
+  unavailableMessage;
+  unavailableHint;
+  constructor(options) {
+    this.baseUrl = options.baseUrl.replace(/\/+$/, "");
+    this.authorization = options.authorization;
+    this.missingBaseUrlMessage = options.missingBaseUrlMessage;
+    this.unavailableMessage = options.unavailableMessage;
+    this.unavailableHint = options.unavailableHint;
+  }
+  async get(path, query) {
+    const url = this.url(path, query);
+    return this.json(url, { method: "GET" });
+  }
+  async post(path, body) {
+    return this.json(this.url(path), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body)
+    });
+  }
+  async upload(path, source, logicalPath) {
+    const form = new FormData;
+    form.append("file", new Blob([new Uint8Array(await readFile(source))]), basename(source));
+    if (logicalPath)
+      form.append("logicalPath", logicalPath);
+    return this.json(this.url(path), { method: "POST", body: form });
+  }
+  async download(path, output, query) {
+    const response = await this.fetch(this.url(path, query), { method: "GET" });
+    const temporary = join(dirname(output), `.${basename(output)}.sixb-${randomUUID()}.tmp`);
+    try {
+      const body = response.body ? Readable.fromWeb(response.body) : Readable.from([]);
+      await pipeline(body, createWriteStream(temporary, { flags: "wx" }));
+      await rename(temporary, output);
+    } catch (error) {
+      await rm(temporary, { force: true }).catch(() => {});
+      throw error;
+    }
+  }
+  url(path, query) {
+    if (!this.baseUrl)
+      fail(this.missingBaseUrlMessage, "runtime_unavailable");
+    validateApiPath(path);
+    const url = new URL(`${this.baseUrl}${path}`);
+    for (const [key, value] of Object.entries(query ?? {})) {
+      if (value !== undefined)
+        url.searchParams.set(key, value);
+    }
+    return url;
+  }
+  async json(url, init) {
+    const response = await this.fetch(url, init);
+    const text = await response.text();
+    if (!text)
+      return null;
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new CliError({ code: "invalid_api_response", message: "The Sixb API returned invalid JSON." }, EXIT_API);
+    }
+  }
+  async fetch(url, init) {
+    let response;
+    try {
+      const headers = new Headers(init.headers);
+      if (this.authorization)
+        headers.set("authorization", this.authorization);
+      response = await fetch(url, { ...init, headers });
+    } catch {
+      throw new CliError({
+        code: "api_unreachable",
+        message: this.unavailableMessage,
+        hint: this.unavailableHint
+      }, EXIT_API);
+    }
+    if (response.ok)
+      return response;
+    const body = await response.text();
+    let parsed;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      parsed = undefined;
+    }
+    const record = asRecord(parsed);
+    const error = record.error;
+    const nested = asRecord(error);
+    const code = stringField(record, "code") ?? stringField(nested, "code") ?? "http_error";
+    const message = stringField(record, "message") ?? stringField(nested, "message") ?? (typeof error === "string" ? error : `The Sixb API request failed with HTTP ${response.status}.`);
+    const hint = stringField(record, "hint") ?? stringField(nested, "hint");
+    const issues = Array.isArray(record.issues) ? record.issues : Array.isArray(nested.issues) ? nested.issues : undefined;
+    throw new CliError({
+      code,
+      status: response.status,
+      message,
+      ...hint ? { hint } : {},
+      ...issues ? { issues } : {}
+    }, EXIT_API);
+  }
+}
+function validateApiPath(path) {
+  const invalid = () => fail("API paths must be relative and start with /api/.");
+  if (path.includes("\\") || path.includes("#"))
+    invalid();
+  const normalized = (() => {
+    try {
+      return new URL(path, "http://sixb.invalid");
+    } catch {
+      return invalid();
+    }
+  })();
+  if (normalized.origin !== "http://sixb.invalid" || normalized.pathname !== "/api" && !normalized.pathname.startsWith("/api/")) {
+    invalid();
+  }
+}
+function asRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value : {};
+}
+function stringField(record, key) {
+  const value = record[key];
+  return typeof value === "string" ? value : undefined;
+}
+// ../cli-core/src/arguments.ts
 var RFC3339_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 function isHelp(value) {
   return value === "-h" || value === "--help" || value === "help";
@@ -92,131 +227,7 @@ function formatAlternatives(values) {
     return values[0] ?? "a supported value";
   return `${values.slice(0, -1).join(", ")}, or ${values.at(-1)}`;
 }
-
-// src/agent-cli/api-client.ts
-import { randomUUID } from "node:crypto";
-import { createWriteStream } from "node:fs";
-import { readFile, rename, rm } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
-import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
-class ApiClient {
-  baseUrl;
-  constructor(baseUrl = process.env.SIXB_API_BASE_URL) {
-    if (!baseUrl)
-      fail("SIXB_API_BASE_URL is not set.", "runtime_unavailable");
-    this.baseUrl = baseUrl.replace(/\/$/, "");
-  }
-  async get(path, query) {
-    const url = this.url(path, query);
-    return this.json(url, { method: "GET" });
-  }
-  async post(path, body) {
-    return this.json(this.url(path), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body)
-    });
-  }
-  async upload(path, source, logicalPath) {
-    const form = new FormData;
-    form.append("file", new Blob([await readFile(source)]), basename(source));
-    if (logicalPath)
-      form.append("logicalPath", logicalPath);
-    return this.json(this.url(path), { method: "POST", body: form });
-  }
-  async download(path, output, query) {
-    const response = await this.fetch(this.url(path, query), { method: "GET" });
-    const temporary = join(dirname(output), `.${basename(output)}.sixb-${randomUUID()}.tmp`);
-    try {
-      const body = Readable.from(response.body ?? []);
-      await pipeline(body, createWriteStream(temporary, { flags: "wx" }));
-      await rename(temporary, output);
-    } catch (error) {
-      await rm(temporary, { force: true }).catch(() => {});
-      throw error;
-    }
-  }
-  url(path, query) {
-    validateApiPath(path);
-    const url = new URL(`${this.baseUrl}${path}`);
-    for (const [key, value] of Object.entries(query ?? {})) {
-      if (value !== undefined)
-        url.searchParams.set(key, value);
-    }
-    return url;
-  }
-  async json(url, init) {
-    const response = await this.fetch(url, init);
-    const text = await response.text();
-    if (!text)
-      return null;
-    try {
-      return JSON.parse(text);
-    } catch {
-      throw new CliError({ code: "invalid_api_response", message: "The Sixb API returned invalid JSON." }, EXIT_API);
-    }
-  }
-  async fetch(url, init) {
-    let response;
-    try {
-      response = await fetch(url, init);
-    } catch {
-      throw new CliError({
-        code: "api_unreachable",
-        message: "The Sixb API gateway could not be reached.",
-        hint: "Run 'sixb doctor' to verify the sandbox runtime and gateway."
-      }, EXIT_API);
-    }
-    if (response.ok)
-      return response;
-    const body = await response.text();
-    let parsed;
-    try {
-      parsed = JSON.parse(body);
-    } catch {
-      parsed = undefined;
-    }
-    const record = asRecord(parsed);
-    const error = record.error;
-    const nested = asRecord(error);
-    const code = stringField(record, "code") ?? stringField(nested, "code") ?? "http_error";
-    const message = stringField(record, "message") ?? stringField(nested, "message") ?? (typeof error === "string" ? error : `The Sixb API request failed with HTTP ${response.status}.`);
-    const hint = stringField(record, "hint") ?? stringField(nested, "hint");
-    const issues = Array.isArray(record.issues) ? record.issues : Array.isArray(nested.issues) ? nested.issues : undefined;
-    throw new CliError({
-      code,
-      status: response.status,
-      message,
-      ...hint ? { hint } : {},
-      ...issues ? { issues } : {}
-    }, EXIT_API);
-  }
-}
-function validateApiPath(path) {
-  const invalid = () => fail("API paths must be relative and start with /api/.");
-  if (path.includes("\\") || path.includes("#"))
-    invalid();
-  const normalized = (() => {
-    try {
-      return new URL(path, "http://sixb.invalid");
-    } catch {
-      return invalid();
-    }
-  })();
-  if (normalized.origin !== "http://sixb.invalid" || normalized.pathname !== "/api" && !normalized.pathname.startsWith("/api/")) {
-    invalid();
-  }
-}
-function asRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value) ? value : {};
-}
-function stringField(record, key) {
-  const value = record[key];
-  return typeof value === "string" ? value : undefined;
-}
-
-// src/agent-cli/policies.ts
+// ../cli-core/src/policies.ts
 var CLI_LIMITS = {
   list: { default: 20, maximum: 1000 },
   search: { default: 20, maximum: 50 },
@@ -233,8 +244,8 @@ var DEFAULT_LIST_ORDER = "desc";
 var DEFAULT_OBJECT_ORDER_BY = "updatedAt";
 var DEFAULT_TELEMETRY_ORDER = "desc";
 
-// src/agent-cli/commands/metadata.ts
-var MAIN_HELP = `Sixb agent CLI
+// ../cli-core/src/commands/metadata.ts
+var SANDBOX_MAIN_HELP = `Sixb agent CLI
 
 Usage:
   sixb <command> [options]
@@ -277,6 +288,12 @@ Files:
 
 Run \`sixb <group> --help\` or \`sixb <group> <command> --help\` for exact arguments.
 For query IR, run \`sixb objects query --help\` and \`sixb objects query --example list\`.`;
+var LOCAL_MAIN_HELP = SANDBOX_MAIN_HELP.replace("Sixb agent CLI", "Sixb instance CLI").replace("The CLI uses the run-scoped SIXB_API_BASE_URL. Do not configure authentication or another origin.", "The CLI uses the selected local profile and its API credentials.").replace(`  sixb doctor                         Check the sandbox and API gateway
+  sixb context                        Print the current run context
+`, "");
+function renderInstanceHelp(mode) {
+  return mode === "sandbox" ? SANDBOX_MAIN_HELP : LOCAL_MAIN_HELP;
+}
 var OBJECTS_HELP = `Usage:
   sixb objects inspect <object-type> <primary-id> [options]
   sixb objects list [options]
@@ -415,7 +432,7 @@ var QUERY_EXAMPLES = {
 };
 var FACETS_EXAMPLE = '{"query":{"kind":"start","objectTypeId":"WorkOrder"},"facets":[{"propertyId":"status","limit":10}]}';
 
-// src/agent-cli/commands/shared.ts
+// ../cli-core/src/commands/shared.ts
 import { readFile as readFile2 } from "node:fs/promises";
 function parseQueryOptions(args, names, command) {
   const query = {};
@@ -484,12 +501,11 @@ async function readStdin() {
   return new TextDecoder().decode(Buffer.concat(chunks));
 }
 
-// src/agent-cli/commands/actions.ts
-async function actions(args) {
+// ../cli-core/src/commands/actions.ts
+async function actions(api, args) {
   const [sub, ...rest] = args;
   if (!sub || isHelp(sub) || isHelp(rest[0]))
     return writeText(GROUP_HELP.actions);
-  const api = new ApiClient;
   if (sub === "get") {
     requireExact(rest, 1, "actions get requires exactly one action id.");
     return writeJson(await api.get(`/api/actions/${encodeURIComponent(rest[0] ?? "")}`));
@@ -538,13 +554,12 @@ async function actions(args) {
   fail(`Unknown actions command '${sub}'.`);
 }
 
-// src/agent-cli/commands/files.ts
+// ../cli-core/src/commands/files.ts
 import { access } from "node:fs/promises";
-async function files(args) {
+async function files(api, args) {
   const [sub, ...rest] = args;
   if (!sub || isHelp(sub) || isHelp(rest[0]))
     return writeText(GROUP_HELP.files);
-  const api = new ApiClient;
   if (sub === "upload") {
     const source = requireValue("files upload", rest[0]);
     try {
@@ -587,7 +602,7 @@ async function files(args) {
   fail(`Unknown files command '${sub}'.`);
 }
 
-// src/agent-cli/graph.ts
+// ../cli-core/src/graph.ts
 async function inspectGraph(api, objectTypeId, primaryId, options) {
   if (options.depth === 0)
     return inspectRoot(api, objectTypeId, primaryId, options);
@@ -840,34 +855,34 @@ function compareLinks(left, right) {
   return linkKey(left).localeCompare(linkKey(right));
 }
 
-// src/agent-cli/commands/objects.ts
-async function objects(args) {
+// ../cli-core/src/commands/objects.ts
+async function objects(api, args) {
   const [sub, ...rest] = args;
   if (!sub || isHelp(sub))
     return writeText(OBJECTS_HELP);
   switch (sub) {
     case "inspect":
-      return objectsInspect(rest);
+      return objectsInspect(api, rest);
     case "list":
-      return objectsList(rest);
+      return objectsList(api, rest);
     case "get":
-      return objectsGet(rest);
+      return objectsGet(api, rest);
     case "search":
-      return objectsSearch(rest);
+      return objectsSearch(api, rest);
     case "query":
-      return objectsQuery(rest);
+      return objectsQuery(api, rest);
     case "count":
     case "exists":
-      return objectsScalar(sub, rest);
+      return objectsScalar(api, sub, rest);
     case "facets":
-      return objectsFacets(rest);
+      return objectsFacets(api, rest);
     case "links":
-      return objectsLinks(rest);
+      return objectsLinks(api, rest);
     default:
       fail(`Unknown objects command '${sub}'.`);
   }
 }
-async function objectsInspect(args) {
+async function objectsInspect(api, args) {
   if (isHelp(args[0]))
     return writeText(OBJECTS_HELP);
   const objectTypeId = requireValue("objects inspect object type", args[0]);
@@ -889,14 +904,14 @@ async function objectsInspect(args) {
     } else
       fail(`Unknown objects inspect option '${flag}'.`);
   }
-  writeJson(await inspectGraph(new ApiClient, objectTypeId, primaryId, {
+  writeJson(await inspectGraph(api, objectTypeId, primaryId, {
     depth,
     maxObjects,
     maxLinks,
     full
   }));
 }
-async function objectsList(args) {
+async function objectsList(api, args) {
   if (isHelp(args[0]))
     return writeText(OBJECTS_HELP);
   const optionNames = {
@@ -934,15 +949,15 @@ async function objectsList(args) {
   }
   requireOrderedRange("--created-after", options.createdAfter, "--created-before", options.createdBefore);
   requireOrderedRange("--updated-after", options.updatedAfter, "--updated-before", options.updatedBefore);
-  writeJson(await new ApiClient().get("/api/objects", options));
+  writeJson(await api.get("/api/objects", options));
 }
-async function objectsGet(args) {
+async function objectsGet(api, args) {
   if (isHelp(args[0]))
     return writeText("Usage: sixb objects get <object-type> <primary-id>...");
   const objectTypeId = requireValue("objects get", args[0]);
   if (args.length < 2)
     fail("objects get requires at least one primary id.");
-  writeJson(await new ApiClient().post("/api/objects/query", {
+  writeJson(await api.post("/api/objects/query", {
     query: {
       kind: "refs",
       refs: args.slice(1).map((primaryId) => ({ objectTypeId, primaryId }))
@@ -950,16 +965,16 @@ async function objectsGet(args) {
     includeTotal: false
   }));
 }
-async function objectsSearch(args) {
+async function objectsSearch(api, args) {
   if (isHelp(args[0])) {
     return writeText(`Usage: sixb objects search <text> [--limit <1-${CLI_LIMITS.search.maximum}>]`);
   }
   const query = requireValue("objects search", args[0]);
   const options = parseQueryOptions(args.slice(1), { "--limit": "limit" }, "objects search");
   options.limit = String(integerInRange("--limit", options.limit ?? String(CLI_LIMITS.search.default), 1, CLI_LIMITS.search.maximum));
-  writeJson(await new ApiClient().get("/api/objects/search", { q: query, ...options }));
+  writeJson(await api.get("/api/objects/search", { q: query, ...options }));
 }
-async function objectsQuery(args) {
+async function objectsQuery(api, args) {
   if (isHelp(args[0]))
     return writeText(QUERY_HELP);
   if (args[0] === "--example") {
@@ -991,19 +1006,19 @@ async function objectsQuery(args) {
   const input = await readJson(source);
   const record = asRecord2(input);
   const body = Object.hasOwn(record, "query") ? { ...record, ...Object.hasOwn(record, "includeTotal") ? {} : { includeTotal } } : { query: input, includeTotal };
-  writeJson(await new ApiClient().post("/api/objects/query", body));
+  writeJson(await api.post("/api/objects/query", body));
 }
-async function objectsScalar(operation, args) {
+async function objectsScalar(api, operation, args) {
   if (isHelp(args[0]))
     return writeText(`Usage: sixb objects ${operation} --file <path|->`);
   const source = singleFileOption(args, `objects ${operation}`);
   const input = await readJson(source);
   const record = asRecord2(input);
-  writeJson(await new ApiClient().post(`/api/objects/query/${operation}`, {
+  writeJson(await api.post(`/api/objects/query/${operation}`, {
     query: Object.hasOwn(record, "query") ? record.query : input
   }));
 }
-async function objectsFacets(args) {
+async function objectsFacets(api, args) {
   if (isHelp(args[0])) {
     return writeText(`Usage: sixb objects facets --file <path|->
        sixb objects facets --example`);
@@ -1015,9 +1030,9 @@ async function objectsFacets(args) {
   if (!Object.hasOwn(record, "query") || !Object.hasOwn(record, "facets")) {
     fail("objects facets input must contain query and facets.");
   }
-  writeJson(await new ApiClient().post("/api/objects/query/facets", body));
+  writeJson(await api.post("/api/objects/query/facets", body));
 }
-async function objectsLinks(args) {
+async function objectsLinks(api, args) {
   if (isHelp(args[0]))
     return writeText(OBJECTS_HELP);
   const objectTypeId = requireValue("objects links object type", args[0]);
@@ -1046,7 +1061,7 @@ async function objectsLinks(args) {
     else
       fail(`Unknown objects links option '${flag}'.`);
   }
-  writeJson(await new ApiClient().post("/api/objects/query/links", {
+  writeJson(await api.post("/api/objects/query/links", {
     query: { kind: "refs", refs: [{ objectTypeId, primaryId }] },
     direction,
     includeObjects,
@@ -1056,12 +1071,11 @@ async function objectsLinks(args) {
   }));
 }
 
-// src/agent-cli/commands/ontology.ts
-async function ontology(args) {
+// ../cli-core/src/commands/ontology.ts
+async function ontology(api, args) {
   const [sub, ...rest] = args;
   if (!sub || isHelp(sub))
     return writeText(GROUP_HELP.ontology);
-  const api = new ApiClient;
   if (sub === "list") {
     if (isHelp(rest[0]))
       return writeText("Usage: sixb ontology list [--full]");
@@ -1105,7 +1119,18 @@ async function ontology(args) {
   fail(`Unknown ontology command '${sub}'.`);
 }
 
-// src/agent-cli/commands/runs.ts
+// ../cli-core/src/commands/project.ts
+async function project(api, args) {
+  if (!args[0] || isHelp(args[0]) || args[0] === "show" && isHelp(args[1])) {
+    return writeText(GROUP_HELP.project);
+  }
+  if (args[0] !== "show")
+    fail(`Unknown project command '${args[0]}'.`);
+  requireExact(args, 1, "project show accepts no arguments.");
+  writeJson(await api.get("/api/project"));
+}
+
+// ../cli-core/src/commands/runs.ts
 var ACTION_RUN_STATUSES = ["queued", "running", "succeeded", "failed", "cancelled"];
 var WORKFLOW_RUN_STATUSES = [
   "queued",
@@ -1115,12 +1140,11 @@ var WORKFLOW_RUN_STATUSES = [
   "failed",
   "cancelled"
 ];
-async function runs(kind, args) {
+async function runs(api, kind, args) {
   const [sub, ...rest] = args;
   const group = `${kind}-runs`;
   if (!sub || isHelp(sub) || isHelp(rest[0]))
     return writeText(GROUP_HELP[group]);
-  const api = new ApiClient;
   if (sub === "get") {
     requireExact(rest, 1, `${group} get requires exactly one run id.`);
     return writeJson(await api.get(`/api/${group}/${encodeURIComponent(rest[0] ?? "")}`));
@@ -1163,73 +1187,11 @@ async function runs(kind, args) {
   fail(`Unknown ${group} command '${sub}'.`);
 }
 
-// src/agent-cli/commands/system.ts
-import { readFile as readFile3 } from "node:fs/promises";
-
-// src/agent-runtime/profile.ts
-var AGENT_RUNTIME_PROFILE = "sixb-agent-runtime/v1";
-
-// src/agent-cli/commands/system.ts
-async function doctor(args) {
-  if (isHelp(args[0]))
-    return writeText(GROUP_HELP.doctor);
-  requireExact(args, 0, "doctor accepts no arguments.");
-  const project = asRecord2(await new ApiClient().get("/api/project"));
-  if (typeof project.id !== "string" || project.id.length === 0) {
-    throw new CliError({ code: "invalid_api_response", message: "The Sixb API returned an invalid project." }, EXIT_API);
-  }
-  const report = {
-    ok: true,
-    profile: AGENT_RUNTIME_PROFILE,
-    cli: { version: AGENT_CLI_VERSION },
-    javascript: javascriptRuntime(),
-    project: { id: project.id }
-  };
-  writeJson(report);
-}
-async function context(args) {
-  if (isHelp(args[0]))
-    return writeText(GROUP_HELP.context);
-  requireExact(args, 0, "context accepts no arguments.");
-  const path = process.env.SIXB_RUN_CONTEXT;
-  if (!path)
-    fail("SIXB_RUN_CONTEXT is not set.");
-  let text;
-  try {
-    text = await readFile3(path, "utf8");
-  } catch (error) {
-    if (isFileError(error, "ENOENT"))
-      fail(`Run context '${path}' does not exist.`);
-    throw error;
-  }
-  try {
-    writeJson(JSON.parse(text));
-  } catch {
-    fail(`Run context '${path}' is not valid JSON.`, "invalid_json");
-  }
-}
-async function project(args) {
-  if (!args[0] || isHelp(args[0]) || args[0] === "show" && isHelp(args[1])) {
-    return writeText(GROUP_HELP.project);
-  }
-  if (args[0] !== "show")
-    fail(`Unknown project command '${args[0]}'.`);
-  requireExact(args, 1, "project show accepts no arguments.");
-  writeJson(await new ApiClient().get("/api/project"));
-}
-function javascriptRuntime() {
-  if (typeof globalThis.Bun === "object") {
-    return { name: "bun", version: globalThis.Bun.version };
-  }
-  return { name: "node", version: process.versions.node };
-}
-
-// src/agent-cli/commands/telemetry.ts
-async function telemetry(args) {
+// ../cli-core/src/commands/telemetry.ts
+async function telemetry(api, args) {
   const [sub, ...rest] = args;
   if (!sub || isHelp(sub) || isHelp(rest[0]))
     return writeText(GROUP_HELP.telemetry);
-  const api = new ApiClient;
   if (sub === "latest") {
     requireExact(rest, 3, "telemetry latest requires object type, primary id, and property id.");
     return writeJson(await api.get(telemetryPath(rest, "latest")));
@@ -1284,12 +1246,11 @@ function normalizeTelemetryQueryInput(input) {
   return body;
 }
 
-// src/agent-cli/commands/workflows.ts
-async function workflows(args) {
+// ../cli-core/src/commands/workflows.ts
+async function workflows(api, args) {
   const [sub, ...rest] = args;
   if (!sub || isHelp(sub) || isHelp(rest[0]))
     return writeText(GROUP_HELP.workflows);
-  const api = new ApiClient;
   if (sub === "list") {
     requireExact(rest, 0, "workflows list accepts no arguments.");
     return writeJson(await api.get("/api/workflows"));
@@ -1313,45 +1274,135 @@ async function workflows(args) {
   fail(`Unknown workflows command '${sub}'.`);
 }
 
-// src/agent-cli/commands/index.ts
-async function dispatch(command, args) {
+// ../cli-core/src/commands/index.ts
+var INSTANCE_COMMANDS = [
+  "project",
+  "ontology",
+  "objects",
+  "telemetry",
+  "actions",
+  "action-runs",
+  "files",
+  "workflows",
+  "workflow-runs"
+];
+function isInstanceCommand(command) {
+  return INSTANCE_COMMANDS.includes(command);
+}
+async function dispatch(api, command, args) {
   switch (command) {
-    case "doctor":
-      return doctor(args);
-    case "context":
-      return context(args);
     case "project":
-      return project(args);
+      return project(api, args);
     case "ontology":
-      return ontology(args);
+      return ontology(api, args);
     case "objects":
-      return objects(args);
+      return objects(api, args);
     case "telemetry":
-      return telemetry(args);
+      return telemetry(api, args);
     case "actions":
-      return actions(args);
+      return actions(api, args);
     case "action-runs":
-      return runs("action", args);
+      return runs(api, "action", args);
     case "files":
-      return files(args);
+      return files(api, args);
     case "workflows":
-      return workflows(args);
+      return workflows(api, args);
     case "workflow-runs":
-      return runs("workflow", args);
+      return runs(api, "workflow", args);
     default:
       fail(`Unknown command '${command}'. Run 'sixb --help'.`);
   }
+}
+// ../cli-core/src/run.ts
+async function runInstanceCli(input) {
+  const [command, ...args] = input.args;
+  await dispatch(createInstanceApiClient(input.mode), command ?? "", args);
+}
+function createInstanceApiClient(mode) {
+  return new ApiClient({
+    baseUrl: mode.baseUrl,
+    ...mode.kind === "local" && mode.token ? { authorization: `Bearer ${mode.token}` } : {},
+    missingBaseUrlMessage: mode.kind === "sandbox" ? "SIXB_API_BASE_URL is not set." : "The selected Sixb profile has no API URL.",
+    unavailableMessage: mode.kind === "sandbox" ? "The Sixb API gateway could not be reached." : "The Sixb API could not be reached.",
+    unavailableHint: mode.kind === "sandbox" ? "Run 'sixb doctor' to verify the sandbox runtime and gateway." : "Run 'sixb status' to verify the current profile."
+  });
+}
+// src/agent-cli/commands/system.ts
+import { readFile as readFile3 } from "node:fs/promises";
+
+// src/agent-runtime/profile.ts
+var AGENT_RUNTIME_PROFILE = "sixb-agent-runtime/v1";
+
+// src/agent-cli/commands/system.ts
+async function doctor(args, mode) {
+  if (isHelp(args[0]))
+    return writeText("Usage: sixb doctor");
+  if (args.length !== 0)
+    fail("doctor accepts no arguments.");
+  const project2 = asRecord2(await createInstanceApiClient(mode).get("/api/project"));
+  if (typeof project2.id !== "string" || project2.id.length === 0) {
+    throw new CliError({ code: "invalid_api_response", message: "The Sixb API returned an invalid project." }, EXIT_API);
+  }
+  const report = {
+    ok: true,
+    profile: AGENT_RUNTIME_PROFILE,
+    cli: { version: INSTANCE_CLI_VERSION },
+    javascript: javascriptRuntime(),
+    project: { id: project2.id }
+  };
+  writeJson(report);
+}
+async function context(args) {
+  if (isHelp(args[0]))
+    return writeText("Usage: sixb context");
+  if (args.length !== 0)
+    fail("context accepts no arguments.");
+  const path = process.env.SIXB_RUN_CONTEXT;
+  if (!path)
+    fail("SIXB_RUN_CONTEXT is not set.");
+  let text;
+  try {
+    text = await readFile3(path, "utf8");
+  } catch (error) {
+    if (isFileError(error, "ENOENT"))
+      fail(`Run context '${path}' does not exist.`);
+    throw error;
+  }
+  try {
+    writeJson(JSON.parse(text));
+  } catch {
+    fail(`Run context '${path}' is not valid JSON.`, "invalid_json");
+  }
+}
+function javascriptRuntime() {
+  if (typeof globalThis.Bun === "object") {
+    return { name: "bun", version: globalThis.Bun.version };
+  }
+  return { name: "node", version: process.versions.node };
 }
 
 // src/agent-cli/index.ts
 async function main(args) {
   const [command, ...rest] = args;
   if (!command || isHelp(command))
-    return writeText(MAIN_HELP);
+    return writeText(renderInstanceHelp("sandbox"));
   if (command === "--version" || command === "version") {
-    return writeText(`sixb agent CLI ${AGENT_CLI_VERSION}`);
+    return writeText(`sixb agent CLI ${INSTANCE_CLI_VERSION}`);
   }
-  await dispatch(command, rest);
+  if (command === "doctor")
+    return doctor(rest, sandboxMode());
+  if (command === "context")
+    return context(rest);
+  if (!isInstanceCommand(command))
+    fail(`Unknown command '${command}'. Run 'sixb --help'.`);
+  await runInstanceCli({ args, mode: sandboxMode() });
+}
+function sandboxMode() {
+  return {
+    kind: "sandbox",
+    baseUrl: process.env.SIXB_API_BASE_URL ?? "",
+    runContextPath: process.env.SIXB_RUN_CONTEXT ?? ""
+  };
 }
 try {
   await main(process.argv.slice(2));

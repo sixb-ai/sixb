@@ -1,11 +1,10 @@
 {
-  "name": "@sixb/agent-worker",
-  "version": "0.1.5",
-  "description": "Worker that runs Sixb agent threads",
+  "name": "@sixb/cli-core",
+  "version": "0.1.4",
+  "description": "Shared instance command runtime for Sixb CLIs",
   "keywords": [
     "sixb",
-    "bun",
-    "worker"
+    "cli"
   ],
   "homepage": "https://sixb.ai",
   "bugs": {
@@ -14,7 +13,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/sixb-ai/sixb.git",
-    "directory": "packages/agent-worker"
+    "directory": "packages/cli-core"
   },
   "author": "Sixb contributors",
   "type": "module",
@@ -30,36 +29,11 @@
   },
   "scripts": {
     "build": "bun ../../scripts/build-package.ts",
-    "generate:agent-cli": "bun ./scripts/generate-agent-cli.ts",
-    "check:agent-cli": "bun ./scripts/generate-agent-cli.ts --check",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "prepack": "bun run build"
   },
-  "sixbBuild": {
-    "assets": [
-      {
-        "from": "./src/agent-cli/bin",
-        "to": "./dist/agent-cli/bin"
-      },
-      {
-        "from": "./src/agent-cli/generated",
-        "to": "./dist/agent-cli/generated"
-      }
-    ]
-  },
-  "dependencies": {
-    "@sixb/cli-core": "workspace:^",
-    "ai": "^7.0.4"
-  },
-  "peerDependencies": {
-    "@sixb/core": "workspace:*"
-  },
   "devDependencies": {
-    "@ai-sdk/provider": "^4.0.0",
-    "@sixb/connector-exa": "workspace:*",
-    "@sixb/core": "workspace:*",
-    "@sixb/sandboxes-local": "workspace:*",
     "@types/bun": "latest",
     "typescript": "^5.7.0"
   },
