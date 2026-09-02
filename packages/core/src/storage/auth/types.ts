@@ -5,6 +5,8 @@ export type ServiceAccountStatus = "active" | "suspended"
 export type InvitationStatus = "pending" | "accepted" | "revoked"
 export type GroupMembershipSource = "invitation" | "manual" | "agent"
 export type AccessTokenSubjectType = "user" | "serviceAccount"
+export type DeviceAuthorizationStatus = "pending" | "approved" | "denied" | "consumed"
+export const MAX_PENDING_DEVICE_AUTHORIZATIONS = 100
 
 export interface UserRecord {
   readonly id: string
@@ -137,6 +139,24 @@ export interface OidcAuthorizationAttemptRecord {
   readonly returnTo?: string
   readonly createdAt: Date
   readonly expiresAt: Date
+  readonly consumedAt?: Date
+}
+
+export interface DeviceAuthorizationRecord {
+  readonly id: string
+  readonly projectId: string
+  readonly deviceCodeHash: string
+  readonly userCode: string
+  readonly clientName: string
+  readonly tokenName: string
+  readonly tokenExpiresAt: Date
+  readonly status: DeviceAuthorizationStatus
+  readonly approvedUserId?: string
+  readonly approvedSessionId?: string
+  readonly createdAt: Date
+  readonly expiresAt: Date
+  readonly approvedAt?: Date
+  readonly deniedAt?: Date
   readonly consumedAt?: Date
 }
 
@@ -357,6 +377,31 @@ export interface CreateOidcAuthorizationAttemptInput {
   readonly returnTo?: string
   readonly createdAt: Date
   readonly expiresAt: Date
+}
+
+export interface CreateDeviceAuthorizationInput {
+  readonly id: string
+  readonly projectId: string
+  readonly deviceCodeHash: string
+  readonly userCode: string
+  readonly clientName: string
+  readonly tokenName: string
+  readonly tokenExpiresAt: Date
+  readonly createdAt: Date
+  readonly expiresAt: Date
+}
+
+export interface CompleteDeviceAuthorizationInput {
+  readonly projectId: string
+  readonly id: string
+  readonly deviceCodeHash: string
+  readonly accessToken: CreateAuthAccessTokenInput
+  readonly completedAt: Date
+}
+
+export interface CompleteDeviceAuthorizationResult {
+  readonly authorization: DeviceAuthorizationRecord
+  readonly accessToken: AccessTokenRecord
 }
 
 export interface CompleteMagicLinkSignInInput {
@@ -622,6 +667,30 @@ export interface AuthOidcAuthorizationAttemptStore {
   }): Promise<OidcAuthorizationAttemptRecord>
 }
 
+export interface AuthDeviceAuthorizationStore {
+  create(input: CreateDeviceAuthorizationInput): Promise<DeviceAuthorizationRecord>
+  getById(params: {
+    readonly projectId: string
+    readonly id: string
+  }): Promise<DeviceAuthorizationRecord | null>
+  getByUserCode(params: {
+    readonly projectId: string
+    readonly userCode: string
+  }): Promise<DeviceAuthorizationRecord | null>
+  approve(params: {
+    readonly projectId: string
+    readonly id: string
+    readonly userId: string
+    readonly sessionId: string
+    readonly approvedAt: Date
+  }): Promise<DeviceAuthorizationRecord>
+  deny(params: {
+    readonly projectId: string
+    readonly id: string
+    readonly deniedAt: Date
+  }): Promise<DeviceAuthorizationRecord>
+}
+
 export interface AuthStorage {
   readonly users: AuthUserStore
   readonly identities: AuthUserIdentityStore
@@ -633,8 +702,12 @@ export interface AuthStorage {
   readonly groupMemberships: AuthGroupMembershipStore
   readonly magicLinks: AuthMagicLinkStore
   readonly oidcAuthorizationAttempts: AuthOidcAuthorizationAttemptStore
+  readonly deviceAuthorizations: AuthDeviceAuthorizationStore
 
   completeMagicLinkSignIn(input: CompleteMagicLinkSignInInput): Promise<CompleteSignInResult>
   completeOidcSignIn(input: CompleteOidcSignInInput): Promise<CompleteSignInResult>
+  completeDeviceAuthorization(
+    input: CompleteDeviceAuthorizationInput
+  ): Promise<CompleteDeviceAuthorizationResult>
   suspendUserAndRevokeSessions(input: SuspendUserAndRevokeSessionsInput): Promise<UserRecord>
 }

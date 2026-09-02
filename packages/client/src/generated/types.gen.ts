@@ -268,6 +268,78 @@ export type ObjectQuerySortField =
       direction?: "asc" | "desc"
     }
 
+export type CreateDeviceAuthorizationData = {
+  body: {
+    clientName: string
+    tokenName: string
+    expiresIn?: "90d"
+  }
+  path?: never
+  query?: never
+  url: "/api/auth/device-authorizations"
+}
+
+export type CreateDeviceAuthorizationErrors = {
+  /**
+   * Response for status 429
+   */
+  429: {
+    error: string
+  }
+}
+
+export type CreateDeviceAuthorizationError =
+  CreateDeviceAuthorizationErrors[keyof CreateDeviceAuthorizationErrors]
+
+export type CreateDeviceAuthorizationResponses = {
+  /**
+   * Response for status 201
+   */
+  201: {
+    deviceCode: string
+    userCode: string
+    verificationUri: string
+    verificationUriComplete: string
+    expiresAt: string
+    interval: number
+  }
+}
+
+export type CreateDeviceAuthorizationResponse =
+  CreateDeviceAuthorizationResponses[keyof CreateDeviceAuthorizationResponses]
+
+export type ExchangeDeviceAuthorizationData = {
+  body: {
+    deviceCode: string
+  }
+  path?: never
+  query?: never
+  url: "/api/auth/device-authorizations/token"
+}
+
+export type ExchangeDeviceAuthorizationResponses = {
+  /**
+   * Response for status 200
+   */
+  200:
+    | {
+        status: "pending"
+      }
+    | {
+        status: "denied"
+      }
+    | {
+        status: "expired"
+      }
+    | {
+        status: "approved"
+        accessToken: string
+      }
+}
+
+export type ExchangeDeviceAuthorizationResponse =
+  ExchangeDeviceAuthorizationResponses[keyof ExchangeDeviceAuthorizationResponses]
+
 export type GetAuthSessionData = {
   body?: never
   path?: never

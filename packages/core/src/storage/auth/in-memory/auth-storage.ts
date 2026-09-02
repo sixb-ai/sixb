@@ -1,6 +1,8 @@
 import { AuthStorageError } from "../errors"
 import type {
   AuthStorage,
+  CompleteDeviceAuthorizationInput,
+  CompleteDeviceAuthorizationResult,
   CompleteMagicLinkSignInInput,
   CompleteOidcSignInInput,
   CompleteSignInResult,
@@ -12,6 +14,7 @@ import type {
   UserRecord,
 } from "../types"
 import { InMemoryAuthAccessTokenStore } from "./access-tokens"
+import { InMemoryAuthDeviceAuthorizationStore } from "./device-authorizations"
 import { InMemoryAuthGroupMembershipStore } from "./group-memberships"
 import { InMemoryAuthUserIdentityStore } from "./identities"
 import { InMemoryAuthInvitationStore } from "./invitations"
@@ -27,8 +30,10 @@ import {
   cloneRecord,
   consumeMagicLinkRecord,
   consumeOidcAttemptRecord,
+  createAccessTokenRecord,
   createAuthStorageState,
   createSessionRecord,
+  deviceAuthorizationKey,
   getActiveInvitationByEmail,
   getUserByEmail,
   identityKey,
@@ -60,6 +65,7 @@ export class InMemoryAuthStorage implements AuthStorage {
   readonly groupMemberships = new InMemoryAuthGroupMembershipStore(this.state)
   readonly magicLinks = new InMemoryAuthMagicLinkStore(this.state)
   readonly oidcAuthorizationAttempts = new InMemoryAuthOidcAuthorizationAttemptStore(this.state)
+  readonly deviceAuthorizations = new InMemoryAuthDeviceAuthorizationStore(this.state)
 
   snapshot(): InMemoryAuthStorageSnapshot {
     return {
@@ -73,6 +79,7 @@ export class InMemoryAuthStorage implements AuthStorage {
       groupMemberships: structuredClone(this.state.groupMemberships),
       magicLinks: structuredClone(this.state.magicLinks),
       oidcAuthorizationAttempts: structuredClone(this.state.oidcAuthorizationAttempts),
+      deviceAuthorizations: structuredClone(this.state.deviceAuthorizations),
     }
   }
 
@@ -87,6 +94,68 @@ export class InMemoryAuthStorage implements AuthStorage {
     restoreMap(this.state.groupMemberships, snapshot.groupMemberships)
     restoreMap(this.state.magicLinks, snapshot.magicLinks)
     restoreMap(this.state.oidcAuthorizationAttempts, snapshot.oidcAuthorizationAttempts)
+    restoreMap(this.state.deviceAuthorizations, snapshot.deviceAuthorizations)
+  }
+
+  async completeDeviceAuthorization(
+    input: CompleteDeviceAuthorizationInput
+  ): Promise<CompleteDeviceAuthorizationResult> {
+    const key = deviceAuthorizationKey(input.projectId, input.id)
+    const authorization = this.state.deviceAuthorizations.get(key)
+    if (!authorization) {
+      throw new AuthStorageError(
+        "missing_device_authorization",
+        `[Sixb] Device authorization '${input.id}' not found for project '${input.projectId}'.`
+      )
+    }
+    if (authorization.deviceCodeHash !== input.deviceCodeHash) {
+      throw new AuthStorageError(
+        "invalid_device_authorization",
+        "[Sixb] Invalid device authorization."
+      )
+    }
+    if (authorization.status === "pending") {
+      throw new AuthStorageError(
+        "pending_device_authorization",
+        "[Sixb] Device authorization is pending."
+      )
+    }
+    if (authorization.status === "denied") {
+      throw new AuthStorageError(
+        "device_authorization_denied",
+        "[Sixb] Device authorization was denied."
+      )
+    }
+    if (
+      authorization.status !== "approved" ||
+      !authorization.approvedUserId ||
+      !authorization.approvedSessionId ||
+      authorization.expiresAt <= input.completedAt
+    ) {
+      throw new AuthStorageError(
+        "invalid_device_authorization",
+        "[Sixb] Device authorization is invalid."
+      )
+    }
+    if (
+      input.accessToken.projectId !== input.projectId ||
+      input.accessToken.subjectType !== "user" ||
+      input.accessToken.subjectId !== authorization.approvedUserId ||
+      input.accessToken.createdBySessionId !== authorization.approvedSessionId
+    ) {
+      throw new AuthStorageError(
+        "invalid_device_authorization",
+        "[Sixb] Device access token is invalid."
+      )
+    }
+    const accessToken = createAccessTokenRecord(this.state, input.accessToken)
+    const consumed = {
+      ...authorization,
+      status: "consumed" as const,
+      consumedAt: new Date(input.completedAt),
+    }
+    this.state.deviceAuthorizations.set(key, cloneRecord(consumed))
+    return { authorization: cloneRecord(consumed), accessToken: cloneRecord(accessToken) }
   }
 
   async completeMagicLinkSignIn(

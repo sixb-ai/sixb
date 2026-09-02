@@ -24,10 +24,12 @@ import {
   createAuthPersonalAccessToken,
   createAuthServiceAccount,
   createAuthServiceAccountAccessToken,
+  createDeviceAuthorization,
   createFileUpload,
   deleteAiLimitPolicy,
   disableAuthServiceAccount,
   disconnectConnectorConnection,
+  exchangeDeviceAuthorization,
   existsObjects,
   facetObjects,
   getAction,
@@ -179,6 +181,9 @@ import type {
   CreateAuthServiceAccountData,
   CreateAuthServiceAccountError,
   CreateAuthServiceAccountResponse,
+  CreateDeviceAuthorizationData,
+  CreateDeviceAuthorizationError,
+  CreateDeviceAuthorizationResponse,
   CreateFileUploadData,
   CreateFileUploadError,
   CreateFileUploadResponse,
@@ -191,6 +196,8 @@ import type {
   DisconnectConnectorConnectionData,
   DisconnectConnectorConnectionError,
   DisconnectConnectorConnectionResponse,
+  ExchangeDeviceAuthorizationData,
+  ExchangeDeviceAuthorizationResponse,
   ExistsObjectsData,
   ExistsObjectsError,
   ExistsObjectsResponse,
@@ -498,6 +505,60 @@ import type {
   UpsertObjectLinkResponse,
   UpsertObjectResponse,
 } from "../types.gen"
+
+/**
+ * Start device authorization
+ */
+export const createDeviceAuthorizationMutation = (
+  options?: Partial<Options<CreateDeviceAuthorizationData>>
+): UseMutationOptions<
+  CreateDeviceAuthorizationResponse,
+  CreateDeviceAuthorizationError,
+  Options<CreateDeviceAuthorizationData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    CreateDeviceAuthorizationResponse,
+    CreateDeviceAuthorizationError,
+    Options<CreateDeviceAuthorizationData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await createDeviceAuthorization({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Exchange an approved device authorization
+ */
+export const exchangeDeviceAuthorizationMutation = (
+  options?: Partial<Options<ExchangeDeviceAuthorizationData>>
+): UseMutationOptions<
+  ExchangeDeviceAuthorizationResponse,
+  DefaultError,
+  Options<ExchangeDeviceAuthorizationData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    ExchangeDeviceAuthorizationResponse,
+    DefaultError,
+    Options<ExchangeDeviceAuthorizationData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await exchangeDeviceAuthorization({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
 
 export type QueryKey<TOptions extends Options> = [
   Pick<TOptions, "baseUrl" | "body" | "headers" | "path" | "query"> & {

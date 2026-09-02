@@ -26,6 +26,10 @@ export function classifyRoute(request: Request): RouteAccess {
     return { kind: "api", csrfProtected: !isCsrfExemptMethod(request.method) }
   }
 
+  if (pathname === "/auth/device") {
+    return { kind: "html", csrfProtected: !isCsrfExemptMethod(request.method) }
+  }
+
   if (pathname === "/docs" || pathname.startsWith("/docs/")) {
     return { kind: "html", csrfProtected: !isCsrfExemptMethod(request.method) }
   }
@@ -69,6 +73,20 @@ export function isPublicRoute(pathname: string, method: string): boolean {
   }
 
   if (pathname === "/api/auth/sign-out" && normalizedMethod === "POST") {
+    return true
+  }
+
+  if (
+    (pathname === "/api/auth/device-authorizations" ||
+      pathname === "/api/auth/device-authorizations/token") &&
+    normalizedMethod === "POST"
+  ) {
+    return true
+  }
+
+  // Native HTML forms cannot set the CSRF header. The handler authenticates the
+  // browser session and verifies the submitted token against the CSRF cookie.
+  if (pathname === "/auth/device" && normalizedMethod === "POST") {
     return true
   }
 
