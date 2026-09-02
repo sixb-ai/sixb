@@ -155,6 +155,29 @@ work running through it.
 
 <sub>Shown with data from the <a href="examples/northline">Northline reference project</a>.</sub>
 
+## Sixb CLI
+
+Install the CLI globally to work with a running Sixb instance from your terminal, Codex, or Claude
+Code:
+
+```bash
+bun add --global @sixb/cli
+sixb --version
+```
+
+Connect once, then use the same commands locally or from an agent:
+
+```bash
+sixb login http://localhost:3002 --profile local
+sixb status
+sixb ontology list
+sixb objects search "Northline"
+```
+
+If the instance requires authentication, `sixb login` prompts for an existing API token without
+echoing it. Profiles are stored in `~/.config/sixb/config.json`. Run `sixb --help` to discover the
+complete command set.
+
 ## Architecture
 
 ```text

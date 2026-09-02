@@ -1,6 +1,7 @@
 import { Box, render, Text } from "ink"
 import type React from "react"
 import { useEffect, useMemo, useState } from "react"
+import { CLI_EXAMPLES, type CliHelp, ROOT_HELP } from "../lib/command-line"
 import { errorMessage, errorRemediation } from "../lib/errors"
 
 // ─── Primitives ──────────────────────────────────────────────────────────────
@@ -331,123 +332,50 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
       ) : null}
       <Spacer />
       <SectionTitle>Usage</SectionTitle>
-      <Text> sixb {"<command>"} [options]</Text>
+      <Text> {ROOT_HELP.usage}</Text>
       <Spacer />
       <SectionTitle>Commands</SectionTitle>
-      <KeyValueList
-        labelWidth={22}
-        items={[
-          { label: "dev", value: "Start local development (server + built-in UI + app)" },
-          { label: "api", value: "Start production API/docs/WebSocket server" },
-          { label: "atlas", value: "Start production Atlas UI server" },
-          { label: "app", value: "Start production custom app server" },
-          { label: "auth status", value: "Check API token authentication" },
-          { label: "token list", value: "List personal access tokens" },
-          { label: "token create", value: "Create a personal access token" },
-          { label: "token revoke <id>", value: "Revoke a personal access token" },
-          { label: "service-account list", value: "List service accounts" },
-          { label: "service-account create", value: "Create a service account" },
-          { label: "service-account disable", value: "Disable a service account" },
-          {
-            label: "service-account token",
-            value: "List, create, or revoke service-account tokens",
-          },
-          { label: "scheduler", value: "Start production scheduler event producer" },
-          { label: "orchestrator", value: "Start production event-to-queue dispatcher" },
-          { label: "rules", value: "Start production rules runtime" },
-          {
-            label: "worker <type>",
-            value:
-              "Start production queue worker: sync, action, agent, pipeline, projection, workflow",
-          },
-          {
-            label: "worker-group [types...]",
-            value: "Co-host multiple queue workers in one process (constrained resources)",
-          },
-          { label: "check", value: "Validate project configuration and health" },
-          { label: "typegen", value: "Generate ontology types for client query inference" },
-          { label: "build", value: "Build runtime and production UI/app assets" },
-          { label: "db migrate", value: "Run adapter-owned database migrations ahead of a role" },
-          { label: "lake check", value: "Check lake dataset definitions for drift" },
-          { label: "lake cleanup", value: "Run lake storage maintenance cleanup" },
-          { label: "init [dir]", value: "Initialize sixb project in directory" },
-          { label: "create <name>", value: "Create a new sixb project" },
-        ]}
-      />
+      <KeyValueList labelWidth={22} items={ROOT_HELP.commands} />
       <Spacer />
       <SectionTitle>Options</SectionTitle>
-      <KeyValueList
-        labelWidth={22}
-        items={[
-          { label: "--entry <path>", value: "Entry file (default: sixb.config.ts)" },
-          {
-            label: "--no-migrate",
-            value: "Start a role without migrating storage (or SIXB_SKIP_MIGRATION=1)",
-          },
-          { label: "--port <port>", value: "Role port; dev uses Atlas base port" },
-          {
-            label: "--host <host>",
-            value: "Bind host (dev: 127.0.0.1, production roles: 0.0.0.0)",
-          },
-          { label: "--api-port <port>", value: "API port (default: Atlas port + 2)" },
-          { label: "--api-host <host>", value: "API bind host (default: --host)" },
-          { label: "--api-public-origin <origin>", value: "Public API origin" },
-          {
-            label: "--agent-turn-timeout <duration>",
-            value: "Agent turn wall-clock budget (default: 10m)",
-          },
-          {
-            label: "--concurrency <value>",
-            value: "Concurrent jobs: count for worker; repeat type=count for dev/worker-group",
-          },
-          { label: "--atlas-public-origin <origin>", value: "Public Atlas origin" },
-          { label: "--app-public-origin <origin>", value: "Public custom app origin" },
-          { label: "--api-url <url>", value: "API origin for auth/token commands" },
-          { label: "--token <token>", value: "API token for auth/token commands" },
-          { label: "--name <name>", value: "Token or service-account name" },
-          { label: "--description <text>", value: "Service-account description" },
-          { label: "--expires-in <duration>", value: "Token lifetime, e.g. 30d or 1y" },
-          { label: "--expires-at <iso>", value: "Token expiration timestamp" },
-          { label: "--group <id>", value: "Assignable token group; may repeat" },
-          { label: "--json", value: "Print JSON for auth/token commands" },
-          { label: "--outdir <path>", value: "Build output directory" },
-          { label: "--dry-run", value: "Preview lake cleanup without changing storage" },
-          { label: "--expire-older-than <interval>", value: "Lake snapshot expiration window" },
-          { label: "--delete-older-than <interval>", value: "Lake file deletion window" },
-          { label: "--help", value: "Show this help message" },
-          { label: "--version", value: "Show version" },
-        ]}
-      />
+      <KeyValueList labelWidth={22} items={ROOT_HELP.options} />
       <Spacer />
       <SectionTitle>Examples</SectionTitle>
-      <BulletList
-        dim
-        items={[
-          "sixb dev",
-          "sixb build",
-          "sixb api",
-          "SIXB_API_URL=http://localhost:3002 SIXB_API_TOKEN=sixb_pat_... sixb token list",
-          "sixb token create --name 'Local CLI' --expires-in 90d",
-          "sixb service-account create --id svc_sandbox --name 'Sandbox agent' --group agents",
-          "sixb service-account token create svc_sandbox --name 'Sandbox token' --expires-in 30d",
-          "sixb auth status",
-          "sixb atlas",
-          "sixb app",
-          "sixb scheduler",
-          "sixb orchestrator",
-          "sixb rules",
-          "sixb worker pipeline",
-          "sixb worker agent --concurrency 8",
-          "sixb worker-group sync agent --concurrency sync=2 --concurrency agent=8",
-          "sixb dev --entry examples/mac-os/sixb.config.ts --port 8080",
-          "sixb check",
-          "sixb typegen",
-          "sixb db migrate",
-          "sixb lake check",
-          "sixb lake cleanup --dry-run",
-          "sixb create my-project",
-        ]}
-      />
+      <BulletList dim items={CLI_EXAMPLES} />
+    </Box>
+  )
+}
+
+export function CommandHelpView({ help, errorMessage }: { help: CliHelp; errorMessage?: string }) {
+  return (
+    <Box flexDirection="column">
+      <Text color="cyan" bold>
+        {help.path.length > 0 ? help.path.join(" ") : "sixb"}
+      </Text>
+      <Text dimColor>{help.summary}</Text>
+      {errorMessage ? (
+        <>
+          <Spacer />
+          <Text color="red">{errorMessage}</Text>
+        </>
+      ) : null}
+      <Spacer />
+      <SectionTitle>Usage</SectionTitle>
+      <Text> {help.usage}</Text>
+      {help.commands.length > 0 ? (
+        <>
+          <Spacer />
+          <SectionTitle>Commands</SectionTitle>
+          <KeyValueList items={help.commands} />
+        </>
+      ) : null}
+      {help.options.length > 0 ? (
+        <>
+          <Spacer />
+          <SectionTitle>Options</SectionTitle>
+          <KeyValueList items={help.options} />
+        </>
+      ) : null}
     </Box>
   )
 }
@@ -886,35 +814,6 @@ export function LakeCleanupView({
           { label: "Orphaned files", value: String(report.orphanedFiles) },
         ]}
       />
-    </Box>
-  )
-}
-
-export function CreateView({
-  name,
-  targetDir,
-  commands,
-}: {
-  name: string
-  targetDir: string
-  commands: readonly string[]
-}) {
-  return (
-    <Box flexDirection="column">
-      <Text color="cyan" bold>
-        sixb
-      </Text>
-      <Spacer />
-      <Text>
-        <Text color="green" bold>
-          Success!
-        </Text>{" "}
-        Created {name}
-      </Text>
-      <Text dimColor>{targetDir}</Text>
-      <Spacer />
-      <SectionTitle>Next steps</SectionTitle>
-      <CommandList commands={commands} />
     </Box>
   )
 }

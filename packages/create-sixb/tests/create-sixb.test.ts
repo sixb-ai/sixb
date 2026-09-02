@@ -7,6 +7,7 @@ import { scaffoldProject } from "../src/scaffold"
 const repoRoot = resolve(import.meta.dir, "..", "..", "..")
 const createPackageDir = join(repoRoot, "packages", "create-sixb")
 const cliPackageDir = join(repoRoot, "packages", "cli")
+const cliCorePackageDir = join(repoRoot, "packages", "cli-core")
 
 let layoutRoot: string
 let runRoot: string
@@ -20,16 +21,19 @@ beforeAll(async () => {
   runRoot = join(layoutRoot, "run")
   await mkdir(artifactsDir, { recursive: true })
   await mkdir(join(nodeModulesDir, "@sixb", "cli"), { recursive: true })
+  await mkdir(join(nodeModulesDir, "@sixb", "cli-core"), { recursive: true })
   await mkdir(join(nodeModulesDir, "create-sixb"), { recursive: true })
   await mkdir(runRoot, { recursive: true })
 
   const createTarball = packPackage(createPackageDir, artifactsDir)
   const cliTarball = packPackage(cliPackageDir, artifactsDir)
+  const cliCoreTarball = packPackage(cliCorePackageDir, artifactsDir)
   extractPackage(createTarball, join(nodeModulesDir, "create-sixb"))
   extractPackage(cliTarball, join(nodeModulesDir, "@sixb", "cli"))
+  extractPackage(cliCoreTarball, join(nodeModulesDir, "@sixb", "cli-core"))
 
-  // The packed CLI imports only Ink and React before dispatching `create`. Link those installed
-  // third-party dependencies while keeping both Sixb packages isolated from workspace symlinks.
+  // Link the packed CLI's eager third-party dependencies while keeping every Sixb package
+  // isolated from workspace symlinks.
   await linkInstalledDependency("ink", nodeModulesDir)
   await linkInstalledDependency("react", nodeModulesDir)
 
@@ -50,6 +54,7 @@ describe("create-sixb packed artifacts", () => {
 
     expect(createManifest.dependencies).toBeUndefined()
     expect(cliManifest.dependencies?.["create-sixb"]).toBe("^0.1.2")
+    expect(cliManifest.dependencies?.["@sixb/cli-core"]).toBe("^0.1.4")
   })
 
   test("shows the bun create usage", () => {
@@ -75,14 +80,15 @@ describe("create-sixb packed artifacts", () => {
     await assertScaffold(join(cwd, "starter"), "starter")
   })
 
-  test("creates a project through the packed sixb CLI", async () => {
+  test("initializes a project through the packed sixb CLI", async () => {
     const cwd = await createRunDirectory("cli")
-    const result = runPacked([cliEntry, "create", "starter-cli"], cwd)
+    const result = runPacked([cliEntry, "init", "starter-cli"], cwd)
 
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("sixb\n\nSuccess! Created starter-cli")
+    expect(result.stdout).toContain("Sixb initialized")
+    expect(result.stdout).toContain("starter-cli")
     expect(result.stdout).toContain("Next steps\n  cd starter-cli\n  bun install\n  bun run dev")
-    expect(result.stdout).not.toContain("Files")
+    expect(result.stdout).toContain("Files")
     expect(result.stderr).toBe("")
     await assertScaffold(join(cwd, "starter-cli"), "starter-cli")
   })
@@ -105,23 +111,18 @@ describe("create-sixb packed artifacts", () => {
     expect(currentResult.stdout).toContain("Next steps\n  bun install\n  bun run dev")
   })
 
-  test("refuses to merge into a non-empty directory from either command", async () => {
-    for (const [command, prefix] of [
-      ["launcher-non-empty", [createEntry]],
-      ["cli-non-empty", [cliEntry, "create"]],
-    ] as const) {
-      const cwd = await createRunDirectory(command)
-      const target = join(cwd, "existing")
-      await mkdir(target)
-      await writeFile(join(target, "keep.txt"), "keep\n")
+  test("the zero-dependency launcher refuses to merge into a non-empty directory", async () => {
+    const cwd = await createRunDirectory("launcher-non-empty")
+    const target = join(cwd, "existing")
+    await mkdir(target)
+    await writeFile(join(target, "keep.txt"), "keep\n")
 
-      const result = runPacked([...prefix, "existing"], cwd)
+    const result = runPacked([createEntry, "existing"], cwd)
 
-      expect(result.exitCode).toBe(1)
-      expect(`${result.stdout}\n${result.stderr}`).toContain("Target directory is not empty")
-      expect(await readFile(join(target, "keep.txt"), "utf8")).toBe("keep\n")
-      expect(await Bun.file(join(target, "package.json")).exists()).toBe(false)
-    }
+    expect(result.exitCode).toBe(1)
+    expect(`${result.stdout}\n${result.stderr}`).toContain("Target directory is not empty")
+    expect(await readFile(join(target, "keep.txt"), "utf8")).toBe("keep\n")
+    expect(await Bun.file(join(target, "package.json")).exists()).toBe(false)
   })
 
   test("never overwrites an existing project tsconfig during init", async () => {

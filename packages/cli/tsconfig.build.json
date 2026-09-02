@@ -33,6 +33,9 @@
       "path": "../core/tsconfig.build.json"
     },
     {
+      "path": "../cli-core/tsconfig.build.json"
+    },
+    {
       "path": "../orchestrator/tsconfig.build.json"
     },
     {

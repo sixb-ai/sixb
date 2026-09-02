@@ -65,6 +65,8 @@ describe("sixb command dispatch", () => {
       expect(result.stdout).toContain(command)
     }
     expect(result.stdout).toContain("sixb worker pipeline")
+    expect(result.stdout).toContain("action-runs")
+    expect(result.stdout).toContain("workflow-runs")
     expect(result.stderr).toBe("")
   })
 
@@ -79,15 +81,126 @@ describe("sixb command dispatch", () => {
   test("does not expose the removed production supervisor command", () => {
     const result = runCli(["start"])
 
-    expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("Unknown command: start")
+    expect(result.exitCode).toBe(2)
+    expect(result.stdout).toContain("Unknown command 'start'")
     expect(result.stderr).toBe("")
+  })
+
+  test("does not expose the removed auth status alias", () => {
+    const result = runCli(["auth", "status"])
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stdout).toContain("Unknown command 'auth'")
+    expect(result.stderr).toBe("")
+  })
+
+  test("does not expose the redundant create command", () => {
+    const result = runCli(["create", "my-project"])
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stdout).toContain("Unknown command 'create'")
+    expect(result.stderr).toBe("")
+  })
+
+  test("shows scoped help without running a command group", () => {
+    for (const group of ["profile", "token", "service-account", "db", "lake"]) {
+      const result = runCli([group])
+
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).toContain("Usage")
+      expect(result.stdout).not.toContain("Real-time digital twin framework")
+      expect(result.stderr).toBe("")
+    }
+
+    const nestedGroup = runCli(["service-account", "token"])
+    expect(nestedGroup.exitCode).toBe(0)
+    expect(nestedGroup.stdout).toContain(
+      "sixb service-account token <list|create|revoke> <service-account-id>"
+    )
+    expect(nestedGroup.stderr).toBe("")
+  })
+
+  test("supports contextual help for local command leaves", () => {
+    for (const args of [
+      ["token", "create", "--help"],
+      ["help", "token", "create"],
+      ["api", "--help"],
+    ]) {
+      const result = runCli(args)
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).toContain("Usage")
+      expect(result.stdout).not.toContain("Real-time digital twin framework")
+      expect(result.stderr).toBe("")
+    }
+  })
+
+  test("rejects unknown, missing, and duplicate options before running a command", () => {
+    const cases = [
+      { args: ["status", "--unknown-option"], message: "Unknown option '--unknown-option'" },
+      { args: ["status", "--profile"], message: "--profile requires a value" },
+      {
+        args: ["status", "--profile", "one", "--profile", "two"],
+        message: "--profile may only be provided once",
+      },
+      {
+        args: ["profile", "list", "--unknown-option"],
+        message: "Unknown option '--unknown-option'",
+      },
+      {
+        args: ["status", "--api-url", "http://localhost:3002", "--profile", "local"],
+        message: "--api-url and --profile cannot be used together",
+      },
+      { args: ["token", "create"], message: "Missing required --name <name>" },
+      { args: ["init", "--unknown-option"], message: "Unknown option '--unknown-option'" },
+    ]
+
+    for (const entry of cases) {
+      const result = runCli(entry.args)
+      expect(result.exitCode).toBe(2)
+      expect(result.stdout).toContain(entry.message)
+      expect(result.stderr).toBe("")
+    }
+  })
+
+  test("emits structured errors when a management command requests JSON", () => {
+    const result = runCli(["profile", "list", "--unknown-option", "--json"])
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stdout).toBe("")
+    expect(JSON.parse(result.stderr)).toEqual({
+      error: {
+        code: "invalid_arguments",
+        message: "Unknown option '--unknown-option' for 'profile list'.",
+        hint: "sixb profile list",
+      },
+    })
+  })
+
+  test("uses the shared usage contract for instance connection options", () => {
+    const result = runCli([
+      "project",
+      "show",
+      "--api-url",
+      "http://localhost:3002",
+      "--profile",
+      "local",
+    ])
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stdout).toBe("")
+    expect(JSON.parse(result.stderr)).toEqual({
+      error: {
+        code: "invalid_arguments",
+        message: "--api-url and --profile cannot be used together.",
+      },
+    })
   })
 
   test("does not document removed production command shapes", async () => {
     const staleCommands = [
       "sixb start",
       "sixb worker --worker",
+      "sixb create my-project",
       "bun ../../packages/cli/src/index.tsx start",
     ]
 

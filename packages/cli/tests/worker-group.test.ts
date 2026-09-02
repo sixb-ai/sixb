@@ -94,8 +94,8 @@ describe("sixb worker-group", () => {
   test("rejects a missing typed worker concurrency value", async () => {
     const result = await runOnce(["worker-group", "sync", "--concurrency"], "valid-project")
 
-    expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("Invalid worker concurrency ''")
+    expect(result.exitCode).toBe(2)
+    expect(result.stdout).toContain("--concurrency requires a value")
     expect(result.stdout).not.toContain("Unknown worker")
     expect(result.stdout).not.toContain("requires a queues provider")
   })
