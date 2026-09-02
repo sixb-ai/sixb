@@ -1,4 +1,4 @@
-import { ApiClient } from "../api-client"
+import type { ApiClient } from "../api-client"
 import {
   enumValue,
   integerInRange,
@@ -19,33 +19,33 @@ import {
   singleFileOption,
 } from "./shared"
 
-export async function objects(args: string[]): Promise<void> {
+export async function objects(api: ApiClient, args: readonly string[]): Promise<void> {
   const [sub, ...rest] = args
   if (!sub || isHelp(sub)) return writeText(OBJECTS_HELP)
   switch (sub) {
     case "inspect":
-      return objectsInspect(rest)
+      return objectsInspect(api, rest)
     case "list":
-      return objectsList(rest)
+      return objectsList(api, rest)
     case "get":
-      return objectsGet(rest)
+      return objectsGet(api, rest)
     case "search":
-      return objectsSearch(rest)
+      return objectsSearch(api, rest)
     case "query":
-      return objectsQuery(rest)
+      return objectsQuery(api, rest)
     case "count":
     case "exists":
-      return objectsScalar(sub, rest)
+      return objectsScalar(api, sub, rest)
     case "facets":
-      return objectsFacets(rest)
+      return objectsFacets(api, rest)
     case "links":
-      return objectsLinks(rest)
+      return objectsLinks(api, rest)
     default:
       fail(`Unknown objects command '${sub}'.`)
   }
 }
 
-async function objectsInspect(args: string[]): Promise<void> {
+async function objectsInspect(api: ApiClient, args: readonly string[]): Promise<void> {
   if (isHelp(args[0])) return writeText(OBJECTS_HELP)
   const objectTypeId = requireValue("objects inspect object type", args[0])
   const primaryId = requireValue("objects inspect primary id", args[1])
@@ -80,7 +80,7 @@ async function objectsInspect(args: string[]): Promise<void> {
     } else fail(`Unknown objects inspect option '${flag}'.`)
   }
   writeJson(
-    await inspectGraph(new ApiClient(), objectTypeId, primaryId, {
+    await inspectGraph(api, objectTypeId, primaryId, {
       depth,
       maxObjects,
       maxLinks,
@@ -89,7 +89,7 @@ async function objectsInspect(args: string[]): Promise<void> {
   )
 }
 
-async function objectsList(args: string[]): Promise<void> {
+async function objectsList(api: ApiClient, args: readonly string[]): Promise<void> {
   if (isHelp(args[0])) return writeText(OBJECTS_HELP)
   const optionNames: Record<string, string> = {
     "--type": "objectTypeId",
@@ -135,15 +135,15 @@ async function objectsList(args: string[]): Promise<void> {
     "--updated-before",
     options.updatedBefore
   )
-  writeJson(await new ApiClient().get("/api/objects", options))
+  writeJson(await api.get("/api/objects", options))
 }
 
-async function objectsGet(args: string[]): Promise<void> {
+async function objectsGet(api: ApiClient, args: readonly string[]): Promise<void> {
   if (isHelp(args[0])) return writeText("Usage: sixb objects get <object-type> <primary-id>...")
   const objectTypeId = requireValue("objects get", args[0])
   if (args.length < 2) fail("objects get requires at least one primary id.")
   writeJson(
-    await new ApiClient().post("/api/objects/query", {
+    await api.post("/api/objects/query", {
       query: {
         kind: "refs",
         refs: args.slice(1).map((primaryId) => ({ objectTypeId, primaryId })),
@@ -153,7 +153,7 @@ async function objectsGet(args: string[]): Promise<void> {
   )
 }
 
-async function objectsSearch(args: string[]): Promise<void> {
+async function objectsSearch(api: ApiClient, args: readonly string[]): Promise<void> {
   if (isHelp(args[0])) {
     return writeText(`Usage: sixb objects search <text> [--limit <1-${CLI_LIMITS.search.maximum}>]`)
   }
@@ -167,10 +167,10 @@ async function objectsSearch(args: string[]): Promise<void> {
       CLI_LIMITS.search.maximum
     )
   )
-  writeJson(await new ApiClient().get("/api/objects/search", { q: query, ...options }))
+  writeJson(await api.get("/api/objects/search", { q: query, ...options }))
 }
 
-async function objectsQuery(args: string[]): Promise<void> {
+async function objectsQuery(api: ApiClient, args: readonly string[]): Promise<void> {
   if (isHelp(args[0])) return writeText(QUERY_HELP)
   if (args[0] === "--example") {
     if (args.length !== 2) fail("objects query --example requires exactly one example name.")
@@ -195,22 +195,26 @@ async function objectsQuery(args: string[]): Promise<void> {
   const body = Object.hasOwn(record, "query")
     ? { ...record, ...(Object.hasOwn(record, "includeTotal") ? {} : { includeTotal }) }
     : { query: input, includeTotal }
-  writeJson(await new ApiClient().post("/api/objects/query", body))
+  writeJson(await api.post("/api/objects/query", body))
 }
 
-async function objectsScalar(operation: "count" | "exists", args: string[]): Promise<void> {
+async function objectsScalar(
+  api: ApiClient,
+  operation: "count" | "exists",
+  args: readonly string[]
+): Promise<void> {
   if (isHelp(args[0])) return writeText(`Usage: sixb objects ${operation} --file <path|->`)
   const source = singleFileOption(args, `objects ${operation}`)
   const input = await readJson(source)
   const record = asRecord(input)
   writeJson(
-    await new ApiClient().post(`/api/objects/query/${operation}`, {
+    await api.post(`/api/objects/query/${operation}`, {
       query: Object.hasOwn(record, "query") ? record.query : input,
     })
   )
 }
 
-async function objectsFacets(args: string[]): Promise<void> {
+async function objectsFacets(api: ApiClient, args: readonly string[]): Promise<void> {
   if (isHelp(args[0])) {
     return writeText(
       "Usage: sixb objects facets --file <path|->\n       sixb objects facets --example"
@@ -222,10 +226,10 @@ async function objectsFacets(args: string[]): Promise<void> {
   if (!Object.hasOwn(record, "query") || !Object.hasOwn(record, "facets")) {
     fail("objects facets input must contain query and facets.")
   }
-  writeJson(await new ApiClient().post("/api/objects/query/facets", body))
+  writeJson(await api.post("/api/objects/query/facets", body))
 }
 
-async function objectsLinks(args: string[]): Promise<void> {
+async function objectsLinks(api: ApiClient, args: readonly string[]): Promise<void> {
   if (isHelp(args[0])) return writeText(OBJECTS_HELP)
   const objectTypeId = requireValue("objects links object type", args[0])
   const primaryId = requireValue("objects links primary id", args[1])
@@ -255,7 +259,7 @@ async function objectsLinks(args: string[]): Promise<void> {
     else fail(`Unknown objects links option '${flag}'.`)
   }
   writeJson(
-    await new ApiClient().post("/api/objects/query/links", {
+    await api.post("/api/objects/query/links", {
       query: { kind: "refs", refs: [{ objectTypeId, primaryId }] },
       direction,
       includeObjects,

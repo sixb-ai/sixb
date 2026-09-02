@@ -4,14 +4,22 @@ import { readFile, rename, rm } from "node:fs/promises"
 import { basename, dirname, join } from "node:path"
 import { Readable } from "node:stream"
 import { pipeline } from "node:stream/promises"
+import type { ReadableStream as NodeReadableStream } from "node:stream/web"
 import { CliError, EXIT_API, fail } from "./output"
 
 export class ApiClient {
   readonly baseUrl: string
+  private readonly authorization: string | undefined
+  private readonly missingBaseUrlMessage: string
+  private readonly unavailableMessage: string
+  private readonly unavailableHint: string
 
-  constructor(baseUrl = process.env.SIXB_API_BASE_URL) {
-    if (!baseUrl) fail("SIXB_API_BASE_URL is not set.", "runtime_unavailable")
-    this.baseUrl = baseUrl.replace(/\/$/, "")
+  constructor(options: ApiClientOptions) {
+    this.baseUrl = options.baseUrl.replace(/\/+$/, "")
+    this.authorization = options.authorization
+    this.missingBaseUrlMessage = options.missingBaseUrlMessage
+    this.unavailableMessage = options.unavailableMessage
+    this.unavailableHint = options.unavailableHint
   }
 
   async get(path: string, query?: Readonly<Record<string, string | undefined>>): Promise<unknown> {
@@ -29,7 +37,7 @@ export class ApiClient {
 
   async upload(path: string, source: string, logicalPath?: string): Promise<unknown> {
     const form = new FormData()
-    form.append("file", new Blob([await readFile(source)]), basename(source))
+    form.append("file", new Blob([new Uint8Array(await readFile(source))]), basename(source))
     if (logicalPath) form.append("logicalPath", logicalPath)
     return this.json(this.url(path), { method: "POST", body: form })
   }
@@ -42,7 +50,9 @@ export class ApiClient {
     const response = await this.fetch(this.url(path, query), { method: "GET" })
     const temporary = join(dirname(output), `.${basename(output)}.sixb-${randomUUID()}.tmp`)
     try {
-      const body = Readable.from(response.body ?? [])
+      const body = response.body
+        ? Readable.fromWeb(response.body as unknown as NodeReadableStream)
+        : Readable.from([])
       await pipeline(body, createWriteStream(temporary, { flags: "wx" }))
       await rename(temporary, output)
     } catch (error) {
@@ -52,6 +62,7 @@ export class ApiClient {
   }
 
   private url(path: string, query?: Readonly<Record<string, string | undefined>>): URL {
+    if (!this.baseUrl) fail(this.missingBaseUrlMessage, "runtime_unavailable")
     validateApiPath(path)
     const url = new URL(`${this.baseUrl}${path}`)
     for (const [key, value] of Object.entries(query ?? {})) {
@@ -77,13 +88,15 @@ export class ApiClient {
   private async fetch(url: URL, init: RequestInit): Promise<Response> {
     let response: Response
     try {
-      response = await fetch(url, init)
+      const headers = new Headers(init.headers)
+      if (this.authorization) headers.set("authorization", this.authorization)
+      response = await fetch(url, { ...init, headers })
     } catch {
       throw new CliError(
         {
           code: "api_unreachable",
-          message: "The Sixb API gateway could not be reached.",
-          hint: "Run 'sixb doctor' to verify the sandbox runtime and gateway.",
+          message: this.unavailableMessage,
+          hint: this.unavailableHint,
         },
         EXIT_API
       )
@@ -124,6 +137,14 @@ export class ApiClient {
       EXIT_API
     )
   }
+}
+
+export interface ApiClientOptions {
+  readonly baseUrl: string
+  readonly authorization?: string
+  readonly missingBaseUrlMessage: string
+  readonly unavailableMessage: string
+  readonly unavailableHint: string
 }
 
 function validateApiPath(path: string): void {

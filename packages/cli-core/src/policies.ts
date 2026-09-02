@@ -1,3 +1,4 @@
+/** Stable safety and output bounds shared by local and sandbox modes. */
 export const CLI_LIMITS = {
   list: { default: 20, maximum: 1_000 },
   search: { default: 20, maximum: 50 },

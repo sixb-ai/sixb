@@ -545,6 +545,9 @@
     "packages/agent-worker": {
       "name": "@sixb/agent-worker",
       "version": "0.1.6",
+      "dependencies": {
+        "@sixb/cli-core": "workspace:^",
+      },
       "devDependencies": {
         "@sixb/connector-exa": "workspace:*",
         "@sixb/core": "workspace:*",
@@ -635,6 +638,14 @@
       "devDependencies": {
         "@types/bun": "latest",
         "@types/react": "^19.0.0",
+        "typescript": "^5.7.0",
+      },
+    },
+    "packages/cli-core": {
+      "name": "@sixb/cli-core",
+      "version": "0.1.4",
+      "devDependencies": {
+        "@types/bun": "latest",
         "typescript": "^5.7.0",
       },
     },
@@ -1433,6 +1444,8 @@
     "@sixb/broker-redis": ["@sixb/broker-redis@workspace:broker/redis"],
 
     "@sixb/cli": ["@sixb/cli@workspace:packages/cli"],
+
+    "@sixb/cli-core": ["@sixb/cli-core@workspace:packages/cli-core"],
 
     "@sixb/client": ["@sixb/client@workspace:packages/client"],
 
