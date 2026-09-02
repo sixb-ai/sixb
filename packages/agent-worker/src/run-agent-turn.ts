@@ -262,7 +262,9 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         runId,
         role: assistant.role,
         parts: assistantParts,
-        authorPrincipal: context.agentPrincipal,
+        ...(context.authorPrincipal === undefined
+          ? {}
+          : { authorPrincipal: context.authorPrincipal }),
       },
       finish: {
         projectId,
@@ -362,7 +364,9 @@ async function finalizeInterruptedTurn(input: {
       runId: run.id,
       role: "assistant",
       parts,
-      authorPrincipal: context.agentPrincipal,
+      ...(context.authorPrincipal === undefined
+        ? {}
+        : { authorPrincipal: context.authorPrincipal }),
     },
     finish: {
       projectId,

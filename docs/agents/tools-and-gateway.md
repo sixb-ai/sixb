@@ -1,7 +1,7 @@
 # Tools and gateway
 
-Every agent run gets sandboxed `read` and `bash` tools plus scoped access to the Sixb API. Agents
-may also receive explicitly selected tools that run in the agent worker.
+Every agent run gets sandboxed `read` and `bash` tools plus scoped access to the Sixb API. The main
+agent also receives project tools that run in the agent worker.
 
 | Capability | Runs in | Setup |
 | --- | --- | --- |
@@ -58,10 +58,10 @@ export const sixb = createSixb({
 
 See [Sandboxes](../sandboxes/overview.md) for factory options and isolation.
 
-## Selected tools
+## Project tools
 
-Selected tools run in the agent worker, not the Bash sandbox. Connector credentials stay on the
-host and are not model input.
+Project tools run in the agent worker, not the Bash sandbox. Connector credentials stay on the host
+and are not model input. Register them once in `createSixb`; the main agent receives the full list.
 
 ### Custom tools
 
@@ -69,7 +69,8 @@ host and are not model input.
 
 ```ts
 // agent-tools/search-knowledge.ts
-import { defineAgentTool } from "@sixb/core"
+import { createSixb, defineAgentTool } from "@sixb/core"
+import { vercelGateway } from "@sixb/vercel-ai-gateway"
 import { knowledgeConnector } from "../connectors/knowledge"
 
 export const searchKnowledge = defineAgentTool("search_knowledge")
@@ -81,6 +82,16 @@ export const searchKnowledge = defineAgentTool("search_knowledge")
     return { results }
   })
 ```
+
+```ts
+export const sixb = createSixb({
+  models: { language: [vercelGateway("openai/gpt-5.5")] },
+  tools: [searchKnowledge],
+})
+```
+
+Defined agents continue selecting their own `tools` until workflow agent configuration moves away
+from `defineAgent`.
 
 The handler receives inferred input, the provider's `toolCallId`, cancellation, run metadata,
 connector resolution, a run-scoped logger, and an artifact publisher. Ordinary results must be
@@ -157,6 +168,8 @@ attachments. Symbolic links and paths outside the workspace are rejected.
 Complete files moved there are collected as final assistant attachments; it is not used as the live
 tool-result transport.
 
+Names must be unique within each list. `bash`, `read`, `view_file`, and `spawn_agent` are reserved
+for framework tools.
 ### Exa web tools
 
 Install and register the Exa connector:

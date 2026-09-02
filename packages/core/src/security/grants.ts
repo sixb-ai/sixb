@@ -8,6 +8,7 @@
  */
 
 import type { ActionDefinition } from "../actions/types"
+import type { AgentReference } from "../agents/main"
 import type { AgentDefinition } from "../agents/types"
 import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets"
@@ -187,10 +188,10 @@ function apply(input: GrantInput<ActionDefinition, "action">): ApplyGrant {
 function run(input: GrantInput<WorkflowDefinition, "workflow">): RunGrant<"workflow">
 function run(input: GrantInput<SyncDefinition, "sync">): RunGrant<"sync">
 function run(input: GrantInput<PipelineDefinition, "pipeline">): RunGrant<"pipeline">
-function run(input: GrantInput<AgentDefinition, "agent">): RunGrant<"agent">
+function run(input: GrantInput<AgentDefinition | AgentReference, "agent">): RunGrant<"agent">
 function run(
   input: GrantInput<
-    WorkflowDefinition | SyncDefinition | PipelineDefinition | AgentDefinition,
+    WorkflowDefinition | SyncDefinition | PipelineDefinition | AgentDefinition | AgentReference,
     "workflow" | "sync" | "pipeline" | "agent"
   >
 ): RunGrant {

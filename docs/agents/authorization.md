@@ -1,14 +1,34 @@
 # Authorization
 
-Agents touch the same data and actions as everyone else, so the same
-[authorization](../auth/authorization.md) model governs them. Two things decide what an agent can do:
-the **groups** on its definition and the **owner** of each thread.
+Agents use the same [authorization](../auth/authorization.md) model as every other primitive.
+
+## Main agent
+
+`run:agent` gates who may start the main agent. Use the exported reference in a role:
+
+```ts
+import { agent, can, defineRole } from "@sixb/core"
+
+export const assistantUser = defineRole("assistant.user", {
+  grantedTo: [employees],
+  grants: [can.run(agent)],
+})
+```
+
+Each run inherits the user's durable request authority. The worker revalidates the session or access
+token and current memberships before executing, so the agent never receives broader access than the
+caller. When authentication is disabled, it follows the same unrestricted behavior as other API
+requests.
+
+## Defined agents
+
+Existing agents created with `defineAgent` retain their managed service-account authority.
 
 When authentication is disabled for the runtime, requests through the Agent API gateway follow the
 same unrestricted authorization behavior as normal API requests. The group restrictions below
 apply when authentication is enabled.
 
-## Groups gate use and reach
+### Groups gate use and reach
 
 An agent's `groups` (set on `defineAgent`) do two things:
 
@@ -41,7 +61,8 @@ Every referenced group must exist in your security registry (`security/groups/` 
 A thread records the principal that created it. Reading it, posting to it, and subscribing to its
 stream all require that owner (plus the `run:agent` grant). Anyone else sees it as not-found.
 
-The run API exposes `requestedBy`, resolved from its immutable execution record. The Agent's managed service account is the execution authority; it is stored once in that execution record rather than copied onto the run.
+The run API exposes `requestedBy`, resolved from its immutable execution record. Authority is stored
+on that execution record rather than copied onto the run.
 
 ## Related
 

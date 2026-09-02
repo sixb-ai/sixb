@@ -41,28 +41,38 @@ export async function findPrimitiveRunExecution(input: {
   return execution
 }
 
-/** Find the immutable execution and service-account authority owned by one Agent run. */
+/** Find the immutable execution and authority owned by one Agent run. */
 export async function findAgentRunExecution(input: {
   readonly executions: ExecutionStorage
   readonly projectId: string
   readonly executionId: string
   readonly runId: string
-  readonly serviceAccountId: string
+  readonly authority:
+    | { readonly type: "managed"; readonly serviceAccountId: string }
+    | { readonly type: "inherited" }
 }): Promise<ExecutionRecord | null> {
   const execution = await input.executions.getById({
     projectId: input.projectId,
     id: input.executionId,
   })
   const authority = execution?.authorizationRef
+  const validAuthority =
+    input.authority.type === "managed"
+      ? authority?.type === "principal" &&
+        authority.principal.type === "serviceAccount" &&
+        authority.principal.id === input.authority.serviceAccountId &&
+        authority.credential === undefined
+      : authority?.type === "disabled" ||
+        (authority?.type === "principal" &&
+          authority.principal.type === "user" &&
+          authority.credential !== undefined)
+
   if (
     !execution ||
     execution.source.type !== "execution" ||
     execution.executor.type !== "agent" ||
     execution.executor.runId !== input.runId ||
-    authority?.type !== "principal" ||
-    authority.principal.type !== "serviceAccount" ||
-    authority.principal.id !== input.serviceAccountId ||
-    authority.credential !== undefined
+    !validAuthority
   ) {
     return null
   }

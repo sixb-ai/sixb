@@ -1,15 +1,33 @@
 import { SYSTEM_PRINCIPAL } from "../auth"
 import type { AuthorizationContext } from "../authorization"
 import { resolveAuthorizationContext } from "../authorization"
+import { createSixbError } from "../errors/internal"
 import type { AuthorizablePrincipal, AuthorizationRef } from "../execution"
 import type { SecurityDefinitionCatalog } from "../security"
 import type {
+  AccessTokenRecord,
   AuthStorage,
   ServiceAccountGroupMembershipRecord,
   ServiceAccountRecord,
+  SessionRecord,
+  UserRecord,
 } from "../storage/auth"
 import { AuthStorageError } from "../storage/auth"
 import type { AgentDefinition } from "./types"
+
+export type AgentExecutionAuthorization =
+  | { readonly type: "principal"; readonly context: AuthorizationContext }
+  | { readonly type: "disabled" }
+
+type UserCredentialRef = NonNullable<
+  Extract<AuthorizationRef, { readonly type: "principal" }>["credential"]
+>
+
+interface CredentialedUserAuthorizationRef {
+  readonly type: "principal"
+  readonly principal: Extract<AuthorizablePrincipal, { readonly type: "user" }>
+  readonly credential: UserCredentialRef
+}
 
 export interface AgentExecutionIdentity {
   readonly serviceAccount: ServiceAccountRecord
@@ -158,6 +176,129 @@ export async function resolveAgentExecutionAuthorization(input: {
       roles: input.security.listResolvedRoles(),
     }),
   }
+}
+
+/** Revalidate the durable user authority inherited by the framework-owned main Agent. */
+export async function resolveInheritedMainAgentExecutionAuthorization(input: {
+  readonly auth: AuthStorage | undefined
+  readonly projectId: string
+  readonly authorizationRef: AuthorizationRef
+  readonly security: SecurityDefinitionCatalog
+  readonly now?: Date
+}): Promise<AgentExecutionAuthorization> {
+  if (input.authorizationRef.type === "disabled") return { type: "disabled" }
+
+  const ref = requireCredentialedUserAuthority(input.authorizationRef)
+  const auth = requireAuthStorage(input.auth)
+  const now = input.now ?? new Date()
+  const user = await requireActiveUser(auth, input.projectId, ref.principal.id)
+  const memberships = await auth.groupMemberships.listForUser({
+    projectId: input.projectId,
+    userId: user.id,
+  })
+  const credential = await revalidateUserCredential({
+    auth,
+    projectId: input.projectId,
+    userId: user.id,
+    credential: ref.credential,
+    currentGroupIds: memberships.map((membership) => membership.groupId),
+    now,
+  })
+
+  return {
+    type: "principal",
+    context: resolveAuthorizationContext({
+      principal: ref.principal,
+      groupIds: credential.groupIds,
+      roles: input.security.listResolvedRoles(),
+      ...(credential.sessionId === undefined ? {} : { sessionId: credential.sessionId }),
+    }),
+  }
+}
+
+function requireCredentialedUserAuthority(ref: AuthorizationRef): CredentialedUserAuthorizationRef {
+  if (ref.type !== "principal" || ref.principal.type !== "user" || ref.credential === undefined) {
+    throw invalidInheritedAuthority("the durable reference is not a credentialed user")
+  }
+  return {
+    type: "principal",
+    principal: { type: "user", id: ref.principal.id },
+    credential: { type: ref.credential.type, id: ref.credential.id },
+  }
+}
+
+async function requireActiveUser(
+  auth: AuthStorage,
+  projectId: string,
+  userId: string
+): Promise<UserRecord> {
+  const user = await auth.users.getById({ projectId, id: userId })
+  if (!user || user.status !== "active") {
+    throw invalidInheritedAuthority(`user '${userId}' is not active`)
+  }
+  return user
+}
+
+async function revalidateUserCredential(input: {
+  readonly auth: AuthStorage
+  readonly projectId: string
+  readonly userId: string
+  readonly credential: UserCredentialRef
+  readonly currentGroupIds: readonly string[]
+  readonly now: Date
+}): Promise<{ readonly groupIds: readonly string[]; readonly sessionId?: string }> {
+  if (input.credential.type === "session") {
+    const session = await input.auth.sessions.getById({
+      projectId: input.projectId,
+      id: input.credential.id,
+    })
+    if (!isUsableUserSession(session, input.userId, input.now)) {
+      throw invalidInheritedAuthority("the inherited session is no longer valid")
+    }
+    return { groupIds: input.currentGroupIds, sessionId: session.id }
+  }
+
+  const accessToken = await input.auth.accessTokens.getById({
+    projectId: input.projectId,
+    id: input.credential.id,
+  })
+  if (!isUsableUserAccessToken(accessToken, input.userId, input.now)) {
+    throw invalidInheritedAuthority("the inherited access token is no longer valid")
+  }
+  if (accessToken.groupIds === undefined) return { groupIds: input.currentGroupIds }
+
+  const allowedGroupIds = new Set(accessToken.groupIds)
+  return {
+    groupIds: input.currentGroupIds.filter((groupId) => allowedGroupIds.has(groupId)),
+  }
+}
+
+function isUsableUserSession(
+  session: SessionRecord | null,
+  userId: string,
+  now: Date
+): session is SessionRecord {
+  if (!session || session.userId !== userId || session.revokedAt !== undefined) return false
+  if (session.expiresAt.getTime() <= now.getTime()) return false
+  return (
+    session.absoluteExpiresAt === undefined || session.absoluteExpiresAt.getTime() > now.getTime()
+  )
+}
+
+function isUsableUserAccessToken(
+  token: AccessTokenRecord | null,
+  userId: string,
+  now: Date
+): token is AccessTokenRecord {
+  if (!token || token.subjectType !== "user" || token.subjectId !== userId) return false
+  return token.revokedAt === undefined && token.expiresAt.getTime() > now.getTime()
+}
+
+function invalidInheritedAuthority(reason: string): Error {
+  return createSixbError(
+    "agent.execution_failed",
+    `[Sixb] The main Agent execution cannot restore its inherited authority: ${reason}.`
+  )
 }
 
 function requireAuthStorage(auth: AuthStorage | undefined): AuthStorage {

@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util"
 import type {
   AuthorizablePrincipal,
   AuthorizationRef,
@@ -190,16 +191,28 @@ function assertExecutorAuthority(record: ExecutionRecord): void {
       return
     }
     case "agent": {
+      if (source.type !== "execution") {
+        invalid("Agent executions require a parent execution source.")
+      }
       if (
-        authorizationRef.type !== "principal" ||
-        authorizationRef.principal.type !== "serviceAccount"
+        authorizationRef.type === "principal" &&
+        authorizationRef.principal.type === "serviceAccount" &&
+        authorizationRef.credential === undefined
       ) {
-        invalid("Agent executions require service-account authority.")
+        return
       }
-      if (authorizationRef.credential !== undefined) {
-        invalid("Agent execution authority cannot carry an external credential.")
+      if (
+        authorizationRef.type === "principal" &&
+        authorizationRef.principal.type === "user" &&
+        authorizationRef.credential !== undefined
+      ) {
+        return
       }
-      return
+      if (authorizationRef.type === "disabled") return
+      invalid(
+        "Agent executions require managed service-account, credentialed user, or explicitly disabled authority."
+      )
+      break
     }
     case "kernel": {
       if (
@@ -310,6 +323,23 @@ async function validateParent(
       `[Sixb] Child execution '${record.id}' must preserve its parent requested-by principal.`
     )
   }
+  if (
+    record.executor.type === "agent" &&
+    isInheritedAgentAuthority(record.authorizationRef) &&
+    !isDeepStrictEqual(parent.authorizationRef, record.authorizationRef)
+  ) {
+    throw new ExecutionStorageError(
+      "invalid_parent_execution",
+      `[Sixb] Child Agent execution '${record.id}' must inherit its parent's authorization reference.`
+    )
+  }
+}
+
+function isInheritedAgentAuthority(ref: AuthorizationRef): boolean {
+  return (
+    ref.type === "disabled" ||
+    (ref.type === "principal" && ref.principal.type === "user" && ref.credential !== undefined)
+  )
 }
 
 function assertPrincipal(principal: AuthorizablePrincipal, label: string): void {

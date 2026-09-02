@@ -413,8 +413,8 @@ function agentExecution(id: string): CreateExecutionInput {
     projectId,
     requestedBy: { type: "user", id: "user-one" },
     executor: { type: "agent", runId: `run-${id}` },
-    source: { type: "event", eventId: `event-${id}` },
-    correlationId: `correlation-${id}`,
+    source: { type: "execution", executionId: "principal-request" },
+    correlationId: "correlation-principal-request",
     authorizationRef: {
       type: "principal",
       principal: { type: "serviceAccount", id: "service-one" },
