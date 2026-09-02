@@ -273,7 +273,7 @@ function assertTelemetryBatchResultMatchesRequest(
   }
 }
 
-function <createActionReadObjectSetAdapter<TObjectType extends ObjectTypeWithPropertyTokens>(
+function createActionReadObjectSetAdapter<TObjectType extends ObjectTypeWithPropertyTokens>(
   objectType: TObjectType,
   objectSet: ActionReadObjectSetSource,
   options: ActionReadFacadeOptions | undefined
