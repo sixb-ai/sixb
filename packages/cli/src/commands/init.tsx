@@ -1,6 +1,6 @@
 import { relative, sep } from "node:path"
 import { scaffoldProject } from "create-sixb/scaffold"
-import { CreateView, InitView, renderStatic } from "../ui"
+import { InitView, renderStatic } from "../ui"
 
 export async function runInit(dir?: string): Promise<void> {
   const result = await scaffoldProject(dir ?? ".", { allowExisting: true })
@@ -10,18 +10,6 @@ export async function runInit(dir?: string): Promise<void> {
       name={result.name}
       targetDir={result.targetDir}
       files={result.files}
-      commands={nextStepsFor(result.targetDir)}
-    />
-  )
-}
-
-export async function runCreate(name: string): Promise<void> {
-  const result = await scaffoldProject(name)
-
-  await renderStatic(
-    <CreateView
-      name={result.name}
-      targetDir={result.targetDir}
       commands={nextStepsFor(result.targetDir)}
     />
   )

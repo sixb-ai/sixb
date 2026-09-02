@@ -1,9 +1,11 @@
+import { writeJson } from "@sixb/cli-core"
 import {
   createAuthPersonalAccessToken,
   listAuthAccessTokens,
   revokeAuthAccessToken,
 } from "@sixb/client"
-import { createCliSixbClient, resolveApiClientConfig, unwrapSixbApiResult } from "../lib/api-client"
+import { createCliSixbClient, unwrapSixbApiResult } from "../lib/api-client"
+import { resolveProfileApiClientConfig } from "../lib/profile-api-client"
 import { KeyValueResultView, renderStatic, SecretResultView, TableResultView } from "../ui"
 import {
   formatDate,
@@ -17,6 +19,7 @@ export interface TokenCommandOptions {
   readonly positionals?: readonly string[]
   readonly apiUrl?: string
   readonly token?: string
+  readonly profile?: string
   readonly id?: string
   readonly name?: string
   readonly expiresAt?: string
@@ -26,7 +29,7 @@ export interface TokenCommandOptions {
 }
 
 export async function runToken(options: TokenCommandOptions = {}) {
-  const action = options.action ?? "list"
+  const action = options.action
   if (action === "list") {
     await listTokens(options)
     return
@@ -46,11 +49,11 @@ export async function runToken(options: TokenCommandOptions = {}) {
 }
 
 async function listTokens(options: TokenCommandOptions) {
-  const client = createCliSixbClient(resolveApiClientConfig(options))
+  const client = createCliSixbClient(await resolveProfileApiClientConfig(options))
   const result = unwrapSixbApiResult(await listAuthAccessTokens({ client }))
 
   if (options.json) {
-    console.log(JSON.stringify(result, null, 2))
+    writeJson(result)
     return
   }
 
@@ -80,7 +83,7 @@ async function createToken(options: TokenCommandOptions) {
 
   const expiresAt = resolveExpiration(options)
   const groupIds = normalizeGroupIds(options.groupIds)
-  const client = createCliSixbClient(resolveApiClientConfig(options))
+  const client = createCliSixbClient(await resolveProfileApiClientConfig(options))
   const result = unwrapSixbApiResult(
     await createAuthPersonalAccessToken({
       client,
@@ -93,7 +96,7 @@ async function createToken(options: TokenCommandOptions) {
   )
 
   if (options.json) {
-    console.log(JSON.stringify(result, null, 2))
+    writeJson(result)
     return
   }
 
@@ -117,7 +120,7 @@ async function revokeToken(options: TokenCommandOptions) {
     throw new Error("Usage: sixb token revoke <token-id>")
   }
 
-  const client = createCliSixbClient(resolveApiClientConfig(options))
+  const client = createCliSixbClient(await resolveProfileApiClientConfig(options))
   const result = unwrapSixbApiResult(
     await revokeAuthAccessToken({
       client,
@@ -126,7 +129,7 @@ async function revokeToken(options: TokenCommandOptions) {
   )
 
   if (options.json) {
-    console.log(JSON.stringify(result, null, 2))
+    writeJson(result)
     return
   }
 

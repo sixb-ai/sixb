@@ -6,6 +6,19 @@ export interface SixbCliErrorOptions extends ErrorOptions {
   readonly remediation?: string
 }
 
+/** An HTTP or transport failure returned by the Sixb API. */
+export class SixbApiError extends Error {
+  readonly status: number | undefined
+  readonly responseBody: unknown
+
+  constructor(message: string, status: number | undefined, responseBody: unknown) {
+    super(message)
+    this.name = "SixbApiError"
+    this.status = status
+    this.responseBody = responseBody
+  }
+}
+
 /** A failure the CLI raised itself, as opposed to one it caught from the runtime. */
 export class SixbCliError extends Error {
   readonly remediation: string | undefined

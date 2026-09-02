@@ -1,7 +1,18 @@
 #!/usr/bin/env bun
 
 import { join } from "node:path"
-import { HelpView, renderCliError, renderStatic, VersionView } from "./ui"
+import { CliError } from "@sixb/cli-core"
+import {
+  booleanOption,
+  type CliOptionName,
+  CliUsageError,
+  parseCliArgs,
+  repeatedOption,
+  stringOption,
+  wantsManagementJson,
+} from "./lib/command-line"
+import { errorMessage, SixbApiError } from "./lib/errors"
+import { CommandHelpView, HelpView, renderCliError, renderStatic, VersionView } from "./ui"
 
 const args = process.argv.slice(2)
 
@@ -59,121 +70,29 @@ async function readPackageVersion(): Promise<string> {
   }
 }
 
-function getFlag(name: string): string | undefined {
-  const direct = args.find((arg) => arg.startsWith(`--${name}=`))
-  if (direct) return direct.slice(name.length + 3)
-
-  const idx = args.indexOf(`--${name}`)
-  if (idx >= 0) return args[idx + 1]
-
-  return undefined
-}
-
-function getFlags(name: string, options: { readonly includeMissing?: boolean } = {}): string[] {
-  const values: string[] = []
-
-  for (let index = 0; index < args.length; index++) {
-    const arg = args[index]
-    if (arg === `--${name}`) {
-      const value = args[index + 1]
-      if (value && !value.startsWith("--")) {
-        values.push(value)
-        index++
-      } else if (options.includeMissing) {
-        values.push("")
-      }
-    } else if (arg?.startsWith(`--${name}=`)) {
-      values.push(arg.slice(name.length + 3))
-    }
-  }
-
-  return values
-}
-
-function getFlagRequiringValue(name: string): string | undefined {
-  const value = getFlag(name)
-  return value ?? (hasFlagValue(name) ? "" : undefined)
-}
-
-function hasFlag(name: string): boolean {
-  return args.includes(`--${name}`)
-}
-
-function hasFlagValue(name: string): boolean {
-  return hasFlag(name) || args.some((arg) => arg.startsWith(`--${name}=`))
-}
-
-const flagsWithValues = new Set([
-  "entry",
-  "port",
-  "host",
-  "api-port",
-  "api-host",
-  "api-public-origin",
-  "agent-turn-timeout",
-  "concurrency",
-  "atlas-public-origin",
-  "app-public-origin",
-  "outdir",
-  "dir",
-  "expire-older-than",
-  "delete-older-than",
-  "api-url",
-  "token",
-  "id",
-  "name",
-  "description",
-  "expires-at",
-  "expires-in",
-  "group",
-])
-
-function getCommandPositionals(): string[] {
-  const values: string[] = []
-
-  for (let index = 1; index < args.length; index++) {
-    const arg = args[index]
-    if (!arg) continue
-
-    if (arg.startsWith("--")) {
-      const flagName = arg.slice(2).split("=")[0] ?? ""
-      const next = args[index + 1]
-      if (!arg.includes("=") && flagsWithValues.has(flagName) && next && !next.startsWith("--")) {
-        index++
-      }
-      continue
-    }
-
-    values.push(arg)
-  }
-
-  return values
-}
-
-function getCommand(): string {
-  if (args[0] === "db") {
-    return args[1] ? `db:${args[1]}` : "db"
-  }
-  if (args[0] === "lake") {
-    return args[1] ? `lake:${args[1]}` : "lake"
-  }
-  return args[0] ?? "help"
-}
-
 async function main(): Promise<void> {
-  const command = getCommand()
-
-  if (hasFlag("help") || command === "help") {
-    await renderStatic(<HelpView />)
-    return
-  }
-
-  if (hasFlag("version") || command === "--version" || command === "-v") {
+  const parsed = parseCliArgs(args)
+  if (parsed.kind === "version") {
     await renderStatic(<VersionView version={VERSION} />)
     return
   }
+  if (parsed.kind === "help") {
+    if (parsed.help.path.length === 0) await renderStatic(<HelpView />)
+    else await renderStatic(<CommandHelpView help={parsed.help} />)
+    return
+  }
+  if (parsed.kind === "instance") {
+    const { runLocalInstanceCommand } = await import("./lib/instance-command")
+    await runLocalInstanceCommand(parsed.args)
+    return
+  }
 
-  switch (command) {
+  const { options, positionals } = parsed
+  const getFlag = (name: CliOptionName) => stringOption(options, name)
+  const getFlags = (name: CliOptionName) => repeatedOption(options, name)
+  const hasFlag = (name: CliOptionName) => booleanOption(options, name)
+
+  switch (parsed.id) {
     case "dev": {
       const { runDev } = await import("./commands/dev")
       await runDev({
@@ -186,24 +105,20 @@ async function main(): Promise<void> {
         atlasPublicOrigin: getFlag("atlas-public-origin"),
         appPublicOrigin: getFlag("app-public-origin"),
         agentTurnTimeout: getFlag("agent-turn-timeout"),
-        concurrency: getFlags("concurrency", { includeMissing: true }),
+        concurrency: getFlags("concurrency"),
       })
       break
     }
 
     case "worker": {
-      if (hasFlagValue("type") || hasFlagValue("worker")) {
-        throw new Error("[SixbWorker] Use `sixb worker <type>`.")
-      }
-
       const { runWorker } = await import("./commands/worker")
       await runWorker({
         entry: getFlag("entry"),
         noMigrate: hasFlag("no-migrate"),
-        workerType: getCommandPositionals()[0],
+        workerType: positionals[0],
         apiPublicOrigin: getFlag("api-public-origin"),
         agentTurnTimeout: getFlag("agent-turn-timeout"),
-        concurrency: getFlagRequiringValue("concurrency"),
+        concurrency: getFlag("concurrency"),
       })
       break
     }
@@ -213,10 +128,10 @@ async function main(): Promise<void> {
       await runWorkerGroup({
         entry: getFlag("entry"),
         noMigrate: hasFlag("no-migrate"),
-        workerTypes: getCommandPositionals(),
+        workerTypes: positionals,
         apiPublicOrigin: getFlag("api-public-origin"),
         agentTurnTimeout: getFlag("agent-turn-timeout"),
-        concurrency: getFlags("concurrency", { includeMissing: true }),
+        concurrency: getFlags("concurrency"),
       })
       break
     }
@@ -261,26 +176,57 @@ async function main(): Promise<void> {
       break
     }
 
-    case "auth": {
-      const { runAuth } = await import("./commands/auth")
-      const positionals = getCommandPositionals()
-      await runAuth({
-        action: positionals[0],
-        apiUrl: getFlag("api-url"),
-        token: getFlag("token"),
+    case "login": {
+      const { runLogin } = await import("./commands/login")
+      await runLogin({
+        apiUrl: positionals[0],
+        profile: getFlag("profile"),
+        tokenStdin: hasFlag("token-stdin"),
         json: hasFlag("json"),
       })
       break
     }
 
-    case "token": {
-      const { runToken } = await import("./commands/token")
-      const positionals = getCommandPositionals()
-      await runToken({
-        action: positionals[0],
-        positionals,
+    case "logout": {
+      const { runLogout } = await import("./commands/logout")
+      await runLogout({ profile: getFlag("profile"), json: hasFlag("json") })
+      break
+    }
+
+    case "status": {
+      const { runStatus } = await import("./commands/status")
+      await runStatus({
         apiUrl: getFlag("api-url"),
         token: getFlag("token"),
+        profile: getFlag("profile"),
+        json: hasFlag("json"),
+      })
+      break
+    }
+
+    case "profile:list":
+    case "profile:show":
+    case "profile:use": {
+      const { runProfile } = await import("./commands/profile")
+      await runProfile({
+        action: parsed.id.slice("profile:".length),
+        name: positionals[0],
+        json: hasFlag("json"),
+      })
+      break
+    }
+
+    case "token:list":
+    case "token:create":
+    case "token:revoke": {
+      const { runToken } = await import("./commands/token")
+      const action = parsed.id.slice("token:".length)
+      await runToken({
+        action,
+        positionals: [action, ...positionals],
+        apiUrl: getFlag("api-url"),
+        token: getFlag("token"),
+        profile: getFlag("profile"),
         id: getFlag("id"),
         name: getFlag("name"),
         expiresAt: getFlag("expires-at"),
@@ -291,12 +237,19 @@ async function main(): Promise<void> {
       break
     }
 
-    case "service-account": {
+    case "service-account:list":
+    case "service-account:create":
+    case "service-account:disable":
+    case "service-account:token:list":
+    case "service-account:token:create":
+    case "service-account:token:revoke": {
       const { runServiceAccount } = await import("./commands/service-account")
+      const commandPath = parsed.id.split(":").slice(1)
       await runServiceAccount({
-        positionals: getCommandPositionals(),
+        positionals: [...commandPath, ...positionals],
         apiUrl: getFlag("api-url"),
         token: getFlag("token"),
+        profile: getFlag("profile"),
         id: getFlag("id"),
         name: getFlag("name"),
         description: getFlag("description"),
@@ -368,39 +321,64 @@ async function main(): Promise<void> {
     }
 
     case "init": {
-      const dir = args[1] && !args[1].startsWith("-") ? args[1] : undefined
       const { runInit } = await import("./commands/init")
-      await runInit(dir)
+      await runInit(positionals[0])
       break
     }
-
-    case "create": {
-      const positionals = getCommandPositionals()
-      if (positionals.length !== 1) {
-        throw new Error("Usage: sixb create <project-name>")
-      }
-      const { runCreate } = await import("./commands/init")
-      await runCreate(positionals[0]!)
-      break
-    }
-
-    case "db":
-      await renderStatic(<HelpView errorMessage="Usage: sixb db <migrate>" />)
-      process.exit(1)
-      break
-
-    case "lake":
-      await renderStatic(<HelpView errorMessage="Usage: sixb lake <check|cleanup>" />)
-      process.exit(1)
-      break
 
     default:
-      await renderStatic(<HelpView errorMessage={`Unknown command: ${command}`} />)
-      process.exit(1)
+      assertNever(parsed.id)
   }
 }
 
 main().catch(async (error) => {
-  await renderCliError(error)
-  process.exit(1)
+  const exitCode = cliExitCode(error)
+  if (wantsManagementJson(args)) {
+    process.stderr.write(`${JSON.stringify({ error: cliErrorBody(error) })}\n`)
+  } else if (error instanceof CliUsageError) {
+    if (error.help.path.length === 0) {
+      await renderStatic(<HelpView errorMessage={error.message} />)
+    } else {
+      await renderStatic(<CommandHelpView help={error.help} errorMessage={error.message} />)
+    }
+  } else {
+    await renderCliError(error)
+  }
+  process.exit(exitCode)
 })
+
+function cliExitCode(error: unknown): number {
+  if (error instanceof CliUsageError) return error.exitCode
+  if (error instanceof CliError) return error.exitCode
+  if (error instanceof SixbApiError) return 3
+  if (errorMessage(error).startsWith("Usage:")) return 2
+  return 1
+}
+
+function cliErrorBody(error: unknown): {
+  readonly code: string
+  readonly status?: number
+  readonly message: string
+  readonly hint?: string
+  readonly issues?: readonly unknown[]
+} {
+  if (error instanceof CliError) return error.body
+  if (error instanceof CliUsageError) {
+    return { code: "invalid_arguments", message: error.message, hint: error.help.usage }
+  }
+  if (error instanceof SixbApiError) {
+    return {
+      code: "api_error",
+      ...(error.status === undefined ? {} : { status: error.status }),
+      message: error.message,
+    }
+  }
+  return {
+    code: errorMessage(error).startsWith("Usage:") ? "invalid_arguments" : "command_failed",
+    message: errorMessage(error),
+  }
+}
+
+function assertNever(value: never): never {
+  throw new Error(`[SixbCLI] Command '${String(value)}' has no handler.`)
+}
