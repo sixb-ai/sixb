@@ -3493,7 +3493,10 @@ describe("AgentWorker", () => {
       expect(systemPrompt).toContain("<sixb_mode_rules>")
       expect(systemPrompt).toContain("use relative paths from this prompt or sandboxPath values")
       expect(systemPrompt).toContain("inside a live Sixb project modeled as an ontology")
-      expect(systemPrompt).toContain("Use the `sixb` CLI to discover and interact with the project")
+      expect(systemPrompt).toContain(
+        "Use the `sixb` CLI only for the live project data or capability needed by the task"
+      )
+      expect(systemPrompt).not.toContain("`sixb --help`")
       expect(systemPrompt).not.toContain("sixb objects inspect <type> <id>")
       expect(systemPrompt).not.toContain("Available Agent Skills")
       expect(systemPrompt).toContain("<agent_instructions>")
@@ -5739,8 +5742,9 @@ describe("AgentWorker", () => {
       expect(capturedSystem).toContain("<sixb_runtime_context>")
       expect(capturedSystem).toContain("inside a live Sixb project modeled as an ontology")
       expect(capturedSystem).toContain(
-        "Use the `sixb` CLI to discover and interact with the project"
+        "Use the `sixb` CLI only for the live project data or capability needed by the task"
       )
+      expect(capturedSystem).not.toContain("`sixb --help`")
       expect(capturedSystem).toContain("<agent_instructions>")
       expect(capturedSystem).toContain("You are a helpful test assistant.")
       expect(capturedSystem).not.toContain("Available Agent Skills")
@@ -6526,7 +6530,10 @@ describe("AgentWorker", () => {
     expect(capturedSystem).toContain("<sixb_mode_rules>")
     expect(capturedSystem).toContain("<sixb_runtime_context>")
     expect(capturedSystem).toContain("inside a live Sixb project modeled as an ontology")
-    expect(capturedSystem).toContain("Use the `sixb` CLI to discover and interact with the project")
+    expect(capturedSystem).toContain(
+      "Use the `sixb` CLI only for the live project data or capability needed by the task"
+    )
+    expect(capturedSystem).not.toContain("`sixb --help`")
     expect(capturedSystem).toContain("<agent_instructions>")
     expect(capturedSystem).toContain("You are a helpful test assistant.")
     expect(capturedSystem.indexOf("<agent_instructions>")).toBeLessThan(

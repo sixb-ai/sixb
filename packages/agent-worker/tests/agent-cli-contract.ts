@@ -140,6 +140,7 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
         ["objects", "query", "--help"],
         ["telemetry", "--help"],
         ["actions", "--help"],
+        ["actions", "get", "opaque/action", "--help"],
         ["action-runs", "--help"],
         ["files", "--help"],
         ["workflows", "--help"],
@@ -838,6 +839,45 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
       } finally {
         api.close()
         await rm(tempDir, { recursive: true, force: true })
+      }
+    })
+
+    test("requests and waits for the exact Action run in one command", async () => {
+      let reads = 0
+      const api = startTestApi((request) => {
+        if (request.method === "POST" && request.url.pathname === "/api/actions/dispatch%2Fwork") {
+          return json({ runId: "act/opaque", queuedAt: new Date(0).toISOString(), created: true })
+        }
+        if (request.method === "GET" && request.url.pathname === "/api/action-runs/act%2Fopaque") {
+          reads += 1
+          return json({
+            id: "act/opaque",
+            actionId: "dispatch/work",
+            status: reads === 1 ? "running" : "succeeded",
+          })
+        }
+      })
+      try {
+        const result = await runCli(
+          implementation,
+          ["actions", "request", "dispatch/work", "--run-id", "act/opaque", "--wait"],
+          apiEnv(api)
+        )
+
+        expect(result.exitCode).toBe(0)
+        expect(result.stderr).toBe("")
+        expect(JSON.parse(result.stdout)).toEqual({
+          id: "act/opaque",
+          actionId: "dispatch/work",
+          status: "succeeded",
+        })
+        expect(api.requests.map((request) => `${request.method} ${request.url.pathname}`)).toEqual([
+          "POST /api/actions/dispatch%2Fwork",
+          "GET /api/action-runs/act%2Fopaque",
+          "GET /api/action-runs/act%2Fopaque",
+        ])
+      } finally {
+        api.close()
       }
     })
 

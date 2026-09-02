@@ -37,7 +37,7 @@ export const invoiceAssistant = defineAgent("invoice-assistant", {
 | `providerOptions` | provider-keyed object | No | Per-provider passthrough, e.g. `{ openai: { ... } }`. |
 | `groups` | `GroupDefinition[]` | No | Gate who can use the agent and what it can reach. See [Authorization](./authorization.md). |
 | `tools` | `AgentToolDefinition[]` | No | Worker-side tools this agent is explicitly allowed to call. Defaults to none. |
-| `loop` | `AgentLoopConfig` | No | Step cap and optional context-budget overrides. |
+| `loop` | `AgentLoopConfig` | No | Step cap, prompt caching, and optional context-budget overrides. |
 
 ## The model
 
@@ -114,6 +114,16 @@ continues until it stops or hits `loop.stopWhen.maxSteps` (default 25).
 loop: { stopWhen: { maxSteps: 12 } }
 ```
 
+For Gateway models, Sixb enables the Gateway's automatic prompt caching by default and records
+cache reads and writes in AI usage. Provider details stay out of project prompts and
+`providerOptions`. Opt out only when the workload requires it:
+
+```ts
+loop: { caching: "off" }
+```
+
+Direct-provider models are unchanged unless their AI SDK binding implements caching implicitly.
+
 Sixb automatically checkpoints long conversations before their next model request exceeds the
 selected model's context window. The worker resolves exact model limits from its pinned Models.dev
 snapshot. If no exact entry exists, it uses a conservative 128,000-token window and logs one startup
@@ -127,6 +137,7 @@ Use `loop.context` only when a model deployment or workload needs an explicit ov
 ```ts
 loop: {
   stopWhen: { maxSteps: 12 },
+  caching: "auto",
   context: {
     windowTokens: 200_000,
   },

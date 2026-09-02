@@ -263,6 +263,11 @@ workflow task. It combines project-authored `instructions` with runtime guidance
 worker-owned rules that preserve the mode's approval, output, and user-communication boundaries.
 Prompt composition is not worker configuration.
 
+Runtime guidance gives exact references a fast path: `objects get` before relationship inspection,
+`actions get` before request, and JSON parameters through stdin. Generic help and catalogs remain
+available when the task does not already identify the needed type, object, or Action. `actions
+request --wait` returns the terminal run in the same command when it finishes within 25 seconds.
+
 ## Agent Skills in the sandbox
 
 When a project defines Agent Skills under `skills/<name>/SKILL.md`, each run receives them under

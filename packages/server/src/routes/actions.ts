@@ -1,10 +1,12 @@
 import type { ActionDefinition, SixbHostView } from "@sixb/core"
+import { schemaFieldsToJsonSchema } from "@sixb/core/internal/ontology"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
   ActionCatalogItemSchema,
+  ActionDetailSchema,
   ActionIdParamsSchema,
   RequestActionBodySchema,
   RequestActionResponseSchema,
@@ -38,7 +40,20 @@ function serializeAction(
   })
 }
 
-export function registerActionRoutes(app: Elysia, _host: SixbHostView) {
+function serializeActionDetail(
+  action: ActionDefinition,
+  host: SixbHostView
+): ReturnType<typeof ActionDetailSchema.parse> {
+  return ActionDetailSchema.parse({
+    ...serializeAction(action),
+    inputSchema: schemaFieldsToJsonSchema({
+      fields: action.params,
+      valueTypesById: host.definitions.ontology.getValueTypesById(),
+    }),
+  })
+}
+
+export function registerActionRoutes(app: Elysia, host: SixbHostView) {
   return app
     .get(
       "/api/actions",
@@ -66,11 +81,11 @@ export function registerActionRoutes(app: Elysia, _host: SixbHostView) {
           return { error: "Action not found" }
         }
 
-        return serializeAction(action)
+        return serializeActionDetail(action, host)
       },
       {
         params: ActionIdParamsSchema,
-        response: { 200: ActionCatalogItemSchema, 404: ErrorResponseSchema },
+        response: { 200: ActionDetailSchema, 404: ErrorResponseSchema },
         detail: {
           summary: "Get action metadata",
           tags: [OPENAPI_TAGS.actions.name],

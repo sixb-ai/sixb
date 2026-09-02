@@ -45,6 +45,8 @@ export interface AgentLoopConfig {
     readonly maxSteps?: number
   }
   readonly context?: AgentContextConfig
+  /** Automatic provider prompt caching. Defaults to `auto`; use `off` to opt out. */
+  readonly caching?: "auto" | "off"
 }
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {}

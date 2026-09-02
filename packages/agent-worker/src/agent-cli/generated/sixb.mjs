@@ -314,8 +314,9 @@ Inspect options:
   --max-links <1-${CLI_LIMITS.inspect.links.maximum}>                 Defaults to ${CLI_LIMITS.inspect.links.default}
   --full                              Include timestamps and encountered type definitions
 
-Use \`objects inspect\` first when context identifies an object. It follows both relationship
-directions to depth 2 by default and returns a bounded graph.
+Use \`objects get\` first when context provides an exact object reference. Use \`objects inspect\`
+only when related objects are needed; it follows both relationship directions to depth 2 by
+default and returns a bounded graph.
 Inspect omits materialization timestamps and ontology definitions by default. Use \`--full\` when
 storage timestamps, declared links, or available actions are needed.
 
@@ -367,9 +368,11 @@ History options:
   actions: `Usage:
   sixb actions list [--type <object-type>]
   sixb actions get <action-id>
-  sixb actions request <action-id> [--subject-type <type> --subject-id <id>] [--file <path|->] [--run-id <id>]
+  sixb actions request <action-id> [--subject-type <type> --subject-id <id>] [--file <path|->] [--run-id <id>] [--wait]
 
-The JSON file contains the action parameter object. Use - to read standard input.`,
+\`actions get\` includes inputSchema, the exact JSON shape accepted by the Action. The JSON file
+contains that parameter object; use - to read standard input. --wait returns the terminal Action
+run and waits at most 25 seconds.`,
   "action-runs": `Usage:
   sixb action-runs list [options]
   sixb action-runs get <run-id>
@@ -487,7 +490,7 @@ async function readStdin() {
 // src/agent-cli/commands/actions.ts
 async function actions(args) {
   const [sub, ...rest] = args;
-  if (!sub || isHelp(sub) || isHelp(rest[0]))
+  if (!sub || args.some(isHelp))
     return writeText(GROUP_HELP.actions);
   const api = new ApiClient;
   if (sub === "get") {
@@ -509,6 +512,7 @@ async function actions(args) {
     let subjectId;
     let paramsSource;
     let runId;
+    let wait = false;
     for (let index = 1;index < rest.length; index += 1) {
       const flag = rest[index];
       if (flag === "--subject-type")
@@ -519,7 +523,11 @@ async function actions(args) {
         paramsSource = requireValue(flag, rest[++index]);
       else if (flag === "--run-id")
         runId = requireValue(flag, rest[++index]);
-      else
+      else if (flag === "--wait") {
+        if (wait)
+          fail("--wait may be provided only once.");
+        wait = true;
+      } else
         fail(`Unknown actions request option '${flag}'.`);
     }
     if (Boolean(subjectType) !== Boolean(subjectId)) {
@@ -529,13 +537,41 @@ async function actions(args) {
     if (Array.isArray(params) || typeof params !== "object" || params === null) {
       fail("Action params must be a JSON object.");
     }
-    return writeJson(await api.post(`/api/actions/${encodeURIComponent(actionId)}`, {
+    const requested = await api.post(`/api/actions/${encodeURIComponent(actionId)}`, {
       params,
       ...subjectType && subjectId ? { subject: { kind: "object", objectTypeId: subjectType, primaryId: subjectId } } : {},
       ...runId ? { runId } : {}
-    }));
+    });
+    if (!wait)
+      return writeJson(requested);
+    const requestedRunId = asRecord2(requested).runId;
+    if (typeof requestedRunId !== "string" || requestedRunId.length === 0) {
+      throw new CliError({
+        code: "invalid_api_response",
+        message: "The Action request response did not contain a run id."
+      }, EXIT_API);
+    }
+    return writeJson(await waitForActionRun(api, requestedRunId));
   }
   fail(`Unknown actions command '${sub}'.`);
+}
+var ACTION_WAIT_TIMEOUT_MS = 25000;
+var ACTION_WAIT_POLL_MS = 250;
+var TERMINAL_ACTION_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
+async function waitForActionRun(api, runId) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < ACTION_WAIT_TIMEOUT_MS) {
+    const run = await api.get(`/api/action-runs/${encodeURIComponent(runId)}`);
+    const status = asRecord2(run).status;
+    if (typeof status === "string" && TERMINAL_ACTION_STATUSES.has(status))
+      return run;
+    await new Promise((resolve) => setTimeout(resolve, ACTION_WAIT_POLL_MS));
+  }
+  throw new CliError({
+    code: "action_wait_timeout",
+    message: `Action run '${runId}' did not finish within ${ACTION_WAIT_TIMEOUT_MS / 1000} seconds.`,
+    hint: `Inspect it with 'sixb action-runs get ${runId}'.`
+  }, EXIT_API);
 }
 
 // src/agent-cli/commands/files.ts

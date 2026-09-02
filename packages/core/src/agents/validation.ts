@@ -171,6 +171,9 @@ export function resolveAgentLoopConfig(
       "[Sixb] Agent loop.stopWhen.maxSteps must be a positive safe integer."
     )
   }
+  if (loop.caching !== undefined && loop.caching !== "auto" && loop.caching !== "off") {
+    throw new AgentDefinitionError("[Sixb] Agent loop.caching must be 'auto' or 'off'.")
+  }
 
   const context = loop.context ? snapshotAgentContextConfig(loop.context) : undefined
   return Object.freeze({
@@ -178,6 +181,7 @@ export function resolveAgentLoopConfig(
       ? {}
       : { stopWhen: Object.freeze({ ...(maxSteps === undefined ? {} : { maxSteps }) }) }),
     ...(context === undefined ? {} : { context }),
+    ...(loop.caching === undefined ? {} : { caching: loop.caching }),
   })
 }
 

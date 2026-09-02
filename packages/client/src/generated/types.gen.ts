@@ -7220,6 +7220,9 @@ export type GetActionResponses = {
       edits: boolean
       effects: boolean
     }
+    inputSchema: {
+      [key: string]: unknown
+    }
   }
 }
 
