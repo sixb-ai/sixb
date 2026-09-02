@@ -18,7 +18,7 @@ import type { EditBatch } from "../src/edits"
 import { lowerEditBatch } from "../src/edits"
 import { bindDurablePrimitiveExecution } from "../src/execution/primitive"
 import { createLinkScopeFingerprint } from "../src/materializer"
-import type { ObjectRow, Storage } from "../src/storage"
+import type { ObjectRow, Storage, TimeseriesHistoryBatchResult } from "../src/storage"
 import { StorageTransactionError } from "../src/storage"
 import { createTestSixb, queueTestActionRun } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -546,6 +546,10 @@ describe("Action read dependency capture", () => {
         host.definitions.ontology
           .resolveObjectType(objectTypeId)
           .links.map((definition) => definition.id),
+      telemetry: {
+        resolveObjectType: (objectTypeId) => sixb.objects.resolveType(objectTypeId),
+        getHistoryBatch: (input) => sixb.objects.getTelemetryHistoryBatch(input),
+      },
     })
     return { facade, reads }
   }
@@ -569,6 +573,87 @@ describe("Action read dependency capture", () => {
       },
       { ref: { objectTypeId: "Invoice", primaryId: "inv_missing" }, exists: false },
     ])
+  })
+
+  test("reads telemetry batches without turning history into a commit dependency", async () => {
+    const { host, sixb } = createRuntime()
+    await seedInvoice(sixb)
+    await sixb.objects(Invoice).appendTelemetryBatch([
+      {
+        id: "inv_1",
+        properties: { temperature: 18 },
+        at: new Date("2026-06-01T10:00:00.000Z"),
+      },
+      {
+        id: "inv_1",
+        properties: { temperature: 20 },
+        at: new Date("2026-06-02T10:00:00.000Z"),
+      },
+    ])
+    const { facade, reads } = createFacade(host, sixb)
+
+    const histories = await facade.telemetry.historyBatch({
+      series: [
+        { objectId: "inv_1", property: Invoice.p.temperature },
+        { objectId: "inv_1", property: Invoice.p.temperature },
+      ],
+      order: "desc",
+      limitPerSeries: 1,
+    })
+
+    expect(histories.map((history) => history.points.map((point) => point.value))).toEqual([
+      [20],
+      [20],
+    ])
+    expect(reads.dependencies()).toEqual({ objects: [], links: [], linkScopes: [] })
+
+    await expect(
+      facade.telemetry.historyBatch({
+        series: [
+          {
+            objectId: "inv_1",
+            property: Invoice.p.status as unknown as typeof Invoice.p.temperature,
+          },
+        ],
+      })
+    ).rejects.toThrow("Property status is not telemetry-enabled")
+  })
+
+  test("rejects telemetry providers that break batch cardinality or position", async () => {
+    const reads = new ActionReadRecorder()
+    let providerResults: readonly TimeseriesHistoryBatchResult[] = []
+    const facade = createActionReadFacade(
+      () => {
+        throw new Error("Object reads are not expected in this test.")
+      },
+      {
+        recorder: reads,
+        resolveLinkIds: () => [],
+        telemetry: {
+          resolveObjectType: () => Invoice,
+          getHistoryBatch: async () => providerResults,
+        },
+      }
+    )
+    const input = {
+      series: [{ objectId: "inv_1", property: Invoice.p.temperature }],
+    } as const
+
+    await expect(facade.telemetry.historyBatch(input)).rejects.toThrow(
+      "returned 0 batch results for 1 requested series"
+    )
+
+    providerResults = [
+      {
+        objectTypeId: "Invoice",
+        objectId: "inv_other",
+        propertyId: "temperature",
+        points: [],
+      },
+    ]
+    await expect(facade.telemetry.historyBatch(input)).rejects.toThrow(
+      "returned an unexpected series at batch index 0"
+    )
   })
 
   test("records complete link scopes, including the ones a listing found empty", async () => {

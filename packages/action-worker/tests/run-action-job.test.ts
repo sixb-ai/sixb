@@ -32,6 +32,10 @@ const Device = defineObjectType({
     prop("id", "string", { required: true, primary: true }),
     prop("name", "string", { required: true }),
     prop("status", "string"),
+    prop("temperature", "double", {
+      mode: "telemetry",
+      semanticType: "Temperature",
+    }),
   ],
   links: [link.ref("sensor", "Sensor", { cardinality: "one" })],
 })
@@ -763,6 +767,105 @@ describe("runActionJob", () => {
     expect(result.status).toBe("succeeded")
     const updated = await deviceObjects(sixb).get("device-1")
     expect(updated?.properties.status).toBe("Sensor 1")
+  })
+
+  test("reads typed telemetry histories in one action batch", async () => {
+    const generateReport = defineAction("generateReport")
+      .on(Device)
+      .params({})
+      .writeback(async ({ read, run, target }) => {
+        const histories = await read.telemetry.historyBatch({
+          series: [
+            { objectId: "device-2", property: Device.p.temperature },
+            { objectId: target.primaryId, property: Device.p.temperature },
+            { objectId: "device-2", property: Device.p.temperature },
+          ],
+          from: new Date("2026-04-01T00:00:00.000Z"),
+          to: run.startedAt,
+          limitPerSeries: 2,
+          order: "desc",
+        })
+
+        return {
+          series: histories.map((history) => ({
+            objectId: history.objectId,
+            propertyId: history.property.id,
+            values: history.points.map((point) => point.value),
+            units: history.points.map((point) => point.unit ?? null),
+          })),
+        }
+      })
+
+    const { host, sixb } = createSixb([generateReport])
+    await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
+    await sixb.objects.upsert("Device", { id: "device-2", name: "Device 2" })
+    await sixb.objects.appendTelemetry("Device", [
+      {
+        id: "device-1",
+        properties: { temperature: { value: 18, unit: "degreeCelsius" } },
+        at: new Date("2026-04-02T08:00:00.000Z"),
+      },
+      {
+        id: "device-1",
+        properties: { temperature: { value: 19, unit: "degreeCelsius" } },
+        at: new Date("2026-04-03T08:00:00.000Z"),
+      },
+      {
+        id: "device-2",
+        properties: { temperature: { value: 20, unit: "degreeCelsius" } },
+        at: new Date("2026-04-02T08:00:00.000Z"),
+      },
+      {
+        id: "device-2",
+        properties: { temperature: { value: 21, unit: "degreeCelsius" } },
+        at: new Date("2026-04-03T08:00:00.000Z"),
+      },
+      {
+        id: "device-2",
+        properties: { temperature: { value: 22, unit: "degreeCelsius" } },
+        at: new Date("2026-04-04T08:00:00.000Z"),
+      },
+      {
+        id: "device-2",
+        properties: { temperature: { value: 99, unit: "degreeCelsius" } },
+        at: new Date("2099-05-01T08:00:00.000Z"),
+      },
+    ])
+    await queueActionRun(host, {
+      id: "act_report",
+      actionId: "generateReport",
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
+      params: {},
+    })
+
+    const result = await runStoredActionJob({
+      host,
+      job: { id: "act_report", actionId: "generateReport" },
+    })
+
+    expect(result.status).toBe("succeeded")
+    expect(result.record.writeback?.result).toEqual({
+      series: [
+        {
+          objectId: "device-2",
+          propertyId: "temperature",
+          values: [22, 21],
+          units: ["degreeCelsius", "degreeCelsius"],
+        },
+        {
+          objectId: "device-1",
+          propertyId: "temperature",
+          values: [19, 18],
+          units: ["degreeCelsius", "degreeCelsius"],
+        },
+        {
+          objectId: "device-2",
+          propertyId: "temperature",
+          values: [22, 21],
+          units: ["degreeCelsius", "degreeCelsius"],
+        },
+      ],
+    })
   })
 
   test("fences a writeback read against a change made before the commit", async () => {
