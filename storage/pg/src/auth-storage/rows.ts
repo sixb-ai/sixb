@@ -1,6 +1,7 @@
 import type { Principal } from "@sixb/core"
 import type {
   AccessTokenRecord,
+  DeviceAuthorizationRecord,
   GroupMembershipRecord,
   GroupMembershipSource,
   InvitationRecord,
@@ -147,6 +148,24 @@ export interface PgAuthOidcAttemptRow {
   readonly return_to: string | null
   readonly created_at: PgDate
   readonly expires_at: PgDate
+  readonly consumed_at: PgDate | null
+}
+
+export interface PgAuthDeviceAuthorizationRow {
+  readonly project_id: string
+  readonly id: string
+  readonly device_code_hash: string
+  readonly user_code: string
+  readonly client_name: string
+  readonly token_name: string
+  readonly token_expires_at: PgDate
+  readonly status: DeviceAuthorizationRecord["status"]
+  readonly approved_user_id: string | null
+  readonly approved_session_id: string | null
+  readonly created_at: PgDate
+  readonly expires_at: PgDate
+  readonly approved_at: PgDate | null
+  readonly denied_at: PgDate | null
   readonly consumed_at: PgDate | null
 }
 
@@ -300,6 +319,28 @@ export function rowToOidcAuthorizationAttemptRecord(
     returnTo: row.return_to ?? undefined,
     createdAt: toDate(row.created_at),
     expiresAt: toDate(row.expires_at),
+    consumedAt: row.consumed_at ? toDate(row.consumed_at) : undefined,
+  }
+}
+
+export function rowToDeviceAuthorizationRecord(
+  row: PgAuthDeviceAuthorizationRow
+): DeviceAuthorizationRecord {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    deviceCodeHash: row.device_code_hash,
+    userCode: row.user_code,
+    clientName: row.client_name,
+    tokenName: row.token_name,
+    tokenExpiresAt: toDate(row.token_expires_at),
+    status: row.status,
+    approvedUserId: row.approved_user_id ?? undefined,
+    approvedSessionId: row.approved_session_id ?? undefined,
+    createdAt: toDate(row.created_at),
+    expiresAt: toDate(row.expires_at),
+    approvedAt: row.approved_at ? toDate(row.approved_at) : undefined,
+    deniedAt: row.denied_at ? toDate(row.denied_at) : undefined,
     consumedAt: row.consumed_at ? toDate(row.consumed_at) : undefined,
   }
 }

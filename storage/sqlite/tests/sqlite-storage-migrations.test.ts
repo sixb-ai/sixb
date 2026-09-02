@@ -259,6 +259,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 33,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "034-device-authorizations",
+    status: "applied",
+    version: 34,
+  },
 ]
 
 afterEach(async () => {
@@ -1935,6 +1942,7 @@ describe("SQLite storage migrations", () => {
     expect(tables).toContain("auth_group_memberships")
     expect(tables).toContain("auth_magic_links")
     expect(tables).toContain("auth_oidc_authorization_attempts")
+    expect(tables).toContain("auth_device_authorizations")
     expect(sessionColumns).toContain("audience")
     expect(sessionColumns).toContain("absolute_expires_at")
     expect(sessionColumns).toContain("user_agent")

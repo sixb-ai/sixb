@@ -172,6 +172,7 @@ describe("Postgres storage migrations", () => {
             "031-subagent-runs",
             "032-conversation-run-spec",
             "033-retire-agent-definitions",
+            "034-device-authorizations",
           ],
         },
       ])
@@ -406,6 +407,13 @@ describe("Postgres storage migrations", () => {
           id: "033-retire-agent-definitions",
           status: "applied",
           version: 33,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "034-device-authorizations",
+          status: "applied",
+          version: 34,
         },
       ])
     })
@@ -1357,6 +1365,7 @@ describe("Postgres storage migrations", () => {
           "auth_group_memberships",
           "auth_magic_links",
           "auth_oidc_authorization_attempts",
+          "auth_device_authorizations",
         ])
       )
       expect(sessionColumns).toContain("audience")
@@ -1958,6 +1967,13 @@ describe("Postgres storage migrations", () => {
           id: "033-retire-agent-definitions",
           status: "applied",
           version: 33,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "034-device-authorizations",
+          status: "applied",
+          version: 34,
         },
       ])
     } finally {

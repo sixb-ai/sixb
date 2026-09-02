@@ -50,6 +50,9 @@ import type {
   CreateAuthServiceAccountData,
   CreateAuthServiceAccountErrors,
   CreateAuthServiceAccountResponses,
+  CreateDeviceAuthorizationData,
+  CreateDeviceAuthorizationErrors,
+  CreateDeviceAuthorizationResponses,
   CreateFileUploadData,
   CreateFileUploadErrors,
   CreateFileUploadResponses,
@@ -62,6 +65,8 @@ import type {
   DisconnectConnectorConnectionData,
   DisconnectConnectorConnectionErrors,
   DisconnectConnectorConnectionResponses,
+  ExchangeDeviceAuthorizationData,
+  ExchangeDeviceAuthorizationResponses,
   ExistsObjectsData,
   ExistsObjectsErrors,
   ExistsObjectsResponses,
@@ -401,6 +406,40 @@ export type Options<
    */
   meta?: Record<string, unknown>
 }
+
+/**
+ * Start device authorization
+ */
+export const createDeviceAuthorization = <ThrowOnError extends boolean = false>(
+  options: Options<CreateDeviceAuthorizationData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    CreateDeviceAuthorizationResponses,
+    CreateDeviceAuthorizationErrors,
+    ThrowOnError
+  >({
+    url: "/api/auth/device-authorizations",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Exchange an approved device authorization
+ */
+export const exchangeDeviceAuthorization = <ThrowOnError extends boolean = false>(
+  options: Options<ExchangeDeviceAuthorizationData, ThrowOnError>
+) =>
+  (options.client ?? client).post<ExchangeDeviceAuthorizationResponses, unknown, ThrowOnError>({
+    url: "/api/auth/device-authorizations/token",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
 
 /**
  * Get current auth session
