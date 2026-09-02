@@ -174,9 +174,9 @@ sixb ontology list
 sixb objects search "Northline"
 ```
 
-If the instance requires authentication, `sixb login` prompts for an existing API token without
-echoing it. Profiles are stored in `~/.config/sixb/config.json`. Run `sixb --help` to discover the
-complete command set.
+If the instance requires authentication, `sixb login` opens a browser for device authorization.
+Profiles are stored in `~/.config/sixb/config.json`. Run `sixb --help` to discover the complete
+command set.
 
 ## Architecture
 

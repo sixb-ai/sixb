@@ -288,6 +288,38 @@ export const AuthSignOutResponseSchema = z.object({
   success: z.boolean(),
 })
 
+export const CreateDeviceAuthorizationBodySchema = z.object({
+  clientName: z.string().trim().min(1).max(100),
+  tokenName: z.string().trim().min(1).max(100),
+  expiresIn: z.literal("90d").optional(),
+})
+
+export const CreateDeviceAuthorizationResponseSchema = z.object({
+  deviceCode: z.string(),
+  userCode: z.string(),
+  verificationUri: z.string(),
+  verificationUriComplete: z.string(),
+  expiresAt: z.string(),
+  interval: z.number(),
+})
+
+export const ExchangeDeviceAuthorizationBodySchema = z.object({
+  deviceCode: z.string().min(1),
+})
+
+export const ExchangeDeviceAuthorizationResponseSchema = z.union([
+  z.object({ status: z.literal("pending") }),
+  z.object({ status: z.literal("denied") }),
+  z.object({ status: z.literal("expired") }),
+  z.object({ status: z.literal("approved"), accessToken: z.string() }),
+])
+
+export const DeviceAuthorizationDecisionBodySchema = z.object({
+  userCode: z.string().trim().min(1),
+  decision: z.enum(["approve", "deny"]),
+  csrfToken: z.string().min(1),
+})
+
 export const AuthSessionSummarySchema = z.object({
   id: z.string(),
   audience: z.enum(["atlas", "app"]),

@@ -22,23 +22,22 @@ import {
   toIso,
 } from "./shared"
 
-export class SqliteAuthAccessTokenStore implements AuthAccessTokenStore {
-  constructor(private readonly db: Database) {}
+export function createAuthAccessToken(
+  db: Database,
+  input: CreateAuthAccessTokenInput
+): AccessTokenRecord {
+  const id = assertNonEmpty(input.id, "Access token id")
+  const projectId = assertNonEmpty(input.projectId, "Project id")
+  const name = assertNonEmpty(input.name, "Access token name")
+  const subjectId = assertNonEmpty(input.subjectId, "Access token subject id")
+  const tokenHash = assertNonEmpty(input.tokenHash, "Access token hash")
+  assertKindMatchesSubject(input)
+  assertSubjectExists(db, projectId, input.subjectType, subjectId)
+  const groupIds = input.groupIds === undefined ? undefined : normalizeGroupIds(input.groupIds)
 
-  async create(input: CreateAuthAccessTokenInput): Promise<AccessTokenRecord> {
-    const id = assertNonEmpty(input.id, "Access token id")
-    const projectId = assertNonEmpty(input.projectId, "Project id")
-    const name = assertNonEmpty(input.name, "Access token name")
-    const subjectId = assertNonEmpty(input.subjectId, "Access token subject id")
-    const tokenHash = assertNonEmpty(input.tokenHash, "Access token hash")
-    assertKindMatchesSubject(input)
-    this.assertSubjectExists(projectId, input.subjectType, subjectId)
-    const groupIds = input.groupIds === undefined ? undefined : normalizeGroupIds(input.groupIds)
-
-    try {
-      this.db
-        .query(
-          `
+  try {
+    db.query(
+      `
           INSERT INTO auth_access_tokens (
             project_id,
             id,
@@ -55,38 +54,47 @@ export class SqliteAuthAccessTokenStore implements AuthAccessTokenStore {
             expires_at
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `
-        )
-        .run(
-          projectId,
-          id,
-          name,
-          input.kind,
-          input.subjectType,
-          subjectId,
-          tokenHash,
-          serializeOptionalStringArray(groupIds),
-          input.createdByPrincipal?.type ?? null,
-          input.createdByPrincipal?.id ?? null,
-          input.createdBySessionId ?? null,
-          toIso(input.createdAt),
-          toIso(input.expiresAt)
-        )
-    } catch (error) {
-      mapUniqueConstraintError(
-        error,
-        "duplicate_access_token",
-        `[Sixb] Access token '${id}' already exists for project '${projectId}'.`
-      )
-    }
+    ).run(
+      projectId,
+      id,
+      name,
+      input.kind,
+      input.subjectType,
+      subjectId,
+      tokenHash,
+      serializeOptionalStringArray(groupIds),
+      input.createdByPrincipal?.type ?? null,
+      input.createdByPrincipal?.id ?? null,
+      input.createdBySessionId ?? null,
+      toIso(input.createdAt),
+      toIso(input.expiresAt)
+    )
+  } catch (error) {
+    mapUniqueConstraintError(
+      error,
+      "duplicate_access_token",
+      `[Sixb] Access token '${id}' already exists for project '${projectId}'.`
+    )
+  }
 
-    const token = await this.getById({ projectId, id })
-    if (!token) {
-      throw new AuthStorageError(
-        "missing_access_token",
-        `[Sixb] Access token '${id}' not found for project '${projectId}'.`
-      )
-    }
-    return token
+  const row = db
+    .query("SELECT * FROM auth_access_tokens WHERE project_id = ? AND id = ?")
+    .get(projectId, id) as SqliteAuthAccessTokenRow | null
+  const token = row ? rowToAccessTokenRecord(row) : null
+  if (!token) {
+    throw new AuthStorageError(
+      "missing_access_token",
+      `[Sixb] Access token '${id}' not found for project '${projectId}'.`
+    )
+  }
+  return token
+}
+
+export class SqliteAuthAccessTokenStore implements AuthAccessTokenStore {
+  constructor(private readonly db: Database) {}
+
+  async create(input: CreateAuthAccessTokenInput): Promise<AccessTokenRecord> {
+    return createAuthAccessToken(this.db, input)
   }
 
   async getById(params: {
@@ -246,32 +254,33 @@ export class SqliteAuthAccessTokenStore implements AuthAccessTokenStore {
       lastUsedIpAddress,
     }
   }
+}
 
-  private assertSubjectExists(
-    projectId: string,
-    subjectType: CreateAuthAccessTokenInput["subjectType"],
-    subjectId: string
-  ): void {
-    if (subjectType === "user") {
-      const row = this.db
-        .query("SELECT * FROM auth_users WHERE project_id = ? AND id = ?")
-        .get(projectId, subjectId) as SqliteAuthUserRow | null
-      if (row) return
-      throw new AuthStorageError(
-        "missing_user",
-        `[Sixb] User '${subjectId}' not found for project '${projectId}'.`
-      )
-    }
-
-    const row = this.db
-      .query("SELECT * FROM auth_service_accounts WHERE project_id = ? AND id = ?")
-      .get(projectId, subjectId) as SqliteAuthServiceAccountRow | null
+function assertSubjectExists(
+  db: Database,
+  projectId: string,
+  subjectType: CreateAuthAccessTokenInput["subjectType"],
+  subjectId: string
+): void {
+  if (subjectType === "user") {
+    const row = db
+      .query("SELECT * FROM auth_users WHERE project_id = ? AND id = ?")
+      .get(projectId, subjectId) as SqliteAuthUserRow | null
     if (row) return
     throw new AuthStorageError(
-      "missing_service_account",
-      `[Sixb] Service account '${subjectId}' not found for project '${projectId}'.`
+      "missing_user",
+      `[Sixb] User '${subjectId}' not found for project '${projectId}'.`
     )
   }
+
+  const row = db
+    .query("SELECT * FROM auth_service_accounts WHERE project_id = ? AND id = ?")
+    .get(projectId, subjectId) as SqliteAuthServiceAccountRow | null
+  if (row) return
+  throw new AuthStorageError(
+    "missing_service_account",
+    `[Sixb] Service account '${subjectId}' not found for project '${projectId}'.`
+  )
 }
 
 function assertKindMatchesSubject(input: CreateAuthAccessTokenInput): void {
