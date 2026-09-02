@@ -158,6 +158,7 @@ export type {
   AccessTokenRecord,
   AccessTokenSubjectType,
   AuthAccessTokenStore,
+  AuthDeviceAuthorizationStore,
   AuthGroupMembershipStore,
   AuthInvitationStore,
   AuthMagicLinkStore,
@@ -170,6 +171,8 @@ export type {
   AuthUserIdentityStore,
   AuthUserStore,
   CompleteAuthSessionInput,
+  CompleteDeviceAuthorizationInput,
+  CompleteDeviceAuthorizationResult,
   CompleteMagicLinkSignInInput,
   CompleteOidcSignInInput,
   CompleteSignInResult,
@@ -178,8 +181,11 @@ export type {
   CreateAuthServiceAccountInput,
   CreateAuthSessionInput,
   CreateAuthUserInput,
+  CreateDeviceAuthorizationInput,
   CreateOidcAuthorizationAttemptInput,
   CreateOrUpdateAuthInvitationInput,
+  DeviceAuthorizationRecord,
+  DeviceAuthorizationStatus,
   GroupMembershipRecord,
   GroupMembershipSource,
   InvitationRecord,
@@ -210,7 +216,7 @@ export type {
   UserRecord,
   UserStatus,
 } from "./auth"
-export { AuthStorageError, InMemoryAuthStorage } from "./auth"
+export { AuthStorageError, InMemoryAuthStorage, MAX_PENDING_DEVICE_AUTHORIZATIONS } from "./auth"
 export type {
   AttachConnectorConnectionRunAuthorizationInput,
   ClaimConnectorConnectionRunCallbackInput,

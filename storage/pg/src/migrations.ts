@@ -73,6 +73,9 @@ import agentContextCheckpointsSql from "./migrations/027-agent-context-checkpoin
 import objectOverrideEditTimesSql from "./migrations/028-object-override-edit-times.sql" with {
   type: "text",
 }
+import deviceAuthorizationsSql from "./migrations/029-device-authorizations.sql" with {
+  type: "text",
+}
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -354,6 +357,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("026-ai-cost-accounting", aiCostAccountingSql),
     pgSql("027-agent-context-checkpoints", agentContextCheckpointsSql),
     pgSql("028-object-override-edit-times", objectOverrideEditTimesSql),
+    pgSql("029-device-authorizations", deviceAuthorizationsSql),
   ],
 })
 

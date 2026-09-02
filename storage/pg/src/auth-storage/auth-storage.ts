@@ -1,8 +1,11 @@
 import type {
   AuthStorage,
+  CompleteDeviceAuthorizationInput,
+  CompleteDeviceAuthorizationResult,
   CompleteMagicLinkSignInInput,
   CompleteOidcSignInInput,
   CompleteSignInResult,
+  DeviceAuthorizationRecord,
   GroupMembershipRecord,
   InvitationRecord,
   SessionRecord,
@@ -19,6 +22,10 @@ import {
   runPgTransaction,
 } from "../transactions"
 import { PgAuthAccessTokenStore } from "./access-tokens"
+import {
+  getPgDeviceAuthorizationById,
+  PgAuthDeviceAuthorizationStore,
+} from "./device-authorizations"
 import { PgAuthGroupMembershipStore } from "./group-memberships"
 import { PgAuthUserIdentityStore } from "./identities"
 import { PgAuthInvitationStore } from "./invitations"
@@ -77,6 +84,7 @@ export class PgAuthStorage implements AuthStorage {
   readonly groupMemberships: PgAuthGroupMembershipStore
   readonly magicLinks: PgAuthMagicLinkStore
   readonly oidcAuthorizationAttempts: PgAuthOidcAuthorizationAttemptStore
+  readonly deviceAuthorizations: PgAuthDeviceAuthorizationStore
 
   constructor(options: PgAuthStorageOptions) {
     this.sql = options.sql
@@ -90,6 +98,43 @@ export class PgAuthStorage implements AuthStorage {
     this.groupMemberships = new PgAuthGroupMembershipStore(this.sql)
     this.magicLinks = new PgAuthMagicLinkStore(this.sql)
     this.oidcAuthorizationAttempts = new PgAuthOidcAuthorizationAttemptStore(this.sql)
+    this.deviceAuthorizations = new PgAuthDeviceAuthorizationStore(this.sql)
+  }
+
+  async completeDeviceAuthorization(
+    input: CompleteDeviceAuthorizationInput
+  ): Promise<CompleteDeviceAuthorizationResult> {
+    return runPgTransaction(this.sql, async (tx) => {
+      const authorization = await getPgDeviceAuthorizationById(tx, input.projectId, input.id)
+      if (!authorization) {
+        throw new AuthStorageError(
+          "missing_device_authorization",
+          `[Sixb] Device authorization '${input.id}' not found for project '${input.projectId}'.`
+        )
+      }
+      assertCompletableDeviceAuthorization(authorization, input)
+      const accessToken = await new PgAuthAccessTokenStore(tx).create(input.accessToken)
+      const [consumed] = await tx`
+        UPDATE auth_device_authorizations
+        SET status = 'consumed', consumed_at = ${input.completedAt}
+        WHERE project_id = ${input.projectId} AND id = ${input.id} AND status = 'approved'
+        RETURNING *
+      `
+      if (!consumed) {
+        throw new AuthStorageError(
+          "invalid_device_authorization",
+          "[Sixb] Device authorization was already consumed."
+        )
+      }
+      return {
+        authorization: {
+          ...authorization,
+          status: "consumed" as const,
+          consumedAt: new Date(input.completedAt),
+        },
+        accessToken,
+      }
+    })
   }
 
   async completeMagicLinkSignIn(
@@ -795,4 +840,43 @@ function assertSignInSessionAudience(
     "invalid_input",
     `[Sixb] Sign-in session audience '${sessionAudience}' does not match stored auth audience '${storedAudience}' for project '${projectId}'.`
   )
+}
+
+function assertCompletableDeviceAuthorization(
+  authorization: DeviceAuthorizationRecord,
+  input: CompleteDeviceAuthorizationInput
+): void {
+  if (authorization.deviceCodeHash !== input.deviceCodeHash) {
+    throw new AuthStorageError(
+      "invalid_device_authorization",
+      "[Sixb] Invalid device authorization."
+    )
+  }
+  if (authorization.status === "pending") {
+    throw new AuthStorageError(
+      "pending_device_authorization",
+      "[Sixb] Device authorization is pending."
+    )
+  }
+  if (authorization.status === "denied") {
+    throw new AuthStorageError(
+      "device_authorization_denied",
+      "[Sixb] Device authorization was denied."
+    )
+  }
+  if (
+    authorization.status !== "approved" ||
+    authorization.expiresAt <= input.completedAt ||
+    !authorization.approvedUserId ||
+    !authorization.approvedSessionId ||
+    input.accessToken.projectId !== input.projectId ||
+    input.accessToken.subjectType !== "user" ||
+    input.accessToken.subjectId !== authorization.approvedUserId ||
+    input.accessToken.createdBySessionId !== authorization.approvedSessionId
+  ) {
+    throw new AuthStorageError(
+      "invalid_device_authorization",
+      "[Sixb] Device authorization is invalid."
+    )
+  }
 }

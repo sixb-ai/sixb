@@ -1316,6 +1316,91 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
       })
     })
 
+    test("authorizes a device and atomically creates its one-time access token", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+        await storage.sessions.create({
+          id: "ses_device",
+          projectId,
+          userId: "usr_1",
+          strategyId: "magic-link",
+          audience: "atlas",
+          tokenHash: "session-hash",
+          createdAt: at("2026-05-14T10:00:00.000Z"),
+          expiresAt: at("2026-05-21T10:00:00.000Z"),
+        })
+        await storage.deviceAuthorizations.create({
+          id: "dva_1",
+          projectId,
+          deviceCodeHash: "device-code-hash",
+          userCode: "BCDF-HJKM",
+          clientName: "sixb CLI",
+          tokenName: "codex",
+          tokenExpiresAt: at("2026-08-12T10:00:00.000Z"),
+          createdAt: at("2026-05-14T10:00:00.000Z"),
+          expiresAt: at("2026-05-14T10:10:00.000Z"),
+        })
+
+        await expect(
+          storage.deviceAuthorizations.getByUserCode({ projectId, userCode: "BCDF-HJKM" })
+        ).resolves.toMatchObject({ id: "dva_1", status: "pending" })
+        await storage.deviceAuthorizations.approve({
+          projectId,
+          id: "dva_1",
+          userId: "usr_1",
+          sessionId: "ses_device",
+          approvedAt: at("2026-05-14T10:01:00.000Z"),
+        })
+
+        const completed = await storage.completeDeviceAuthorization({
+          projectId,
+          id: "dva_1",
+          deviceCodeHash: "device-code-hash",
+          completedAt: at("2026-05-14T10:02:00.000Z"),
+          accessToken: {
+            id: "tok_device",
+            projectId,
+            name: "codex",
+            kind: "personal",
+            subjectType: "user",
+            subjectId: "usr_1",
+            tokenHash: "access-token-hash",
+            createdByPrincipal: { type: "user", id: "usr_1" },
+            createdBySessionId: "ses_device",
+            createdAt: at("2026-05-14T10:02:00.000Z"),
+            expiresAt: at("2026-08-12T10:00:00.000Z"),
+          },
+        })
+
+        expect(completed.authorization).toMatchObject({ status: "consumed" })
+        expect(completed.accessToken).toMatchObject({ id: "tok_device", subjectId: "usr_1" })
+        await expectAuthError(
+          storage.completeDeviceAuthorization({
+            projectId,
+            id: "dva_1",
+            deviceCodeHash: "device-code-hash",
+            completedAt: at("2026-05-14T10:03:00.000Z"),
+            accessToken: {
+              id: "tok_device_2",
+              projectId,
+              name: "codex",
+              kind: "personal",
+              subjectType: "user",
+              subjectId: "usr_1",
+              tokenHash: "access-token-hash-2",
+              createdBySessionId: "ses_device",
+              createdAt: at("2026-05-14T10:03:00.000Z"),
+              expiresAt: at("2026-08-12T10:00:00.000Z"),
+            },
+          }),
+          "invalid_device_authorization"
+        )
+        await expect(
+          storage.accessTokens.getById({ projectId, id: "tok_device_2" })
+        ).resolves.toBeNull()
+      })
+    })
+
     test("completes magic-link sign-in for an existing user", async () => {
       await withStorage(async (storage) => {
         await createUser(storage)

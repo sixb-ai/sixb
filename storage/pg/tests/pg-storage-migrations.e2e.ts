@@ -80,6 +80,7 @@ describe("Postgres storage migrations", () => {
             "026-ai-cost-accounting",
             "027-agent-context-checkpoints",
             "028-object-override-edit-times",
+            "029-device-authorizations",
           ],
         },
       ])
@@ -279,6 +280,13 @@ describe("Postgres storage migrations", () => {
           id: "028-object-override-edit-times",
           status: "applied",
           version: 28,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "029-device-authorizations",
+          status: "applied",
+          version: 29,
         },
       ])
     })
@@ -1230,6 +1238,7 @@ describe("Postgres storage migrations", () => {
           "auth_group_memberships",
           "auth_magic_links",
           "auth_oidc_authorization_attempts",
+          "auth_device_authorizations",
         ])
       )
       expect(sessionColumns).toContain("audience")
@@ -1758,6 +1767,13 @@ describe("Postgres storage migrations", () => {
           id: "028-object-override-edit-times",
           status: "applied",
           version: 28,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "029-device-authorizations",
+          status: "applied",
+          version: 29,
         },
       ])
     } finally {

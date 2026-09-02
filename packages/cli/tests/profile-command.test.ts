@@ -52,6 +52,61 @@ function startProjectServer(
 }
 
 describe("sixb profile commands", () => {
+  test("authorizes login in the browser and stores the exchanged token", async () => {
+    const env: Record<string, string | undefined> = {
+      ...(await tempConfigEnvironment()),
+      SIXB_CLI_NO_BROWSER: "1",
+    }
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(request) {
+        const url = new URL(request.url)
+        if (url.pathname === "/api/auth/device-authorizations") {
+          return Response.json(
+            {
+              deviceCode: "dva_test.device-secret",
+              userCode: "BCDF-HJKM",
+              verificationUri: `${url.origin}/auth/device`,
+              verificationUriComplete: `${url.origin}/auth/device?user_code=BCDF-HJKM`,
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              interval: 1,
+            },
+            { status: 201 }
+          )
+        }
+        if (url.pathname === "/api/auth/device-authorizations/token") {
+          return Response.json({ status: "approved", accessToken: "browser-token" })
+        }
+        if (request.headers.get("authorization") !== "Bearer browser-token") {
+          return Response.json({ error: "Unauthorized" }, { status: 401 })
+        }
+        return Response.json({ id: "browser-project" })
+      },
+    })
+    servers.push(server)
+    const apiUrl = `http://127.0.0.1:${server.port}`
+
+    const result = await runCliToCompletion({
+      cmd: ["bun", cliEntry, "login", apiUrl, "--profile", "codex", "--json"],
+      cwd: repoRoot,
+      env,
+    })
+
+    assertCliSucceeded(result)
+    expect(result.stderr).toContain(`Opening ${apiUrl}/auth/device?user_code=BCDF-HJKM`)
+    expect(result.stderr).toContain("Confirm code: BCDF-HJKM")
+    expect(JSON.parse(result.stdout)).toEqual({
+      profile: "codex",
+      projectId: "browser-project",
+      apiUrl,
+      authenticated: true,
+    })
+    expect(await readFile(join(env["XDG_CONFIG_HOME"]!, "sixb", "config.json"), "utf8")).toContain(
+      "browser-token"
+    )
+  }, 20_000)
+
   test("imports a token, stores a profile, and dispatches instance commands", async () => {
     const env = await tempConfigEnvironment()
     const { server, authorizationHeaders } = startProjectServer({ token: "secret-token" })

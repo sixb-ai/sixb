@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto"
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto"
 import type { AuthSessionAudience, GroupDefinition, SixbHostView } from "@sixb/core"
 import {
   type AuthenticatedUserRequestSession,
@@ -6,6 +6,7 @@ import {
   AuthRuntimeError,
   clearCsrfCookieHeader,
   clearSessionCookieHeader,
+  createAccessTokenCredential,
   createCsrfCookieHeader,
   createSessionCookieHeader,
   createSessionCredential,
@@ -61,7 +62,12 @@ import {
   CreateAuthServiceAccountAccessTokenResponseSchema,
   CreateAuthServiceAccountBodySchema,
   CreateAuthServiceAccountResponseSchema,
+  CreateDeviceAuthorizationBodySchema,
+  CreateDeviceAuthorizationResponseSchema,
+  DeviceAuthorizationDecisionBodySchema,
   DisableAuthServiceAccountResponseSchema,
+  ExchangeDeviceAuthorizationBodySchema,
+  ExchangeDeviceAuthorizationResponseSchema,
   GetAuthAccessManagementOptionsResponseSchema,
   GetAuthInvitationOptionsResponseSchema,
   GetAuthMembershipOptionsResponseSchema,
@@ -134,6 +140,246 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
       "/auth/assets/*",
       async ({ request }) => customAuthExperienceAssetResponse(options.authExperience, request),
       { detail: { hide: true } }
+    )
+    .post(
+      "/api/auth/device-authorizations",
+      async ({ body, request }) => {
+        const parsed = CreateDeviceAuthorizationBodySchema.parse(body)
+        const now = new Date()
+        const id = `dva_${randomUUID()}`
+        const deviceCode = `${id}.${randomBytes(32).toString("base64url")}`
+        const userCode = createDeviceUserCode()
+        const expiresAt = new Date(now.getTime() + DEVICE_AUTHORIZATION_TTL_MS)
+        try {
+          await requireAuthStorage(host).deviceAuthorizations.create({
+            id,
+            projectId: host.id,
+            deviceCodeHash: hashDeviceCode(deviceCode),
+            userCode,
+            clientName: parsed.clientName,
+            tokenName: parsed.tokenName,
+            tokenExpiresAt: new Date(now.getTime() + DEVICE_ACCESS_TOKEN_TTL_MS),
+            createdAt: now,
+            expiresAt,
+          })
+        } catch (error) {
+          return authRouteErrorResponse(error)
+        }
+        const verificationUri = new URL(
+          "/auth/device",
+          options.resolveAuthRequestOrigin(request)
+        ).toString()
+        const verificationUriComplete = new URL(verificationUri)
+        verificationUriComplete.searchParams.set("user_code", userCode)
+        return jsonResponse(
+          {
+            deviceCode,
+            userCode,
+            verificationUri,
+            verificationUriComplete: verificationUriComplete.toString(),
+            expiresAt: expiresAt.toISOString(),
+            interval: DEVICE_AUTHORIZATION_POLL_INTERVAL_SECONDS,
+          },
+          201
+        )
+      },
+      {
+        body: CreateDeviceAuthorizationBodySchema,
+        response: { 201: CreateDeviceAuthorizationResponseSchema, 429: ErrorResponseSchema },
+        detail: {
+          summary: "Start device authorization",
+          tags: [OPENAPI_TAGS.authSessions.name],
+          operationId: "createDeviceAuthorization",
+        },
+      }
+    )
+    .post(
+      "/api/auth/device-authorizations/token",
+      async ({ body }) => {
+        const { deviceCode } = ExchangeDeviceAuthorizationBodySchema.parse(body)
+        const id = parseDeviceAuthorizationId(deviceCode)
+        if (!id) return jsonResponse({ status: "expired" as const }, 200)
+        const storage = requireAuthStorage(host)
+        const authorization = await storage.deviceAuthorizations.getById({
+          projectId: host.id,
+          id,
+        })
+        const now = new Date()
+        if (
+          !authorization ||
+          authorization.deviceCodeHash !== hashDeviceCode(deviceCode) ||
+          authorization.expiresAt <= now ||
+          authorization.status === "consumed"
+        ) {
+          return jsonResponse({ status: "expired" as const }, 200)
+        }
+        if (authorization.status === "pending") {
+          return jsonResponse({ status: "pending" as const }, 200)
+        }
+        if (authorization.status === "denied") {
+          return jsonResponse({ status: "denied" as const }, 200)
+        }
+        if (!authorization.approvedUserId || !authorization.approvedSessionId) {
+          return jsonResponse({ status: "expired" as const }, 200)
+        }
+        const credential = createAccessTokenCredential("personal")
+        try {
+          await storage.completeDeviceAuthorization({
+            projectId: host.id,
+            id,
+            deviceCodeHash: hashDeviceCode(deviceCode),
+            completedAt: now,
+            accessToken: {
+              id: credential.tokenId,
+              projectId: host.id,
+              name: authorization.tokenName,
+              kind: "personal",
+              subjectType: "user",
+              subjectId: authorization.approvedUserId,
+              tokenHash: credential.tokenHash,
+              createdByPrincipal: { type: "user", id: authorization.approvedUserId },
+              createdBySessionId: authorization.approvedSessionId,
+              createdAt: now,
+              expiresAt: authorization.tokenExpiresAt,
+            },
+          })
+        } catch (error) {
+          if (error instanceof AuthStorageError && error.code === "invalid_device_authorization") {
+            return jsonResponse({ status: "expired" as const }, 200)
+          }
+          throw error
+        }
+        return jsonResponse(
+          { status: "approved" as const, accessToken: credential.tokenValue },
+          200
+        )
+      },
+      {
+        body: ExchangeDeviceAuthorizationBodySchema,
+        response: { 200: ExchangeDeviceAuthorizationResponseSchema },
+        detail: {
+          summary: "Exchange an approved device authorization",
+          tags: [OPENAPI_TAGS.authSessions.name],
+          operationId: "exchangeDeviceAuthorization",
+        },
+      }
+    )
+    .get(
+      "/auth/device",
+      async ({ request }) => {
+        const rawUserCode = new URL(request.url).searchParams.get("user_code")
+        if (!rawUserCode) {
+          return authPageResponse(
+            [
+              "<h1>Authorize a device</h1>",
+              '<form method="get" action="/auth/device">',
+              '<input name="user_code" autocomplete="one-time-code" placeholder="BCDF-HJKM" aria-label="Device code" required autofocus>',
+              '<button type="submit">Continue</button>',
+              "</form>",
+            ].join("")
+          )
+        }
+        const userCode = normalizeDeviceUserCode(rawUserCode)
+        if (!userCode) return authPageResponse("<h1>Invalid authorization</h1>", 400)
+        const authorization = await requireAuthStorage(host).deviceAuthorizations.getByUserCode({
+          projectId: host.id,
+          userCode,
+        })
+        const now = new Date()
+        if (
+          !authorization ||
+          authorization.status !== "pending" ||
+          authorization.expiresAt <= now
+        ) {
+          return authPageResponse("<h1>This authorization has expired</h1>", 400)
+        }
+        const authOptions = resolveAuthOptions(options, request)
+        const session = await host.auth.getSession(request, authOptions)
+        if (!session.authenticated) return authPageResponse("<h1>Authentication required</h1>", 401)
+        const cookieOptions = host.auth.getCookieOptions(authOptions)
+        const csrf = resolveSessionCsrfToken({
+          request,
+          cookieOptions,
+          expiresAt: session.session.expiresAt,
+        })
+        const groups = session.groupIds.length
+          ? `<p>Groups: ${escapeHtml(session.groupIds.join(", "))}</p>`
+          : "<p>Groups: none</p>"
+        const response = authPageResponse(
+          [
+            "<h1>Authorize this device?</h1>",
+            `<p><strong>${escapeHtml(authorization.clientName)}</strong> is requesting access.</p>`,
+            `<p>Code: <strong>${escapeHtml(authorization.userCode)}</strong></p>`,
+            `<p>Token: ${escapeHtml(authorization.tokenName)}</p>`,
+            `<p>Expires: ${escapeHtml(authorization.tokenExpiresAt.toLocaleDateString("en-US"))}</p>`,
+            groups,
+            '<form method="post" action="/auth/device">',
+            `<input type="hidden" name="userCode" value="${escapeHtml(userCode)}">`,
+            `<input type="hidden" name="csrfToken" value="${escapeHtml(csrf.token)}">`,
+            '<button name="decision" value="approve" type="submit">Authorize</button>',
+            '<button name="decision" value="deny" type="submit">Deny</button>',
+            "</form>",
+          ].join("")
+        )
+        if (csrf.setCookie) response.headers.append("set-cookie", csrf.setCookie)
+        return response
+      },
+      { detail: { hide: true } }
+    )
+    .post(
+      "/auth/device",
+      async ({ body, request }) => {
+        const parsed = DeviceAuthorizationDecisionBodySchema.parse(body)
+        const authOptions = resolveAuthOptions(options, request)
+        const session = await host.auth.getSession(request, authOptions)
+        if (!session.authenticated) return authPageResponse("<h1>Authentication required</h1>", 401)
+        if (!sessionCanAccessApplication(host, session, authOptions.audience)) {
+          return authPageResponse("<h1>Access denied</h1>", 403)
+        }
+        const csrfHeaders = new Headers(request.headers)
+        csrfHeaders.set("x-sixb-csrf", parsed.csrfToken)
+        if (
+          !verifyDoubleSubmitCsrf(
+            new Request(request.url, { method: "POST", headers: csrfHeaders }),
+            {
+              cookieName: host.auth.getCookieOptions(authOptions).csrfCookieName,
+            }
+          )
+        ) {
+          return authPageResponse("<h1>Invalid authorization request</h1>", 403)
+        }
+        const storage = requireAuthStorage(host)
+        const authorization = await storage.deviceAuthorizations.getByUserCode({
+          projectId: host.id,
+          userCode: parsed.userCode,
+        })
+        if (!authorization) return authPageResponse("<h1>Invalid authorization</h1>", 400)
+        if (parsed.decision === "approve") {
+          await storage.deviceAuthorizations.approve({
+            projectId: host.id,
+            id: authorization.id,
+            userId: session.user.id,
+            sessionId: session.session.id,
+            approvedAt: new Date(),
+          })
+          return authPageResponse("<h1>Device authorized</h1><p>You can close this window.</p>")
+        }
+        await storage.deviceAuthorizations.deny({
+          projectId: host.id,
+          id: authorization.id,
+          deniedAt: new Date(),
+        })
+        return authPageResponse("<h1>Authorization denied</h1><p>You can close this window.</p>")
+      },
+      {
+        body: t.Object({
+          userCode: t.String(),
+          decision: t.Union([t.Literal("approve"), t.Literal("deny")]),
+          csrfToken: t.String(),
+        }),
+        parse: "urlencoded",
+        detail: { hide: true },
+      }
     )
     .get(
       "/api/auth/session",
@@ -1489,6 +1735,36 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     )
 }
 
+const DEVICE_AUTHORIZATION_TTL_MS = 10 * 60 * 1000
+const DEVICE_ACCESS_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000
+const DEVICE_AUTHORIZATION_POLL_INTERVAL_SECONDS = 2
+const DEVICE_USER_CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXYZ23456789"
+
+function hashDeviceCode(deviceCode: string): string {
+  return createHash("sha256").update(deviceCode).digest("base64url")
+}
+
+function parseDeviceAuthorizationId(deviceCode: string): string | null {
+  const separator = deviceCode.indexOf(".")
+  if (separator <= 0 || separator !== deviceCode.lastIndexOf(".")) return null
+  const id = deviceCode.slice(0, separator)
+  return /^dva_[A-Za-z0-9-]+$/.test(id) ? id : null
+}
+
+function createDeviceUserCode(): string {
+  const bytes = randomBytes(8)
+  const characters = [...bytes].map(
+    (value) => DEVICE_USER_CODE_ALPHABET[value % DEVICE_USER_CODE_ALPHABET.length]
+  )
+  return `${characters.slice(0, 4).join("")}-${characters.slice(4).join("")}`
+}
+
+function normalizeDeviceUserCode(value: string): string | null {
+  const compact = value.toUpperCase().replaceAll(/[^A-Z0-9]/g, "")
+  if (compact.length !== 8) return null
+  return `${compact.slice(0, 4)}-${compact.slice(4)}`
+}
+
 // The pending cookie carries the preimage of the `requester` hash embedded in
 // the emailed callback URL. Only the browser that requested the link holds it,
 // so GET /auth/callback can distinguish that browser (sign in immediately) from
@@ -2333,6 +2609,9 @@ function authRouteErrorResponse(error: unknown): Response {
   }
 
   if (error instanceof AuthStorageError) {
+    if (error.code === "device_authorization_limit_exceeded") {
+      return jsonResponse({ error: error.message }, 429)
+    }
     if (
       error.code === "missing_invitation" ||
       error.code === "missing_access_token" ||

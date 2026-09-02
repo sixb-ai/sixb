@@ -6,6 +6,7 @@ import type {
   CreateAuthAccessTokenInput,
   CreateAuthServiceAccountInput,
   CreateAuthSessionInput,
+  DeviceAuthorizationRecord,
   GroupMembershipRecord,
   InvitationRecord,
   MagicLinkRecord,
@@ -30,6 +31,7 @@ export interface AuthStorageState {
   readonly groupMemberships: Map<string, GroupMembershipRecord>
   readonly magicLinks: Map<string, MagicLinkRecord>
   readonly oidcAuthorizationAttempts: Map<string, OidcAuthorizationAttemptRecord>
+  readonly deviceAuthorizations: Map<string, DeviceAuthorizationRecord>
 }
 
 export function createAuthStorageState(): AuthStorageState {
@@ -44,6 +46,7 @@ export function createAuthStorageState(): AuthStorageState {
     groupMemberships: new Map(),
     magicLinks: new Map(),
     oidcAuthorizationAttempts: new Map(),
+    deviceAuthorizations: new Map(),
   }
 }
 
@@ -72,6 +75,10 @@ export function serviceAccountGroupMembershipKey(
 }
 
 export function sessionKey(projectId: string, id: string): string {
+  return scopedKey(projectId, id)
+}
+
+export function deviceAuthorizationKey(projectId: string, id: string): string {
   return scopedKey(projectId, id)
 }
 

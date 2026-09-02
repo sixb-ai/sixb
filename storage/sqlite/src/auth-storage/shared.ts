@@ -658,6 +658,7 @@ export function mapUniqueConstraintError(
   error: unknown,
   code:
     | "duplicate_access_token"
+    | "duplicate_device_authorization"
     | "duplicate_identity"
     | "duplicate_invitation"
     | "duplicate_magic_link"

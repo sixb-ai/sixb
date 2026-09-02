@@ -358,6 +358,100 @@ describe("server auth guard", () => {
     expect(response.headers.get("set-cookie")).toContain("sixb_csrf=")
   })
 
+  test("completes the one-time device authorization flow", async () => {
+    const { sixb, storage } = createRuntime({ auth: true })
+    const seeded = await seedSession(storage)
+    const app = createSixbApi(
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
+    )
+
+    const started = await app.fetch(
+      new Request("http://localhost/api/auth/device-authorizations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ clientName: "sixb CLI", tokenName: "codex", expiresIn: "90d" }),
+      })
+    )
+    expect(started.status).toBe(201)
+    const authorization = (await started.json()) as {
+      readonly deviceCode: string
+      readonly userCode: string
+      readonly verificationUriComplete: string
+    }
+    expect(authorization.verificationUriComplete).toContain("/auth/device?user_code=")
+
+    const page = await app.fetch(
+      new Request(authorization.verificationUriComplete, {
+        headers: { cookie: `${seeded.cookie}; ${seeded.csrfCookie}` },
+      })
+    )
+    expect(page.status).toBe(200)
+    expect(await page.text()).toContain(authorization.userCode)
+
+    const missingCsrf = await app.fetch(
+      new Request("http://localhost/auth/device", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          cookie: `${seeded.cookie}; ${seeded.csrfCookie}`,
+        },
+        body: new URLSearchParams({
+          userCode: authorization.userCode,
+          decision: "approve",
+          csrfToken: "wrong",
+        }),
+      })
+    )
+    expect(missingCsrf.status).toBe(403)
+
+    const approved = await app.fetch(
+      new Request("http://localhost/auth/device", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          cookie: `${seeded.cookie}; ${seeded.csrfCookie}`,
+        },
+        body: new URLSearchParams({
+          userCode: authorization.userCode,
+          decision: "approve",
+          csrfToken: "csrf_1",
+        }),
+      })
+    )
+    expect(approved.status).toBe(200)
+
+    const exchanged = await app.fetch(
+      new Request("http://localhost/api/auth/device-authorizations/token", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ deviceCode: authorization.deviceCode }),
+      })
+    )
+    expect(exchanged.status).toBe(200)
+    const token = (await exchanged.json()) as {
+      readonly status: string
+      readonly accessToken: string
+    }
+    expect(token.status).toBe("approved")
+    expect(token.accessToken).toStartWith("sixb_pat_")
+
+    const authenticated = await app.fetch(
+      new Request("http://localhost/api/project", {
+        headers: { authorization: `Bearer ${token.accessToken}` },
+      })
+    )
+    expect(authenticated.status).toBe(200)
+
+    const replayed = await app.fetch(
+      new Request("http://localhost/api/auth/device-authorizations/token", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ deviceCode: authorization.deviceCode }),
+      })
+    )
+    expect(await replayed.json()).toEqual({ status: "expired" })
+  })
+
   test("renews session and CSRF cookies on foreground protected requests", async () => {
     const now = new Date("2026-07-01T10:00:00.000Z")
     setSystemTime(now)

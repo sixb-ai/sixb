@@ -182,7 +182,10 @@ The directory is mode `0700`; the config file is atomically replaced at mode `06
 ```bash
 sixb login http://localhost:3002 --profile local
 
-# For an API that requires an existing token:
+# Authenticated APIs open a browser and wait for approval:
+sixb login https://api.acme.example --profile production
+
+# Non-interactive fallback with an existing token:
 printf '%s\n' "$SIXB_API_TOKEN" |
   sixb login https://api.acme.example --profile production --token-stdin
 
@@ -193,9 +196,10 @@ sixb ontology list
 sixb objects inspect Customer customer-123
 ```
 
-An auth-disabled local API stores a tokenless profile. If authentication is required and
-`--token-stdin` is omitted, `sixb login` prompts for the token without echoing it. Browser login is
-planned separately.
+An auth-disabled local API stores a tokenless profile. Authenticated APIs use a short-lived device
+code: the browser approves the request through the existing session, and the CLI stores the
+one-time personal access token only after validating it against `/api/project`. Use `--token-stdin`
+for automation or when you already have a token.
 
 Remote target resolution is deterministic:
 

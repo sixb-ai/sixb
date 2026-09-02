@@ -1,6 +1,7 @@
 import type { Principal } from "@sixb/core"
 import type {
   AccessTokenRecord,
+  DeviceAuthorizationRecord,
   GroupMembershipRecord,
   GroupMembershipSource,
   InvitationRecord,
@@ -142,6 +143,24 @@ export interface SqliteAuthOidcAttemptRow {
   readonly return_to: string | null
   readonly created_at: string
   readonly expires_at: string
+  readonly consumed_at: string | null
+}
+
+export interface SqliteAuthDeviceAuthorizationRow {
+  readonly project_id: string
+  readonly id: string
+  readonly device_code_hash: string
+  readonly user_code: string
+  readonly client_name: string
+  readonly token_name: string
+  readonly token_expires_at: string
+  readonly status: DeviceAuthorizationRecord["status"]
+  readonly approved_user_id: string | null
+  readonly approved_session_id: string | null
+  readonly created_at: string
+  readonly expires_at: string
+  readonly approved_at: string | null
+  readonly denied_at: string | null
   readonly consumed_at: string | null
 }
 
@@ -315,6 +334,28 @@ export function rowToOidcAuthorizationAttemptRecord(
     returnTo: row.return_to ?? undefined,
     createdAt: new Date(row.created_at),
     expiresAt: new Date(row.expires_at),
+    consumedAt: row.consumed_at ? new Date(row.consumed_at) : undefined,
+  }
+}
+
+export function rowToDeviceAuthorizationRecord(
+  row: SqliteAuthDeviceAuthorizationRow
+): DeviceAuthorizationRecord {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    deviceCodeHash: row.device_code_hash,
+    userCode: row.user_code,
+    clientName: row.client_name,
+    tokenName: row.token_name,
+    tokenExpiresAt: new Date(row.token_expires_at),
+    status: row.status,
+    approvedUserId: row.approved_user_id ?? undefined,
+    approvedSessionId: row.approved_session_id ?? undefined,
+    createdAt: new Date(row.created_at),
+    expiresAt: new Date(row.expires_at),
+    approvedAt: row.approved_at ? new Date(row.approved_at) : undefined,
+    deniedAt: row.denied_at ? new Date(row.denied_at) : undefined,
     consumedAt: row.consumed_at ? new Date(row.consumed_at) : undefined,
   }
 }

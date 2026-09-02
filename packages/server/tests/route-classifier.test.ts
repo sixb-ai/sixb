@@ -20,6 +20,9 @@ const PUBLIC: ReadonlyArray<readonly [string, string, string]> = [
   ["POST", "/api/webhooks/github/events", "third-party callers sign their payloads"],
   ["GET", "/api/auth/session", "answers whether a session exists"],
   ["POST", "/api/auth/sign-out", "must work with an expired session"],
+  ["POST", "/api/auth/device-authorizations", "starts a device authorization"],
+  ["POST", "/api/auth/device-authorizations/token", "device code authenticates polling"],
+  ["POST", "/auth/device", "handler verifies session and submitted CSRF token"],
   ["GET", "/auth/assets/auth-example.js", "custom auth experience asset"],
   ["HEAD", "/auth/assets/auth-example.js", "custom auth experience asset metadata"],
   ["GET", "/auth/sign-in", "the page that creates a session"],
@@ -85,6 +88,7 @@ describe("classifyRoute", () => {
     expect(classifyRoute(request("GET", "/ws/events")).kind).toBe("websocket")
     expect(classifyRoute(request("GET", "/docs")).kind).toBe("html")
     expect(classifyRoute(request("GET", "/docs/json")).kind).toBe("html")
+    expect(classifyRoute(request("GET", "/auth/device?user_code=BCDF-HJKM")).kind).toBe("html")
   })
 
   test("a mutation to an unrecognized path is CSRF-protected", () => {
