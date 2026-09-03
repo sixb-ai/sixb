@@ -44,7 +44,7 @@ type PrincipalAuthorizationContext = Omit<AuthorizationContext, "principal"> & {
 interface AgentExecutionBinding {
   readonly type: "agent"
   readonly executionId: string
-  readonly agentId: string
+  readonly agentId?: string
   readonly runId: string
 }
 
@@ -62,7 +62,7 @@ export function createPrincipalRuntimeAuthorization(input: {
 export function createAgentRuntimeAuthorization(input: {
   readonly projectId: string
   readonly executionId: string
-  readonly agentId: string
+  readonly agentId?: string
   readonly runId: string
   readonly authority:
     | {
@@ -76,12 +76,12 @@ export function createAgentRuntimeAuthorization(input: {
     | { readonly type: "disabled" }
 }): RuntimeAuthorization {
   assertNonEmpty(input.executionId, "Execution id")
-  assertNonEmpty(input.agentId, "Agent id")
+  if (input.agentId !== undefined) assertNonEmpty(input.agentId, "Agent id")
   assertNonEmpty(input.runId, "Agent run id")
   const executionBinding: AgentExecutionBinding = {
     type: "agent",
     executionId: input.executionId,
-    agentId: input.agentId,
+    ...(input.agentId === undefined ? {} : { agentId: input.agentId }),
     runId: input.runId,
   }
 

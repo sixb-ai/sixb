@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryBroker } from "@sixb/core"
 import { AGENT_ACTIVITY_STREAM_ID } from "@sixb/core/agents/streams"
-import type { AgentRunRecord } from "@sixb/core/storage"
+import type { ConversationAgentRunRecord } from "@sixb/core/storage"
 import { NOOP_STREAM_SINK, withAgentActivityStream } from "../src/stream-sink"
 
-function runRecord(status: AgentRunRecord["status"]): AgentRunRecord {
+function runRecord(status: ConversationAgentRunRecord["status"]): ConversationAgentRunRecord {
   return {
+    kind: "conversation",
     id: "run-1",
     projectId: "project",
     executionId: "execution-1",

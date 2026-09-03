@@ -270,7 +270,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
         })
       })
 
-      test("keeps syncRuns, pipelines, projections, workflows, and actions lanes independent", async () => {
+      test("keeps every worker lane independent", async () => {
         await withQueues(async (queues) => {
           await queues.syncRuns.enqueue({
             projectId: "project-a",
@@ -309,6 +309,24 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
               },
             ],
           })
+          await queues.agents.enqueue({
+            projectId: "project-a",
+            jobs: [
+              {
+                type: "agent.run.requested",
+                payload: { runId: "agent-run-1" },
+              },
+            ],
+          })
+          await queues.agentChildren.enqueue({
+            projectId: "project-a",
+            jobs: [
+              {
+                type: "agent.subagent-run.requested",
+                payload: { runId: "child-run-1" },
+              },
+            ],
+          })
 
           const crossLane = await queues.pipelines.claim({
             projectId: "project-a",
@@ -330,6 +348,16 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
             workerId: "action-worker-1",
             limit: 10,
           })
+          const agentLane = await queues.agents.claim({
+            projectId: "project-a",
+            workerId: "agent-worker-1",
+            limit: 10,
+          })
+          const childLane = await queues.agentChildren.claim({
+            projectId: "project-a",
+            workerId: "child-agent-worker-1",
+            limit: 10,
+          })
           const sameLane = await queues.syncRuns.claim({
             projectId: "project-a",
             workerId: "sync-worker-1",
@@ -344,6 +372,13 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
           expect(workflowLane[0]?.job.payload.runId).toBe("workflow-run-1")
           expect(actionLane).toHaveLength(1)
           expect(actionLane[0]?.job.payload.runId).toBe("act_1")
+          expect(agentLane).toHaveLength(1)
+          expect(agentLane[0]?.job).toMatchObject({
+            type: "agent.run.requested",
+            payload: { runId: "agent-run-1" },
+          })
+          expect(childLane).toHaveLength(1)
+          expect(childLane[0]?.job.payload.runId).toBe("child-run-1")
           expect(sameLane).toHaveLength(1)
         })
       })

@@ -44,13 +44,16 @@ export type {
   AgentMessageRecord,
   AgentRunExecution,
   AgentRunFailureCode,
+  AgentRunKind,
   AgentRunRecord,
   AgentStorage,
   AgentThreadRecord,
   AppendAgentMessageInput,
   ConfirmAgentRunExecutionOwnershipInput,
+  ConversationAgentRunRecord,
   CreateAgentRunInput,
   CreateAgentThreadInput,
+  CreateSubagentRunInput,
   FinishAgentRunInput,
   FinishQueuedAgentRunInput,
   ListAgentMessagesInput,
@@ -61,6 +64,9 @@ export type {
   ListAgentThreadsResult,
   ReclaimAgentRunInput,
   StartAgentRunInput,
+  SubagentRunRecord,
+  SubagentRunResult,
+  SubagentRunSpec,
 } from "./agents"
 export { AGENT_RUN_FAILURE_CODES, AgentStorageError } from "./agents"
 export type {

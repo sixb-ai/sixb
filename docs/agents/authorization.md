@@ -20,6 +20,9 @@ token and current memberships before executing, so the agent never receives broa
 caller. When authentication is disabled, it follows the same unrestricted behavior as other API
 requests.
 
+Child agents inherit that same durable authority reference and revalidate it independently when
+they start. Delegation therefore cannot widen the user's permissions.
+
 ## Defined agents
 
 Existing agents created with `defineAgent` retain their managed service-account authority.

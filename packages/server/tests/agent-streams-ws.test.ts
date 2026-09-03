@@ -79,7 +79,7 @@ describe("/ws/agents", () => {
         expect(await nextWsMessage(ws)).toEqual({ type: "subscribed.activity" })
 
         const run = await agentStorage(sixb).runs.getById({ projectId, id: runId })
-        if (!run) throw new Error("expected durable run")
+        if (!run || run.kind !== "conversation") throw new Error("expected conversational run")
         await publishAgentRunActivity(sixb.broker, run)
 
         expect(await nextWsMessage(ws)).toMatchObject({

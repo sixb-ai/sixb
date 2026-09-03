@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import { defineAgent, InMemoryBlobStorage, InMemoryStorage, type Storage } from "@sixb/core"
 import { toModelMessages } from "@sixb/core/internal/agents"
 import type { ModelMessage, ModelUsage } from "@sixb/core/models"
+import type { ConversationAgentRunRecord } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
 import { resolveAgentExecutionPlan } from "../src/execution-plan"
 import { runAgentTurn } from "../src/run-agent-turn"
@@ -128,7 +129,7 @@ async function seedThread(withCheckpoint: boolean) {
     triggerMessageId: "message_3",
     requesterGroupIds: [],
   })
-  const run = await agents.runs.start({
+  const started = await agents.runs.start({
     id: "run_2",
     projectId,
     execution: {
@@ -136,6 +137,8 @@ async function seedThread(withCheckpoint: boolean) {
       queueLeaseExpiresAt: new Date("2026-08-27T12:10:00.000Z"),
     },
   })
+  if (started.kind !== "conversation") throw new Error("Expected a conversational Agent run.")
+  const run: ConversationAgentRunRecord = started
 
   if (withCheckpoint) {
     await agents.checkpoints.create({

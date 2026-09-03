@@ -57,6 +57,20 @@ describe("agent system prompt", () => {
     expect(prompt).not.toContain("$SIXB_OUTPUT_STAGING_DIR")
   })
 
+  test("renders the canonical subagent mode", () => {
+    const prompt = renderAgentSystemPrompt({
+      mode: "subagent",
+      instructions: "Research one focused question.",
+      skills: [],
+    })
+
+    expect(prompt).toContain("headless child agent")
+    expect(prompt).toContain("Never spawn another agent or start a workflow")
+    expect(prompt).toContain("Do not ask a follow-up question")
+    expect(prompt).not.toContain("ask for approval")
+    expect(prompt).toContain("everything the parent Agent needs")
+  })
+
   test("does not advertise a skill catalog when no skills are installed", () => {
     const prompt = renderAgentSystemPrompt({
       mode: "conversation",

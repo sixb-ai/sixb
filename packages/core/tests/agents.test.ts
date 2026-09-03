@@ -239,7 +239,7 @@ describe("defineAgentTool", () => {
     for (const name of ["", "1search", "search knowledge", "a".repeat(65)]) {
       expect(() => validateName(name)).toThrow(AgentDefinitionError)
     }
-    for (const name of ["bash", "read", "view_file", "spawn_agent"]) {
+    for (const name of ["bash", "read", "view_file", "spawn_agent", "wait_agent"]) {
       expect(() => validateName(name)).toThrow("reserved by the framework")
     }
   })
