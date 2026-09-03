@@ -3168,6 +3168,9 @@
                   },
                   "returnTo": {
                     "type": "string"
+                  },
+                  "revealLink": {
+                    "type": "boolean"
                   }
                 },
                 "required": ["email"],
@@ -3198,6 +3201,9 @@
                   },
                   "returnTo": {
                     "type": "string"
+                  },
+                  "revealLink": {
+                    "type": "boolean"
                   }
                 },
                 "required": ["email"],
@@ -3228,6 +3234,9 @@
                   },
                   "returnTo": {
                     "type": "string"
+                  },
+                  "revealLink": {
+                    "type": "boolean"
                   }
                 },
                 "required": ["email"],
@@ -3296,6 +3305,20 @@
                         "status": {
                           "type": "string",
                           "enum": ["sent", "skipped", "rate_limited", "not_supported"]
+                        },
+                        "link": {
+                          "type": "object",
+                          "properties": {
+                            "url": {
+                              "type": "string",
+                              "format": "uri"
+                            },
+                            "expiresAt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["url"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["status"],

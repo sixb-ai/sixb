@@ -253,24 +253,36 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
   }
 
   async deliverInvitation(input: InvitationDeliveryInput): Promise<InviteDeliveryResult> {
+    const url = this.createSignInUrl({
+      audience: input.audience,
+      requestOrigin: input.requestOrigin,
+      returnTo: input.returnTo,
+    })
+    const revealed = input.revealLink
+      ? {
+          link: {
+            url,
+            // For a new user, the non-secret OIDC entry link stops provisioning access when the
+            // invitation expires. Existing users may continue to use the same sign-in page.
+            expiresAt: input.invitation.expiresAt,
+          },
+        }
+      : {}
+
     if (!this.sendInvitation) {
-      return { status: "not_supported" }
+      return { status: "not_supported", ...revealed }
     }
 
     await this.sendInvitation(
       createOidcInvitationEmail({
         email: input.invitation.email,
         from: this.from,
-        url: this.createSignInUrl({
-          audience: input.audience,
-          requestOrigin: input.requestOrigin,
-          returnTo: input.returnTo,
-        }),
+        url,
         subject: this.subject,
       })
     )
 
-    return { status: "sent" }
+    return { status: "sent", ...revealed }
   }
 
   private async getConfiguration(): Promise<unknown> {

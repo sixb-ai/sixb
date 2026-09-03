@@ -1242,11 +1242,19 @@ export class AuthRuntime {
         audience: deliveryAudience,
         returnTo: options.delivery?.returnTo ?? sanitizeReturnTo(input.returnTo),
         requestOrigin: options.delivery?.requestOrigin ?? new URL(request.url).origin,
+        revealLink: input.revealLink,
         now,
       })
     } catch (error) {
       await this.revokeInvitationAfterDeliveryFailure(authStorage, invitation, now)
       throw error
+    }
+
+    // The runtime owns the disclosure boundary even for third-party strategies. A strategy that
+    // accidentally returns a link must not expose it unless the caller opted in explicitly.
+    delivery = {
+      status: delivery.status,
+      ...(input.revealLink && delivery.link ? { link: delivery.link } : {}),
     }
 
     if (delivery.status === "not_supported") {

@@ -658,6 +658,47 @@ describe("SixbHost auth runtime", () => {
     })
   })
 
+  test("reveals invitation links only when the caller opts in", async () => {
+    const strategy: MagicLinkAuthStrategy = {
+      id: "magic-link",
+      kind: "magicLink" as const,
+      async requestMagicLink() {
+        return { status: "sent" as const }
+      },
+      async deliverInvitation() {
+        return {
+          status: "sent" as const,
+          link: {
+            url: "https://api.example/auth/callback?token=secret",
+            expiresAt: new Date("2099-05-16T10:15:00.000Z"),
+          },
+        }
+      },
+      async completeMagicLinkSignIn(): Promise<never> {
+        throw new Error("unused")
+      },
+    }
+    const { deps, sixb } = createInviteRuntime({ strategy })
+    const request = await seedAuthenticatedUser(sixb, deps, {
+      userId: "usr_admin",
+      email: "admin@acme.com",
+      groupIds: ["security-admins"],
+    })
+
+    const concealed = await sixb.auth.invite(request, {
+      email: "ava@acme.com",
+      groups: [commercial],
+    })
+    expect(concealed.delivery).toEqual({ status: "sent" })
+
+    const revealed = await sixb.auth.invite(request, {
+      email: "ava@acme.com",
+      groups: [commercial],
+      revealLink: true,
+    })
+    expect(revealed.delivery.link?.url).toContain("token=secret")
+  })
+
   test("rejects undeliverable invitations before writing", async () => {
     const strategy: MagicLinkAuthStrategy = {
       id: "magic-link",

@@ -127,6 +127,7 @@ export type {
   ReactivateMemberInput,
   ReactivateMemberResult,
   ResolvedAuthConfig,
+  RevealedInvitationLink,
   RevokeAccessTokenResult,
   RevokeInvitationInput,
   RevokeInvitationResult,

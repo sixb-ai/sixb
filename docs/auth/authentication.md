@@ -179,8 +179,26 @@ const { invitation, delivery } = await sixb.auth.invite(request, {
 ```
 
 `invite(request, input, options)` takes an `input` of `email` plus optional `groups` / `groupIds`,
-`expiresAt`, and `returnTo`. The companion methods are `listInvitations`, `revokeInvitation`, and
-`getInvitationOptions`.
+`expiresAt`, `returnTo`, and `revealLink`. The companion methods are `listInvitations`,
+`revokeInvitation`, and `getInvitationOptions`.
+
+Set `revealLink: true` only for an explicit manual-delivery fallback. The delivered link is returned
+once on `delivery.link`, remains hash-only in storage, and is never included when invitations are
+listed:
+
+```ts
+const { delivery } = await sixb.auth.invite(request, {
+  email: "newhire@acme-corp.com",
+  groups: [teamMembers],
+  revealLink: true,
+})
+
+const linkToShowOnce = delivery.link?.url
+```
+
+The HTTP API accepts the same `revealLink` boolean. Anyone holding a revealed magic link can sign in
+as its recipient, so expose this option only to trusted inviters and verify the recipient through a
+separate channel before sharing it. A normal sign-in request never returns its magic link.
 
 In Atlas, the invite form also offers every browser application configured on the API. Selecting
 **Custom app** sends a link with the `app` session audience and returns the recipient to the custom
