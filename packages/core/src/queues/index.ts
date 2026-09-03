@@ -22,6 +22,8 @@ export type {
   QueueJobEnvelope,
   QueueJobFailure,
   Queues,
+  SubagentQueueJob,
+  SubagentRunRequestedQueueJob,
   SyncQueueJobFailureCode,
   SyncRunRequestedQueueJob,
   WorkflowQueueJob,

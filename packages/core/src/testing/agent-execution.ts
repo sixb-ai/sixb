@@ -13,31 +13,36 @@ export async function createTestAgentExecution(
     readonly runId: string
     readonly executionId?: string
     readonly sourceExecutionId?: string
+    /** Defaults to the definition-backed Agent service account. */
+    readonly authority?: "managed" | "inherited"
   }
 ): Promise<string> {
-  const auth = storage.auth
-  if (!auth) throw new Error("Agent execution fixtures require auth storage.")
+  const authority = input.authority ?? "managed"
   const serviceAccountId = agentServiceAccountId(input.agentId)
-  const serviceAccount = await auth.serviceAccounts.getById({
-    projectId: input.projectId,
-    id: serviceAccountId,
-  })
-  if (!serviceAccount) {
-    const now = new Date()
-    try {
-      await auth.serviceAccounts.create({
-        id: serviceAccountId,
-        projectId: input.projectId,
-        name: `Test Agent ${input.agentId}`,
-        description: `Test service account for Agent '${input.agentId}'.`,
-        status: "active",
-        createdByPrincipal: SYSTEM_PRINCIPAL,
-        createdAt: now,
-        updatedAt: now,
-      })
-    } catch (error) {
-      if (!(error instanceof AuthStorageError) || error.code !== "duplicate_service_account") {
-        throw error
+  if (authority === "managed") {
+    const auth = storage.auth
+    if (!auth) throw new Error("Managed Agent execution fixtures require auth storage.")
+    const serviceAccount = await auth.serviceAccounts.getById({
+      projectId: input.projectId,
+      id: serviceAccountId,
+    })
+    if (!serviceAccount) {
+      const now = new Date()
+      try {
+        await auth.serviceAccounts.create({
+          id: serviceAccountId,
+          projectId: input.projectId,
+          name: `Test Agent ${input.agentId}`,
+          description: `Test service account for Agent '${input.agentId}'.`,
+          status: "active",
+          createdByPrincipal: SYSTEM_PRINCIPAL,
+          createdAt: now,
+          updatedAt: now,
+        })
+      } catch (error) {
+        if (!(error instanceof AuthStorageError) || error.code !== "duplicate_service_account") {
+          throw error
+        }
       }
     }
   }
@@ -73,10 +78,13 @@ export async function createTestAgentExecution(
       ? {}
       : { requestedBy: structuredClone(parent.requestedBy) }),
     correlationId: parent.correlationId,
-    authorizationRef: {
-      type: "principal",
-      principal: { type: "serviceAccount", id: serviceAccountId },
-    },
+    authorizationRef:
+      authority === "inherited"
+        ? structuredClone(parent.authorizationRef)
+        : {
+            type: "principal",
+            principal: { type: "serviceAccount", id: serviceAccountId },
+          },
   })
   return executionId
 }

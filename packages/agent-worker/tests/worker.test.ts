@@ -50,6 +50,7 @@ import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
 import {
   createAgentRunExecutionToken,
   createAgentRunId,
+  createSubagentRunId,
   ensureAgentExecutionIdentity,
   publishAgentRunCancel,
   resolveAgentExecutionAuthorization,
@@ -61,11 +62,14 @@ import { workflowAgentStepActorId } from "@sixb/core/internal/workflows"
 import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
 import {
   type AgentMessageRecord,
+  type AgentRunRecord,
   type AgentStorage,
   AgentStorageError,
   type AiUsageStorage,
   type AppendAgentMessageInput,
+  type ConversationAgentRunRecord,
   type RecordAiModelCallInput,
+  type SubagentRunRecord,
   type WorkflowRunStorage,
 } from "@sixb/core/storage"
 import {
@@ -350,6 +354,56 @@ function answerModel(captureTools?: (names: readonly string[]) => void): MockLan
         { type: "text-start", id: "answer" },
         { type: "text-delta", id: "answer", delta: "Done" },
         { type: "text-end", id: "answer" },
+        finish("stop"),
+      ])
+    },
+  })
+}
+
+function delegatingParentModel(input: {
+  readonly childRunId: () => string
+  readonly childModel: { readonly provider: string; readonly modelId: string }
+}): MockLanguageModelV4 {
+  let call = 0
+  return new MockLanguageModelV4({
+    provider: "parent-provider",
+    modelId: "parent-model",
+    doStream: async () => {
+      call += 1
+      if (call === 1) {
+        return stream([
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: "spawn-child",
+            toolName: "spawn_agent",
+            input: JSON.stringify({
+              key: "research",
+              task: "Research the exact delegated fact.",
+              model: input.childModel,
+              reasoning: "high",
+            }),
+          },
+          finish("tool-calls"),
+        ])
+      }
+      if (call === 2) {
+        return stream([
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: "wait-child",
+            toolName: "wait_agent",
+            input: JSON.stringify({ runIds: [input.childRunId()] }),
+          },
+          finish("tool-calls"),
+        ])
+      }
+      return stream([
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "parent-answer" },
+        { type: "text-delta", id: "parent-answer", delta: "Delegation complete" },
+        { type: "text-end", id: "parent-answer" },
         finish("stop"),
       ])
     },
@@ -1703,11 +1757,17 @@ async function reserveRequestedRun(
   sixb: TestSixb,
   request: { readonly run: { readonly id: string } }
 ) {
-  return agentStorageOf(sixb).runs.start({
+  const run = await agentStorageOf(sixb).runs.start({
     id: request.run.id,
     projectId: PROJECT_ID,
     execution: freshTestExecution(),
   })
+  return requireConversationRun(run)
+}
+
+function requireConversationRun(run: AgentRunRecord): ConversationAgentRunRecord {
+  if (run.kind !== "conversation") throw new Error("Expected a conversational Agent run.")
+  return run
 }
 
 async function runBashTool(
@@ -1857,6 +1917,7 @@ function withFlakyAgentFinishStorage(storage: Storage, failTimes: number): Stora
     checkpoints: agents.checkpoints,
     runs: {
       create: (input) => agents.runs.create(input),
+      createSubagent: (input) => agents.runs.createSubagent(input),
       start: (input) => agents.runs.start(input),
       finishQueued: (input) => agents.runs.finishQueued(input),
       reclaim: (input) => agents.runs.reclaim(input),
@@ -1898,6 +1959,7 @@ function withAlwaysFailingTransactionalFinish(storage: Storage): Storage {
     checkpoints: agents.checkpoints,
     runs: {
       create: (input) => agents.runs.create(input),
+      createSubagent: (input) => agents.runs.createSubagent(input),
       start: (input) => agents.runs.start(input),
       finishQueued: (input) => agents.runs.finishQueued(input),
       reclaim: (input) => agents.runs.reclaim(input),
@@ -1998,10 +2060,10 @@ function hangingCompactionModel(): MockLanguageModelV4 {
 }
 
 describe("AgentWorker", () => {
-  test("uses four concurrent jobs by default and accepts an explicit limit", () => {
+  test("uses eight concurrent jobs by default and accepts an explicit limit", () => {
     const sixb = buildSixb(toolThenAnswerModel())
 
-    expect(new AgentWorker(sixb, workerOptions()).concurrency).toBe(4)
+    expect(new AgentWorker(sixb, workerOptions()).concurrency).toBe(8)
     expect(new AgentWorker(sixb, workerOptions({ concurrency: 7 })).concurrency).toBe(7)
   })
 
@@ -4197,6 +4259,7 @@ describe("AgentWorker", () => {
       .input({ value: "string" })
       .run(async ({ input, run, signal, connector, logger }) => {
         selectedCalls += 1
+        if (!run.agentId) throw new Error("Expected a definition-backed Agent run.")
         handlerContext = { runId: run.id, agentId: run.agentId, threadId: run.threadId }
         handlerSignal = signal
         const client = await connector(knowledge)
@@ -5012,7 +5075,10 @@ describe("AgentWorker", () => {
             projectId: PROJECT_ID,
             id: requested.run.id,
           })
-          return current && current.status !== "queued" && current.status !== "running"
+          return current &&
+            current.kind === "conversation" &&
+            current.status !== "queued" &&
+            current.status !== "running"
             ? current
             : null
         },
@@ -5044,6 +5110,259 @@ describe("AgentWorker", () => {
             part.state === "output-available"
         )
       ).toBe(true)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("delegates to an isolated child lane without consuming another primary slot", async () => {
+    let childRunId = ""
+    const childCalls: LanguageModelV4CallOptions[] = []
+    const childModel = new MockLanguageModelV4({
+      provider: "child-provider",
+      modelId: "child-model",
+      doStream: async (options) => {
+        childCalls.push(options)
+        return stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "child-answer" },
+          { type: "text-delta", id: "child-answer", delta: "The delegated fact is 42." },
+          { type: "text-end", id: "child-answer" },
+          finish("stop"),
+        ])
+      },
+    })
+    const parentModel = delegatingParentModel({
+      childRunId: () => childRunId,
+      childModel: { provider: childModel.provider, modelId: childModel.modelId },
+    })
+    const sandboxes = new RecordingSandboxFactory()
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), sandboxes, {
+      models: { language: [parentModel, childModel] },
+      projectTools: [echoAgentTool],
+    })
+    const storage = agentStorageOf(sixb)
+    const requested = await requestAgent(sixb, {
+      agentId: "main",
+      text: "Delegate this research task.",
+    })
+    childRunId = createSubagentRunId(requested.run.id, "research")
+    const worker = new AgentWorker(sixb, workerOptions({ concurrency: 1 }))
+
+    await worker.start()
+    try {
+      const parent = await waitFor(
+        async () => {
+          const current = await storage.runs.getById({
+            projectId: PROJECT_ID,
+            id: requested.run.id,
+          })
+          return current?.kind === "conversation" && current.status === "succeeded" ? current : null
+        },
+        { label: "delegating parent run terminal" }
+      )
+      const loadedChild = await storage.runs.getById({
+        projectId: PROJECT_ID,
+        id: childRunId,
+      })
+      if (!loadedChild || loadedChild.kind !== "subagent") {
+        throw new Error("Expected a durable child Agent run.")
+      }
+      const child: SubagentRunRecord = loadedChild
+
+      expect(parent.kind).toBe("conversation")
+      expect(child).toMatchObject({
+        parentRunId: parent.id,
+        spawnKey: "research",
+        status: "succeeded",
+        modelId: "child-model",
+        finishReason: "stop",
+        spec: {
+          model: { provider: "child-provider", modelId: "child-model" },
+          reasoning: "high",
+          task: "Research the exact delegated fact.",
+          toolNames: ["echo"],
+        },
+      })
+      expect(child.result).toEqual({ text: "The delegated fact is 42." })
+
+      const [parentExecution, childExecution] = await Promise.all([
+        sixb.storage.executions.getById({ projectId: PROJECT_ID, id: parent.executionId }),
+        sixb.storage.executions.getById({ projectId: PROJECT_ID, id: child.executionId }),
+      ])
+      expect(parentExecution?.authorizationRef).toEqual({ type: "disabled" })
+      expect(childExecution).toMatchObject({
+        executor: { type: "agent", runId: child.id },
+        source: { type: "execution", executionId: parent.executionId },
+        correlationId: parentExecution?.correlationId,
+        authorizationRef: { type: "disabled" },
+      })
+      expect(childExecution?.requestedBy).toEqual(parentExecution?.requestedBy)
+
+      expect(childCalls).toHaveLength(1)
+      expect(childCalls[0]?.reasoning).toBe("high")
+      const childToolNames = childCalls[0]?.tools?.map((entry) => entry.name) ?? []
+      expect(childToolNames).toEqual(expect.arrayContaining(["echo", "view_file", "read", "bash"]))
+      expect(childToolNames).not.toContain("spawn_agent")
+      expect(childToolNames).not.toContain("wait_agent")
+      const childPrompt = JSON.stringify(childCalls[0]?.prompt)
+      expect(childPrompt).toContain("headless child agent")
+      expect(childPrompt).toContain("Research the exact delegated fact.")
+
+      expect(sandboxes.sandboxes).toHaveLength(2)
+      expect(new Set(sandboxes.sandboxes.map((sandbox) => sandbox.id)).size).toBe(2)
+
+      const childStream = await listRunStreamRecords(sixb.broker, child.id)
+      expect(childStream.map((record) => record.name)).toEqual(
+        expect.arrayContaining(["agent.run.started", "agent.ui.chunk", "agent.run.finished"])
+      )
+      expect(
+        childStream.every((record) => {
+          const payload = record.payload as unknown as Record<string, unknown>
+          return payload.parentRunId === parent.id && !Object.hasOwn(payload, "threadId")
+        })
+      ).toBe(true)
+
+      const conversationMessages = await listMessages(storage, parent.threadId)
+      expect(conversationMessages).toHaveLength(2)
+      expect(conversationMessages.some((message) => message.runId === child.id)).toBe(false)
+      expect(
+        conversationMessages.some(
+          (message) => message.role === "assistant" && message.runId === parent.id
+        )
+      ).toBe(true)
+
+      await expect(
+        aiUsageStorageOf(sixb).summarizeExecution({
+          projectId: PROJECT_ID,
+          executionId: child.executionId,
+        })
+      ).resolves.toMatchObject({ modelCallCount: 1 })
+      await expect(
+        sixb.storage.aiCosts?.listModelCalls({
+          projectId: PROJECT_ID,
+          executionId: child.executionId,
+          from: new Date("2000-01-01T00:00:00.000Z"),
+          to: new Date("2100-01-01T00:00:00.000Z"),
+        })
+      ).resolves.toMatchObject({
+        items: [
+          {
+            attribution: {
+              kind: "subagent",
+              subagentRunId: child.id,
+              parentRunId: parent.id,
+            },
+          },
+        ],
+      })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("cancels a running child when its parent finishes", async () => {
+    let markChildStarted!: () => void
+    const childStarted = new Promise<void>((resolve) => {
+      markChildStarted = resolve
+    })
+    const childModel = new MockLanguageModelV4({
+      provider: "child-provider",
+      modelId: "blocking-child",
+      doStream: async (options) => ({
+        stream: new ReadableStream<LanguageModelV4StreamPart>({
+          start(controller) {
+            controller.enqueue({ type: "stream-start", warnings: [] })
+            markChildStarted()
+            const abort = () => controller.error(new DOMException("Aborted", "AbortError"))
+            if (options.abortSignal?.aborted) abort()
+            else options.abortSignal?.addEventListener("abort", abort, { once: true })
+          },
+        }),
+      }),
+    })
+    let parentCall = 0
+    const parentModel = new MockLanguageModelV4({
+      provider: "parent-provider",
+      modelId: "finishing-parent",
+      doStream: async () => {
+        parentCall += 1
+        if (parentCall === 1) {
+          return stream([
+            { type: "stream-start", warnings: [] },
+            {
+              type: "tool-call",
+              toolCallId: "spawn-blocking-child",
+              toolName: "spawn_agent",
+              input: JSON.stringify({
+                key: "background-work",
+                task: "Keep researching until cancelled.",
+                model: { provider: childModel.provider, modelId: childModel.modelId },
+              }),
+            },
+            finish("tool-calls"),
+          ])
+        }
+        await childStarted
+        return stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "parent-answer" },
+          { type: "text-delta", id: "parent-answer", delta: "No longer needed" },
+          { type: "text-end", id: "parent-answer" },
+          finish("stop"),
+        ])
+      },
+    })
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [parentModel, childModel] },
+    })
+    const storage = agentStorageOf(sixb)
+    const requested = await requestAgent(sixb, {
+      agentId: "main",
+      text: "Start background work, then finish.",
+    })
+    const childRunId = createSubagentRunId(requested.run.id, "background-work")
+    const worker = new AgentWorker(sixb, workerOptions({ concurrency: 1 }))
+
+    await worker.start()
+    try {
+      const [parent, child] = await Promise.all([
+        waitFor(
+          async () => {
+            const current = await storage.runs.getById({
+              projectId: PROJECT_ID,
+              id: requested.run.id,
+            })
+            return current?.status === "succeeded" ? current : null
+          },
+          { label: "finished parent run" }
+        ),
+        waitFor(
+          async () => {
+            const current = await storage.runs.getById({ projectId: PROJECT_ID, id: childRunId })
+            return current?.status === "cancelled" ? current : null
+          },
+          { label: "cancelled child run" }
+        ),
+      ])
+
+      expect(parent.status).toBe("succeeded")
+      expect(child).toMatchObject({
+        kind: "subagent",
+        parentRunId: parent.id,
+        status: "cancelled",
+        error: { code: "runtime.cancelled" },
+      })
+      expect(
+        (
+          await storage.runs.list({
+            projectId: PROJECT_ID,
+            kinds: ["subagent"],
+            parentRunId: parent.id,
+            statuses: ["queued", "running"],
+          })
+        ).runs
+      ).toHaveLength(0)
     } finally {
       await worker.stop()
     }
@@ -6677,11 +6996,13 @@ describe("AgentWorker", () => {
     })
 
     // This worker started the run, but another delivery rotated its execution token.
-    const staleRun = await storage.runs.start({
-      id: runId,
-      projectId: PROJECT_ID,
-      execution: freshTestExecution(),
-    })
+    const staleRun = requireConversationRun(
+      await storage.runs.start({
+        id: runId,
+        projectId: PROJECT_ID,
+        execution: freshTestExecution(),
+      })
+    )
     await storage.runs.reclaim({
       projectId: PROJECT_ID,
       id: runId,
@@ -7144,11 +7465,13 @@ describe("AgentWorker", () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
     const request = await requestAgent(sixb, { agentId: "assistant", text: "echo hi" })
-    const run = await storage.runs.start({
-      id: request.run.id,
-      projectId: PROJECT_ID,
-      execution: freshTestExecution(),
-    })
+    const run = requireConversationRun(
+      await storage.runs.start({
+        id: request.run.id,
+        projectId: PROJECT_ID,
+        execution: freshTestExecution(),
+      })
+    )
 
     const failingStorage = withAlwaysFailingTransactionalFinish(sixb.storage)
     await expect(
@@ -7185,11 +7508,13 @@ describe("AgentWorker", () => {
     )
     expect(afterFailureRecords.some((record) => record.name === "agent.run.finished")).toBe(false)
 
-    const reclaimed = await storage.runs.reclaim({
-      projectId: PROJECT_ID,
-      id: request.run.id,
-      execution: freshTestExecution(),
-    })
+    const reclaimed = requireConversationRun(
+      await storage.runs.reclaim({
+        projectId: PROJECT_ID,
+        id: request.run.id,
+        execution: freshTestExecution(),
+      })
+    )
     await runAgentTurn({
       context: {
         id: PROJECT_ID,

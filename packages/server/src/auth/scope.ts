@@ -1,6 +1,6 @@
 import type { OntologySource } from "@sixb/core"
 import type { RequestExecutionAuthorization, Sixb } from "@sixb/core/internal/request-execution"
-import type { AgentRunRecord } from "@sixb/core/storage"
+import type { AgentRunRecord, ConversationAgentRunRecord } from "@sixb/core/storage"
 
 /**
  * Per-request authorization state attached by the server's auth derive.
@@ -11,10 +11,11 @@ import type { AgentRunRecord } from "@sixb/core/storage"
 export interface RequestAuthState {
   readonly sixb: Sixb<readonly OntologySource[]> | null
   /** Present for requests proxied through the run-scoped agent API gateway. */
-  readonly agentRun?: AgentRunRecord
+  readonly agentRun?: ConversationAgentRunRecord
   /** Identifies which kind of active agent execution owns a gateway request. */
   readonly agentExecution?:
     | { readonly kind: "conversation"; readonly runId: string }
+    | { readonly kind: "subagent"; readonly runId: string; readonly parentRunId: string }
     | { readonly kind: "workflow"; readonly nodeRunId: string }
 }
 

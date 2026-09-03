@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { MAIN_AGENT_ID } from "../agents/main"
 import { AGENT_MESSAGE_CONTENT_VERSION } from "../agents/message"
 import type { Principal } from "../auth"
 import type { SixbFailure } from "../errors/types"
@@ -11,6 +12,7 @@ import {
   type CreateAgentContextCheckpointInput,
   type CreateAgentRunInput,
   type CreateAgentThreadInput,
+  type CreateSubagentRunInput,
   type StartAgentRunInput,
 } from "../storage/agents"
 import type { AuthStorage } from "../storage/auth"
@@ -102,6 +104,77 @@ function runInput(overrides: Partial<TestRunInput> = {}): TestRunInput {
     ...input,
     executionId: overrides.executionId ?? `test_agent_execution:${input.id}`,
   }
+}
+
+function subagentInput(
+  parentExecutionToken: string,
+  overrides: Partial<CreateSubagentRunInput> = {}
+): CreateSubagentRunInput {
+  const id = overrides.id ?? "child_1"
+  return {
+    id,
+    projectId,
+    executionId: overrides.executionId ?? `test_agent_execution:${id}`,
+    parentRunId: "parent_1",
+    parentExecutionToken,
+    spawnKey: "research-orders",
+    spec: {
+      model: { provider: "test", modelId: "small" },
+      reasoning: "medium",
+      task: "Research the open orders.",
+      toolNames: ["search_orders"],
+      maxSteps: 25,
+    },
+    maxActiveChildren: 4,
+    createdAt: at("2026-06-23T10:01:00.000Z"),
+    ...overrides,
+  }
+}
+
+async function createRunningParent(
+  storage: AgentStorage,
+  fixture: AgentStorageContractStorage
+): Promise<void> {
+  await storage.threads.create(threadInput({ id: "parent_thread", agentId: MAIN_AGENT_ID }))
+  const parent = runInput({
+    id: "parent_1",
+    threadId: "parent_thread",
+    agentId: MAIN_AGENT_ID,
+    execution: execution("parent_token"),
+  })
+  await createTestAgentExecution(fixture, {
+    projectId,
+    agentId: MAIN_AGENT_ID,
+    runId: parent.id,
+    executionId: parent.executionId,
+    authority: "inherited",
+  })
+  await storage.runs.create(parent)
+  await storage.runs.start({
+    projectId,
+    id: parent.id,
+    modelId: "large",
+    execution: parent.execution,
+  })
+}
+
+async function createSubagent(
+  storage: AgentStorage,
+  fixture: AgentStorageContractStorage,
+  overrides: Partial<CreateSubagentRunInput> = {}
+) {
+  const input = subagentInput("parent_token", overrides)
+  const parent = await storage.runs.getById({ projectId: input.projectId, id: input.parentRunId })
+  if (!parent || parent.kind !== "conversation") throw new Error("Expected child parent fixture")
+  await createTestAgentExecution(fixture, {
+    projectId: input.projectId,
+    agentId: MAIN_AGENT_ID,
+    runId: input.id,
+    executionId: input.executionId,
+    sourceExecutionId: parent.executionId,
+    authority: "inherited",
+  })
+  return storage.runs.createSubagent(input)
 }
 
 function checkpointInput(
@@ -422,6 +495,179 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
           attempt: 0,
           error: failure("Agent is unavailable", "2026-06-23T10:02:00.000Z"),
         })
+      })
+    })
+
+    // ── durable child runs ─────────────────────────────────────────────────────────────────────
+
+    test("creates and exactly replays a child run without claiming a thread", async () => {
+      await withStorage(async (storage, fixture) => {
+        await createRunningParent(storage, fixture)
+        const input = subagentInput("parent_token")
+        const child = await createSubagent(storage, fixture)
+
+        expect(child).toMatchObject({
+          kind: "subagent",
+          id: "child_1",
+          parentRunId: "parent_1",
+          spawnKey: "research-orders",
+          status: "queued",
+          attempt: 0,
+          requesterGroupIds: ["engineering", "support"],
+          spec: input.spec,
+        })
+        expect(child).not.toHaveProperty("threadId")
+        await expect(storage.runs.createSubagent(input)).resolves.toEqual(child)
+        await expectAgentError(
+          storage.runs.createSubagent({
+            ...input,
+            spec: { ...input.spec, task: "Research different orders." },
+          }),
+          "duplicate_id"
+        )
+
+        const listed = await storage.runs.list({
+          projectId,
+          kinds: ["subagent"],
+          parentRunId: "parent_1",
+        })
+        expect(listed.runs.map((run) => run.id)).toEqual(["child_1"])
+        await expect(
+          storage.runs.list({ projectId, kinds: ["conversation"] })
+        ).resolves.toMatchObject({ runs: [{ id: "parent_1" }], total: 1 })
+        await expect(
+          storage.threads.getById({ projectId, id: "parent_thread" })
+        ).resolves.toMatchObject({ activeRunId: "parent_1" })
+      })
+    })
+
+    test("fences child admission by the active parent execution", async () => {
+      await withStorage(async (storage, fixture) => {
+        await createRunningParent(storage, fixture)
+        const wrongLineage = subagentInput("parent_token", {
+          id: "child_wrong_parent",
+          executionId: "test_agent_execution:child_wrong_parent",
+          spawnKey: "wrong-parent",
+        })
+        await createTestAgentExecution(fixture, {
+          projectId,
+          agentId: MAIN_AGENT_ID,
+          runId: wrongLineage.id,
+          executionId: wrongLineage.executionId,
+          sourceExecutionId: "unrelated_request_execution",
+          authority: "inherited",
+        })
+        await expectAgentError(storage.runs.createSubagent(wrongLineage), "invalid_input")
+
+        const input = subagentInput("stale_parent_token")
+        await createTestAgentExecution(fixture, {
+          projectId,
+          agentId: MAIN_AGENT_ID,
+          runId: input.id,
+          executionId: input.executionId,
+          sourceExecutionId: "test_agent_execution:parent_1",
+          authority: "inherited",
+        })
+        await expectAgentError(storage.runs.createSubagent(input), "execution_lost")
+
+        await storage.runs.finish({
+          projectId,
+          id: "parent_1",
+          executionToken: "parent_token",
+          status: "succeeded",
+        })
+        await expectAgentError(
+          storage.runs.createSubagent({ ...input, parentExecutionToken: "parent_token" }),
+          "invalid_state"
+        )
+      })
+    })
+
+    test("enforces the active-child limit atomically", async () => {
+      await withStorage(async (storage, fixture) => {
+        await createRunningParent(storage, fixture)
+        const inputs = ["child_a", "child_b"].map((id) =>
+          subagentInput("parent_token", {
+            id,
+            executionId: `test_agent_execution:${id}`,
+            spawnKey: id,
+            maxActiveChildren: 1,
+          })
+        )
+        for (const input of inputs) {
+          await createTestAgentExecution(fixture, {
+            projectId,
+            agentId: MAIN_AGENT_ID,
+            runId: input.id,
+            executionId: input.executionId,
+            sourceExecutionId: "test_agent_execution:parent_1",
+            authority: "inherited",
+          })
+        }
+
+        const settled = await Promise.allSettled(
+          inputs.map((input) => storage.runs.createSubagent(input))
+        )
+        expect(settled.filter((result) => result.status === "fulfilled")).toHaveLength(1)
+        const rejected = settled.filter(
+          (result): result is PromiseRejectedResult => result.status === "rejected"
+        )
+        expect(rejected).toHaveLength(1)
+        expect(rejected[0]?.reason).toMatchObject({ code: "active_child_limit" })
+      })
+    })
+
+    test("requires and round-trips a successful child result", async () => {
+      await withStorage(async (storage, fixture) => {
+        await createRunningParent(storage, fixture)
+        await createSubagent(storage, fixture)
+        await storage.runs.start({
+          projectId,
+          id: "child_1",
+          modelId: "small",
+          execution: execution("child_token"),
+        })
+        await expectAgentError(
+          storage.runs.finish({
+            projectId,
+            id: "child_1",
+            executionToken: "child_token",
+            status: "succeeded",
+          }),
+          "invalid_input"
+        )
+        await expectAgentError(
+          storage.runs.finish({
+            projectId,
+            id: "child_1",
+            executionToken: "child_token",
+            status: "succeeded",
+            result: {},
+          }),
+          "invalid_input"
+        )
+
+        const result = {
+          text: "Three open orders.",
+          files: [
+            {
+              blobId: `blob_${"a".repeat(64)}`,
+              digest: `sha256:${"a".repeat(64)}` as const,
+              fileName: "orders.csv",
+              mediaType: "text/csv",
+              sizeBytes: 42,
+            },
+          ],
+        }
+        const completed = await storage.runs.finish({
+          projectId,
+          id: "child_1",
+          executionToken: "child_token",
+          status: "succeeded",
+          result,
+        })
+        expect(completed).toMatchObject({ status: "succeeded", result })
+        await expect(storage.runs.getById({ projectId, id: "child_1" })).resolves.toEqual(completed)
       })
     })
 

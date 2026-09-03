@@ -6,8 +6,8 @@ import { resolveExecutionUsage } from "../runtime/ai-usage"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { SecurityDefinitionCatalog } from "../security"
 import type {
-  AgentRunRecord,
   AgentThreadRecord,
+  ConversationAgentRunRecord,
   ListAgentRunsInput,
   ListAgentRunsResult,
   ListAgentThreadsInput,
@@ -54,7 +54,7 @@ export interface AgentRunsRuntime {
 }
 
 /** Execution-facing run view with provenance resolved from the immutable execution ledger. */
-export interface AgentRunView extends AgentRunRecord {
+export interface AgentRunView extends ConversationAgentRunRecord {
   readonly requestedBy?: AuthorizablePrincipal
   /** Derived from the model-call ledger; never persisted on the Agent run row. */
   readonly usage?: AiModelCallUsage
@@ -104,13 +104,13 @@ export function createAgentsRuntime(
     return agent && allowed(agentId) ? agent : null
   }
 
-  const getVisibleRunRecord = async (runId: string): Promise<AgentRunRecord | null> => {
+  const getVisibleRunRecord = async (runId: string): Promise<ConversationAgentRunRecord | null> => {
     const run =
       (await runtime.storage.agents?.runs.getById({
         projectId: runtime.projectId,
         id: runId,
       })) ?? null
-    if (!run) return null
+    if (!run || run.kind !== "conversation") return null
     const thread = await getThread(run.threadId)
     return thread?.agentId === run.agentId ? run : null
   }
@@ -203,7 +203,10 @@ export function createAgentsRuntime(
         })
         return {
           ...result,
-          runs: await attachRunViews(runtime, result.runs),
+          runs: await attachRunViews(
+            runtime,
+            result.runs.filter((run) => run.kind === "conversation")
+          ),
         }
       },
     },
@@ -212,7 +215,7 @@ export function createAgentsRuntime(
 
 async function attachRunView(
   runtime: SixbRuntimeContext,
-  run: AgentRunRecord
+  run: ConversationAgentRunRecord
 ): Promise<AgentRunView> {
   const [view] = await attachRunViews(runtime, [run])
   if (!view) throw new Error(`[Sixb] Could not build Agent run '${run.id}' view.`)
@@ -221,7 +224,7 @@ async function attachRunView(
 
 async function attachRunViews(
   runtime: SixbRuntimeContext,
-  runs: readonly AgentRunRecord[]
+  runs: readonly ConversationAgentRunRecord[]
 ): Promise<readonly AgentRunView[]> {
   const executionIds = runs.map((run) => run.executionId)
   const [executions, usages, costs] = await Promise.all([

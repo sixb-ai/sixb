@@ -168,8 +168,8 @@ defineAgentStep("research", {
 })
 ```
 
-Names must be unique within each list. `bash`, `read`, `view_file`, and `spawn_agent` are reserved
-for framework tools.
+Names must be unique within each list. `bash`, `read`, `view_file`, `spawn_agent`, and `wait_agent`
+are reserved for framework tools.
 
 ### Exa web tools
 

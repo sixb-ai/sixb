@@ -22,7 +22,10 @@ import {
   SixbHost,
   SYSTEM_PRINCIPAL,
 } from "@sixb/core"
-import { createInheritedMainAgentExecutionRecord } from "@sixb/core/internal/agent-execution"
+import {
+  createInheritedAgentExecutionRecord,
+  createInheritedMainAgentExecutionRecord,
+} from "@sixb/core/internal/agent-execution"
 import {
   createAgentApiGatewayCapability,
   createAgentRunExecutionToken,
@@ -152,6 +155,29 @@ describe("agent API gateway", () => {
       expect.objectContaining({ id: "contract" }),
       expect.objectContaining({ id: "device" }),
     ])
+  })
+
+  test("restores child authority without allowing recursive workflows", async () => {
+    const { app, gatewayBaseUrl } = await createGatewayRuntime({ executionKind: "subagent" })
+
+    const objectTypes = await app.fetch(new Request(`${gatewayBaseUrl}/api/object-types`))
+    expect(objectTypes.status).toBe(200)
+    await expect(objectTypes.json()).resolves.toEqual([
+      expect.objectContaining({ id: "contract" }),
+      expect.objectContaining({ id: "device" }),
+    ])
+
+    const workflow = await app.fetch(
+      new Request(`${gatewayBaseUrl}/api/workflows/inspect-devices/runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      })
+    )
+    expect(workflow.status).toBe(409)
+    await expect(workflow.json()).resolves.toEqual({
+      error: "Child agents cannot start a workflow run.",
+    })
   })
 
   test("exposes files, links, action history, and authorized workflow runs", async () => {
@@ -586,7 +612,7 @@ async function runAgentCli(
 async function createGatewayRuntime(
   options: {
     readonly auth?: boolean
-    readonly executionKind?: "conversation" | "workflow"
+    readonly executionKind?: "conversation" | "subagent" | "workflow"
     readonly mainAgent?: boolean
     readonly queueLeaseExpiresAt?: Date
   } = {}
@@ -674,7 +700,7 @@ async function createGatewayRuntime(
     finishedAt: NOW,
   })
 
-  if (!options.mainAgent) {
+  if (!options.mainAgent && options.executionKind !== "subagent") {
     const serviceAccountId = "svc_agent_assistant"
     await storage.auth.serviceAccounts.create({
       id: serviceAccountId,
@@ -695,7 +721,12 @@ async function createGatewayRuntime(
   }
 
   const threadId = "thread-1"
-  const runId = options.executionKind === "workflow" ? "workflow-node-1" : "run-1"
+  const runId =
+    options.executionKind === "workflow"
+      ? "workflow-node-1"
+      : options.executionKind === "subagent"
+        ? "child-run-1"
+        : "run-1"
   const execution = {
     token: createAgentRunExecutionToken(),
     queueLeaseExpiresAt: options.queueLeaseExpiresAt ?? new Date(Date.now() + 60_000),
@@ -749,6 +780,68 @@ async function createGatewayRuntime(
     await storage.workflowRuns.agentNodes.start({
       projectId: PROJECT_ID,
       nodeRunId: runId,
+      execution,
+      startedAt: NOW,
+    })
+  } else if (options.executionKind === "subagent") {
+    const parentRunId = "parent-run-1"
+    const parentExecutionId = await createMainAgentExecution(storage, parentRunId)
+    const parentExecution = {
+      token: createAgentRunExecutionToken(),
+      queueLeaseExpiresAt: new Date(Date.now() + 60_000),
+    }
+    await storage.agents.threads.create({
+      id: threadId,
+      projectId: PROJECT_ID,
+      agentId: "main",
+      ownerPrincipal: { type: "user", id: "usr_requester" },
+      createdAt: NOW,
+      updatedAt: NOW,
+    })
+    await storage.agents.runs.create({
+      id: parentRunId,
+      projectId: PROJECT_ID,
+      executionId: parentExecutionId,
+      threadId,
+      agentId: "main",
+      triggerMessageId: "msg-1",
+      requesterGroupIds: [agentRuntime.id],
+      createdAt: NOW,
+    })
+    await storage.agents.runs.start({
+      id: parentRunId,
+      projectId: PROJECT_ID,
+      execution: parentExecution,
+      startedAt: NOW,
+    })
+    const parent = await storage.executions.getById({
+      projectId: PROJECT_ID,
+      id: parentExecutionId,
+    })
+    if (!parent) throw new Error("Expected the parent Agent execution.")
+    const executionId = "execution-child-agent"
+    await storage.executions.create(
+      createInheritedAgentExecutionRecord({ id: executionId, parent, runId })
+    )
+    await storage.agents.runs.createSubagent({
+      id: runId,
+      projectId: PROJECT_ID,
+      executionId,
+      parentRunId,
+      parentExecutionToken: parentExecution.token,
+      spawnKey: "inspect",
+      spec: {
+        model: { provider: "test", modelId: "child" },
+        task: "Inspect devices.",
+        toolNames: [],
+        maxSteps: 25,
+      },
+      maxActiveChildren: 4,
+      createdAt: NOW,
+    })
+    await storage.agents.runs.start({
+      id: runId,
+      projectId: PROJECT_ID,
       execution,
       startedAt: NOW,
     })

@@ -32,7 +32,13 @@ const AGENT_TOOL_PRIMITIVE_SCHEMAS = new Set([
   "fileRef",
 ])
 
-export const AGENT_RESERVED_TOOL_NAMES = ["bash", "read", "view_file", "spawn_agent"] as const
+export const AGENT_RESERVED_TOOL_NAMES = [
+  "bash",
+  "read",
+  "view_file",
+  "spawn_agent",
+  "wait_agent",
+] as const
 
 export function assertNonEmpty(value: string, field: string): void {
   if (!value.trim()) {

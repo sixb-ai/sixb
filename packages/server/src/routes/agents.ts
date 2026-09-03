@@ -491,7 +491,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           ])
           const diagnosticsByRunId = new Map(
             runs
-              .filter((run) => run.threadId === thread.id)
+              .filter((run) => run.kind === "conversation" && run.threadId === thread.id)
               .map((run) => [run.id, run.diagnostics ?? []] as const)
           )
           const checkpointsByRunId = new Map(
@@ -644,11 +644,15 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           let cancelledWhileQueued = false
           if (current.status === "queued") {
             try {
-              current = await storage.runs.finishQueued({
+              const cancelled = await storage.runs.finishQueued({
                 projectId: host.id,
                 id: current.id,
                 status: "cancelled",
               })
+              if (cancelled.kind !== "conversation") {
+                throw new Error(`[SixbServer] Agent run '${cancelled.id}' changed kind.`)
+              }
+              current = cancelled
               cancelledWhileQueued = true
             } catch (error) {
               if (!(error instanceof AgentStorageError) || error.code !== "invalid_state") {
@@ -662,6 +666,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
               const refreshed = await storage.runs.getById({ projectId: host.id, id: current.id })
               if (
                 !refreshed ||
+                refreshed.kind !== "conversation" ||
                 refreshed.threadId !== thread.id ||
                 refreshed.agentId !== thread.agentId
               ) {

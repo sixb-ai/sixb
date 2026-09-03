@@ -32,6 +32,7 @@ import type { AgentToolModelOutput } from "./tools/result-output"
 
 export type AgentErrorDetails =
   | { readonly agentId: string; readonly runId: string }
+  | { readonly parentRunId: string; readonly runId: string }
   | {
       readonly agentStepId: string
       readonly workflowId: string
@@ -67,12 +68,9 @@ export function aiSdkToolsFromAgentDefinitions(
     if (Object.hasOwn(tools, definition.name)) {
       throw createSixbError(
         "internal.unexpected",
-        `[SixbAgentWorker] Agent '${input.run.agentId}' has duplicate selected tool name '${definition.name}'.`,
+        `[SixbAgentWorker] Agent run '${input.run.id}' has duplicate selected tool name '${definition.name}'.`,
         {
-          details: input.errorDetails ?? {
-            agentId: input.run.agentId,
-            runId: input.run.id,
-          },
+          details: input.errorDetails ?? agentToolRunErrorDetails(input.run),
         }
       )
     }
@@ -93,7 +91,7 @@ function aiSdkToolFromAgentDefinition(
       definition,
       spec.inputSchema,
       context.valueTypesById,
-      context.errorDetails ?? { agentId: context.run.agentId, runId: context.run.id }
+      context.errorDetails ?? agentToolRunErrorDetails(context.run)
     ),
     async execute(input, { abortSignal, toolCallId }) {
       let result: JsonValue
@@ -132,6 +130,12 @@ function aiSdkToolFromAgentDefinition(
       }
     },
   })
+}
+
+function agentToolRunErrorDetails(run: AgentToolRunInfo): AgentErrorDetails {
+  return run.agentId === undefined
+    ? { parentRunId: run.parentRunId, runId: run.id }
+    : { agentId: run.agentId, runId: run.id }
 }
 
 function aiSdkInputSchemaFromAgentDefinition(

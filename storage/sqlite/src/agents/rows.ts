@@ -9,6 +9,8 @@ import {
   type AgentRunRecord,
   type AgentThreadRecord,
   coerceAgentRunFinishReason,
+  type SubagentRunResult,
+  type SubagentRunSpec,
 } from "@sixb/core/storage"
 import type { SqliteValue } from "../run-list-query"
 
@@ -33,9 +35,14 @@ export interface AgentRunRow {
   project_id: string
   id: string
   execution_id: string
-  thread_id: string
-  agent_id: string
-  trigger_message_id: string
+  kind: AgentRunRecord["kind"]
+  thread_id: string | null
+  agent_id: string | null
+  trigger_message_id: string | null
+  parent_run_id: string | null
+  spawn_key: string | null
+  spec: string | null
+  result: string | null
   requester_group_ids: string
   status: AgentRunRecord["status"]
   model_id: string | null
@@ -102,13 +109,10 @@ export function rowToThreadRecord(row: AgentThreadRow): AgentThreadRecord {
 }
 
 export function rowToRunRecord(row: AgentRunRow): AgentRunRecord {
-  return {
+  const base = {
     id: row.id,
     projectId: row.project_id,
     executionId: row.execution_id,
-    threadId: row.thread_id,
-    agentId: row.agent_id,
-    triggerMessageId: row.trigger_message_id,
     requesterGroupIds: JSON.parse(row.requester_group_ids) as string[],
     status: row.status,
     modelId: row.model_id ?? undefined,
@@ -127,6 +131,31 @@ export function rowToRunRecord(row: AgentRunRow): AgentRunRecord {
     createdAt: new Date(row.created_at),
     startedAt: row.started_at ? new Date(row.started_at) : undefined,
     completedAt: row.completed_at ? new Date(row.completed_at) : undefined,
+  }
+  if (row.kind === "conversation") {
+    if (!row.thread_id || !row.agent_id || !row.trigger_message_id) {
+      throw new Error(
+        `[SixbSqlite] Conversational Agent run '${row.id}' has invalid persisted fields.`
+      )
+    }
+    return {
+      ...base,
+      kind: "conversation",
+      threadId: row.thread_id,
+      agentId: row.agent_id,
+      triggerMessageId: row.trigger_message_id,
+    }
+  }
+  if (!row.parent_run_id || !row.spawn_key || row.spec === null) {
+    throw new Error(`[SixbSqlite] Subagent run '${row.id}' has invalid persisted fields.`)
+  }
+  return {
+    ...base,
+    kind: "subagent",
+    parentRunId: row.parent_run_id,
+    spawnKey: row.spawn_key,
+    spec: JSON.parse(row.spec) as SubagentRunSpec,
+    ...(row.result === null ? {} : { result: JSON.parse(row.result) as SubagentRunResult }),
   }
 }
 

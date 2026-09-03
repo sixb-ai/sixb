@@ -106,11 +106,12 @@ The terminal run state is stored on the run record:
   CLI on `PATH`, writes configured project skills into `SIXB_SKILLS_DIR`, and creates the sandbox
   with a restricted network policy allowing the server origin. The gateway authorizes scoped
   ontology, object, telemetry, file publication, action, and workflow routes from the run execution
-  token and managed agent service account; no bearer token is exposed to the sandbox.
+  token and restored execution authority; no bearer token is exposed to the sandbox.
 - `skillsDir`: optional project Agent Skills directory. Defaults to `<projectRoot>/skills`. Set to
   `false` to disable project skills.
 - `concurrency`: maximum number of agent run jobs this worker claims and executes at once; defaults
-  to `4`.
+  to `8`. Headless children use a separate four-job lane so waiting parents cannot consume their
+  capacity.
 - `streamSink`: stream sink override; defaults to a broker-backed sink.
 - `leaseMs`: queue visibility duration; defaults to 60 seconds. The worker renews it while the turn
   runs.

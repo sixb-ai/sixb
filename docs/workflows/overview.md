@@ -60,7 +60,8 @@ A field typed `ref(Invoice)` carries an object reference of the shape `{ objectT
 
 ## Define agent tasks
 
-An agent task owns its model instructions, permissions, tools, and typed input/output contract.
+An agent task is a fresh, headless Agent execution dedicated to one workflow node. It does not
+reuse the conversational Agent or its thread.
 
 ```ts
 import { defineAgentStep, ref } from "@sixb/core"
@@ -78,15 +79,31 @@ const composeReminder = defineAgentStep("compose-reminder", {
   .prompt(({ input }) => `Draft a reminder for invoice '${input.invoice.primaryId}'.`)
 ```
 
+During its tool loop, the model receives two distinct messages:
+
+| Message | Content |
+| --- | --- |
+| System | Sixb runtime context, the step's `instructions`, then non-overridable workflow rules |
+| User | The string returned by `.prompt(...)` for this run |
+
+After the loop, Sixb performs a tool-free structured-output pass using the same instructions,
+original prompt, and final answer. This validates the value against `.output(...)` without doing
+new work.
+
 | Option | Behavior |
 | --- | --- |
+| `instructions` | Stable task-specific guidance added to the system prompt |
 | `model` | Optional; otherwise uses the first `models.language` entry |
+| `reasoning` | Optional AI SDK reasoning level for the task |
 | `groups` | Permissions of the task's stable, Sixb-managed service account; defaults to none |
-| `tools` | Project tools available to this task; defaults to none |
+| `tools` | Additional project-defined tools available to this task; defaults to none |
 
 Tools must also be registered in `createSixb({ tools })`. When a model catalog is configured, an
-explicit model must belong to `models.language`. Sandboxed framework tools such as `read` and
-`bash` are injected separately.
+explicit model must belong to `models.language`.
+
+Every task also receives the sandboxed `sixb` CLI plus `read`, `view_file`, and `bash`. It can
+therefore explore live project objects without a custom tool, within the permissions granted by
+`groups`. The `tools` option only selects project-defined AI SDK tools for that task.
 
 ## Compose the chain
 

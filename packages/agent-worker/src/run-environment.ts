@@ -1,11 +1,13 @@
-import type { Sandbox } from "@sixb/core"
+import type { AgentToolRunInfo, Sandbox } from "@sixb/core"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type {
   AgentMessageRecord,
-  AgentRunRecord,
+  ConversationAgentRunRecord,
+  SubagentRunRecord,
   WorkflowAgentNodeRunRecord,
 } from "@sixb/core/storage"
+import type { ToolSet } from "ai"
 import { type AgentExecutionMode, renderAgentSystemPrompt } from "./agent-prompt"
 import { assertAgentRuntimeProfile } from "./agent-runtime/preflight"
 import type { AgentSkill } from "./agent-skills"
@@ -46,11 +48,17 @@ interface CreateAgentEnvironmentInput {
 }
 
 export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvironmentInput {
-  readonly run: AgentRunRecord
+  readonly run: ConversationAgentRunRecord
   /** Retained model tail selected by preflight. Falls back to storage for direct callers. */
   readonly messages?: readonly AgentMessageRecord[]
   /** Skills already loaded while estimating the request. */
   readonly skills?: readonly AgentSkill[]
+  /** Framework-owned tools available only to the main conversational Agent. */
+  readonly frameworkTools?: ToolSet
+}
+
+export interface CreateSubagentEnvironmentInput extends CreateAgentEnvironmentInput {
+  readonly run: SubagentRunRecord
 }
 
 export interface CreateWorkflowAgentNodeEnvironmentInput extends CreateAgentEnvironmentInput {
@@ -103,6 +111,36 @@ export async function createConversationAgentEnvironment(
     apiBaseUrl,
     attachmentContext,
     skills,
+    frameworkTools: input.frameworkTools,
+    onDetachedTeardown: input.onDetachedTeardown,
+  })
+}
+
+/** Build an isolated environment for one fresh, headless child Agent. */
+export async function createSubagentEnvironment(
+  input: CreateSubagentEnvironmentInput
+): Promise<AgentExecutionEnvironment> {
+  const { context, plan, run } = input
+  const execution = run.execution
+  if (!execution) {
+    throw new Error(`[SixbAgentWorker] Subagent run '${run.id}' must hold an execution token.`)
+  }
+
+  return startAgentEnvironment({
+    mode: "subagent",
+    context,
+    plan,
+    runId: run.id,
+    parentRunId: run.parentRunId,
+    apiBaseUrl: createAgentApiGatewayBaseUrl({
+      apiBaseUrl: context.apiBaseUrl,
+      projectId: context.id,
+      runId: run.id,
+      executionToken: execution.token,
+    }),
+    attachmentContext: emptyAttachmentContext(context.id),
+    skills: await context.agentSkills,
+    errorDetails: { parentRunId: run.parentRunId, runId: run.id },
     onDetachedTeardown: input.onDetachedTeardown,
   })
 }
@@ -147,7 +185,8 @@ export async function createWorkflowAgentNodeEnvironment(
 }
 
 interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
-  readonly agentId: string
+  readonly agentId?: string
+  readonly parentRunId?: string
   readonly mode: AgentExecutionMode
   readonly runId: string
   readonly threadId?: string
@@ -155,6 +194,7 @@ interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
   readonly attachmentContext: PreparedAgentAttachmentContext
   readonly skills: Awaited<AgentWorkerContext["agentSkills"]>
   readonly errorDetails?: AgentErrorDetails
+  readonly frameworkTools?: ToolSet
 }
 
 /**
@@ -170,9 +210,11 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
     id: runId,
   })
   const logger = logSession.logger.child({
-    agentId,
+    ...(agentId === undefined ? {} : { agentId }),
+    ...(input.parentRunId === undefined ? {} : { parentRunId: input.parentRunId }),
     ...(threadId ? { threadId } : {}),
   })
+  const toolRun = agentToolRunInfo({ runId, agentId, parentRunId: input.parentRunId, threadId })
   let ready: Promise<AgentSandboxHandle>
   const fileRegistry = new AgentSandboxFileRegistry()
   const artifactBudget = new AgentToolArtifactBudget()
@@ -195,12 +237,16 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
   const tools = aiSdkToolsFromAgentDefinitions({
     definitions: plan.tools,
     valueTypesById: context.valueTypesById,
-    run: { id: runId, agentId, ...(threadId ? { threadId } : {}) },
+    run: toolRun,
     connector: context.connector,
     logger,
     artifactsForToolCall,
     toolResultToModelOutput: (output) => mediaBridge.toModelOutput(output),
-    errorDetails: input.errorDetails ?? { agentId, runId },
+    errorDetails:
+      input.errorDetails ??
+      (agentId === undefined
+        ? { parentRunId: input.parentRunId ?? "unknown", runId }
+        : { agentId, runId }),
   })
 
   let sandboxWasUsed = false
@@ -218,6 +264,14 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
   }
   tools[READ_TOOL_SPEC.name] = createReadTool(resolveSandbox)
   tools[BASH_TOOL_SPEC.name] = createBashTool(resolveSandbox)
+  for (const [name, frameworkTool] of Object.entries(input.frameworkTools ?? {})) {
+    if (Object.hasOwn(tools, name)) {
+      throw new Error(
+        `[SixbAgentWorker] Framework tool '${name}' conflicts with another tool in Agent run '${runId}'.`
+      )
+    }
+    tools[name] = frameworkTool
+  }
 
   ready = provisionSandbox({
     context,
@@ -266,9 +320,38 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
   }
 }
 
+function agentToolRunInfo(input: {
+  readonly runId: string
+  readonly agentId?: string
+  readonly parentRunId?: string
+  readonly threadId?: string
+}): AgentToolRunInfo {
+  if (input.agentId !== undefined) {
+    return {
+      id: input.runId,
+      agentId: input.agentId,
+      ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
+    }
+  }
+  if (input.parentRunId !== undefined) {
+    return { id: input.runId, parentRunId: input.parentRunId }
+  }
+  throw new Error(`[SixbAgentWorker] Agent run '${input.runId}' has no execution identity.`)
+}
+
+function emptyAttachmentContext(projectId: string): PreparedAgentAttachmentContext {
+  return {
+    entries: [],
+    promptTextByPartKey: new Map(),
+    modelFileDataByPartKey: new Map(),
+    sandboxFiles: [],
+    manifestJson: JSON.stringify({ projectId, attachments: [] }, null, 2),
+  }
+}
+
 interface ProvisionSandboxInput {
   readonly context: AgentExecutionContext
-  readonly agentId: string
+  readonly agentId?: string
   readonly run: { readonly id: string; readonly threadId?: string }
   readonly apiBaseUrl: string
   readonly apiOrigin: string
@@ -287,7 +370,7 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<AgentSand
       sandbox,
       apiBaseUrl,
       projectId: context.id,
-      agentId,
+      ...(agentId === undefined ? {} : { agentId }),
       ...(run.threadId ? { threadId: run.threadId } : {}),
       runId: run.id,
       attachments: input.attachmentContext,

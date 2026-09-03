@@ -7,7 +7,11 @@ import type {
   LanguageModelCatalog,
 } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
+import type { SubagentRunRecord } from "@sixb/core/storage"
 import { withAutomaticPromptCaching } from "./provider-caching"
+
+const SUBAGENT_INSTRUCTIONS =
+  "Complete the delegated task autonomously and return a concise result to the parent Agent."
 
 /**
  * Fully resolved inputs shared by the agent execution engines.
@@ -96,6 +100,45 @@ export function resolveWorkflowAgentStepExecutionPlan(input: {
     tools: Object.freeze(tools),
     maxSteps: input.defaultMaxSteps,
     ...(step.reasoning === undefined ? {} : { reasoning: step.reasoning }),
+    ...(providerOptions === undefined ? {} : { providerOptions }),
+  })
+}
+
+/** Restore a headless child from the immutable model and tool selection captured at admission. */
+export function resolveSubagentExecutionPlan(input: {
+  readonly run: SubagentRunRecord
+  readonly models?: LanguageModelCatalog
+  readonly tools: AgentToolCatalog
+}): ResolvedAgentExecutionPlan {
+  const { run, models } = input
+  const model = models?.getByRef(run.spec.model)?.model ?? null
+  if (model === null) {
+    throw createSixbError(
+      "agent.execution_failed",
+      `[SixbAgentWorker] Subagent run '${run.id}' cannot resolve language model '${run.spec.model.provider}/${run.spec.model.modelId}'.`,
+      { details: { parentRunId: run.parentRunId, runId: run.id } }
+    )
+  }
+
+  const tools = run.spec.toolNames.map((name) => {
+    const definition = input.tools.getByName(name)
+    if (definition === null) {
+      throw createSixbError(
+        "agent.execution_failed",
+        `[SixbAgentWorker] Subagent run '${run.id}' cannot resolve project tool '${name}'.`,
+        { details: { parentRunId: run.parentRunId, runId: run.id, toolName: name } }
+      )
+    }
+    return definition
+  })
+  const providerOptions = withAutomaticPromptCaching(model, undefined)
+
+  return Object.freeze({
+    model,
+    instructions: SUBAGENT_INSTRUCTIONS,
+    tools: Object.freeze(tools),
+    maxSteps: run.spec.maxSteps,
+    ...(run.spec.reasoning === undefined ? {} : { reasoning: run.spec.reasoning }),
     ...(providerOptions === undefined ? {} : { providerOptions }),
   })
 }

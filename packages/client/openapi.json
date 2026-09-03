@@ -5585,6 +5585,23 @@
                                   "workflowRunId"
                                 ],
                                 "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": ["subagent"]
+                                  },
+                                  "subagentRunId": {
+                                    "type": "string"
+                                  },
+                                  "parentRunId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["kind", "subagentRunId", "parentRunId"],
+                                "additionalProperties": false
                               }
                             ]
                           },

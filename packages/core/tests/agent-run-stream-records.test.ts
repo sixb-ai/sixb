@@ -11,7 +11,7 @@ import {
   isAgentRunStreamEvent,
   publishAgentRunActivity,
 } from "../src/agents/streams"
-import type { AgentRunRecord } from "../src/storage"
+import type { ConversationAgentRunRecord, SubagentRunRecord } from "../src/storage"
 
 const OCCURRED_AT = new Date("2026-01-02T03:04:05.000Z")
 const FAILURE = {
@@ -22,8 +22,11 @@ const FAILURE = {
   details: { agentId: "assistant", runId: "agt_run_1" },
 }
 
-function runRecord(overrides: Partial<AgentRunRecord> = {}): AgentRunRecord {
+function runRecord(
+  overrides: Partial<ConversationAgentRunRecord> = {}
+): ConversationAgentRunRecord {
   return {
+    kind: "conversation",
     id: "agt_run_1",
     projectId: "stream-records-tests",
     executionId: "exec_agt_run_1",
@@ -33,6 +36,28 @@ function runRecord(overrides: Partial<AgentRunRecord> = {}): AgentRunRecord {
     requesterGroupIds: [],
     status: "cancelled",
     attempt: 0,
+    createdAt: new Date("2026-01-02T03:00:00.000Z"),
+    ...overrides,
+  }
+}
+
+function subagentRunRecord(overrides: Partial<SubagentRunRecord> = {}): SubagentRunRecord {
+  return {
+    kind: "subagent",
+    id: "agt_run_child_1",
+    projectId: "stream-records-tests",
+    executionId: "exec_agt_run_child_1",
+    parentRunId: "agt_run_1",
+    spawnKey: "research",
+    spec: {
+      model: { provider: "gateway", modelId: "openai/gpt-5" },
+      task: "Research the delegated question.",
+      toolNames: [],
+      maxSteps: 25,
+    },
+    requesterGroupIds: [],
+    status: "cancelled",
+    attempt: 1,
     createdAt: new Date("2026-01-02T03:00:00.000Z"),
     ...overrides,
   }
@@ -74,6 +99,32 @@ describe("agent run stream records", () => {
       error: FAILURE,
       occurredAt: "2026-01-02T03:04:05.000Z",
     })
+  })
+
+  test("uses parent lineage for a headless child stream", async () => {
+    const broker = new InMemoryBroker()
+    const run = subagentRunRecord()
+    const event = agentRunFinishedEvent(run, OCCURRED_AT)
+
+    expect(event).toEqual({
+      schemaVersion: 1,
+      type: "agent.run.finished",
+      projectId: "stream-records-tests",
+      runId: "agt_run_child_1",
+      parentRunId: "agt_run_1",
+      attempt: 1,
+      status: "cancelled",
+      occurredAt: "2026-01-02T03:04:05.000Z",
+    })
+    expect(isAgentRunStreamEvent(event)).toBe(true)
+    expect(isAgentRunStreamEvent({ ...event, threadId: "agt_thr_1", agentId: "main" })).toBe(false)
+
+    await publishAgentRunFinished(broker, run)
+    const activity = await broker.read({
+      projectId: run.projectId,
+      streamId: AGENT_ACTIVITY_STREAM_ID,
+    })
+    expect(activity.records).toHaveLength(0)
   })
 
   test("validates the exact durable failure on a finished event", () => {

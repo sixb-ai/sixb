@@ -1,6 +1,8 @@
+import { isDeepStrictEqual } from "node:util"
 import { agentServiceAccountId } from "../../agents/authority"
-import { MAIN_AGENT_ID } from "../../agents/main"
-import type { ExecutionStorage } from "../executions"
+import { AGENT_REASONING_LEVELS } from "../../agents/types"
+import { isFileRef } from "../../blob-storage"
+import type { ExecutionRecord, ExecutionStorage } from "../executions"
 import { findAgentRunExecution } from "../executions/run-link"
 import { AgentStorageError } from "./errors"
 import type {
@@ -9,6 +11,9 @@ import type {
   AgentRunRecord,
   AgentThreadRecord,
   CreateAgentContextCheckpointInput,
+  CreateSubagentRunInput,
+  SubagentRunRecord,
+  SubagentRunResult,
 } from "./types"
 
 /** Validate the semantic link between a conversational Agent run and its immutable execution. */
@@ -17,23 +22,134 @@ export async function assertAgentRunExecution(input: {
   readonly projectId: string
   readonly executionId: string
   readonly runId: string
-  readonly agentId: string
-}): Promise<void> {
+  readonly authority:
+    | { readonly type: "managed"; readonly agentId: string }
+    | { readonly type: "inherited" }
+}): Promise<ExecutionRecord> {
   const execution = await findAgentRunExecution({
     executions: input.executions,
     projectId: input.projectId,
     executionId: input.executionId,
     runId: input.runId,
-    // Transitional: run kind will replace the reserved id as the authority discriminator.
     authority:
-      input.agentId === MAIN_AGENT_ID
+      input.authority.type === "inherited"
         ? { type: "inherited" }
-        : { type: "managed", serviceAccountId: agentServiceAccountId(input.agentId) },
+        : {
+            type: "managed",
+            serviceAccountId: agentServiceAccountId(input.authority.agentId),
+          },
   })
   if (!execution) {
     throw new AgentStorageError(
       "invalid_input",
       `[Sixb] Execution '${input.executionId}' does not authorize Agent run '${input.runId}'.`
+    )
+  }
+  return execution
+}
+
+/** Validate the provider-neutral payload of an idempotent child admission. */
+export function assertCreateSubagentRunInput(input: CreateSubagentRunInput, prefix = "Sixb"): void {
+  for (const [name, value] of [
+    ["id", input.id],
+    ["projectId", input.projectId],
+    ["executionId", input.executionId],
+    ["parentRunId", input.parentRunId],
+    ["parentExecutionToken", input.parentExecutionToken],
+    ["spawnKey", input.spawnKey],
+    ["model.provider", input.spec.model.provider],
+    ["model.modelId", input.spec.model.modelId],
+    ["task", input.spec.task],
+  ] as const) {
+    if (value.trim().length === 0) {
+      throw new AgentStorageError(
+        "invalid_input",
+        `[${prefix}] Subagent run '${name}' must not be empty.`
+      )
+    }
+  }
+  if (input.spawnKey.length > 128) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Subagent spawn key must not exceed 128 characters.`
+    )
+  }
+  for (const [name, value] of [
+    ["maxActiveChildren", input.maxActiveChildren],
+    ["spec.maxSteps", input.spec.maxSteps],
+  ] as const) {
+    if (!Number.isSafeInteger(value) || value < 1) {
+      throw new AgentStorageError(
+        "invalid_input",
+        `[${prefix}] Subagent run '${name}' must be a positive safe integer.`
+      )
+    }
+  }
+  if (new Set(input.spec.toolNames).size !== input.spec.toolNames.length) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Subagent run tool names must be unique.`
+    )
+  }
+  if (
+    input.spec.reasoning !== undefined &&
+    !(AGENT_REASONING_LEVELS as readonly string[]).includes(input.spec.reasoning)
+  ) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Subagent reasoning must be one of: ${AGENT_REASONING_LEVELS.join(", ")}.`
+    )
+  }
+  if (input.spec.toolNames.some((name) => !name.trim())) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Subagent run tool names must not be empty.`
+    )
+  }
+  if (input.createdAt && !Number.isFinite(input.createdAt.getTime())) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Subagent run createdAt must be a valid date.`
+    )
+  }
+}
+
+/** Exact semantic match required when a durable spawn key is replayed. */
+export function subagentRunMatchesCreateInput(
+  run: AgentRunRecord,
+  input: CreateSubagentRunInput
+): run is SubagentRunRecord {
+  return (
+    run.kind === "subagent" &&
+    run.id === input.id &&
+    run.projectId === input.projectId &&
+    run.executionId === input.executionId &&
+    run.parentRunId === input.parentRunId &&
+    run.spawnKey === input.spawnKey &&
+    isDeepStrictEqual(run.spec, input.spec)
+  )
+}
+
+/** Validate the small durable result returned by a successful child. */
+export function assertSubagentRunResult(
+  result: SubagentRunResult | undefined,
+  runId: string,
+  prefix = "Sixb"
+): asserts result is SubagentRunResult {
+  const text = result?.text
+  const files = result?.files
+  const hasText = typeof text === "string" && text.trim().length > 0
+  const hasFiles = Array.isArray(files) && files.length > 0 && files.every(isFileRef)
+  if (!result || (!hasText && !hasFiles)) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Succeeded subagent run '${runId}' requires text or files.`
+    )
+  }
+  if ((text !== undefined && !hasText) || (files !== undefined && !hasFiles)) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Subagent run '${runId}' has an invalid result.`
     )
   }
 }
@@ -141,7 +257,7 @@ export function assertAgentContextCheckpointAuthority(input: {
       `[${prefix}] Agent thread '${create.threadId}' not found for project '${create.projectId}'.`
     )
   }
-  if (run.threadId !== create.threadId) {
+  if (run.kind !== "conversation" || run.threadId !== create.threadId) {
     throw new AgentStorageError(
       "invalid_input",
       `[${prefix}] Agent run '${run.id}' does not belong to thread '${create.threadId}'.`

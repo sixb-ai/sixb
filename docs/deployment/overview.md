@@ -122,7 +122,7 @@ sixb worker agent --agent-turn-timeout 20m
 SIXB_AGENT_TURN_TIMEOUT=20m sixb worker-group
 ```
 
-Queue workers execute a bounded number of jobs in each process. Agent workers default to `4`;
+Queue workers execute a bounded number of jobs in each process. Agent workers default to `8`;
 sync, pipeline, projection, workflow, and action workers default to `1`. Set a scalar count for a
 single worker process:
 
@@ -143,6 +143,9 @@ The flag wins over `SIXB_<TYPE>_WORKER_CONCURRENCY`, such as
 `SIXB_AGENT_WORKER_CONCURRENCY=8`. Action execution remains serial and rejects a concurrency
 override. Concurrency is jobs inside one process; use deployment replicas to run more worker
 processes.
+
+Each agent worker also reserves four independent slots for headless child agents. This prevents a
+parent waiting for delegated work from occupying the capacity needed to execute that work.
 
 A role process is **idle**, not an error, when it has nothing to do — an
 orchestrator with no routes, a rules process with no rules, or a worker group
