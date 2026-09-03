@@ -1,5 +1,5 @@
-import { SYSTEM_PRINCIPAL } from "../auth"
 import { agentServiceAccountId } from "../agents/authority"
+import { SYSTEM_PRINCIPAL } from "../auth"
 import type { AuthStorage } from "../storage/auth"
 import { AuthStorageError } from "../storage/auth"
 import type { ExecutionStorage } from "../storage/executions"
