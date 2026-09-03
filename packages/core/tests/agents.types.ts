@@ -53,13 +53,20 @@ const searchKnowledge = defineAgentTool("search_knowledge")
     logger.info("Searching", { limit, mode, active })
     signal.throwIfAborted()
     const runId: string = run.id
-    const agentId: string = run.agentId
+    const agentId: string | undefined = run.agentId
     const threadId: string | undefined = run.threadId
 
     // @ts-expect-error tool handlers receive no privileged Sixb runtime
     context.sixb
 
-    return { results, note: note ?? null, requestedAt, runId, agentId, threadId: threadId ?? null }
+    return {
+      results,
+      note: note ?? null,
+      requestedAt,
+      runId,
+      agentId: agentId ?? null,
+      threadId: threadId ?? null,
+    }
   })
 
 type SearchKnowledgeInput = InferAgentToolInput<typeof searchKnowledge>

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 
 /**
  * Id helpers for agent persistence. Threads, the run id, and the user (trigger) message are minted
@@ -12,6 +12,21 @@ export function createAgentThreadId(): string {
 
 export function createAgentRunId(): string {
   return `agt_run_${randomUUID()}`
+}
+
+/** One stable child identity per parent-selected spawn key. */
+export function createSubagentRunId(parentRunId: string, spawnKey: string): string {
+  const digest = createHash("sha256")
+    .update(parentRunId)
+    .update("\0")
+    .update(spawnKey)
+    .digest("hex")
+  return `agt_run_child_${digest}`
+}
+
+/** Stable execution identity paired with a deterministic child run. */
+export function createSubagentExecutionId(runId: string): string {
+  return `exec_${runId}`
 }
 
 export function createAgentMessageId(): string {

@@ -95,7 +95,7 @@ describe("owned model adapters", () => {
         limit: input.limit,
         mode: input.mode,
         aborted: signal.aborted,
-        run: { id: run.id, agentId: run.agentId, threadId: run.threadId ?? null },
+        run: { id: run.id, agentId: run.agentId ?? null, threadId: run.threadId ?? null },
       }))
     const run = { id: "run-1", agentId: "research", threadId: "thread-1" }
     const [tool] = modelToolsFromAgentDefinitions({

@@ -37,6 +37,7 @@ export {
   ensureAgentExecutionIdentity,
   ensureManagedAgentExecutionIdentity,
   resolveAgentExecutionAuthorization,
+  resolveInheritedAgentExecutionAuthorization,
   resolveInheritedMainAgentExecutionAuthorization,
 } from "./authority"
 export { defineAgent, defineAgentTool } from "./builders"
@@ -80,6 +81,8 @@ export type {
 export {
   agentRunQueueJobId,
   dispatchQueuedAgentRuns,
+  dispatchQueuedSubagentRuns,
+  subagentRunQueueJobId,
   workflowAgentNodeQueueJobId,
 } from "./dispatch"
 export {
@@ -96,6 +99,8 @@ export {
   createAgentRunExecutionToken,
   createAgentRunId,
   createAgentThreadId,
+  createSubagentExecutionId,
+  createSubagentRunId,
 } from "./ids"
 export type { AgentReference } from "./main"
 export {

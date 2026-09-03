@@ -1,6 +1,7 @@
 export type AgentStorageErrorCode =
   | "thread_not_found"
   | "active_run_exists"
+  | "active_child_limit"
   | "run_not_found"
   | "invalid_input"
   | "invalid_state"

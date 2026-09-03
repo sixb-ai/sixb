@@ -7,14 +7,14 @@ export function createAgentExecutionContext(input: {
   readonly context: AgentWorkerContext
   readonly host: AgentWorkerHost
   readonly execution: ExecutionRecord
-  readonly agentId: string
+  readonly agentId?: string
   readonly runId: string
   readonly authorization: AgentExecutionAuthorization
   readonly authorPrincipal?: AgentExecutionContext["authorPrincipal"]
 }): AgentExecutionContext {
   const sixb = bindDurableAgentExecution(input.host, {
     execution: input.execution,
-    agentId: input.agentId,
+    ...(input.agentId === undefined ? {} : { agentId: input.agentId }),
     runId: input.runId,
     authorization: input.authorization,
   })

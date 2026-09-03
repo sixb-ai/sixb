@@ -6,6 +6,7 @@ import {
   type AgentRunFinishReason,
   type AgentRunRecord,
   type AgentStorage,
+  type ConversationAgentRunRecord,
   coerceAgentRunFinishReason,
 } from "@sixb/core/storage"
 import { DEFAULT_AGENT_FINAL_STEP_INSTRUCTION } from "./agent-prompt"
@@ -34,7 +35,7 @@ export interface RunAgentTurnInput {
   readonly context: AgentTurnContext
   readonly plan: ResolvedAgentExecutionPlan
   /** The run this delivery reserved or reclaimed with its execution token. */
-  readonly run: AgentRunRecord
+  readonly run: ConversationAgentRunRecord
   /** The worker's shutdown signal. */
   readonly signal: AbortSignal
   /** Shared with preflight when this turn performed compaction. */
@@ -313,7 +314,7 @@ async function finalizeInterruptedTurn(input: {
   readonly storage: Storage
   readonly agents: AgentStorage
   readonly context: AgentTurnContext
-  readonly run: AgentRunRecord
+  readonly run: ConversationAgentRunRecord
   readonly executionToken: string
   readonly projectId: string
   readonly modelId?: string

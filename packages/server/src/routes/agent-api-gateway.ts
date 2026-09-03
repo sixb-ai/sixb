@@ -3,16 +3,24 @@ import { assertAgentExecutionRecord } from "@sixb/core/internal/agent-execution"
 import {
   AGENT_API_GATEWAY_PREFIX,
   AGENT_API_ROUTES,
+  type AgentExecutionAuthorization,
   isAllowedAgentApiRequest,
   isValidAgentApiGatewayCapability,
   MAIN_AGENT_ID,
   resolveAgentExecutionAuthorization,
-  resolveInheritedMainAgentExecutionAuthorization,
+  resolveInheritedAgentExecutionAuthorization,
 } from "@sixb/core/internal/agents"
 import { normalizeRoutePath, pathSegmentsFor } from "@sixb/core/internal/http"
 import type { RequestExecutionAuthorization } from "@sixb/core/internal/request-execution"
+import type {
+  AgentRunRecord,
+  AuthStorage,
+  ConversationAgentRunRecord,
+  ExecutionRecord,
+  WorkflowAgentNodeRunRecord,
+} from "@sixb/core/storage"
 import type { Elysia } from "elysia"
-import { registerInternalRequestAuthState } from "../auth/scope"
+import { type InternalRequestAuthState, registerInternalRequestAuthState } from "../auth/scope"
 import { DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES } from "./files"
 
 const MAX_AGENT_API_BODY_BYTES = 1_000_000
@@ -81,11 +89,16 @@ async function handleAgentApiGatewayRequest(input: {
     return authState
   }
   if (
-    authState.agentExecution.kind === "workflow" &&
+    authState.agentExecution.kind !== "conversation" &&
     input.request.method === "POST" &&
     matchesWorkflowRunStart(upstreamPath)
   ) {
-    return jsonError(409, "Workflow agent nodes cannot start another workflow run.")
+    return jsonError(
+      409,
+      authState.agentExecution.kind === "workflow"
+        ? "Workflow agent nodes cannot start another workflow run."
+        : "Child agents cannot start a workflow run."
+    )
   }
 
   let body: ArrayBuffer | undefined
@@ -131,32 +144,26 @@ async function resolveAgentRunAuthState(
     return jsonError(501, "Agent API gateway is not configured for this runtime.")
   }
 
-  const conversationalRun = await agentStorage?.runs.getById({
+  const storedAgentRun = await agentStorage?.runs.getById({
     projectId: host.id,
     id: input.runId,
   })
-  const workflowRun = conversationalRun
+  const workflowRun = storedAgentRun
     ? null
     : await workflowRuns?.agentNodes.getByNodeRunId({
         projectId: host.id,
         nodeRunId: input.runId,
       })
-  const run = conversationalRun ?? workflowRun
-  const agentExecution = conversationalRun
-    ? ({ kind: "conversation", runId: conversationalRun.id } as const)
-    : workflowRun
-      ? ({ kind: "workflow", nodeRunId: workflowRun.nodeRunId } as const)
-      : null
+  const runState = toGatewayRunState(storedAgentRun ?? null, workflowRun ?? null)
   if (
-    !run ||
-    !agentExecution ||
-    run.status !== "running" ||
-    !run.execution ||
-    run.execution.queueLeaseExpiresAt.getTime() <= Date.now() ||
+    !runState ||
+    runState.run.status !== "running" ||
+    !runState.run.execution ||
+    runState.run.execution.queueLeaseExpiresAt.getTime() <= Date.now() ||
     !isValidAgentApiGatewayCapability({
       projectId: host.id,
       runId: input.runId,
-      executionToken: run.execution.token,
+      executionToken: runState.run.execution.token,
       capability: input.capability,
     })
   ) {
@@ -166,8 +173,8 @@ async function resolveAgentRunAuthState(
   if (!host.auth.isEnabled()) {
     return {
       authorization: { type: "disabled" as const },
-      agentExecution,
-      ...(conversationalRun ? { agentRun: conversationalRun } : {}),
+      agentExecution: runState.agentExecution,
+      ...(runState.agentRun === undefined ? {} : { agentRun: runState.agentRun }),
     }
   }
 
@@ -177,7 +184,7 @@ async function resolveAgentRunAuthState(
   }
   const execution = await host.storage.executions.getById({
     projectId: host.id,
-    id: run.executionId,
+    id: runState.run.executionId,
   })
   if (!execution) {
     return jsonError(403, "Agent run execution is not available.")
@@ -185,48 +192,124 @@ async function resolveAgentRunAuthState(
 
   let authorization: RequestExecutionAuthorization
   try {
-    // Transitional: run kind will replace the reserved id as the authority discriminator.
-    if (run.agentId === MAIN_AGENT_ID) {
-      const inherited = await resolveInheritedMainAgentExecutionAuthorization({
-        auth,
-        projectId: host.id,
-        authorizationRef: execution.authorizationRef,
-        security: host.definitions.security,
-      })
-      authorization =
-        inherited.type === "principal" && execution.authorizationRef.type === "principal"
-          ? {
-              type: "principal",
-              context: inherited.context,
-              ...(execution.authorizationRef.credential === undefined
-                ? {}
-                : { credential: execution.authorizationRef.credential }),
-            }
-          : inherited
-    } else {
-      const resolved = await resolveAgentExecutionAuthorization({
-        auth,
-        projectId: host.id,
-        agentId: run.agentId,
-        authorizationRef: execution.authorizationRef,
-        security: host.definitions.security,
-      })
-      authorization = { type: "principal", context: resolved.context }
-    }
-    assertAgentExecutionRecord({
-      execution,
-      agentId: run.agentId,
-      runId: input.runId,
-      authorization,
-    })
+    authorization = await resolveGatewayRunAuthorization({ host, auth, runState, execution })
   } catch {
     return jsonError(403, "Agent run execution authority is not valid.")
   }
 
   return {
     authorization,
-    agentExecution,
-    ...(conversationalRun ? { agentRun: conversationalRun } : {}),
+    agentExecution: runState.agentExecution,
+    ...(runState.agentRun === undefined ? {} : { agentRun: runState.agentRun }),
+  }
+}
+
+type GatewayRunState = {
+  readonly run: AgentRunRecord | WorkflowAgentNodeRunRecord
+  readonly runId: string
+  readonly agentExecution: NonNullable<InternalRequestAuthState["agentExecution"]>
+  readonly agentRun?: ConversationAgentRunRecord
+} & (
+  | { readonly authority: "inherited" }
+  | { readonly authority: "managed"; readonly agentId: string }
+)
+
+function toGatewayRunState(
+  storedRun: AgentRunRecord | null,
+  workflowRun: WorkflowAgentNodeRunRecord | null
+): GatewayRunState | null {
+  if (storedRun?.kind === "subagent") {
+    return {
+      run: storedRun,
+      runId: storedRun.id,
+      agentExecution: {
+        kind: "subagent",
+        runId: storedRun.id,
+        parentRunId: storedRun.parentRunId,
+      },
+      authority: "inherited",
+    }
+  }
+
+  if (storedRun?.kind === "conversation") {
+    const common = {
+      run: storedRun,
+      runId: storedRun.id,
+      agentExecution: { kind: "conversation", runId: storedRun.id } as const,
+      agentRun: storedRun,
+    }
+    if (storedRun.agentId === MAIN_AGENT_ID) {
+      return { ...common, authority: "inherited" }
+    }
+    return { ...common, authority: "managed", agentId: storedRun.agentId }
+  }
+
+  if (!workflowRun) return null
+  const common = {
+    run: workflowRun,
+    runId: workflowRun.nodeRunId,
+    agentExecution: { kind: "workflow", nodeRunId: workflowRun.nodeRunId } as const,
+  }
+  if (workflowRun.agentId === MAIN_AGENT_ID) {
+    return { ...common, authority: "inherited" }
+  }
+  return { ...common, authority: "managed", agentId: workflowRun.agentId }
+}
+
+async function resolveGatewayRunAuthorization(input: {
+  readonly host: SixbHostView
+  readonly auth: AuthStorage
+  readonly runState: GatewayRunState
+  readonly execution: ExecutionRecord
+}): Promise<RequestExecutionAuthorization> {
+  if (input.runState.authority === "inherited") {
+    const resolved = await resolveInheritedAgentExecutionAuthorization({
+      auth: input.auth,
+      projectId: input.host.id,
+      authorizationRef: input.execution.authorizationRef,
+      security: input.host.definitions.security,
+    })
+    const authorization = inheritedRequestAuthorization(resolved, input.execution.authorizationRef)
+    assertAgentExecutionRecord({
+      execution: input.execution,
+      runId: input.runState.runId,
+      authorization,
+    })
+    return authorization
+  }
+
+  const resolved = await resolveAgentExecutionAuthorization({
+    auth: input.auth,
+    projectId: input.host.id,
+    agentId: input.runState.agentId,
+    authorizationRef: input.execution.authorizationRef,
+    security: input.host.definitions.security,
+  })
+  const authorization = { type: "principal", context: resolved.context } as const
+  assertAgentExecutionRecord({
+    execution: input.execution,
+    agentId: input.runState.agentId,
+    runId: input.runState.runId,
+    authorization,
+  })
+  return authorization
+}
+
+function inheritedRequestAuthorization(
+  resolved: AgentExecutionAuthorization,
+  authorizationRef: ExecutionRecord["authorizationRef"]
+): RequestExecutionAuthorization {
+  if (
+    resolved.type !== "principal" ||
+    authorizationRef.type !== "principal" ||
+    authorizationRef.credential === undefined
+  ) {
+    return resolved
+  }
+  return {
+    type: "principal",
+    context: resolved.context,
+    credential: authorizationRef.credential,
   }
 }
 

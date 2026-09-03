@@ -134,6 +134,81 @@ function aiRoutes(host: SixbHost<readonly []>, authorization?: AuthorizationCont
   return registerAiAccountingRoutes(app, host)
 }
 
+async function createSubagentApp() {
+  const storage = new InMemoryStorage()
+  const parentRunId = "parent_run_1"
+  const childRunId = "child_run_1"
+  await storage.agents.threads.create({
+    id: "thread_1",
+    projectId,
+    agentId: "main",
+    ownerPrincipal: { type: "user", id: "user_1" },
+  })
+  const parentExecutionId = await createTestAgentExecution(storage, {
+    projectId,
+    agentId: "main",
+    runId: parentRunId,
+    authority: "inherited",
+  })
+  await storage.agents.runs.create({
+    id: parentRunId,
+    projectId,
+    executionId: parentExecutionId,
+    threadId: "thread_1",
+    agentId: "main",
+    triggerMessageId: "message_1",
+    requesterGroupIds: [],
+  })
+  await storage.agents.runs.start({
+    id: parentRunId,
+    projectId,
+    execution: {
+      token: "parent-token",
+      queueLeaseExpiresAt: new Date("2100-01-01T00:00:00.000Z"),
+    },
+  })
+  const childExecutionId = await createTestAgentExecution(storage, {
+    projectId,
+    agentId: "child",
+    runId: childRunId,
+    sourceExecutionId: parentExecutionId,
+    authority: "inherited",
+  })
+  await storage.agents.runs.createSubagent({
+    id: childRunId,
+    projectId,
+    executionId: childExecutionId,
+    parentRunId,
+    parentExecutionToken: "parent-token",
+    spawnKey: "research",
+    spec: {
+      model: { provider: "openai", modelId: "gpt-5" },
+      task: "Research the issue.",
+      toolNames: [],
+      maxSteps: 25,
+    },
+    maxActiveChildren: 4,
+  })
+  await storage.aiUsage.recordModelCall({
+    id: "usage_child_1",
+    projectId,
+    executionId: childExecutionId,
+    attempt: 1,
+    callId: "call_1",
+    requesterGroupIds: [],
+    providerId: "openai",
+    requestedModelId: "gpt-5",
+    responseId: "response_1",
+    usage: { inputTokens: 10, outputTokens: 5 },
+    occurredAt: new Date("2026-09-10T12:30:00.000Z"),
+  })
+  const host = {
+    id: projectId,
+    storage: { aiCosts: storage.aiCosts },
+  } as unknown as SixbHostView
+  return registerAiAccountingRoutes(new Elysia(), host)
+}
+
 describe("AI accounting routes", () => {
   test("returns the selected inline cost and its independent local estimate", async () => {
     // Removal proof: remove estimate from AiModelCallCostSchema; response parsing strips it.
@@ -236,6 +311,32 @@ describe("AI accounting routes", () => {
             reason: "unsupportedPricingDimension",
           },
           valuationStatus: "unpriceable",
+        },
+      ],
+    })
+  })
+
+  test("serializes child-agent attribution", async () => {
+    const app = await createSubagentApp()
+    const response = await app.handle(
+      new Request(
+        "http://localhost/api/ai/model-calls?" +
+          new URLSearchParams({
+            from: "2026-09-10T00:00:00.000Z",
+            to: "2026-09-11T00:00:00.000Z",
+          })
+      )
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      items: [
+        {
+          attribution: {
+            kind: "subagent",
+            subagentRunId: "child_run_1",
+            parentRunId: "parent_run_1",
+          },
         },
       ],
     })

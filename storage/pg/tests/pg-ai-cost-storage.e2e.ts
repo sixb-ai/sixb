@@ -103,6 +103,99 @@ test("PgAiCostStorage returns direct agent attribution with each model-call page
   }
 })
 
+test("PgAiCostStorage returns child-agent attribution with each model-call page", async () => {
+  const { storage } = await createTestStorage()
+  try {
+    const parentRunId = "parent_run_1"
+    const childRunId = "child_run_1"
+    await storage.agents.threads.create({
+      id: "thread_1",
+      projectId: "project_1",
+      agentId: "main",
+      ownerPrincipal: { type: "user", id: "user_1" },
+    })
+    const parentExecutionId = await createTestAgentExecution(storage, {
+      projectId: "project_1",
+      agentId: "main",
+      runId: parentRunId,
+      authority: "inherited",
+    })
+    await storage.agents.runs.create({
+      id: parentRunId,
+      projectId: "project_1",
+      executionId: parentExecutionId,
+      threadId: "thread_1",
+      agentId: "main",
+      triggerMessageId: "message_1",
+      requesterGroupIds: ["users"],
+    })
+    await storage.agents.runs.start({
+      id: parentRunId,
+      projectId: "project_1",
+      execution: {
+        token: "parent-token",
+        queueLeaseExpiresAt: new Date("2100-01-01T00:00:00.000Z"),
+      },
+    })
+    const childExecutionId = await createTestAgentExecution(storage, {
+      projectId: "project_1",
+      agentId: "child",
+      runId: childRunId,
+      sourceExecutionId: parentExecutionId,
+      authority: "inherited",
+    })
+    await storage.agents.runs.createSubagent({
+      id: childRunId,
+      projectId: "project_1",
+      executionId: childExecutionId,
+      parentRunId,
+      parentExecutionToken: "parent-token",
+      spawnKey: "research",
+      spec: {
+        model: { provider: "anthropic.messages", modelId: "claude-opus-4-8" },
+        task: "Research the incident.",
+        toolNames: [],
+        maxSteps: 25,
+      },
+      maxActiveChildren: 4,
+    })
+    await storage.aiUsage.recordModelCall({
+      id: "usage_child_agent_1",
+      projectId: "project_1",
+      executionId: childExecutionId,
+      attempt: 1,
+      callId: "call_1",
+      requesterGroupIds: ["users"],
+      providerId: "anthropic.messages",
+      requestedModelId: "claude-opus-4-8",
+      responseId: "response_1",
+      usage: { inputTokens: 10, outputTokens: 5 },
+      occurredAt: new Date("2026-09-01T12:00:00.000Z"),
+    })
+
+    await expect(
+      storage.aiCosts.listModelCalls({
+        projectId: "project_1",
+        from: new Date("2026-09-01T00:00:00.000Z"),
+        to: new Date("2026-09-02T00:00:00.000Z"),
+      })
+    ).resolves.toMatchObject({
+      items: [
+        {
+          attribution: {
+            kind: "subagent",
+            subagentRunId: childRunId,
+            parentRunId,
+          },
+        },
+      ],
+    })
+  } finally {
+    await storage.dropSchema()
+    await storage.close()
+  }
+})
+
 runAiCostStorageContractSuite("PgAiCostStorage", {
   createStorage: async () => {
     const { storage } = await createTestStorage()

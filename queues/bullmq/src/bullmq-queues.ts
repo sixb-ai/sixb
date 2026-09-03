@@ -8,6 +8,7 @@ import type {
   PipelineRunRequestedQueueJob,
   ProjectionQueueJobFailureCode,
   ProjectionRunRequestedQueueJob,
+  SubagentQueueJob,
   SyncQueueJobFailureCode,
   SyncRunRequestedQueueJob,
   WorkflowQueueJob,
@@ -81,6 +82,7 @@ export class BullMqQueues implements Queues {
   readonly workflows: BullMqQueue<WorkflowQueueJob, WorkflowQueueJobFailureCode>
   readonly actions: BullMqQueue<ActionRunRequestedQueueJob, ActionQueueJobFailureCode>
   readonly agents: BullMqQueue<AgentQueueJob, AgentQueueJobFailureCode>
+  readonly agentChildren: BullMqQueue<SubagentQueueJob, AgentQueueJobFailureCode>
 
   private readonly connections: BullMqConnections
 
@@ -118,6 +120,10 @@ export class BullMqQueues implements Queues {
       "action.runs"
     )
     this.agents = new BullMqQueue<AgentQueueJob, AgentQueueJobFailureCode>(shared, "agent.runs")
+    this.agentChildren = new BullMqQueue<SubagentQueueJob, AgentQueueJobFailureCode>(
+      shared,
+      "agent.children"
+    )
   }
 
   /** The non-blocking handle: a probe has no business queueing behind BullMQ's fetch loop. */
@@ -133,6 +139,7 @@ export class BullMqQueues implements Queues {
       this.workflows.close(),
       this.actions.close(),
       this.agents.close(),
+      this.agentChildren.close(),
     ])
     // Short grace so a just-dispatched Redis command (typically the final stalled-check tick)
     // can settle on the socket before owned IORedis handles are quit. No-op when connections

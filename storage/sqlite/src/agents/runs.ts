@@ -1,5 +1,11 @@
 import type { Database } from "bun:sqlite"
-import { assertAgentRunExecution } from "@sixb/core/internal/agent-run-storage-provider"
+import {
+  assertAgentRunExecution,
+  assertCreateSubagentRunInput,
+  assertSubagentRunResult,
+  subagentRunMatchesCreateInput,
+} from "@sixb/core/internal/agent-run-storage-provider"
+import { MAIN_AGENT_ID } from "@sixb/core/internal/agents"
 import { normalizeRequesterGroupIds } from "@sixb/core/internal/auth"
 import { serializeSixbFailure } from "@sixb/core/internal/errors"
 import {
@@ -8,7 +14,9 @@ import {
   type AgentRunStore,
   AgentStorageError,
   type ConfirmAgentRunExecutionOwnershipInput,
+  type ConversationAgentRunRecord,
   type CreateAgentRunInput,
+  type CreateSubagentRunInput,
   type ExecutionStorage,
   type FinishAgentRunInput,
   type FinishQueuedAgentRunInput,
@@ -16,6 +24,7 @@ import {
   type ListAgentRunsResult,
   type ReclaimAgentRunInput,
   type StartAgentRunInput,
+  type SubagentRunRecord,
 } from "@sixb/core/storage"
 import {
   appendRunListFilters,
@@ -34,14 +43,17 @@ export class SqliteAgentRunStore implements AgentRunStore {
     private readonly executions: ExecutionStorage
   ) {}
 
-  async create(input: CreateAgentRunInput): Promise<AgentRunRecord> {
+  async create(input: CreateAgentRunInput): Promise<ConversationAgentRunRecord> {
     const createdAt = input.createdAt ?? new Date()
     await assertAgentRunExecution({
       executions: this.executions,
       projectId: input.projectId,
       executionId: input.executionId,
       runId: input.id,
-      agentId: input.agentId,
+      authority:
+        input.agentId === MAIN_AGENT_ID
+          ? { type: "inherited" }
+          : { type: "managed", agentId: input.agentId },
     })
 
     return this.db.transaction(() => {
@@ -71,6 +83,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
               project_id,
               id,
               execution_id,
+              kind,
               thread_id,
               agent_id,
               trigger_message_id,
@@ -78,7 +91,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
               status,
               attempt,
               created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?)
+            ) VALUES (?, ?, ?, 'conversation', ?, ?, ?, ?, 'queued', 0, ?)
           `
           )
           .run(
@@ -108,7 +121,116 @@ export class SqliteAgentRunStore implements AgentRunStore {
         )
         .run(input.id, createdAt.toISOString(), input.projectId, input.threadId)
 
-      return this.requireRun(input.projectId, input.id)
+      const created = this.requireRun(input.projectId, input.id)
+      if (created.kind !== "conversation") {
+        throw new Error(`[SixbSqlite] Agent run insert '${input.id}' returned the wrong run kind.`)
+      }
+      return created
+    })()
+  }
+
+  async createSubagent(input: CreateSubagentRunInput): Promise<SubagentRunRecord> {
+    assertCreateSubagentRunInput(input, "SixbSqlite")
+    const execution = await assertAgentRunExecution({
+      executions: this.executions,
+      projectId: input.projectId,
+      executionId: input.executionId,
+      runId: input.id,
+      authority: { type: "inherited" },
+    })
+
+    return this.db.transaction(() => {
+      const parentRow = this.db
+        .query("SELECT * FROM agent_runs WHERE project_id = ? AND id = ?")
+        .get(input.projectId, input.parentRunId) as AgentRunRow | null
+      if (!parentRow || parentRow.kind !== "conversation") {
+        throw new AgentStorageError(
+          "run_not_found",
+          `[SixbSqlite] Parent Agent run '${input.parentRunId}' was not found.`
+        )
+      }
+
+      const existingRow = this.db
+        .query("SELECT * FROM agent_runs WHERE project_id = ? AND id = ?")
+        .get(input.projectId, input.id) as AgentRunRow | null
+      if (existingRow) {
+        const existing = rowToRunRecord(existingRow)
+        if (subagentRunMatchesCreateInput(existing, input)) return existing
+        throw new AgentStorageError(
+          "duplicate_id",
+          `[SixbSqlite] Subagent run '${input.id}' already exists with different immutable inputs.`
+        )
+      }
+      if (parentRow.status !== "running") {
+        throw new AgentStorageError(
+          "invalid_state",
+          `[SixbSqlite] Parent Agent run '${parentRow.id}' is not running (status '${parentRow.status}').`
+        )
+      }
+      if (
+        execution.source.type !== "execution" ||
+        execution.source.executionId !== parentRow.execution_id
+      ) {
+        throw new AgentStorageError(
+          "invalid_input",
+          `[SixbSqlite] Subagent execution '${execution.id}' is not a child of parent execution '${parentRow.execution_id}'.`
+        )
+      }
+      if (parentRow.execution_token !== input.parentExecutionToken) {
+        throw new AgentStorageError(
+          "execution_lost",
+          `[SixbSqlite] Parent Agent run '${parentRow.id}' is no longer owned by this execution.`
+        )
+      }
+
+      const count = this.db
+        .query(
+          `SELECT COUNT(*) AS count FROM agent_runs
+           WHERE project_id = ? AND parent_run_id = ? AND status IN ('queued', 'running')`
+        )
+        .get(input.projectId, input.parentRunId) as { count: number }
+      if (count.count >= input.maxActiveChildren) {
+        throw new AgentStorageError(
+          "active_child_limit",
+          `[SixbSqlite] Agent run '${parentRow.id}' already has ${count.count} active subagents.`
+        )
+      }
+
+      try {
+        this.db
+          .query(
+            `
+            INSERT INTO agent_runs (
+              project_id, id, execution_id, kind, parent_run_id, spawn_key, spec,
+              requester_group_ids, status, attempt, created_at
+            ) VALUES (?, ?, ?, 'subagent', ?, ?, ?, ?, 'queued', 0, ?)
+          `
+          )
+          .run(
+            input.projectId,
+            input.id,
+            input.executionId,
+            input.parentRunId,
+            input.spawnKey,
+            JSON.stringify(input.spec),
+            parentRow.requester_group_ids,
+            (input.createdAt ?? new Date()).toISOString()
+          )
+      } catch (error) {
+        if (isUniqueConstraintError(error)) {
+          throw new AgentStorageError(
+            "duplicate_id",
+            `[SixbSqlite] Subagent run '${input.id}' conflicts with an existing durable spawn.`
+          )
+        }
+        throw error
+      }
+
+      const created = this.requireRun(input.projectId, input.id)
+      if (created.kind !== "subagent") {
+        throw new Error(`[SixbSqlite] Subagent insert '${input.id}' returned the wrong run kind.`)
+      }
+      return created
     })()
   }
 
@@ -205,7 +327,6 @@ export class SqliteAgentRunStore implements AgentRunStore {
           `[SixbSqlite] Execution token is no longer current on agent run '${input.id}'.`
         )
       }
-
       this.db
         .query(
           `
@@ -235,6 +356,19 @@ export class SqliteAgentRunStore implements AgentRunStore {
           `[SixbSqlite] Execution token is no longer current on agent run '${input.id}'.`
         )
       }
+      if (input.status === "succeeded" && run.kind === "subagent") {
+        assertSubagentRunResult(input.result, run.id, "SixbSqlite")
+      }
+      if (
+        input.status === "succeeded" &&
+        run.kind === "conversation" &&
+        input.result !== undefined
+      ) {
+        throw new AgentStorageError(
+          "invalid_input",
+          `[SixbSqlite] Conversational Agent run '${run.id}' cannot persist a subagent result.`
+        )
+      }
 
       this.db
         .query(
@@ -246,6 +380,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
             finish_reason = ?,
             error = ?,
             diagnostics = ?,
+            result = ?,
             execution_token = NULL,
             execution_queue_lease_expires_at = NULL,
             completed_at = ?
@@ -258,6 +393,9 @@ export class SqliteAgentRunStore implements AgentRunStore {
           input.finishReason ?? null,
           errorValue,
           input.diagnostics === undefined ? null : JSON.stringify(input.diagnostics),
+          input.status === "succeeded" && input.result !== undefined
+            ? JSON.stringify(input.result)
+            : null,
           completedAt.toISOString(),
           input.projectId,
           input.id
@@ -304,12 +442,17 @@ export class SqliteAgentRunStore implements AgentRunStore {
   }
 
   async list(input: ListAgentRunsInput): Promise<ListAgentRunsResult> {
-    if (hasEmptyStatuses(input)) {
+    if (hasEmptyStatuses(input) || input.kinds?.length === 0) {
       return { runs: [], hasMore: false, total: 0 }
     }
 
     const whereClauses = ["project_id = ?"]
     const args: SqliteValue[] = [input.projectId]
+
+    if (input.kinds) {
+      whereClauses.push(`kind IN (${input.kinds.map(() => "?").join(", ")})`)
+      args.push(...input.kinds)
+    }
 
     if (input.threadId) {
       whereClauses.push("thread_id = ?")
@@ -319,6 +462,11 @@ export class SqliteAgentRunStore implements AgentRunStore {
     if (input.agentId) {
       whereClauses.push("agent_id = ?")
       args.push(input.agentId)
+    }
+
+    if (input.parentRunId) {
+      whereClauses.push("parent_run_id = ?")
+      args.push(input.parentRunId)
     }
 
     appendRunListFilters(whereClauses, args, input, "COALESCE(started_at, created_at)")
@@ -367,6 +515,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
   }
 
   private releaseThread(run: AgentRunRow, completedAt: Date): void {
+    if (run.kind !== "conversation") return
     this.db
       .query(
         `
