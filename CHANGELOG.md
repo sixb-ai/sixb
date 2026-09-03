@@ -2,6 +2,36 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-09-03 — Framework 0.1.5
+
+This selective release is anchored by `@sixb/core` `0.1.5`.
+
+### Highlights
+
+- Add typed, authorized batch telemetry history reads to Actions through
+  `read.telemetry.historyBatch(...)`.
+- Expose Action input schemas and the CLI command catalog to agents so they can inspect and request
+  Actions with less prompt and tool overhead.
+- Enable automatic prompt caching for AI Gateway models, with an explicit
+  `loop.caching: "off"` opt-out.
+
+### Upgrade notes
+
+- This release contains no SQLite or PostgreSQL schema migration.
+- AI Gateway prompt caching is enabled automatically. Set `loop.caching` to `"off"` for workloads
+  that must retain the previous behavior. Direct-provider models are unchanged unless their AI SDK
+  binding implements caching itself.
+- Deploy `@sixb/core`, its exact worker and storage consumers, and `@sixb/cli` as one coordinated
+  release so packages importing core internals remain on the same version line.
+- This pre-1.0 release has no database downgrade path.
+
+### Package versions
+
+- `0.1.5`: `@sixb/core`, `@sixb/action-worker`, `@sixb/agent-worker`, `@sixb/client`,
+  `@sixb/orchestrator`, `@sixb/pg`, `@sixb/pipeline-worker`, `@sixb/projection-worker`,
+  `@sixb/rules-worker`, `@sixb/server`, `@sixb/sqlite`, `@sixb/sync-worker`,
+  `@sixb/workflow-worker`, and `@sixb/cli`.
+
 ## 2026-09-01 — Google connector 0.1.4
 
 - `@sixb/connector-google` `0.1.4`: add the complete stable Google Meet REST API v2 surface for
