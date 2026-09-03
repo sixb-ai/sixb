@@ -1,4 +1,5 @@
 import type {
+  CreateAuthInvitationResponse,
   GetAuthInvitationOptionsResponse,
   ListAuthInvitationsResponse,
   ListAuthMembersResponse,
@@ -31,6 +32,7 @@ import {
   AlertDialogTitle,
   Badge,
   Button,
+  Checkbox,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -58,8 +60,10 @@ import { cn } from "@sixb/ui/lib/utils"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Ban,
+  Check,
   CheckCircle2,
   Clock3,
+  Copy,
   Loader2,
   Mail,
   MoreHorizontal,
@@ -67,6 +71,7 @@ import {
   Pencil,
   RotateCcw,
   Search,
+  TriangleAlert,
   UsersRound,
   XCircle,
 } from "lucide-react"
@@ -91,6 +96,9 @@ type Invitation = ListAuthInvitationsResponse["invitations"][number]
 type InvitationCreateCapability =
   GetAuthInvitationOptionsResponse["capabilities"]["createInvitation"]
 type InvitationDestination = GetAuthInvitationOptionsResponse["destinations"][number]
+type RevealedInvitationLink = NonNullable<CreateAuthInvitationResponse["delivery"]["link"]> & {
+  readonly email: string
+}
 type MemberAction = "suspend" | "reactivate"
 
 const memberListOptions = {
@@ -115,6 +123,15 @@ const STATUS_FILTERS: readonly { readonly id: StatusFilter; readonly label: stri
 
 function displayName(user: MemberUser): string {
   return user.displayName?.trim() || user.email
+}
+
+function formatDateTime(timestamp: string): string {
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) return "at an unknown time"
+  return date.toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  })
 }
 
 function initials(user: MemberUser): string {
@@ -263,6 +280,8 @@ function InviteMembersCard({
   onDestinationChange,
   selectedGroupIds,
   onGroupsChange,
+  revealLink,
+  onRevealLinkChange,
   onSubmit,
   isSubmitting,
   errorMessage,
@@ -277,10 +296,13 @@ function InviteMembersCard({
   readonly onDestinationChange: (destinationId: string) => void
   readonly selectedGroupIds: readonly string[]
   readonly onGroupsChange: (groupIds: string[]) => void
+  readonly revealLink: boolean
+  readonly onRevealLinkChange: (revealLink: boolean) => void
   readonly onSubmit: (body: {
     email: string
     groupIds: string[]
     destinationId?: "atlas" | "app"
+    revealLink?: boolean
   }) => void
   readonly isSubmitting: boolean
   readonly errorMessage: string | null
@@ -300,6 +322,7 @@ function InviteMembersCard({
       email: email.trim(),
       groupIds: [...selectedGroupIds],
       ...(destinationId === "atlas" || destinationId === "app" ? { destinationId } : {}),
+      ...(revealLink ? { revealLink: true } : {}),
     })
   }
 
@@ -387,6 +410,25 @@ function InviteMembersCard({
               disabled={disabled || isSubmitting}
               emptyMessage="You have no groups available to assign."
             />
+
+            <div className="mt-4 flex items-start gap-3 rounded-lg border border-border/60 bg-muted/20 p-3.5">
+              <Checkbox
+                id="invite-reveal-link"
+                checked={revealLink}
+                onCheckedChange={(checked) => onRevealLinkChange(checked === true)}
+                disabled={disabled || isSubmitting}
+                className="mt-0.5"
+              />
+              <div className="min-w-0">
+                <label htmlFor="invite-reveal-link" className="text-sm font-medium text-foreground">
+                  Show a copyable invitation link
+                </label>
+                <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                  Use only as a fallback. With magic-link authentication, the link signs in as this
+                  recipient.
+                </p>
+              </div>
+            </div>
           </div>
 
           {errorMessage && (
@@ -404,6 +446,79 @@ function InviteMembersCard({
         </div>
       </form>
     </section>
+  )
+}
+
+function InvitationLinkReveal({
+  link,
+  onDone,
+}: {
+  readonly link: RevealedInvitationLink
+  readonly onDone: () => void
+}) {
+  const [copied, setCopied] = useState(false)
+  const [copyFailed, setCopyFailed] = useState(false)
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(link.url)
+      setCopied(true)
+      setCopyFailed(false)
+    } catch {
+      setCopied(false)
+      setCopyFailed(true)
+    }
+  }
+
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>Copy the invitation link</DialogTitle>
+        <DialogDescription>
+          A link was created for {link.email}. It is shown only for this request.
+        </DialogDescription>
+      </DialogHeader>
+
+      <div className="space-y-4">
+        <div className="flex items-stretch overflow-hidden rounded-lg border border-border/60 bg-background">
+          <code className="min-w-0 flex-1 break-all px-3 py-2.5 font-mono text-xs leading-relaxed text-foreground">
+            {link.url}
+          </code>
+          <button
+            type="button"
+            onClick={copy}
+            className={cn(
+              "flex shrink-0 items-center gap-1.5 border-l border-border/60 bg-card px-3.5 text-xs font-medium transition-colors hover:bg-accent",
+              copied ? "text-emerald-700 dark:text-emerald-300" : "text-foreground"
+            )}
+          >
+            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
+
+        <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
+          <TriangleAlert className="mt-px h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+          <p className="text-xs text-amber-700 dark:text-amber-300">
+            Treat this link as sensitive and verify the recipient through another trusted channel.
+            Magic links can be used once
+            {link.expiresAt ? ` and expire ${formatDateTime(link.expiresAt)}` : ""}.
+          </p>
+        </div>
+
+        {copyFailed ? (
+          <p className="text-xs text-muted-foreground">
+            Clipboard access failed. Select the link above and copy it manually.
+          </p>
+        ) : null}
+      </div>
+
+      <DialogFooter>
+        <Button type="button" onClick={onDone}>
+          Done
+        </Button>
+      </DialogFooter>
+    </>
   )
 }
 
@@ -495,6 +610,8 @@ export function SettingsMembersPage() {
   const [inviteEmail, setInviteEmail] = useState("")
   const [inviteDestinationId, setInviteDestinationId] = useState("")
   const [inviteGroupIds, setInviteGroupIds] = useState<string[]>([])
+  const [revealInviteLink, setRevealInviteLink] = useState(false)
+  const [revealedInviteLink, setRevealedInviteLink] = useState<RevealedInvitationLink | null>(null)
   const [revokingInvitationId, setRevokingInvitationId] = useState<string | null>(null)
   const [showPastInvitations, setShowPastInvitations] = useState(false)
 
@@ -641,6 +758,12 @@ export function SettingsMembersPage() {
   const createInvitation = useMutation({
     ...createAuthInvitationMutation(),
     onSuccess: async (result) => {
+      if (result.delivery.link) {
+        setRevealedInviteLink({
+          ...result.delivery.link,
+          email: result.invitation.email,
+        })
+      }
       toast.success(
         result.delivery.status === "sent"
           ? `Invitation sent to ${result.invitation.email}.`
@@ -648,6 +771,7 @@ export function SettingsMembersPage() {
       )
       setInviteEmail("")
       setInviteGroupIds([])
+      setRevealInviteLink(false)
       // Land on the invitations tab so the new invite is visible immediately.
       setActiveTab("invitations")
       await refreshInvitations()
@@ -767,12 +891,15 @@ export function SettingsMembersPage() {
         onDestinationChange={setInviteDestinationId}
         selectedGroupIds={inviteGroupIds}
         onGroupsChange={setInviteGroupIds}
+        revealLink={revealInviteLink}
+        onRevealLinkChange={setRevealInviteLink}
         onSubmit={(body) =>
           createInvitation.mutate({
             body: {
               email: body.email,
               ...(body.groupIds.length > 0 ? { groupIds: body.groupIds } : {}),
               ...(body.destinationId ? { destinationId: body.destinationId } : {}),
+              ...(body.revealLink ? { revealLink: true } : {}),
             },
           })
         }
@@ -1251,6 +1378,28 @@ export function SettingsMembersPage() {
                 </Button>
               </DialogFooter>
             </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={revealedInviteLink !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRevealedInviteLink(null)
+            createInvitation.reset()
+          }
+        }}
+      >
+        <DialogContent>
+          {revealedInviteLink ? (
+            <InvitationLinkReveal
+              link={revealedInviteLink}
+              onDone={() => {
+                setRevealedInviteLink(null)
+                createInvitation.reset()
+              }}
+            />
           ) : null}
         </DialogContent>
       </Dialog>

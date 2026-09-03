@@ -1140,6 +1140,7 @@ export type CreateAuthInvitationData = {
     destinationId?: "atlas" | "app"
     expiresAt?: string
     returnTo?: string
+    revealLink?: boolean
   }
   path?: never
   query?: never
@@ -1205,6 +1206,10 @@ export type CreateAuthInvitationResponses = {
     }
     delivery: {
       status: "sent" | "skipped" | "rate_limited" | "not_supported"
+      link?: {
+        url: string
+        expiresAt?: string
+      }
     }
   }
 }

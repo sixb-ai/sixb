@@ -22,6 +22,12 @@ export const AuthInvitationSchema = z.object({
 
 export const AuthInvitationDeliverySchema = z.object({
   status: z.enum(["sent", "skipped", "rate_limited", "not_supported"]),
+  link: z
+    .object({
+      url: z.string().url(),
+      expiresAt: z.string().optional(),
+    })
+    .optional(),
 })
 
 export const AuthInvitationGroupOptionSchema = AuthGroupOptionSchema
@@ -230,6 +236,7 @@ export const CreateAuthInvitationBodySchema = z.object({
   destinationId: z.enum(["atlas", "app"]).optional(),
   expiresAt: z.string().optional(),
   returnTo: z.string().optional(),
+  revealLink: z.boolean().optional(),
 })
 
 export const CreateAuthInvitationResponseSchema = z.object({

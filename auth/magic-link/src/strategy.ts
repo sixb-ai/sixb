@@ -12,6 +12,8 @@ import type {
   MagicLinkPeekResult,
   MagicLinkRequestInput,
   MagicLinkRequestResult,
+  MagicLinkRequestStatus,
+  RevealedInvitationLink,
 } from "@sixb/core/auth/strategy"
 import type { AuthStorage } from "@sixb/core/storage"
 import { createMagicLinkEmail, type SendMagicLinkInput } from "./email"
@@ -56,6 +58,10 @@ export function magicLink(options: MagicLinkOptions): MagicLinkAuthStrategy {
   return new MagicLinkAuthStrategyImpl(options)
 }
 
+type MagicLinkIssueResult =
+  | { readonly status: Exclude<MagicLinkRequestStatus, "sent"> }
+  | { readonly status: "sent"; readonly link: RevealedInvitationLink }
+
 class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
   readonly kind = "magicLink"
   readonly id: string
@@ -85,6 +91,30 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
   }
 
   async requestMagicLink(input: MagicLinkRequestInput): Promise<MagicLinkRequestResult> {
+    const result = await this.issueMagicLink(input)
+    // A public sign-in request must never receive its credential in the response.
+    return { status: result.status }
+  }
+
+  async deliverInvitation(input: InvitationDeliveryInput): Promise<InviteDeliveryResult> {
+    const result = await this.issueMagicLink({
+      projectId: input.projectId,
+      authStorage: input.authStorage,
+      email: input.invitation.email,
+      audience: input.audience,
+      returnTo: input.returnTo,
+      requestOrigin: input.requestOrigin,
+      now: input.now,
+    })
+
+    if (result.status !== "sent" || !input.revealLink) {
+      return { status: result.status }
+    }
+
+    return result
+  }
+
+  private async issueMagicLink(input: MagicLinkRequestInput): Promise<MagicLinkIssueResult> {
     const now = input.now ? new Date(input.now) : new Date()
     const email = normalizeEmail(input.email)
     if (!email || !this.isAllowedEmail(email)) {
@@ -107,6 +137,7 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
 
     const credential = createMagicLinkCredential()
     const magicLinkId = `ml_${randomUUID()}`
+    const expiresAt = new Date(now.getTime() + this.magicLinkTtlMs)
     await input.authStorage.magicLinks.create({
       id: magicLinkId,
       projectId: input.projectId,
@@ -116,7 +147,7 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
       tokenHash: credential.tokenHash,
       returnTo: input.returnTo,
       createdAt: now,
-      expiresAt: new Date(now.getTime() + this.magicLinkTtlMs),
+      expiresAt,
     })
 
     const link = this.createCallbackUrl({
@@ -145,19 +176,13 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
       throw error
     }
 
-    return { status: "sent" }
-  }
-
-  async deliverInvitation(input: InvitationDeliveryInput): Promise<InviteDeliveryResult> {
-    return this.requestMagicLink({
-      projectId: input.projectId,
-      authStorage: input.authStorage,
-      email: input.invitation.email,
-      audience: input.audience,
-      returnTo: input.returnTo,
-      requestOrigin: input.requestOrigin,
-      now: input.now,
-    })
+    return {
+      status: "sent",
+      link: {
+        url: link,
+        expiresAt,
+      },
+    }
   }
 
   async validateInvitationRecipient(

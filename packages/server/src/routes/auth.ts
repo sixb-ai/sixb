@@ -11,6 +11,7 @@ import {
   createSessionCredential,
   generateCsrfToken,
   getCookie,
+  type InviteDeliveryResult,
   isMagicLinkAuthStrategy,
   isOidcAuthStrategy,
   type MagicLinkAuthStrategy,
@@ -901,6 +902,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
               groupIds: parsed.groupIds,
               expiresAt: parseDate(parsed.expiresAt),
               returnTo: deliveryContext.returnTo,
+              revealLink: parsed.revealLink,
             },
             {
               ...authOptions,
@@ -915,7 +917,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           return jsonResponse(
             {
               invitation: serializeInvitation(result.invitation),
-              delivery: result.delivery,
+              delivery: serializeInvitationDelivery(result.delivery),
             },
             201
           )
@@ -2274,6 +2276,20 @@ function serializeInvitation(invitation: InvitationRecord) {
     expiresAt: toIsoString(invitation.expiresAt),
     acceptedAt: invitation.acceptedAt ? toIsoString(invitation.acceptedAt) : undefined,
     revokedAt: invitation.revokedAt ? toIsoString(invitation.revokedAt) : undefined,
+  }
+}
+
+function serializeInvitationDelivery(delivery: InviteDeliveryResult) {
+  return {
+    status: delivery.status,
+    ...(delivery.link
+      ? {
+          link: {
+            url: delivery.link.url,
+            expiresAt: delivery.link.expiresAt ? toIsoString(delivery.link.expiresAt) : undefined,
+          },
+        }
+      : {}),
   }
 }
 
