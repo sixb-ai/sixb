@@ -1,5 +1,6 @@
 import type { SixbHostView } from "@sixb/core"
 import type { Elysia } from "elysia"
+import type { LanguageModelDisplayResolver } from "./models-dev/display"
 import { registerActionRunRoutes } from "./routes/action-runs"
 import { registerActionRoutes } from "./routes/actions"
 import { registerAgentApiGatewayRoutes } from "./routes/agent-api-gateway"
@@ -31,6 +32,7 @@ import { registerWorkflowRoutes } from "./routes/workflows"
 
 export interface HttpRouteOptions {
   readonly connectorConnections: ConnectorConnectionRouteOptions
+  readonly modelDisplayResolver?: LanguageModelDisplayResolver
 }
 
 export function registerHttpRoutes(app: Elysia, host: SixbHostView, options: HttpRouteOptions) {
@@ -52,7 +54,7 @@ export function registerHttpRoutes(app: Elysia, host: SixbHostView, options: Htt
   registerFileRoutes(app, host)
   registerActionRunRoutes(app, host)
   registerAgentRoutes(app, host)
-  registerModelRoutes(app, host)
+  registerModelRoutes(app, host, { displayResolver: options.modelDisplayResolver })
   registerLinkRoutes(app, host)
   registerTelemetryRoutes(app, host)
   registerEventRoutes(app, host)

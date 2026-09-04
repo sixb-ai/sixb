@@ -10,11 +10,49 @@ import type {
   AgentMessageRecord,
   AgentRunRecord,
   AgentThreadRecord,
+  ConversationAgentRunSpec,
   CreateAgentContextCheckpointInput,
   CreateSubagentRunInput,
   SubagentRunRecord,
   SubagentRunResult,
 } from "./types"
+
+/** Validate the provider-neutral model selection captured for a conversational turn. */
+export function assertConversationAgentRunSpec(
+  spec: ConversationAgentRunSpec,
+  prefix = "Sixb"
+): void {
+  if (!isRecord(spec) || !isRecord(spec.model)) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Conversational Agent run spec must contain a model reference.`
+    )
+  }
+  for (const [name, value] of [
+    ["model.provider", spec.model.provider],
+    ["model.modelId", spec.model.modelId],
+  ] as const) {
+    if (typeof value !== "string" || value.trim().length === 0) {
+      throw new AgentStorageError(
+        "invalid_input",
+        `[${prefix}] Conversational Agent run '${name}' must not be empty.`
+      )
+    }
+  }
+  if (
+    spec.reasoning !== undefined &&
+    !(AGENT_REASONING_LEVELS as readonly string[]).includes(spec.reasoning)
+  ) {
+    throw new AgentStorageError(
+      "invalid_input",
+      `[${prefix}] Conversational Agent reasoning must be one of: ${AGENT_REASONING_LEVELS.join(", ")}.`
+    )
+  }
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
 
 /** Validate the semantic link between a conversational Agent run and its immutable execution. */
 export async function assertAgentRunExecution(input: {

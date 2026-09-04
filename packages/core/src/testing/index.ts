@@ -13,6 +13,10 @@ export {
   seedAiCostStorageContractUsage,
 } from "./ai-cost-storage-contract"
 export {
+  type AiModelCallGroupsContractStorage,
+  runAiModelCallGroupsContractSuite,
+} from "./ai-model-call-groups-contract"
+export {
   type AiUsageStorageContractSuiteOptions,
   runAiUsageStorageContractSuite,
   seedAiUsageStorageContractExecutions,

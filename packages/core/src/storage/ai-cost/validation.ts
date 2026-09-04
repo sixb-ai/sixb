@@ -81,12 +81,42 @@ export function normalizeAiModelCallCostRecord(
     projectId: input.projectId,
     usageRecordId: input.usageRecordId,
     pricingContext: normalizeAiPricingContext(input.pricingContext),
-    priceSource: normalizePriceSource(input.priceSource),
     ratedAt: cloneDate(input.ratedAt, "cost record ratedAt"),
   }
 
-  if (input.status === "rated") return normalizeRatedCost(input, base)
-  if (input.status === "unpriceable") return normalizeUnpriceableCost(input, base)
+  if (input.status === "reported") {
+    assertNonBlank(input.reportSource.providerId, "report source providerId")
+    assertNonBlank(input.reportSource.responseId, "report source responseId")
+    const billingIdentity = normalizeBillingIdentity(input.billingIdentity)
+    if (billingIdentity.providerId !== input.reportSource.providerId) {
+      throw new TypeError("[Sixb] AI reported cost provider does not match its billing identity.")
+    }
+    return {
+      ...base,
+      status: "reported",
+      billingIdentity,
+      money: {
+        currency: normalizeCurrency(input.money.currency),
+        amountNanos: parseNonnegativeInt64(input.money.amountNanos, "money amountNanos").toString(),
+      },
+      reportSource: {
+        providerId: input.reportSource.providerId,
+        responseId: input.reportSource.responseId,
+      },
+    }
+  }
+  if (input.status === "rated") {
+    return normalizeRatedCost(input, {
+      ...base,
+      priceSource: normalizePriceSource(input.priceSource),
+    })
+  }
+  if (input.status === "unpriceable") {
+    return normalizeUnpriceableCost(input, {
+      ...base,
+      priceSource: normalizePriceSource(input.priceSource),
+    })
+  }
   throw new TypeError("[Sixb] AI cost status is invalid.")
 }
 
@@ -99,6 +129,12 @@ export function aiModelCallCostMatchesUsage(
     return false
   }
   if (record.status === "unpriceable") return true
+  if (record.status === "reported") {
+    return (
+      record.billingIdentity.providerId === usageRecord.providerId &&
+      record.billingIdentity.modelId === usageRecord.requestedModelId
+    )
+  }
 
   const usage = normalizeAiModelCallUsage(usageRecord.usage)
   const components = new Map(record.components.map((component) => [component.meter, component]))

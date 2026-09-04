@@ -3,7 +3,6 @@ import {
   getProjectInfoOptions,
   getWorkflowRunOptions,
   listActionsOptions,
-  listAgentsOptions,
   listConnectorsOptions,
   listDatasetsOptions,
   listObjectsPageOptions,
@@ -296,11 +295,6 @@ export function ProjectWorkspace() {
     enabled: !!projectInfo,
   })
 
-  const { data: agents = [] } = useQuery({
-    ...listAgentsOptions(),
-    enabled: !!projectInfo,
-  })
-
   const selectedObjectIdForSidebar = objectIdFromUrl
 
   useEffect(() => {
@@ -313,7 +307,6 @@ export function ProjectWorkspace() {
       projectionCount,
       workflowCount: workflows.length,
       actionCount: actions.length,
-      agentCount: agents.length,
       ruleCount: rules.length,
       ontologyCount: objectTypes.length,
     })
@@ -327,7 +320,6 @@ export function ProjectWorkspace() {
     projectionCount,
     workflows.length,
     actions.length,
-    agents.length,
     rules.length,
     objectTypes.length,
     setSidebarData,

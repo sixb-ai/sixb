@@ -11,6 +11,7 @@ import {
 } from "../execution/agent"
 import { ensureExecutionRecord, executionRecordInputFromRuntime } from "../execution/durable"
 import type { ExecutionContext } from "../execution/types"
+import type { LanguageModelCatalog, LanguageModelRef } from "../models"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { SecurityDefinitionCatalog } from "../security"
 import {
@@ -18,6 +19,7 @@ import {
   AgentStorageError,
   type AgentThreadRecord,
   type ConversationAgentRunRecord,
+  type ConversationAgentRunSpec,
 } from "../storage/agents"
 import type { CreateExecutionInput } from "../storage/executions"
 import { ensureAgentExecutionIdentity, resolveAgentExecutionAuthorization } from "./authority"
@@ -28,7 +30,7 @@ import { AgentRequestError } from "./errors"
 import { createAgentMessageId, createAgentRunId, createAgentThreadId } from "./ids"
 import { MAIN_AGENT_ID } from "./main"
 import { publishAgentRunActivity } from "./streams"
-import type { AgentDefinition } from "./types"
+import { AGENT_REASONING_LEVELS, type AgentDefinition, type AgentReasoningLevel } from "./types"
 
 export interface RequestAgentRunInput {
   /** The agent to run. */
@@ -41,6 +43,10 @@ export interface RequestAgentRunInput {
   readonly context?: readonly AgentContextEntryInput[]
   /** Continue an existing thread. Omitted → a fresh thread is created for this agent. */
   readonly threadId?: string
+  /** Configured language model selected for this turn. Omitted uses the agent default. */
+  readonly model?: LanguageModelRef
+  /** Provider-neutral reasoning effort selected for this turn. */
+  readonly reasoning?: AgentReasoningLevel
   /** Title to stamp on the thread when one is created. */
   readonly title?: string
   /** Explicit id for the trigger (user) message. Defaults to a generated id. */
@@ -71,10 +77,12 @@ export async function requestAgentRun(
   execution: ExecutionContext,
   security: SecurityDefinitionCatalog,
   agent: AgentDefinition,
-  input: RequestAgentRunInput
+  input: RequestAgentRunInput,
+  models?: LanguageModelCatalog
 ): Promise<RequestAgentRunResult> {
   assertAuthorized(runtime, { kind: "agent.run", agentId: agent.id })
   assertRequestAuthorityCanRunAgent(runtime, agent)
+  const spec = resolveConversationRunSpec({ agent, models, input })
 
   // Resolve context before creating a thread: invalid or inaccessible references must not leave an
   // empty conversation behind. The resulting parts are the exact snapshot persisted below.
@@ -148,6 +156,7 @@ export async function requestAgentRun(
         threadId: thread.id,
         agentId: agent.id,
         triggerMessageId,
+        spec,
         requesterGroupIds,
       })
     })
@@ -225,12 +234,55 @@ export async function retryAgentRun(
       threadId: failedRun.threadId,
       agentId: agent.id,
       triggerMessageId: failedRun.triggerMessageId,
+      spec:
+        failedRun.spec ??
+        resolveConversationRunSpec({
+          agent,
+          input: {},
+        }),
       requesterGroupIds,
     })
   })
   await publishRunActivity(runtime, run)
   const jobId = await dispatchAgentRun(runtime, agents, runId)
   return { run, ...(jobId ? { jobId } : {}), createdThread: false }
+}
+
+function resolveConversationRunSpec(input: {
+  readonly agent: AgentDefinition
+  readonly models?: LanguageModelCatalog
+  readonly input: Pick<RequestAgentRunInput, "model" | "reasoning">
+}): ConversationAgentRunSpec {
+  const selected = input.input.model ?? input.agent.model
+  const model =
+    input.models === undefined
+      ? selected.provider === input.agent.model.provider &&
+        selected.modelId === input.agent.model.modelId
+        ? selected
+        : null
+      : input.models.getByRef(selected)
+  if (model === null) {
+    throw new AgentRequestError(
+      "model_not_found",
+      `[Sixb] Language model '${selected.provider}/${selected.modelId}' is not in the project model catalog.`
+    )
+  }
+
+  const reasoning = input.input.reasoning ?? input.agent.reasoning
+  if (
+    reasoning !== undefined &&
+    !(AGENT_REASONING_LEVELS as readonly string[]).includes(reasoning)
+  ) {
+    throw new AgentRequestError(
+      "invalid_model_selection",
+      `[Sixb] Agent reasoning must be one of: ${AGENT_REASONING_LEVELS.join(", ")}.`
+    )
+  }
+
+  return Object.freeze({
+    model: Object.freeze({ provider: selected.provider, modelId: selected.modelId }),
+    ...(reasoning === undefined ? {} : { reasoning }),
+  })
 }
 
 async function prepareDurableAgentExecution(

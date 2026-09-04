@@ -1,10 +1,6 @@
+import type { AgentReasoningLevel } from "@sixb/core"
 import {
   Button,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -15,7 +11,7 @@ import {
   TooltipTrigger,
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { Check, ChevronLeft, History, Info, PanelLeft, Pencil, Search } from "lucide-react"
+import { History, Info, PanelLeft, Pencil, Search } from "lucide-react"
 import { useMemo, useState } from "react"
 import { groupThreadsByDate } from "../format"
 import type { LiveRunState } from "../liveRun"
@@ -26,10 +22,9 @@ import type {
   AgentFileRef,
   AgentMessage,
   AgentThread,
+  LanguageModel,
 } from "../types"
-import { AgentAvatar } from "./AgentAvatar"
 import { Composer } from "./Composer"
-import { RunErrorMarker } from "./MessageView"
 import { Transcript } from "./Transcript"
 
 export interface ConversationPanelProps {
@@ -58,21 +53,15 @@ export interface ConversationPanelProps {
   readonly reconnecting: boolean
   /** A failed send to surface above the composer, or null. English, user-facing. */
   readonly sendError?: string | null
-  /** All registered agents, for the header quick-switcher. */
-  readonly agents: readonly Agent[]
   /** Other chats with this agent, for the header history menu. */
   readonly agentThreads: readonly AgentThread[]
-  /** Whether a home/landing exists to return to (i.e. more than one agent). */
-  readonly canGoHome: boolean
   readonly onSend: (
     text: string,
     attachments: readonly AgentFileRef[],
     context: readonly AgentContextEntryInput[]
   ) => void
-  readonly onBackHome: () => void
   readonly onOpenWorkspaceNavigation?: () => void
   readonly onNewChat: () => void
-  readonly onPickAgent: (agentId: string) => void
   readonly onSelectThread: (threadId: string) => void
   readonly composerDisabled: boolean
   readonly composerPending: boolean
@@ -81,6 +70,13 @@ export interface ConversationPanelProps {
   /** A stop has been requested and we're waiting for the run to end. */
   readonly composerStopping: boolean
   readonly onStop: () => void
+  readonly models: readonly LanguageModel[]
+  readonly selectedModel?: LanguageModel
+  readonly selectedReasoning?: AgentReasoningLevel
+  readonly modelsLoading?: boolean
+  readonly modelsError?: boolean
+  readonly onSelectModel: (model: LanguageModel) => void
+  readonly onSelectReasoning: (reasoning: AgentReasoningLevel) => void
   readonly composerPlaceholder?: string
   /** Text to restore into the composer (e.g. after a failed send), applied when the nonce changes. */
   readonly composerDraft?: string
@@ -89,7 +85,7 @@ export interface ConversationPanelProps {
   readonly composerDraftNonce?: number
   readonly ambientContext?: readonly AgentContextInput[]
   readonly compact?: boolean
-  /** Full-page mode uses the persistent thread rail for navigation and agent selection. */
+  /** Full-page mode uses the persistent thread rail for navigation. */
   readonly workspace?: boolean
 }
 
@@ -115,20 +111,23 @@ export function ConversationPanel({
   continuing,
   reconnecting,
   sendError,
-  agents,
   agentThreads,
-  canGoHome,
   onSend,
-  onBackHome,
   onOpenWorkspaceNavigation,
   onNewChat,
-  onPickAgent,
   onSelectThread,
   composerDisabled,
   composerPending,
   composerRunning,
   composerStopping,
   onStop,
+  models,
+  selectedModel,
+  selectedReasoning,
+  modelsLoading,
+  modelsError,
+  onSelectModel,
+  onSelectReasoning,
   composerPlaceholder,
   composerDraft,
   composerDraftAttachments,
@@ -148,20 +147,22 @@ export function ConversationPanel({
     live.parts.length > 0 ||
     awaitingResponse
   const showWelcome = !messagesLoading && !messagesError && !hasActivity && messages.length === 0
-  const renderSendError = (className?: string) =>
-    sendError ? (
-      <div className={cn("mx-auto w-full max-w-3xl px-4 pb-1", className)}>
-        <RunErrorMarker message={sendError} />
-      </div>
-    ) : null
   const renderComposer = (workspaceClassName?: string) => (
     <Composer
       onSend={onSend}
+      error={sendError ?? undefined}
       disabled={composerDisabled}
       pending={composerPending}
       running={composerRunning}
       stopping={composerStopping}
       onStop={onStop}
+      models={models}
+      selectedModel={selectedModel}
+      selectedReasoning={selectedReasoning}
+      modelsLoading={modelsLoading}
+      modelsError={modelsError}
+      onSelectModel={onSelectModel}
+      onSelectReasoning={onSelectReasoning}
       placeholder={composerPlaceholder}
       className={compact ? "px-4 pt-2 pb-4" : workspaceClassName}
       draft={composerDraft}
@@ -188,18 +189,9 @@ export function ConversationPanel({
           >
             <PanelLeft />
           </Button>
-        ) : canGoHome ? (
-          <Button variant="ghost" size="icon-sm" onClick={onBackHome} aria-label="Back to chats">
-            <ChevronLeft />
-          </Button>
         ) : null}
 
-        <AgentIdentity
-          agent={agent}
-          agents={agents}
-          onPickAgent={onPickAgent}
-          interactive={!workspace}
-        />
+        <AgentIdentity agent={agent} />
 
         <div className="ml-auto flex items-center gap-1">
           {!workspace && agentThreads.length > 0 ? (
@@ -230,7 +222,6 @@ export function ConversationPanel({
         >
           <Welcome agent={agent} compact={compact} />
           <div className="shrink-0">
-            {renderSendError("md:px-0")}
             {renderComposer("md:bg-transparent md:px-0 md:pt-0 md:pb-0")}
           </div>
         </div>
@@ -268,10 +259,7 @@ export function ConversationPanel({
             )}
           </div>
 
-          <div className="shrink-0">
-            {renderSendError()}
-            {renderComposer()}
-          </div>
+          <div className="shrink-0">{renderComposer()}</div>
         </>
       )}
     </div>
@@ -367,56 +355,13 @@ function historyGroupLabel(label: string): string {
   return label === "Previous 7 days" ? "This week" : label
 }
 
-function AgentIdentity({
-  agent,
-  agents,
-  onPickAgent,
-  interactive,
-}: {
-  agent: Agent | undefined
-  agents: readonly Agent[]
-  onPickAgent: (agentId: string) => void
-  interactive: boolean
-}) {
+function AgentIdentity({ agent }: { agent: Agent | undefined }) {
   const name = agent?.name ?? "Agent"
 
-  if (!interactive) {
-    return (
-      <div className="flex min-w-0 items-center gap-2.5 px-1.5 py-1">
-        <AgentAvatar name={name} />
-        <span className="truncate text-sm font-medium text-foreground">{name}</span>
-      </div>
-    )
-  }
-
-  if (agents.length <= 1) return null
-
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className="flex min-w-0 items-center gap-2.5 rounded-lg px-1.5 py-1 transition-colors hover:bg-muted"
-        >
-          <AgentAvatar name={name} />
-          <span className="truncate text-sm font-medium text-foreground">{name}</span>
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-64">
-        <DropdownMenuLabel>Switch agent</DropdownMenuLabel>
-        {agents.map((candidate) => (
-          <DropdownMenuItem
-            key={candidate.id}
-            onSelect={() => onPickAgent(candidate.id)}
-            className="gap-2.5"
-          >
-            <AgentAvatar name={candidate.name} className="size-6 text-[10px]" />
-            <span className="min-w-0 flex-1 truncate">{candidate.name}</span>
-            {candidate.id === agent?.id ? <Check className="size-4 shrink-0" /> : null}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <div className="flex min-w-0 items-center px-1.5 py-1">
+      <span className="truncate text-sm font-medium text-foreground">{name}</span>
+    </div>
   )
 }
 
@@ -428,7 +373,6 @@ function Welcome({ agent, compact }: { agent: Agent | undefined; compact: boolea
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center px-4 text-center md:flex-none md:px-0 md:pb-8">
         <div className="inline-flex max-w-full items-center justify-center gap-1.5 md:gap-3">
-          <AgentAvatar name={name} className="hidden size-10 text-sm md:flex" />
           <p className="min-w-0 truncate text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
             {name}
           </p>
@@ -441,7 +385,6 @@ function Welcome({ agent, compact }: { agent: Agent | undefined; compact: boolea
   return (
     <div className="flex min-h-0 flex-1 -translate-y-3 items-center justify-center px-4 text-center">
       <div className="inline-flex max-w-full items-center justify-center gap-3">
-        <AgentAvatar name={name} className="size-9 text-sm md:size-10" />
         <p
           className={cn(
             "min-w-0 truncate font-semibold tracking-tight text-foreground",

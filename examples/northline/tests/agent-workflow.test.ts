@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { lookupResponsePolicy, operationsAssistant } from "../agents/operations-assistant"
+import { languageModels } from "../ai/models"
+import { lookupResponsePolicy } from "../ai/tools"
 import {
   agentServiceAssessmentWorkflow,
   assessServiceCase,
@@ -7,7 +8,12 @@ import {
 
 describe("Northline agent workflow", () => {
   test("provides a manually runnable agent node with a policy tool and structured output", () => {
-    expect(operationsAssistant.tools).toContain(lookupResponsePolicy)
+    expect(languageModels.map((model) => model.modelId)).toEqual([
+      "deepseek/deepseek-v4-flash-vision-exp",
+      "openai/gpt-5.6-luna",
+      "anthropic/claude-haiku-4.5",
+    ])
+    expect(assessServiceCase.toolNames).toContain(lookupResponsePolicy.name)
     expect(agentServiceAssessmentWorkflow.triggers).toEqual([])
     expect(agentServiceAssessmentWorkflow.nodes).toHaveLength(1)
     expect(agentServiceAssessmentWorkflow.nodes[0]).toMatchObject({

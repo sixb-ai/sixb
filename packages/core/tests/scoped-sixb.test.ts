@@ -100,7 +100,10 @@ const contractPipeline: PipelineDefinition =
 const invoicePipeline: PipelineDefinition =
   definePipeline("invoice-pipeline").then(invoicePipelineStep)
 
-const model = {} as Parameters<typeof defineAgent>[1]["model"]
+const model = {
+  provider: "test",
+  modelId: "test-model",
+} as Parameters<typeof defineAgent>[1]["model"]
 
 const contractAgent = defineAgent("contract-agent", {
   name: "Contract Agent",

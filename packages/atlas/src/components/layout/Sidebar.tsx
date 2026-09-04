@@ -65,29 +65,12 @@ const projectNavItems: NavItem[] = [
   { id: "home", label: "Objects", Icon: Box },
   { id: "actions", label: "Actions", Icon: Bolt },
   { id: "workflows", label: "Workflows", Icon: GitBranch },
-  { id: "agents", label: "Agents", Icon: Bot },
+  { id: "agents", label: "Agent", Icon: Bot },
   { id: "ai-usage", label: "AI usage", Icon: ChartNoAxesCombined },
   { id: "logs", label: "Logs", Icon: ScrollText },
   { id: "rules", label: "Rules", Icon: ListChecks },
   { id: "settings", label: "Settings", Icon: Settings },
 ]
-
-function SixbMark({ className }: { className?: string }) {
-  return (
-    <svg
-      aria-hidden="true"
-      className={className}
-      viewBox="0 0 480 394"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <path
-        d="M5.42 162.63 39.47 392.44 342.17 296.69 472.14 104.34 183.6 1.82C120.12 59.31 59.11 114.33 5.42 162.63Z"
-        fill="currentColor"
-      />
-    </svg>
-  )
-}
 
 function apiDocsUrl(): string {
   return new URL("/docs", client.getConfig().baseUrl ?? window.location.origin).toString()
@@ -105,7 +88,6 @@ interface SidebarProps {
   projectionCount?: number
   workflowCount?: number
   actionCount?: number
-  agentCount?: number
   ruleCount?: number
   ontologyCount?: number
   objectCount?: number
@@ -123,7 +105,6 @@ export function Sidebar({
   projectionCount,
   workflowCount,
   actionCount,
-  agentCount,
   ruleCount,
   ontologyCount,
   objectCount,
@@ -137,7 +118,6 @@ export function Sidebar({
     if (id === "pipelines") return pipelineCount
     if (id === "workflows") return workflowCount
     if (id === "actions") return actionCount
-    if (id === "agents") return agentCount
     if (id === "rules") return ruleCount
     if (id === "ontology") return ontologyCount
     return undefined
@@ -199,10 +179,6 @@ export function AtlasSidebarHeader({ selectedProject }: { selectedProject: Proje
   return (
     <SidebarHeader className="h-[54px] justify-center border-b border-sidebar-border">
       <div className="flex items-center gap-3 px-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
-        {/* Sixb's orbit mark anchors Atlas to the website identity. */}
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center text-sidebar-accent-foreground">
-          <SixbMark className="h-[18px] w-[22px]" />
-        </div>
         <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
           <p className="truncate text-[14px] font-semibold tracking-[-0.02em] text-sidebar-accent-foreground">
             Sixb Atlas

@@ -5,9 +5,15 @@ import {
   createTestAgentExecution,
   createTestWorkflowExecution,
   runAiCostStorageContractSuite,
+  runAiModelCallGroupsContractSuite,
   seedAiCostStorageContractUsage,
 } from "@sixb/core/testing"
 import { SqliteStorage } from "../src"
+
+runAiModelCallGroupsContractSuite("SQLite model-call groups", {
+  createStorage: () => new SqliteStorage(),
+  cleanup: (storage) => storage.close(),
+})
 
 const bundles = new Map<AiCostStorage, SqliteStorage>()
 runAiCostStorageContractSuite("SqliteAiCostStorage", {
@@ -88,6 +94,12 @@ describe("SqliteStorage AI accounting", () => {
       expect(overview.totals.costs.amounts).toEqual([
         { currency: "USD", amountNanos: "18446744073709551614" },
       ])
+      const groups = await storage.aiCosts.listModelCallGroups({
+        projectId: "cost-contract-project",
+        from: new Date("2026-08-01T00:00:00.000Z"),
+        to: new Date("2026-08-02T00:00:00.000Z"),
+      })
+      expect(groups.items[0]?.costs.amounts).toEqual(overview.totals.costs.amounts)
     } finally {
       storage.close()
     }
@@ -152,6 +164,23 @@ describe("SqliteStorage AI accounting", () => {
       })
 
       await expect(
+        storage.aiCosts.listModelCallGroups({
+          projectId: "project_1",
+          from: new Date("2026-09-01T00:00:00.000Z"),
+          to: new Date("2026-09-02T00:00:00.000Z"),
+        })
+      ).resolves.toMatchObject({
+        total: 1,
+        items: [
+          {
+            executionId,
+            attribution: { kind: "workflowAgent", workflowId, workflowRunId, nodeRunId },
+            modelCallCount: 1,
+            executions: [{ executionId, modelCallCount: 1 }],
+          },
+        ],
+      })
+      await expect(
         storage.aiCosts.listModelCalls({
           projectId: "project_1",
           from: new Date("2026-09-01T00:00:00.000Z"),
@@ -199,6 +228,7 @@ describe("SqliteStorage AI accounting", () => {
         threadId: "thread_1",
         agentId: "main",
         triggerMessageId: "message_1",
+        spec: { model: { provider: "test", modelId: "test-model" } },
         requesterGroupIds: ["users"],
       })
       await storage.agents.runs.start({
@@ -287,6 +317,7 @@ describe("SqliteStorage AI accounting", () => {
         threadId: "thread_1",
         agentId: "research",
         triggerMessageId: "message_1",
+        spec: { model: { provider: "test", modelId: "test-model" } },
         requesterGroupIds: [],
       })
       await storage.transaction(async (tx) => {

@@ -4855,6 +4855,10 @@
                                 "additionalProperties": false
                               }
                             },
+                            "reportedCallCount": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
                             "ratedCallCount": {
                               "type": "integer",
                               "minimum": 0
@@ -4870,6 +4874,7 @@
                           },
                           "required": [
                             "amounts",
+                            "reportedCallCount",
                             "ratedCallCount",
                             "unpriceableCallCount",
                             "unvaluedCallCount"
@@ -4953,6 +4958,10 @@
                                   "additionalProperties": false
                                 }
                               },
+                              "reportedCallCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
                               "ratedCallCount": {
                                 "type": "integer",
                                 "minimum": 0
@@ -4968,6 +4977,7 @@
                             },
                             "required": [
                               "amounts",
+                              "reportedCallCount",
                               "ratedCallCount",
                               "unpriceableCallCount",
                               "unvaluedCallCount"
@@ -5060,6 +5070,10 @@
                                   "additionalProperties": false
                                 }
                               },
+                              "reportedCallCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
                               "ratedCallCount": {
                                 "type": "integer",
                                 "minimum": 0
@@ -5075,6 +5089,7 @@
                             },
                             "required": [
                               "amounts",
+                              "reportedCallCount",
                               "ratedCallCount",
                               "unpriceableCallCount",
                               "unvaluedCallCount"
@@ -5165,6 +5180,10 @@
                                   "additionalProperties": false
                                 }
                               },
+                              "reportedCallCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
                               "ratedCallCount": {
                                 "type": "integer",
                                 "minimum": 0
@@ -5180,6 +5199,7 @@
                             },
                             "required": [
                               "amounts",
+                              "reportedCallCount",
                               "ratedCallCount",
                               "unpriceableCallCount",
                               "unvaluedCallCount"
@@ -5267,6 +5287,10 @@
                                   "additionalProperties": false
                                 }
                               },
+                              "reportedCallCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
                               "ratedCallCount": {
                                 "type": "integer",
                                 "minimum": 0
@@ -5282,6 +5306,7 @@
                             },
                             "required": [
                               "amounts",
+                              "reportedCallCount",
                               "ratedCallCount",
                               "unpriceableCallCount",
                               "unvaluedCallCount"
@@ -5405,7 +5430,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["rated", "unpriceable", "unvalued"]
+              "enum": ["reported", "rated", "unpriceable", "unvalued"]
             }
           },
           {
@@ -5607,6 +5632,104 @@
                           },
                           "cost": {
                             "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "status": {
+                                    "type": "string",
+                                    "enum": ["reported"]
+                                  },
+                                  "billingIdentity": {
+                                    "type": "object",
+                                    "properties": {
+                                      "providerId": {
+                                        "type": "string"
+                                      },
+                                      "modelId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["providerId", "modelId"],
+                                    "additionalProperties": false
+                                  },
+                                  "pricingContext": {
+                                    "type": "object",
+                                    "properties": {
+                                      "serviceTier": {
+                                        "type": "string"
+                                      },
+                                      "batch": {
+                                        "type": "boolean"
+                                      },
+                                      "region": {
+                                        "type": "string"
+                                      },
+                                      "inferenceGeo": {
+                                        "type": "string"
+                                      },
+                                      "routedProviderId": {
+                                        "type": "string"
+                                      },
+                                      "deploymentId": {
+                                        "type": "string"
+                                      },
+                                      "inferenceProfileId": {
+                                        "type": "string"
+                                      },
+                                      "cacheWriteTtlSeconds": {
+                                        "type": "integer",
+                                        "exclusiveMinimum": true,
+                                        "minimum": 0
+                                      },
+                                      "mode": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  "reportSource": {
+                                    "type": "object",
+                                    "properties": {
+                                      "providerId": {
+                                        "type": "string"
+                                      },
+                                      "responseId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["providerId", "responseId"],
+                                    "additionalProperties": false
+                                  },
+                                  "money": {
+                                    "type": "object",
+                                    "properties": {
+                                      "currency": {
+                                        "type": "string",
+                                        "pattern": "^[A-Z]{3}$"
+                                      },
+                                      "amountNanos": {
+                                        "type": "string",
+                                        "pattern": "^\\d+$"
+                                      }
+                                    },
+                                    "required": ["currency", "amountNanos"],
+                                    "additionalProperties": false
+                                  },
+                                  "ratedAt": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  }
+                                },
+                                "required": [
+                                  "status",
+                                  "billingIdentity",
+                                  "pricingContext",
+                                  "reportSource",
+                                  "money",
+                                  "ratedAt"
+                                ],
+                                "additionalProperties": false
+                              },
                               {
                                 "type": "object",
                                 "properties": {
@@ -5890,7 +6013,7 @@
                           },
                           "valuationStatus": {
                             "type": "string",
-                            "enum": ["rated", "unpriceable", "unvalued"]
+                            "enum": ["reported", "rated", "unpriceable", "unvalued"]
                           }
                         },
                         "required": ["usage", "valuationStatus"],
@@ -5906,6 +6029,467 @@
                     }
                   },
                   "required": ["items", "hasMore", "total"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ai/model-call-groups": {
+      "get": {
+        "summary": "List AI model calls grouped by initiating execution",
+        "tags": ["AI Accounting"],
+        "operationId": "listAiModelCallGroups",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "providerId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "modelId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "valuationStatus",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["reported", "rated", "unpriceable", "unvalued"]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d+$"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "executionId": {
+                            "type": "string"
+                          },
+                          "attribution": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": ["agent"]
+                                  },
+                                  "agentId": {
+                                    "type": "string"
+                                  },
+                                  "agentRunId": {
+                                    "type": "string"
+                                  },
+                                  "threadId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["kind", "agentId", "agentRunId", "threadId"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": ["workflowAgent"]
+                                  },
+                                  "agentId": {
+                                    "type": "string"
+                                  },
+                                  "nodeRunId": {
+                                    "type": "string"
+                                  },
+                                  "workflowId": {
+                                    "type": "string"
+                                  },
+                                  "workflowRunId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "agentId",
+                                  "nodeRunId",
+                                  "workflowId",
+                                  "workflowRunId"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": ["subagent"]
+                                  },
+                                  "subagentRunId": {
+                                    "type": "string"
+                                  },
+                                  "parentRunId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["kind", "subagentRunId", "parentRunId"],
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
+                          "modelCallCount": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "totalTokens": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "costs": {
+                            "type": "object",
+                            "properties": {
+                              "amounts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "currency": {
+                                      "type": "string",
+                                      "pattern": "^[A-Z]{3}$"
+                                    },
+                                    "amountNanos": {
+                                      "type": "string",
+                                      "pattern": "^\\d+$"
+                                    }
+                                  },
+                                  "required": ["currency", "amountNanos"],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "reportedCallCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "ratedCallCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "unpriceableCallCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "unvaluedCallCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            },
+                            "required": [
+                              "amounts",
+                              "reportedCallCount",
+                              "ratedCallCount",
+                              "unpriceableCallCount",
+                              "unvaluedCallCount"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "firstCallAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "lastCallAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "executions": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "executionId": {
+                                  "type": "string"
+                                },
+                                "attribution": {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": ["agent"]
+                                        },
+                                        "agentId": {
+                                          "type": "string"
+                                        },
+                                        "agentRunId": {
+                                          "type": "string"
+                                        },
+                                        "threadId": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["kind", "agentId", "agentRunId", "threadId"],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": ["workflowAgent"]
+                                        },
+                                        "agentId": {
+                                          "type": "string"
+                                        },
+                                        "nodeRunId": {
+                                          "type": "string"
+                                        },
+                                        "workflowId": {
+                                          "type": "string"
+                                        },
+                                        "workflowRunId": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "agentId",
+                                        "nodeRunId",
+                                        "workflowId",
+                                        "workflowRunId"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": ["subagent"]
+                                        },
+                                        "subagentRunId": {
+                                          "type": "string"
+                                        },
+                                        "parentRunId": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["kind", "subagentRunId", "parentRunId"],
+                                      "additionalProperties": false
+                                    }
+                                  ]
+                                },
+                                "modelCallCount": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "totalTokens": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "costs": {
+                                  "type": "object",
+                                  "properties": {
+                                    "amounts": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "currency": {
+                                            "type": "string",
+                                            "pattern": "^[A-Z]{3}$"
+                                          },
+                                          "amountNanos": {
+                                            "type": "string",
+                                            "pattern": "^\\d+$"
+                                          }
+                                        },
+                                        "required": ["currency", "amountNanos"],
+                                        "additionalProperties": false
+                                      }
+                                    },
+                                    "reportedCallCount": {
+                                      "type": "integer",
+                                      "minimum": 0
+                                    },
+                                    "ratedCallCount": {
+                                      "type": "integer",
+                                      "minimum": 0
+                                    },
+                                    "unpriceableCallCount": {
+                                      "type": "integer",
+                                      "minimum": 0
+                                    },
+                                    "unvaluedCallCount": {
+                                      "type": "integer",
+                                      "minimum": 0
+                                    }
+                                  },
+                                  "required": [
+                                    "amounts",
+                                    "reportedCallCount",
+                                    "ratedCallCount",
+                                    "unpriceableCallCount",
+                                    "unvaluedCallCount"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "firstCallAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "lastCallAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "models": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "providerId": {
+                                        "type": "string"
+                                      },
+                                      "modelId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["providerId", "modelId"],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "label": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "executionId",
+                                "modelCallCount",
+                                "costs",
+                                "firstCallAt",
+                                "lastCallAt",
+                                "models"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "canOpenThread": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "executionId",
+                          "modelCallCount",
+                          "costs",
+                          "firstCallAt",
+                          "lastCallAt",
+                          "executions",
+                          "canOpenThread"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["items", "total", "hasMore"],
                   "additionalProperties": false
                 }
               }
@@ -15746,6 +16330,10 @@
                                       "additionalProperties": false
                                     }
                                   },
+                                  "reportedCallCount": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
                                   "ratedCallCount": {
                                     "type": "integer",
                                     "minimum": 0
@@ -15761,6 +16349,7 @@
                                 },
                                 "required": [
                                   "amounts",
+                                  "reportedCallCount",
                                   "ratedCallCount",
                                   "unpriceableCallCount",
                                   "unvaluedCallCount"
@@ -15971,6 +16560,10 @@
                             "additionalProperties": false
                           }
                         },
+                        "reportedCallCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
                         "ratedCallCount": {
                           "type": "integer",
                           "minimum": 0
@@ -15986,6 +16579,7 @@
                       },
                       "required": [
                         "amounts",
+                        "reportedCallCount",
                         "ratedCallCount",
                         "unpriceableCallCount",
                         "unvaluedCallCount"
@@ -17032,6 +17626,10 @@
                                       "additionalProperties": false
                                     }
                                   },
+                                  "reportedCallCount": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
                                   "ratedCallCount": {
                                     "type": "integer",
                                     "minimum": 0
@@ -17047,6 +17645,7 @@
                                 },
                                 "required": [
                                   "amounts",
+                                  "reportedCallCount",
                                   "ratedCallCount",
                                   "unpriceableCallCount",
                                   "unvaluedCallCount"
@@ -24349,6 +24948,33 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "model": {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["provider", "modelId"],
+                    "additionalProperties": false
+                  },
+                  "reasoning": {
+                    "type": "string",
+                    "enum": [
+                      "provider-default",
+                      "none",
+                      "minimal",
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh"
+                    ]
+                  },
                   "attachments": {
                     "type": "array",
                     "items": {
@@ -24487,6 +25113,33 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "model": {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["provider", "modelId"],
+                    "additionalProperties": false
+                  },
+                  "reasoning": {
+                    "type": "string",
+                    "enum": [
+                      "provider-default",
+                      "none",
+                      "minimal",
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh"
+                    ]
+                  },
                   "attachments": {
                     "type": "array",
                     "items": {
@@ -24624,6 +25277,33 @@
                   "text": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "model": {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["provider", "modelId"],
+                    "additionalProperties": false
+                  },
+                  "reasoning": {
+                    "type": "string",
+                    "enum": [
+                      "provider-default",
+                      "none",
+                      "minimal",
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh"
+                    ]
                   },
                   "attachments": {
                     "type": "array",
@@ -24802,6 +25482,33 @@
                           "type": "string",
                           "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                         },
+                        "model": {
+                          "type": "object",
+                          "properties": {
+                            "provider": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "modelId": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["provider", "modelId"],
+                          "additionalProperties": false
+                        },
+                        "reasoning": {
+                          "type": "string",
+                          "enum": [
+                            "provider-default",
+                            "none",
+                            "minimal",
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh"
+                          ]
+                        },
                         "modelId": {
                           "type": "string"
                         },
@@ -24882,6 +25589,10 @@
                                 "additionalProperties": false
                               }
                             },
+                            "reportedCallCount": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
                             "ratedCallCount": {
                               "type": "integer",
                               "minimum": 0
@@ -24897,6 +25608,7 @@
                           },
                           "required": [
                             "amounts",
+                            "reportedCallCount",
                             "ratedCallCount",
                             "unpriceableCallCount",
                             "unvaluedCallCount"
@@ -25421,6 +26133,33 @@
                           "type": "string",
                           "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                         },
+                        "model": {
+                          "type": "object",
+                          "properties": {
+                            "provider": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "modelId": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["provider", "modelId"],
+                          "additionalProperties": false
+                        },
+                        "reasoning": {
+                          "type": "string",
+                          "enum": [
+                            "provider-default",
+                            "none",
+                            "minimal",
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh"
+                          ]
+                        },
                         "modelId": {
                           "type": "string"
                         },
@@ -25501,6 +26240,10 @@
                                 "additionalProperties": false
                               }
                             },
+                            "reportedCallCount": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
                             "ratedCallCount": {
                               "type": "integer",
                               "minimum": 0
@@ -25516,6 +26259,7 @@
                           },
                           "required": [
                             "amounts",
+                            "reportedCallCount",
                             "ratedCallCount",
                             "unpriceableCallCount",
                             "unvaluedCallCount"
@@ -25792,6 +26536,33 @@
                           "type": "string",
                           "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                         },
+                        "model": {
+                          "type": "object",
+                          "properties": {
+                            "provider": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "modelId": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["provider", "modelId"],
+                          "additionalProperties": false
+                        },
+                        "reasoning": {
+                          "type": "string",
+                          "enum": [
+                            "provider-default",
+                            "none",
+                            "minimal",
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh"
+                          ]
+                        },
                         "modelId": {
                           "type": "string"
                         },
@@ -25872,6 +26643,10 @@
                                 "additionalProperties": false
                               }
                             },
+                            "reportedCallCount": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
                             "ratedCallCount": {
                               "type": "integer",
                               "minimum": 0
@@ -25887,6 +26662,7 @@
                           },
                           "required": [
                             "amounts",
+                            "reportedCallCount",
                             "ratedCallCount",
                             "unpriceableCallCount",
                             "unvaluedCallCount"
@@ -26185,6 +26961,33 @@
                             "type": "string",
                             "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                           },
+                          "model": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "modelId": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["provider", "modelId"],
+                            "additionalProperties": false
+                          },
+                          "reasoning": {
+                            "type": "string",
+                            "enum": [
+                              "provider-default",
+                              "none",
+                              "minimal",
+                              "low",
+                              "medium",
+                              "high",
+                              "xhigh"
+                            ]
+                          },
                           "modelId": {
                             "type": "string"
                           },
@@ -26265,6 +27068,10 @@
                                   "additionalProperties": false
                                 }
                               },
+                              "reportedCallCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
                               "ratedCallCount": {
                                 "type": "integer",
                                 "minimum": 0
@@ -26280,6 +27087,7 @@
                             },
                             "required": [
                               "amounts",
+                              "reportedCallCount",
                               "ratedCallCount",
                               "unpriceableCallCount",
                               "unvaluedCallCount"
@@ -26529,6 +27337,33 @@
                       "type": "string",
                       "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                     },
+                    "model": {
+                      "type": "object",
+                      "properties": {
+                        "provider": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "modelId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["provider", "modelId"],
+                      "additionalProperties": false
+                    },
+                    "reasoning": {
+                      "type": "string",
+                      "enum": [
+                        "provider-default",
+                        "none",
+                        "minimal",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh"
+                      ]
+                    },
                     "modelId": {
                       "type": "string"
                     },
@@ -26609,6 +27444,10 @@
                             "additionalProperties": false
                           }
                         },
+                        "reportedCallCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
                         "ratedCallCount": {
                           "type": "integer",
                           "minimum": 0
@@ -26624,6 +27463,7 @@
                       },
                       "required": [
                         "amounts",
+                        "reportedCallCount",
                         "ratedCallCount",
                         "unpriceableCallCount",
                         "unvaluedCallCount"
@@ -26823,16 +27663,110 @@
                         "type": "object",
                         "properties": {
                           "provider": {
-                            "type": "string"
+                            "type": "string",
+                            "minLength": 1
                           },
                           "modelId": {
-                            "type": "string"
+                            "type": "string",
+                            "minLength": 1
                           },
                           "isDefault": {
                             "type": "boolean"
+                          },
+                          "name": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "description": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "publisher": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "logoUrl": {
+                                "type": "string",
+                                "format": "uri"
+                              }
+                            },
+                            "required": ["id", "name"],
+                            "additionalProperties": false
+                          },
+                          "via": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "capabilities": {
+                            "type": "object",
+                            "properties": {
+                              "input": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "enum": ["text", "image", "audio", "video", "pdf"]
+                                }
+                              },
+                              "output": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "enum": ["text", "image", "audio", "video", "pdf"]
+                                }
+                              },
+                              "attachments": {
+                                "type": "boolean"
+                              },
+                              "reasoning": {
+                                "type": "boolean"
+                              },
+                              "tools": {
+                                "type": "boolean"
+                              },
+                              "structuredOutput": {
+                                "type": "boolean"
+                              },
+                              "contextWindowTokens": {
+                                "type": "integer",
+                                "exclusiveMinimum": true,
+                                "minimum": 0
+                              }
+                            },
+                            "required": ["input", "output"],
+                            "additionalProperties": false
+                          },
+                          "reasoningLevels": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "provider-default",
+                                "none",
+                                "minimal",
+                                "low",
+                                "medium",
+                                "high",
+                                "xhigh"
+                              ]
+                            }
                           }
                         },
-                        "required": ["provider", "modelId", "isDefault"],
+                        "required": [
+                          "provider",
+                          "modelId",
+                          "isDefault",
+                          "name",
+                          "publisher",
+                          "capabilities",
+                          "reasoningLevels"
+                        ],
                         "additionalProperties": false
                       }
                     }

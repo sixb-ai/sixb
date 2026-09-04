@@ -165,6 +165,7 @@ describe("/ws/agents", () => {
         threadId,
         agentId,
         triggerMessageId: "msg_queued",
+        spec: { model: { provider: "test", modelId: "test-model" } },
         requesterGroupIds: [],
       })
       const ws = new WebSocket(`${baseUrl.replace("http://", "ws://")}/ws/agents`)
@@ -306,6 +307,7 @@ describe("canAccessAgentRunStream", () => {
       threadId,
       agentId,
       triggerMessageId: "msg_ws_1",
+      spec: { model: { provider: "test", modelId: "test-model" } },
       requesterGroupIds: ["support-users"],
     })
 
@@ -528,6 +530,7 @@ async function advanceDurableRun(
       threadId,
       agentId,
       triggerMessageId: `msg_${input.runId}`,
+      spec: { model: { provider: "test", modelId: "test-model" } },
       requesterGroupIds: [],
     })
   }

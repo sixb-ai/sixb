@@ -4,6 +4,11 @@ import {
   runAiCostStorageContractSuite,
   seedAiCostStorageContractUsage,
 } from "../src/testing/ai-cost-storage-contract"
+import { runAiModelCallGroupsContractSuite } from "../src/testing/ai-model-call-groups-contract"
+
+runAiModelCallGroupsContractSuite("InMemory model-call groups", {
+  createStorage: () => new InMemoryStorage(),
+})
 
 runAiCostStorageContractSuite("InMemoryAiCostStorage contract", {
   createStorage: async () => {

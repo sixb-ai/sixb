@@ -24,19 +24,18 @@ credentials.
 
 ### Optional Operations Assistant
 
-The button at the bottom-right opens an embedded agent panel with the current route and detail
-object attached as context. The demo uses `deepseek/deepseek-v4-flash-vision-exp` through Vercel AI
-Gateway. Run it with your own AI Gateway key:
+The button at the bottom-right opens the project agent with the current route and detail object
+attached as context. Northline configures three language models through Vercel AI Gateway; choose
+the model and reasoning effort from the composer. The first model is the default.
 
 ```bash
 AI_GATEWAY_API_KEY=your_key bun --filter @sixb/example-northline dev
 ```
 
 Without `AI_GATEWAY_API_KEY`, Northline still starts, syncs, and runs normally; only model-backed
-assistant turns are unavailable. To customize the assistant, edit
-[`agents/operations-assistant.ts`](./agents/operations-assistant.ts) and change the model passed to
-`gateway()` and the `instructions` prompt. Agent commands run through the local sandbox provider by
-default.
+assistant turns are unavailable. Customize the model catalog in [`ai/models.ts`](./ai/models.ts)
+and project tools in [`ai/tools.ts`](./ai/tools.ts). Agent commands run through the local sandbox
+provider by default.
 
 To exercise an agent inside a workflow, open **Workflows → Agent service assessment** in Atlas and
 request a run with these values:
@@ -51,29 +50,6 @@ summary: RTU-7 supply fan VFD failed while the building is occupied.
 The single agent node calls `lookup_response_policy` and then produces a structured service
 assessment, making the prompt, tool call, tool result, agent response, and final workflow output
 available from one run.
-
-#### Test conversation compaction
-
-Enable an intentionally small 4,000-token input threshold so compaction is easy to exercise without
-constraining normal Northline conversations:
-
-```bash
-NORTHLINE_AGENT_COMPACTION_DEMO=1 \
-AI_GATEWAY_API_KEY=your_key \
-bun --filter @sixb/example-northline dev
-```
-
-Then, in one thread:
-
-1. Send six to eight messages of roughly 1,500–2,000 characters each, including a distinct fact in
-   the earliest and latest messages.
-2. Wait for each assistant response before sending the next message.
-3. After **Condensing earlier conversation…** appears, ask the assistant to recall both facts.
-
-The next response should continue normally, and every original message should remain visible in
-the thread. Outside this opt-in demonstration mode, Northline uses Sixb's automatic model-derived
-context budget. The worker resolves the selected model from its pinned Models.dev snapshot and
-falls back to a 128,000-token window when no exact catalog entry exists.
 
 ### Hosted sandbox
 
@@ -189,10 +165,11 @@ Follow one connected path rather than browsing by feature:
 10. [`actions/dispatchWorkOrder.ts`](./actions/dispatchWorkOrder.ts)
 11. [`rules/service-operations.ts`](./rules/service-operations.ts)
 12. [`workflows/service-response.ts`](./workflows/service-response.ts)
-13. [`agents/operations-assistant.ts`](./agents/operations-assistant.ts)
-14. [`app/_components/operations-assistant.tsx`](./app/_components/operations-assistant.tsx)
-15. [`app/service-cases/[id]/page.tsx`](./app/service-cases/%5Bid%5D/page.tsx)
-16. [`tests/scenario.test.ts`](./tests/scenario.test.ts)
+13. [`ai/models.ts`](./ai/models.ts)
+14. [`ai/tools.ts`](./ai/tools.ts)
+15. [`app/_components/operations-assistant.tsx`](./app/_components/operations-assistant.tsx)
+16. [`app/service-cases/[id]/page.tsx`](./app/service-cases/%5Bid%5D/page.tsx)
+17. [`tests/scenario.test.ts`](./tests/scenario.test.ts)
 
 ## Why the example is deliberately bounded
 

@@ -1,9 +1,16 @@
-import type { AiBillableMeter, AiModelCallCostRecord, AiPricingContext } from "./types"
+import type {
+  AiBillableMeter,
+  AiCostReportSource,
+  AiModelCallCostRecord,
+  AiPriceSource,
+  AiPricingContext,
+} from "./types"
 import { normalizeAiPricingContext } from "./validation"
 
 export interface AiModelCallCostDetails {
   readonly pricingContext: AiPricingContext
-  readonly priceSource: Omit<AiModelCallCostRecord["priceSource"], "observedAt"> & {
+  readonly reportSource?: AiCostReportSource
+  readonly priceSource?: Omit<AiPriceSource, "observedAt"> & {
     readonly observedAt: string
   }
   readonly components?: Extract<AiModelCallCostRecord, { status: "rated" }>["components"]
@@ -11,6 +18,9 @@ export interface AiModelCallCostDetails {
 }
 
 export function aiModelCallCostDetails(record: AiModelCallCostRecord): AiModelCallCostDetails {
+  if (record.status === "reported") {
+    return { pricingContext: record.pricingContext, reportSource: record.reportSource }
+  }
   return {
     pricingContext: record.pricingContext,
     priceSource: { ...record.priceSource, observedAt: record.priceSource.observedAt.toISOString() },
@@ -24,6 +34,22 @@ export function aiModelCallCostDetails(record: AiModelCallCostRecord): AiModelCa
 export function parseAiModelCallCostDetails(value: unknown): AiModelCallCostDetails {
   const parsed: unknown = typeof value === "string" ? JSON.parse(value) : value
   if (!isRecord(parsed)) throw invalidDetails()
+  if (parsed.reportSource !== undefined) {
+    if (
+      !isRecord(parsed.reportSource) ||
+      parsed.priceSource !== undefined ||
+      parsed.components !== undefined ||
+      parsed.missingMeters !== undefined
+    )
+      throw invalidDetails()
+    return {
+      pricingContext: pricingContextFromUnknown(parsed.pricingContext),
+      reportSource: {
+        providerId: requiredString(parsed.reportSource.providerId),
+        responseId: requiredString(parsed.reportSource.responseId),
+      },
+    }
+  }
   const priceSource = parsed.priceSource
   if (!isRecord(priceSource)) throw invalidDetails()
   const components = parsed.components

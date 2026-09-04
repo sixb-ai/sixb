@@ -198,6 +198,9 @@ import type {
   ListAgentThreadsData,
   ListAgentThreadsErrors,
   ListAgentThreadsResponses,
+  ListAiModelCallGroupsData,
+  ListAiModelCallGroupsErrors,
+  ListAiModelCallGroupsResponses,
   ListAiModelCallsData,
   ListAiModelCallsErrors,
   ListAiModelCallsResponses,
@@ -792,6 +795,18 @@ export const listAiModelCalls = <ThrowOnError extends boolean = false>(
     url: "/api/ai/model-calls",
     ...options,
   })
+
+/**
+ * List AI model calls grouped by initiating execution
+ */
+export const listAiModelCallGroups = <ThrowOnError extends boolean = false>(
+  options: Options<ListAiModelCallGroupsData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    ListAiModelCallGroupsResponses,
+    ListAiModelCallGroupsErrors,
+    ThrowOnError
+  >({ url: "/api/ai/model-call-groups", ...options })
 
 /**
  * Get current project metadata

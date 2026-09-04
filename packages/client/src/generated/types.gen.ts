@@ -1694,6 +1694,7 @@ export type GetAiAccountingOverviewResponses = {
           currency: string
           amountNanos: string
         }>
+        reportedCallCount: number
         ratedCallCount: number
         unpriceableCallCount: number
         unvaluedCallCount: number
@@ -1717,6 +1718,7 @@ export type GetAiAccountingOverviewResponses = {
           currency: string
           amountNanos: string
         }>
+        reportedCallCount: number
         ratedCallCount: number
         unpriceableCallCount: number
         unvaluedCallCount: number
@@ -1742,6 +1744,7 @@ export type GetAiAccountingOverviewResponses = {
           currency: string
           amountNanos: string
         }>
+        reportedCallCount: number
         ratedCallCount: number
         unpriceableCallCount: number
         unvaluedCallCount: number
@@ -1767,6 +1770,7 @@ export type GetAiAccountingOverviewResponses = {
           currency: string
           amountNanos: string
         }>
+        reportedCallCount: number
         ratedCallCount: number
         unpriceableCallCount: number
         unvaluedCallCount: number
@@ -1791,6 +1795,7 @@ export type GetAiAccountingOverviewResponses = {
           currency: string
           amountNanos: string
         }>
+        reportedCallCount: number
         ratedCallCount: number
         unpriceableCallCount: number
         unvaluedCallCount: number
@@ -1812,7 +1817,7 @@ export type ListAiModelCallsData = {
     providerId?: string
     modelId?: string
     executionId?: string
-    valuationStatus?: "rated" | "unpriceable" | "unvalued"
+    valuationStatus?: "reported" | "rated" | "unpriceable" | "unvalued"
     limit?: string
     offset?: string
   }
@@ -1885,6 +1890,33 @@ export type ListAiModelCallsResponses = {
             parentRunId: string
           }
       cost?:
+        | {
+            status: "reported"
+            billingIdentity: {
+              providerId: string
+              modelId: string
+            }
+            pricingContext: {
+              serviceTier?: string
+              batch?: boolean
+              region?: string
+              inferenceGeo?: string
+              routedProviderId?: string
+              deploymentId?: string
+              inferenceProfileId?: string
+              cacheWriteTtlSeconds?: number
+              mode?: string
+            }
+            reportSource: {
+              providerId: string
+              responseId: string
+            }
+            money: {
+              currency: string
+              amountNanos: string
+            }
+            ratedAt: string
+          }
         | {
             status: "rated"
             billingIdentity: {
@@ -1969,7 +2001,7 @@ export type ListAiModelCallsResponses = {
             >
             ratedAt: string
           }
-      valuationStatus: "rated" | "unpriceable" | "unvalued"
+      valuationStatus: "reported" | "rated" | "unpriceable" | "unvalued"
     }>
     hasMore: boolean
     total: number
@@ -1977,6 +2009,131 @@ export type ListAiModelCallsResponses = {
 }
 
 export type ListAiModelCallsResponse = ListAiModelCallsResponses[keyof ListAiModelCallsResponses]
+
+export type ListAiModelCallGroupsData = {
+  body?: never
+  path?: never
+  query: {
+    from: string
+    to: string
+    providerId?: string
+    modelId?: string
+    valuationStatus?: "reported" | "rated" | "unpriceable" | "unvalued"
+    limit?: string
+    offset?: string
+  }
+  url: "/api/ai/model-call-groups"
+}
+
+export type ListAiModelCallGroupsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type ListAiModelCallGroupsError =
+  ListAiModelCallGroupsErrors[keyof ListAiModelCallGroupsErrors]
+
+export type ListAiModelCallGroupsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    items: Array<{
+      executionId: string
+      attribution?:
+        | {
+            kind: "agent"
+            agentId: string
+            agentRunId: string
+            threadId: string
+          }
+        | {
+            kind: "workflowAgent"
+            agentId: string
+            nodeRunId: string
+            workflowId: string
+            workflowRunId: string
+          }
+        | {
+            kind: "subagent"
+            subagentRunId: string
+            parentRunId: string
+          }
+      modelCallCount: number
+      totalTokens?: number
+      costs: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        reportedCallCount: number
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
+      }
+      firstCallAt: string
+      lastCallAt: string
+      label?: string
+      executions: Array<{
+        executionId: string
+        attribution?:
+          | {
+              kind: "agent"
+              agentId: string
+              agentRunId: string
+              threadId: string
+            }
+          | {
+              kind: "workflowAgent"
+              agentId: string
+              nodeRunId: string
+              workflowId: string
+              workflowRunId: string
+            }
+          | {
+              kind: "subagent"
+              subagentRunId: string
+              parentRunId: string
+            }
+        modelCallCount: number
+        totalTokens?: number
+        costs: {
+          amounts: Array<{
+            currency: string
+            amountNanos: string
+          }>
+          reportedCallCount: number
+          ratedCallCount: number
+          unpriceableCallCount: number
+          unvaluedCallCount: number
+        }
+        firstCallAt: string
+        lastCallAt: string
+        models: Array<{
+          providerId: string
+          modelId: string
+        }>
+        label?: string
+      }>
+      canOpenThread: boolean
+    }>
+    total: number
+    hasMore: boolean
+  }
+}
+
+export type ListAiModelCallGroupsResponse =
+  ListAiModelCallGroupsResponses[keyof ListAiModelCallGroupsResponses]
 
 export type GetProjectInfoData = {
   body?: never
@@ -5454,6 +5611,7 @@ export type GetWorkflowRunResponses = {
             currency: string
             amountNanos: string
           }>
+          reportedCallCount: number
           ratedCallCount: number
           unpriceableCallCount: number
           unvaluedCallCount: number
@@ -5526,6 +5684,7 @@ export type GetWorkflowAgentNodeExecutionResponses = {
         currency: string
         amountNanos: string
       }>
+      reportedCallCount: number
       ratedCallCount: number
       unpriceableCallCount: number
       unvaluedCallCount: number
@@ -5905,6 +6064,7 @@ export type CancelWorkflowRunResponses = {
             currency: string
             amountNanos: string
           }>
+          reportedCallCount: number
           ratedCallCount: number
           unpriceableCallCount: number
           unvaluedCallCount: number
@@ -8475,6 +8635,11 @@ export type ListAgentThreadMessagesResponse =
 export type PostAgentThreadMessageData = {
   body: {
     text: string
+    model?: {
+      provider: string
+      modelId: string
+    }
+    reasoning?: "provider-default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
     attachments?: Array<{
       blobId: string
       digest: string
@@ -8573,6 +8738,11 @@ export type PostAgentThreadMessageResponses = {
         id: string
       }
       status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      model?: {
+        provider: string
+        modelId: string
+      }
+      reasoning?: "provider-default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
       modelId?: string
       finishReason?:
         | "stop"
@@ -8599,6 +8769,7 @@ export type PostAgentThreadMessageResponses = {
           currency: string
           amountNanos: string
         }>
+        reportedCallCount: number
         ratedCallCount: number
         unpriceableCallCount: number
         unvaluedCallCount: number
@@ -8798,6 +8969,11 @@ export type CancelAgentRunResponses = {
         id: string
       }
       status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      model?: {
+        provider: string
+        modelId: string
+      }
+      reasoning?: "provider-default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
       modelId?: string
       finishReason?:
         | "stop"
@@ -8824,6 +9000,7 @@ export type CancelAgentRunResponses = {
           currency: string
           amountNanos: string
         }>
+        reportedCallCount: number
         ratedCallCount: number
         unpriceableCallCount: number
         unvaluedCallCount: number
@@ -8926,6 +9103,11 @@ export type RetryAgentRunResponses = {
         id: string
       }
       status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      model?: {
+        provider: string
+        modelId: string
+      }
+      reasoning?: "provider-default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
       modelId?: string
       finishReason?:
         | "stop"
@@ -8952,6 +9134,7 @@ export type RetryAgentRunResponses = {
           currency: string
           amountNanos: string
         }>
+        reportedCallCount: number
         ratedCallCount: number
         unpriceableCallCount: number
         unvaluedCallCount: number
@@ -9052,6 +9235,11 @@ export type ListAgentThreadRunsResponses = {
         id: string
       }
       status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      model?: {
+        provider: string
+        modelId: string
+      }
+      reasoning?: "provider-default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
       modelId?: string
       finishReason?:
         | "stop"
@@ -9078,6 +9266,7 @@ export type ListAgentThreadRunsResponses = {
           currency: string
           amountNanos: string
         }>
+        reportedCallCount: number
         ratedCallCount: number
         unpriceableCallCount: number
         unvaluedCallCount: number
@@ -9175,6 +9364,11 @@ export type GetAgentRunResponses = {
       id: string
     }
     status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+    model?: {
+      provider: string
+      modelId: string
+    }
+    reasoning?: "provider-default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
     modelId?: string
     finishReason?:
       | "stop"
@@ -9201,6 +9395,7 @@ export type GetAgentRunResponses = {
         currency: string
         amountNanos: string
       }>
+      reportedCallCount: number
       ratedCallCount: number
       unpriceableCallCount: number
       unvaluedCallCount: number
@@ -9263,6 +9458,26 @@ export type ListModelsResponses = {
       provider: string
       modelId: string
       isDefault: boolean
+      name: string
+      description?: string
+      publisher: {
+        id: string
+        name: string
+        logoUrl?: string
+      }
+      via?: string
+      capabilities: {
+        input: Array<"text" | "image" | "audio" | "video" | "pdf">
+        output: Array<"text" | "image" | "audio" | "video" | "pdf">
+        attachments?: boolean
+        reasoning?: boolean
+        tools?: boolean
+        structuredOutput?: boolean
+        contextWindowTokens?: number
+      }
+      reasoningLevels: Array<
+        "provider-default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
+      >
     }>
   }
 }

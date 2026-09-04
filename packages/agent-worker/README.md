@@ -34,7 +34,7 @@ await worker.start()
 - The queue lease is the sole authority for liveness and redelivery; the worker renews it during
   turns.
 - Every completed `streamText` and `generateText` provider call is appended to `storage.aiUsage`
-  with an immutable Models.dev valuation in `storage.aiCosts`; API conversation and workflow-agent
+  with an immutable valuation in `storage.aiCosts`; API conversation and workflow-agent
   summaries are derived from that ledger. Run rows do not store a second usage aggregate.
 - Every delivery rotates a durable execution token that fences stale finalization after redelivery.
   Usage remains unfenced because a completed provider call is billable even when execution ownership
@@ -42,13 +42,30 @@ await worker.start()
   authorization. That value is a projection of the queue lease—not a separate run lease, timer, or
   heartbeat—and is extended only from successful queue renewals.
 - The assistant message append and successful run finish happen in one storage transaction.
+- `spawn_agent` advertises exact `{ provider, modelId }` pairs from the project catalog, with
+  available pricing and context metadata. For example, Gateway uses
+  `{ provider: "gateway", modelId: "deepseek/deepseek-v4-flash-vision-exp" }`. The tool schema
+  restricts selection to configured pairs; the worker rechecks them before creating a child.
+  Omitting `model` uses the first configured language model.
 
 ## Usage accounting
 
 Every completed conversation and workflow-agent provider call observed by the AI SDK lifecycle is
-appended to `storage.aiUsage` and rated against the same versioned Models.dev catalog the worker
-uses for model context limits. The catalog is loaded when a worker has registered agents. This
-includes individual calls in tool loops and calls completed before later cancellation, tool failure,
+appended to `storage.aiUsage` with one valuation, in this order:
+
+1. A validated provider-reported amount (`reported`).
+2. A Models.dev catalog estimate when all required meters and pricing dimensions are known (`rated`).
+3. An explicit `unpriceable` result, never an assumed zero.
+
+The Gateway adapter reads `providerMetadata.gateway.cost` and retains its generation ID.
+It accepts only confirmed system-credential routes: BYOK or unknown routing cannot establish a
+complete call cost from the Gateway charge alone and fall back to the catalog. No extra network
+request is made. USD amounts are rounded half-up to nanounits using integer arithmetic.
+Reported amounts are not invoice reconciliation; Atlas distinguishes them from estimates and
+excludes unavailable costs from totals. Existing valuations are immutable and are not retroactively
+replaced when pricing or adapter support changes.
+
+This includes individual calls in tool loops and calls completed before later cancellation, tool failure,
 output validation, or execution ownership loss. Workflow nodes use their own durable execution and
 inherit the parent workflow's admission-time group snapshot.
 Usage writes are intentionally not fenced: a stale worker cannot finalize the execution, but a
@@ -61,7 +78,7 @@ blocks the next model step and the owning Agent run or workflow fails closed whi
 recovery continues independently. If the durable handoff also fails, the same stop prevents silent
 usage loss. This local path cannot close a process-crash window before lifecycle delivery;
 provider-side reconciliation is the appropriate later layer for that guarantee. A model middleware
-also retains the provider's response model identity and provider metadata. Sixb rates only exact
+also retains the provider's response model identity and provider metadata. Catalog estimation uses only exact
 Models.dev matches observed through reviewed AI SDK namespaces; custom providers, aliases, and
 unsupported deployment contexts remain unpriceable rather than being normalized heuristically.
 

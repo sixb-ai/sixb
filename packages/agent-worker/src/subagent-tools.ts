@@ -88,7 +88,7 @@ export class SubagentCoordinator {
           "Omit model to use the project default.",
           `At most ${MAX_ACTIVE_SUBAGENTS} child agents may be active for this run.`,
         ].join("\n"),
-        inputSchema: jsonSchema<SpawnSubagentInput>(spawnInputSchema()),
+        inputSchema: jsonSchema<SpawnSubagentInput>(spawnInputSchema(this.models)),
         execute: (input, options) => this.spawn(input, options.abortSignal ?? NEVER_ABORTED_SIGNAL),
       }),
       wait_agent: tool({
@@ -198,8 +198,10 @@ export class SubagentCoordinator {
     if (ref === undefined) return this.models.default
     const model = this.models.getByRef(ref)
     if (model) return model
+    const available = this.models.list().map(formatModelRef).join(", ")
     throw new AgentToolPublicError(
-      `[SixbAgentWorker] Language model '${ref.provider}/${ref.modelId}' is not configured for this project.`
+      `[SixbAgentWorker] Language model ${formatModelRef(ref)} is not configured for this project. ` +
+        `Use one of: ${available}. Omit model to use the project default.`
     )
   }
 }
@@ -226,12 +228,16 @@ export function renderSubagentModelGuide(
     }
     if (!metadata?.pricing && !metadata?.limits) details.push("metadata unavailable")
 
-    return `- ${model.provider}/${model.modelId} (${details.join("; ")})`
+    return `- ${formatModelRef(model)} (${details.join("; ")})`
   })
 
   return ["Available models (Models.dev base reference metadata when available):", ...entries].join(
     "\n"
   )
+}
+
+function formatModelRef({ provider, modelId }: LanguageModelRef): string {
+  return JSON.stringify({ provider, modelId })
 }
 
 function sameModel(
@@ -261,7 +267,7 @@ function formatScaled(value: number, scale: number): string {
   return (Math.round((value / scale) * 100) / 100).toString()
 }
 
-function spawnInputSchema(): JSONSchema7 {
+function spawnInputSchema(models: LanguageModelCatalog): JSONSchema7 {
   return {
     type: "object",
     properties: {
@@ -273,13 +279,18 @@ function spawnInputSchema(): JSONSchema7 {
       },
       task: { type: "string", minLength: 1, description: "Focused task for the child agent." },
       model: {
-        type: "object",
-        properties: {
-          provider: { type: "string", minLength: 1 },
-          modelId: { type: "string", minLength: 1 },
-        },
-        required: ["provider", "modelId"],
-        additionalProperties: false,
+        description:
+          "Copy one exact model reference from the available models. Keep provider and modelId unchanged, including any '/' inside modelId. Omit to use the project default.",
+        // Keep each pair together: independent enums would also admit unconfigured bindings.
+        anyOf: models.list().map(({ provider, modelId }) => ({
+          type: "object",
+          properties: {
+            provider: { type: "string", enum: [provider] },
+            modelId: { type: "string", enum: [modelId] },
+          },
+          required: ["provider", "modelId"],
+          additionalProperties: false,
+        })),
       },
       reasoning: { type: "string", enum: [...AGENT_REASONING_LEVELS] },
     },

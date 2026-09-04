@@ -133,6 +133,8 @@ export function serializeAgentRun(run: AgentRunView): ReturnType<typeof AgentRun
     triggerMessageId: run.triggerMessageId,
     requestedBy: run.requestedBy,
     status: run.status,
+    model: run.spec?.model,
+    reasoning: run.spec?.reasoning,
     modelId: run.modelId,
     finishReason: run.finishReason,
     usage: run.usage,
@@ -211,6 +213,8 @@ function handleAgentRouteError(
       case "storage_unavailable":
       case "thread_agent_mismatch":
       case "invalid_context":
+      case "invalid_model_selection":
+      case "model_not_found":
         set.status = 400
         break
     }
@@ -584,6 +588,8 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             agentId: thread.agentId,
             threadId: thread.id,
             text: parsed.text,
+            model: parsed.model,
+            reasoning: parsed.reasoning,
             attachments: parsed.attachments as readonly FileRef[] | undefined,
             context: parsed.context,
             messageId: parsed.messageId,

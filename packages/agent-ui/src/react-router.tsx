@@ -4,10 +4,7 @@ import { useNavigate, useParams } from "react-router-dom"
 import { AgentChat, type AgentChatProps } from "./AgentChat"
 
 export interface AgentChatPageProps
-  extends Omit<
-    AgentChatProps,
-    "threadId" | "draftAgentId" | "onNavigateHome" | "onNavigateDraft" | "onNavigateThread"
-  > {
+  extends Omit<AgentChatProps, "threadId" | "onNavigateHome" | "onNavigateThread"> {
   readonly routeBase?: string
   /** Destination outside the standalone Agents workspace. */
   readonly backTo?: string
@@ -22,7 +19,7 @@ export function AgentChatPage({
   ...props
 }: AgentChatPageProps) {
   const navigate = useNavigate()
-  const { agentId: routeAgentId, threadId: routeThreadId } = useParams()
+  const { threadId: routeThreadId } = useParams()
   const normalizedRouteBase = normalizeRouteBase(routeBase)
 
   const onExit = useCallback(() => {
@@ -32,13 +29,6 @@ export function AgentChatPage({
   const onNavigateHome = useCallback(() => {
     navigate(normalizedRouteBase)
   }, [navigate, normalizedRouteBase])
-
-  const onNavigateDraft = useCallback(
-    (agentId: string) => {
-      navigate(draftPath(normalizedRouteBase, agentId))
-    },
-    [navigate, normalizedRouteBase]
-  )
 
   const onNavigateThread = useCallback(
     (threadId: string) => {
@@ -52,9 +42,7 @@ export function AgentChatPage({
       <AgentChat
         {...props}
         threadId={routeThreadId ?? null}
-        draftAgentId={routeAgentId ?? null}
         onNavigateHome={onNavigateHome}
-        onNavigateDraft={onNavigateDraft}
         onNavigateThread={onNavigateThread}
         onExit={onExit}
         exitLabel={backLabel}
@@ -74,9 +62,4 @@ function normalizeRouteBase(routeBase: string): string {
 function threadPath(routeBase: string, threadId: string): string {
   const encoded = encodeURIComponent(threadId)
   return routeBase === "/" ? `/${encoded}` : `${routeBase}/${encoded}`
-}
-
-function draftPath(routeBase: string, agentId: string): string {
-  const encoded = encodeURIComponent(agentId)
-  return routeBase === "/" ? `/new/${encoded}` : `${routeBase}/new/${encoded}`
 }

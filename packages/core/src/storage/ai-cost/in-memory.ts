@@ -2,6 +2,7 @@ import type { AiModelCallUsageRecord, InMemoryAiUsageStorageSnapshot } from "../
 import type { AiAccountingRecordSetItem } from "./analytics"
 import { buildAiAccountingOverview, buildAiModelCallAccountingList } from "./analytics"
 import { AiCostStorageError } from "./errors"
+import { type AiAccountingGroupIdentity, buildAiModelCallGroups } from "./groups"
 import type {
   AiAccountingAttribution,
   AiAccountingOverview,
@@ -11,6 +12,8 @@ import type {
   AiMoney,
   ListAiModelCallAccountingInput,
   ListAiModelCallAccountingResult,
+  ListAiModelCallGroupsInput,
+  ListAiModelCallGroupsResult,
   QueryAiAccountingOverviewInput,
   SummarizeAiCostExecutionsInput,
 } from "./types"
@@ -25,6 +28,10 @@ interface InMemoryAiCostUsageSource {
 }
 
 export interface InMemoryAiAccountingAttributionSource {
+  resolveGroup?(input: {
+    readonly projectId: string
+    readonly executionId: string
+  }): Promise<{ readonly executionId: string; readonly attribution?: AiAccountingAttribution }>
   resolve(input: {
     readonly projectId: string
     readonly executionId: string
@@ -85,6 +92,35 @@ export class InMemoryAiCostStorage implements AiCostStorage {
     return structuredClone({ recordsByUsage: this.recordsByUsage })
   }
 
+  async listModelCallGroups(
+    input: ListAiModelCallGroupsInput
+  ): Promise<ListAiModelCallGroupsResult> {
+    const items = await this.accountingItems()
+    const roots = new Map<string, Promise<AiAccountingGroupIdentity>>()
+    return buildAiModelCallGroups(
+      input,
+      await Promise.all(
+        items.map(async (item) => {
+          const key = usageRecordKey(item.usage.projectId, item.usage.executionId)
+          let root = roots.get(key)
+          if (!root) {
+            root =
+              this.attribution?.resolveGroup?.({
+                projectId: item.usage.projectId,
+                executionId: item.usage.executionId,
+              }) ??
+              Promise.resolve({
+                executionId: item.usage.executionId,
+                attribution: item.attribution,
+              })
+            roots.set(key, root)
+          }
+          return { ...item, root: await root }
+        })
+      )
+    )
+  }
+
   restore(snapshot: InMemoryAiCostStorageSnapshot): void {
     replaceMap(this.recordsByUsage, snapshot.recordsByUsage)
   }
@@ -114,6 +150,7 @@ export class InMemoryAiCostStorage implements AiCostStorage {
 
   private summarizeUsageIds(projectId: string, ids: readonly string[]): AiCostSummary {
     const amounts = new Map<string, bigint>()
+    let reportedCallCount = 0
     let ratedCallCount = 0
     let unpriceableCallCount = 0
     let unvaluedCallCount = 0
@@ -122,7 +159,8 @@ export class InMemoryAiCostStorage implements AiCostStorage {
       if (!cost) unvaluedCallCount += 1
       else if (cost.status === "unpriceable") unpriceableCallCount += 1
       else {
-        ratedCallCount += 1
+        if (cost.status === "reported") reportedCallCount += 1
+        else ratedCallCount += 1
         addMoney(amounts, cost.money)
       }
     }
@@ -130,6 +168,7 @@ export class InMemoryAiCostStorage implements AiCostStorage {
       amounts: [...amounts]
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([currency, amount]) => ({ currency, amountNanos: amount.toString() })),
+      reportedCallCount,
       ratedCallCount,
       unpriceableCallCount,
       unvaluedCallCount,

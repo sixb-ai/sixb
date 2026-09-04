@@ -70,6 +70,22 @@ export class InMemoryStorage implements Storage {
   private readonly aiUsageStorage = new InMemoryAiUsageStorage(this.executionStorage)
   private readonly aiCostStorage = new InMemoryAiCostStorage(this.aiUsageStorage, {
     resolve: (input) => this.resolveAiAccountingAttribution(input),
+    resolveGroup: async (input) => {
+      const attribution = await this.resolveAiAccountingAttribution(input)
+      if (attribution?.kind !== "subagent") return { executionId: input.executionId, attribution }
+      const parent = await this.agentStorage.runs.getById({
+        projectId: input.projectId,
+        id: attribution.parentRunId,
+      })
+      if (!parent) throw new Error("[Sixb] Subagent accounting parent is missing.")
+      return {
+        executionId: parent.executionId,
+        attribution: await this.resolveAiAccountingAttribution({
+          ...input,
+          executionId: parent.executionId,
+        }),
+      }
+    },
   })
   private readonly actionRunStorage = new InMemoryActionRunStorage(this.executionStorage)
   private readonly syncRunStorage = new InMemorySyncRunStorage(this.executionStorage)

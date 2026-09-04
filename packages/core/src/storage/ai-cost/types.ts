@@ -17,7 +17,7 @@ export interface AiMoney {
   readonly amountNanos: string
 }
 
-/** Provider and model key in a pricing catalog. */
+/** Provider and model identified by a valuation's source. */
 export interface AiBillingIdentity {
   readonly providerId: string
   readonly modelId: string
@@ -63,13 +63,27 @@ interface AiModelCallCostRecordBase {
   readonly projectId: string
   readonly usageRecordId: string
   readonly pricingContext: AiPricingContext
-  readonly priceSource: AiPriceSource
   readonly ratedAt: Date
+}
+
+/** Provenance of a provider-declared model-call amount; not an invoice reconciliation. */
+export interface AiCostReportSource {
+  readonly providerId: string
+  readonly responseId: string
+}
+
+/** A complete model-call amount declared by its provider, without invented token rates. */
+export interface AiReportedModelCallCostRecord extends AiModelCallCostRecordBase {
+  readonly status: "reported"
+  readonly billingIdentity: AiBillingIdentity
+  readonly money: AiMoney
+  readonly reportSource: AiCostReportSource
 }
 
 /** Exact arithmetic under one immutable catalog snapshot; not a provider-settled charge. */
 export interface AiRatedModelCallCostRecord extends AiModelCallCostRecordBase {
   readonly status: "rated"
+  readonly priceSource: AiPriceSource
   readonly billingIdentity: AiBillingIdentity
   readonly money: AiMoney
   readonly components: readonly AiCostComponent[]
@@ -78,12 +92,16 @@ export interface AiRatedModelCallCostRecord extends AiModelCallCostRecordBase {
 /** Explicit result when the compact catalog cannot completely and safely value a call. */
 export interface AiUnpriceableModelCallCostRecord extends AiModelCallCostRecordBase {
   readonly status: "unpriceable"
+  readonly priceSource: AiPriceSource
   readonly billingIdentity?: AiBillingIdentity
   readonly reason: AiUnpriceableReason
   readonly missingMeters?: readonly AiBillableMeter[]
 }
 
-export type AiModelCallCostRecord = AiRatedModelCallCostRecord | AiUnpriceableModelCallCostRecord
+export type AiModelCallCostRecord =
+  | AiReportedModelCallCostRecord
+  | AiRatedModelCallCostRecord
+  | AiUnpriceableModelCallCostRecord
 
 export interface SummarizeAiCostExecutionsInput {
   readonly projectId: string
@@ -92,6 +110,7 @@ export interface SummarizeAiCostExecutionsInput {
 
 export interface AiCostSummary {
   readonly amounts: readonly AiMoney[]
+  readonly reportedCallCount: number
   readonly ratedCallCount: number
   readonly unpriceableCallCount: number
   readonly unvaluedCallCount: number
@@ -117,7 +136,7 @@ export interface ListAiModelCallAccountingInput extends AiAccountingRange {
   readonly providerId?: string
   readonly modelId?: string
   readonly executionId?: string
-  readonly valuationStatus?: "rated" | "unpriceable" | "unvalued"
+  readonly valuationStatus?: AiModelCallCostRecord["status"] | "unvalued"
   readonly limit?: number
   readonly offset?: number
 }
@@ -180,7 +199,7 @@ export interface AiModelCallAccountingItem {
   readonly usage: AiModelCallUsageRecord
   readonly attribution?: AiAccountingAttribution
   readonly cost?: AiModelCallCostRecord
-  readonly valuationStatus: "rated" | "unpriceable" | "unvalued"
+  readonly valuationStatus: AiModelCallCostRecord["status"] | "unvalued"
 }
 
 export interface ListAiModelCallAccountingResult {
@@ -189,10 +208,43 @@ export interface ListAiModelCallAccountingResult {
   readonly total: number
 }
 
+export type ListAiModelCallGroupsInput = Omit<ListAiModelCallAccountingInput, "executionId">
+
+/** Filtered usage; an absent token total means at least one call did not report it. */
+export interface AiModelCallGroupSummary {
+  readonly modelCallCount: number
+  readonly totalTokens?: number
+  readonly costs: AiCostSummary
+}
+
+export interface AiModelCallExecutionSummary extends AiModelCallGroupSummary {
+  readonly executionId: string
+  readonly attribution?: AiAccountingAttribution
+  readonly firstCallAt: Date
+  readonly lastCallAt: Date
+  readonly models: readonly AiBillingIdentity[]
+}
+
+/** One initiating execution, including only calls matching the accounting filters. */
+export interface AiModelCallGroup extends AiModelCallGroupSummary {
+  readonly executionId: string
+  readonly attribution?: AiAccountingAttribution
+  readonly firstCallAt: Date
+  readonly lastCallAt: Date
+  readonly executions: readonly AiModelCallExecutionSummary[]
+}
+
+export interface ListAiModelCallGroupsResult {
+  readonly items: readonly AiModelCallGroup[]
+  readonly total: number
+  readonly hasMore: boolean
+}
+
 /** Immutable model-call costs plus execution and project accounting reads. */
 export interface AiCostStorage {
   recordModelCallCost(input: AiModelCallCostRecord): Promise<void>
   summarizeExecutions(input: SummarizeAiCostExecutionsInput): Promise<readonly AiCostSummary[]>
   queryProjectOverview(input: QueryAiAccountingOverviewInput): Promise<AiAccountingOverview>
   listModelCalls(input: ListAiModelCallAccountingInput): Promise<ListAiModelCallAccountingResult>
+  listModelCallGroups(input: ListAiModelCallGroupsInput): Promise<ListAiModelCallGroupsResult>
 }

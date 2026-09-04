@@ -3,7 +3,12 @@ import { mkdir } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 
 const SOURCE_URL = "https://models.dev/api.json"
+const MODEL_SOURCE_URL = "https://models.dev/models.json"
 const OUTPUT_PATH = resolve(import.meta.dir, "../packages/agent-worker/src/models-dev/catalog.json")
+const DISPLAY_OUTPUT_PATH = resolve(
+  import.meta.dir,
+  "../packages/server/src/models-dev/catalog.json"
+)
 
 interface ModelsDevCost {
   readonly input: number
@@ -22,6 +27,11 @@ interface ModelsDevMode {
   readonly cost?: ModelsDevCost
 }
 
+type ModelsDevReasoningOption =
+  | { readonly type: "toggle" }
+  | { readonly type: "effort"; readonly values: readonly (string | null)[] }
+  | { readonly type: "budget_tokens" }
+
 interface ModelsDevModel {
   readonly cost?: ModelsDevCost
   readonly limit?: {
@@ -31,10 +41,27 @@ interface ModelsDevModel {
   readonly experimental?: {
     readonly modes?: Readonly<Record<string, ModelsDevMode>>
   }
+  readonly reasoning_options?: readonly ModelsDevReasoningOption[]
 }
 
 interface ModelsDevProvider {
+  readonly name: string
   readonly models: Readonly<Record<string, ModelsDevModel>>
+}
+
+interface ModelsDevDisplayModel {
+  readonly name: string
+  readonly description: string
+  readonly attachment: boolean
+  readonly reasoning: boolean
+  readonly reasoning_options?: readonly ModelsDevReasoningOption[]
+  readonly tool_call: boolean
+  readonly structured_output: boolean
+  readonly modalities: {
+    readonly input: readonly string[]
+    readonly output: readonly string[]
+  }
+  readonly limit: { readonly context?: number }
 }
 
 interface GeneratedModelLimits {
@@ -68,6 +95,12 @@ if (!response.ok) {
 }
 const sourceText = await response.text()
 const source = JSON.parse(sourceText) as Readonly<Record<string, ModelsDevProvider>>
+const modelResponse = await fetch(MODEL_SOURCE_URL)
+if (!modelResponse.ok) {
+  throw new Error(`[SixbModelsDev] Models.dev returned HTTP ${modelResponse.status}.`)
+}
+const modelSourceText = await modelResponse.text()
+const displaySource = JSON.parse(modelSourceText) as Readonly<Record<string, ModelsDevDisplayModel>>
 const providers: Record<string, Record<string, GeneratedCatalogModel>> = {}
 let modelCount = 0
 
@@ -99,9 +132,77 @@ const output = {
 
 await mkdir(dirname(OUTPUT_PATH), { recursive: true })
 await Bun.write(OUTPUT_PATH, `${JSON.stringify(output)}\n`)
+const displayOutput = generatedDisplayCatalog(displaySource, source, modelSourceText)
+await mkdir(dirname(DISPLAY_OUTPUT_PATH), { recursive: true })
+await Bun.write(DISPLAY_OUTPUT_PATH, `${JSON.stringify(displayOutput)}\n`)
 console.log(
-  `[SixbModelsDev] Wrote ${modelCount} models from ${Object.keys(providers).length} providers to ${OUTPUT_PATH} (${output.source.version}).`
+  `[SixbModelsDev] Wrote ${modelCount} priced models and ${Object.keys(displayOutput.models).length} display models (${output.source.version}).`
 )
+
+function generatedDisplayCatalog(
+  models: Readonly<Record<string, ModelsDevDisplayModel>>,
+  providers: Readonly<Record<string, ModelsDevProvider>>,
+  sourceText: string
+) {
+  const publisherNames: Record<string, string> = {}
+  const generatedModels: Record<string, object> = {}
+
+  for (const [canonicalId, model] of Object.entries(models).sort(compareEntries)) {
+    const separator = canonicalId.indexOf("/")
+    if (separator <= 0) continue
+    const publisherId = canonicalId.slice(0, separator)
+    const publisherModelId = canonicalId.slice(separator + 1)
+    publisherNames[publisherId] = providers[publisherId]?.name ?? humanizeId(publisherId)
+
+    const providerModel =
+      providers[publisherId]?.models[publisherModelId] ?? providers.vercel?.models[canonicalId]
+    const reasoningOptions = providerModel?.reasoning_options ?? model.reasoning_options
+    const reasoningLevels = [
+      ...new Set(
+        reasoningOptions?.flatMap((option) =>
+          option.type === "effort"
+            ? option.values.filter((value): value is string => typeof value === "string")
+            : []
+        ) ?? []
+      ),
+    ]
+    const reasoningToggle = reasoningOptions?.some((option) => option.type === "toggle") ?? false
+
+    generatedModels[canonicalId] = {
+      name: model.name,
+      description: model.description,
+      attachment: model.attachment,
+      reasoning: model.reasoning,
+      toolCall: model.tool_call,
+      structuredOutput: model.structured_output,
+      modalities: model.modalities,
+      ...(isPositiveSafeInteger(model.limit.context)
+        ? { contextWindowTokens: model.limit.context }
+        : {}),
+      ...(reasoningLevels.length === 0 ? {} : { reasoningLevels }),
+      ...(reasoningToggle ? { reasoningToggle: true } : {}),
+    }
+  }
+
+  return {
+    source: {
+      id: "models.dev",
+      version: `sha256:${createHash("sha256").update(sourceText).digest("hex")}`,
+      url: MODEL_SOURCE_URL,
+      observedAt: new Date().toISOString(),
+    },
+    publisherNames,
+    models: generatedModels,
+  }
+}
+
+function humanizeId(value: string): string {
+  return value
+    .split(/[-_.]/g)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ")
+}
 
 function generatedLimits(limit: ModelsDevModel["limit"]): GeneratedModelLimits | undefined {
   if (!isPositiveSafeInteger(limit?.context)) return undefined

@@ -9,7 +9,6 @@ export interface ProjectSidebarData {
   projectionCount: number
   workflowCount: number
   actionCount: number
-  agentCount: number
   ruleCount: number
   ontologyCount: number
 }

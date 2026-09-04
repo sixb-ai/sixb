@@ -74,6 +74,7 @@ export interface AiAccountingAggregateFragment {
   }
   readonly costs: {
     readonly amount?: AiMoney
+    readonly reportedCallCount: string
     readonly ratedCallCount: string
     readonly unpriceableCallCount: string
     readonly unvaluedCallCount: string
@@ -321,12 +322,14 @@ function aggregateAccountingItems(
 
 function aggregateCosts(items: readonly AiAccountingRecordSetItem[]): AiCostSummary {
   const amounts = new Map<string, bigint>()
+  let reportedCallCount = 0
   let ratedCallCount = 0
   let unpriceableCallCount = 0
   let unvaluedCallCount = 0
   for (const item of items) {
-    if (item.cost?.status === "rated") {
-      ratedCallCount += 1
+    if (item.cost?.status === "reported" || item.cost?.status === "rated") {
+      if (item.cost.status === "reported") reportedCallCount += 1
+      else ratedCallCount += 1
       addAmount(amounts, item.cost.money.currency, item.cost.money.amountNanos)
     } else if (item.cost?.status === "unpriceable") {
       unpriceableCallCount += 1
@@ -338,6 +341,7 @@ function aggregateCosts(items: readonly AiAccountingRecordSetItem[]): AiCostSumm
     amounts: [...amounts]
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([currency, amountNanos]) => ({ currency, amountNanos: amountNanos.toString() })),
+    reportedCallCount,
     ratedCallCount,
     unpriceableCallCount,
     unvaluedCallCount,
@@ -361,6 +365,7 @@ interface AggregateFragmentAccumulator {
   reportedUsageCallCount: bigint
   usage: Record<AggregateUsageField, { presentCallCount: bigint; total: bigint }>
   amounts: Map<string, bigint>
+  reportedCallCount: bigint
   ratedCallCount: bigint
   unpriceableCallCount: bigint
   unvaluedCallCount: bigint
@@ -374,6 +379,7 @@ function aggregateFragmentAccumulator(): AggregateFragmentAccumulator {
       AGGREGATE_USAGE_FIELDS.map((field) => [field, { presentCallCount: 0n, total: 0n }])
     ) as AggregateFragmentAccumulator["usage"],
     amounts: new Map(),
+    reportedCallCount: 0n,
     ratedCallCount: 0n,
     unpriceableCallCount: 0n,
     unvaluedCallCount: 0n,
@@ -410,6 +416,10 @@ function appendAggregateFragment(
       throw new TypeError(`[Sixb] AI accounting SQL ${field} total is missing.`)
     }
   }
+  target.reportedCallCount += naturalBigInt(
+    fragment.costs.reportedCallCount,
+    "reported cost call count"
+  )
   target.ratedCallCount += naturalBigInt(fragment.costs.ratedCallCount, "rated call count")
   target.unpriceableCallCount += naturalBigInt(
     fragment.costs.unpriceableCallCount,
@@ -423,7 +433,10 @@ function appendAggregateFragment(
 
 function finishAggregateFragment(value: AggregateFragmentAccumulator): AiAccountingAggregate {
   const classifiedCallCount =
-    value.ratedCallCount + value.unpriceableCallCount + value.unvaluedCallCount
+    value.reportedCallCount +
+    value.ratedCallCount +
+    value.unpriceableCallCount +
+    value.unvaluedCallCount
   if (
     classifiedCallCount !== value.modelCallCount ||
     value.reportedUsageCallCount > value.modelCallCount ||
@@ -454,6 +467,7 @@ function finishAggregateFragment(value: AggregateFragmentAccumulator): AiAccount
       amounts: [...value.amounts]
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([currency, amountNanos]) => ({ currency, amountNanos: amountNanos.toString() })),
+      reportedCallCount: safeAggregateNumber(value.reportedCallCount, "reported call count"),
       ratedCallCount: safeAggregateNumber(value.ratedCallCount, "rated call count"),
       unpriceableCallCount: safeAggregateNumber(
         value.unpriceableCallCount,

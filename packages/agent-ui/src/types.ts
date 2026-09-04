@@ -3,7 +3,9 @@ import type {
   ListAgentsResponse,
   ListAgentThreadMessagesResponse,
   ListAgentThreadsResponse,
+  ListModelsResponse,
 } from "@sixb/client"
+import type { AgentReasoningLevel } from "@sixb/core"
 import type { AgentContextEntryInput, AgentContextInput } from "@sixb/core/agents/context"
 
 export type { AgentContextEntryInput, AgentContextInput }
@@ -26,3 +28,10 @@ export type AgentContextPart = Extract<AgentMessagePart, { type: "context" }>
 export type AgentRun = GetAgentRunResponse
 
 export type AgentRunStatus = AgentRun["status"]
+
+export type LanguageModel = ListModelsResponse["language"][number]
+
+export interface AgentModelSelection {
+  readonly model: Pick<LanguageModel, "provider" | "modelId">
+  readonly reasoning?: AgentReasoningLevel
+}

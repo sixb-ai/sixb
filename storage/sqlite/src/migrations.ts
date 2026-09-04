@@ -77,6 +77,9 @@ import objectOverrideEditTimesSql from "./migrations/028-object-override-edit-ti
   type: "text",
 }
 import subagentRunsSql from "./migrations/029-subagent-runs.sql" with { type: "text" }
+import conversationRunSpecSql from "./migrations/030-conversation-run-spec.sql" with {
+  type: "text",
+}
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -161,6 +164,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("027-agent-context-checkpoints", agentContextCheckpointsSql),
     sqliteSql("028-object-override-edit-times", objectOverrideEditTimesSql),
     sqliteSql("029-subagent-runs", subagentRunsSql),
+    sqliteSql("030-conversation-run-spec", conversationRunSpecSql),
   ],
 })
 

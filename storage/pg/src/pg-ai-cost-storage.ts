@@ -20,15 +20,24 @@ import {
   type AiModelCallUsageRecord,
   type ListAiModelCallAccountingInput,
   type ListAiModelCallAccountingResult,
+  type ListAiModelCallGroupsInput,
+  type ListAiModelCallGroupsResult,
   type QueryAiAccountingOverviewInput,
   type SummarizeAiCostExecutionsInput,
 } from "@sixb/core/storage"
+import { listAiModelCallGroups } from "./ai-cost-groups"
 import type { PgStoreClient } from "./transactions"
 import { runPgTransaction } from "./transactions"
 
 /** PostgreSQL-backed immutable valuations stored in one append-only table. */
 export class PgAiCostStorage implements AiCostStorage {
   constructor(private readonly sql: PgStoreClient) {}
+
+  async listModelCallGroups(
+    input: ListAiModelCallGroupsInput
+  ): Promise<ListAiModelCallGroupsResult> {
+    return listAiModelCallGroups(this.sql, input)
+  }
 
   async recordModelCallCost(input: AiModelCallCostRecord): Promise<void> {
     const record = normalizeAiModelCallCostRecord(input)
@@ -37,7 +46,7 @@ export class PgAiCostStorage implements AiCostStorage {
       if (!usage) throw missingUsage(record)
       assertCostMatchesUsage(record, usage)
       if (await findCost(tx, record.projectId, record.usageRecordId)) return
-      const rated = record.status === "rated" ? record : undefined
+      const valued = record.status !== "unpriceable" ? record : undefined
       const inserted = await tx<{ usage_record_id: string }[]>`
         INSERT INTO ai_model_call_valuations (
           project_id, usage_record_id, status, provider_id, model_id,
@@ -45,8 +54,8 @@ export class PgAiCostStorage implements AiCostStorage {
         ) VALUES (
           ${record.projectId}, ${record.usageRecordId}, ${record.status},
           ${record.billingIdentity?.providerId ?? null},
-          ${record.billingIdentity?.modelId ?? null}, ${rated?.money.currency ?? null},
-          ${rated?.money.amountNanos ?? null},
+          ${record.billingIdentity?.modelId ?? null}, ${valued?.money.currency ?? null},
+          ${valued?.money.amountNanos ?? null},
           ${record.status === "unpriceable" ? record.reason : null},
           ${JSON.stringify(aiModelCallCostDetails(record))}::text::jsonb, ${record.ratedAt}
         )
@@ -123,13 +132,9 @@ export class PgAiCostStorage implements AiCostStorage {
           AND (${modelId}::text IS NULL OR usage.requested_model_id = ${modelId})
       ), classified AS (
         SELECT filtered.*,
-          CASE
-            WHEN cost_status = 'rated' THEN 'rated'
-            WHEN cost_status = 'unpriceable' THEN 'unpriceable'
-            ELSE 'unvalued'
-          END AS valuation_status,
-          CASE WHEN cost_status = 'rated' THEN cost_currency ELSE NULL END AS amount_currency,
-          CASE WHEN cost_status = 'rated' THEN cost_amount_nanos ELSE NULL END AS amount_nanos
+          COALESCE(cost_status, 'unvalued') AS valuation_status,
+          cost_currency AS amount_currency,
+          cost_amount_nanos AS amount_nanos
         FROM filtered
       ), expanded AS (
         SELECT 'totals'::text AS dimension,
@@ -181,6 +186,7 @@ export class PgAiCostStorage implements AiCostStorage {
         COUNT(reasoning_output_tokens)::text AS reasoning_output_tokens_count,
         SUM(reasoning_output_tokens)::text AS reasoning_output_tokens_sum,
         COUNT(*) FILTER (WHERE valuation_status = 'rated')::text AS rated_call_count,
+        COUNT(*) FILTER (WHERE valuation_status = 'reported')::text AS reported_cost_call_count,
         COUNT(*) FILTER (WHERE valuation_status = 'unpriceable')::text
           AS unpriceable_call_count,
         COUNT(*) FILTER (WHERE valuation_status = 'unvalued')::text
@@ -211,11 +217,7 @@ export class PgAiCostStorage implements AiCostStorage {
         AND (${modelId}::text IS NULL OR usage.requested_model_id = ${modelId})
         AND (${executionId}::text IS NULL OR usage.execution_id = ${executionId})
         AND (
-          ${valuationStatus}::text IS NULL OR ${valuationStatus} = CASE
-            WHEN cost.status = 'rated' THEN 'rated'
-            WHEN cost.status = 'unpriceable' THEN 'unpriceable'
-            ELSE 'unvalued'
-          END
+          ${valuationStatus}::text IS NULL OR ${valuationStatus} = COALESCE(cost.status, 'unvalued')
         )
     `
     const rows = await this.sql<JoinedRow[]>`
@@ -264,11 +266,7 @@ export class PgAiCostStorage implements AiCostStorage {
         AND (${modelId}::text IS NULL OR usage.requested_model_id = ${modelId})
         AND (${executionId}::text IS NULL OR usage.execution_id = ${executionId})
         AND (
-          ${valuationStatus}::text IS NULL OR ${valuationStatus} = CASE
-            WHEN cost.status = 'rated' THEN 'rated'
-            WHEN cost.status = 'unpriceable' THEN 'unpriceable'
-            ELSE 'unvalued'
-          END
+          ${valuationStatus}::text IS NULL OR ${valuationStatus} = COALESCE(cost.status, 'unvalued')
         )
       ORDER BY usage.occurred_at DESC, usage.id ASC
       LIMIT ${query.limit} OFFSET ${query.offset}
@@ -287,7 +285,7 @@ export class PgAiCostStorage implements AiCostStorage {
 interface ValuationRow {
   readonly project_id: string
   readonly usage_record_id: string
-  readonly status: "rated" | "unpriceable"
+  readonly status: AiModelCallCostRecord["status"]
   readonly provider_id: string | null
   readonly model_id: string | null
   readonly currency: string | null
@@ -364,6 +362,7 @@ interface AggregateRow {
   readonly reasoning_output_tokens_count: string
   readonly reasoning_output_tokens_sum: string | null
   readonly rated_call_count: string
+  readonly reported_cost_call_count: string
   readonly unpriceable_call_count: string
   readonly unvalued_call_count: string
   readonly amount_nanos: string | null
@@ -450,6 +449,7 @@ function aggregateFragmentFromRow(row: AggregateRow): AiAccountingAggregateFragm
             },
           }),
       ratedCallCount: row.rated_call_count,
+      reportedCallCount: row.reported_cost_call_count,
       unpriceableCallCount: row.unpriceable_call_count,
       unvaluedCallCount: row.unvalued_call_count,
     },
@@ -582,15 +582,23 @@ function costRecord(input: {
     projectId: input.projectId,
     usageRecordId: input.usageId,
     pricingContext: details.pricingContext,
-    priceSource: {
-      ...details.priceSource,
-      observedAt: new Date(details.priceSource.observedAt),
-    },
     ratedAt: new Date(input.ratedAt),
   }
+  if (input.status === "reported") {
+    return normalizeAiModelCallCostRecord({
+      ...base,
+      status: "reported",
+      billingIdentity: { providerId: required(input.providerId), modelId: required(input.modelId) },
+      money: { currency: required(input.currency), amountNanos: required(input.amountNanos) },
+      reportSource: required(details.reportSource),
+    })
+  }
+  const source = required(details.priceSource)
+  const priceSource = { ...source, observedAt: new Date(source.observedAt) }
   if (input.status === "rated") {
     return normalizeAiModelCallCostRecord({
       ...base,
+      priceSource,
       status: "rated",
       billingIdentity: { providerId: required(input.providerId), modelId: required(input.modelId) },
       money: { currency: required(input.currency), amountNanos: required(input.amountNanos) },
@@ -599,6 +607,7 @@ function costRecord(input: {
   }
   return normalizeAiModelCallCostRecord({
     ...base,
+    priceSource,
     status: "unpriceable",
     ...(input.providerId && input.modelId
       ? { billingIdentity: { providerId: input.providerId, modelId: input.modelId } }
@@ -622,7 +631,8 @@ function aggregateSummaryRows(
     if (row.status === null) value.unvaluedCallCount += 1
     else if (row.status === "unpriceable") value.unpriceableCallCount += 1
     else {
-      value.ratedCallCount += 1
+      if (row.status === "reported") value.reportedCallCount += 1
+      else value.ratedCallCount += 1
       add(value.amounts, required(row.currency), required(row.amount_nanos))
     }
   }
@@ -631,6 +641,7 @@ function aggregateSummaryRows(
 
 interface Accumulator {
   amounts: Map<string, bigint>
+  reportedCallCount: number
   ratedCallCount: number
   unpriceableCallCount: number
   unvaluedCallCount: number
@@ -639,6 +650,7 @@ interface Accumulator {
 function accumulator(): Accumulator {
   return {
     amounts: new Map(),
+    reportedCallCount: 0,
     ratedCallCount: 0,
     unpriceableCallCount: 0,
     unvaluedCallCount: 0,
@@ -650,6 +662,7 @@ function finish(value: Accumulator): AiCostSummary {
     amounts: [...value.amounts]
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([currency, amount]) => ({ currency, amountNanos: amount.toString() })),
+    reportedCallCount: value.reportedCallCount,
     ratedCallCount: value.ratedCallCount,
     unpriceableCallCount: value.unpriceableCallCount,
     unvaluedCallCount: value.unvaluedCallCount,
