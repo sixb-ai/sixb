@@ -3,11 +3,20 @@ import type { AiCostStorage } from "@sixb/core/storage"
 import {
   createTestAgentExecution,
   runAiCostStorageContractSuite,
+  runAiModelCallGroupsContractSuite,
   seedAiCostStorageContractUsage,
 } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
 import type { PgStoreClient } from "../src/transactions"
 import { createTestStorage } from "./helpers"
+
+runAiModelCallGroupsContractSuite("PostgreSQL model-call groups", {
+  createStorage: async () => (await createTestStorage()).storage,
+  cleanup: async (storage) => {
+    await storage.dropSchema()
+    await storage.close()
+  },
+})
 
 const bundles = new Map<AiCostStorage, PostgresStorage>()
 test("PgAiCostStorage deserializes only the requested model-call page", async () => {
@@ -63,6 +72,7 @@ test("PgAiCostStorage returns direct agent attribution with each model-call page
       threadId: "thread_1",
       agentId: "research",
       triggerMessageId: "message_1",
+      spec: { model: { provider: "test", modelId: "test-model" } },
       requesterGroupIds: [],
     })
     await storage.aiUsage.recordModelCall({
@@ -127,6 +137,7 @@ test("PgAiCostStorage returns child-agent attribution with each model-call page"
       threadId: "thread_1",
       agentId: "main",
       triggerMessageId: "message_1",
+      spec: { model: { provider: "test", modelId: "test-model" } },
       requesterGroupIds: ["users"],
     })
     await storage.agents.runs.start({

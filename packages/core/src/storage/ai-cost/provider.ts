@@ -1,4 +1,5 @@
 /** @internal Storage-provider helpers; not part of the app-author API. */
+
 export type {
   AiAccountingAggregateFragment,
   AiAccountingRecordSetItem,
@@ -13,6 +14,12 @@ export {
 } from "./analytics"
 export type { AiModelCallCostDetails } from "./codec"
 export { aiModelCallCostDetails, parseAiModelCallCostDetails } from "./codec"
+export type {
+  AiAccountingGroupIdentity,
+  AiModelCallGroupFragment,
+  AiModelCallGroupRow,
+} from "./groups"
+export { aiModelCallGroupFragmentFromRow, buildAiModelCallGroupsFromFragments } from "./groups"
 export {
   aiModelCallCostMatchesUsage,
   normalizeAiModelCallCostRecord,

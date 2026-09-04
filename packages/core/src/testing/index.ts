@@ -19,6 +19,10 @@ export {
   seedAiLimitStorageContractExecution,
 } from "./ai-limit-storage-contract"
 export {
+  type AiModelCallGroupsContractStorage,
+  runAiModelCallGroupsContractSuite,
+} from "./ai-model-call-groups-contract"
+export {
   type AiUsageStorageContractSuiteOptions,
   runAiUsageStorageContractSuite,
   seedAiUsageStorageContractExecutions,

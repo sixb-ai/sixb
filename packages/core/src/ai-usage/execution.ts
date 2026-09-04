@@ -11,6 +11,8 @@ import type {
   ListAiLimitPolicyStatusesInput,
   ListAiModelCallAccountingInput,
   ListAiModelCallAccountingResult,
+  ListAiModelCallGroupsInput,
+  ListAiModelCallGroupsResult,
   QueryAiAccountingOverviewInput,
   ServiceAccountStatus,
   UpdateAiLimitPolicyInput,
@@ -19,6 +21,7 @@ import type {
 
 export type QueryAiUsageOverviewInput = Omit<QueryAiAccountingOverviewInput, "projectId">
 export type ListAiUsageModelCallsInput = Omit<ListAiModelCallAccountingInput, "projectId">
+export type ListAiUsageModelCallGroupsInput = Omit<ListAiModelCallGroupsInput, "projectId">
 export type ListAiUsageLimitPoliciesInput = Omit<ListAiLimitPoliciesInput, "projectId">
 export type ListAiUsageLimitStatusesInput = Omit<
   ListAiLimitPolicyStatusesInput,
@@ -68,6 +71,7 @@ export interface AiUsageRuntime {
   canManageLimits(): boolean
   queryOverview(input: QueryAiUsageOverviewInput): Promise<AiAccountingOverview>
   listModelCalls(input: ListAiUsageModelCallsInput): Promise<ListAiModelCallAccountingResult>
+  listModelCallGroups(input: ListAiUsageModelCallGroupsInput): Promise<ListAiModelCallGroupsResult>
   listLimitPolicies(input?: ListAiUsageLimitPoliciesInput): Promise<readonly AiLimitPolicy[]>
   listLimitStatuses(input?: ListAiUsageLimitStatusesInput): Promise<readonly AiLimitPolicyStatus[]>
   listLimitSubjectOptions(): Promise<AiUsageLimitSubjectOptions>
@@ -123,6 +127,10 @@ export function createAiUsageRuntime(
     listModelCalls: (input) => {
       assertObservable()
       return requireCosts().listModelCalls({ ...input, projectId: runtime.projectId })
+    },
+    listModelCallGroups: (input) => {
+      assertObservable()
+      return requireCosts().listModelCallGroups({ ...input, projectId: runtime.projectId })
     },
     listLimitPolicies: (input = {}) => {
       assertPolicyReadable()

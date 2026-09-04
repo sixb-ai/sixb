@@ -208,10 +208,43 @@ export interface ListAiModelCallAccountingResult {
   readonly total: number
 }
 
+export type ListAiModelCallGroupsInput = Omit<ListAiModelCallAccountingInput, "executionId">
+
+/** Filtered usage; an absent token total means at least one call did not report it. */
+export interface AiModelCallGroupSummary {
+  readonly modelCallCount: number
+  readonly totalTokens?: number
+  readonly costs: AiCostSummary
+}
+
+export interface AiModelCallExecutionSummary extends AiModelCallGroupSummary {
+  readonly executionId: string
+  readonly attribution?: AiAccountingAttribution
+  readonly firstCallAt: Date
+  readonly lastCallAt: Date
+  readonly models: readonly AiBillingIdentity[]
+}
+
+/** One initiating execution, including only calls matching the accounting filters. */
+export interface AiModelCallGroup extends AiModelCallGroupSummary {
+  readonly executionId: string
+  readonly attribution?: AiAccountingAttribution
+  readonly firstCallAt: Date
+  readonly lastCallAt: Date
+  readonly executions: readonly AiModelCallExecutionSummary[]
+}
+
+export interface ListAiModelCallGroupsResult {
+  readonly items: readonly AiModelCallGroup[]
+  readonly total: number
+  readonly hasMore: boolean
+}
+
 /** Immutable call-time costs. Inline provider costs take precedence over local estimates. */
 export interface AiCostStorage {
   recordModelCallCost(input: AiModelCallCostRecord): Promise<void>
   summarizeExecutions(input: SummarizeAiCostExecutionsInput): Promise<readonly AiCostSummary[]>
   queryProjectOverview(input: QueryAiAccountingOverviewInput): Promise<AiAccountingOverview>
   listModelCalls(input: ListAiModelCallAccountingInput): Promise<ListAiModelCallAccountingResult>
+  listModelCallGroups(input: ListAiModelCallGroupsInput): Promise<ListAiModelCallGroupsResult>
 }

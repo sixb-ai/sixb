@@ -217,3 +217,31 @@ export const AiModelCallAccountingListResponseSchema = z.object({
   hasMore: z.boolean(),
   total: z.number().int().nonnegative(),
 })
+
+export const AiModelCallGroupsQuerySchema = AiModelCallAccountingListQuerySchema.omit({
+  executionId: true,
+})
+
+const AiModelCallExecutionSummarySchema = z.object({
+  executionId: z.string(),
+  attribution: AiModelCallAccountingItemSchema.shape.attribution,
+  modelCallCount: z.number().int().nonnegative(),
+  totalTokens: z.number().int().nonnegative().optional(),
+  costs: AiCostSummarySchema,
+  firstCallAt: IsoDateSchema,
+  lastCallAt: IsoDateSchema,
+  models: z.array(AiBillingIdentitySchema),
+  /** Present only when the caller can read the initiating conversation. */
+  label: z.string().optional(),
+})
+
+export const AiModelCallGroupsResponseSchema = z.object({
+  items: z.array(
+    AiModelCallExecutionSummarySchema.omit({ models: true }).extend({
+      executions: z.array(AiModelCallExecutionSummarySchema),
+      canOpenThread: z.boolean(),
+    })
+  ),
+  total: z.number().int().nonnegative(),
+  hasMore: z.boolean(),
+})

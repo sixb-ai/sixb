@@ -27,6 +27,7 @@ export type {
   AppendAgentMessageInput,
   ConfirmAgentRunExecutionOwnershipInput,
   ConversationAgentRunRecord,
+  ConversationAgentRunSpec,
   CreateAgentContextCheckpointInput,
   CreateAgentRunInput,
   CreateAgentThreadInput,

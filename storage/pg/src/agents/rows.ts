@@ -7,6 +7,7 @@ import {
   type AgentRunDiagnostic,
   type AgentRunRecord,
   type AgentThreadRecord,
+  type ConversationAgentRunSpec,
   coerceAgentRunFinishReason,
   type SubagentRunResult,
   type SubagentRunSpec,
@@ -41,7 +42,7 @@ export interface AgentRunRow {
   trigger_message_id: string | null
   parent_run_id: string | null
   spawn_key: string | null
-  spec: SubagentRunSpec | string | null
+  spec: ConversationAgentRunSpec | SubagentRunSpec | string | null
   result: SubagentRunResult | string | null
   requester_group_ids: string[] | string
   status: AgentRunRecord["status"]
@@ -144,6 +145,7 @@ export function rowToRunRecord(row: AgentRunRow): AgentRunRecord {
       threadId: row.thread_id,
       agentId: row.agent_id,
       triggerMessageId: row.trigger_message_id,
+      ...(row.spec === null ? {} : { spec: parseJsonColumn<ConversationAgentRunSpec>(row.spec) }),
     }
   }
   if (!row.parent_run_id || !row.spawn_key || row.spec === null) {
@@ -230,8 +232,8 @@ function normalizeDiagnostics(
   return typeof value === "string" ? (JSON.parse(value) as AgentRunDiagnostic[]) : value
 }
 
-function parseJsonColumn<T>(value: T | string): T {
-  return typeof value === "string" ? (JSON.parse(value) as T) : value
+function parseJsonColumn<T>(value: unknown): T {
+  return typeof value === "string" ? (JSON.parse(value) as T) : (value as T)
 }
 
 // ── offset pagination (threads / messages order by their own column, not started_at) ─────────────

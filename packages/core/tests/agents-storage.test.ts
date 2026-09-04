@@ -37,6 +37,7 @@ describe("InMemoryStorage agents", () => {
           threadId: "thr_1",
           agentId: "sales",
           triggerMessageId: "msg_1",
+          spec: { model: { provider: "test", modelId: "test-model" } },
           requesterGroupIds: ["engineering"],
           createdAt: new Date("2026-06-23T10:00:10.000Z"),
         })
@@ -83,6 +84,7 @@ describe("InMemoryStorage agents", () => {
       threadId: "thr_1",
       agentId: "sales",
       triggerMessageId: "msg_1",
+      spec: { model: { provider: "test", modelId: "test-model" } },
       requesterGroupIds: ["engineering"],
       createdAt: new Date("2026-06-23T10:00:10.000Z"),
     })

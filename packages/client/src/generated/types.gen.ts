@@ -2637,6 +2637,135 @@ export type UpdateAiLimitPolicyResponses = {
 export type UpdateAiLimitPolicyResponse =
   UpdateAiLimitPolicyResponses[keyof UpdateAiLimitPolicyResponses]
 
+export type ListAiModelCallGroupsData = {
+  body?: never
+  path?: never
+  query: {
+    from: string
+    to: string
+    providerId?: string
+    modelId?: string
+    valuationStatus?: "rated" | "unpriceable" | "unvalued"
+    limit?: string
+    offset?: string
+  }
+  url: "/api/ai/model-call-groups"
+}
+
+export type ListAiModelCallGroupsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type ListAiModelCallGroupsError =
+  ListAiModelCallGroupsErrors[keyof ListAiModelCallGroupsErrors]
+
+export type ListAiModelCallGroupsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    items: Array<{
+      executionId: string
+      attribution?:
+        | {
+            kind: "agent"
+            agentId: string
+            agentRunId: string
+            threadId: string
+          }
+        | {
+            kind: "workflowAgent"
+            agentId: string
+            nodeRunId: string
+            workflowId: string
+            workflowRunId: string
+          }
+        | {
+            kind: "subagent"
+            subagentRunId: string
+            parentRunId: string
+          }
+      modelCallCount: number
+      totalTokens?: number
+      costs: {
+        amounts: Array<{
+          currency: string
+          amountNanos: string
+        }>
+        ratedCallCount: number
+        unpriceableCallCount: number
+        unvaluedCallCount: number
+      }
+      firstCallAt: string
+      lastCallAt: string
+      label?: string
+      executions: Array<{
+        executionId: string
+        attribution?:
+          | {
+              kind: "agent"
+              agentId: string
+              agentRunId: string
+              threadId: string
+            }
+          | {
+              kind: "workflowAgent"
+              agentId: string
+              nodeRunId: string
+              workflowId: string
+              workflowRunId: string
+            }
+          | {
+              kind: "subagent"
+              subagentRunId: string
+              parentRunId: string
+            }
+        modelCallCount: number
+        totalTokens?: number
+        costs: {
+          amounts: Array<{
+            currency: string
+            amountNanos: string
+          }>
+          ratedCallCount: number
+          unpriceableCallCount: number
+          unvaluedCallCount: number
+        }
+        firstCallAt: string
+        lastCallAt: string
+        models: Array<{
+          providerId: string
+          modelId: string
+        }>
+        label?: string
+      }>
+      canOpenThread: boolean
+    }>
+    total: number
+    hasMore: boolean
+  }
+}
+
+export type ListAiModelCallGroupsResponse =
+  ListAiModelCallGroupsResponses[keyof ListAiModelCallGroupsResponses]
+
 export type GetProjectInfoData = {
   body?: never
   path?: never
@@ -9260,6 +9389,22 @@ export type ListAgentThreadMessagesResponse =
 export type PostAgentThreadMessageData = {
   body: {
     text: string
+    model?: {
+      provider: string
+      modelId: string
+    }
+    reasoning?:
+      | "provider-default"
+      | "none"
+      | "minimal"
+      | "low"
+      | "medium"
+      | "high"
+      | "xhigh"
+      | "max"
+      | {
+          budgetTokens: number
+        }
     attachments?: Array<{
       blobId: string
       digest: string
@@ -9380,6 +9525,22 @@ export type PostAgentThreadMessageResponses = {
         id: string
       }
       status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      model?: {
+        provider: string
+        modelId: string
+      }
+      reasoning?:
+        | "provider-default"
+        | "none"
+        | "minimal"
+        | "low"
+        | "medium"
+        | "high"
+        | "xhigh"
+        | "max"
+        | {
+            budgetTokens: number
+          }
       modelId?: string
       finishReason?:
         | "stop"
@@ -9618,6 +9779,22 @@ export type CancelAgentRunResponses = {
         id: string
       }
       status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      model?: {
+        provider: string
+        modelId: string
+      }
+      reasoning?:
+        | "provider-default"
+        | "none"
+        | "minimal"
+        | "low"
+        | "medium"
+        | "high"
+        | "xhigh"
+        | "max"
+        | {
+            budgetTokens: number
+          }
       modelId?: string
       finishReason?:
         | "stop"
@@ -9773,6 +9950,22 @@ export type RetryAgentRunResponses = {
         id: string
       }
       status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      model?: {
+        provider: string
+        modelId: string
+      }
+      reasoning?:
+        | "provider-default"
+        | "none"
+        | "minimal"
+        | "low"
+        | "medium"
+        | "high"
+        | "xhigh"
+        | "max"
+        | {
+            budgetTokens: number
+          }
       modelId?: string
       finishReason?:
         | "stop"
@@ -9904,6 +10097,22 @@ export type ListAgentThreadRunsResponses = {
         id: string
       }
       status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      model?: {
+        provider: string
+        modelId: string
+      }
+      reasoning?:
+        | "provider-default"
+        | "none"
+        | "minimal"
+        | "low"
+        | "medium"
+        | "high"
+        | "xhigh"
+        | "max"
+        | {
+            budgetTokens: number
+          }
       modelId?: string
       finishReason?:
         | "stop"
@@ -10032,6 +10241,22 @@ export type GetAgentRunResponses = {
       id: string
     }
     status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+    model?: {
+      provider: string
+      modelId: string
+    }
+    reasoning?:
+      | "provider-default"
+      | "none"
+      | "minimal"
+      | "low"
+      | "medium"
+      | "high"
+      | "xhigh"
+      | "max"
+      | {
+          budgetTokens: number
+        }
     modelId?: string
     finishReason?:
       | "stop"
@@ -10125,6 +10350,25 @@ export type ListModelsResponses = {
       provider: string
       modelId: string
       isDefault: boolean
+      name: string
+      description?: string
+      publisher: {
+        id: string
+        name: string
+      }
+      via?: string
+      capabilities: {
+        input: Array<"text" | "image" | "audio" | "video" | "pdf">
+        output: Array<"text" | "image" | "audio" | "video" | "pdf">
+        attachments?: boolean
+        reasoning?: boolean
+        tools?: boolean
+        structuredOutput?: boolean
+        contextWindowTokens?: number
+      }
+      reasoningLevels: Array<
+        "provider-default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+      >
     }>
   }
 }

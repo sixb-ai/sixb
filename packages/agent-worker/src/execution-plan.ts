@@ -7,7 +7,7 @@ import type {
   LanguageModelCatalog,
 } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
-import type { SubagentRunRecord } from "@sixb/core/storage"
+import type { ConversationAgentRunSpec, SubagentRunRecord } from "@sixb/core/storage"
 
 const SUBAGENT_INSTRUCTIONS =
   "Complete the delegated task autonomously and return a concise result to the parent Agent."
@@ -30,16 +30,23 @@ export interface ResolvedAgentExecutionPlan {
 /** Adapt today's registered-agent definition to the source-neutral execution contract. */
 export function resolveAgentExecutionPlan(input: {
   readonly agent: AgentDefinition
+  readonly spec?: ConversationAgentRunSpec
   readonly models?: LanguageModelCatalog
   readonly defaultMaxSteps: number
 }): ResolvedAgentExecutionPlan {
-  const { agent, models } = input
-  const ref = { provider: agent.model.providerId, modelId: agent.model.modelId }
-  const model = models?.getByRef(ref)?.model ?? (models === undefined ? agent.model : null)
+  const { agent, models, spec } = input
+  const modelRef = spec?.model ?? { provider: agent.model.providerId, modelId: agent.model.modelId }
+  const reasoning = spec ? spec.reasoning : agent.reasoning
+  const model =
+    models === undefined
+      ? modelRef.provider === agent.model.providerId && modelRef.modelId === agent.model.modelId
+        ? agent.model
+        : null
+      : (models.getByRef(modelRef)?.model ?? null)
   if (model === null) {
     throw createSixbError(
       "internal.unexpected",
-      `[SixbAgentWorker] Agent '${agent.id}' references language model '${ref.provider}/${ref.modelId}', which is missing from the runtime catalog.`,
+      `[SixbAgentWorker] Agent '${agent.id}' references language model '${modelRef.provider}/${modelRef.modelId}', which is missing from the runtime catalog.`,
       { details: { agentId: agent.id } }
     )
   }
@@ -49,7 +56,7 @@ export function resolveAgentExecutionPlan(input: {
     instructions: agent.instructions,
     tools: agent.tools,
     maxSteps: agent.loop?.stopWhen?.maxSteps ?? input.defaultMaxSteps,
-    ...(agent.reasoning === undefined ? {} : { reasoning: agent.reasoning }),
+    ...(reasoning === undefined ? {} : { reasoning }),
     ...(agent.loop?.caching === undefined ? {} : { caching: agent.loop.caching }),
   })
 }

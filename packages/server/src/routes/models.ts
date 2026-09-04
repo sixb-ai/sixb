@@ -1,10 +1,12 @@
 import type { LanguageModelEntry, SixbHostView } from "@sixb/core"
 import type { Elysia } from "elysia"
+import { languageModelDisplay } from "../models/display"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ModelCatalogSchema } from "../schemas/models"
 
-function serializeLanguageModel(entry: LanguageModelEntry, defaultEntry: LanguageModelEntry) {
+async function serializeLanguageModel(entry: LanguageModelEntry, defaultEntry: LanguageModelEntry) {
   return {
+    ...(await languageModelDisplay(entry)),
     provider: entry.provider,
     modelId: entry.modelId,
     isDefault: entry.provider === defaultEntry.provider && entry.modelId === defaultEntry.modelId,
@@ -14,13 +16,15 @@ function serializeLanguageModel(entry: LanguageModelEntry, defaultEntry: Languag
 export function registerModelRoutes(app: Elysia, host: SixbHostView) {
   return app.get(
     "/api/models",
-    () => {
+    async () => {
       const language = host.definitions.models?.language
       return ModelCatalogSchema.parse({
         language:
           language === undefined
             ? []
-            : language.list().map((entry) => serializeLanguageModel(entry, language.default)),
+            : await Promise.all(
+                language.list().map((entry) => serializeLanguageModel(entry, language.default))
+              ),
       })
     },
     {

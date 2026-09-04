@@ -21,9 +21,12 @@ import {
   type AiModelCallUsageRecord,
   type ListAiModelCallAccountingInput,
   type ListAiModelCallAccountingResult,
+  type ListAiModelCallGroupsInput,
+  type ListAiModelCallGroupsResult,
   type QueryAiAccountingOverviewInput,
   type SummarizeAiCostExecutionsInput,
 } from "@sixb/core/storage"
+import { listAiModelCallGroups } from "./ai-cost-groups"
 import { requestedReasoningFromRow } from "./ai-usage-storage"
 import { isUniqueConstraintError } from "./storage-errors"
 import { runImmediateTransaction, type SqliteStoreConnection } from "./transactions"
@@ -31,6 +34,12 @@ import { runImmediateTransaction, type SqliteStoreConnection } from "./transacti
 /** SQLite-backed immutable valuations stored in one append-only table. */
 export class SqliteAiCostStorage implements AiCostStorage {
   constructor(private readonly connection: SqliteStoreConnection) {}
+
+  async listModelCallGroups(
+    input: ListAiModelCallGroupsInput
+  ): Promise<ListAiModelCallGroupsResult> {
+    return listAiModelCallGroups(this.connection, input)
+  }
 
   async recordModelCallCost(input: AiModelCallCostRecord): Promise<void> {
     const record = normalizeAiModelCallCostRecord(input)

@@ -8,6 +8,7 @@ import {
   type AgentRunDiagnostic,
   type AgentRunRecord,
   type AgentThreadRecord,
+  type ConversationAgentRunSpec,
   coerceAgentRunFinishReason,
   type SubagentRunResult,
   type SubagentRunSpec,
@@ -144,6 +145,7 @@ export function rowToRunRecord(row: AgentRunRow): AgentRunRecord {
       threadId: row.thread_id,
       agentId: row.agent_id,
       triggerMessageId: row.trigger_message_id,
+      ...(row.spec === null ? {} : { spec: JSON.parse(row.spec) as ConversationAgentRunSpec }),
     }
   }
   if (!row.parent_run_id || !row.spawn_key || row.spec === null) {
