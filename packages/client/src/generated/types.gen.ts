@@ -1661,6 +1661,12 @@ export type GetAiAccountingOverviewErrors = {
     error: string
   }
   /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
    * Response for status 501
    */
   501: {
@@ -1832,6 +1838,12 @@ export type ListAiModelCallsErrors = {
     error: string
   }
   /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
    * Response for status 501
    */
   501: {
@@ -1977,6 +1989,537 @@ export type ListAiModelCallsResponses = {
 }
 
 export type ListAiModelCallsResponse = ListAiModelCallsResponses[keyof ListAiModelCallsResponses]
+
+export type ListAiLimitPoliciesData = {
+  body?: never
+  path?: never
+  query?: {
+    includeDisabled?: "true" | "false"
+  }
+  url: "/api/ai/limits"
+}
+
+export type ListAiLimitPoliciesErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type ListAiLimitPoliciesError = ListAiLimitPoliciesErrors[keyof ListAiLimitPoliciesErrors]
+
+export type ListAiLimitPoliciesResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    items: Array<{
+      id: string
+      subject:
+        | {
+            type: "project"
+          }
+        | {
+            type: "group"
+            id: string
+          }
+        | {
+            type: "user"
+            id: string
+          }
+        | {
+            type: "serviceAccount"
+            id: string
+          }
+      limit:
+        | {
+            meter: "tokens.total"
+            amount: number
+          }
+        | {
+            meter: "cost.catalogEstimated"
+            amount: {
+              currency: "USD"
+              amountNanos: string
+            }
+          }
+      period: "calendarMonth"
+      enabled: boolean
+      createdAt: string
+      updatedAt: string
+    }>
+    capabilities: {
+      manage: boolean
+    }
+  }
+}
+
+export type ListAiLimitPoliciesResponse =
+  ListAiLimitPoliciesResponses[keyof ListAiLimitPoliciesResponses]
+
+export type CreateAiLimitPolicyData = {
+  body: {
+    subject:
+      | {
+          type: "project"
+        }
+      | {
+          type: "group"
+          id: string
+        }
+      | {
+          type: "user"
+          id: string
+        }
+      | {
+          type: "serviceAccount"
+          id: string
+        }
+    limit:
+      | {
+          meter: "tokens.total"
+          amount: number
+        }
+      | {
+          meter: "cost.catalogEstimated"
+          amount: {
+            currency: "USD"
+            amountNanos: string
+          }
+        }
+    enabled?: boolean
+  }
+  path?: never
+  query?: never
+  url: "/api/ai/limits"
+}
+
+export type CreateAiLimitPolicyErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type CreateAiLimitPolicyError = CreateAiLimitPolicyErrors[keyof CreateAiLimitPolicyErrors]
+
+export type CreateAiLimitPolicyResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    id: string
+    subject:
+      | {
+          type: "project"
+        }
+      | {
+          type: "group"
+          id: string
+        }
+      | {
+          type: "user"
+          id: string
+        }
+      | {
+          type: "serviceAccount"
+          id: string
+        }
+    limit:
+      | {
+          meter: "tokens.total"
+          amount: number
+        }
+      | {
+          meter: "cost.catalogEstimated"
+          amount: {
+            currency: "USD"
+            amountNanos: string
+          }
+        }
+    period: "calendarMonth"
+    enabled: boolean
+    createdAt: string
+    updatedAt: string
+  }
+}
+
+export type CreateAiLimitPolicyResponse =
+  CreateAiLimitPolicyResponses[keyof CreateAiLimitPolicyResponses]
+
+export type GetAiLimitStatusData = {
+  body?: never
+  path?: never
+  query?: {
+    includeDisabled?: "true" | "false"
+  }
+  url: "/api/ai/limits/status"
+}
+
+export type GetAiLimitStatusErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type GetAiLimitStatusError = GetAiLimitStatusErrors[keyof GetAiLimitStatusErrors]
+
+export type GetAiLimitStatusResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    items: Array<{
+      policy: {
+        id: string
+        subject:
+          | {
+              type: "project"
+            }
+          | {
+              type: "group"
+              id: string
+            }
+          | {
+              type: "user"
+              id: string
+            }
+          | {
+              type: "serviceAccount"
+              id: string
+            }
+        limit:
+          | {
+              meter: "tokens.total"
+              amount: number
+            }
+          | {
+              meter: "cost.catalogEstimated"
+              amount: {
+                currency: "USD"
+                amountNanos: string
+              }
+            }
+        period: "calendarMonth"
+        enabled: boolean
+        createdAt: string
+        updatedAt: string
+      }
+      period: {
+        kind: "calendarMonth"
+        start: string
+        end: string
+        resetAt: string
+      }
+      consumption: {
+        actual:
+          | {
+              meter: "tokens.total"
+              amount: number
+            }
+          | {
+              meter: "cost.catalogEstimated"
+              amount: {
+                currency: "USD"
+                amountNanos: string
+              }
+            }
+        reserved:
+          | {
+              meter: "tokens.total"
+              amount: number
+            }
+          | {
+              meter: "cost.catalogEstimated"
+              amount: {
+                currency: "USD"
+                amountNanos: string
+              }
+            }
+        unknown:
+          | {
+              meter: "tokens.total"
+              amount: number
+            }
+          | {
+              meter: "cost.catalogEstimated"
+              amount: {
+                currency: "USD"
+                amountNanos: string
+              }
+            }
+        remaining:
+          | {
+              meter: "tokens.total"
+              amount: number
+            }
+          | {
+              meter: "cost.catalogEstimated"
+              amount: {
+                currency: "USD"
+                amountNanos: string
+              }
+            }
+      }
+      accountingStatus: "complete" | "unavailable"
+      exhausted: boolean
+      orphaned: boolean
+    }>
+    capabilities: {
+      manage: boolean
+    }
+  }
+}
+
+export type GetAiLimitStatusResponse = GetAiLimitStatusResponses[keyof GetAiLimitStatusResponses]
+
+export type GetAiLimitSubjectOptionsData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/ai/limits/subjects"
+}
+
+export type GetAiLimitSubjectOptionsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+}
+
+export type GetAiLimitSubjectOptionsError =
+  GetAiLimitSubjectOptionsErrors[keyof GetAiLimitSubjectOptionsErrors]
+
+export type GetAiLimitSubjectOptionsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    groups: Array<{
+      id: string
+      label?: string
+      description?: string
+    }>
+    users: Array<{
+      id: string
+      email: string
+      displayName?: string
+      status: "active" | "suspended"
+    }>
+    serviceAccounts: Array<{
+      id: string
+      name: string
+      description?: string
+      status: "active" | "suspended"
+    }>
+  }
+}
+
+export type GetAiLimitSubjectOptionsResponse =
+  GetAiLimitSubjectOptionsResponses[keyof GetAiLimitSubjectOptionsResponses]
+
+export type DeleteAiLimitPolicyData = {
+  body?: never
+  path: {
+    limitId: string
+  }
+  query?: never
+  url: "/api/ai/limits/{limitId}"
+}
+
+export type DeleteAiLimitPolicyErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type DeleteAiLimitPolicyError = DeleteAiLimitPolicyErrors[keyof DeleteAiLimitPolicyErrors]
+
+export type DeleteAiLimitPolicyResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    success: boolean
+  }
+}
+
+export type DeleteAiLimitPolicyResponse =
+  DeleteAiLimitPolicyResponses[keyof DeleteAiLimitPolicyResponses]
+
+export type UpdateAiLimitPolicyData = {
+  body: {
+    limit?:
+      | {
+          meter: "tokens.total"
+          amount: number
+        }
+      | {
+          meter: "cost.catalogEstimated"
+          amount: {
+            currency: "USD"
+            amountNanos: string
+          }
+        }
+    enabled?: boolean
+  }
+  path: {
+    limitId: string
+  }
+  query?: never
+  url: "/api/ai/limits/{limitId}"
+}
+
+export type UpdateAiLimitPolicyErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
+}
+
+export type UpdateAiLimitPolicyError = UpdateAiLimitPolicyErrors[keyof UpdateAiLimitPolicyErrors]
+
+export type UpdateAiLimitPolicyResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    id: string
+    subject:
+      | {
+          type: "project"
+        }
+      | {
+          type: "group"
+          id: string
+        }
+      | {
+          type: "user"
+          id: string
+        }
+      | {
+          type: "serviceAccount"
+          id: string
+        }
+    limit:
+      | {
+          meter: "tokens.total"
+          amount: number
+        }
+      | {
+          meter: "cost.catalogEstimated"
+          amount: {
+            currency: "USD"
+            amountNanos: string
+          }
+        }
+    period: "calendarMonth"
+    enabled: boolean
+    createdAt: string
+    updatedAt: string
+  }
+}
+
+export type UpdateAiLimitPolicyResponse =
+  UpdateAiLimitPolicyResponses[keyof UpdateAiLimitPolicyResponses]
 
 export type GetProjectInfoData = {
   body?: never

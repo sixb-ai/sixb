@@ -35,6 +35,9 @@ import type {
   CreateAgentThreadData,
   CreateAgentThreadErrors,
   CreateAgentThreadResponses,
+  CreateAiLimitPolicyData,
+  CreateAiLimitPolicyErrors,
+  CreateAiLimitPolicyResponses,
   CreateAuthInvitationData,
   CreateAuthInvitationErrors,
   CreateAuthInvitationResponses,
@@ -50,6 +53,9 @@ import type {
   CreateFileUploadData,
   CreateFileUploadErrors,
   CreateFileUploadResponses,
+  DeleteAiLimitPolicyData,
+  DeleteAiLimitPolicyErrors,
+  DeleteAiLimitPolicyResponses,
   DisableAuthServiceAccountData,
   DisableAuthServiceAccountErrors,
   DisableAuthServiceAccountResponses,
@@ -86,6 +92,12 @@ import type {
   GetAiAccountingOverviewData,
   GetAiAccountingOverviewErrors,
   GetAiAccountingOverviewResponses,
+  GetAiLimitStatusData,
+  GetAiLimitStatusErrors,
+  GetAiLimitStatusResponses,
+  GetAiLimitSubjectOptionsData,
+  GetAiLimitSubjectOptionsErrors,
+  GetAiLimitSubjectOptionsResponses,
   GetAuthAccessManagementOptionsData,
   GetAuthAccessManagementOptionsErrors,
   GetAuthAccessManagementOptionsResponses,
@@ -198,6 +210,9 @@ import type {
   ListAgentThreadsData,
   ListAgentThreadsErrors,
   ListAgentThreadsResponses,
+  ListAiLimitPoliciesData,
+  ListAiLimitPoliciesErrors,
+  ListAiLimitPoliciesResponses,
   ListAiModelCallsData,
   ListAiModelCallsErrors,
   ListAiModelCallsResponses,
@@ -349,6 +364,9 @@ import type {
   SuspendAuthMemberData,
   SuspendAuthMemberErrors,
   SuspendAuthMemberResponses,
+  UpdateAiLimitPolicyData,
+  UpdateAiLimitPolicyErrors,
+  UpdateAiLimitPolicyResponses,
   UpdateAuthMemberGroupsData,
   UpdateAuthMemberGroupsErrors,
   UpdateAuthMemberGroupsResponses,
@@ -780,7 +798,11 @@ export const getAiAccountingOverview = <ThrowOnError extends boolean = false>(
     GetAiAccountingOverviewResponses,
     GetAiAccountingOverviewErrors,
     ThrowOnError
-  >({ url: "/api/ai/accounting/overview", ...options })
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/ai/accounting/overview",
+    ...options,
+  })
 
 /**
  * List project AI model-call accounting records
@@ -789,8 +811,120 @@ export const listAiModelCalls = <ThrowOnError extends boolean = false>(
   options: Options<ListAiModelCallsData, ThrowOnError>
 ) =>
   (options.client ?? client).get<ListAiModelCallsResponses, ListAiModelCallsErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/ai/model-calls",
     ...options,
+  })
+
+/**
+ * List project AI usage-limit policies
+ */
+export const listAiLimitPolicies = <ThrowOnError extends boolean = false>(
+  options?: Options<ListAiLimitPoliciesData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<
+    ListAiLimitPoliciesResponses,
+    ListAiLimitPoliciesErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/ai/limits",
+    ...options,
+  })
+
+/**
+ * Create an AI usage-limit policy
+ */
+export const createAiLimitPolicy = <ThrowOnError extends boolean = false>(
+  options: Options<CreateAiLimitPolicyData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    CreateAiLimitPolicyResponses,
+    CreateAiLimitPolicyErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/ai/limits",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Get current project AI usage-limit status
+ */
+export const getAiLimitStatus = <ThrowOnError extends boolean = false>(
+  options?: Options<GetAiLimitStatusData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<GetAiLimitStatusResponses, GetAiLimitStatusErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/ai/limits/status",
+    ...options,
+  })
+
+/**
+ * Get selectable AI usage-limit subjects
+ *
+ * Lists registered groups and auth principals available for AI usage-limit policies.
+ */
+export const getAiLimitSubjectOptions = <ThrowOnError extends boolean = false>(
+  options?: Options<GetAiLimitSubjectOptionsData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<
+    GetAiLimitSubjectOptionsResponses,
+    GetAiLimitSubjectOptionsErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/ai/limits/subjects",
+    ...options,
+  })
+
+/**
+ * Delete an AI usage-limit policy
+ */
+export const deleteAiLimitPolicy = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteAiLimitPolicyData, ThrowOnError>
+) =>
+  (options.client ?? client).delete<
+    DeleteAiLimitPolicyResponses,
+    DeleteAiLimitPolicyErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/ai/limits/{limitId}",
+    ...options,
+  })
+
+/**
+ * Update an AI usage-limit policy
+ */
+export const updateAiLimitPolicy = <ThrowOnError extends boolean = false>(
+  options: Options<UpdateAiLimitPolicyData, ThrowOnError>
+) =>
+  (options.client ?? client).put<
+    UpdateAiLimitPolicyResponses,
+    UpdateAiLimitPolicyErrors,
+    ThrowOnError
+  >({
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
+    url: "/api/ai/limits/{limitId}",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   })
 
 /**

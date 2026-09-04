@@ -427,6 +427,22 @@ export {
   resolveAuthorizationContext,
 } from "./authorization"
 
+// ── AI usage ───────────────────────────────────────────────
+
+export type {
+  AiUsageLimitGroupOption,
+  AiUsageLimitServiceAccountOption,
+  AiUsageLimitSubjectOptions,
+  AiUsageLimitUserOption,
+  AiUsageRuntime,
+  CreateAiUsageLimitPolicyInput,
+  ListAiUsageLimitPoliciesInput,
+  ListAiUsageLimitStatusesInput,
+  ListAiUsageModelCallsInput,
+  QueryAiUsageOverviewInput,
+  UpdateAiUsageLimitPolicyInput,
+} from "./ai-usage"
+
 // ── Security Definitions ───────────────────────────────────
 
 export type {
@@ -445,6 +461,7 @@ export type {
   GroupDefinition,
   GroupReference,
   ManageGrant,
+  ManageGrantTarget,
   MembershipOperation,
   MembershipPolicyDefinition,
   ObserveGrant,
