@@ -30,11 +30,10 @@ import { AgentToolExecutionError, AgentToolOutputError } from "./errors"
 import { type AgentModelToolSpec, agentModelToolSpecFromDefinition } from "./tools/model-spec"
 import type { AgentToolModelOutput } from "./tools/result-output"
 
-type AgentErrorDetails =
+export type AgentErrorDetails =
   | { readonly agentId: string; readonly runId: string }
-  | { readonly agentId: string; readonly nodeRunId: string }
   | {
-      readonly agentId: string
+      readonly agentStepId: string
       readonly workflowId: string
       readonly workflowRunId: string
       readonly nodeRunId: string

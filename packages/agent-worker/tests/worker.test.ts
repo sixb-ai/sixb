@@ -57,6 +57,7 @@ import {
 import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
+import { workflowAgentStepActorId } from "@sixb/core/internal/workflows"
 import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
 import {
   type AgentMessageRecord,
@@ -1421,14 +1422,12 @@ async function queueWorkflowAgentNode(input: {
   readonly requestedByPrincipal?: typeof REQUESTER
   readonly requesterGroupIds?: readonly string[]
 }) {
-  const agent = defineAgent("workflow-usage-agent", {
-    name: "Workflow usage agent",
+  const agentStep = defineAgentStep("workflow-usage-step", {
     model: input.model,
     instructions: "Resolve the best project.",
     groups: [AGENT_RUNTIME_GROUP],
     ...(input.tools === undefined ? {} : { tools: input.tools }),
   })
-  const agentStep = defineAgentStep("workflow-usage-step", agent)
     .input({ query: "string" })
     .output({ answer: "string", confidence: "double" })
     .prompt(({ input: stepInput }) => `Resolve '${stepInput.query}'.`)
@@ -1436,8 +1435,8 @@ async function queueWorkflowAgentNode(input: {
   const sixb = new SixbHost({
     id: PROJECT_ID,
     ontology: [],
-    agents: [agent],
     workflows: [workflow],
+    tools: input.tools ?? [],
     groups: [AGENT_RUNTIME_GROUP],
     broker: new InMemoryBroker(),
     storage: input.storage ?? new InMemoryStorage(),
@@ -1453,6 +1452,7 @@ async function queueWorkflowAgentNode(input: {
   await seedRequesterUser(sixb.storage, requestedBy)
 
   const nodeRunId = `${input.runId}:node:0`
+  const actorId = workflowAgentStepActorId(workflow.id, agentStep.id)
   const executionId = await createTestWorkflowExecution(sixb.storage.executions, {
     projectId: PROJECT_ID,
     workflowId: workflow.id,
@@ -1481,7 +1481,7 @@ async function queueWorkflowAgentNode(input: {
   })
   const agentExecutionId = await createTestAgentExecution(sixb.storage, {
     projectId: PROJECT_ID,
-    agentId: agent.id,
+    agentId: actorId,
     runId: nodeRunId,
     sourceExecutionId: executionId,
   })
@@ -1489,7 +1489,7 @@ async function queueWorkflowAgentNode(input: {
     projectId: PROJECT_ID,
     nodeRunId,
     executionId: agentExecutionId,
-    agentId: agent.id,
+    agentId: actorId,
     prompt: "Resolve 'alpha'.",
   })
   await runs.nodes.wait({ projectId: PROJECT_ID, id: nodeRunId })
@@ -1505,7 +1505,7 @@ async function queueWorkflowAgentNode(input: {
     ],
   })
 
-  return { sixb, runs, workflow, agent, nodeRunId, agentExecutionId }
+  return { sixb, runs, workflow, agentStep, nodeRunId, agentExecutionId }
 }
 
 class FailingRunStreamBroker extends InMemoryBroker {
@@ -2514,16 +2514,13 @@ describe("AgentWorker", () => {
         lookupCalls += 1
         return { project: "Project Alpha", query: input.query, runId: run.id }
       })
-    const agent = defineAgent("workflow-resolver", {
-      name: "Workflow resolver",
+    const agentStep = defineAgentStep("resolve-project", {
       model,
       instructions: "Resolve the best project.",
       groups: [AGENT_RUNTIME_GROUP],
       tools: [lookupProject],
       reasoning: "high",
-      providerOptions: { openai: { reasoningSummary: "detailed" } },
     })
-    const agentStep = defineAgentStep("resolve-project", agent)
       .input({ query: "string" })
       .output({ answer: "string", confidence: "double" })
       .prompt(({ input }) => `Resolve '${input.query}'.`)
@@ -2533,8 +2530,8 @@ describe("AgentWorker", () => {
     const sixb = new SixbHost({
       id: PROJECT_ID,
       ontology: [],
-      agents: [agent],
       workflows: [workflow],
+      tools: [lookupProject],
       groups: [AGENT_RUNTIME_GROUP],
       broker: new InMemoryBroker(),
       storage: new InMemoryStorage(),
@@ -2546,6 +2543,7 @@ describe("AgentWorker", () => {
     const runs = sixb.storage.workflowRuns!
     const runId = "workflow-agent-run"
     const nodeRunId = `${runId}:node:0`
+    const actorId = workflowAgentStepActorId(workflow.id, agentStep.id)
     await seedRequesterUser(sixb.storage)
     const executionId = await createTestWorkflowExecution(sixb.storage.executions, {
       projectId: PROJECT_ID,
@@ -2578,7 +2576,7 @@ describe("AgentWorker", () => {
     })
     const agentExecutionId = await createTestAgentExecution(sixb.storage, {
       projectId: PROJECT_ID,
-      agentId: agent.id,
+      agentId: actorId,
       runId: nodeRunId,
       sourceExecutionId: executionId,
     })
@@ -2586,7 +2584,7 @@ describe("AgentWorker", () => {
       projectId: PROJECT_ID,
       nodeRunId,
       executionId: agentExecutionId,
-      agentId: agent.id,
+      agentId: actorId,
       prompt: "Resolve 'alpha'.",
     })
     await runs.nodes.wait({ projectId: PROJECT_ID, id: nodeRunId })
@@ -2623,7 +2621,7 @@ describe("AgentWorker", () => {
       )
       expect(execution).toMatchObject({
         status: "succeeded",
-        agentId: agent.id,
+        agentId: actorId,
         modelId: "mock-model",
         finishReason: "stop",
         attempt: 1,
@@ -2736,7 +2734,7 @@ describe("AgentWorker", () => {
       expect(finalizer?.tools?.length ?? 0).toBe(0)
       expect(finalizer?.responseFormat).toMatchObject({ type: "json" })
       expect(finalizer?.reasoning).toBeUndefined()
-      expect(finalizer?.providerOptions).toEqual({ openai: { reasoningSummary: "detailed" } })
+      expect(finalizer?.providerOptions).toBeUndefined()
       expect(JSON.stringify(finalizer?.prompt)).not.toContain("workflow-lookup")
       expect(JSON.stringify(finalizer?.prompt)).not.toContain("private workflow reasoning")
       expect(JSON.stringify(finalizer?.prompt)).not.toContain(nodeRunId)
@@ -2820,7 +2818,7 @@ describe("AgentWorker", () => {
         error: {
           code: "agent.execution_failed",
           details: {
-            agentId: "workflow-usage-agent",
+            agentStepId: "workflow-usage-step",
             workflowId: "workflow-usage-test",
             workflowRunId: "workflow-runtime-profile-failure",
             nodeId: "workflow-usage-step",
@@ -3047,7 +3045,7 @@ describe("AgentWorker", () => {
         message: "Agent execution failed.",
         retryable: false,
         details: {
-          agentId: "workflow-usage-agent",
+          agentStepId: "workflow-usage-step",
           workflowId: "workflow-usage-test",
           workflowRunId: "workflow-accounting-failure",
           nodeId: "workflow-usage-step",
@@ -3151,7 +3149,7 @@ describe("AgentWorker", () => {
         message: "Agent execution failed.",
         retryable: false,
         details: {
-          agentId: "workflow-usage-agent",
+          agentStepId: "workflow-usage-step",
           workflowId: "workflow-usage-test",
           workflowRunId: "workflow-final-callback-failure",
           nodeId: "workflow-usage-step",
@@ -3194,7 +3192,7 @@ describe("AgentWorker", () => {
         message: "Agent execution failed.",
         retryable: false,
         details: {
-          agentId: "workflow-usage-agent",
+          agentStepId: "workflow-usage-step",
           workflowId: "workflow-usage-test",
           workflowRunId: "workflow-finalization-failure",
           nodeId: "workflow-usage-step",
@@ -3257,7 +3255,7 @@ describe("AgentWorker", () => {
         retryable: false,
         at: cancelledAt.toISOString(),
         details: {
-          agentId: "workflow-usage-agent",
+          agentStepId: "workflow-usage-step",
           workflowId: "workflow-usage-test",
           workflowRunId: runId,
           nodeRunId,
@@ -3328,13 +3326,11 @@ describe("AgentWorker", () => {
         throw originalError
       },
     })
-    const agent = defineAgent("workflow-failure-agent", {
-      name: "Workflow failure agent",
+    const agentStep = defineAgentStep("resolve-or-fail", {
       model,
       instructions: "Fail for this test.",
       groups: [AGENT_RUNTIME_GROUP],
     })
-    const agentStep = defineAgentStep("resolve-or-fail", agent)
       .input({ query: "string" })
       .output({ answer: "string" })
       .prompt(({ input }) => `Resolve '${input.query}'.`)
@@ -3344,7 +3340,6 @@ describe("AgentWorker", () => {
     const sixb = new SixbHost({
       id: PROJECT_ID,
       ontology: [],
-      agents: [agent],
       workflows: [workflow],
       groups: [AGENT_RUNTIME_GROUP],
       broker: new InMemoryBroker(),
@@ -3361,6 +3356,7 @@ describe("AgentWorker", () => {
     const runs = sixb.storage.workflowRuns!
     const runId = "workflow-agent-failure-run"
     const nodeRunId = `${runId}:node:0`
+    const actorId = workflowAgentStepActorId(workflow.id, agentStep.id)
     const executionId = await createTestWorkflowExecution(sixb.storage.executions, {
       projectId: PROJECT_ID,
       workflowId: workflow.id,
@@ -3388,7 +3384,7 @@ describe("AgentWorker", () => {
     })
     const agentExecutionId = await createTestAgentExecution(sixb.storage, {
       projectId: PROJECT_ID,
-      agentId: agent.id,
+      agentId: actorId,
       runId: nodeRunId,
       sourceExecutionId: executionId,
     })
@@ -3396,7 +3392,7 @@ describe("AgentWorker", () => {
       projectId: PROJECT_ID,
       nodeRunId,
       executionId: agentExecutionId,
-      agentId: agent.id,
+      agentId: actorId,
       prompt: "Resolve 'alpha'.",
     })
     await runs.nodes.wait({ projectId: PROJECT_ID, id: nodeRunId })
@@ -3435,7 +3431,7 @@ describe("AgentWorker", () => {
         message: "Agent execution failed.",
         retryable: false,
         details: {
-          agentId: agent.id,
+          agentStepId: agentStep.id,
           workflowId: workflow.id,
           workflowRunId: runId,
           nodeId: agentStep.id,
@@ -3448,7 +3444,7 @@ describe("AgentWorker", () => {
         message: "Workflow node execution failed.",
         retryable: false,
         details: {
-          agentId: agent.id,
+          agentStepId: agentStep.id,
           workflowId: workflow.id,
           workflowRunId: runId,
           nodeId: agentStep.id,

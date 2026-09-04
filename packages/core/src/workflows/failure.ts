@@ -15,7 +15,7 @@ export interface WorkflowNodeFailureIdentity extends WorkflowNodeFailureIdentity
         readonly actionId: string
         readonly actionRunId?: string
       }
-    | { readonly type: "agent"; readonly agentId: string }
+    | { readonly type: "agent"; readonly agentStepId: string }
     | { readonly type: "intervention"; readonly interventionId: string }
 }
 
@@ -56,7 +56,7 @@ function workflowNodeFailureDetails(identity: WorkflowNodeFailureIdentity) {
         ...(identity.child.actionRunId ? { actionRunId: identity.child.actionRunId } : {}),
       }
     case "agent":
-      return { ...base, agentId: identity.child.agentId }
+      return { ...base, agentStepId: identity.child.agentStepId }
     case "intervention":
       return { ...base, interventionId: identity.child.interventionId }
   }

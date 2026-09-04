@@ -27,8 +27,8 @@ When authentication is enabled, the main agent inherits the requesting user's cu
 
 ## Defined agents
 
-`defineAgent` remains available for existing agent workflow steps during the transition to direct
-workflow agent configuration.
+`defineAgent` remains temporarily available for existing conversational agents. New workflow agent
+tasks are configured directly with `defineAgentStep`; see [Workflows](../workflows/overview.md).
 
 Put each definition in `agents/` and export it.
 
@@ -56,7 +56,7 @@ See [Defining agents](./defining-agents.md) for every config field.
 | Concept | What it is |
 | --- | --- |
 | **Main agent** | The framework-owned conversational entry point, enabled by the project model catalog. |
-| **Defined agent** | An existing `defineAgent` configuration used by current workflow steps. |
+| **Defined agent** | A transitional `defineAgent` configuration for existing conversations. |
 | **Thread** | One conversation with an agent, owned by a principal. |
 | **Run** | One turn. Posting a user message triggers a run. |
 | **Message** | A `system`, `user`, or `assistant` message made of `text`, `reasoning`, `step-start`, and `tool-call` parts. |

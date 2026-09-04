@@ -1,13 +1,34 @@
 import { describe, expect, test } from "bun:test"
 import {
+  type AgentStepDefinition,
+  type AgentToolCatalog,
+  type AgentToolDefinition,
   defineAgent,
+  defineAgentStep,
   defineAgentTool,
   type LanguageModelCatalog,
   type LanguageModelEntry,
   type LanguageModelRef,
 } from "@sixb/core"
 import { MockLanguageModelV4 } from "ai/test"
-import { resolveAgentExecutionPlan } from "../src/execution-plan"
+import {
+  resolveAgentExecutionPlan,
+  resolveWorkflowAgentStepExecutionPlan,
+} from "../src/execution-plan"
+
+function workflowStep(config: Parameters<typeof defineAgentStep>[1]): AgentStepDefinition {
+  return defineAgentStep("review", config)
+    .input({ request: "string" })
+    .output({ answer: "string" })
+    .prompt(({ input }) => input.request)
+}
+
+function toolCatalog(tools: readonly AgentToolDefinition[]): AgentToolCatalog {
+  return {
+    list: () => tools,
+    getByName: (name) => tools.find((tool) => tool.name === name) ?? null,
+  }
+}
 
 describe("resolveAgentExecutionPlan", () => {
   test("maps executable configuration and resolves the worker step default", () => {
@@ -102,5 +123,63 @@ describe("resolveAgentExecutionPlan", () => {
     expect(() => resolveAgentExecutionPlan({ agent, models, defaultMaxSteps: 25 })).toThrow(
       /missing from the runtime catalog/
     )
+  })
+})
+
+describe("resolveWorkflowAgentStepExecutionPlan", () => {
+  test("uses the project default model and grants no project tools by default", () => {
+    const model = new MockLanguageModelV4({ modelId: "default-model" })
+    const entry: LanguageModelEntry = {
+      provider: model.provider,
+      modelId: model.modelId,
+      model,
+    }
+    const models: LanguageModelCatalog = {
+      default: entry,
+      list: () => [entry],
+      getByRef: () => entry,
+    }
+
+    const plan = resolveWorkflowAgentStepExecutionPlan({
+      workflowId: "triage",
+      step: workflowStep({ instructions: "Review the request." }),
+      models,
+      tools: toolCatalog([]),
+      defaultMaxSteps: 25,
+    })
+
+    expect(plan.model).toBe(model)
+    expect(plan.instructions).toBe("Review the request.")
+    expect(plan.tools).toEqual([])
+    expect(plan.maxSteps).toBe(25)
+  })
+
+  test("resolves only the tools selected by the workflow step", () => {
+    const model = new MockLanguageModelV4({ modelId: "task-model" })
+    const selected = defineAgentTool("selected")
+      .description("Selected tool.")
+      .input({ value: "string" })
+      .run(({ input }) => input)
+    const unselected = defineAgentTool("unselected")
+      .description("Unselected tool.")
+      .input({ value: "string" })
+      .run(({ input }) => input)
+
+    const plan = resolveWorkflowAgentStepExecutionPlan({
+      workflowId: "triage",
+      step: workflowStep({
+        model,
+        reasoning: "high",
+        instructions: "Review the request.",
+        tools: [selected],
+      }),
+      tools: toolCatalog([selected, unselected]),
+      defaultMaxSteps: 9,
+    })
+
+    expect(plan.model).toBe(model)
+    expect(plan.reasoning).toBe("high")
+    expect(plan.tools).toEqual([selected])
+    expect(plan.maxSteps).toBe(9)
   })
 })

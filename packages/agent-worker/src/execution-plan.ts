@@ -1,6 +1,8 @@
 import type {
   AgentDefinition,
   AgentReasoningLevel,
+  AgentStepDefinition,
+  AgentToolCatalog,
   AgentToolDefinition,
   LanguageModelCatalog,
 } from "@sixb/core"
@@ -51,4 +53,58 @@ export function resolveAgentExecutionPlan(input: {
     ...(agent.reasoning === undefined ? {} : { reasoning: agent.reasoning }),
     ...(providerOptions === undefined ? {} : { providerOptions }),
   })
+}
+
+/** Resolve a directly configured workflow task into the shared Agent execution contract. */
+export function resolveWorkflowAgentStepExecutionPlan(input: {
+  readonly workflowId: string
+  readonly step: AgentStepDefinition
+  readonly models?: LanguageModelCatalog
+  readonly tools: AgentToolCatalog
+  readonly defaultMaxSteps: number
+}): ResolvedAgentExecutionPlan {
+  const { workflowId, step, models } = input
+  const model = resolveWorkflowAgentStepModel(step, models)
+  if (model === null) {
+    const reference =
+      step.model === undefined
+        ? "the project default language model"
+        : `language model '${step.model.provider}/${step.model.modelId}'`
+    throw createSixbError(
+      "internal.unexpected",
+      `[SixbAgentWorker] Workflow '${workflowId}' agent step '${step.id}' cannot resolve ${reference}.`,
+      { details: { workflowId, agentStepId: step.id } }
+    )
+  }
+
+  const tools = step.toolNames.map((name) => {
+    const tool = input.tools.getByName(name)
+    if (tool === null) {
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbAgentWorker] Workflow '${workflowId}' agent step '${step.id}' cannot resolve project tool '${name}'.`,
+        { details: { workflowId, agentStepId: step.id, toolName: name } }
+      )
+    }
+    return tool
+  })
+  const providerOptions = withAutomaticPromptCaching(model, undefined)
+
+  return Object.freeze({
+    model,
+    instructions: step.instructions,
+    tools: Object.freeze(tools),
+    maxSteps: input.defaultMaxSteps,
+    ...(step.reasoning === undefined ? {} : { reasoning: step.reasoning }),
+    ...(providerOptions === undefined ? {} : { providerOptions }),
+  })
+}
+
+function resolveWorkflowAgentStepModel(
+  step: AgentStepDefinition,
+  models: LanguageModelCatalog | undefined
+): AgentDefinition["model"] | null {
+  if (step.model === undefined) return models?.default.model ?? null
+  if (models === undefined) return step.model
+  return models.getByRef(step.model)?.model ?? null
 }

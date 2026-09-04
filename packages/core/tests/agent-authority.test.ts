@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryStorage } from "../src"
-import { resolveInheritedMainAgentExecutionAuthorization } from "../src/agents/authority"
+import {
+  agentServiceAccountId,
+  ensureManagedAgentExecutionIdentity,
+  resolveAgentExecutionAuthorization,
+  resolveInheritedMainAgentExecutionAuthorization,
+} from "../src/agents/authority"
 import { SecurityRegistry } from "../src/security"
 
 const projectId = "main-agent-authority"
@@ -72,5 +77,62 @@ describe("main agent authority", () => {
         now,
       })
     ).rejects.toMatchObject({ code: "agent.execution_failed" })
+  })
+})
+
+describe("managed agent authority", () => {
+  test("does not adopt a service account created outside the Agent runtime", async () => {
+    const storage = new InMemoryStorage()
+    const agentId = "workflow:billing:step:review"
+    const serviceAccountId = agentServiceAccountId(agentId)
+    await storage.auth.serviceAccounts.create({
+      id: serviceAccountId,
+      projectId,
+      name: "Conflicting account",
+      createdByPrincipal: { type: "user", id: userId },
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    await expect(
+      ensureManagedAgentExecutionIdentity({
+        auth: storage.auth,
+        projectId,
+        agentId,
+        name: "Billing review",
+        description: "Managed workflow Agent task.",
+        groupIds: ["billing"],
+      })
+    ).rejects.toThrow(`service account '${serviceAccountId}' because it is not managed by Sixb`)
+  })
+
+  test("fails closed when a managed Agent receives an external group membership", async () => {
+    const storage = new InMemoryStorage()
+    const agentId = "workflow:billing:step:review"
+    const identity = await ensureManagedAgentExecutionIdentity({
+      auth: storage.auth,
+      projectId,
+      agentId,
+      name: "Billing review",
+      description: "Managed workflow Agent task.",
+      groupIds: ["billing"],
+    })
+    await storage.auth.serviceAccountGroupMemberships.upsert({
+      projectId,
+      serviceAccountId: identity.serviceAccount.id,
+      groupId: "administrators",
+      source: "manual",
+      createdAt: now,
+    })
+
+    await expect(
+      resolveAgentExecutionAuthorization({
+        auth: storage.auth,
+        projectId,
+        agentId,
+        authorizationRef: { type: "principal", principal: identity.principal },
+        security,
+      })
+    ).rejects.toThrow("group memberships not managed by its definition: administrators")
   })
 })

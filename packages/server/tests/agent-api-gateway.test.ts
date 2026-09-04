@@ -20,6 +20,7 @@ import {
   type OntologySource,
   prop,
   SixbHost,
+  SYSTEM_PRINCIPAL,
 } from "@sixb/core"
 import { createInheritedMainAgentExecutionRecord } from "@sixb/core/internal/agent-execution"
 import {
@@ -680,6 +681,7 @@ async function createGatewayRuntime(
       projectId: PROJECT_ID,
       name: "Assistant agent",
       status: "active",
+      createdByPrincipal: SYSTEM_PRINCIPAL,
       createdAt: NOW,
       updatedAt: NOW,
     })

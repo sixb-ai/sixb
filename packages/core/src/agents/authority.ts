@@ -1,4 +1,4 @@
-import { SYSTEM_PRINCIPAL } from "../auth"
+import { principalsEqual, SYSTEM_PRINCIPAL } from "../auth"
 import type { AuthorizationContext } from "../authorization"
 import { resolveAuthorizationContext } from "../authorization"
 import { createSixbError } from "../errors/internal"
@@ -45,34 +45,55 @@ export async function ensureAgentExecutionIdentity(input: {
   readonly projectId: string
   readonly agent: AgentDefinition
 }): Promise<AgentExecutionIdentity> {
+  return ensureManagedAgentExecutionIdentity({
+    auth: input.auth,
+    projectId: input.projectId,
+    agentId: input.agent.id,
+    name: input.agent.name,
+    description: `Managed service account for agent '${input.agent.id}'.`,
+    groupIds: input.agent.groupIds,
+  })
+}
+
+/** Ensure a framework-managed Agent actor exists with exactly its declared group memberships. */
+export async function ensureManagedAgentExecutionIdentity(input: {
+  readonly auth: AuthStorage | undefined
+  readonly projectId: string
+  readonly agentId: string
+  readonly name: string
+  readonly description: string
+  readonly groupIds: readonly string[]
+}): Promise<AgentExecutionIdentity> {
   const auth = requireAuthStorage(input.auth)
-  const id = agentServiceAccountId(input.agent.id)
-  const name = input.agent.name
-  const description = `Managed service account for agent '${input.agent.id}'.`
+  const id = agentServiceAccountId(input.agentId)
   const now = new Date()
   const loaded = await loadOrCreateAgentServiceAccount(auth, {
     id,
     projectId: input.projectId,
-    name,
-    description,
+    name: input.name,
+    description: input.description,
     updatedAt: now,
   })
-  assertActiveAgentServiceAccount(input.agent.id, loaded)
+  assertFrameworkManagedAgentServiceAccount(input.agentId, loaded)
+  assertActiveAgentServiceAccount(input.agentId, loaded)
   const serviceAccount = await updateAgentServiceAccountMetadata(auth, {
     existing: loaded,
-    name,
-    description,
+    name: input.name,
+    description: input.description,
     updatedAt: now,
   })
-  assertActiveAgentServiceAccount(input.agent.id, serviceAccount)
+  assertActiveAgentServiceAccount(input.agentId, serviceAccount)
 
-  const groupMemberships = await auth.serviceAccountGroupMemberships.reconcileForServiceAccount({
-    projectId: input.projectId,
-    serviceAccountId: id,
-    groupIds: input.agent.groupIds,
-    source: "agent",
-    updatedAt: now,
-  })
+  const groupMemberships = requireDefinitionOwnedGroupMemberships(
+    input.agentId,
+    await auth.serviceAccountGroupMemberships.reconcileForServiceAccount({
+      projectId: input.projectId,
+      serviceAccountId: id,
+      groupIds: input.groupIds,
+      source: "agent",
+      updatedAt: now,
+    })
+  )
 
   return {
     serviceAccount,
@@ -133,6 +154,39 @@ function assertActiveAgentServiceAccount(
   }
 }
 
+function assertFrameworkManagedAgentServiceAccount(
+  agentId: string,
+  serviceAccount: ServiceAccountRecord
+): void {
+  if (
+    serviceAccount.createdByPrincipal === undefined ||
+    !principalsEqual(serviceAccount.createdByPrincipal, SYSTEM_PRINCIPAL)
+  ) {
+    throw createSixbError(
+      "agent.execution_failed",
+      `[Sixb] Agent '${agentId}' cannot use service account '${serviceAccount.id}' because it is not managed by Sixb.`,
+      { details: { agentId, serviceAccountId: serviceAccount.id } }
+    )
+  }
+}
+
+function requireDefinitionOwnedGroupMemberships(
+  agentId: string,
+  memberships: readonly ServiceAccountGroupMembershipRecord[]
+): readonly ServiceAccountGroupMembershipRecord[] {
+  const externalGroupIds = memberships
+    .filter((membership) => membership.source !== "agent")
+    .map((membership) => membership.groupId)
+  if (externalGroupIds.length > 0) {
+    throw createSixbError(
+      "agent.execution_failed",
+      `[Sixb] Agent '${agentId}' service account has group memberships not managed by its definition: ${externalGroupIds.join(", ")}.`,
+      { details: { agentId, externalGroupIds } }
+    )
+  }
+  return memberships
+}
+
 /** Resolve current grants for the service account referenced by a durable Agent execution. */
 export async function resolveAgentExecutionAuthorization(input: {
   readonly auth: AuthStorage | undefined
@@ -158,11 +212,15 @@ export async function resolveAgentExecutionAuthorization(input: {
   if (!serviceAccount || serviceAccount.status !== "active") {
     throw new Error(`[Sixb] Agent service account '${principal.id}' is not active.`)
   }
+  assertFrameworkManagedAgentServiceAccount(input.agentId, serviceAccount)
 
-  const groupMemberships = await auth.serviceAccountGroupMemberships.listForServiceAccount({
-    projectId: input.projectId,
-    serviceAccountId: principal.id,
-  })
+  const groupMemberships = requireDefinitionOwnedGroupMemberships(
+    input.agentId,
+    await auth.serviceAccountGroupMemberships.listForServiceAccount({
+      projectId: input.projectId,
+      serviceAccountId: principal.id,
+    })
+  )
   const identity: AgentExecutionIdentity = {
     serviceAccount,
     principal: { type: "serviceAccount", id: principal.id },

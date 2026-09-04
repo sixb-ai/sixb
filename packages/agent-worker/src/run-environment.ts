@@ -9,7 +9,7 @@ import type {
 import { type AgentExecutionMode, renderAgentSystemPrompt } from "./agent-prompt"
 import { assertAgentRuntimeProfile } from "./agent-runtime/preflight"
 import type { AgentSkill } from "./agent-skills"
-import { aiSdkToolsFromAgentDefinitions } from "./ai-sdk-adapters"
+import { type AgentErrorDetails, aiSdkToolsFromAgentDefinitions } from "./ai-sdk-adapters"
 import { createAgentApiGatewayBaseUrl } from "./api-url"
 import {
   modelSupportsInlineImages,
@@ -56,6 +56,7 @@ export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvi
 export interface CreateWorkflowAgentNodeEnvironmentInput extends CreateAgentEnvironmentInput {
   readonly run: WorkflowAgentNodeRunRecord
   readonly nodeInput: WorkflowIOSnapshot
+  readonly errorDetails: AgentErrorDetails
 }
 
 /** Prepare conversation history and attachments, then start the shared agent environment. */
@@ -140,6 +141,7 @@ export async function createWorkflowAgentNodeEnvironment(
     }),
     attachmentContext,
     skills,
+    errorDetails: input.errorDetails,
     onDetachedTeardown: input.onDetachedTeardown,
   })
 }
@@ -152,6 +154,7 @@ interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
   readonly apiBaseUrl: string
   readonly attachmentContext: PreparedAgentAttachmentContext
   readonly skills: Awaited<AgentWorkerContext["agentSkills"]>
+  readonly errorDetails?: AgentErrorDetails
 }
 
 /**
@@ -197,7 +200,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
     logger,
     artifactsForToolCall,
     toolResultToModelOutput: (output) => mediaBridge.toModelOutput(output),
-    errorDetails: mode === "conversation" ? { agentId, runId } : { agentId, nodeRunId: runId },
+    errorDetails: input.errorDetails ?? { agentId, runId },
   })
 
   let sandboxWasUsed = false

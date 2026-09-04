@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { createAgentExecutionRecord } from "@sixb/core/internal/agent-execution"
 import {
-  ensureAgentExecutionIdentity,
+  ensureManagedAgentExecutionIdentity,
   workflowAgentNodeQueueJobId,
 } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
@@ -9,6 +9,7 @@ import type { WorkflowAgentNodeDefinition } from "@sixb/core/internal/workflows"
 import {
   snapshotWorkflowAgentStepInput,
   validateWorkflowAgentStepInput,
+  workflowAgentStepActorId,
 } from "@sixb/core/internal/workflows"
 import type { WorkflowNodeExecutor } from "../execution/node-executor"
 import { throwIfAborted } from "../normalize"
@@ -67,7 +68,7 @@ export const agentNodeExecutor: WorkflowNodeExecutor<WorkflowAgentNodeDefinition
         `[SixbWorkflowWorker] Workflow '${context.workflow.id}' agent node '${node.id}' prompt must return a non-empty string.`,
         {
           details: {
-            agentId: node.agentStep.agent.id,
+            agentStepId: node.agentStep.id,
             workflowId: context.workflow.id,
             workflowRunId: context.job.id,
             nodeId: node.id,
@@ -77,10 +78,14 @@ export const agentNodeExecutor: WorkflowNodeExecutor<WorkflowAgentNodeDefinition
       )
     }
     throwIfAborted(context.signal)
-    const identity = await ensureAgentExecutionIdentity({
+    const actorId = workflowAgentStepActorId(context.workflow.id, node.agentStep.id)
+    const identity = await ensureManagedAgentExecutionIdentity({
       auth: context.runtime.storage.auth,
       projectId: context.runtime.projectId,
-      agent: node.agentStep.agent,
+      agentId: actorId,
+      name: `Workflow ${context.workflow.id} · ${node.agentStep.id}`,
+      description: `Managed service account for workflow '${context.workflow.id}' agent step '${node.agentStep.id}'.`,
+      groupIds: node.agentStep.groupIds,
     })
     const parentExecution = await context.runtime.storage.executions.getById({
       projectId: context.runtime.projectId,
@@ -92,7 +97,7 @@ export const agentNodeExecutor: WorkflowNodeExecutor<WorkflowAgentNodeDefinition
         `[SixbWorkflowWorker] Workflow run '${context.job.id}' references missing execution '${context.runtime.sixb.execution.id}'.`,
         {
           details: {
-            agentId: node.agentStep.agent.id,
+            agentStepId: node.agentStep.id,
             workflowId: context.workflow.id,
             workflowRunId: context.job.id,
             nodeId: node.id,
@@ -105,7 +110,7 @@ export const agentNodeExecutor: WorkflowNodeExecutor<WorkflowAgentNodeDefinition
     const agentExecution = createAgentExecutionRecord({
       id: `exec_${randomUUID()}`,
       parent: parentExecution,
-      agentId: node.agentStep.agent.id,
+      agentId: actorId,
       runId: nodeRun.id,
       principal: identity.principal,
     })
@@ -118,7 +123,7 @@ export const agentNodeExecutor: WorkflowNodeExecutor<WorkflowAgentNodeDefinition
           `[SixbWorkflowWorker] Workflow '${context.workflow.id}' agent node '${node.id}' requires storage.workflowRuns.`,
           {
             details: {
-              agentId: node.agentStep.agent.id,
+              agentStepId: node.agentStep.id,
               workflowId: context.workflow.id,
               workflowRunId: context.job.id,
               nodeId: node.id,
@@ -132,7 +137,7 @@ export const agentNodeExecutor: WorkflowNodeExecutor<WorkflowAgentNodeDefinition
         projectId: context.runtime.projectId,
         nodeRunId: nodeRun.id,
         executionId: agentExecution.id,
-        agentId: node.agentStep.agent.id,
+        agentId: actorId,
         prompt,
         createdAt: waitingAt,
       })

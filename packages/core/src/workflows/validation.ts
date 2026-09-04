@@ -1,8 +1,11 @@
 import { isActionDefinition } from "../actions"
-import { isAgentDefinition } from "../agents"
+import { AGENT_REASONING_LEVELS, type AgentReasoningLevel, type AgentToolCatalog } from "../agents"
+import type { ModelCatalog } from "../models"
 import type { SchemaOrRef, ValueType } from "../ontology"
 import { validateSchemaOrRefValue } from "../ontology"
 import type { ScheduleDefinition } from "../schedules"
+import type { SecurityDefinitionCatalog } from "../security"
+import { workflowAgentStepActorId } from "./agent-step-identity"
 import { WorkflowDefinitionError, WorkflowValidationError } from "./errors"
 import type {
   AgentStepDefinition,
@@ -45,7 +48,11 @@ export function isAgentStepDefinition(value: unknown): value is AgentStepDefinit
     isRecord(value) &&
     value.kind === "agentStep" &&
     typeof value.id === "string" &&
-    isAgentDefinition(value.agent) &&
+    (value.model === undefined || isLanguageModel(value.model)) &&
+    (value.reasoning === undefined || isAgentReasoningLevel(value.reasoning)) &&
+    typeof value.instructions === "string" &&
+    isStringArray(value.groupIds) &&
+    isStringArray(value.toolNames) &&
     isRecord(value.input) &&
     isRecord(value.output) &&
     typeof value.prompt === "function"
@@ -112,6 +119,8 @@ export function validateWorkflowsAtStartup(options: {
   registeredSchedules: ReadonlyMap<string, ScheduleDefinition>
   registeredActionIds: ReadonlySet<string>
   registeredAgentIds: ReadonlySet<string>
+  models?: ModelCatalog
+  tools: AgentToolCatalog
 }): readonly WorkflowDefinition[] {
   for (const workflow of options.workflows) {
     validateWorkflowDefinition(workflow)
@@ -131,15 +140,65 @@ export function validateWorkflowsAtStartup(options: {
           `Workflow "${workflow.id}" references unknown action "${node.action.id}". Add it to 'actions' in createSixb() or export it from 'actions/'.`
         )
       }
-      if (node.type === "agent" && !options.registeredAgentIds.has(node.agentStep.agent.id)) {
-        throw new WorkflowDefinitionError(
-          `Workflow "${workflow.id}" references unknown agent "${node.agentStep.agent.id}". Add it to 'agents' in createSixb() or export it from 'agents/'.`
-        )
+      if (node.type === "agent") {
+        const actorId = workflowAgentStepActorId(workflow.id, node.agentStep.id)
+        if (options.registeredAgentIds.has(actorId)) {
+          throw new WorkflowDefinitionError(
+            `Workflow "${workflow.id}" agent step "${node.id}" conflicts with registered agent "${actorId}".`
+          )
+        }
+        validateWorkflowAgentStepRuntimeReferences(workflow.id, node.agentStep, options)
       }
     }
   }
 
   return options.workflows
+}
+
+/** Validate workflow task memberships once the security catalog has been composed. */
+export function validateWorkflowAgentStepGroupReferences(
+  workflows: readonly WorkflowDefinition[],
+  security: SecurityDefinitionCatalog
+): void {
+  for (const workflow of workflows) {
+    for (const node of workflow.nodes) {
+      if (node.type !== "agent") continue
+      for (const groupId of node.agentStep.groupIds) {
+        if (!security.getGroupById(groupId)) {
+          throw new WorkflowDefinitionError(
+            `Workflow "${workflow.id}" agent step "${node.id}" references unknown group "${groupId}". Add it to 'security/groups/' or pass it to createSixb({ groups }).`
+          )
+        }
+      }
+    }
+  }
+}
+
+function validateWorkflowAgentStepRuntimeReferences(
+  workflowId: string,
+  step: AgentStepDefinition,
+  options: { readonly models?: ModelCatalog; readonly tools: AgentToolCatalog }
+): void {
+  if (step.model === undefined && options.models === undefined) {
+    throw new WorkflowDefinitionError(
+      `Workflow "${workflowId}" agent step "${step.id}" needs a model. Configure 'models.language' or pass 'model' to defineAgentStep().`
+    )
+  }
+  if (step.model !== undefined && options.models !== undefined) {
+    const ref = { provider: step.model.provider, modelId: step.model.modelId }
+    if (options.models.language.getByRef(ref) === null) {
+      throw new WorkflowDefinitionError(
+        `Workflow "${workflowId}" agent step "${step.id}" uses unknown language model "${ref.provider}/${ref.modelId}". Add it to 'models.language' in createSixb().`
+      )
+    }
+  }
+  for (const toolName of step.toolNames) {
+    if (options.tools.getByName(toolName) === null) {
+      throw new WorkflowDefinitionError(
+        `Workflow "${workflowId}" agent step "${step.id}" uses unknown project tool "${toolName}". Add it to 'tools' in createSixb().`
+      )
+    }
+  }
 }
 
 export function validateWorkflowInput(params: {
@@ -326,11 +385,56 @@ function validateAgentNodeDefinition(workflowId: string, node: WorkflowAgentNode
       `Workflow "${workflowId}" agent node id "${node.id}" does not match agent step definition id "${node.agentStep.id}".`
     )
   }
+  if (!node.agentStep.instructions.trim()) {
+    throw new WorkflowDefinitionError(
+      `Workflow "${workflowId}" agent step "${node.id}" instructions must not be empty.`
+    )
+  }
+  assertUniqueNonEmptyAgentStepValues(workflowId, node.id, "group", node.agentStep.groupIds)
+  assertUniqueNonEmptyAgentStepValues(workflowId, node.id, "tool", node.agentStep.toolNames)
   if (node.mapper !== undefined && typeof node.mapper !== "function") {
     throw new WorkflowDefinitionError(
       `Workflow "${workflowId}" agent node "${node.id}" mapper must be a function.`
     )
   }
+}
+
+function assertUniqueNonEmptyAgentStepValues(
+  workflowId: string,
+  stepId: string,
+  kind: "group" | "tool",
+  values: readonly string[]
+): void {
+  const seen = new Set<string>()
+  for (const value of values) {
+    if (!value.trim()) {
+      throw new WorkflowDefinitionError(
+        `Workflow "${workflowId}" agent step "${stepId}" has an empty ${kind} id.`
+      )
+    }
+    if (seen.has(value)) {
+      throw new WorkflowDefinitionError(
+        `Workflow "${workflowId}" agent step "${stepId}" has duplicate ${kind} '${value}'.`
+      )
+    }
+    seen.add(value)
+  }
+}
+
+function isLanguageModel(value: unknown): boolean {
+  return (typeof value === "object" || typeof value === "function") && value !== null
+}
+
+function isAgentReasoningLevel(value: unknown): value is AgentReasoningLevel {
+  return typeof value === "string" && (AGENT_REASONING_LEVELS as readonly string[]).includes(value)
+}
+
+function isStringArray(value: unknown): value is readonly string[] {
+  if (!Array.isArray(value)) return false
+  for (let index = 0; index < value.length; index += 1) {
+    if (!Object.hasOwn(value, index) || typeof value[index] !== "string") return false
+  }
+  return true
 }
 
 export function validateWorkflowAgentStepInput(params: {

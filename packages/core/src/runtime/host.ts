@@ -110,7 +110,7 @@ export interface SixbHostOptions<TOntologySources extends readonly OntologySourc
   workflows?: readonly WorkflowDefinition[]
   agents?: readonly AgentDefinition[]
   models?: ModelCatalogInput
-  /** Project tools available to the built-in main agent. */
+  /** Project tools available to Agent runtimes. */
   tools?: readonly AgentToolDefinition[]
   groups?: readonly GroupDefinition[]
   roles?: readonly RoleDefinition[]

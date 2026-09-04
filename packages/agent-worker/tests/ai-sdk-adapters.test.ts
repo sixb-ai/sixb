@@ -475,7 +475,7 @@ describe("AI SDK agent adapters", () => {
   test("rejects unsupported or non-JSON trace content instead of silently losing fidelity", () => {
     const error = captureThrown(() =>
       agentTraceFromAiSdkSteps([{ content: [{ type: "source" }] }], {
-        agentId: "workflow-agent",
+        agentStepId: "workflow-agent",
         workflowId: "review",
         workflowRunId: "workflow-run-1",
         nodeRunId: "node-run-1",
@@ -487,7 +487,7 @@ describe("AI SDK agent adapters", () => {
       message:
         "[SixbAgentWorker] AI SDK trace content 'source' is not supported by the durable agent trace contract.",
       details: {
-        agentId: "workflow-agent",
+        agentStepId: "workflow-agent",
         workflowId: "review",
         workflowRunId: "workflow-run-1",
         nodeRunId: "node-run-1",

@@ -1,3 +1,4 @@
+import type { LanguageModelV4 } from "@ai-sdk/provider"
 import type {
   ActionDefinition,
   GlobalActionDefinition,
@@ -6,7 +7,7 @@ import type {
 } from "../actions"
 import type { ActionsRuntime } from "../actions/execution"
 import type { AgentsRuntime } from "../agents/execution"
-import type { AgentDefinition } from "../agents/types"
+import type { AgentReasoningLevel, AgentToolDefinition } from "../agents/types"
 import type { Principal } from "../auth"
 import type { BlobsRuntime } from "../blob-storage/execution"
 import type { ConnectorRuntime } from "../connectors/execution"
@@ -22,6 +23,7 @@ import type { ProjectionsRuntime } from "../projections/execution"
 import type { RulesRuntime } from "../rules/execution"
 import type { ScheduleDefinition, ScheduleDefinitionForEvent } from "../schedules"
 import type { SchedulesRuntime } from "../schedules/execution"
+import type { GroupDefinition } from "../security"
 import type { SyncsRuntime } from "../syncs/execution"
 import type { WorkflowsRuntime } from "./execution"
 
@@ -133,9 +135,18 @@ export type AgentStepPrompt<TInput extends Record<string, unknown>> = (
   ctx: AgentStepPromptContext<TInput>
 ) => string | Promise<string>
 
+/** Runtime configuration owned directly by a workflow Agent step. */
+export interface DefineAgentStepConfig {
+  readonly model?: LanguageModelV4
+  readonly reasoning?: AgentReasoningLevel
+  readonly instructions: string
+  readonly groups?: readonly GroupDefinition[]
+  /** Project tools this workflow task may call. Defaults to none. */
+  readonly tools?: readonly AgentToolDefinition[]
+}
+
 export interface AgentStepDefinition<
   TId extends string = string,
-  TAgent extends AgentDefinition = AgentDefinition,
   TInput extends Record<string, unknown> = Record<string, unknown>,
   TOutput extends Record<string, unknown> = Record<string, unknown>,
   TInputValue extends Record<string, unknown> = Record<string, unknown>,
@@ -143,7 +154,11 @@ export interface AgentStepDefinition<
 > {
   readonly kind: "agentStep"
   readonly id: TId
-  readonly agent: TAgent
+  readonly model?: LanguageModelV4
+  readonly reasoning?: AgentReasoningLevel
+  readonly instructions: string
+  readonly groupIds: readonly string[]
+  readonly toolNames: readonly string[]
   readonly input: TInput
   readonly output: TOutput
   readonly prompt: AgentStepPrompt<Record<string, unknown>>
@@ -153,7 +168,6 @@ export interface AgentStepDefinition<
 
 export interface AgentStepPromptBuilder<
   TId extends string,
-  TAgent extends AgentDefinition,
   TInput extends Record<string, unknown>,
   TOutput extends Record<string, unknown>,
 > {
@@ -161,7 +175,6 @@ export interface AgentStepPromptBuilder<
     prompt: AgentStepPrompt<InferSchemaOrRefRecord<TInput>>
   ): AgentStepDefinition<
     TId,
-    TAgent,
     TInput,
     TOutput,
     InferSchemaOrRefRecord<TInput>,
@@ -171,18 +184,17 @@ export interface AgentStepPromptBuilder<
 
 export interface AgentStepOutputBuilder<
   TId extends string,
-  TAgent extends AgentDefinition,
   TInput extends Record<string, unknown>,
 > {
   output<const TOutput extends Record<string, unknown>>(
     output: TOutput & SchemaOrRefInput<TOutput>
-  ): AgentStepPromptBuilder<TId, TAgent, TInput, TOutput>
+  ): AgentStepPromptBuilder<TId, TInput, TOutput>
 }
 
-export interface AgentStepBuilder<TId extends string, TAgent extends AgentDefinition> {
+export interface AgentStepBuilder<TId extends string> {
   input<const TInput extends Record<string, unknown>>(
     input: TInput & SchemaOrRefInput<TInput>
-  ): AgentStepOutputBuilder<TId, TAgent, TInput>
+  ): AgentStepOutputBuilder<TId, TInput>
 }
 
 export type InferAgentStepInput<TStep extends AgentStepDefinition> = TStep extends {
