@@ -1,4 +1,3 @@
-import type { AgentDefinition } from "@sixb/core"
 import {
   type ModelMessage,
   type Output,
@@ -10,8 +9,8 @@ import {
   type ToolSet,
 } from "ai"
 import type { AiSdkTraceStep } from "./ai-sdk-adapters"
+import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import type { AiModelCallRecorder } from "./model-call-recorder"
-import { withAutomaticPromptCaching } from "./provider-caching"
 
 export const FINAL_AGENT_LOOP_STEP_INSTRUCTION = [
   "Provide the best possible final answer from the context available.",
@@ -20,11 +19,10 @@ export const FINAL_AGENT_LOOP_STEP_INSTRUCTION = [
 ].join(" ")
 
 export interface RunAgentLoopInput {
-  readonly agent: AgentDefinition
+  readonly plan: ResolvedAgentExecutionPlan
   readonly system: string
   readonly messages: ModelMessage[]
   readonly tools: ToolSet
-  readonly maxSteps: number
   readonly usageRecorder: AiModelCallRecorder
   readonly prepareStep?: PrepareStepFunction<ToolSet>
   readonly abortSignal: AbortSignal
@@ -42,24 +40,22 @@ export interface RunAgentLoopInput {
 export function runAgentLoop(
   input: RunAgentLoopInput
 ): StreamTextResult<ToolSet, Record<string, unknown>, ReturnType<typeof Output.text>> {
-  const providerOptions =
-    input.agent.loop?.caching === "off"
-      ? input.agent.providerOptions
-      : withAutomaticPromptCaching(input.agent.model, input.agent.providerOptions)
   return streamText({
-    model: input.usageRecorder.wrapModel(input.agent.model),
-    ...(input.agent.reasoning === undefined ? {} : { reasoning: input.agent.reasoning }),
-    ...(providerOptions === undefined ? {} : { providerOptions }),
+    model: input.usageRecorder.wrapModel(input.plan.model),
+    ...(input.plan.reasoning === undefined ? {} : { reasoning: input.plan.reasoning }),
+    ...(input.plan.providerOptions === undefined
+      ? {}
+      : { providerOptions: input.plan.providerOptions }),
     system: input.system,
     messages: input.messages,
     tools: input.tools,
-    stopWhen: stepCountIs(input.maxSteps),
+    stopWhen: stepCountIs(input.plan.maxSteps),
     prepareStep: async (options) => {
       input.usageRecorder.prepareStep()
       const prepared = await input.prepareStep?.(options)
 
       // If the step is not the last one, allow tools to be used.
-      if (options.stepNumber !== input.maxSteps - 1) return prepared
+      if (options.stepNumber !== input.plan.maxSteps - 1) return prepared
 
       // If the step is the last one, disable tools.
       return {

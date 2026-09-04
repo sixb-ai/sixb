@@ -67,8 +67,9 @@ export const sixb = createSixb({
 })
 ```
 
-The first entry of each kind is the project default. Sixb identifies each entry by the model you
-configured — you never author an id or an alias. Configure the same model twice and startup fails.
+The first entry of each kind is the project default. The AI SDK model's `{ provider, modelId }` pair
+identifies its binding; you never author another id or alias. Two instances with the same pair are
+the same catalog entry, so configuring both fails at startup.
 
 An entry is the binding, not the vendor's model: `gateway("openai/gpt-5.5")` and
 `openai("gpt-5.5")` are two entries, because they route and bill differently. An agent's `model`
