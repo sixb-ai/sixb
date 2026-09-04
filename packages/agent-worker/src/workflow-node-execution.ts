@@ -100,6 +100,7 @@ export async function executeWorkflowAgentNode(
     models: input.host.definitions.models?.language,
     defaultMaxSteps: context.defaultMaxSteps,
   })
+  // Transitional: workflow steps still use their referenced Agent's managed identity.
   const resolved = await resolveAgentExecutionAuthorization({
     auth: context.storage.auth,
     projectId: context.id,
@@ -113,8 +114,8 @@ export async function executeWorkflowAgentNode(
     execution: durableExecution,
     agentId: agent.id,
     runId: nodeRun.id,
-    authorization: resolved.context,
-    agentPrincipal: resolved.identity.principal,
+    authorization: { type: "principal", context: resolved.context },
+    authorPrincipal: resolved.identity.principal,
   })
   const reserved = await reserveWorkflowAgentNode({
     runs,

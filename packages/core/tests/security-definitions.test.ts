@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url"
 import {
   type ActionDefinition,
   type AgentDefinition,
+  agent,
   applications,
   type ConnectorDefinition,
   can,
@@ -447,6 +448,12 @@ describe("role definitions", () => {
       capability: "run",
       target: "agent",
       selection: { all: false, ids: ["ops"] },
+    })
+    expect(can.run(agent)).toEqual({
+      kind: "grant",
+      capability: "run",
+      target: "agent",
+      selection: { all: false, ids: ["main"] },
     })
     expect(can.run(every.agent()).selection).toEqual({ all: true, except: [] })
     expect(can.run(every.agent().except([opsAgent]))).toEqual({

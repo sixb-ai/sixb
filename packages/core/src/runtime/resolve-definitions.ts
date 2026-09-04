@@ -1,7 +1,13 @@
 import { ActionRegistry } from "../actions"
 import type { ActionDefinition } from "../actions/types"
-import type { AgentDefinition } from "../agents"
-import { validateAgentGroupReferences, validateAgentToolsAtStartup } from "../agents"
+import type { AgentDefinition, AgentToolDefinition } from "../agents"
+import {
+  createMainAgentDefinition,
+  MAIN_AGENT_ID,
+  validateAgentGroupReferences,
+  validateAgentToolsAtStartup,
+} from "../agents"
+import { createAgentToolCatalog } from "../agents/tool-catalog"
 import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets/types"
 import { assertDatasetDefinition } from "../datasets/validation"
@@ -41,6 +47,7 @@ interface DefinitionOptions {
   readonly rules?: readonly RuleDefinition[]
   readonly workflows?: readonly WorkflowDefinition[]
   readonly agents?: readonly AgentDefinition[]
+  readonly tools?: readonly AgentToolDefinition[]
   readonly models?: ModelCatalogInput
   readonly groups?: readonly GroupDefinition[]
   readonly roles?: readonly RoleDefinition[]
@@ -60,9 +67,26 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
   const actionRegistry = new ActionRegistry({ actions: options.actions ?? [], ontology })
   const registeredActionIds = new Set(actionRegistry.list().map((action) => action.id))
 
-  const agents = options.agents ?? []
-  validateAgentToolsAtStartup(agents)
+  const configuredAgents = options.agents ?? []
   const models = options.models === undefined ? undefined : createModelCatalog(options.models)
+  const tools = createAgentToolCatalog(options.tools)
+  // Transitional: remove this adapter with defineAgent and the static Agent catalog.
+  if (configuredAgents.some((agent) => agent.id === MAIN_AGENT_ID)) {
+    throw new RuntimeError(
+      `[Sixb] Agent id '${MAIN_AGENT_ID}' is reserved by the framework-owned main agent.`
+    )
+  }
+  const agents =
+    models === undefined
+      ? configuredAgents
+      : [
+          createMainAgentDefinition({
+            model: models.language.default.model,
+            tools: tools.list(),
+          }),
+          ...configuredAgents,
+        ]
+  validateAgentToolsAtStartup(agents)
   validateAgentModelReferences(agents, models)
   const agentsById = indexUniqueDefinitions("agent", agents)
   const connectorsById = indexUniqueDefinitions("connector", options.connectors ?? [])
@@ -160,6 +184,7 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
     ontology,
     actions: actionRegistry,
     agents: createDefinitionCatalog(agentsById),
+    tools,
     connectors: createDefinitionCatalog(connectorsById),
     datasets: createDefinitionCatalog(datasetsById),
     ...(models === undefined ? {} : { models }),

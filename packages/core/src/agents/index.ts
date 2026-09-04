@@ -31,11 +31,12 @@ export {
   isAllowedAgentApiRequest,
   isValidAgentApiGatewayCapability,
 } from "./api-gateway"
-export type { AgentExecutionIdentity } from "./authority"
+export type { AgentExecutionAuthorization, AgentExecutionIdentity } from "./authority"
 export {
   agentServiceAccountId,
   ensureAgentExecutionIdentity,
   resolveAgentExecutionAuthorization,
+  resolveInheritedMainAgentExecutionAuthorization,
 } from "./authority"
 export { defineAgent, defineAgentTool } from "./builders"
 export type {
@@ -95,6 +96,14 @@ export {
   createAgentRunId,
   createAgentThreadId,
 } from "./ids"
+export type { AgentReference } from "./main"
+export {
+  agent,
+  createMainAgentDefinition,
+  MAIN_AGENT_ID,
+  MAIN_AGENT_INSTRUCTIONS,
+  MAIN_AGENT_NAME,
+} from "./main"
 export {
   AGENT_MESSAGE_CONTENT_VERSION,
   type AgentFilePart,
@@ -143,6 +152,7 @@ export type {
   ProjectAgentThreadModelContextInput,
 } from "./thread-context-projection"
 export { projectAgentThreadModelContext } from "./thread-context-projection"
+export type { AgentToolCatalog } from "./tool-catalog"
 export { isAgentToolResult } from "./tool-result"
 export type {
   AgentContextConfig,

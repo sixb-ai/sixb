@@ -45,6 +45,7 @@ export type AgentRequestErrorCode =
   | "thread_not_found"
   | "thread_agent_mismatch"
   | "active_run_exists"
+  | "authority_not_inheritable"
   | "invalid_context"
   | "storage_unavailable"
 

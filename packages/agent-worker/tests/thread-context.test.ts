@@ -180,7 +180,7 @@ async function runAndCaptureModelPrompt(withCheckpoint: boolean) {
   await runAgentTurn({
     context: {
       id: projectId,
-      agentPrincipal: { type: "serviceAccount", id: "service_agent" },
+      authorPrincipal: { type: "serviceAccount", id: "service_agent" },
       storage: requireWorkerStorage(seeded.storage),
       blobStorage: new InMemoryBlobStorage(),
       tools: {},

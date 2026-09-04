@@ -205,6 +205,9 @@ function handleAgentRouteError(
       case "run_not_retryable":
         set.status = 409
         break
+      case "authority_not_inheritable":
+        set.status = 403
+        break
       case "storage_unavailable":
       case "thread_agent_mismatch":
       case "invalid_context":

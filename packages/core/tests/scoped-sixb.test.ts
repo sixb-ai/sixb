@@ -1099,7 +1099,7 @@ describe("bound Sixb fails closed on ungranted surfaces", () => {
     const scope = restoreAgentExecutionScope({
       agentId: "contract-agent",
       runId: "agent-run-1",
-      authorization,
+      authorization: { type: "principal", context: authorization },
       execution: {
         id: "agent-execution-1",
         projectId: host.id,
