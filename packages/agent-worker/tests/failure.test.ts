@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { aiUsageLimitExceededError } from "@sixb/core/internal/ai-limit-enforcement"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { AgentRuntimeProfileError } from "../src/agent-runtime/errors"
 import { AGENT_RUNTIME_PROFILE } from "../src/agent-runtime/profile"
@@ -35,6 +36,20 @@ describe("Agent execution failure", () => {
       retryable: false,
       at: at.toISOString(),
       details: { agentId: details.agentId, runId: details.runId },
+    })
+  })
+
+  test("preserves AI usage-limit failures as a distinct terminal state", () => {
+    const error = aiUsageLimitExceededError(new Date("2026-09-01T00:00:00.000Z"))
+
+    expect(toAgentExecutionFailure(error, { status: "failed", at, details })).toEqual({
+      code: "ai.usage_limit_exceeded",
+      message: "AI usage limit exceeded.",
+      retryable: false,
+      at: at.toISOString(),
+      details: {
+        resetAt: "2026-09-01T00:00:00.000Z",
+      },
     })
   })
 

@@ -18,6 +18,14 @@ import {
 } from "./ai-sdk-adapters"
 import { AgentUsageRecordingError } from "./errors"
 import { recordAiModelCallAccounting } from "./model-call-accounting"
+import {
+  type AiModelCallAdmissionDecision,
+  type AiModelCallAdmissionInput,
+  aiModelCallOutputTokenAllowance,
+  type BeforeAiModelCall,
+  estimateAiModelCallInputTokens,
+  estimatedAiModelCallTotalTokens,
+} from "./model-call-admission"
 import { isPermanentAiUsageRecoveryError } from "./model-call-recovery"
 import type { AgentWorkerStorage, RecoverAiModelCall, RecoverAiModelCallInput } from "./types"
 
@@ -30,6 +38,12 @@ export interface AiModelCallRecorderInput {
   readonly attempt: number
   readonly requesterGroupIds: readonly string[]
   readonly providerOptions?: unknown
+  /** Aggregate-budget admission invoked immediately before every provider request. */
+  readonly beforeModelCall?: BeforeAiModelCall
+  /** Moves a provider attempt with no trustworthy usage callback into conservative unknown state. */
+  readonly markModelCallUnknown?: (
+    input: Pick<AiModelCallAdmissionInput, "projectId" | "executionId" | "attempt" | "callId">
+  ) => void | Promise<void>
   readonly recoverAiModelCall: RecoverAiModelCall
   /** Run identity used only in terminal recorder diagnostics. */
   readonly errorRunId: string
@@ -37,6 +51,7 @@ export interface AiModelCallRecorderInput {
 
 interface AiModelCallRecorderInternals {
   readonly generateId?: () => string
+  readonly generateCallId?: () => string
   readonly now?: () => Date
   readonly retryDelaysMs?: readonly number[]
   readonly sleep?: (ms: number) => Promise<void>
@@ -48,6 +63,7 @@ interface ModelCallStartSnapshot {
 }
 
 interface ModelCallResponseSnapshot {
+  readonly callId: string
   readonly modelId?: string
   readonly providerMetadata?: ReadonlyJsonObject
   readonly pricingContext?: AiPricingContext
@@ -62,12 +78,17 @@ interface ModelCallResponseSnapshot {
  */
 export class AiModelCallRecorder {
   private readonly generateId: () => string
+  private readonly generateCallId: () => string
   private readonly now: () => Date
   private readonly retryDelaysMs: readonly number[]
   private readonly sleep: (ms: number) => Promise<void>
   private readonly recordAccounting: (input: RecoverAiModelCallInput) => Promise<void>
   private readonly starts = new Map<string, ModelCallStartSnapshot>()
   private readonly responses = new Map<string, ModelCallResponseSnapshot>()
+  private readonly completedResponses: ModelCallResponseSnapshot[] = []
+  private readonly callIds = new Set<string>()
+  private readonly limitedCalls = new Map<string, AiModelCallAdmissionInput>()
+  private admissionError: unknown
   private recordingError: AgentUsageRecordingError | undefined
 
   constructor(
@@ -75,6 +96,7 @@ export class AiModelCallRecorder {
     internals: AiModelCallRecorderInternals = {}
   ) {
     this.generateId = internals.generateId ?? (() => `ai_usage_${randomUUID()}`)
+    this.generateCallId = internals.generateCallId ?? (() => `ai_call_${randomUUID()}`)
     this.now = internals.now ?? (() => new Date())
     this.retryDelaysMs = internals.retryDelaysMs ?? STORAGE_RETRY_DELAYS_MS
     this.sleep = internals.sleep ?? sleep
@@ -95,9 +117,10 @@ export class AiModelCallRecorder {
   readonly onLanguageModelCallEnd = async (event: LanguageModelCallEndEvent): Promise<void> => {
     if (this.recordingError) return
 
+    let callId = event.callId
     try {
-      const response = this.responses.get(event.responseId)
-      this.responses.delete(event.responseId)
+      const response = this.takeCompletedResponse(event.responseId)
+      callId = response?.callId ?? event.callId
       const normalizedRawUsage =
         event.usage.raw === undefined
           ? undefined
@@ -120,7 +143,7 @@ export class AiModelCallRecorder {
         projectId: this.input.projectId,
         executionId: this.input.executionId,
         attempt: this.input.attempt,
-        callId: event.callId,
+        callId,
         requesterGroupIds: this.input.requesterGroupIds,
         providerId: event.provider,
         requestedModelId: event.modelId,
@@ -138,6 +161,7 @@ export class AiModelCallRecorder {
           rawUsage
         ),
         ratedAt: new Date(occurredAt),
+        reconcileLimitReservation: this.limitedCalls.has(callId),
       }
 
       try {
@@ -147,6 +171,7 @@ export class AiModelCallRecorder {
           this.sleep,
           (error) => !isPermanentAiUsageRecoveryError(error)
         )
+        this.limitedCalls.delete(callId)
       } catch (storageError) {
         if (isPermanentAiUsageRecoveryError(storageError)) throw storageError
 
@@ -163,15 +188,22 @@ export class AiModelCallRecorder {
             "Direct AI accounting and durable recovery both failed."
           )
         }
-        throw new AgentUsageRecordingError(this.input.errorRunId, event.callId, true, {
+        throw new AgentUsageRecordingError(this.input.errorRunId, callId, true, {
           cause: storageError,
         })
       }
     } catch (error) {
+      try {
+        await this.markCallUnknown(callId)
+      } catch {
+        // The active reservation still holds the same capacity when the unknown transition is
+        // unavailable, so admission remains fail-closed. Preserve the accounting error that stops
+        // the loop and drives durable recovery.
+      }
       this.recordingError =
         error instanceof AgentUsageRecordingError
           ? error
-          : new AgentUsageRecordingError(this.input.errorRunId, event.callId, false, {
+          : new AgentUsageRecordingError(this.input.errorRunId, callId, false, {
               cause: error,
             })
     }
@@ -186,8 +218,13 @@ export class AiModelCallRecorder {
       middleware: {
         specificationVersion: "v4",
         wrapGenerate: async ({ doGenerate, model, params }) => {
-          const result = await doGenerate()
+          const admission = await this.beforeProviderCall(model, params)
+          const result = await Promise.resolve(doGenerate()).catch(async (error: unknown) => {
+            await this.markCallUnknown(admission.callId)
+            throw error
+          })
           this.rememberResponse(
+            admission.callId,
             result.response,
             result.providerMetadata,
             aiPricingContextFromAiSdkCallStart(model, params.providerOptions)
@@ -195,19 +232,34 @@ export class AiModelCallRecorder {
           return result
         },
         wrapStream: async ({ doStream, model, params }) => {
-          const result = await doStream()
+          const admission = await this.beforeProviderCall(model, params)
+          const result = await Promise.resolve(doStream()).catch(async (error: unknown) => {
+            await this.markCallUnknown(admission.callId)
+            throw error
+          })
           const pricingContext = aiPricingContextFromAiSdkCallStart(model, params.providerOptions)
           let response: { readonly id?: string; readonly modelId?: string } | undefined
+          let finished = false
           return {
             ...result,
             stream: result.stream.pipeThrough(
               new TransformStream({
-                transform: (part, controller) => {
+                transform: async (part, controller) => {
                   if (part.type === "response-metadata") response = part
                   if (part.type === "finish") {
-                    this.rememberResponse(response, part.providerMetadata, pricingContext)
+                    finished = true
+                    this.rememberResponse(
+                      admission.callId,
+                      response,
+                      part.providerMetadata,
+                      pricingContext
+                    )
                   }
+                  if (part.type === "error") await this.markCallUnknown(admission.callId)
                   controller.enqueue(part)
+                },
+                flush: async () => {
+                  if (!finished) await this.markCallUnknown(admission.callId)
                 },
               })
             ),
@@ -224,32 +276,105 @@ export class AiModelCallRecorder {
   }
 
   assertHealthy(): void {
+    if (this.admissionError !== undefined) throw this.admissionError
     if (this.recordingError) throw this.recordingError
   }
 
   private rememberResponse(
+    callId: string,
     response: { readonly id?: string; readonly modelId?: string } | undefined,
     providerMetadata: unknown,
     pricingContext: AiPricingContext
   ): void {
-    if (!response?.id) return
     const normalizedProviderMetadata =
       providerMetadata === undefined
         ? undefined
         : (omitUndefinedObjectProperties(providerMetadata) as ReadonlyJsonObject)
-    if (
-      response.modelId === undefined &&
-      normalizedProviderMetadata === undefined &&
-      Object.keys(pricingContext).length === 0
-    ) {
-      return
-    }
-    this.responses.set(response.id, {
-      ...(response.modelId === undefined ? {} : { modelId: response.modelId }),
+    const snapshot: ModelCallResponseSnapshot = {
+      callId,
+      ...(response?.modelId === undefined ? {} : { modelId: response.modelId }),
       ...(normalizedProviderMetadata === undefined
         ? {}
         : { providerMetadata: normalizedProviderMetadata }),
       ...(Object.keys(pricingContext).length === 0 ? {} : { pricingContext }),
+    }
+    this.completedResponses.push(snapshot)
+    if (response?.id) this.responses.set(response.id, snapshot)
+  }
+
+  private takeCompletedResponse(responseId: string): ModelCallResponseSnapshot | undefined {
+    const indexed = this.responses.get(responseId)
+    const index = indexed === undefined ? 0 : this.completedResponses.indexOf(indexed)
+    if (index < 0 || index >= this.completedResponses.length) return indexed
+    const [response] = this.completedResponses.splice(index, 1)
+    // Keep the resolved response-to-call mapping for this recorder's bounded lifetime. AI SDK may
+    // replay a lifecycle callback; forgetting the mapping would fall back to its different call ID
+    // and defeat the usage ledger's idempotency key.
+    if (response && indexed === undefined) this.responses.set(responseId, response)
+    return response ?? indexed
+  }
+
+  private async beforeProviderCall(
+    model: { readonly provider: string; readonly modelId: string },
+    params: {
+      readonly prompt: unknown
+      readonly tools?: unknown
+      readonly responseFormat?: unknown
+      readonly maxOutputTokens?: number
+      readonly providerOptions?: unknown
+    }
+  ): Promise<AiModelCallAdmissionInput> {
+    this.assertHealthy()
+    const callId = this.generateCallId()
+    if (!callId.trim() || this.callIds.has(callId)) {
+      throw new Error("[SixbAgentWorker] AI model-call IDs must be nonempty and unique.")
+    }
+    this.callIds.add(callId)
+
+    const inputTokens = estimateAiModelCallInputTokens({
+      prompt: params.prompt,
+      tools: params.tools,
+      responseFormat: params.responseFormat,
+    })
+    const outputTokenAllowance = aiModelCallOutputTokenAllowance(params.maxOutputTokens)
+    const estimatedTotalTokens = estimatedAiModelCallTotalTokens(inputTokens, outputTokenAllowance)
+    const admission: AiModelCallAdmissionInput = {
+      projectId: this.input.projectId,
+      executionId: this.input.executionId,
+      attempt: this.input.attempt,
+      requesterGroupIds: [...this.input.requesterGroupIds],
+      callId,
+      providerId: model.provider,
+      modelId: model.modelId,
+      pricingContext: aiPricingContextFromAiSdkCallStart(model, params.providerOptions),
+      inputTokens,
+      outputTokenAllowance,
+      ...(estimatedTotalTokens === undefined ? {} : { estimatedTotalTokens }),
+    }
+    let decision: AiModelCallAdmissionDecision
+    try {
+      decision = this.input.beforeModelCall
+        ? await this.input.beforeModelCall(admission)
+        : { reservation: "none" as const }
+    } catch (error) {
+      // Streaming SDKs may turn middleware errors into stream error parts. Retain the exact coded
+      // admission rejection so the run terminal boundary cannot collapse it into a generic model
+      // failure after the stream drains.
+      this.admissionError = error
+      throw error
+    }
+    if (decision.reservation === "active") this.limitedCalls.set(callId, admission)
+    return admission
+  }
+
+  private async markCallUnknown(callId: string): Promise<void> {
+    const admission = this.limitedCalls.get(callId)
+    if (!admission) return
+    await this.input.markModelCallUnknown?.({
+      projectId: admission.projectId,
+      executionId: admission.executionId,
+      attempt: admission.attempt,
+      callId: admission.callId,
     })
   }
 }

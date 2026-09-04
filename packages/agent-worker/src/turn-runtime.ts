@@ -1,6 +1,8 @@
+import type { AuthorizablePrincipal } from "@sixb/core"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { AgentRunRecord } from "@sixb/core/storage"
 import { AgentTurnTimeoutError } from "./errors"
+import { createAiModelCallLimitController } from "./model-call-limits"
 import { AiModelCallRecorder } from "./model-call-recorder"
 import type { AgentTurnContext } from "./types"
 
@@ -25,7 +27,14 @@ export function createAgentTurnRuntime(input: {
   readonly run: AgentRunRecord
   readonly signal: AbortSignal
   readonly providerOptions?: unknown
+  readonly requestedBy?: AuthorizablePrincipal
 }): AgentTurnRuntime {
+  const modelCallLimits = createAiModelCallLimitController({
+    storage: input.context.storage,
+    projectId: input.context.id,
+    requestedBy: input.requestedBy,
+    requesterGroupIds: input.run.requesterGroupIds,
+  })
   const usageRecorder = new AiModelCallRecorder({
     storage: input.context.storage,
     projectId: input.context.id,
@@ -33,6 +42,8 @@ export function createAgentTurnRuntime(input: {
     attempt: input.run.attempt,
     requesterGroupIds: input.run.requesterGroupIds,
     providerOptions: input.providerOptions,
+    beforeModelCall: modelCallLimits.beforeModelCall,
+    markModelCallUnknown: modelCallLimits.markModelCallUnknown,
     recoverAiModelCall: input.context.recoverAiModelCall,
     errorRunId: input.run.id,
   })

@@ -51,7 +51,7 @@ import {
   PostAgentMessageResponseSchema,
   RetryAgentRunResponseSchema,
 } from "../schemas/agents"
-import { ErrorResponseSchema } from "../schemas/common"
+import { codedErrorResponseSchema, ErrorResponseSchema, JsonValueSchema } from "../schemas/common"
 import { FileContentQuerySchema } from "../schemas/files"
 import {
   handleRouteError,
@@ -66,6 +66,11 @@ const AgentMessageFileContentQuerySchema = FileContentQuerySchema.extend({
     .min(1)
     .regex(/^\/parts(?:\/|$)/, "Agent message file content paths must start with /parts/"),
 })
+
+const AiUsageLimitErrorResponseSchema = codedErrorResponseSchema([
+  "ai.usage_limit_exceeded",
+  "ai.usage_limit_unavailable",
+]).extend({ details: JsonValueSchema.optional() })
 
 function serializeAgent(agent: AgentDefinition): ReturnType<typeof AgentCatalogItemSchema.parse> {
   return AgentCatalogItemSchema.parse({
@@ -181,8 +186,8 @@ async function publishQueuedRunCancellation(
 
 function handleAgentRouteError(
   error: unknown,
-  set: { status?: number | string }
-): { error: string } {
+  set: { status?: number | string; headers?: unknown }
+): ReturnType<typeof handleRouteError> {
   // A duplicate id is a conflict, not a bad request. Map it to a generic 409 rather than echoing the
   // provider's raw message (which leaks the id, project, and storage prefix).
   if (error instanceof AgentStorageError && error.code === "duplicate_id") {
@@ -604,6 +609,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           403: ErrorResponseSchema,
           404: ErrorResponseSchema,
           409: ErrorResponseSchema,
+          429: AiUsageLimitErrorResponseSchema,
           501: ErrorResponseSchema,
         },
         detail: {
@@ -753,6 +759,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
           409: ErrorResponseSchema,
+          429: AiUsageLimitErrorResponseSchema,
           501: ErrorResponseSchema,
         },
         detail: {

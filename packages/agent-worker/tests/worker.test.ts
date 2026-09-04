@@ -1955,6 +1955,54 @@ describe("AgentWorker", () => {
     expect(new AgentWorker(sixb, workerOptions({ concurrency: 7 })).concurrency).toBe(7)
   })
 
+  test("rechecks AI limits after a queued conversation is claimed", async () => {
+    let providerCalls = 0
+    const model = new MockLanguageModelV4({
+      modelId: "mock-model",
+      doStream: async () => {
+        providerCalls += 1
+        throw new Error("A denied conversation call must not reach the provider")
+      },
+    })
+    const sixb = buildSixb(model)
+    const reporter = attachSixbErrorReporter(sixb, () => {})
+    const request = await requestAgent(sixb, { agentId: "assistant", text: "queued first" })
+    await sixb.storage.aiLimits?.createPolicy({
+      id: "project_tokens_exhausted_after_queue",
+      projectId: PROJECT_ID,
+      subject: { type: "project" },
+      limit: { meter: "tokens.total", amount: 0 },
+    })
+
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      const failed = await waitFor(
+        async () => {
+          const run = await agentStorageOf(sixb).runs.getById({
+            projectId: PROJECT_ID,
+            id: request.run.id,
+          })
+          return run?.status === "failed" ? run : null
+        },
+        { label: "queued conversation limit failure" }
+      )
+
+      expect(providerCalls).toBe(0)
+      expect(failed.error).toMatchObject({
+        code: "ai.usage_limit_exceeded",
+        details: {
+          resetAt: expect.any(String),
+        },
+      })
+      expect(failed.error?.details).not.toHaveProperty("policies")
+      expect(await listMessages(agentStorageOf(sixb), request.run.threadId)).toHaveLength(1)
+      await reporter.flush()
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("requires an API base URL", () => {
     const sixb = buildSixb(toolThenAnswerModel())
 
@@ -3383,6 +3431,146 @@ describe("AgentWorker", () => {
         run: { runId, workflowId: workflow.id },
         failure: run?.error,
       })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("enforces project AI limits at the workflow agent provider boundary", async () => {
+    let providerCalls = 0
+    const model = new MockLanguageModelV4({
+      modelId: "mock-model",
+      doStream: async () => {
+        providerCalls += 1
+        throw new Error("A denied workflow Agent call must not reach the provider")
+      },
+    })
+    const agent = defineAgent("workflow-limit-agent", {
+      name: "Workflow limit agent",
+      model,
+      instructions: "This call is denied before the provider.",
+      groups: [AGENT_RUNTIME_GROUP],
+    })
+    const agentStep = defineAgentStep("limited-agent-step", agent)
+      .input({ query: "string" })
+      .output({ answer: "string" })
+      .prompt(({ input }) => `Resolve '${input.query}'.`)
+    const workflow = defineWorkflow("agent-limit-workflow")
+      .input({ query: "string" })
+      .then(agentStep)
+    const sixb = new SixbHost({
+      id: PROJECT_ID,
+      ontology: [],
+      agents: [agent],
+      workflows: [workflow],
+      groups: [AGENT_RUNTIME_GROUP],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage: new InMemoryLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+      sandboxes: new RecordingSandboxFactory(),
+    })
+    const reporter = attachSixbErrorReporter(sixb, () => {})
+    await sixb.storage.aiLimits?.createPolicy({
+      id: "project_tokens_exhausted",
+      projectId: PROJECT_ID,
+      subject: { type: "project" },
+      limit: { meter: "tokens.total", amount: 0 },
+    })
+    const runs = sixb.storage.workflowRuns!
+    const runId = "workflow-agent-limit-run"
+    const nodeRunId = `${runId}:node:0`
+    const executionId = await createTestWorkflowExecution(sixb.storage.executions, {
+      projectId: PROJECT_ID,
+      workflowId: workflow.id,
+      runId,
+    })
+    await runs.queue({
+      id: runId,
+      projectId: PROJECT_ID,
+      executionId,
+      workflowId: workflow.id,
+      input: { query: "alpha" },
+      requesterGroupIds: [],
+    })
+    await runs.start({ id: runId, projectId: PROJECT_ID })
+    await runs.nodes.start({
+      id: nodeRunId,
+      projectId: PROJECT_ID,
+      workflowRunId: runId,
+      workflowId: workflow.id,
+      nodeIndex: 0,
+      nodeType: "agent",
+      nodeId: agentStep.id,
+      nodeKey: "limitedAgentStep",
+      input: { query: "alpha" },
+    })
+    const agentExecutionId = await createTestAgentExecution(sixb.storage, {
+      projectId: PROJECT_ID,
+      agentId: agent.id,
+      runId: nodeRunId,
+      sourceExecutionId: executionId,
+    })
+    await runs.agentNodes.create({
+      projectId: PROJECT_ID,
+      nodeRunId,
+      executionId: agentExecutionId,
+      agentId: agent.id,
+      prompt: "Resolve 'alpha'.",
+    })
+    await runs.nodes.wait({ projectId: PROJECT_ID, id: nodeRunId })
+    await runs.wait({ projectId: PROJECT_ID, id: runId })
+    await sixb.queues.agents.enqueue({
+      projectId: PROJECT_ID,
+      jobs: [
+        {
+          id: `wfa_job_${nodeRunId}`,
+          type: "agent.workflow-node.requested",
+          payload: { nodeRunId },
+        },
+      ],
+    })
+
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      const execution = await waitFor(
+        async () => {
+          const record = await runs.agentNodes.getByNodeRunId({
+            projectId: PROJECT_ID,
+            nodeRunId,
+          })
+          return record?.status === "failed" ? record : null
+        },
+        { label: "workflow agent limit failure" }
+      )
+      const [nodeRun, run] = await Promise.all([
+        runs.nodes.getById({ projectId: PROJECT_ID, id: nodeRunId }),
+        runs.getById({ projectId: PROJECT_ID, id: runId }),
+      ])
+
+      expect(providerCalls).toBe(0)
+      expect(execution.error).toMatchObject({
+        code: "ai.usage_limit_exceeded",
+        details: {
+          agentId: agent.id,
+          workflowId: workflow.id,
+          workflowRunId: runId,
+          nodeRunId,
+          resetAt: expect.any(String),
+        },
+      })
+      expect(execution.error?.details).not.toHaveProperty("policies")
+      expect(run?.error).toMatchObject({
+        code: "ai.usage_limit_exceeded",
+        details: {
+          resetAt: expect.any(String),
+        },
+      })
+      expect(run?.error?.details).not.toHaveProperty("policies")
+      expect(nodeRun?.error).toEqual(run?.error)
+      await reporter.flush()
     } finally {
       await worker.stop()
     }

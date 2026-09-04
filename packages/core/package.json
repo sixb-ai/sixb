@@ -143,6 +143,12 @@
       "import": "./dist/storage/ai-limits/provider.js",
       "default": "./dist/storage/ai-limits/provider.js"
     },
+    "./internal/ai-limit-enforcement": {
+      "types": "./dist/storage/ai-limits/enforcement.d.ts",
+      "bun": "./src/storage/ai-limits/enforcement.ts",
+      "import": "./dist/storage/ai-limits/enforcement.js",
+      "default": "./dist/storage/ai-limits/enforcement.js"
+    },
     "./internal/auth": {
       "types": "./dist/auth/index.d.ts",
       "bun": "./src/auth/index.ts",

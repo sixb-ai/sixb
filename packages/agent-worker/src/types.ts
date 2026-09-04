@@ -15,6 +15,7 @@ import type { LoggingService } from "@sixb/core/internal/logging"
 import type {
   AgentStorage,
   AiCostStorage,
+  AiLimitStorage,
   AiPricingContext,
   AiUsageStorage,
   AuthStorage,
@@ -31,6 +32,7 @@ export type AgentWorkerStorage = Storage & {
   readonly agents: AgentStorage
   readonly aiUsage: AiUsageStorage
   readonly aiCosts: AiCostStorage
+  readonly aiLimits: AiLimitStorage
   readonly auth: AuthStorage
 }
 
@@ -38,6 +40,8 @@ export interface RecoverAiModelCallInput {
   readonly usage: RecordAiModelCallInput
   readonly pricingContext: AiPricingContext
   readonly ratedAt: Date
+  /** True only when admission created an aggregate-budget reservation for this provider attempt. */
+  readonly reconcileLimitReservation?: boolean
 }
 
 export type RecoverAiModelCall = (input: RecoverAiModelCallInput) => Promise<void>

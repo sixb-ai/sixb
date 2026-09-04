@@ -9,6 +9,7 @@ import type {
   AiModelCallCostRecord,
   AiModelCallUsage,
   AiModelCallUsageRecord,
+  AiMoney,
   AiPriceSource,
   AiPricingContext,
   AiUnpriceableReason,
@@ -34,6 +35,98 @@ interface RateAiModelCallInput {
   readonly usage: AiModelCallUsageRecord
   readonly pricingContext?: AiPricingContext
   readonly ratedAt: Date
+}
+
+export interface EstimateAiModelCallCostInput {
+  readonly providerId: string
+  readonly modelId: string
+  readonly pricingContext?: AiPricingContext
+  readonly inputTokens: number
+  readonly outputTokens: number
+}
+
+export type AiModelCallCostEstimate =
+  | {
+      readonly status: "estimated"
+      readonly money: AiMoney & { readonly currency: "USD" }
+      readonly billingIdentity: AiBillingIdentity
+    }
+  | {
+      readonly status: "unavailable"
+      readonly reason: AiUnpriceableReason
+      readonly billingIdentity?: AiBillingIdentity
+    }
+
+/**
+ * Conservatively pre-price one prepared text request against the pinned catalog.
+ *
+ * Each token partition is charged at the highest applicable rate, with an extra rounding bound for
+ * every possible partition. The reservation can therefore be larger than the final valuation but
+ * cannot be smaller merely because cache or reasoning partitions are not known before the call.
+ */
+export function estimateAiModelCallCost(
+  input: EstimateAiModelCallCostInput
+): AiModelCallCostEstimate {
+  const pricingContext = normalizeAiPricingContext(input.pricingContext ?? {})
+  const inputTokens = parseQuantity(input.inputTokens, "estimated input token quantity")
+  const outputTokens = parseQuantity(input.outputTokens, "estimated output token quantity")
+  const billingIdentity = resolveModelsDevBillingIdentity({
+    providerId: input.providerId,
+    requestedModelId: input.modelId,
+  })
+  if (!billingIdentity) return { status: "unavailable", reason: "missingBillingIdentity" }
+
+  const entry = getModelsDevCatalogModel(
+    billingIdentity.providerId,
+    billingIdentity.modelId
+  )?.pricing
+  if (!entry) {
+    return { status: "unavailable", reason: "missingCatalogEntry", billingIdentity }
+  }
+  if (
+    pricingContext.batch === true ||
+    !isBaseServiceTier(pricingContext.serviceTier) ||
+    (pricingContext.cacheWriteTtlSeconds !== undefined &&
+      pricingContext.cacheWriteTtlSeconds !== 300) ||
+    hasUnsupportedRoutingContext(pricingContext)
+  ) {
+    return { status: "unavailable", reason: "unsupportedPricingDimension", billingIdentity }
+  }
+
+  let rates: ModelsDevCatalogRateSet = entry
+  let tiers = entry.tiers
+  if (pricingContext.mode !== undefined) {
+    const modeRates = entry.modes?.[pricingContext.mode]
+    if (!modeRates) {
+      return { status: "unavailable", reason: "unsupportedPricingDimension", billingIdentity }
+    }
+    rates = modeRates
+    tiers = modeRates.tiers
+  }
+  if (tiers?.length) rates = selectTier(tiers, input.inputTokens) ?? rates
+
+  // The snapshot only contains the five-minute cache-write rate. A request that may write cache
+  // without an explicit TTL could use a differently priced provider dimension, so it is unsafe to
+  // admit under a hard catalog-cost policy.
+  if (rates.cacheWrite !== undefined && pricingContext.cacheWriteTtlSeconds === undefined) {
+    return { status: "unavailable", reason: "unsupportedPricingDimension", billingIdentity }
+  }
+
+  const inputRates = [rates.input, rates.cacheRead, rates.cacheWrite].filter(
+    (rate): rate is string => rate !== undefined
+  )
+  const outputRates = [rates.output, rates.reasoning].filter(
+    (rate): rate is string => rate !== undefined
+  )
+  const inputCharge = conservativePartitionedCharge(inputTokens, inputRates, "input estimate")
+  const outputCharge = conservativePartitionedCharge(outputTokens, outputRates, "output estimate")
+  const amountNanos = inputCharge + outputCharge
+  assertSignedInt64(amountNanos, "cost estimate")
+  return {
+    status: "estimated",
+    money: { currency: "USD", amountNanos: amountNanos.toString() },
+    billingIdentity,
+  }
 }
 
 /** Rate one immutable usage record against this worker's pinned Models.dev snapshot. */
@@ -311,6 +404,21 @@ function calculateComponent(
     rateAmountNanosPerMillion: rate.toString(),
     chargeAmountNanos: charge.toString(),
   }
+}
+
+function conservativePartitionedCharge(
+  quantity: bigint,
+  rateTexts: readonly string[],
+  field: string
+): bigint {
+  const rates = rateTexts.map((rate) => parseNonnegativeInt64(rate, `${field} rate`))
+  const maxRate = rates.reduce((maximum, rate) => (rate > maximum ? rate : maximum), 0n)
+  // ceil(total * maxRate) plus one nanounit for every additional independently rounded partition.
+  const charge =
+    (quantity * maxRate + TOKENS_PER_MILLION - 1n) / TOKENS_PER_MILLION +
+    BigInt(Math.max(0, rates.length - 1))
+  assertSignedInt64(charge, `${field} charge`)
+  return charge
 }
 
 function unpriceable(

@@ -18,6 +18,14 @@ export const SIXB_ERROR_DEFINITIONS = {
     publicMessage: "Agent execution failed.",
     retryable: false,
   },
+  "ai.usage_limit_exceeded": {
+    publicMessage: "AI usage limit exceeded.",
+    retryable: false,
+  },
+  "ai.usage_limit_unavailable": {
+    publicMessage: "AI usage limit could not be evaluated.",
+    retryable: true,
+  },
   "connector.adapter_invalid": {
     publicMessage: "Connector adapter returned an invalid result.",
     retryable: false,

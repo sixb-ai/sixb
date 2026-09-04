@@ -30,6 +30,26 @@ describe("handleRouteError", () => {
     })
   })
 
+  test("exposes structured details only for declared AI limit errors", () => {
+    const hidden = handleRouteError(
+      createSixbError("dataset.not_found", "Missing", { details: { datasetId: "private" } }),
+      {}
+    )
+    const exposed = handleRouteError(
+      createSixbError("ai.usage_limit_unavailable", "Unavailable", {
+        details: { reasons: ["missingEstimate"] },
+      }),
+      {}
+    )
+
+    expect(hidden).toEqual({ error: "Missing", code: "dataset.not_found" })
+    expect(exposed).toEqual({
+      error: "Unavailable",
+      code: "ai.usage_limit_unavailable",
+      details: { reasons: ["missingEstimate"] },
+    })
+  })
+
   test("does not infer a status from legacy error messages", () => {
     for (const message of ["Unknown property", "Resource not found"]) {
       const set: { status?: number | string } = {}

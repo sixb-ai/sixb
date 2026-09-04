@@ -135,6 +135,126 @@ describe("AI usage recovery", () => {
     })
   })
 
+  test("durable accounting recovery reconciles the original reservation", async () => {
+    const queues = new InMemoryQueues()
+    const storage = new InMemoryStorage()
+    await createTestAgentExecution(storage, {
+      projectId,
+      agentId: "assistant",
+      runId: "run_1",
+      executionId,
+    })
+    await storage.aiLimits.createPolicy({
+      id: "project_tokens",
+      projectId,
+      subject: { type: "project" },
+      limit: { meter: "tokens.total", amount: 1_000 },
+    })
+    await storage.aiLimits.reserveModelCall({
+      projectId,
+      executionId,
+      attempt: 2,
+      callId: "call_1",
+      subjects: [{ type: "project" }],
+      estimates: [{ meter: "tokens.total", amount: 100 }],
+    })
+    await enqueueAiModelCallRecovery(queues.agents, {
+      usage: modelCall(),
+      pricingContext: {},
+      ratedAt: new Date("2026-07-01T12:00:01.000Z"),
+      reconcileLimitReservation: true,
+    })
+    const [claimed] = await queues.agents.claim({
+      projectId,
+      workerId: "test-worker",
+      limit: 1,
+    })
+    if (claimed?.job.type !== "agent.ai-usage.record.requested") {
+      throw new Error("Expected an AI usage recovery job.")
+    }
+    expect(claimed.job.payload.accounting?.reconcileLimitReservation).toBe(true)
+
+    await recordRecoveredAiModelCall(storage, claimed.job)
+    await expect(
+      storage.aiLimits.listPolicyStatuses({
+        projectId,
+        at: new Date("2026-07-15T00:00:00.000Z"),
+      })
+    ).resolves.toMatchObject([
+      {
+        consumption: {
+          actual: { amount: 20 },
+          reserved: { amount: 0 },
+          unknown: { amount: 0 },
+        },
+      },
+    ])
+  })
+
+  test("keeps the estimate as unknown when recovered usage cannot be measured", async () => {
+    const queues = new InMemoryQueues()
+    const storage = new InMemoryStorage()
+    await createTestAgentExecution(storage, {
+      projectId,
+      agentId: "assistant",
+      runId: "run_1",
+      executionId,
+    })
+    await storage.aiLimits.createPolicy({
+      id: "project_tokens",
+      projectId,
+      subject: { type: "project" },
+      limit: { meter: "tokens.total", amount: 1_000 },
+    })
+    await storage.aiLimits.reserveModelCall({
+      projectId,
+      executionId,
+      attempt: 2,
+      callId: "call_missing",
+      subjects: [{ type: "project" }],
+      estimates: [{ meter: "tokens.total", amount: 100 }],
+      reservedAt: new Date("2026-07-01T11:59:59.000Z"),
+    })
+    await enqueueAiModelCallRecovery(queues.agents, {
+      usage: {
+        ...modelCall(),
+        id: "usage_missing",
+        callId: "call_missing",
+        usage: {},
+      },
+      pricingContext: {},
+      ratedAt: new Date("2026-07-01T12:00:01.000Z"),
+      reconcileLimitReservation: true,
+    })
+    const [claimed] = await queues.agents.claim({
+      projectId,
+      workerId: "test-worker",
+      limit: 1,
+    })
+    if (claimed?.job.type !== "agent.ai-usage.record.requested") {
+      throw new Error("Expected an AI usage recovery job.")
+    }
+
+    await expect(recordRecoveredAiModelCall(storage, claimed.job)).resolves.toMatchObject({
+      created: true,
+    })
+    await expect(
+      storage.aiLimits.listPolicyStatuses({
+        projectId,
+        at: new Date("2026-07-15T00:00:00.000Z"),
+      })
+    ).resolves.toMatchObject([
+      {
+        accountingStatus: "unavailable",
+        consumption: {
+          actual: { amount: 0 },
+          reserved: { amount: 0 },
+          unknown: { amount: 100 },
+        },
+      },
+    ])
+  })
+
   test("rejects malformed jobs instead of retrying them forever", async () => {
     const record = modelCall()
     const job: AgentAiUsageRecordRequestedQueueJob = {

@@ -120,14 +120,27 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   // preflight start it here, after fallible history and attachment preparation, so setup failures
   // do not leave a detached deadline timer behind.
   const ownsRuntime = input.runtime === undefined
-  const runtime =
-    input.runtime ??
-    createAgentTurnRuntime({
+  let runtime = input.runtime
+  if (!runtime) {
+    const durableExecution = await storage.executions.getById({
+      projectId,
+      id: run.executionId,
+    })
+    if (!durableExecution) {
+      throw createSixbError(
+        "internal.unexpected",
+        `[SixbAgentWorker] Agent run '${runId}' references missing execution '${run.executionId}'.`,
+        { details: { agentId: run.agentId, runId, executionId: run.executionId } }
+      )
+    }
+    runtime = createAgentTurnRuntime({
       context,
       run,
       signal,
       providerOptions: agent.providerOptions,
+      requestedBy: durableExecution.requestedBy,
     })
+  }
   const usageRecorder = runtime.usageRecorder
   const abortSignal = AbortSignal.any([runtime.signal, sandboxReadiness.signal])
 

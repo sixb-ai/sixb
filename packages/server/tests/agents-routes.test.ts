@@ -743,6 +743,40 @@ describe("agent routes", () => {
     })
   })
 
+  test("returns a coded 429 and retry time for an exhausted AI usage limit", async () => {
+    const { app, storage, sixb } = createApp()
+    const thread = await storage.agents.threads.create({
+      id: "thread-limit-exhausted",
+      projectId: sixb.id,
+      agentId: "assistant",
+      ownerPrincipal: { type: "system", id: "system" },
+    })
+    await storage.aiLimits.createPolicy({
+      id: "project_tokens_exhausted",
+      projectId: sixb.id,
+      subject: { type: "project" },
+      limit: { meter: "tokens.total", amount: 0 },
+    })
+
+    const response = await app.fetch(
+      jsonRequest(`/api/agent-threads/${thread.id}/messages`, "POST", { text: "blocked" })
+    )
+
+    expect(response.status).toBe(429)
+    expect(Number(response.headers.get("retry-after"))).toBeGreaterThanOrEqual(0)
+    const responseBody = await response.json()
+    expect(responseBody).toMatchObject({
+      code: "ai.usage_limit_exceeded",
+      details: {
+        resetAt: expect.any(String),
+      },
+    })
+    expect(responseBody.details).not.toHaveProperty("policies")
+    await expect(
+      storage.agents.messages.list({ projectId: sixb.id, threadId: thread.id })
+    ).resolves.toMatchObject({ messages: [], total: 0 })
+  })
+
   test("cancels a queued run before a worker starts it", async () => {
     const { app, storage, sixb } = createApp()
     const request = await createTestSixb(sixb).agents.runs.request({
