@@ -147,6 +147,7 @@ export function runAiCostStorageContractSuite<TStorage extends AiCostStorage>(
         ).resolves.toEqual([
           {
             amounts: [{ currency: "USD", amountNanos: "95000" }],
+            reportedCallCount: 0,
             ratedCallCount: 1,
             unpriceableCallCount: 1,
             unvaluedCallCount: 1,
@@ -169,6 +170,7 @@ export function runAiCostStorageContractSuite<TStorage extends AiCostStorage>(
           },
           costs: {
             amounts: [{ currency: "USD", amountNanos: "95000" }],
+            reportedCallCount: 0,
             ratedCallCount: 1,
             unpriceableCallCount: 1,
             unvaluedCallCount: 1,
@@ -214,6 +216,93 @@ export function runAiCostStorageContractSuite<TStorage extends AiCostStorage>(
           hasMore: false,
           items: [{ usage: { id: "usage_2" }, valuationStatus: "unpriceable" }],
         })
+      } finally {
+        await options.cleanup?.(storage)
+      }
+    })
+
+    test("combines reported and estimated costs once while preserving provenance", async () => {
+      // Without reported-cost support, the insert/filter or aggregate assertions fail.
+      const storage = await fixture()
+      try {
+        const reported = {
+          projectId,
+          usageRecordId: "usage_2",
+          status: "reported",
+          billingIdentity: { providerId: "gateway", modelId: "unpriced/model" },
+          pricingContext: {},
+          money: { currency: "USD", amountNanos: "530200" },
+          reportSource: { providerId: "gateway", responseId: "gen_2" },
+          ratedAt: new Date("2026-08-01T12:00:00.200Z"),
+        } as const satisfies AiModelCallCostRecord
+        await storage.recordModelCallCost(ratedCost())
+        await storage.recordModelCallCost(reported)
+        await storage.recordModelCallCost(reported)
+        // Later replays must not replace a previously recorded valuation.
+        await storage.recordModelCallCost(unpriceableCost())
+        const expected = {
+          amounts: [{ currency: "USD", amountNanos: "625200" }],
+          reportedCallCount: 1,
+          ratedCallCount: 1,
+          unpriceableCallCount: 0,
+          unvaluedCallCount: 1,
+        }
+        expect(
+          await storage.summarizeExecutions({ projectId, executionIds: [executionId] })
+        ).toEqual([expected])
+        const query = {
+          projectId,
+          from: new Date("2026-08-01T00:00:00.000Z"),
+          to: new Date("2026-08-02T00:00:00.000Z"),
+        }
+        const overview = await storage.queryProjectOverview({ ...query, bucket: "day" })
+        expect(overview.totals.costs).toEqual(expected)
+        expect(overview.series[0]?.costs).toEqual(expected)
+        expect(
+          overview.models.find((model) => model.modelId === "unpriced/model")?.costs
+        ).toMatchObject({ amounts: [reported.money], reportedCallCount: 1, ratedCallCount: 0 })
+        expect(
+          await storage.listModelCalls({ ...query, valuationStatus: "reported" })
+        ).toMatchObject({
+          total: 1,
+          hasMore: false,
+          items: [{ cost: reported, valuationStatus: "reported" }],
+        })
+      } finally {
+        await options.cleanup?.(storage)
+      }
+    })
+
+    test("preserves reported zero and rejects a report for a different model", async () => {
+      const storage = await fixture()
+      try {
+        const reported = {
+          projectId,
+          usageRecordId: "usage_1",
+          status: "reported",
+          billingIdentity: { providerId: "gateway", modelId: "openai/gpt-5" },
+          pricingContext: {},
+          money: { currency: "USD", amountNanos: "0" },
+          reportSource: { providerId: "gateway", responseId: "gen_free" },
+          ratedAt: new Date("2026-08-01T12:00:00.200Z"),
+        } as const satisfies AiModelCallCostRecord
+        await expect(
+          storage.recordModelCallCost({
+            ...reported,
+            billingIdentity: { ...reported.billingIdentity, modelId: "wrong-model" },
+          })
+        ).rejects.toMatchObject({ code: "cost_mismatch" })
+        await storage.recordModelCallCost(reported)
+        expect(
+          await storage.summarizeExecutions({ projectId, executionIds: [executionId] })
+        ).toMatchObject([
+          {
+            amounts: [{ currency: "USD", amountNanos: "0" }],
+            reportedCallCount: 1,
+            ratedCallCount: 0,
+            unvaluedCallCount: 2,
+          },
+        ])
       } finally {
         await options.cleanup?.(storage)
       }

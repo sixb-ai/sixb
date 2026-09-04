@@ -1,7 +1,10 @@
 import type { GetAiAccountingOverviewResponse, ListAiModelCallsResponse } from "@sixb/client"
-import { getAiAccountingOverviewOptions, listAiModelCallsOptions } from "@sixb/client/hooks"
 import {
-  Badge,
+  getAiAccountingOverviewOptions,
+  listAiModelCallGroupsOptions,
+  listAiModelCallsQueryKey,
+} from "@sixb/client/hooks"
+import {
   Button,
   Card,
   CardContent,
@@ -14,14 +17,8 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
 } from "@sixb/ui/components"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Bot,
   CircleDollarSign,
@@ -32,9 +29,10 @@ import {
   TriangleAlert,
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
-import { Link } from "react-router-dom"
+import { AiModelCallsTable } from "../components/AiModelCallsTable"
 import { AiUsageBreakdown, AiUsageMetricCard, AiUsageTimeSeries } from "../components/AiUsageCharts"
 import { AiUsageDateRangeControl } from "../components/AiUsageDateRangeControl"
+import { formatMoney } from "../lib/aiAccounting"
 import { utcAccountingRangeForCalendarDays } from "../lib/aiUsageDateRange"
 
 const PAGE_SIZE = 25
@@ -57,6 +55,7 @@ const RANGE_OPTIONS: readonly { value: RangePreset; label: string; milliseconds:
 ]
 
 export function AiUsagePage() {
+  const queryClient = useQueryClient()
   const [rangeSelection, setRangeSelection] = useState<RangeSelection>(() => ({
     kind: "preset",
     preset: "7d",
@@ -82,7 +81,7 @@ export function AiUsagePage() {
   const overview = (hasFilters ? overviewQuery.data : unfilteredQuery.data) as Overview | undefined
   const filterSource = unfilteredQuery.data as Overview | undefined
   const callsQuery = useQuery(
-    listAiModelCallsOptions({
+    listAiModelCallGroupsOptions({
       query: {
         ...range,
         providerId,
@@ -108,6 +107,7 @@ export function AiUsagePage() {
     void unfilteredQuery.refetch()
     if (hasFilters) void overviewQuery.refetch()
     void callsQuery.refetch()
+    void queryClient.invalidateQueries({ queryKey: listAiModelCallsQueryKey({ query: range }) })
   }
   const loading = unfilteredQuery.isLoading || (hasFilters && overviewQuery.isLoading)
   const error = unfilteredQuery.error ?? overviewQuery.error
@@ -125,19 +125,26 @@ export function AiUsagePage() {
   }
 
   const totals = overview.totals
-  const catalogValuedCalls = totals.costs.ratedCallCount
-  const coverage =
-    totals.modelCallCount === 0 ? 0 : (catalogValuedCalls / totals.modelCallCount) * 100
+  const valuedCalls = totals.costs.reportedCallCount + totals.costs.ratedCallCount
+  const coverage = totals.modelCallCount === 0 ? 0 : (valuedCalls / totals.modelCallCount) * 100
   const selectedAmount = amountForCurrency(totals.costs.amounts, currency)
   const tokenSeries = overview.series.map((period) => ({
     at: period.start,
     input: bucketTokenValue(period, "inputTokens"),
     output: bucketTokenValue(period, "outputTokens"),
   }))
-  const costSeries = overview.series.map((period) => ({
-    at: period.start,
-    cost: nanosToChartValue(amountForCurrency(period.costs.amounts, currency)?.amountNanos),
-  }))
+  const costSeries = overview.series.map((period) => {
+    const amount = amountForCurrency(period.costs.amounts, currency)
+    return {
+      at: period.start,
+      // Empty periods are zero; periods whose calls have no cost are unknown.
+      cost: amount
+        ? nanosToChartValue(amount.amountNanos)
+        : period.modelCallCount === 0
+          ? 0
+          : undefined,
+    }
+  })
   const modelCosts = overview.models
     .flatMap((model) => {
       const amount = amountForCurrency(model.costs.amounts, currency)
@@ -184,7 +191,8 @@ export function AiUsagePage() {
     .sort((left, right) => right.value - left.value)
     .slice(0, 8)
   const valuationBreakdown = [
-    { key: "rated", label: "Catalog-valued", value: totals.costs.ratedCallCount },
+    { key: "reported", label: "Provider-reported", value: totals.costs.reportedCallCount },
+    { key: "rated", label: "Estimated", value: totals.costs.ratedCallCount },
     { key: "unpriceable", label: "Unpriceable", value: totals.costs.unpriceableCallCount },
     { key: "unvalued", label: "Unvalued", value: totals.costs.unvaluedCallCount },
   ].filter((item) => item.value > 0)
@@ -286,16 +294,15 @@ export function AiUsagePage() {
         <>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <AiUsageMetricCard
-              label="Catalog-estimated cost"
+              label="Recorded cost"
               value={selectedAmount ? formatMoney(selectedAmount) : "—"}
-              description={
-                currency ? `Catalog-valued calls in ${currency}` : "No catalog-valued calls"
-              }
+              description={`${totals.costs.reportedCallCount.toLocaleString()} reported · ${totals.costs.ratedCallCount.toLocaleString()} estimated`}
               icon={<CircleDollarSign className="size-4" />}
-              sparkline={costSeries.map((point) => ({
-                timestamp: point.at,
-                value: point.cost,
-              }))}
+              sparkline={
+                costSeries.every((point) => point.cost !== undefined)
+                  ? costSeries.map((point) => ({ timestamp: point.at, value: point.cost! }))
+                  : undefined
+              }
             />
             <AiUsageMetricCard
               label="Total tokens"
@@ -316,7 +323,7 @@ export function AiUsagePage() {
             <AiUsageMetricCard
               label="Pricing coverage"
               value={`${coverage.toFixed(coverage >= 99.95 ? 0 : 1)}%`}
-              description={`${catalogValuedCalls.toLocaleString()} of ${totals.modelCallCount.toLocaleString()} calls catalog-valued`}
+              description={`${valuedCalls.toLocaleString()} of ${totals.modelCallCount.toLocaleString()} calls valued`}
               icon={<Coins className="size-4" />}
             />
           </div>
@@ -338,11 +345,11 @@ export function AiUsagePage() {
           <div className="grid items-start gap-4 xl:grid-cols-3">
             <ChartCard
               className="xl:col-span-2"
-              title="Estimated cost over time"
+              title="Cost over time"
               description={
                 currency
-                  ? `Catalog-valued model calls in ${currency}`
-                  : "No catalog-valued calls in this range"
+                  ? `Reported amounts and catalog estimates in ${currency}; not a final invoice`
+                  : "No valued calls in this range"
               }
             >
               <AiUsageTimeSeries
@@ -354,27 +361,27 @@ export function AiUsagePage() {
                 series={[
                   {
                     key: "cost",
-                    label: currency ? `Estimated cost (${currency})` : "Estimated cost",
+                    label: currency ? `Cost (${currency})` : "Cost",
                     color: "var(--chart-1)",
                   },
                 ]}
                 xFormatter={(value) => formatBucketLabel(value, bucket)}
                 valueFormatter={(value) => formatChartMoney(value, currency)}
-                emptyLabel="No catalog-estimated cost in this range"
-                ariaLabel="Catalog-estimated AI cost over time"
+                emptyLabel="No recorded cost in this range"
+                ariaLabel="Recorded AI cost over time"
               />
             </ChartCard>
             <ChartCard
               className="h-full"
-              title="Estimated cost by requested model"
-              description="Highest catalog-estimated cost for the selected currency"
+              title="Cost by requested model"
+              description="Highest recorded cost for the selected currency"
             >
               <AiUsageBreakdown
                 data={modelCosts}
-                valueLabel="Estimated cost"
+                valueLabel="Cost"
                 valueFormatter={(value) => formatChartMoney(value, currency)}
-                emptyLabel="No catalog-estimated model cost in this range"
-                ariaLabel="Catalog-estimated AI cost by requested model"
+                emptyLabel="No recorded model cost in this range"
+                ariaLabel="Recorded AI cost by requested model"
               />
             </ChartCard>
             <ChartCard
@@ -415,28 +422,25 @@ export function AiUsagePage() {
           {agentCosts.length > 1 || workflowCosts.length > 1 ? (
             <div className="grid gap-4 xl:grid-cols-2">
               {agentCosts.length > 1 ? (
-                <ChartCard
-                  title="Estimated cost by agent"
-                  description="Highest catalog-estimated cost in this range"
-                >
+                <ChartCard title="Cost by agent" description="Highest recorded cost in this range">
                   <AiUsageBreakdown
                     data={agentCosts}
-                    valueLabel="Estimated cost"
+                    valueLabel="Cost"
                     valueFormatter={(value) => formatChartMoney(value, currency)}
-                    ariaLabel="Catalog-estimated AI cost by agent"
+                    ariaLabel="Recorded AI cost by agent"
                   />
                 </ChartCard>
               ) : null}
               {workflowCosts.length > 1 ? (
                 <ChartCard
-                  title="Estimated cost by workflow"
-                  description="Highest catalog-estimated workflow Agent nodes in this range"
+                  title="Cost by workflow"
+                  description="Highest recorded workflow Agent node cost in this range"
                 >
                   <AiUsageBreakdown
                     data={workflowCosts}
-                    valueLabel="Estimated cost"
+                    valueLabel="Cost"
                     valueFormatter={(value) => formatChartMoney(value, currency)}
-                    ariaLabel="Catalog-estimated AI cost by workflow"
+                    ariaLabel="Recorded AI cost by workflow"
                   />
                 </ChartCard>
               ) : null}
@@ -445,196 +449,30 @@ export function AiUsagePage() {
         </>
       )}
 
-      <ModelCallsTable
-        calls={(callsQuery.data as ListAiModelCallsResponse | undefined)?.items ?? []}
-        total={(callsQuery.data as ListAiModelCallsResponse | undefined)?.total ?? 0}
+      <AiModelCallsTable
+        key={JSON.stringify({ ...range, providerId, modelId, valuationStatus, offset })}
+        data={callsQuery.data}
+        filters={{ ...range, providerId, modelId, valuationStatus }}
         loading={callsQuery.isLoading}
         error={callsQuery.isError}
         offset={offset}
-        hasMore={(callsQuery.data as ListAiModelCallsResponse | undefined)?.hasMore ?? false}
-        valuationStatus={valuationStatus}
-        onValuationStatusChange={(value) => {
-          setValuationStatus(value)
-          setOffset(0)
-        }}
         onPrevious={() => setOffset((value) => Math.max(0, value - PAGE_SIZE))}
         onNext={() => setOffset((value) => value + PAGE_SIZE)}
         onRetry={() => void callsQuery.refetch()}
+        filterControl={
+          <AccountingSelect
+            label="All valuations"
+            value={valuationStatus}
+            options={["reported", "rated", "unpriceable", "unvalued"]}
+            formatOption={(value) => valuationStatusLabel(value as ValuationStatus)}
+            onChange={(value) => {
+              setValuationStatus(value as ValuationStatus | undefined)
+              setOffset(0)
+            }}
+          />
+        }
       />
     </div>
-  )
-}
-
-function ModelCallsTable({
-  calls,
-  total,
-  loading,
-  error,
-  offset,
-  hasMore,
-  valuationStatus,
-  onValuationStatusChange,
-  onPrevious,
-  onNext,
-  onRetry,
-}: {
-  calls: readonly ModelCall[]
-  total: number
-  loading: boolean
-  error: boolean
-  offset: number
-  hasMore: boolean
-  valuationStatus?: ValuationStatus
-  onValuationStatusChange: (value: ValuationStatus | undefined) => void
-  onPrevious: () => void
-  onNext: () => void
-  onRetry: () => void
-}) {
-  return (
-    <Card id="ai-model-calls" className="scroll-mt-4">
-      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <CardTitle>Model calls</CardTitle>
-          <CardDescription>Immutable usage and valuation drilldown</CardDescription>
-        </div>
-        <AccountingSelect
-          label="All valuations"
-          value={valuationStatus}
-          options={["rated", "unpriceable", "unvalued"]}
-          formatOption={(value) => valuationStatusLabel(value as ValuationStatus)}
-          onChange={(value) => onValuationStatusChange(value as ValuationStatus | undefined)}
-        />
-      </CardHeader>
-      <CardContent className="px-0">
-        <div className="[&_[data-slot=table-container]]:max-h-[70vh] [&_[data-slot=table-container]]:overflow-auto">
-          <Table>
-            <TableHeader className="sticky top-0 z-10">
-              <TableRow>
-                <TableHead className="pl-6">Time</TableHead>
-                <TableHead>Provider / model</TableHead>
-                <TableHead className="text-right">Tokens</TableHead>
-                <TableHead className="text-right">Catalog-estimated cost</TableHead>
-                <TableHead>Valuation</TableHead>
-                <TableHead className="pr-6">Source</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
-                    Loading model calls…
-                  </TableCell>
-                </TableRow>
-              ) : error ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="h-28 text-center">
-                    <div className="flex flex-col items-center gap-3">
-                      <p className="text-sm text-muted-foreground">
-                        Atlas could not load model-call accounting records.
-                      </p>
-                      <Button variant="outline" size="sm" onClick={onRetry}>
-                        Retry
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ) : calls.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
-                    No model calls match these filters.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                calls.map((call) => (
-                  <TableRow key={call.usage.id}>
-                    <TableCell className="whitespace-nowrap pl-6 text-xs text-muted-foreground">
-                      {formatCallTime(call.usage.occurredAt)}
-                    </TableCell>
-                    <TableCell>
-                      <p className="font-medium">{call.usage.requestedModelId}</p>
-                      <p className="text-xs text-muted-foreground">{call.usage.providerId}</p>
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-xs tabular-nums">
-                      {formatOptionalTokens(call.usage.usage.totalTokens)}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-right font-mono text-xs tabular-nums">
-                      {call.cost?.status === "rated" ? formatMoney(call.cost.money) : "—"}
-                    </TableCell>
-                    <TableCell>
-                      <ValuationBadge call={call} />
-                    </TableCell>
-                    <TableCell className="max-w-48 pr-6 text-xs">
-                      <AccountingSource call={call} />
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
-        <div className="flex items-center justify-between border-t px-6 py-3">
-          <p className="text-xs text-muted-foreground">
-            {total === 0
-              ? "0 calls"
-              : `${(offset + 1).toLocaleString()}–${Math.min(offset + calls.length, total).toLocaleString()} of ${total.toLocaleString()}`}
-          </p>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" disabled={offset === 0} onClick={onPrevious}>
-              Previous
-            </Button>
-            <Button variant="outline" size="sm" disabled={!hasMore} onClick={onNext}>
-              Next
-            </Button>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
-function AccountingSource({ call }: { call: ModelCall }) {
-  if (call.attribution?.kind === "agent") {
-    return (
-      <Link
-        to={`/agents/${encodeURIComponent(call.attribution.threadId)}`}
-        className="block truncate font-medium text-foreground hover:underline"
-      >
-        Agent · {call.attribution.agentId}
-      </Link>
-    )
-  }
-  if (call.attribution?.kind === "workflowAgent") {
-    return (
-      <Link
-        to={`/workflows/${encodeURIComponent(call.attribution.workflowId)}?run=${encodeURIComponent(call.attribution.workflowRunId)}`}
-        className="block truncate font-medium text-foreground hover:underline"
-      >
-        Workflow · {call.attribution.workflowId}
-      </Link>
-    )
-  }
-  return (
-    <span className="block truncate font-mono text-muted-foreground">{call.usage.executionId}</span>
-  )
-}
-
-function ValuationBadge({ call }: { call: ModelCall }) {
-  const title =
-    call.cost?.status === "unpriceable"
-      ? unpriceableReasonLabel(call.cost.reason)
-      : valuationStatusLabel(call.valuationStatus)
-  return (
-    <Badge
-      variant="outline"
-      title={title}
-      className={
-        call.valuationStatus === "rated"
-          ? "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300"
-          : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-      }
-    >
-      {title}
-    </Badge>
   )
 }
 
@@ -653,7 +491,7 @@ function AccountingQualityNotice({
   }
   if (coverage < 100) {
     messages.push(
-      `${overview.totals.costs.unpriceableCallCount + overview.totals.costs.unvaluedCallCount} calls do not have a catalog-estimated cost`
+      `${overview.totals.costs.unpriceableCallCount + overview.totals.costs.unvaluedCallCount} calls have no available cost; totals exclude them`
     )
   }
   const reviewStatus = overview.totals.costs.unpriceableCallCount > 0 ? "unpriceable" : "unvalued"
@@ -702,9 +540,7 @@ function AccountingInsights({
     <Card className="h-full">
       <CardHeader>
         <CardTitle>Efficiency and coverage</CardTitle>
-        <CardDescription>
-          Token composition and confidence in catalog-estimated cost
-        </CardDescription>
+        <CardDescription>Token composition and cost provenance</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="grid grid-cols-2 gap-x-6 gap-y-4">
@@ -730,7 +566,7 @@ function AccountingInsights({
           <div
             className="flex h-2.5 overflow-hidden rounded-full bg-muted"
             role="img"
-            aria-label={`${coverage.toFixed(1)}% of calls have a catalog-estimated cost`}
+            aria-label={`${coverage.toFixed(1)}% of calls have a reported or estimated cost`}
           >
             {valuationBreakdown.map((item) => (
               <div
@@ -767,12 +603,14 @@ function InsightMetric({ label, value }: { label: string; value: string }) {
 }
 
 function valuationSegmentClass(key: string): string {
+  if (key === "reported") return "bg-emerald-500"
   if (key === "rated") return "bg-foreground"
   if (key === "unpriceable") return "bg-amber-500"
   return "bg-muted-foreground/40"
 }
 
 function valuationDotClass(key: string): string {
+  if (key === "reported") return "bg-emerald-500"
   if (key === "rated") return "bg-foreground"
   if (key === "unpriceable") return "bg-amber-500"
   return "bg-muted-foreground/40"
@@ -927,13 +765,6 @@ function nanosToChartValue(amountNanos: string | undefined): number {
   return amountNanos === undefined ? 0 : Number(amountNanos) / 1_000_000_000
 }
 
-function formatMoney(money: { currency: string; amountNanos: string }): string {
-  const nanos = BigInt(money.amountNanos)
-  const whole = nanos / 1_000_000_000n
-  const fraction = (nanos % 1_000_000_000n).toString().padStart(9, "0").replace(/0+$/, "")
-  return `${money.currency} ${whole.toLocaleString("en-US")}${fraction ? `.${fraction.padEnd(2, "0")}` : ".00"}`
-}
-
 function formatChartMoney(value: number, currency: string | undefined): string {
   if (!currency) return value.toLocaleString(undefined, { maximumFractionDigits: 4 })
   const maximumFractionDigits = value === 0 ? 2 : value < 0.01 ? 6 : value < 1 ? 4 : 2
@@ -992,43 +823,15 @@ function formatDateRange(from: Date, through: Date): string {
   return `${from.toLocaleDateString([], options)} – ${through.toLocaleDateString([], options)}`
 }
 
-function formatCallTime(value: string): string {
-  return new Date(value).toLocaleString([], {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  })
-}
-
 function valuationStatusLabel(status: ValuationStatus): string {
   switch (status) {
+    case "reported":
+      return "Provider-reported"
     case "rated":
-      return "Catalog-valued"
+      return "Estimated"
     case "unpriceable":
       return "Unpriceable"
     case "unvalued":
       return "Unvalued"
-  }
-}
-
-function unpriceableReasonLabel(
-  reason: NonNullable<ModelCall["cost"]> extends infer Cost
-    ? Cost extends { status: "unpriceable"; reason: infer Reason }
-      ? Reason
-      : never
-    : never
-): string {
-  switch (reason) {
-    case "missingBillingIdentity":
-      return "Missing billing identity"
-    case "missingCatalogEntry":
-      return "Missing Models.dev entry"
-    case "missingUsageMeter":
-      return "Missing usage meter"
-    case "unsupportedPricingDimension":
-      return "Unsupported pricing"
-    case "invalidUsageForFormula":
-      return "Invalid usage formula"
   }
 }

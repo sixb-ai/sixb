@@ -277,9 +277,11 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     }
     const plan = resolveAgentExecutionPlan({
       agent,
+      spec: queuedRun.spec,
       models: this.host.definitions.models?.language,
       defaultMaxSteps: context.defaultMaxSteps,
     })
+    const executionAgent = plan.model === agent.model ? agent : { ...agent, model: plan.model }
 
     const durableExecution = await context.storage.executions.getById({
       projectId: context.id,
@@ -390,8 +392,14 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       })
       const prepared = await prepareAgentConversationContext({
         context: executionContext,
-        agent,
-        budget: requiredContextBudget(this.contextBudgets, agent.id),
+        agent: executionAgent,
+        budget:
+          queuedRun.spec === undefined
+            ? requiredContextBudget(this.contextBudgets, agent.id)
+            : resolveAgentContextBudget(
+                executionAgent,
+                requiredModelsDevCatalog(this.modelsDev).resolveModelsDevContextLimits(plan.model)
+              ),
         run,
         runtime,
       })

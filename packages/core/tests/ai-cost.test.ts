@@ -68,6 +68,41 @@ function cost(): Extract<AiModelCallCostRecord, { status: "rated" }> {
 }
 
 describe("AI cost record validation", () => {
+  test("validates reported money and provenance without requiring complete token meters", () => {
+    const report = {
+      projectId: usage.projectId,
+      usageRecordId: usage.id,
+      status: "reported",
+      billingIdentity: { providerId: usage.providerId, modelId: usage.requestedModelId },
+      reportSource: { providerId: usage.providerId, responseId: "report_1" },
+      pricingContext: {},
+      ratedAt: usage.occurredAt,
+      money: { currency: "USD", amountNanos: "0" },
+    } as const satisfies AiModelCallCostRecord
+    const normalized = normalizeAiModelCallCostRecord(report)
+    expect(normalized).toEqual(report)
+    expect(normalized.ratedAt).not.toBe(report.ratedAt)
+    expect(
+      aiModelCallCostMatchesUsage(normalized, {
+        ...usage,
+        usage: { reportingStatus: "unavailable" },
+      })
+    ).toBe(true)
+    expect(() =>
+      normalizeAiModelCallCostRecord({
+        ...report,
+        reportSource: { ...report.reportSource, providerId: "wrong" },
+      })
+    ).toThrow("does not match")
+    for (const amountNanos of ["-1", "1.1", "9223372036854775808"]) {
+      expect(() =>
+        normalizeAiModelCallCostRecord({
+          ...report,
+          money: { currency: "USD", amountNanos },
+        })
+      ).toThrow()
+    }
+  })
   test("validates persisted component arithmetic", () => {
     const record = cost()
     expect(() =>

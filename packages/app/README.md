@@ -111,7 +111,7 @@ function Layout() {
     <AgentContextProvider>
       <main><InvoicePage invoiceId="inv-123" /></main>
       <aside className="h-[42rem]">
-        <AgentPanel agentId="invoice-assistant" />
+        <AgentPanel />
       </aside>
     </AgentContextProvider>
   )
@@ -128,7 +128,7 @@ const view = agentContext.appState("invoice-view", {
   value: { activeTab, filters },
 })
 
-<AgentPanel agentId="invoice-assistant" context={[view]} />
+<AgentPanel context={[view]} />
 ```
 
 Context is visible and removable before send, then stored on that user message. `@` adds authorized

@@ -1,11 +1,7 @@
-import { type AgentToolResult, defineAgent, defineAgentTool, stringEnum } from "@sixb/core"
+import { type AgentToolResult, defineAgentTool, stringEnum } from "@sixb/core"
 import { gateway, generateImage } from "ai"
 
 const IMAGE_MODEL = "xai/grok-imagine-image-2.0"
-
-export const operationsAssistantModel: ReturnType<typeof gateway> = gateway(
-  "deepseek/deepseek-v4-flash-vision-exp"
-)
 
 export const generateImageTool = defineAgentTool("generate_image")
   .description("Generate an image from a text prompt and return it as an attachment.")
@@ -59,40 +55,6 @@ export const lookupResponsePolicy = defineAgentTool("lookup_response_policy")
       policyBasis: "Northline service response policy",
     }
   })
-
-const compactionDemoContext =
-  process.env.NORTHLINE_AGENT_COMPACTION_DEMO === "1"
-    ? {
-        windowTokens: 8_000,
-        reserveTokens: 4_000,
-        keepRecentTokens: 700,
-      }
-    : undefined
-
-export const operationsAssistant = defineAgent("operations-assistant", {
-  name: "Operations Assistant",
-  description: "A demo agent showing how to add an AI assistant to a Sixb app.",
-  model: operationsAssistantModel,
-  reasoning: "medium",
-  instructions: [
-    "This is a demo agent for the Northline example.",
-    "Help users understand and work with the business information available in this example.",
-    "When assessing service response urgency, call lookup_response_policy before making a " +
-      "recommendation and ground the recommendation in the returned policy.",
-    "Only when a user asks how to run or configure the example, explain that they can use their " +
-      "own Vercel AI Gateway key by setting " +
-      "AI_GATEWAY_API_KEY and starting the example with " +
-      "`bun --filter @sixb/example-northline dev`.",
-    "Only when a user asks how to customize the agent, explain that they can edit this file, " +
-      "change the model passed to gateway(), and replace these instructions with their own prompt.",
-    "When the user asks you to create an image, call generate_image with a detailed prompt.",
-  ].join("\n"),
-  tools: [lookupResponsePolicy, generateImageTool],
-  loop: {
-    stopWhen: { maxSteps: 12 },
-    ...(compactionDemoContext ? { context: compactionDemoContext } : {}),
-  },
-})
 
 function imageFileExtension(mediaType: string): string {
   if (mediaType === "image/jpeg") return "jpg"

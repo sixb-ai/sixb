@@ -5,6 +5,7 @@ import * as modelsDev from "../src/models-dev/catalog"
 import { renderSubagentModelGuide } from "../src/subagent-tools"
 
 describe("subagent model guidance", () => {
+  // Regression check: restore slash-joined references in renderSubagentModelGuide; these tests fail.
   test("identifies the default and includes exact Models.dev metadata", () => {
     const catalog = languageModels([
       new MockLanguageModelV4({ provider: "gateway", modelId: "openai/gpt-5.4-mini" }),
@@ -14,8 +15,8 @@ describe("subagent model guidance", () => {
     expect(renderSubagentModelGuide(catalog, modelsDev)).toBe(
       [
         "Available models (Models.dev base reference metadata when available):",
-        "- gateway/openai/gpt-5.4-mini (default; base input $0.75 / output $4.5 per 1M tokens; context 400k tokens)",
-        "- private/specialist (metadata unavailable)",
+        '- {"provider":"gateway","modelId":"openai/gpt-5.4-mini"} (default; base input $0.75 / output $4.5 per 1M tokens; context 400k tokens)',
+        '- {"provider":"private","modelId":"specialist"} (metadata unavailable)',
       ].join("\n")
     )
   })
@@ -26,8 +27,19 @@ describe("subagent model guidance", () => {
     ])
 
     expect(renderSubagentModelGuide(catalog, modelsDev)).toContain(
-      "- private/specialist (default; metadata unavailable)"
+      '- {"provider":"private","modelId":"specialist"} (default; metadata unavailable)'
     )
+  })
+
+  test("distinguishes references with identical slash-joined labels", () => {
+    const catalog = languageModels([
+      new MockLanguageModelV4({ provider: "gateway", modelId: "private/specialist" }),
+      new MockLanguageModelV4({ provider: "gateway/private", modelId: "specialist" }),
+    ])
+
+    const guide = renderSubagentModelGuide(catalog, modelsDev)
+    expect(guide).toContain('{"provider":"gateway","modelId":"private/specialist"}')
+    expect(guide).toContain('{"provider":"gateway/private","modelId":"specialist"}')
   })
 })
 

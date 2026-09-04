@@ -12,6 +12,7 @@ import {
   assertAgentContextCheckpointAuthority,
   assertAgentContextCheckpointReplayState,
   assertAgentRunExecution,
+  assertConversationAgentRunSpec,
   assertCreateAgentContextCheckpointInput,
   assertCreateSubagentRunInput,
   assertSubagentRunResult,
@@ -188,6 +189,7 @@ class InMemoryAgentRunStore implements AgentRunStore {
   ) {}
 
   async create(input: CreateAgentRunInput): Promise<ConversationAgentRunRecord> {
+    assertConversationAgentRunSpec(input.spec)
     await assertAgentRunExecution({
       executions: this.executions,
       projectId: input.projectId,
@@ -242,6 +244,7 @@ class InMemoryAgentRunStore implements AgentRunStore {
       threadId: input.threadId,
       agentId: input.agentId,
       triggerMessageId: input.triggerMessageId,
+      spec: clone(input.spec),
       requesterGroupIds: normalizeRequesterGroupIds(input.requesterGroupIds),
       status: "queued",
       attempt: 0,

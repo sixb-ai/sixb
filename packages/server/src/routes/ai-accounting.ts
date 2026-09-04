@@ -3,14 +3,18 @@ import type {
   AiAccountingAggregate,
   AiAccountingOverview,
   AiModelCallAccountingItem,
+  AiModelCallGroup,
 } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
+import { type RequestAuthState, requestAuthState } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
   AiAccountingOverviewQuerySchema,
   AiAccountingOverviewResponseSchema,
   AiModelCallAccountingListQuerySchema,
   AiModelCallAccountingListResponseSchema,
+  AiModelCallGroupsQuerySchema,
+  AiModelCallGroupsResponseSchema,
 } from "../schemas/ai-accounting"
 import { ErrorResponseSchema } from "../schemas/common"
 import { handleRouteError, parseOptionalInt, unconfiguredStorageResponse } from "../utils/http"
@@ -73,14 +77,57 @@ function serializeModelCall(item: AiModelCallAccountingItem) {
         ? undefined
         : {
             ...item.cost,
-            priceSource: {
-              ...item.cost.priceSource,
-              observedAt: item.cost.priceSource.observedAt.toISOString(),
-            },
+            ...(item.cost.status === "reported"
+              ? {}
+              : {
+                  priceSource: {
+                    ...item.cost.priceSource,
+                    observedAt: item.cost.priceSource.observedAt.toISOString(),
+                  },
+                }),
             ratedAt: item.cost.ratedAt.toISOString(),
           },
     valuationStatus: item.valuationStatus,
   })
+}
+
+async function serializeGroup(
+  group: AiModelCallGroup,
+  host: SixbHostView,
+  sixb: RequestAuthState["sixb"]
+) {
+  // Accounting is project-wide; conversation titles and delegation keys remain private.
+  const thread =
+    group.attribution?.kind === "agent" && sixb
+      ? await sixb.agents.threads.getById(group.attribution.threadId)
+      : null
+  const childIds = thread
+    ? group.executions.flatMap((execution) =>
+        execution.attribution?.kind === "subagent" ? [execution.attribution.subagentRunId] : []
+      )
+    : []
+  const children =
+    childIds.length > 0
+      ? ((await host.storage.agents?.runs.getByIds({ projectId: host.id, ids: childIds })) ?? [])
+      : []
+  const labels = new Map(
+    children.flatMap((run) =>
+      run.kind === "subagent" ? [[run.executionId, run.spawnKey] as const] : []
+    )
+  )
+  return {
+    ...group,
+    label: thread?.title,
+    canOpenThread: thread !== null,
+    firstCallAt: group.firstCallAt.toISOString(),
+    lastCallAt: group.lastCallAt.toISOString(),
+    executions: group.executions.map((execution) => ({
+      ...execution,
+      label: labels.get(execution.executionId),
+      firstCallAt: execution.firstCallAt.toISOString(),
+      lastCallAt: execution.lastCallAt.toISOString(),
+    })),
+  }
 }
 
 export function registerAiAccountingRoutes(app: Elysia, host: SixbHostView) {
@@ -158,6 +205,48 @@ export function registerAiAccountingRoutes(app: Elysia, host: SixbHostView) {
         summary: "List project AI model-call accounting records",
         tags: [OPENAPI_TAGS.aiAccounting.name],
         operationId: "listAiModelCalls",
+      },
+    }
+  )
+
+  app.get(
+    "/api/ai/model-call-groups",
+    async (context) => {
+      const { query, set } = context
+      try {
+        const parsed = AiModelCallGroupsQuerySchema.parse(query)
+        const storage = host.storage.aiCosts
+        if (!storage) return unconfiguredStorageResponse(set, "AI cost storage")
+        const result = await storage.listModelCallGroups({
+          projectId: host.id,
+          from: new Date(parsed.from),
+          to: new Date(parsed.to),
+          providerId: parsed.providerId,
+          modelId: parsed.modelId,
+          valuationStatus: parsed.valuationStatus,
+          limit: parseOptionalInt(parsed.limit),
+          offset: parseOptionalInt(parsed.offset),
+        })
+        const { sixb } = requestAuthState(context)
+        return AiModelCallGroupsResponseSchema.parse({
+          ...result,
+          items: await Promise.all(result.items.map((group) => serializeGroup(group, host, sixb))),
+        })
+      } catch (error) {
+        return handleRouteError(error, set)
+      }
+    },
+    {
+      query: AiModelCallGroupsQuerySchema,
+      response: {
+        200: AiModelCallGroupsResponseSchema,
+        400: ErrorResponseSchema,
+        501: ErrorResponseSchema,
+      },
+      detail: {
+        summary: "List AI model calls grouped by initiating execution",
+        tags: [OPENAPI_TAGS.aiAccounting.name],
+        operationId: "listAiModelCallGroups",
       },
     }
   )

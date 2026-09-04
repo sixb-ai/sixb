@@ -102,6 +102,19 @@ it ends as `cancelled`.
 Retrying a failed run creates a new queued run that points to the failed run's existing
 `triggerMessageId`. The original user message is not appended again.
 
+## Inspect model calls and costs
+
+In Atlas, **AI usage → Model calls** groups calls by initiating run. Expand a run to see its
+direct calls and sub-agents, then expand an execution for individual calls. A conversation with
+several turns appears as several groups.
+
+- Parent totals include matching child calls once; missing costs stay unknown, not zero.
+- Date, provider, model, and valuation filters apply to calls. A parent remains visible when only
+  its children match. Pagination counts initiating runs, not individual calls.
+- Conversation titles and delegation names are shown only when you can access the conversation.
+- `GET /api/ai/model-call-groups` returns filtered summaries; `GET /api/ai/model-calls` with
+  `executionId` provides the paginated call detail.
+
 ## Stream a run
 
 Connect to `/ws/agents` and send JSON commands; the server replies with JSON events.
@@ -150,9 +163,9 @@ original transcript.
 ## A ready-made chat UI
 
 You rarely need to wire this HTTP + WebSocket flow by hand. `@sixb/agent-ui` ships a turnkey React
-chat: `AgentChat` (a full thread with composer and live transcript), `AgentsHome` (an agent
-picker), and the `Composer`, `Transcript`, and streaming hooks as building blocks. For a
-React-Router app, `@sixb/agent-ui/react-router` exposes a drop-in `AgentChatPage`:
+workspace for the project agent, an embeddable `AgentPanel`, and the `Composer`, `Transcript`, and
+streaming hooks as building blocks. For a React-Router app, `@sixb/agent-ui/react-router` exposes a
+drop-in `AgentChatPage`:
 
 ```tsx
 import { AgentChatPage } from "@sixb/agent-ui/react-router"

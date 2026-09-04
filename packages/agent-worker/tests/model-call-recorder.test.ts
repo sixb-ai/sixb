@@ -6,8 +6,13 @@ import {
   normalizeAiModelCallRecord,
 } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
-import { generateText, type LanguageModelCallEndEvent, type LanguageModelCallStartEvent } from "ai"
-import { MockLanguageModelV4 } from "ai/test"
+import {
+  generateText,
+  type LanguageModelCallEndEvent,
+  type LanguageModelCallStartEvent,
+  streamText,
+} from "ai"
+import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test"
 import { AgentUsageRecordingError } from "../src/errors"
 import { AiModelCallRecorder } from "../src/model-call-recorder"
 import type { RecoverAiModelCall } from "../src/types"
@@ -99,6 +104,66 @@ async function recordedUsage(storage: InMemoryStorage, usageRecordId: string) {
 }
 
 describe("AiModelCallRecorder", () => {
+  test.each([
+    "generate",
+    "stream",
+  ] as const)("records Gateway costs through %s middleware", async (mode) => {
+    const storage = await createInMemoryStorage()
+    const accounting = recorder(storage, {
+      generateId: () => "usage_gateway",
+      now: () => occurredAt,
+    })
+    const providerMetadata = {
+      gateway: {
+        cost: "0.0005302",
+        generationId: "gen_gateway",
+        routing: { modelAttempts: [{ providerAttempts: [{ credentialType: "system" }] }] },
+      },
+    }
+    const usage = {
+      inputTokens: { total: 2059, noCache: 3, cacheRead: 0, cacheWrite: 2056 },
+      outputTokens: { total: 13, text: 13, reasoning: 0 },
+    }
+    const finishReason = { unified: "stop", raw: "stop" } as const
+    const response = { id: "response_gateway", modelId: "openai/gpt-5.6-luna" }
+    const model = new MockLanguageModelV4({
+      provider: "gateway",
+      modelId: "openai/gpt-5.6-luna",
+      doGenerate: {
+        content: [{ type: "text", text: "Done" }],
+        finishReason,
+        usage,
+        providerMetadata,
+        response,
+        warnings: [],
+      },
+      doStream: {
+        stream: convertArrayToReadableStream([
+          { type: "stream-start", warnings: [] },
+          { type: "response-metadata", ...response },
+          { type: "text-start", id: "answer" },
+          { type: "text-delta", id: "answer", delta: "Done" },
+          { type: "text-end", id: "answer" },
+          { type: "finish", finishReason, usage, providerMetadata },
+        ]),
+      },
+    })
+    const options = {
+      model: accounting.wrapModel(model),
+      prompt: "hello",
+      onLanguageModelCallStart: accounting.onLanguageModelCallStart,
+      onLanguageModelCallEnd: accounting.onLanguageModelCallEnd,
+    }
+    if (mode === "generate") await generateText(options)
+    else await streamText(options).consumeStream()
+    accounting.assertHealthy()
+    expect((await recordedCall(storage, "usage_gateway"))?.cost).toMatchObject({
+      status: "reported",
+      money: { currency: "USD", amountNanos: "530200" },
+      reportSource: { providerId: "gateway", responseId: "gen_gateway" },
+    })
+  })
+
   test("captures the provider response model identity through middleware", async () => {
     const storage = await createInMemoryStorage()
     const usage = recorder(storage, {

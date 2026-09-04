@@ -1,4 +1,5 @@
 import { searchObjectsOptions, useUploadFile } from "@sixb/client/hooks"
+import type { AgentReasoningLevel } from "@sixb/core"
 import {
   type AgentContextEntryInput,
   type AgentContextInput,
@@ -6,10 +7,11 @@ import {
   agentContextIdentity,
   MAX_AGENT_CONTEXT_ENTRIES,
 } from "@sixb/core/agents/context"
-import { Spinner, Textarea } from "@sixb/ui/components"
+import { Marker, MarkerContent, MarkerIcon, Spinner, Textarea } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
 import {
+  AlertTriangle,
   ArrowUp,
   File as FileIcon,
   FileText,
@@ -30,7 +32,7 @@ import {
   useState,
 } from "react"
 import { createPortal } from "react-dom"
-import type { AgentFileRef } from "../types"
+import type { AgentFileRef, LanguageModel } from "../types"
 import { agentContextLabel, mergeAgentContext } from "../utils/contextDisplay"
 import {
   type AgentContextMention,
@@ -39,6 +41,7 @@ import {
 } from "../utils/contextMention"
 import { ContextChips } from "./ContextChips"
 import { ContextPicker } from "./ContextPicker"
+import { ModelControls } from "./ModelControls"
 
 export interface ComposerProps {
   readonly onSend: (
@@ -53,11 +56,20 @@ export interface ComposerProps {
   /** A stop has been requested and we're waiting for the run to end. */
   readonly stopping?: boolean
   readonly onStop?: () => void
+  readonly models?: readonly LanguageModel[]
+  readonly selectedModel?: LanguageModel
+  readonly selectedReasoning?: AgentReasoningLevel
+  readonly modelsLoading?: boolean
+  readonly modelsError?: boolean
+  readonly onSelectModel?: (model: LanguageModel) => void
+  readonly onSelectReasoning?: (reasoning: AgentReasoningLevel) => void
   readonly placeholder?: string
   /** Optional classes for the composer shell. */
   readonly className?: string
   /** Optional status line shown under the input, e.g. while a run is active. */
   readonly hint?: string
+  /** A failed send, kept within the same width constraint as the input. */
+  readonly error?: string
   /**
    * Text to restore into the input, e.g. after a failed send so the user does not lose it.
    * Applied whenever `draftNonce` changes to a non-zero value, so re-sending the same text works.
@@ -112,9 +124,17 @@ export function Composer({
   running,
   stopping,
   onStop,
+  models = [],
+  selectedModel,
+  selectedReasoning,
+  modelsLoading,
+  modelsError,
+  onSelectModel,
+  onSelectReasoning,
   placeholder,
   className,
   hint,
+  error,
   draft,
   draftAttachments,
   draftContext,
@@ -533,6 +553,14 @@ export function Composer({
         )
       ) : null}
       <div className="mx-auto w-full max-w-2xl">
+        {error ? (
+          <Marker role="alert" className="mb-2 items-start text-destructive">
+            <MarkerIcon>
+              <AlertTriangle className="text-destructive" />
+            </MarkerIcon>
+            <MarkerContent>{error}</MarkerContent>
+          </Marker>
+        ) : null}
         <div
           className={cn(
             "relative rounded-3xl border border-border bg-card shadow-sm transition-[border-color,box-shadow] duration-500",
@@ -564,7 +592,28 @@ export function Composer({
               ))}
             </div>
           ) : null}
-          <div className="relative flex items-end gap-2 py-2 pr-2.5 pl-3">
+          <div className="px-4 pt-2.5 pb-1">
+            <Textarea
+              ref={textareaRef}
+              autoFocus={composerCanFocus({ disabled, pending, running })}
+              value={value}
+              onChange={(event) => {
+                setValue(event.target.value)
+                setDismissedMention(null)
+                updateMention(event.target.value, event.target.selectionStart)
+              }}
+              onSelect={(event) =>
+                updateMention(event.currentTarget.value, event.currentTarget.selectionStart)
+              }
+              onKeyDown={handleKeyDown}
+              disabled={disabled}
+              rows={1}
+              placeholder={placeholder ?? "Send a message…"}
+              aria-label="Message"
+              className="max-h-[200px] min-h-9 w-full resize-none overflow-y-hidden border-0 bg-transparent px-0 py-1 text-[15px] leading-relaxed shadow-none focus-visible:ring-0 md:text-[15px]"
+            />
+          </div>
+          <div className="relative flex min-w-0 items-center gap-1 px-2.5 pb-2">
             <input
               ref={fileInputRef}
               type="file"
@@ -586,25 +635,19 @@ export function Composer({
             >
               <Plus className="size-5" />
             </button>
-            <Textarea
-              ref={textareaRef}
-              autoFocus={composerCanFocus({ disabled, pending, running })}
-              value={value}
-              onChange={(event) => {
-                setValue(event.target.value)
-                setDismissedMention(null)
-                updateMention(event.target.value, event.target.selectionStart)
-              }}
-              onSelect={(event) =>
-                updateMention(event.currentTarget.value, event.currentTarget.selectionStart)
-              }
-              onKeyDown={handleKeyDown}
-              disabled={disabled}
-              rows={1}
-              placeholder={placeholder ?? "Send a message…"}
-              aria-label="Message"
-              className="max-h-[200px] min-h-9 flex-1 resize-none overflow-y-hidden border-0 bg-transparent px-0 py-1.5 text-[15px] leading-relaxed shadow-none focus-visible:ring-0 md:text-[15px]"
-            />
+            {onSelectModel && onSelectReasoning ? (
+              <ModelControls
+                models={models}
+                selectedModel={selectedModel}
+                selectedReasoning={selectedReasoning}
+                loading={modelsLoading}
+                error={modelsError}
+                disabled={disabled || pending || running}
+                onSelectModel={onSelectModel}
+                onSelectReasoning={onSelectReasoning}
+              />
+            ) : null}
+            <span className="min-w-0 flex-1" />
             {running ? (
               <button
                 type="button"

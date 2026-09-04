@@ -805,6 +805,7 @@ async function createGatewayRuntime(
       threadId,
       agentId: "main",
       triggerMessageId: "msg-1",
+      spec: { model: { provider: "test", modelId: "test-model" } },
       requesterGroupIds: [agentRuntime.id],
       createdAt: NOW,
     })
@@ -869,6 +870,7 @@ async function createGatewayRuntime(
       threadId,
       agentId,
       triggerMessageId: "msg-1",
+      spec: { model: { provider: "test", modelId: "test-model" } },
       requesterGroupIds: ["engineering"],
       createdAt: NOW,
     })

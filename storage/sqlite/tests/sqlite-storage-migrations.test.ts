@@ -231,6 +231,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 29,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "030-conversation-run-spec",
+    status: "applied",
+    version: 30,
+  },
 ]
 
 afterEach(async () => {
@@ -1389,7 +1396,7 @@ describe("SQLite storage migrations", () => {
     }
   })
 
-  test("subagent migration preserves existing conversational runs and their execution", () => {
+  test("Agent run migrations preserve existing conversations and admit per-turn specs", () => {
     const db = new Database(":memory:")
     try {
       const migrationIndex = sqliteStorageMigrations.steps.findIndex(
@@ -1457,6 +1464,21 @@ describe("SQLite storage migrations", () => {
       expect(db.query("SELECT executor_id FROM executions WHERE id = 'exec-run-1'").get()).toEqual({
         executor_id: "run-1",
       })
+
+      const conversationSpecMigration = sqliteStorageMigrations.steps[migrationIndex + 1]
+      if (conversationSpecMigration?.id !== "030-conversation-run-spec") {
+        throw new Error("SQLite conversation-run-spec migration is missing.")
+      }
+      conversationSpecMigration.up(db)
+      expect(db.query("PRAGMA foreign_key_list(agent_runs)").all()).toContainEqual(
+        expect.objectContaining({ table: "agent_runs", from: "parent_run_id", to: "id" })
+      )
+      const spec = JSON.stringify({
+        model: { provider: "gateway", modelId: "openai/gpt-5.4-mini" },
+        reasoning: "medium",
+      })
+      db.query("UPDATE agent_runs SET spec = ? WHERE id = 'run-1'").run(spec)
+      expect(db.query("SELECT spec FROM agent_runs WHERE id = 'run-1'").get()).toEqual({ spec })
       expect(db.query("PRAGMA foreign_key_check").all()).toHaveLength(0)
     } finally {
       db.close()
@@ -1883,6 +1905,26 @@ describe("SQLite storage migrations", () => {
         expect.arrayContaining(["usage_record_id", "status", "details", "amount_nanos", "rated_at"])
       )
       expect(tableColumns(db, "ai_price_schedules")).toEqual([])
+      db.run(`
+        INSERT INTO ai_model_call_valuations (
+          project_id, usage_record_id, status, provider_id, model_id, currency, amount_nanos,
+          reason, details, rated_at
+        ) VALUES (
+          'project-a', 'usage-1', 'rated', 'vercel', 'openai/gpt-5', 'USD', 20,
+          NULL, '{"pricingContext":{},"historical":"preserve"}', '2026-08-01T12:00:01.000Z'
+        )
+      `)
+      const oldCost = db.query("SELECT * FROM ai_model_call_valuations").get()
+      expect(() => db.run("UPDATE ai_model_call_valuations SET status = 'reported'")).toThrow()
+      for (const migration of sqliteStorageMigrations.steps.slice(costIndex + 1)) {
+        migration.up(db)
+      }
+      // Removing the reported-cost part of migration 030 makes the UPDATE below fail.
+      expect(db.query("SELECT * FROM ai_model_call_valuations").get()).toEqual(oldCost)
+      expect(db.query("SELECT * FROM ai_model_call_usage").get()).toEqual(before)
+      expect(() => db.run("UPDATE ai_model_call_valuations SET status = 'reported'")).not.toThrow()
+      expect(() => db.run("UPDATE ai_model_call_valuations SET amount_nanos = NULL")).toThrow()
+      expect(db.query("PRAGMA foreign_key_check").all()).toEqual([])
     } finally {
       db.close()
     }

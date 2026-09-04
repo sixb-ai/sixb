@@ -30,6 +30,7 @@ import { ServerAuthGuard } from "./auth/guard"
 import { consumeInternalRequestAuthState } from "./auth/scope"
 import { SESSION_ACTIVITY_HEADER_NAME } from "./auth/session-activity"
 import { createSessionRenewalCookieHeaders } from "./auth/session-cookies"
+import type { LanguageModelDisplayResolver } from "./models-dev/display"
 import {
   SIXB_BEARER_SECURITY_SCHEME,
   SIXB_BEARER_SECURITY_SCHEME_ID,
@@ -173,7 +174,12 @@ export class SixbServer {
   }
 }
 
-export function createSixbApi(server: SixbServer) {
+export interface CreateSixbApiOptions {
+  /** Internal seam for deterministic route tests; production uses the runtime Models.dev cache. */
+  readonly modelDisplayResolver?: LanguageModelDisplayResolver
+}
+
+export function createSixbApi(server: SixbServer, options: CreateSixbApiOptions = {}) {
   const host = server.getHost()
   const guard = new ServerAuthGuard({
     host,
@@ -329,6 +335,7 @@ export function createSixbApi(server: SixbServer) {
       resolveCallbackUrl: (request) =>
         new URL("/auth/connectors/callback", server.resolveAuthRequestOrigin(request)).toString(),
     },
+    modelDisplayResolver: options.modelDisplayResolver,
   })
   registerWebhookRoutes(app, host)
   registerWebSocketRoutes(app, server)

@@ -7,7 +7,7 @@ import type {
   LanguageModelCatalog,
 } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
-import type { SubagentRunRecord } from "@sixb/core/storage"
+import type { ConversationAgentRunSpec, SubagentRunRecord } from "@sixb/core/storage"
 import { withAutomaticPromptCaching } from "./provider-caching"
 
 const SUBAGENT_INSTRUCTIONS =
@@ -31,15 +31,23 @@ export interface ResolvedAgentExecutionPlan {
 /** Adapt today's registered-agent definition to the source-neutral execution contract. */
 export function resolveAgentExecutionPlan(input: {
   readonly agent: AgentDefinition
+  readonly spec?: ConversationAgentRunSpec
   readonly models?: LanguageModelCatalog
   readonly defaultMaxSteps: number
 }): ResolvedAgentExecutionPlan {
-  const { agent, models } = input
-  const model = models?.getByRef(agent.model)?.model ?? (models === undefined ? agent.model : null)
+  const { agent, models, spec } = input
+  const modelRef = spec?.model ?? agent.model
+  const reasoning = spec ? spec.reasoning : agent.reasoning
+  const model =
+    models === undefined
+      ? modelRef.provider === agent.model.provider && modelRef.modelId === agent.model.modelId
+        ? agent.model
+        : null
+      : (models.getByRef(modelRef)?.model ?? null)
   if (model === null) {
     throw createSixbError(
       "internal.unexpected",
-      `[SixbAgentWorker] Agent '${agent.id}' references language model '${agent.model.provider}/${agent.model.modelId}', which is missing from the runtime catalog.`,
+      `[SixbAgentWorker] Agent '${agent.id}' references language model '${modelRef.provider}/${modelRef.modelId}', which is missing from the runtime catalog.`,
       { details: { agentId: agent.id } }
     )
   }
@@ -54,7 +62,7 @@ export function resolveAgentExecutionPlan(input: {
     instructions: agent.instructions,
     tools: agent.tools,
     maxSteps: agent.loop?.stopWhen?.maxSteps ?? input.defaultMaxSteps,
-    ...(agent.reasoning === undefined ? {} : { reasoning: agent.reasoning }),
+    ...(reasoning === undefined ? {} : { reasoning }),
     ...(providerOptions === undefined ? {} : { providerOptions }),
   })
 }

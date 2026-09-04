@@ -20,15 +20,24 @@ import {
   type AiModelCallUsageRecord,
   type ListAiModelCallAccountingInput,
   type ListAiModelCallAccountingResult,
+  type ListAiModelCallGroupsInput,
+  type ListAiModelCallGroupsResult,
   type QueryAiAccountingOverviewInput,
   type SummarizeAiCostExecutionsInput,
 } from "@sixb/core/storage"
+import { listAiModelCallGroups } from "./ai-cost-groups"
 import { isUniqueConstraintError } from "./storage-errors"
 import { runImmediateTransaction, type SqliteStoreConnection } from "./transactions"
 
 /** SQLite-backed immutable valuations stored in one append-only table. */
 export class SqliteAiCostStorage implements AiCostStorage {
   constructor(private readonly connection: SqliteStoreConnection) {}
+
+  async listModelCallGroups(
+    input: ListAiModelCallGroupsInput
+  ): Promise<ListAiModelCallGroupsResult> {
+    return listAiModelCallGroups(this.connection, input)
+  }
 
   async recordModelCallCost(input: AiModelCallCostRecord): Promise<void> {
     const record = normalizeAiModelCallCostRecord(input)
@@ -109,7 +118,7 @@ export class SqliteAiCostStorage implements AiCostStorage {
   }
 
   private insertCost(record: AiModelCallCostRecord): void {
-    const rated = record.status === "rated" ? record : undefined
+    const valued = record.status !== "unpriceable" ? record : undefined
     const details = aiModelCallCostDetails(record)
     this.connection.db
       .query(
@@ -124,8 +133,8 @@ export class SqliteAiCostStorage implements AiCostStorage {
         record.status,
         record.billingIdentity?.providerId ?? null,
         record.billingIdentity?.modelId ?? null,
-        rated?.money.currency ?? null,
-        rated ? BigInt(rated.money.amountNanos) : null,
+        valued?.money.currency ?? null,
+        valued ? BigInt(valued.money.amountNanos) : null,
         record.status === "unpriceable" ? record.reason : null,
         JSON.stringify(details),
         record.ratedAt.toISOString()
@@ -157,11 +166,7 @@ const SQLITE_ACCOUNTING_LIST_FILTER = `
   AND (? IS NULL OR usage.requested_model_id = ?)
   AND (? IS NULL OR usage.execution_id = ?)
   AND (
-    ? IS NULL OR ? = CASE
-      WHEN cost.status = 'rated' THEN 'rated'
-      WHEN cost.status = 'unpriceable' THEN 'unpriceable'
-      ELSE 'unvalued'
-    END
+    ? IS NULL OR ? = COALESCE(cost.status, 'unvalued')
   )
 `
 
@@ -235,13 +240,9 @@ const SQLITE_ACCOUNTING_OVERVIEW_SQL = `
       usage.reporting_status,
       COALESCE(direct_agent.agent_id, workflow_agent.agent_id) AS attribution_agent_id,
       workflow_node.workflow_id AS attribution_workflow_id,
-      CASE
-        WHEN cost.status = 'rated' THEN 'rated'
-        WHEN cost.status = 'unpriceable' THEN 'unpriceable'
-        ELSE 'unvalued'
-      END AS valuation_status,
-      CASE WHEN cost.status = 'rated' THEN cost.currency ELSE NULL END AS amount_currency,
-      CASE WHEN cost.status = 'rated' THEN cost.amount_nanos ELSE NULL END AS amount_nanos
+      COALESCE(cost.status, 'unvalued') AS valuation_status,
+      cost.currency AS amount_currency,
+      cost.amount_nanos AS amount_nanos
     FROM ai_model_call_usage AS usage
     LEFT JOIN agent_runs AS direct_agent
       ON direct_agent.project_id = usage.project_id
@@ -307,6 +308,8 @@ const SQLITE_ACCOUNTING_OVERVIEW_SQL = `
     CAST(SUM(reasoning_output_tokens) AS TEXT) AS reasoning_output_tokens_sum,
     CAST(SUM(CASE WHEN valuation_status = 'rated' THEN 1 ELSE 0 END) AS TEXT)
       AS rated_call_count,
+    CAST(SUM(CASE WHEN valuation_status = 'reported' THEN 1 ELSE 0 END) AS TEXT)
+      AS reported_cost_call_count,
     CAST(SUM(CASE WHEN valuation_status = 'unpriceable' THEN 1 ELSE 0 END) AS TEXT)
       AS unpriceable_call_count,
     CAST(SUM(CASE WHEN valuation_status = 'unvalued' THEN 1 ELSE 0 END) AS TEXT)
@@ -339,7 +342,7 @@ function accountingListFilterParameters(
 interface ValuationRow {
   readonly project_id: string
   readonly usage_record_id: string
-  readonly status: "rated" | "unpriceable"
+  readonly status: AiModelCallCostRecord["status"]
   readonly provider_id: string | null
   readonly model_id: string | null
   readonly currency: string | null
@@ -416,6 +419,7 @@ interface AggregateRow {
   readonly reasoning_output_tokens_count: string
   readonly reasoning_output_tokens_sum: string | null
   readonly rated_call_count: string
+  readonly reported_cost_call_count: string
   readonly unpriceable_call_count: string
   readonly unvalued_call_count: string
   readonly amount_high: string | null
@@ -484,6 +488,7 @@ function aggregateFragmentFromRow(row: AggregateRow): AiAccountingAggregateFragm
             },
           }),
       ratedCallCount: row.rated_call_count,
+      reportedCallCount: row.reported_cost_call_count,
       unpriceableCallCount: row.unpriceable_call_count,
       unvaluedCallCount: row.unvalued_call_count,
     },
@@ -623,15 +628,23 @@ function costRecord(input: {
     projectId: input.projectId,
     usageRecordId: input.usageId,
     pricingContext: details.pricingContext,
-    priceSource: {
-      ...details.priceSource,
-      observedAt: new Date(details.priceSource.observedAt),
-    },
     ratedAt: new Date(input.ratedAt),
   }
+  if (input.status === "reported") {
+    return normalizeAiModelCallCostRecord({
+      ...base,
+      status: "reported",
+      billingIdentity: { providerId: required(input.providerId), modelId: required(input.modelId) },
+      money: { currency: required(input.currency), amountNanos: required(input.amountNanos) },
+      reportSource: required(details.reportSource),
+    })
+  }
+  const source = required(details.priceSource)
+  const priceSource = { ...source, observedAt: new Date(source.observedAt) }
   if (input.status === "rated") {
     return normalizeAiModelCallCostRecord({
       ...base,
+      priceSource,
       status: "rated",
       billingIdentity: { providerId: required(input.providerId), modelId: required(input.modelId) },
       money: { currency: required(input.currency), amountNanos: required(input.amountNanos) },
@@ -640,6 +653,7 @@ function costRecord(input: {
   }
   return normalizeAiModelCallCostRecord({
     ...base,
+    priceSource,
     status: "unpriceable",
     ...(input.providerId && input.modelId
       ? { billingIdentity: { providerId: input.providerId, modelId: input.modelId } }
@@ -663,7 +677,8 @@ function aggregateSummaryRows(
     if (row.status === null) value.unvaluedCallCount += 1
     else if (row.status === "unpriceable") value.unpriceableCallCount += 1
     else {
-      value.ratedCallCount += 1
+      if (row.status === "reported") value.reportedCallCount += 1
+      else value.ratedCallCount += 1
       add(value.amounts, required(row.currency), required(row.amount_nanos))
     }
   }
@@ -672,6 +687,7 @@ function aggregateSummaryRows(
 
 interface Accumulator {
   amounts: Map<string, bigint>
+  reportedCallCount: number
   ratedCallCount: number
   unpriceableCallCount: number
   unvaluedCallCount: number
@@ -680,6 +696,7 @@ interface Accumulator {
 function accumulator(): Accumulator {
   return {
     amounts: new Map(),
+    reportedCallCount: 0,
     ratedCallCount: 0,
     unpriceableCallCount: 0,
     unvaluedCallCount: 0,
@@ -691,6 +708,7 @@ function finish(value: Accumulator): AiCostSummary {
     amounts: [...value.amounts]
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([currency, amount]) => ({ currency, amountNanos: amount.toString() })),
+    reportedCallCount: value.reportedCallCount,
     ratedCallCount: value.ratedCallCount,
     unpriceableCallCount: value.unpriceableCallCount,
     unvaluedCallCount: value.unvaluedCallCount,

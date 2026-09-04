@@ -1,11 +1,10 @@
-import type { Agent, AgentThread } from "./types"
+import type { AgentThread } from "./types"
 
 export const THREAD_PAGE_SIZE = 50
 
-/** Search across the human-visible thread and agent identity without changing its date order. */
+/** Search human-visible thread titles without changing their date order. */
 export function filterThreadNavigation(
   threads: readonly AgentThread[],
-  agentsById: ReadonlyMap<string, Agent>,
   searchTerm: string
 ): readonly AgentThread[] {
   const query = searchTerm.trim().toLowerCase()
@@ -13,7 +12,6 @@ export function filterThreadNavigation(
 
   return threads.filter((thread) => {
     const title = thread.title?.trim() || "Untitled chat"
-    const agentName = agentsById.get(thread.agentId)?.name ?? thread.agentId
-    return `${title}\n${agentName}`.toLowerCase().includes(query)
+    return title.toLowerCase().includes(query)
   })
 }

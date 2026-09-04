@@ -1,5 +1,4 @@
 import {
-  Button,
   EmptyState,
   Sheet,
   SheetContent,
@@ -8,29 +7,21 @@ import {
   SheetTitle,
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { ChevronRight, MessagesSquare, PanelLeft } from "lucide-react"
-import { type CSSProperties, type ReactNode, useCallback, useEffect, useState } from "react"
-import { AgentAvatar } from "./components/AgentAvatar"
-import { AgentsHome } from "./components/AgentsHome"
+import { MessagesSquare } from "lucide-react"
+import { type CSSProperties, type ReactNode, useState } from "react"
 import { ConversationPanel } from "./components/ConversationPanel"
 import { ThreadSidebar } from "./components/ThreadSidebar"
 import { DocumentPreviewRoot } from "./document-preview/DocumentPreviewRoot"
 import { useAgentConversation } from "./hooks/useAgentConversation"
-import type { Agent, AgentContextInput } from "./types"
-
-const LAST_SELECTED_AGENT_KEY = "sixb.agent-ui.last-selected-agent"
+import type { AgentContextInput } from "./types"
 
 export interface AgentChatProps {
   readonly threadId?: string | null
-  readonly draftAgentId?: string | null
   readonly onNavigateHome: () => void
-  readonly onNavigateDraft: (agentId: string) => void
   readonly onNavigateThread: (threadId: string) => void
   readonly onExit?: () => void
   readonly exitLabel?: string
   readonly className?: string
-  /** Restrict the conversation surface to one agent (used by embedded AgentPanel). */
-  readonly pinnedAgentId?: string
   readonly ambientContext?: readonly AgentContextInput[]
   readonly compact?: boolean
   /** Host chrome rendered above the workspace thread navigation. */
@@ -44,14 +35,11 @@ export interface AgentChatProps {
 /** Route-independent conversation view; routing and embedded panels only adapt its callbacks. */
 export function AgentChat({
   threadId: threadIdInput = null,
-  draftAgentId: draftAgentIdInput = null,
   onNavigateHome,
-  onNavigateDraft,
   onNavigateThread,
   onExit,
   exitLabel = "Back to app",
   className,
-  pinnedAgentId,
   ambientContext = [],
   compact = false,
   sidebarHeader,
@@ -61,47 +49,16 @@ export function AgentChat({
   const threadId = threadIdInput ?? null
   const conversation = useAgentConversation({
     threadId,
-    draftAgentId: draftAgentIdInput ?? null,
-    pinnedAgentId,
+    embedded: compact,
     onThreadCreated: onNavigateThread,
   })
-  const [lastSelectedAgentId, setLastSelectedAgentId] = useState(readLastSelectedAgent)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
-  const rememberAgent = useCallback((agentId: string) => {
-    setLastSelectedAgentId(agentId)
-    writeLastSelectedAgent(agentId)
-  }, [])
-  const currentAgentId = conversation.currentAgent?.id
-  const selectedAgentId =
-    currentAgentId ??
-    (lastSelectedAgentId && conversation.agentsById.has(lastSelectedAgentId)
-      ? lastSelectedAgentId
-      : null)
 
-  useEffect(() => {
-    if (!pinnedAgentId && currentAgentId) rememberAgent(currentAgentId)
-  }, [currentAgentId, pinnedAgentId, rememberAgent])
-
-  useEffect(() => {
-    if (!compact && !pinnedAgentId && conversation.home && selectedAgentId) {
-      onNavigateDraft(selectedAgentId)
-    }
-  }, [compact, conversation.home, onNavigateDraft, pinnedAgentId, selectedAgentId])
-
-  const startNewChatWith = (agentId: string) => {
-    setMobileSidebarOpen(false)
-    rememberAgent(agentId)
-    onNavigateDraft(agentId)
-  }
   const selectThread = (nextThreadId: string) => {
     setMobileSidebarOpen(false)
     onNavigateThread(nextThreadId)
   }
   const startNewThread = () => {
-    if (selectedAgentId) {
-      startNewChatWith(selectedAgentId)
-      return
-    }
     setMobileSidebarOpen(false)
     onNavigateHome()
   }
@@ -115,15 +72,12 @@ export function AgentChat({
   const presentation = conversation.presentation
   const renderThreadSidebar = (sidebarClassName: string, width?: CSSProperties["width"]) => (
     <ThreadSidebar
-      agents={conversation.agents}
       threads={conversation.threads}
-      agentsById={conversation.agentsById}
       currentThreadId={threadId}
-      selectedAgentId={selectedAgentId}
       loading={conversation.agentsLoading}
       threadsError={
         conversation.agentsError
-          ? "Agents unavailable."
+          ? "Agent unavailable."
           : conversation.threadsError
             ? "Could not load threads."
             : null
@@ -132,7 +86,6 @@ export function AgentChat({
       hasMoreThreads={conversation.threadsHasMore}
       loadingMoreThreads={conversation.threadsLoadingMore}
       loadMoreThreadsError={conversation.threadsLoadMoreError}
-      onPickAgent={startNewChatWith}
       onStartNewThread={startNewThread}
       onSelectThread={selectThread}
       onLoadMoreThreads={() => void conversation.loadMoreThreads()}
@@ -149,40 +102,22 @@ export function AgentChat({
   if (conversation.agentsLoading) {
     content = <div className="h-full" aria-busy="true" />
   } else if (conversation.agentsError) {
-    content = (
-      <ErrorState title="Agents unavailable" description="Could not load registered agents." />
-    )
+    content = <ErrorState title="Agent unavailable" description="Could not load the agent." />
   } else if (conversation.agents.length === 0) {
     content = (
       <div className="flex h-full items-center justify-center p-6">
         <EmptyState
           icon={<MessagesSquare className="size-12 stroke-1" />}
-          title={pinnedAgentId ? "Agent unavailable" : "No agents registered"}
-          description={
-            pinnedAgentId
-              ? `The agent '${pinnedAgentId}' is not registered or is not available to this user.`
-              : "Agents are discovered from your project's agents/ directory. Define one to start a chat."
-          }
+          title="Agent unavailable"
+          description="Configure at least one language model and grant access to the project agent."
         />
       </div>
     )
-  } else if (!compact && !pinnedAgentId && conversation.home && selectedAgentId) {
-    content = <div className="h-full" aria-busy="true" />
-  } else if (conversation.home) {
-    content = compact ? (
-      <AgentsHome
-        agents={conversation.agents}
-        threads={conversation.threads}
-        agentsById={conversation.agentsById}
-        threadsError={conversation.threadsError ? "Could not load chats." : null}
-        onPickAgent={startNewChatWith}
-        onSelectThread={selectThread}
-      />
-    ) : (
-      <WorkspaceHome
-        agents={conversation.agents}
-        onPickAgent={startNewChatWith}
-        onOpenNavigation={() => setMobileSidebarOpen(true)}
+  } else if (conversation.threadUnavailable) {
+    content = (
+      <ErrorState
+        title="Conversation unavailable"
+        description="This conversation does not belong to the project agent or is no longer available."
       />
     )
   } else {
@@ -227,22 +162,23 @@ export function AgentChat({
         continuing={conversation.composerPending}
         reconnecting={conversation.reconnecting}
         sendError={conversation.sendError}
-        agents={conversation.agents}
         agentThreads={conversation.agentThreads}
-        canGoHome={compact ? conversation.canGoHome : true}
         onSend={conversation.send}
-        onBackHome={onNavigateHome}
         onOpenWorkspaceNavigation={() => setMobileSidebarOpen(true)}
-        onNewChat={() => {
-          if (conversation.currentAgent) startNewChatWith(conversation.currentAgent.id)
-        }}
-        onPickAgent={startNewChatWith}
+        onNewChat={startNewThread}
         onSelectThread={selectThread}
         composerDisabled={conversation.isRunning}
         composerPending={conversation.composerPending}
         composerRunning={conversation.isRunning}
         composerStopping={conversation.stopping}
         onStop={conversation.stop}
+        models={conversation.models}
+        selectedModel={conversation.selectedModel}
+        selectedReasoning={conversation.selectedReasoning}
+        modelsLoading={conversation.modelsLoading}
+        modelsError={conversation.modelsError}
+        onSelectModel={conversation.selectModel}
+        onSelectReasoning={conversation.selectReasoning}
         composerPlaceholder="Ask anything"
         composerDraft={conversation.draftReseed.text}
         composerDraftAttachments={conversation.draftReseed.attachments}
@@ -256,14 +192,10 @@ export function AgentChat({
   }
 
   return (
-    <DocumentPreviewRoot
-      compact={compact}
-      scopeKey={threadId ?? (draftAgentIdInput ? `draft:${draftAgentIdInput}` : "home")}
-      persistenceKey={threadId}
-    >
+    <DocumentPreviewRoot compact={compact} scopeKey={threadId ?? "draft"} persistenceKey={threadId}>
       <div
         data-agent-panel={compact ? "" : undefined}
-        className={cn("relative flex h-full min-h-0", compact && "flex-col", className)}
+        className={cn("relative flex h-full min-h-0 min-w-0", compact && "flex-col", className)}
       >
         {!compact ? (
           <>
@@ -276,9 +208,7 @@ export function AgentChat({
               >
                 <SheetHeader className="sr-only">
                   <SheetTitle>Agent navigation</SheetTitle>
-                  <SheetDescription>
-                    Switch agents and threads or start a new thread.
-                  </SheetDescription>
+                  <SheetDescription>Switch threads or start a new one.</SheetDescription>
                 </SheetHeader>
                 {renderThreadSidebar("flex h-full w-full border-r-0")}
               </SheetContent>
@@ -289,86 +219,6 @@ export function AgentChat({
         <main className="min-h-0 min-w-0 flex-1">{content}</main>
       </div>
     </DocumentPreviewRoot>
-  )
-}
-
-function readLastSelectedAgent(): string | null {
-  if (typeof window === "undefined") return null
-  try {
-    return window.localStorage.getItem(LAST_SELECTED_AGENT_KEY)
-  } catch {
-    return null
-  }
-}
-
-function writeLastSelectedAgent(agentId: string): void {
-  if (typeof window === "undefined") return
-  try {
-    window.localStorage.setItem(LAST_SELECTED_AGENT_KEY, agentId)
-  } catch {
-    // A private or restricted browser context can disable storage; in-memory selection still works.
-  }
-}
-
-function WorkspaceHome({
-  agents,
-  onPickAgent,
-  onOpenNavigation,
-}: {
-  agents: readonly Agent[]
-  onPickAgent: (agentId: string) => void
-  onOpenNavigation: () => void
-}) {
-  return (
-    <div className="relative flex h-full items-center justify-center px-6 pb-[10vh]">
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        onClick={onOpenNavigation}
-        aria-label="Open agent navigation"
-        className="absolute top-2 left-2 md:hidden"
-      >
-        <PanelLeft />
-      </Button>
-      <div className="w-full max-w-md">
-        <div className="text-center">
-          <h2 className="text-xl font-semibold tracking-tight text-foreground">
-            Start a new thread
-          </h2>
-          <p className="mt-1.5 text-sm text-muted-foreground">
-            Choose the agent best suited to the work.
-          </p>
-        </div>
-        <div className="mt-6 overflow-hidden rounded-xl border border-border/80 bg-card shadow-xs">
-          {agents.map((agent, index) => (
-            <button
-              key={agent.id}
-              type="button"
-              onClick={() => onPickAgent(agent.id)}
-              className={cn(
-                "group flex w-full items-center gap-3 px-4 py-3.5 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                index > 0 && "border-t border-border/70"
-              )}
-            >
-              <AgentAvatar name={agent.name} className="size-9 text-xs" />
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm font-medium text-foreground">{agent.name}</span>
-                {agent.description ? (
-                  <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
-                    {agent.description}
-                  </span>
-                ) : null}
-              </span>
-              <ChevronRight
-                className="size-4 shrink-0 text-muted-foreground/60 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground"
-                aria-hidden="true"
-              />
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
   )
 }
 

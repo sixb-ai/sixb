@@ -1,6 +1,7 @@
 import type { WorkflowDefinition } from "@sixb/core"
 import { defineAgentStep, defineWorkflow, stringEnum } from "@sixb/core"
-import { lookupResponsePolicy, operationsAssistantModel } from "../agents/operations-assistant"
+import { languageModels } from "../ai/models"
+import { lookupResponsePolicy } from "../ai/tools"
 
 const serviceAssessmentInput = {
   caseNumber: "string",
@@ -10,7 +11,7 @@ const serviceAssessmentInput = {
 } as const
 
 export const assessServiceCase = defineAgentStep("assess-service-case", {
-  model: operationsAssistantModel,
+  model: languageModels[0],
   reasoning: "medium",
   instructions: "Assess service response urgency using Northline's response policy.",
   tools: [lookupResponsePolicy],

@@ -64,7 +64,7 @@ export function OperationsAssistant() {
           >
             <ChevronRight className="size-4" />
           </Button>
-          <AgentPanel agentId="operations-assistant" context={context} className="h-full" />
+          <AgentPanel context={context} className="h-full" />
         </div>
       </aside>
     </>

@@ -24,13 +24,12 @@ import { AgentPanel } from "@sixb/agent-ui"
 import "@sixb/agent-ui/globals.css"
 
 export function InvoiceSidebar({ invoice }: { invoice: ObjectRef }) {
-  return <AgentPanel agentId="billing-assistant" context={[{ kind: "object", ref: invoice }]} />
+  return <AgentPanel context={[{ kind: "object", ref: invoice }]} />
 }
 ```
 
 | Prop | Purpose |
 | --- | --- |
-| `agentId` | The agent this panel talks to. |
 | `context` | Ambient context the agent sees. Omit it to inherit from `AgentContextProvider` instead; passing it makes the list fully controlled. |
 | `threadId` | Controlled thread. Omit to let the panel own its current thread. |
 | `defaultThreadId`, `onThreadChange` | For remembering where a user left off. |
@@ -57,7 +56,7 @@ function ProjectPage({ project }: { project: ObjectRef }) {
 
 <AgentContextProvider>
   <ProjectPage project={projectRef} />
-  <AgentPanel agentId="project-assistant" />
+  <AgentPanel />
 </AgentContextProvider>
 ```
 
@@ -66,8 +65,8 @@ Registration follows mount and unmount, so context tracks what the user is actua
 
 ## Full page, with routing
 
-The `/react-router` subpath adds `AgentChatPage`, which wires the conversation to real URLs —
-thread and draft ids live in the route, so browser navigation and deep links work.
+The `/react-router` subpath adds `AgentChatPage`, which wires conversation threads to real URLs, so
+browser navigation and deep links work.
 
 ```tsx
 import { AgentChatPage } from "@sixb/agent-ui/react-router"

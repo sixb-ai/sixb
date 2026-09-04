@@ -101,6 +101,42 @@ describe("resolveAgentExecutionPlan", () => {
     expect(plan.model).not.toBe(declaredModel)
   })
 
+  test("uses the immutable model selection captured on a conversational run", () => {
+    const defaultModel = new MockLanguageModelV4({ modelId: "default-model" })
+    const selectedModel = new MockLanguageModelV4({ modelId: "selected-model" })
+    const agent = defineAgent("configured", {
+      name: "Configured",
+      model: defaultModel,
+      reasoning: "medium",
+      instructions: "Resolve the request.",
+    })
+    const entries: readonly LanguageModelEntry[] = [defaultModel, selectedModel].map((model) => ({
+      provider: model.provider,
+      modelId: model.modelId,
+      model,
+    }))
+    const models: LanguageModelCatalog = {
+      default: entries[0]!,
+      list: () => entries,
+      getByRef: (ref) =>
+        entries.find((entry) => entry.provider === ref.provider && entry.modelId === ref.modelId) ??
+        null,
+    }
+
+    const plan = resolveAgentExecutionPlan({
+      agent,
+      spec: {
+        model: { provider: selectedModel.provider, modelId: selectedModel.modelId },
+        reasoning: "high",
+      },
+      models,
+      defaultMaxSteps: 25,
+    })
+
+    expect(plan.model).toBe(selectedModel)
+    expect(plan.reasoning).toBe("high")
+  })
+
   test("fails closed when an agent model is missing from a configured catalog", () => {
     const model = new MockLanguageModelV4({ modelId: "missing-model" })
     const agent = defineAgent("missing", {

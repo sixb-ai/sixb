@@ -25,6 +25,7 @@ const cost = {
 
 const summary = {
   amounts: [{ currency: "USD", amountNanos: "10000000" }],
+  reportedCallCount: 0,
   ratedCallCount: 1,
   unpriceableCallCount: 0,
   unvaluedCallCount: 0,

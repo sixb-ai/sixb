@@ -66,7 +66,7 @@ export function AgentExecutionPanel({
           )}
           {data.cost ? (
             <>
-              <span>{formatAiCostAmounts(data.cost.amounts)} catalog-estimated cost</span>
+              <span>{formatAiCostAmounts(data.cost.amounts)} recorded cost</span>
               <span>{formatAiCostCoverage(data.cost)}</span>
             </>
           ) : null}
@@ -328,15 +328,16 @@ function formatAiCostAmounts(
 }
 
 function formatAiCostCoverage(cost: {
+  reportedCallCount: number
   ratedCallCount: number
   unpriceableCallCount: number
   unvaluedCallCount: number
 }): string {
-  const valued = cost.ratedCallCount
+  const valued = cost.reportedCallCount + cost.ratedCallCount
   const missing = cost.unpriceableCallCount + cost.unvaluedCallCount
   if (valued === 0 && missing === 0) return "No model calls"
-  if (missing === 0) return `${valued} valued`
-  return `${valued} valued · ${missing} missing`
+  const sources = `${cost.reportedCallCount} reported · ${cost.ratedCallCount} estimated`
+  return missing === 0 ? sources : `${sources} · ${missing} missing`
 }
 
 function pluralCount(value: number, singular: string): string {

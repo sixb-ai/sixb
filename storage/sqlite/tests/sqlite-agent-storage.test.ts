@@ -1,4 +1,8 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { migrateStorage } from "@sixb/core"
 import { createTestAgentExecution, runAgentStorageContractSuite } from "@sixb/core/testing"
 import { SqliteStorage } from "../src"
 import { SqliteAgentStorage } from "../src/agents"
@@ -11,6 +15,43 @@ runAgentStorageContractSuite("SqliteAgentStorage", {
 })
 
 describe("SqliteStorage agents", () => {
+  test("admits a conversation run after file-backed migrations", async () => {
+    // Bun 1.3.14 enables legacy_alter_table by default. With foreign_keys OFF during migrations,
+    // SQLite does not rewrite a temporary self-reference on rename. Reintroducing
+    // REFERENCES agent_runs_v4 in migration 030 makes this insert fail (memory-only stores pass).
+    const path = await mkdtemp(join(tmpdir(), "sixb-agent-migration-"))
+    const storage = new SqliteStorage({ path })
+    try {
+      await migrateStorage(storage)
+      await storage.agents.threads.create({
+        id: "thread",
+        projectId: "project",
+        agentId: "sales",
+        ownerPrincipal: { type: "user", id: "user" },
+      })
+      const executionId = await createTestAgentExecution(storage, {
+        projectId: "project",
+        agentId: "sales",
+        runId: "run",
+      })
+      await expect(
+        storage.agents.runs.create({
+          id: "run",
+          projectId: "project",
+          executionId,
+          threadId: "thread",
+          agentId: "sales",
+          triggerMessageId: "message",
+          spec: { model: { provider: "test", modelId: "test-model" } },
+          requesterGroupIds: [],
+        })
+      ).resolves.toMatchObject({ id: "run", status: "queued" })
+    } finally {
+      storage.close()
+      await rm(path, { recursive: true, force: true })
+    }
+  })
+
   test("is bundled into the composite storage", async () => {
     const storage = new SqliteStorage()
 
@@ -58,6 +99,7 @@ describe("SqliteStorage agents", () => {
             threadId: "thr_1",
             agentId: "sales",
             triggerMessageId: "msg_1",
+            spec: { model: { provider: "test", modelId: "test-model" } },
             requesterGroupIds: ["engineering"],
             createdAt: new Date("2026-06-23T10:00:10.000Z"),
           })

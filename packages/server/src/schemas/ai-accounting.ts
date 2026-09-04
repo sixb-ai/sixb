@@ -5,7 +5,7 @@ const IntegerStringSchema = z.string().regex(/^\d+$/)
 const IsoDateSchema = z.string().datetime({ offset: true })
 
 export const AiAccountingBucketSchema = z.enum(["hour", "day", "week"])
-export const AiValuationStatusSchema = z.enum(["rated", "unpriceable", "unvalued"])
+export const AiValuationStatusSchema = z.enum(["reported", "rated", "unpriceable", "unvalued"])
 
 export const AiAccountingRangeQuerySchema = z.object({
   from: IsoDateSchema,
@@ -32,6 +32,7 @@ export const AiMoneySchema = z.object({
 
 export const AiCostSummarySchema = z.object({
   amounts: z.array(AiMoneySchema),
+  reportedCallCount: z.number().int().nonnegative(),
   ratedCallCount: z.number().int().nonnegative(),
   unpriceableCallCount: z.number().int().nonnegative(),
   unvaluedCallCount: z.number().int().nonnegative(),
@@ -113,6 +114,17 @@ const AiPriceSourceSchema = z.object({
 
 const AiModelCallCostSchema = z.discriminatedUnion("status", [
   z.object({
+    status: z.literal("reported"),
+    billingIdentity: AiBillingIdentitySchema,
+    pricingContext: AiPricingContextSchema,
+    reportSource: z.object({
+      providerId: z.string(),
+      responseId: z.string(),
+    }),
+    money: AiMoneySchema,
+    ratedAt: IsoDateSchema,
+  }),
+  z.object({
     status: z.literal("rated"),
     billingIdentity: AiBillingIdentitySchema,
     pricingContext: AiPricingContextSchema,
@@ -184,4 +196,32 @@ export const AiModelCallAccountingListResponseSchema = z.object({
   items: z.array(AiModelCallAccountingItemSchema),
   hasMore: z.boolean(),
   total: z.number().int().nonnegative(),
+})
+
+export const AiModelCallGroupsQuerySchema = AiModelCallAccountingListQuerySchema.omit({
+  executionId: true,
+})
+
+const AiModelCallExecutionSummarySchema = z.object({
+  executionId: z.string(),
+  attribution: AiModelCallAccountingItemSchema.shape.attribution,
+  modelCallCount: z.number().int().nonnegative(),
+  totalTokens: z.number().int().nonnegative().optional(),
+  costs: AiCostSummarySchema,
+  firstCallAt: IsoDateSchema,
+  lastCallAt: IsoDateSchema,
+  models: z.array(AiBillingIdentitySchema),
+  /** Present only when the caller can read the initiating conversation. */
+  label: z.string().optional(),
+})
+
+export const AiModelCallGroupsResponseSchema = z.object({
+  items: z.array(
+    AiModelCallExecutionSummarySchema.omit({ models: true }).extend({
+      executions: z.array(AiModelCallExecutionSummarySchema),
+      canOpenThread: z.boolean(),
+    })
+  ),
+  total: z.number().int().nonnegative(),
+  hasMore: z.boolean(),
 })
