@@ -21,9 +21,12 @@ import {
   type AiModelCallUsageRecord,
   type ListAiModelCallAccountingInput,
   type ListAiModelCallAccountingResult,
+  type ListAiModelCallGroupsInput,
+  type ListAiModelCallGroupsResult,
   type QueryAiAccountingOverviewInput,
   type SummarizeAiCostExecutionsInput,
 } from "@sixb/core/storage"
+import { listAiModelCallGroups } from "./ai-cost-groups"
 import { requestedReasoningFromRow } from "./pg-ai-usage-storage"
 import type { PgStoreClient } from "./transactions"
 import { runPgTransaction } from "./transactions"
@@ -31,6 +34,12 @@ import { runPgTransaction } from "./transactions"
 /** PostgreSQL-backed immutable valuations stored in one append-only table. */
 export class PgAiCostStorage implements AiCostStorage {
   constructor(private readonly sql: PgStoreClient) {}
+
+  async listModelCallGroups(
+    input: ListAiModelCallGroupsInput
+  ): Promise<ListAiModelCallGroupsResult> {
+    return listAiModelCallGroups(this.sql, input)
+  }
 
   async recordModelCallCost(input: AiModelCallCostRecord): Promise<void> {
     const record = normalizeAiModelCallCostRecord(input)

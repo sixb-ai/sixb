@@ -100,7 +100,19 @@ const contractPipeline: PipelineDefinition =
 const invoicePipeline: PipelineDefinition =
   definePipeline("invoice-pipeline").then(invoicePipelineStep)
 
-const model = {} as Parameters<typeof defineAgent>[1]["model"]
+const model = {
+  providerId: "test",
+  modelId: "test-model",
+  definition: {
+    kind: "language",
+    providerId: "test",
+    modelId: "test-model",
+    capabilities: {},
+  },
+  async stream() {
+    throw new Error("This fixture does not run inference.")
+  },
+} satisfies Parameters<typeof defineAgent>[1]["model"]
 
 const contractAgent = defineAgent("contract-agent", {
   name: "Contract Agent",

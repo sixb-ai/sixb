@@ -170,6 +170,7 @@ describe("Postgres storage migrations", () => {
             "029-model-accounting",
             "030-ai-usage-limits",
             "031-subagent-runs",
+            "032-conversation-run-spec",
           ],
         },
       ])
@@ -390,6 +391,13 @@ describe("Postgres storage migrations", () => {
           id: "031-subagent-runs",
           status: "applied",
           version: 31,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "032-conversation-run-spec",
+          status: "applied",
+          version: 32,
         },
       ])
     })
@@ -1492,6 +1500,37 @@ describe("Postgres storage migrations", () => {
           ])
         )
         expect(await readTableColumns(schemaName, "ai_price_schedules")).toEqual([])
+        await sql.unsafe(`
+          INSERT INTO ai_model_call_valuations (
+            project_id, usage_record_id, status, provider_id, model_id, currency, amount_nanos,
+            reason, details, rated_at
+          ) VALUES (
+            'project-a', 'usage-1', 'rated', 'vercel', 'openai/gpt-5', 'USD', 20,
+            NULL, '{"pricingContext":{},"historical":"preserve"}', '2026-08-01T12:00:01.000Z'
+          )
+        `)
+        const oldCost = await sql.unsafe("SELECT * FROM ai_model_call_valuations")
+        await expect(
+          context.exec("UPDATE ai_model_call_valuations SET status = 'reported'")
+        ).rejects.toThrow()
+        for (const migration of postgresStorageMigrations.steps.slice(costIndex + 1)) {
+          await migration.up(context)
+        }
+        // Later agent migrations must preserve the native accounting rows and constraints.
+        expect(await sql.unsafe("SELECT * FROM ai_model_call_valuations")).toEqual(oldCost)
+        expect(await sql.unsafe("SELECT * FROM ai_model_call_usage")).toEqual(
+          before.map((row: Record<string, unknown>) => ({
+            ...row,
+            requested_reasoning: null,
+            provider_ids: null,
+          }))
+        )
+        await expect(
+          context.exec("UPDATE ai_model_call_valuations SET status = 'reported'")
+        ).rejects.toThrow()
+        await expect(
+          context.exec("UPDATE ai_model_call_valuations SET amount_nanos = NULL")
+        ).rejects.toThrow()
       } finally {
         await sql.unsafe("RESET search_path")
         await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
@@ -1893,6 +1932,13 @@ describe("Postgres storage migrations", () => {
           id: "031-subagent-runs",
           status: "applied",
           version: 31,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "032-conversation-run-spec",
+          status: "applied",
+          version: 32,
         },
       ])
     } finally {

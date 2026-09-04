@@ -1,4 +1,4 @@
-import { Route, Routes } from "react-router-dom"
+import { Navigate, Route, Routes } from "react-router-dom"
 import { AppLayout } from "./components/layout"
 import { AgentsPage } from "./pages/AgentsPage"
 import { ProjectWorkspace } from "./pages/ProjectWorkspace"
@@ -8,7 +8,7 @@ export default function App() {
     <Routes>
       <Route element={<AppLayout />}>
         <Route path="agents" element={<AgentsPage />} />
-        <Route path="agents/new/:agentId" element={<AgentsPage />} />
+        <Route path="agents/new/:agentId" element={<Navigate to="/agents" replace />} />
         <Route path="agents/:threadId" element={<AgentsPage />} />
         <Route path="*" element={<ProjectWorkspace />} />
       </Route>

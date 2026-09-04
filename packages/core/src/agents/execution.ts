@@ -1,6 +1,7 @@
 import { principalsEqual, SYSTEM_PRINCIPAL } from "../auth"
 import { assertAuthorized, isAllowed } from "../authorization"
 import type { AuthorizablePrincipal, ExecutionContext } from "../execution"
+import type { ModelCatalog } from "../models"
 import { resolveExecutionCosts } from "../runtime/ai-cost"
 import { resolveExecutionUsage } from "../runtime/ai-usage"
 import type { SixbRuntimeContext } from "../runtime/types"
@@ -81,7 +82,8 @@ export function createAgentsRuntime(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
   source: Pick<AgentsRuntime, "list" | "getById">,
-  security: SecurityDefinitionCatalog
+  security: SecurityDefinitionCatalog,
+  models?: ModelCatalog
 ): AgentsRuntime {
   const principal = runtime.authorization?.principal ?? SYSTEM_PRINCIPAL
   const allowed = (agentId: string) =>
@@ -171,10 +173,17 @@ export function createAgentsRuntime(
             `[Sixb] Agent thread '${input.threadId}' not found.`
           )
         }
-        const result = await requestAgentRun(runtime, execution, security, agent, {
-          ...input,
-          principal,
-        })
+        const result = await requestAgentRun(
+          runtime,
+          execution,
+          security,
+          agent,
+          {
+            ...input,
+            principal,
+          },
+          models?.language
+        )
         return { ...result, run: await attachRunView(runtime, result.run) }
       },
       retry: async (runId) => {

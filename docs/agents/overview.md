@@ -24,6 +24,11 @@ export const sixb = createSixb({
 
 The agent worker runs each turn through the existing durable run, stream, and sandbox lifecycle.
 When authentication is enabled, the main agent inherits the requesting user's current authority.
+The chat composer lists the configured models, their known capabilities, and supported reasoning
+levels. The selected values apply to the next turn and are stored on its durable run.
+Display metadata comes from the configured models' provider catalogs and their caches. If a catalog
+is unavailable, the API keeps the configured definition without inventing capabilities or adding models.
+Provider logos are local presentation assets.
 
 ## Child agents
 

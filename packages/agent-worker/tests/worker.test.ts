@@ -305,12 +305,14 @@ function answerModel(captureTools?: (names: readonly string[]) => void): WorkerT
 function delegatingParentModel(input: {
   readonly childRunId: () => string
   readonly childModel: { readonly provider: string; readonly modelId: string }
+  readonly onCall?: (options: LanguageModelRequest) => void
 }): WorkerTestModel {
   let call = 0
   return new WorkerTestModel({
     providerId: "parent-provider",
     modelId: "parent-model",
-    stream: async () => {
+    stream: async (options) => {
+      input.onCall?.(options)
       call += 1
       if (call === 1) {
         return stream([
@@ -1624,6 +1626,7 @@ async function seedCompletedConversationTurn(input: {
     threadId: input.threadId,
     agentId: "assistant",
     triggerMessageId: userMessageId,
+    spec: { model: { provider: "test", modelId: "test-model" } },
     requesterGroupIds: [],
   })
   const executionToken = `history_execution_${input.index}`
@@ -1930,7 +1933,7 @@ describe("AgentWorker", () => {
   test("automatically checkpoints with the selected model's catalog budget", async () => {
     const summaryPrompts: LanguageModelRequest["messages"][] = []
     const modelId = "gemini-2.5-flash-image"
-    // Regression proof: execute the registered model instead of this.models' prepared binding.
+    // Regression proof: execute the unprepared catalog binding, or use the default model's budget.
     const answeringModel = compactingAnswerModel({
       provider: "google",
       modelId,
@@ -1941,7 +1944,7 @@ describe("AgentWorker", () => {
     })
     const { contextWindow: _contextWindow, ...definition } = answeringModel.definition
     let resolutions = 0
-    const sixb = buildSixb({
+    const selectedModel: LanguageModel = {
       providerId: answeringModel.providerId,
       modelId: answeringModel.modelId,
       definition,
@@ -1957,6 +1960,10 @@ describe("AgentWorker", () => {
           stream: (request: LanguageModelRequest) => answeringModel.stream(request),
         }
       },
+    }
+    const defaultModel = new WorkerTestModel({ modelId: "default-model" })
+    const sixb = buildSixb(defaultModel, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [defaultModel, selectedModel] },
     })
     const storage = agentStorageOf(sixb)
     const threadId = "automatic_compaction_thread"
@@ -1982,6 +1989,7 @@ describe("AgentWorker", () => {
         agentId: "assistant",
         threadId,
         text: "Continue with the catalog-derived context budget.",
+        model: { provider: selectedModel.providerId, modelId: selectedModel.modelId },
       })
       const run = await waitFor(
         async () => {
@@ -4847,10 +4855,11 @@ describe("AgentWorker", () => {
 
   test("delegates to an isolated child lane without consuming another primary slot", async () => {
     let childRunId = ""
+    const parentCalls: LanguageModelRequest[] = []
     const childCalls: LanguageModelRequest[] = []
     const childModel = new WorkerTestModel({
-      providerId: "child-provider",
-      modelId: "child-model",
+      providerId: "gateway",
+      modelId: "deepseek/deepseek-v4-flash-vision-exp",
       stream: async (options) => {
         childCalls.push(options)
         return stream([
@@ -4865,6 +4874,7 @@ describe("AgentWorker", () => {
     const parentModel = delegatingParentModel({
       childRunId: () => childRunId,
       childModel: { provider: childModel.providerId, modelId: childModel.modelId },
+      onCall: (options) => parentCalls.push(options),
     })
     const sandboxes = new RecordingSandboxFactory()
     const sixb = buildSixb(parentModel, new InMemoryBroker(), sandboxes, {
@@ -4905,16 +4915,40 @@ describe("AgentWorker", () => {
         parentRunId: parent.id,
         spawnKey: "research",
         status: "succeeded",
-        modelId: "child-model",
+        modelId: "deepseek/deepseek-v4-flash-vision-exp",
         finishReason: "stop",
         spec: {
-          model: { provider: "child-provider", modelId: "child-model" },
+          model: { provider: "gateway", modelId: "deepseek/deepseek-v4-flash-vision-exp" },
           reasoning: "high",
           task: "Research the exact delegated fact.",
           toolNames: ["echo"],
         },
       })
       expect(child.result).toEqual({ text: "The delegated fact is 42." })
+
+      // Regression check: restore the free-string model schema in spawnInputSchema; this fails.
+      const spawnTool = parentCalls[0]?.tools?.find((tool) => tool.name === "spawn_agent")
+      if (!spawnTool) throw new Error("Expected spawn_agent tool.")
+      expect(spawnTool.inputSchema.required).not.toContain("model")
+      expect(spawnTool.inputSchema).toMatchObject({
+        properties: {
+          model: {
+            description: expect.stringContaining("Keep provider and modelId unchanged"),
+            anyOf: [
+              { provider: "parent-provider", modelId: "parent-model" },
+              { provider: "gateway", modelId: "deepseek/deepseek-v4-flash-vision-exp" },
+            ].map(({ provider, modelId }) => ({
+              type: "object",
+              properties: {
+                provider: { type: "string", enum: [provider] },
+                modelId: { type: "string", enum: [modelId] },
+              },
+              required: ["provider", "modelId"],
+              additionalProperties: false,
+            })),
+          },
+        },
+      })
 
       const [parentExecution, childExecution] = await Promise.all([
         sixb.storage.executions.getById({ projectId: PROJECT_ID, id: parent.executionId }),
@@ -5256,6 +5290,86 @@ describe("AgentWorker", () => {
       await worker.stop()
       modelCalls.mockRestore()
       completion.restore()
+    }
+  })
+
+  test("rejects unconfigured subagent model pairs before admission with exact recovery choices", async () => {
+    const invalidModels = [
+      { provider: "gateway/deepseek", modelId: "deepseek-v4-flash-vision-exp" },
+      { provider: "gateway", modelId: "missing-model" },
+      { provider: "parent-provider", modelId: "deepseek/deepseek-v4-flash-vision-exp" },
+    ]
+    const childModel = new WorkerTestModel({
+      providerId: "gateway",
+      modelId: "deepseek/deepseek-v4-flash-vision-exp",
+    })
+    let call = 0
+    const parentModel = new WorkerTestModel({
+      providerId: "parent-provider",
+      modelId: "parent-model",
+      stream: async () => {
+        call += 1
+        if (call > 1) {
+          return stream([
+            { type: "stream-start", warnings: [] },
+            { type: "text-start", id: "answer" },
+            { type: "text-delta", id: "answer", delta: "Delegation failed." },
+            { type: "text-end", id: "answer" },
+            finish("stop"),
+          ])
+        }
+        // Deliberately bypass the advertised schema: the runtime must still reject these pairs.
+        return stream([
+          { type: "stream-start", warnings: [] },
+          ...invalidModels.map((model, index) => ({
+            type: "tool-call" as const,
+            toolCallId: `invalid-model-${index}`,
+            toolName: "spawn_agent",
+            input: JSON.stringify({ key: `invalid-${index}`, task: "Research a fact.", model }),
+          })),
+          finish("tool-calls"),
+        ])
+      },
+    })
+    const sandboxes = new RecordingSandboxFactory()
+    const sixb = buildSixb(parentModel, new InMemoryBroker(), sandboxes, {
+      models: { language: [parentModel, childModel] },
+    })
+    const storage = agentStorageOf(sixb)
+    const requested = await requestAgent(sixb, { agentId: "main", text: "Delegate this task." })
+    const worker = new AgentWorker(sixb, workerOptions())
+
+    await worker.start()
+    try {
+      await waitFor(
+        async () => {
+          const run = await storage.runs.getById({ projectId: PROJECT_ID, id: requested.run.id })
+          return run?.status === "succeeded" ? run : null
+        },
+        { label: "parent handles rejected subagent models" }
+      )
+      const assistant = (await listMessages(storage, requested.run.threadId)).find(
+        (message) => message.role === "assistant"
+      )
+      for (const [index, model] of invalidModels.entries()) {
+        expect(assistant?.parts).toContainEqual(
+          expect.objectContaining({
+            type: "tool-call",
+            toolCallId: `invalid-model-${index}`,
+            state: "output-error",
+            errorText: `[SixbAgentWorker] Language model ${JSON.stringify(model)} is not configured for this project. Use one of: {"provider":"parent-provider","modelId":"parent-model"}, {"provider":"gateway","modelId":"deepseek/deepseek-v4-flash-vision-exp"}. Omit model to use the project default.`,
+          })
+        )
+        await expect(
+          storage.runs.getById({
+            projectId: PROJECT_ID,
+            id: createSubagentRunId(requested.run.id, `invalid-${index}`),
+          })
+        ).resolves.toBeNull()
+      }
+      expect(sandboxes.sandboxes).toHaveLength(1)
+    } finally {
+      await worker.stop()
     }
   })
 
@@ -7727,6 +7841,7 @@ describe("AgentWorker", () => {
       threadId,
       agentId: "removed-agent",
       triggerMessageId,
+      spec: { model: { provider: "test", modelId: "test-model" } },
       requesterGroupIds: ["engineering"],
     })
     await sixb.queues.agents.enqueue({

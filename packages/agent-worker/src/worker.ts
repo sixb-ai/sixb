@@ -95,7 +95,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
   private readonly host: AgentWorkerHost
   private readonly agents: readonly AgentDefinition[]
   private readonly context: AgentWorkerContext | null
-  private contextBudgets: ReadonlyMap<string, AgentContextBudget> = new Map()
   private models: ReadonlyMap<string, LanguageModel> = new Map()
   private readonly subagentWorker: SubagentQueueWorker
   /**
@@ -148,7 +147,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         ),
         context.agentSkills,
       ])
-      this.contextBudgets = prepared.budgets
       this.models = prepared.models
     }
     await Promise.all([
@@ -246,7 +244,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     // Reserve before preparation so revoked authority on redelivery has a fenced terminal outcome.
     const reservation = await this.startOrReclaim(context, {
       run: queuedRun,
-      modelId: queuedRun.modelId,
+      modelId: queuedRun.spec?.model.modelId,
       execution: freshExecution(delivery.leaseExpiresAt),
     })
     if (reservation.kind === "skip") {
@@ -303,8 +301,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
           { details: agentRunFailureDetails(queuedRun) }
         )
       }
-      const plan = resolveAgentExecutionPlan({
+      const configuredPlan = resolveAgentExecutionPlan({
         agent,
+        spec: queuedRun.spec,
+        models: this.host.definitions.models?.language,
         defaultMaxSteps: context.defaultMaxSteps,
       })
 
@@ -361,6 +361,20 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         })
       })()
 
+      // Pin the selected model and its context/output budget together for this turn.
+      const preparedModel = await prepareAgentModels([
+        {
+          ...agent,
+          model: configuredPlan.model,
+          reasoning: configuredPlan.reasoning,
+        },
+      ])
+      const model = preparedModel.models.get(agent.id)
+      if (!model)
+        throw new Error("[SixbAgentWorker] Conversation model preparation returned no model.")
+      const plan = Object.freeze({ ...configuredPlan, model })
+      const executionAgent = { ...agent, model, reasoning: plan.reasoning }
+
       await context.streamSink.publishStarted(run)
       runtime = createAgentTurnRuntime({
         context: executionContext,
@@ -370,8 +384,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       })
       const prepared = await prepareAgentConversationContext({
         context: executionContext,
-        agent,
-        budget: requiredContextBudget(this.contextBudgets, agent.id),
+        agent: executionAgent,
+        budget: requiredContextBudget(preparedModel.budgets, agent.id),
         run,
         runtime,
       })
@@ -386,7 +400,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
           ? {
               // Temporary: delegation belongs only to the framework main Agent while legacy
               // definition-backed conversational agents remain supported.
-              frameworkTools: new SubagentCoordinator(
+              frameworkTools: await new SubagentCoordinator(
                 this.host,
                 context,
                 run,

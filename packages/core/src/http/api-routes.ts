@@ -421,6 +421,13 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     agentApi: false,
   },
   {
+    operationId: "listAiModelCallGroups",
+    method: "GET",
+    path: "/api/ai/model-call-groups",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
     operationId: "listAiLimitPolicies",
     method: "GET",
     path: "/api/ai/limits",

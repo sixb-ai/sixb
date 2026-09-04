@@ -40,6 +40,7 @@ async function createApp(inlineCost = false) {
     threadId: "thread_1",
     agentId: "accounting-agent",
     triggerMessageId: "message_1",
+    spec: { model: { provider: "test", modelId: "test-model" } },
     requesterGroupIds: [],
   })
   await storage.transaction(async (tx) => {
@@ -134,7 +135,7 @@ function aiRoutes(host: SixbHost<readonly []>, authorization?: AuthorizationCont
   return registerAiAccountingRoutes(app, host)
 }
 
-async function createSubagentApp() {
+async function createSubagentApp(viewer?: { id: string; canRun: boolean }) {
   const storage = new InMemoryStorage()
   const parentRunId = "parent_run_1"
   const childRunId = "child_run_1"
@@ -143,6 +144,7 @@ async function createSubagentApp() {
     projectId,
     agentId: "main",
     ownerPrincipal: { type: "user", id: "user_1" },
+    title: "Private research",
   })
   const parentExecutionId = await createTestAgentExecution(storage, {
     projectId,
@@ -157,6 +159,7 @@ async function createSubagentApp() {
     threadId: "thread_1",
     agentId: "main",
     triggerMessageId: "message_1",
+    spec: { model: { provider: "test", modelId: "test-model" } },
     requesterGroupIds: [],
   })
   await storage.agents.runs.start({
@@ -202,10 +205,76 @@ async function createSubagentApp() {
     usage: { inputTokens: 10, outputTokens: 5 },
     occurredAt: new Date("2026-09-10T12:30:00.000Z"),
   })
-  return aiRoutes(createHost(storage))
+  return aiRoutes(
+    createHost(storage),
+    viewer
+      ? {
+          principal: { type: "user", id: viewer.id },
+          groupIds: [],
+          roleIds: [],
+          grants: {
+            ...emptyGrantIndex(),
+            "observe:aiUsage": new Set(["aiUsage"]),
+            "run:agent": new Set(viewer.canRun ? ["main"] : []),
+          },
+        }
+      : undefined
+  )
 }
 
 describe("AI accounting routes", () => {
+  test.each([
+    { id: "user_1", canRun: true, visible: true },
+    { id: "user_1", canRun: false, visible: false },
+    { id: "someone_else", canRun: true, visible: false },
+  ])("groups child-only matches and protects conversation labels: %j", async (viewer) => {
+    // Bypassing the scoped thread lookup exposes Private research / research to other users.
+    const app = await createSubagentApp(viewer)
+    const response = await app.handle(
+      new Request(
+        "http://localhost/api/ai/model-call-groups?" +
+          new URLSearchParams({
+            from: "2026-09-10T12:00:00.000Z",
+            to: "2026-09-10T14:00:00.000Z",
+            modelId: "gpt-5",
+            limit: "1",
+          })
+      )
+    )
+    expect(response.status).toBe(200)
+    const result = await response.json()
+    expect(result).toMatchObject({
+      total: 1,
+      hasMore: false,
+      items: [
+        {
+          attribution: { kind: "agent", agentRunId: "parent_run_1", threadId: "thread_1" },
+          firstCallAt: "2026-09-10T12:30:00.000Z",
+          modelCallCount: 1,
+          totalTokens: 15,
+          canOpenThread: viewer.visible,
+          executions: [
+            { attribution: { kind: "subagent", subagentRunId: "child_run_1" }, modelCallCount: 1 },
+          ],
+        },
+      ],
+    })
+    expect(result.items[0].label).toBe(viewer.visible ? "Private research" : undefined)
+    expect(result.items[0].executions[0].label).toBe(viewer.visible ? "research" : undefined)
+  })
+
+  test("validates group pagination and valuation filters", async () => {
+    const app = await createSubagentApp()
+    for (const extra of ["limit=201", "offset=-1", "valuationStatus=invalid"]) {
+      const response = await app.handle(
+        new Request(
+          `http://localhost/api/ai/model-call-groups?from=2026-09-10T12:00:00Z&to=2026-09-10T14:00:00Z&${extra}`
+        )
+      )
+      expect([400, 422]).toContain(response.status)
+    }
+  })
+
   test("returns the selected inline cost and its independent local estimate", async () => {
     // Removal proof: remove estimate from AiModelCallCostSchema; response parsing strips it.
     const app = await createApp(true)
@@ -385,9 +454,16 @@ describe("AI accounting routes", () => {
       )
     )
     const limits = await app.handle(new Request("http://localhost/api/ai/limits/status"))
+    // Regression proof: remove the grouped endpoint's observation check; this returns 200.
+    const groups = await app.handle(
+      new Request(
+        "http://localhost/api/ai/model-call-groups?from=2026-09-10T00:00:00.000Z&to=2026-09-11T00:00:00.000Z"
+      )
+    )
 
     expect(accounting.status).toBe(403)
     expect(limits.status).toBe(403)
+    expect(groups.status).toBe(403)
   })
 
   test("exposes status to observers without exposing mutation controls", async () => {

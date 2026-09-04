@@ -75,6 +75,7 @@ import {
   listAgentThreadRuns,
   listAgentThreads,
   listAiLimitPolicies,
+  listAiModelCallGroups,
   listAiModelCalls,
   listAuthAccessTokens,
   listAuthInvitations,
@@ -327,6 +328,9 @@ import type {
   ListAiLimitPoliciesData,
   ListAiLimitPoliciesError,
   ListAiLimitPoliciesResponse,
+  ListAiModelCallGroupsData,
+  ListAiModelCallGroupsError,
+  ListAiModelCallGroupsResponse,
   ListAiModelCallsData,
   ListAiModelCallsError,
   ListAiModelCallsResponse,
@@ -1531,6 +1535,76 @@ export const updateAiLimitPolicyMutation = (
   }
   return mutationOptions
 }
+
+export const listAiModelCallGroupsQueryKey = (options: Options<ListAiModelCallGroupsData>) =>
+  createQueryKey("listAiModelCallGroups", options)
+
+/**
+ * List AI model calls grouped by initiating execution
+ */
+export const listAiModelCallGroupsOptions = (options: Options<ListAiModelCallGroupsData>) =>
+  queryOptions<
+    ListAiModelCallGroupsResponse,
+    ListAiModelCallGroupsError,
+    ListAiModelCallGroupsResponse,
+    ReturnType<typeof listAiModelCallGroupsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listAiModelCallGroups({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listAiModelCallGroupsQueryKey(options),
+  })
+
+export const listAiModelCallGroupsInfiniteQueryKey = (
+  options: Options<ListAiModelCallGroupsData>
+): QueryKey<Options<ListAiModelCallGroupsData>> =>
+  createQueryKey("listAiModelCallGroups", options, true)
+
+/**
+ * List AI model calls grouped by initiating execution
+ */
+export const listAiModelCallGroupsInfiniteOptions = (options: Options<ListAiModelCallGroupsData>) =>
+  infiniteQueryOptions<
+    ListAiModelCallGroupsResponse,
+    ListAiModelCallGroupsError,
+    InfiniteData<ListAiModelCallGroupsResponse>,
+    QueryKey<Options<ListAiModelCallGroupsData>>,
+    | string
+    | Pick<QueryKey<Options<ListAiModelCallGroupsData>>[0], "body" | "headers" | "path" | "query">
+  >(
+    // @ts-ignore
+    {
+      queryFn: async ({ pageParam, queryKey, signal }) => {
+        // @ts-ignore
+        const page: Pick<
+          QueryKey<Options<ListAiModelCallGroupsData>>[0],
+          "body" | "headers" | "path" | "query"
+        > =
+          typeof pageParam === "object"
+            ? pageParam
+            : {
+                query: {
+                  offset: pageParam,
+                },
+              }
+        const params = createInfiniteParams(queryKey, page)
+        const { data } = await listAiModelCallGroups({
+          ...options,
+          ...params,
+          signal,
+          throwOnError: true,
+        })
+        return data
+      },
+      queryKey: listAiModelCallGroupsInfiniteQueryKey(options),
+    }
+  )
 
 export const getProjectInfoQueryKey = (options?: Options<GetProjectInfoData>) =>
   createQueryKey("getProjectInfo", options)

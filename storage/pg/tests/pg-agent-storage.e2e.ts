@@ -35,6 +35,7 @@ async function prepareCheckpointCandidate(storage: TestStorage): Promise<void> {
     threadId: "thr_lock_order",
     agentId: "sales",
     triggerMessageId: "msg_1",
+    spec: { model: { provider: "test", modelId: "test-model" } },
     requesterGroupIds: [],
   })
   await agents.runs.start({
@@ -80,6 +81,7 @@ async function prepareCheckpointCandidate(storage: TestStorage): Promise<void> {
     threadId: "thr_lock_order",
     agentId: "sales",
     triggerMessageId: "msg_3",
+    spec: { model: { provider: "test", modelId: "test-model" } },
     requesterGroupIds: [],
   })
   await agents.runs.start({
@@ -146,6 +148,7 @@ describe("PostgresStorage agents", () => {
             threadId: "thr_1",
             agentId: "sales",
             triggerMessageId: "msg_1",
+            spec: { model: { provider: "test", modelId: "test-model" } },
             requesterGroupIds: ["engineering"],
             createdAt: new Date("2026-06-23T10:00:10.000Z"),
           })

@@ -176,6 +176,14 @@ export interface ConversationAgentRunRecord extends AgentRunRecordBase {
   readonly threadId: string
   readonly agentId: string
   readonly triggerMessageId: string
+  /** Immutable model selection captured at admission. Absent only on runs predating this field. */
+  readonly spec?: ConversationAgentRunSpec
+}
+
+/** Immutable, serialisable model selection for one conversational turn. */
+export interface ConversationAgentRunSpec {
+  readonly model: LanguageModelRef
+  readonly reasoning?: AgentReasoningLevel
 }
 
 /** Immutable, serialisable child configuration captured before dispatch. */
@@ -213,6 +221,7 @@ export interface CreateAgentRunInput {
   readonly threadId: string
   readonly agentId: string
   readonly triggerMessageId: string
+  readonly spec: ConversationAgentRunSpec
   readonly requesterGroupIds: readonly string[]
   readonly createdAt?: Date
 }

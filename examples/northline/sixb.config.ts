@@ -5,18 +5,15 @@ import { DuckLakeStorage } from "@sixb/ducklake"
 import { LocalSandboxFactory } from "@sixb/sandboxes-local"
 import { SmolvmSandboxFactory } from "@sixb/sandboxes-smolvm"
 import { SqliteStorage } from "@sixb/sqlite"
-import {
-  generateImageTool,
-  lookupResponsePolicy,
-  operationsAssistantModel,
-} from "./agents/operations-assistant"
+import { languageModels } from "./ai/models"
+import { generateImageTool, lookupResponsePolicy } from "./ai/tools"
 
 const localLakePath = ".sixb/lake"
 mkdirSync(localLakePath, { recursive: true })
 
 export const sixb = createSixb({
   id: "northline",
-  models: { language: [operationsAssistantModel] },
+  models: { language: languageModels },
   tools: [lookupResponsePolicy, generateImageTool],
   broker: new InMemoryBroker(),
   storage: new SqliteStorage({ path: ".sixb" }),

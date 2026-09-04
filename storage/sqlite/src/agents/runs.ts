@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite"
 import {
   assertAgentRunExecution,
+  assertConversationAgentRunSpec,
   assertCreateSubagentRunInput,
   assertSubagentRunResult,
   subagentRunMatchesCreateInput,
@@ -44,6 +45,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
   ) {}
 
   async create(input: CreateAgentRunInput): Promise<ConversationAgentRunRecord> {
+    assertConversationAgentRunSpec(input.spec, "SixbSqlite")
     const createdAt = input.createdAt ?? new Date()
     await assertAgentRunExecution({
       executions: this.executions,
@@ -87,11 +89,12 @@ export class SqliteAgentRunStore implements AgentRunStore {
               thread_id,
               agent_id,
               trigger_message_id,
+              spec,
               requester_group_ids,
               status,
               attempt,
               created_at
-            ) VALUES (?, ?, ?, 'conversation', ?, ?, ?, ?, 'queued', 0, ?)
+            ) VALUES (?, ?, ?, 'conversation', ?, ?, ?, ?, ?, 'queued', 0, ?)
           `
           )
           .run(
@@ -101,6 +104,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
             input.threadId,
             input.agentId,
             input.triggerMessageId,
+            JSON.stringify(input.spec),
             JSON.stringify(normalizeRequesterGroupIds(input.requesterGroupIds)),
             createdAt.toISOString()
           )

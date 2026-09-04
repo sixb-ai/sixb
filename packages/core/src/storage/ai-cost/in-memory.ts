@@ -2,6 +2,7 @@ import type { AiModelCallUsageRecord, InMemoryAiUsageStorageSnapshot } from "../
 import type { AiAccountingRecordSetItem } from "./analytics"
 import { buildAiAccountingOverview, buildAiModelCallAccountingList } from "./analytics"
 import { AiCostStorageError } from "./errors"
+import { type AiAccountingGroupIdentity, buildAiModelCallGroups } from "./groups"
 import type {
   AiAccountingAttribution,
   AiAccountingOverview,
@@ -11,6 +12,8 @@ import type {
   AiMoney,
   ListAiModelCallAccountingInput,
   ListAiModelCallAccountingResult,
+  ListAiModelCallGroupsInput,
+  ListAiModelCallGroupsResult,
   QueryAiAccountingOverviewInput,
   SummarizeAiCostExecutionsInput,
 } from "./types"
@@ -25,6 +28,10 @@ interface InMemoryAiCostUsageSource {
 }
 
 export interface InMemoryAiAccountingAttributionSource {
+  resolveGroup?(input: {
+    readonly projectId: string
+    readonly executionId: string
+  }): Promise<{ readonly executionId: string; readonly attribution?: AiAccountingAttribution }>
   resolve(input: {
     readonly projectId: string
     readonly executionId: string
@@ -83,6 +90,35 @@ export class InMemoryAiCostStorage implements AiCostStorage {
 
   snapshot(): InMemoryAiCostStorageSnapshot {
     return structuredClone({ recordsByUsage: this.recordsByUsage })
+  }
+
+  async listModelCallGroups(
+    input: ListAiModelCallGroupsInput
+  ): Promise<ListAiModelCallGroupsResult> {
+    const items = await this.accountingItems()
+    const roots = new Map<string, Promise<AiAccountingGroupIdentity>>()
+    return buildAiModelCallGroups(
+      input,
+      await Promise.all(
+        items.map(async (item) => {
+          const key = usageRecordKey(item.usage.projectId, item.usage.executionId)
+          let root = roots.get(key)
+          if (!root) {
+            root =
+              this.attribution?.resolveGroup?.({
+                projectId: item.usage.projectId,
+                executionId: item.usage.executionId,
+              }) ??
+              Promise.resolve({
+                executionId: item.usage.executionId,
+                attribution: item.attribution,
+              })
+            roots.set(key, root)
+          }
+          return { ...item, root: await root }
+        })
+      )
+    )
   }
 
   restore(snapshot: InMemoryAiCostStorageSnapshot): void {

@@ -44,7 +44,7 @@ const FAILURE: SixbFailure<AgentRunFailureCode> = {
   details: { agentId: "assistant" },
 }
 
-type StartedRunInput = Omit<Parameters<AgentStorage["runs"]["create"]>[0], "executionId"> &
+type StartedRunInput = Omit<Parameters<AgentStorage["runs"]["create"]>[0], "executionId" | "spec"> &
   Omit<Parameters<AgentStorage["runs"]["start"]>[0], "id" | "projectId">
 
 function testExecution(token = createAgentRunExecutionToken()) {
@@ -57,7 +57,11 @@ async function createStartedRun(storage: InMemoryStorage, input: StartedRunInput
     agentId: input.agentId,
     runId: input.id,
   })
-  await storage.agents.runs.create({ ...input, executionId })
+  await storage.agents.runs.create({
+    ...input,
+    executionId,
+    spec: { model: { provider: "test", modelId: "test-model" } },
+  })
   return storage.agents.runs.start({
     id: input.id,
     projectId: input.projectId,
@@ -891,7 +895,10 @@ describe("agent routes", () => {
       projectId: sixb.id,
       id: request.run.id,
     })
-    expect(originalRun).toMatchObject({ requesterGroupIds: ["admins", "support-users"] })
+    expect(originalRun).toMatchObject({
+      requesterGroupIds: ["admins", "support-users"],
+      spec: { model: { provider: "test", modelId: "test-model" }, reasoning: "medium" },
+    })
     await expect(
       storage.executions.getById({ projectId: sixb.id, id: originalRun?.executionId ?? "" })
     ).resolves.toMatchObject({ requestedBy: { type: "user", id: "usr_retry" } })
@@ -968,7 +975,10 @@ describe("agent routes", () => {
     })
     expect(body.run.id).not.toBe(request.run.id)
     const retriedRun = await storage.agents.runs.getById({ projectId: sixb.id, id: body.run.id })
-    expect(retriedRun).toMatchObject({ requesterGroupIds: ["ops-users", "support-users"] })
+    expect(retriedRun).toMatchObject({
+      requesterGroupIds: ["ops-users", "support-users"],
+      spec: originalRun?.spec,
+    })
     await expect(
       storage.executions.getById({ projectId: sixb.id, id: retriedRun?.executionId ?? "" })
     ).resolves.toMatchObject({ requestedBy: { type: "user", id: "usr_retry" } })
@@ -1138,6 +1148,7 @@ describe("agent routes", () => {
       threadId: thread.id,
       agentId: "assistant",
       triggerMessageId: "msg-list-1",
+      spec: { model: { provider: "test", modelId: "test-model" } },
       requesterGroupIds: [],
     })
     await storage.agents.runs.finishQueued({
@@ -1157,6 +1168,7 @@ describe("agent routes", () => {
       threadId: thread.id,
       agentId: "assistant",
       triggerMessageId: "msg-list-2",
+      spec: { model: { provider: "test", modelId: "test-model" } },
       requesterGroupIds: [],
     })
 

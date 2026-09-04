@@ -11,7 +11,7 @@ import { AiCostSummarySchema } from "./ai-accounting"
 import { AiUsageSummarySchema } from "./ai-usage"
 import { JsonValueSchema, sixbFailureSchema } from "./common"
 import { FileRefSchema } from "./files"
-import { ModelReasoningLevelSchema, ModelReasoningSchema } from "./models"
+import { LanguageModelRefSchema, ModelReasoningLevelSchema, ModelReasoningSchema } from "./models"
 
 export const AgentRunFailureSchema: z.ZodType<SixbFailure<AgentRunFailureCode>> =
   sixbFailureSchema(AGENT_RUN_FAILURE_CODES)
@@ -251,6 +251,8 @@ export const AgentMessageListResponseSchema = z.object({
 
 export const PostAgentMessageBodySchema = z.object({
   text: z.string().trim().min(1),
+  model: LanguageModelRefSchema.optional(),
+  reasoning: ModelReasoningSchema.optional(),
   attachments: z.array(FileRefSchema).optional(),
   context: z.array(AgentContextEntryInputSchema).max(MAX_AGENT_CONTEXT_ENTRIES).optional(),
   messageId: z.string().trim().min(1).optional(),
@@ -278,6 +280,8 @@ export const AgentRunSchema = z.object({
   triggerMessageId: z.string(),
   requestedBy: AgentAuthorizablePrincipalSchema.optional(),
   status: AgentRunStatusSchema,
+  model: LanguageModelRefSchema.optional(),
+  reasoning: ModelReasoningSchema.optional(),
   modelId: z.string().optional(),
   finishReason: AgentRunFinishReasonSchema.optional(),
   usage: AiUsageSummarySchema.optional(),

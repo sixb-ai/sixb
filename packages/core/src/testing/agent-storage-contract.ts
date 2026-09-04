@@ -94,6 +94,7 @@ function runInput(overrides: Partial<TestRunInput> = {}): TestRunInput {
     threadId: "thr_1",
     agentId: "sales",
     triggerMessageId: "msg_user_1",
+    spec: { model: { provider: "test", modelId: "large" } },
     executionId: "test_agent_execution:run_1",
     requesterGroupIds: ["support", "engineering", "support"],
     execution: execution("exec_1"),
@@ -398,7 +399,12 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
         await storage.threads.create(threadInput())
 
         const queued = await createRun(storage, fixture, runInput({ id: "run_1" }))
-        expect(queued).toMatchObject({ status: "queued", attempt: 0, threadId: "thr_1" })
+        expect(queued).toMatchObject({
+          status: "queued",
+          attempt: 0,
+          threadId: "thr_1",
+          spec: { model: { provider: "test", modelId: "large" } },
+        })
         expect(queued.execution).toBeUndefined()
         expect(queued.startedAt).toBeUndefined()
         await expect(storage.runs.list({ projectId, statuses: ["queued"] })).resolves.toMatchObject(

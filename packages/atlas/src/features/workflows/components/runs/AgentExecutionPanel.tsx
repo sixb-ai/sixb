@@ -337,8 +337,8 @@ function formatAiCostCoverage(cost: {
   const valued = cost.ratedCallCount
   const missing = cost.unpriceableCallCount + cost.unvaluedCallCount
   if (valued === 0 && missing === 0) return "No model calls"
-  if (missing === 0) return `${valued} valued`
-  return `${valued} valued · ${missing} missing`
+  const sources = `${valued} valued`
+  return missing === 0 ? sources : `${sources} · ${missing} missing`
 }
 
 function pluralCount(value: number, singular: string): string {

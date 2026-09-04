@@ -438,6 +438,7 @@ export type {
   CreateAiUsageLimitPolicyInput,
   ListAiUsageLimitPoliciesInput,
   ListAiUsageLimitStatusesInput,
+  ListAiUsageModelCallGroupsInput,
   ListAiUsageModelCallsInput,
   QueryAiUsageOverviewInput,
   UpdateAiUsageLimitPolicyInput,

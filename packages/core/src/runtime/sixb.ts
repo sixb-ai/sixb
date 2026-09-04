@@ -101,7 +101,8 @@ function createExecutionFacades<TOntologySources extends readonly OntologySource
       runtime,
       execution,
       dependencies.definitions.agents,
-      dependencies.definitions.security
+      dependencies.definitions.security,
+      dependencies.definitions.models
     ),
     aiUsage: createAiUsageRuntime(runtime, dependencies.definitions.security),
     events: createEventsRuntime(runtime),

@@ -23,6 +23,9 @@ export type {
   AiCostSummary,
   AiModelCallAccountingItem,
   AiModelCallCostRecord,
+  AiModelCallExecutionSummary,
+  AiModelCallGroup,
+  AiModelCallGroupSummary,
   AiMoney,
   AiPriceSource,
   AiPricingContext,
@@ -31,6 +34,8 @@ export type {
   AiUnpriceableReason,
   ListAiModelCallAccountingInput,
   ListAiModelCallAccountingResult,
+  ListAiModelCallGroupsInput,
+  ListAiModelCallGroupsResult,
   QueryAiAccountingOverviewInput,
   SummarizeAiCostExecutionsInput,
 } from "./types"

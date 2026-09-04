@@ -213,6 +213,9 @@ import type {
   ListAiLimitPoliciesData,
   ListAiLimitPoliciesErrors,
   ListAiLimitPoliciesResponses,
+  ListAiModelCallGroupsData,
+  ListAiModelCallGroupsErrors,
+  ListAiModelCallGroupsResponses,
   ListAiModelCallsData,
   ListAiModelCallsErrors,
   ListAiModelCallsResponses,
@@ -925,6 +928,22 @@ export const updateAiLimitPolicy = <ThrowOnError extends boolean = false>(
       "Content-Type": "application/json",
       ...options.headers,
     },
+  })
+
+/**
+ * List AI model calls grouped by initiating execution
+ */
+export const listAiModelCallGroups = <ThrowOnError extends boolean = false>(
+  options: Options<ListAiModelCallGroupsData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    ListAiModelCallGroupsResponses,
+    ListAiModelCallGroupsErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/ai/model-call-groups",
+    ...options,
   })
 
 /**

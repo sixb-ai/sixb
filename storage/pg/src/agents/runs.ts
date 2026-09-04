@@ -1,5 +1,6 @@
 import {
   assertAgentRunExecution,
+  assertConversationAgentRunSpec,
   assertCreateSubagentRunInput,
   assertSubagentRunResult,
   subagentRunMatchesCreateInput,
@@ -40,6 +41,7 @@ export class PgAgentRunStore implements AgentRunStore {
   ) {}
 
   async create(input: CreateAgentRunInput): Promise<ConversationAgentRunRecord> {
+    assertConversationAgentRunSpec(input.spec, "SixbPg")
     const createdAt = input.createdAt ?? new Date()
     await assertAgentRunExecution({
       executions: this.executions,
@@ -83,6 +85,7 @@ export class PgAgentRunStore implements AgentRunStore {
             thread_id,
             agent_id,
             trigger_message_id,
+            spec,
             requester_group_ids,
             status,
             attempt,
@@ -95,6 +98,7 @@ export class PgAgentRunStore implements AgentRunStore {
             ${input.threadId},
             ${input.agentId},
             ${input.triggerMessageId},
+            ${JSON.stringify(input.spec)}::text::jsonb,
             ${JSON.stringify(normalizeRequesterGroupIds(input.requesterGroupIds))}::text::jsonb,
             ${"queued"},
             ${0},
