@@ -221,13 +221,15 @@ export class PgAiCostStorage implements AiCostStorage {
     const rows = await this.sql<JoinedRow[]>`
       SELECT usage.*,
         CASE
-          WHEN direct_agent.id IS NOT NULL THEN 'agent'
+          WHEN direct_agent.kind = 'conversation' THEN 'agent'
+          WHEN direct_agent.kind = 'subagent' THEN 'subagent'
           WHEN workflow_agent.node_run_id IS NOT NULL THEN 'workflowAgent'
           ELSE NULL
         END AS attribution_kind,
         COALESCE(direct_agent.agent_id, workflow_agent.agent_id) AS attribution_agent_id,
         direct_agent.id AS attribution_agent_run_id,
         direct_agent.thread_id AS attribution_thread_id,
+        direct_agent.parent_run_id AS attribution_parent_run_id,
         workflow_agent.node_run_id AS attribution_node_run_id,
         workflow_node.workflow_id AS attribution_workflow_id,
         workflow_node.workflow_run_id AS attribution_workflow_run_id,
@@ -320,10 +322,11 @@ interface UsageRow {
 }
 
 interface JoinedRow extends UsageRow {
-  readonly attribution_kind: "agent" | "workflowAgent" | null
+  readonly attribution_kind: "agent" | "subagent" | "workflowAgent" | null
   readonly attribution_agent_id: string | null
   readonly attribution_agent_run_id: string | null
   readonly attribution_thread_id: string | null
+  readonly attribution_parent_run_id: string | null
   readonly attribution_node_run_id: string | null
   readonly attribution_workflow_id: string | null
   readonly attribution_workflow_run_id: string | null
@@ -470,13 +473,19 @@ function accountingItemFromRow(row: JoinedRow): AiAccountingRecordSetItem {
             agentRunId: required(row.attribution_agent_run_id),
             threadId: required(row.attribution_thread_id),
           }
-        : {
-            kind: "workflowAgent" as const,
-            agentId: required(row.attribution_agent_id),
-            nodeRunId: required(row.attribution_node_run_id),
-            workflowId: required(row.attribution_workflow_id),
-            workflowRunId: required(row.attribution_workflow_run_id),
-          }
+        : row.attribution_kind === "subagent"
+          ? {
+              kind: "subagent" as const,
+              subagentRunId: required(row.attribution_agent_run_id),
+              parentRunId: required(row.attribution_parent_run_id),
+            }
+          : {
+              kind: "workflowAgent" as const,
+              agentId: required(row.attribution_agent_id),
+              nodeRunId: required(row.attribution_node_run_id),
+              workflowId: required(row.attribution_workflow_id),
+              workflowRunId: required(row.attribution_workflow_run_id),
+            }
   return {
     usage,
     ...(attribution ? { attribution } : {}),

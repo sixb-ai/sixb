@@ -14,10 +14,10 @@ import type { ExecutionContext } from "../execution/types"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { SecurityDefinitionCatalog } from "../security"
 import {
-  type AgentRunRecord,
   type AgentStorage,
   AgentStorageError,
   type AgentThreadRecord,
+  type ConversationAgentRunRecord,
 } from "../storage/agents"
 import type { CreateExecutionInput } from "../storage/executions"
 import { ensureAgentExecutionIdentity, resolveAgentExecutionAuthorization } from "./authority"
@@ -51,7 +51,7 @@ export interface RequestAgentRunInput {
 
 export interface RequestAgentRunResult {
   /** The durable queued run exactly as it was created (`status: "queued"`, attempt 0). */
-  readonly run: AgentRunRecord
+  readonly run: ConversationAgentRunRecord
   /** The enqueued job id, when the queue returns one. */
   readonly jobId?: string
   /** Whether this call created the thread. */
@@ -117,7 +117,7 @@ export async function requestAgentRun(
       })
     : []
   const triggerMessageId = input.messageId ?? createAgentMessageId()
-  let run: AgentRunRecord
+  let run: ConversationAgentRunRecord
   try {
     run = await runtime.storage.transaction(async (tx) => {
       const agents = tx.agents
@@ -174,7 +174,7 @@ export async function retryAgentRun(
   execution: ExecutionContext,
   security: SecurityDefinitionCatalog,
   agent: AgentDefinition,
-  failedRun: AgentRunRecord
+  failedRun: ConversationAgentRunRecord
 ): Promise<RequestAgentRunResult> {
   assertAuthorized(runtime, { kind: "agent.run", agentId: agent.id })
   assertRequestAuthorityCanRunAgent(runtime, agent)
@@ -328,7 +328,10 @@ async function dispatchAgentRun(
 }
 
 /** Activity delivery is observational: durable run admission remains successful if the feed is down. */
-async function publishRunActivity(runtime: SixbRuntimeContext, run: AgentRunRecord): Promise<void> {
+async function publishRunActivity(
+  runtime: SixbRuntimeContext,
+  run: ConversationAgentRunRecord
+): Promise<void> {
   try {
     await publishAgentRunActivity(runtime.broker, run)
   } catch (error) {

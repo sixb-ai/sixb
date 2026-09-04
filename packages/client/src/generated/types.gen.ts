@@ -1884,6 +1884,11 @@ export type ListAiModelCallsResponses = {
             workflowId: string
             workflowRunId: string
           }
+        | {
+            kind: "subagent"
+            subagentRunId: string
+            parentRunId: string
+          }
       cost?:
         | {
             status: "rated"

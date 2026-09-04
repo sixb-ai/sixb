@@ -33,7 +33,7 @@ export type ExecutionExecutor =
       readonly id: string
       readonly runId: string
     }
-  | { readonly type: "agent"; readonly agentId: string; readonly runId: string }
+  | { readonly type: "agent"; readonly agentId?: string; readonly runId: string }
   | { readonly type: "kernel"; readonly operation: KernelOperation }
 
 /**

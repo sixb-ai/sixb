@@ -236,8 +236,8 @@ export async function resolveAgentExecutionAuthorization(input: {
   }
 }
 
-/** Revalidate the durable user authority inherited by the framework-owned main Agent. */
-export async function resolveInheritedMainAgentExecutionAuthorization(input: {
+/** Revalidate the durable user authority inherited by a conversational or child Agent. */
+export async function resolveInheritedAgentExecutionAuthorization(input: {
   readonly auth: AuthStorage | undefined
   readonly projectId: string
   readonly authorizationRef: AuthorizationRef
@@ -273,6 +273,10 @@ export async function resolveInheritedMainAgentExecutionAuthorization(input: {
     }),
   }
 }
+
+/** Compatibility name for the framework-owned conversation entry point. */
+export const resolveInheritedMainAgentExecutionAuthorization =
+  resolveInheritedAgentExecutionAuthorization
 
 function requireCredentialedUserAuthority(ref: AuthorizationRef): CredentialedUserAuthorizationRef {
   if (ref.type !== "principal" || ref.principal.type !== "user" || ref.credential === undefined) {
@@ -355,7 +359,7 @@ function isUsableUserAccessToken(
 function invalidInheritedAuthority(reason: string): Error {
   return createSixbError(
     "agent.execution_failed",
-    `[Sixb] The main Agent execution cannot restore its inherited authority: ${reason}.`
+    `[Sixb] The Agent execution cannot restore its inherited authority: ${reason}.`
   )
 }
 

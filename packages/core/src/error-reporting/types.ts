@@ -15,8 +15,10 @@ export interface SixbRunIdentityByKind {
   }
   readonly agent: {
     readonly runId: string
-    readonly agentId: string
-  }
+  } & (
+    | { readonly agentId: string; readonly parentRunId?: never }
+    | { readonly parentRunId: string; readonly agentId?: never }
+  )
   readonly pipeline: {
     readonly runId: string
     readonly pipelineId: string

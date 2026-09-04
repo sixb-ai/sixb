@@ -1,9 +1,11 @@
 import { type AgentExecutionAuthorization, agentServiceAccountId } from "../agents/authority"
-import { MAIN_AGENT_ID } from "../agents/main"
 import type { OntologySource } from "../ontology"
 import { isBoundSixb, type Sixb } from "../runtime/sixb"
 import type { CreateExecutionInput, ExecutionRecord } from "../storage/executions"
 import { ExecutionStorageError } from "../storage/executions"
+
+export { ensureExecutionRecord } from "./durable"
+
 import { createAgentRuntimeAuthorization, getAuthorizationRef } from "./authorization"
 import type {
   AuthorizablePrincipal,
@@ -60,6 +62,15 @@ export function createInheritedMainAgentExecutionRecord(input: {
   readonly parent: ExecutionRecord
   readonly runId: string
 }): CreateExecutionInput {
+  return createInheritedAgentExecutionRecord(input)
+}
+
+/** Build an Agent execution that carries its parent's exact durable authority reference. */
+export function createInheritedAgentExecutionRecord(input: {
+  readonly id: string
+  readonly parent: ExecutionRecord
+  readonly runId: string
+}): CreateExecutionInput {
   const authority = input.parent.authorizationRef
   if (
     authority.type !== "disabled" &&
@@ -71,7 +82,7 @@ export function createInheritedMainAgentExecutionRecord(input: {
   ) {
     throw new ExecutionStorageError(
       "invalid_input",
-      `[Sixb] Main Agent run '${input.runId}' requires inheritable user or auth-disabled authority.`
+      `[Sixb] Agent run '${input.runId}' requires inheritable user or auth-disabled authority.`
     )
   }
 
@@ -93,7 +104,7 @@ export function bindDurableAgentExecution(
   host: AgentExecutionHost,
   input: {
     readonly execution: ExecutionRecord
-    readonly agentId: string
+    readonly agentId?: string
     readonly runId: string
     readonly authorization: AgentExecutionAuthorization
   }
@@ -109,7 +120,7 @@ export function bindDurableAgentExecution(
 /** Restore one provider-validated Agent execution with its currently resolved grants. */
 export function restoreAgentExecutionScope(input: {
   readonly execution: ExecutionRecord
-  readonly agentId: string
+  readonly agentId?: string
   readonly runId: string
   readonly authorization: AgentExecutionAuthorization
 }): ExecutionScope {
@@ -120,7 +131,11 @@ export function restoreAgentExecutionScope(input: {
     ...(input.execution.requestedBy === undefined
       ? {}
       : { requestedBy: Object.freeze(structuredClone(input.execution.requestedBy)) }),
-    executor: Object.freeze({ type: "agent", agentId: input.agentId, runId: input.runId }),
+    executor: Object.freeze({
+      type: "agent",
+      ...(input.agentId === undefined ? {} : { agentId: input.agentId }),
+      runId: input.runId,
+    }),
     source: Object.freeze(structuredClone(input.execution.source)),
     correlationId: input.execution.correlationId,
   })
@@ -129,7 +144,7 @@ export function restoreAgentExecutionScope(input: {
     authorization: createAgentRuntimeAuthorization({
       projectId: input.execution.projectId,
       executionId: input.execution.id,
-      agentId: input.agentId,
+      ...(input.agentId === undefined ? {} : { agentId: input.agentId }),
       runId: input.runId,
       authority:
         input.authorization.type === "principal"
@@ -149,7 +164,7 @@ export function restoreAgentExecutionScope(input: {
 /** Validate that a durable record belongs to the exact resolved Agent execution. */
 export function assertAgentExecutionRecord(input: {
   readonly execution: ExecutionRecord
-  readonly agentId: string
+  readonly agentId?: string
   readonly runId: string
   readonly authorization: AgentExecutionAuthorization
 }): void {
@@ -162,8 +177,11 @@ export function assertAgentExecutionRecord(input: {
     invalidAgentExecution(input.execution.id, input.runId)
   }
 
-  if (input.agentId === MAIN_AGENT_ID) {
-    assertInheritedMainAgentAuthority(input.execution, input.runId, input.authorization)
+  if (
+    input.authorization.type === "disabled" ||
+    input.authorization.context.principal.type === "user"
+  ) {
+    assertInheritedAgentAuthority(input.execution, input.runId, input.authorization)
     return
   }
 
@@ -177,10 +195,13 @@ export function assertAgentExecutionRecord(input: {
   ) {
     invalidAgentExecution(input.execution.id, input.runId)
   }
+  if (input.agentId === undefined) {
+    invalidAgentExecution(input.execution.id, input.runId)
+  }
   assertAgentPrincipal(input.agentId, authority.principal)
 }
 
-function assertInheritedMainAgentAuthority(
+function assertInheritedAgentAuthority(
   execution: ExecutionRecord,
   runId: string,
   authorization: AgentExecutionAuthorization

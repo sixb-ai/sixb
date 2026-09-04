@@ -7,6 +7,7 @@ import {
   type AgentContextCheckpointReason,
   type AgentRunFailureCode,
   type AgentRunRecord,
+  type ConversationAgentRunRecord,
 } from "../storage/agents/types"
 
 export const AGENT_RUN_STREAM_SCHEMA_VERSION = 1 as const
@@ -42,7 +43,7 @@ export function agentActivityStreamDefinition(): BrokerStreamDefinition {
 }
 
 export function agentRunActivityEvent(
-  run: AgentRunRecord,
+  run: ConversationAgentRunRecord,
   occurredAt: Date = new Date()
 ): AgentRunActivityEvent {
   return {
@@ -74,7 +75,10 @@ export function isAgentRunActivityEvent(value: unknown): value is AgentRunActivi
   )
 }
 
-export async function publishAgentRunActivity(broker: Broker, run: AgentRunRecord): Promise<void> {
+export async function publishAgentRunActivity(
+  broker: Broker,
+  run: ConversationAgentRunRecord
+): Promise<void> {
   const event = agentRunActivityEvent(run)
   await broker.ensureStream({
     projectId: run.projectId,
@@ -108,15 +112,24 @@ export function agentRunStreamDefinition(runId: string): BrokerStreamDefinition 
   }
 }
 
-interface AgentRunStreamEventBase {
+type AgentRunStreamEventBase = {
   readonly schemaVersion: typeof AGENT_RUN_STREAM_SCHEMA_VERSION
   readonly projectId: string
   readonly runId: string
-  readonly threadId: string
-  readonly agentId: string
   readonly attempt: number
   readonly occurredAt: string
-}
+} & (
+  | {
+      readonly threadId: string
+      readonly agentId: string
+      readonly parentRunId?: never
+    }
+  | {
+      readonly parentRunId: string
+      readonly threadId?: never
+      readonly agentId?: never
+    }
+)
 
 // ── Control stream (worker-inbound) ─────────────────────────────────────────────────────────────
 //
@@ -157,7 +170,12 @@ export async function publishAgentRunCancel(
     projectId: params.projectId,
     streamId: agentRunControlStreamId(params.runId),
     records: [
-      { name: AGENT_RUN_CANCEL_RECORD, key: params.runId, payload: { runId: params.runId } },
+      {
+        name: AGENT_RUN_CANCEL_RECORD,
+        key: params.runId,
+        payload: { runId: params.runId },
+        idempotencyKey: `${params.runId}:cancel`,
+      },
     ],
   })
 }
@@ -254,18 +272,29 @@ export function agentRunFinishedEvent(
     )
   }
   return {
-    schemaVersion: AGENT_RUN_STREAM_SCHEMA_VERSION,
+    ...agentRunStreamEventBase(run, occurredAt),
     type: "agent.run.finished",
-    projectId: run.projectId,
-    runId: run.id,
-    threadId: run.threadId,
-    agentId: run.agentId,
-    attempt: run.attempt,
     status: run.status,
     ...(run.finishReason === undefined ? {} : { finishReason: run.finishReason }),
     ...(run.error === undefined ? {} : { error: run.error }),
+  }
+}
+
+/** Shared lineage for stream records emitted by conversational and headless runs. */
+export function agentRunStreamEventBase(
+  run: AgentRunRecord,
+  occurredAt: Date = new Date()
+): AgentRunStreamEventBase {
+  const common = {
+    schemaVersion: AGENT_RUN_STREAM_SCHEMA_VERSION,
+    projectId: run.projectId,
+    runId: run.id,
+    attempt: run.attempt,
     occurredAt: occurredAt.toISOString(),
   }
+  return run.kind === "conversation"
+    ? { ...common, threadId: run.threadId, agentId: run.agentId }
+    : { ...common, parentRunId: run.parentRunId }
 }
 
 /** Validate an Agent stream payload using the same contract its producers use. */
@@ -275,8 +304,6 @@ export function isAgentRunStreamEvent(value: unknown): value is AgentRunStreamEv
     value.schemaVersion !== AGENT_RUN_STREAM_SCHEMA_VERSION ||
     typeof value.projectId !== "string" ||
     typeof value.runId !== "string" ||
-    typeof value.threadId !== "string" ||
-    typeof value.agentId !== "string" ||
     typeof value.attempt !== "number" ||
     !Number.isFinite(value.attempt) ||
     typeof value.occurredAt !== "string" ||
@@ -284,6 +311,15 @@ export function isAgentRunStreamEvent(value: unknown): value is AgentRunStreamEv
   ) {
     return false
   }
+  const hasConversationLineage =
+    typeof value.threadId === "string" &&
+    typeof value.agentId === "string" &&
+    value.parentRunId === undefined
+  const hasSubagentLineage =
+    typeof value.parentRunId === "string" &&
+    value.threadId === undefined &&
+    value.agentId === undefined
+  if (!hasConversationLineage && !hasSubagentLineage) return false
 
   switch (value.type) {
     case "agent.run.started":
@@ -393,5 +429,5 @@ export async function publishAgentRunFinished(broker: Broker, run: AgentRunRecor
       },
     ],
   })
-  await publishAgentRunActivity(broker, run)
+  if (run.kind === "conversation") await publishAgentRunActivity(broker, run)
 }

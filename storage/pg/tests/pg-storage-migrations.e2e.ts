@@ -80,6 +80,7 @@ describe("Postgres storage migrations", () => {
             "026-ai-cost-accounting",
             "027-agent-context-checkpoints",
             "028-object-override-edit-times",
+            "029-subagent-runs",
           ],
         },
       ])
@@ -279,6 +280,13 @@ describe("Postgres storage migrations", () => {
           id: "028-object-override-edit-times",
           status: "applied",
           version: 28,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "029-subagent-runs",
+          status: "applied",
+          version: 29,
         },
       ])
     })
@@ -1284,6 +1292,9 @@ describe("Postgres storage migrations", () => {
         "workflow_agent_node_runs"
       )
       expect(agentRunColumns).toContain("requester_group_ids")
+      expect(agentRunColumns).toEqual(
+        expect.arrayContaining(["kind", "parent_run_id", "spawn_key", "spec", "result"])
+      )
       expect(agentRunColumns).not.toContain("usage_input_tokens")
       expect(agentRunColumns).not.toContain("usage_output_tokens")
       expect(agentRunColumns).not.toContain("usage_total_tokens")
@@ -1758,6 +1769,13 @@ describe("Postgres storage migrations", () => {
           id: "028-object-override-edit-times",
           status: "applied",
           version: 28,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "029-subagent-runs",
+          status: "applied",
+          version: 29,
         },
       ])
     } finally {

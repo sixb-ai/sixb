@@ -13,7 +13,7 @@ import type {
   AgentContextCheckpointReason,
   AgentContextCheckpointRecord,
   AgentMessageRecord,
-  AgentRunRecord,
+  ConversationAgentRunRecord,
 } from "@sixb/core/storage"
 import { AgentStorageError, stableJsonStringify } from "@sixb/core/storage"
 import { generateText } from "ai"
@@ -55,7 +55,7 @@ export async function prepareAgentConversationContext(input: {
   readonly context: AgentExecutionContext
   readonly agent: AgentDefinition
   readonly budget: AgentContextBudget
-  readonly run: AgentRunRecord
+  readonly run: ConversationAgentRunRecord
   readonly runtime: AgentTurnRuntime
 }): Promise<PreparedAgentConversationContext> {
   const { context, agent, budget, run, runtime } = input
@@ -285,7 +285,7 @@ function findLatestUsageAnchor(messages: readonly AgentMessageRecord[], afterSeq
 async function generateCheckpointSummary(input: {
   readonly agent: AgentDefinition
   readonly budget: AgentContextBudget
-  readonly run: AgentRunRecord
+  readonly run: ConversationAgentRunRecord
   readonly runtime: AgentTurnRuntime
   readonly previousCheckpoint: AgentContextCheckpointRecord | null
   readonly messages: readonly AgentMessageRecord[]
@@ -353,7 +353,7 @@ function summaryPrompt(
 async function createCheckpoint(input: {
   readonly context: AgentExecutionContext
   readonly runtime: AgentTurnRuntime
-  readonly run: AgentRunRecord
+  readonly run: ConversationAgentRunRecord
   readonly candidate: AgentContextCheckpointRecord
   readonly estimatedInputTokensAfter: number
   readonly expectedPreviousCheckpointId: string | null
@@ -409,7 +409,10 @@ async function createCheckpoint(input: {
   }
 }
 
-function requiredHeadSeq(messages: readonly AgentMessageRecord[], run: AgentRunRecord): number {
+function requiredHeadSeq(
+  messages: readonly AgentMessageRecord[],
+  run: ConversationAgentRunRecord
+): number {
   const head = messages.at(-1)?.seq
   if (head === undefined) {
     throw new AgentContextCompactionError(
@@ -421,7 +424,7 @@ function requiredHeadSeq(messages: readonly AgentMessageRecord[], run: AgentRunR
   return head
 }
 
-function requiredExecutionToken(run: AgentRunRecord): string {
+function requiredExecutionToken(run: ConversationAgentRunRecord): string {
   const token = run.execution?.token
   if (!token) {
     throw new AgentContextCompactionError(

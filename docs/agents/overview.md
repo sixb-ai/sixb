@@ -25,6 +25,28 @@ export const sixb = createSixb({
 The agent worker runs each turn through the existing durable run, stream, and sandbox lifecycle.
 When authentication is enabled, the main agent inherits the requesting user's current authority.
 
+## Child agents
+
+The main agent can delegate focused tasks to headless child agents. It can choose any language
+model configured in `models.language`, continue working after a child starts, and wait only when it
+needs the result. Children are created at runtime rather than declared with `defineAgent`; no extra
+project configuration is required.
+
+Each child:
+
+- inherits and independently revalidates the parent's durable authority;
+- receives all project tools plus an isolated sandbox and scoped Sixb API access;
+- owns a durable run, usage records, stream, and isolated sandbox, but no conversation thread;
+- is cancelled if its parent finishes while it is still active.
+
+Up to four children may be active per parent run. They execute on a separate worker lane so waiting
+parents cannot consume their capacity. Child agents cannot delegate again or start workflows in
+this first version.
+
+When several models are configured, the main Agent sees the default, base input/output prices, and
+context limits from Sixb's pinned Models.dev catalog when available. Runtime speed is not guessed;
+the default remains the fallback when there is no clear reason to select another model.
+
 ## Defined agents
 
 `defineAgent` remains temporarily available for existing conversational agents. New workflow agent
@@ -60,7 +82,7 @@ See [Defining agents](./defining-agents.md) for every config field.
 | **Thread** | One conversation with an agent, owned by a principal. |
 | **Run** | One turn. Posting a user message triggers a run. |
 | **Message** | A `system`, `user`, or `assistant` message made of `text`, `reasoning`, `step-start`, and `tool-call` parts. |
-| **Tools** | Project tools plus built-in `read` and `bash` in a [sandbox](../sandboxes/overview.md). |
+| **Tools** | Project tools plus `read`, `view_file`, and `bash`; the main agent also gets `spawn_agent` and `wait_agent`. |
 
 ## Run an agent
 

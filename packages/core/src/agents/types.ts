@@ -73,12 +73,14 @@ export type InferAgentToolInputSchema<TInput extends AgentToolInputSchema> =
         readonly [K in keyof TInput]: JsonifyAgentToolInput<InferSchema<TInput[K]>>
       }>
 
-/** Identifies the agent execution that invoked a tool. */
-export interface AgentToolRunInfo {
+/** Identifies the definition-backed or headless Agent execution that invoked a tool. */
+export type AgentToolRunInfo = {
   readonly id: string
-  readonly agentId: string
   readonly threadId?: string
-}
+} & (
+  | { readonly agentId: string; readonly parentRunId?: never }
+  | { readonly parentRunId: string; readonly agentId?: never }
+)
 
 /** Input accepted by the run-scoped artifact publisher exposed to agent tools. */
 export interface AgentToolArtifactPutInput {

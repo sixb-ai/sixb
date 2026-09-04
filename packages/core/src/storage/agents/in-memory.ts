@@ -1,3 +1,4 @@
+import { MAIN_AGENT_ID } from "../../agents/main"
 import { AGENT_MESSAGE_CONTENT_VERSION } from "../../agents/message"
 import { principalsEqual } from "../../auth"
 import { normalizeRequesterGroupIds } from "../../auth/attribution"
@@ -12,6 +13,9 @@ import {
   assertAgentContextCheckpointReplayState,
   assertAgentRunExecution,
   assertCreateAgentContextCheckpointInput,
+  assertCreateSubagentRunInput,
+  assertSubagentRunResult,
+  subagentRunMatchesCreateInput,
 } from "./provider"
 import type {
   AgentContextCheckpointRecord,
@@ -26,9 +30,11 @@ import type {
   AgentThreadStore,
   AppendAgentMessageInput,
   ConfirmAgentRunExecutionOwnershipInput,
+  ConversationAgentRunRecord,
   CreateAgentContextCheckpointInput,
   CreateAgentRunInput,
   CreateAgentThreadInput,
+  CreateSubagentRunInput,
   DeleteAgentMessagesByRunInput,
   FinishAgentRunInput,
   FinishQueuedAgentRunInput,
@@ -40,6 +46,7 @@ import type {
   ListAgentThreadsResult,
   ReclaimAgentRunInput,
   StartAgentRunInput,
+  SubagentRunRecord,
 } from "./types"
 import { AGENT_RUN_FAILURE_CODES } from "./types"
 
@@ -180,13 +187,16 @@ class InMemoryAgentRunStore implements AgentRunStore {
     private readonly executions: ExecutionStorage
   ) {}
 
-  async create(input: CreateAgentRunInput): Promise<AgentRunRecord> {
+  async create(input: CreateAgentRunInput): Promise<ConversationAgentRunRecord> {
     await assertAgentRunExecution({
       executions: this.executions,
       projectId: input.projectId,
       executionId: input.executionId,
       runId: input.id,
-      agentId: input.agentId,
+      authority:
+        input.agentId === MAIN_AGENT_ID
+          ? { type: "inherited" }
+          : { type: "managed", agentId: input.agentId },
     })
     // No `await` between read and write: the in-memory critical section is atomic, so two concurrent
     // queued runs on the same thread cannot both win — the second observes `activeRunId` set.
@@ -224,7 +234,8 @@ class InMemoryAgentRunStore implements AgentRunStore {
     }
 
     const createdAt = new Date(input.createdAt ?? new Date())
-    const run: AgentRunRecord = {
+    const run: ConversationAgentRunRecord = {
+      kind: "conversation",
       id: input.id,
       projectId: input.projectId,
       executionId: input.executionId,
@@ -245,6 +256,95 @@ class InMemoryAgentRunStore implements AgentRunStore {
     }
     this.state.threads.set(threadKey, clone(updatedThread))
 
+    return clone(run)
+  }
+
+  async createSubagent(input: CreateSubagentRunInput): Promise<SubagentRunRecord> {
+    assertCreateSubagentRunInput(input)
+    const execution = await assertAgentRunExecution({
+      executions: this.executions,
+      projectId: input.projectId,
+      executionId: input.executionId,
+      runId: input.id,
+      authority: { type: "inherited" },
+    })
+
+    const runKey = key(input.projectId, input.id)
+    const existing = this.state.runs.get(runKey)
+    if (existing) {
+      if (subagentRunMatchesCreateInput(existing, input)) return clone(existing)
+      throw new AgentStorageError(
+        "duplicate_id",
+        `[Sixb] Subagent run '${input.id}' already exists with different immutable inputs.`
+      )
+    }
+
+    const parent = this.state.runs.get(key(input.projectId, input.parentRunId))
+    if (!parent || parent.kind !== "conversation") {
+      throw new AgentStorageError(
+        "run_not_found",
+        `[Sixb] Parent Agent run '${input.parentRunId}' was not found.`
+      )
+    }
+    if (parent.status !== "running") {
+      throw new AgentStorageError(
+        "invalid_state",
+        `[Sixb] Parent Agent run '${parent.id}' is not running (status '${parent.status}').`
+      )
+    }
+    if (
+      execution.source.type !== "execution" ||
+      execution.source.executionId !== parent.executionId
+    ) {
+      throw new AgentStorageError(
+        "invalid_input",
+        `[Sixb] Subagent execution '${execution.id}' is not a child of parent execution '${parent.executionId}'.`
+      )
+    }
+    if (parent.execution?.token !== input.parentExecutionToken) {
+      throw new AgentStorageError(
+        "execution_lost",
+        `[Sixb] Parent Agent run '${parent.id}' is no longer owned by this execution.`
+      )
+    }
+    const activeChildren = [...this.state.runs.values()].filter(
+      (run) =>
+        run.kind === "subagent" &&
+        run.projectId === input.projectId &&
+        run.parentRunId === parent.id &&
+        (run.status === "queued" || run.status === "running")
+    ).length
+    if (activeChildren >= input.maxActiveChildren) {
+      throw new AgentStorageError(
+        "active_child_limit",
+        `[Sixb] Agent run '${parent.id}' already has ${activeChildren} active subagents.`
+      )
+    }
+    if (
+      [...this.state.runs.values()].some(
+        (run) => run.projectId === input.projectId && run.executionId === input.executionId
+      )
+    ) {
+      throw new AgentStorageError(
+        "duplicate_id",
+        `[Sixb] Execution '${input.executionId}' already belongs to another Agent run.`
+      )
+    }
+
+    const run: SubagentRunRecord = {
+      kind: "subagent",
+      id: input.id,
+      projectId: input.projectId,
+      executionId: input.executionId,
+      parentRunId: input.parentRunId,
+      spawnKey: input.spawnKey,
+      spec: clone(input.spec),
+      requesterGroupIds: clone(parent.requesterGroupIds),
+      status: "queued",
+      attempt: 0,
+      createdAt: new Date(input.createdAt ?? new Date()),
+    }
+    this.state.runs.set(runKey, clone(run))
     return clone(run)
   }
 
@@ -320,6 +420,15 @@ class InMemoryAgentRunStore implements AgentRunStore {
         `[Sixb] Execution token is no longer current on agent run '${input.id}'.`
       )
     }
+    if (input.status === "succeeded" && run.kind === "subagent") {
+      assertSubagentRunResult(input.result, run.id)
+    }
+    if (input.status === "succeeded" && run.kind === "conversation" && input.result !== undefined) {
+      throw new AgentStorageError(
+        "invalid_input",
+        `[Sixb] Conversational Agent run '${run.id}' cannot persist a subagent result.`
+      )
+    }
 
     const completedAt = new Date(input.completedAt ?? new Date())
     const next: AgentRunRecord = {
@@ -328,6 +437,9 @@ class InMemoryAgentRunStore implements AgentRunStore {
       ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
       ...(input.finishReason === undefined ? {} : { finishReason: input.finishReason }),
       ...(input.diagnostics === undefined ? {} : { diagnostics: clone(input.diagnostics) }),
+      ...(input.status === "succeeded" && input.result !== undefined
+        ? { result: clone(input.result) }
+        : {}),
       ...(input.status === "succeeded" || input.error === undefined
         ? {}
         : { error: normalizeFailure(input.error) }),
@@ -359,11 +471,20 @@ class InMemoryAgentRunStore implements AgentRunStore {
   async list(input: ListAgentRunsInput): Promise<ListAgentRunsResult> {
     const order = input.order ?? "desc"
     const statuses = input.statuses ? new Set(input.statuses) : null
+    const kinds = input.kinds ? new Set(input.kinds) : null
 
     const filtered = [...this.state.runs.values()]
       .filter((run) => run.projectId === input.projectId)
-      .filter((run) => (input.threadId ? run.threadId === input.threadId : true))
-      .filter((run) => (input.agentId ? run.agentId === input.agentId : true))
+      .filter((run) => (kinds ? kinds.has(run.kind) : true))
+      .filter((run) =>
+        input.threadId ? run.kind === "conversation" && run.threadId === input.threadId : true
+      )
+      .filter((run) =>
+        input.agentId ? run.kind === "conversation" && run.agentId === input.agentId : true
+      )
+      .filter((run) =>
+        input.parentRunId ? run.kind === "subagent" && run.parentRunId === input.parentRunId : true
+      )
       .filter((run) => (statuses ? statuses.has(run.status) : true))
       .filter((run) =>
         input.startedAfter ? (run.startedAt ?? run.createdAt) >= input.startedAfter : true
@@ -405,6 +526,7 @@ class InMemoryAgentRunStore implements AgentRunStore {
   }
 
   private releaseThread(run: AgentRunRecord, completedAt: Date): void {
+    if (run.kind !== "conversation") return
     const threadKey = key(run.projectId, run.threadId)
     const thread = this.state.threads.get(threadKey)
     if (thread && thread.activeRunId === run.id) {

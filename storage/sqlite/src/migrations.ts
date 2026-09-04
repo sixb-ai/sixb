@@ -76,6 +76,7 @@ import agentContextCheckpointsSql from "./migrations/027-agent-context-checkpoin
 import objectOverrideEditTimesSql from "./migrations/028-object-override-edit-times.sql" with {
   type: "text",
 }
+import subagentRunsSql from "./migrations/029-subagent-runs.sql" with { type: "text" }
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -159,6 +160,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("026-ai-cost-accounting", aiCostAccountingSql),
     sqliteSql("027-agent-context-checkpoints", agentContextCheckpointsSql),
     sqliteSql("028-object-override-edit-times", objectOverrideEditTimesSql),
+    sqliteSql("029-subagent-runs", subagentRunsSql),
   ],
 })
 

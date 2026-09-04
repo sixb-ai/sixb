@@ -124,7 +124,7 @@ export interface AgentWorkerOptions {
   readonly apiBaseUrl: string
   /** Project Agent Skills directory. Defaults to `<projectRoot>/skills`; `false` disables project skills. */
   readonly skillsDir?: string | false
-  /** Maximum number of agent run jobs this worker claims and executes at once. Defaults to 4. */
+  /** Maximum number of primary agent jobs this worker executes at once. Defaults to 8. */
   readonly concurrency?: number
   /** Stream routing seam. Defaults to broker backed. */
   readonly streamSink?: StreamSink

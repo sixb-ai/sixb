@@ -154,7 +154,9 @@ export function buildAiAccountingOverview(
       JSON.stringify([item.usage.providerId, item.usage.requestedModelId]),
       item
     )
-    if (item.attribution) appendGrouped(agentItems, item.attribution.agentId, item)
+    if (item.attribution?.kind === "agent" || item.attribution?.kind === "workflowAgent") {
+      appendGrouped(agentItems, item.attribution.agentId, item)
+    }
     if (item.attribution?.kind === "workflowAgent") {
       appendGrouped(workflowItems, item.attribution.workflowId, item)
     }

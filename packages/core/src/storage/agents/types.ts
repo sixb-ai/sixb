@@ -1,7 +1,10 @@
 import type { AgentMessage, AgentMessagePart, AgentMessageRole } from "../../agents/message"
+import type { AgentReasoningLevel } from "../../agents/types"
 import type { Principal } from "../../auth"
+import type { FileRef } from "../../blob-storage"
 import type { SixbErrorCode, SixbFailure } from "../../errors/types"
 import type { JsonValue } from "../../json"
+import type { LanguageModelRef } from "../../models"
 
 // ── agent_threads — one conversation with an agent ──────────────────────────────────────────────
 
@@ -58,6 +61,7 @@ export interface ListAgentThreadsResult {
 export type AgentExecutionStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled"
 
 export type AgentRunStatus = AgentExecutionStatus
+export type AgentRunKind = "conversation" | "subagent"
 
 /** Error codes an agent execution can persist and expose through its public contract. */
 export const AGENT_RUN_FAILURE_CODES = [
@@ -144,13 +148,10 @@ export interface AgentRunExecution {
   readonly queueLeaseExpiresAt: Date
 }
 
-export interface AgentRunRecord {
+interface AgentRunRecordBase {
   readonly id: string
   readonly projectId: string
   readonly executionId: string
-  readonly threadId: string
-  readonly agentId: string
-  readonly triggerMessageId: string
   /** Durable group memberships snapshotted when the run was admitted. */
   readonly requesterGroupIds: readonly string[]
   readonly status: AgentRunStatus
@@ -169,6 +170,41 @@ export interface AgentRunRecord {
   readonly completedAt?: Date
 }
 
+export interface ConversationAgentRunRecord extends AgentRunRecordBase {
+  readonly kind: "conversation"
+  readonly threadId: string
+  readonly agentId: string
+  readonly triggerMessageId: string
+}
+
+/** Immutable, serialisable child configuration captured before dispatch. */
+export interface SubagentRunSpec {
+  readonly model: LanguageModelRef
+  readonly reasoning?: AgentReasoningLevel
+  /** Focused task supplied by the parent Agent. */
+  readonly task: string
+  /** Project tools available when the child was admitted. Runtime tools are injected separately. */
+  readonly toolNames: readonly string[]
+  readonly maxSteps: number
+}
+
+/** Durable child output returned to its parent by `wait_agent`. */
+export interface SubagentRunResult {
+  readonly text?: string
+  readonly files?: readonly FileRef[]
+}
+
+export interface SubagentRunRecord extends AgentRunRecordBase {
+  readonly kind: "subagent"
+  readonly parentRunId: string
+  /** Stable parent-selected key that makes repeated tool execution idempotent. */
+  readonly spawnKey: string
+  readonly spec: SubagentRunSpec
+  readonly result?: SubagentRunResult
+}
+
+export type AgentRunRecord = ConversationAgentRunRecord | SubagentRunRecord
+
 export interface CreateAgentRunInput {
   readonly id: string
   readonly projectId: string
@@ -177,6 +213,20 @@ export interface CreateAgentRunInput {
   readonly agentId: string
   readonly triggerMessageId: string
   readonly requesterGroupIds: readonly string[]
+  readonly createdAt?: Date
+}
+
+export interface CreateSubagentRunInput {
+  readonly id: string
+  readonly projectId: string
+  readonly executionId: string
+  readonly parentRunId: string
+  /** Current parent delivery token. New children are admitted only while that delivery owns it. */
+  readonly parentExecutionToken: string
+  readonly spawnKey: string
+  readonly spec: SubagentRunSpec
+  /** Internal safety bound enforced atomically across worker processes. */
+  readonly maxActiveChildren: number
   readonly createdAt?: Date
 }
 
@@ -219,6 +269,7 @@ export type FinishAgentRunInput =
       readonly modelId?: string
       readonly finishReason?: AgentRunFinishReason
       readonly diagnostics?: readonly AgentRunDiagnostic[]
+      readonly result?: SubagentRunResult
       readonly completedAt?: Date
     }
   | {
@@ -235,8 +286,10 @@ export type FinishAgentRunInput =
 
 export interface ListAgentRunsInput {
   readonly projectId: string
+  readonly kinds?: readonly AgentRunKind[]
   readonly threadId?: string
   readonly agentId?: string
+  readonly parentRunId?: string
   readonly statuses?: readonly AgentRunStatus[]
   /** Effective start time; runs that never started use `createdAt`. */
   readonly startedAfter?: Date
@@ -371,7 +424,9 @@ export interface AgentThreadStore {
 
 export interface AgentRunStore {
   /** Persist a queued run and atomically claim the thread's single-flight slot. */
-  create(input: CreateAgentRunInput): Promise<AgentRunRecord>
+  create(input: CreateAgentRunInput): Promise<ConversationAgentRunRecord>
+  /** Persist or replay one idempotent child run while atomically enforcing parent fan-out. */
+  createSubagent(input: CreateSubagentRunInput): Promise<SubagentRunRecord>
   /** Transition a queued run to running and install the first delivery's execution token. */
   start(input: StartAgentRunInput): Promise<AgentRunRecord>
   /** Finish a queued run before execution and release the thread's single-flight slot. */

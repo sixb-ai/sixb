@@ -154,12 +154,19 @@ export class InMemoryStorage implements Storage {
       projectId: input.projectId,
       id: execution.executor.runId,
     })
-    if (directRun) {
+    if (directRun?.kind === "conversation") {
       return {
         kind: "agent",
         agentId: directRun.agentId,
         agentRunId: directRun.id,
         threadId: directRun.threadId,
+      }
+    }
+    if (directRun?.kind === "subagent") {
+      return {
+        kind: "subagent",
+        subagentRunId: directRun.id,
+        parentRunId: directRun.parentRunId,
       }
     }
     const agentRun = await this.workflowRunStorage.agentNodes.getByNodeRunId({

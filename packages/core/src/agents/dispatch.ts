@@ -1,4 +1,4 @@
-import type { AgentQueueJob, Queue } from "../queues"
+import type { AgentQueueJob, Queue, SubagentQueueJob } from "../queues"
 import type { AgentStorage } from "../storage/agents"
 
 export interface DispatchQueuedAgentRunsInput {
@@ -31,6 +31,10 @@ export function agentRunQueueJobId(runId: string): string {
   return `agt_job_${runId}`
 }
 
+export function subagentRunQueueJobId(runId: string): string {
+  return `agt_child_job_${runId}`
+}
+
 /** Stable queue identity shared by workflow dispatch and agent reconciliation. */
 export function workflowAgentNodeQueueJobId(nodeRunId: string): string {
   return `wfa_job_${nodeRunId}`
@@ -55,13 +59,14 @@ export async function dispatchQueuedAgentRuns(
     : (
         await input.storage.runs.list({
           projectId: input.projectId,
+          kinds: ["conversation"],
           statuses: ["queued"],
           order: "asc",
           limit,
         })
       ).runs
 
-  const queued = runs.filter((run) => run.status === "queued")
+  const queued = runs.filter((run) => run.kind === "conversation" && run.status === "queued")
   if (queued.length === 0) {
     return { scanned: 0, dispatched: [], failures: [] }
   }
@@ -80,6 +85,58 @@ export async function dispatchQueuedAgentRuns(
       const jobId = agentRunQueueJobId(run.id)
       if (!jobsById.has(jobId)) {
         throw new Error(`[Sixb] Agent queue did not return job '${jobId}'.`)
+      }
+      return { runId: run.id, jobId }
+    })
+    return { scanned: queued.length, dispatched, failures: [] }
+  } catch (error) {
+    return {
+      scanned: queued.length,
+      dispatched: [],
+      failures: queued.map((run) => ({ runId: run.id, error })),
+    }
+  }
+}
+
+export async function dispatchQueuedSubagentRuns(input: {
+  readonly projectId: string
+  readonly storage: AgentStorage
+  readonly queue: Queue<SubagentQueueJob>
+  readonly runIds?: readonly string[]
+  readonly limit?: number
+}): Promise<DispatchQueuedAgentRunsResult> {
+  const limit = normalizeLimit(input.limit)
+  const runs = input.runIds
+    ? await input.storage.runs.getByIds({
+        projectId: input.projectId,
+        ids: [...new Set(input.runIds)].slice(0, limit),
+      })
+    : (
+        await input.storage.runs.list({
+          projectId: input.projectId,
+          kinds: ["subagent"],
+          statuses: ["queued"],
+          order: "asc",
+          limit,
+        })
+      ).runs
+  const queued = runs.filter((run) => run.kind === "subagent" && run.status === "queued")
+  if (queued.length === 0) return { scanned: 0, dispatched: [], failures: [] }
+
+  try {
+    const jobs = await input.queue.enqueue({
+      projectId: input.projectId,
+      jobs: queued.map((run) => ({
+        id: subagentRunQueueJobId(run.id),
+        type: "agent.subagent-run.requested" as const,
+        payload: { runId: run.id },
+      })),
+    })
+    const jobsById = new Set(jobs.map((job) => job.id))
+    const dispatched = queued.map((run) => {
+      const jobId = subagentRunQueueJobId(run.id)
+      if (!jobsById.has(jobId)) {
+        throw new Error(`[Sixb] Subagent queue did not return job '${jobId}'.`)
       }
       return { runId: run.id, jobId }
     })

@@ -170,6 +170,11 @@ export type AiAccountingAttribution =
       readonly workflowId: string
       readonly workflowRunId: string
     }
+  | {
+      readonly kind: "subagent"
+      readonly subagentRunId: string
+      readonly parentRunId: string
+    }
 
 export interface AiModelCallAccountingItem {
   readonly usage: AiModelCallUsageRecord

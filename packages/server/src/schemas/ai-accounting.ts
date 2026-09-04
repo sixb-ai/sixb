@@ -169,6 +169,11 @@ export const AiModelCallAccountingItemSchema = z.object({
         workflowId: z.string(),
         workflowRunId: z.string(),
       }),
+      z.object({
+        kind: z.literal("subagent"),
+        subagentRunId: z.string(),
+        parentRunId: z.string(),
+      }),
     ])
     .optional(),
   cost: AiModelCallCostSchema.optional(),

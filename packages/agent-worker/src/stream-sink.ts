@@ -1,18 +1,22 @@
 import type { Broker, JsonValue } from "@sixb/core"
 import type { AgentCompactionFailureCode, AgentRunStreamEvent } from "@sixb/core/agents/streams"
 import {
-  AGENT_RUN_STREAM_SCHEMA_VERSION,
   agentRunFinishedEvent,
   agentRunStreamDefinition,
+  agentRunStreamEventBase,
   agentRunStreamId,
   agentRunStreamIdempotencyKey,
   publishAgentRunActivity,
 } from "@sixb/core/agents/streams"
 import { createSixbError } from "@sixb/core/internal/errors"
-import type { AgentContextCheckpointReason, AgentRunRecord } from "@sixb/core/storage"
+import type {
+  AgentContextCheckpointReason,
+  AgentRunRecord,
+  ConversationAgentRunRecord,
+} from "@sixb/core/storage"
 
 export interface CompactionStartedInput {
-  readonly run: AgentRunRecord
+  readonly run: ConversationAgentRunRecord
   readonly reason: AgentContextCheckpointReason
   readonly estimatedInputTokensBefore: number
 }
@@ -23,7 +27,7 @@ export interface CompactionCompletedInput extends CompactionStartedInput {
 }
 
 export interface CompactionFailedInput {
-  readonly run: AgentRunRecord
+  readonly run: ConversationAgentRunRecord
   readonly reason: AgentContextCheckpointReason
   readonly errorCode: AgentCompactionFailureCode
 }
@@ -40,7 +44,7 @@ export interface StreamSink {
     readonly chunk: unknown
   }): Promise<void>
   publishMessageFinalized(input: {
-    readonly run: AgentRunRecord
+    readonly run: ConversationAgentRunRecord
     readonly messageId: string
   }): Promise<void>
   publishRunFinished(run: AgentRunRecord): Promise<void>
@@ -97,14 +101,20 @@ export function isolateStreamSink(sink: StreamSink): StreamSink {
 export function withAgentActivityStream(sink: StreamSink, broker: Broker): StreamSink {
   return {
     publishStarted: (run) =>
-      publishLifecycle([sink.publishStarted(run), publishAgentRunActivity(broker, run)]),
+      publishLifecycle([
+        sink.publishStarted(run),
+        ...(run.kind === "conversation" ? [publishAgentRunActivity(broker, run)] : []),
+      ]),
     publishCompactionStarted: (input) => sink.publishCompactionStarted(input),
     publishCompactionCompleted: (input) => sink.publishCompactionCompleted(input),
     publishCompactionFailed: (input) => sink.publishCompactionFailed(input),
     publishUiChunk: (input) => sink.publishUiChunk(input),
     publishMessageFinalized: (input) => sink.publishMessageFinalized(input),
     publishRunFinished: (run) =>
-      publishLifecycle([sink.publishRunFinished(run), publishAgentRunActivity(broker, run)]),
+      publishLifecycle([
+        sink.publishRunFinished(run),
+        ...(run.kind === "conversation" ? [publishAgentRunActivity(broker, run)] : []),
+      ]),
   }
 }
 
@@ -124,21 +134,15 @@ class BrokerStreamSink implements StreamSink {
 
   async publishStarted(run: AgentRunRecord): Promise<void> {
     await this.publish({
-      schemaVersion: AGENT_RUN_STREAM_SCHEMA_VERSION,
+      ...agentRunStreamEventBase(run),
       type: "agent.run.started",
-      projectId: this.projectId,
-      runId: run.id,
-      threadId: run.threadId,
-      agentId: run.agentId,
-      attempt: run.attempt,
       ...(run.modelId === undefined ? {} : { modelId: run.modelId }),
-      occurredAt: new Date().toISOString(),
     })
   }
 
   async publishCompactionStarted(input: CompactionStartedInput): Promise<void> {
     await this.publish({
-      ...streamEventBase(this.projectId, input.run),
+      ...agentRunStreamEventBase(input.run),
       type: "agent.compaction.started",
       reason: input.reason,
       estimatedInputTokensBefore: input.estimatedInputTokensBefore,
@@ -147,7 +151,7 @@ class BrokerStreamSink implements StreamSink {
 
   async publishCompactionCompleted(input: CompactionCompletedInput): Promise<void> {
     await this.publish({
-      ...streamEventBase(this.projectId, input.run),
+      ...agentRunStreamEventBase(input.run),
       type: "agent.compaction.completed",
       reason: input.reason,
       checkpointId: input.checkpointId,
@@ -158,7 +162,7 @@ class BrokerStreamSink implements StreamSink {
 
   async publishCompactionFailed(input: CompactionFailedInput): Promise<void> {
     await this.publish({
-      ...streamEventBase(this.projectId, input.run),
+      ...agentRunStreamEventBase(input.run),
       type: "agent.compaction.failed",
       reason: input.reason,
       errorCode: input.errorCode,
@@ -174,7 +178,6 @@ class BrokerStreamSink implements StreamSink {
     let chunk: JsonValue
     try {
       chunk = toBrokerJson(input.chunk, "Agent stream chunk", {
-        agentId: input.run.agentId,
         runId: input.run.id,
       })
     } catch (error) {
@@ -187,35 +190,23 @@ class BrokerStreamSink implements StreamSink {
     // per streamed token batch — is not serialized a second time inside `publish`.
     await this.publish(
       {
-        schemaVersion: AGENT_RUN_STREAM_SCHEMA_VERSION,
+        ...agentRunStreamEventBase(input.run),
         type: "agent.ui.chunk",
-        projectId: this.projectId,
-        runId: input.run.id,
-        threadId: input.run.threadId,
-        agentId: input.run.agentId,
-        attempt: input.run.attempt,
         chunkIndex: input.chunkIndex,
         chunk,
-        occurredAt: new Date().toISOString(),
       },
       { prevalidated: true }
     )
   }
 
   async publishMessageFinalized(input: {
-    readonly run: AgentRunRecord
+    readonly run: ConversationAgentRunRecord
     readonly messageId: string
   }): Promise<void> {
     await this.publish({
-      schemaVersion: AGENT_RUN_STREAM_SCHEMA_VERSION,
+      ...agentRunStreamEventBase(input.run),
       type: "agent.message.finalized",
-      projectId: this.projectId,
-      runId: input.run.id,
-      threadId: input.run.threadId,
-      agentId: input.run.agentId,
-      attempt: input.run.attempt,
       messageId: input.messageId,
-      occurredAt: new Date().toISOString(),
     })
   }
 
@@ -240,7 +231,6 @@ class BrokerStreamSink implements StreamSink {
     const payload = options.prevalidated
       ? (event as unknown as JsonValue)
       : toBrokerJson(event, "Agent stream event", {
-          agentId: event.agentId,
           runId: event.runId,
         })
     await this.broker.append({
@@ -270,18 +260,6 @@ class BrokerStreamSink implements StreamSink {
   }
 }
 
-function streamEventBase(projectId: string, run: AgentRunRecord) {
-  return {
-    schemaVersion: AGENT_RUN_STREAM_SCHEMA_VERSION,
-    projectId,
-    runId: run.id,
-    threadId: run.threadId,
-    agentId: run.agentId,
-    attempt: run.attempt,
-    occurredAt: new Date().toISOString(),
-  } as const
-}
-
 async function isolateStreamSinkCall(
   runId: string,
   label: string,
@@ -297,7 +275,7 @@ async function isolateStreamSinkCall(
 function toBrokerJson(
   value: unknown,
   label: string,
-  details: { readonly agentId: string; readonly runId: string }
+  details: { readonly runId: string }
 ): JsonValue {
   try {
     const serialized = JSON.stringify(value)

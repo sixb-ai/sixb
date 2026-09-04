@@ -16,6 +16,7 @@ import type {
   QueueJob,
   QueueJobFailure,
   Queues,
+  SubagentQueueJob,
   SyncQueueJobFailureCode,
   SyncRunRequestedQueueJob,
   WorkflowQueueJob,
@@ -381,6 +382,10 @@ export class InMemoryQueues implements Queues {
   readonly agents = new InMemoryQueue<AgentQueueJob, AgentQueueJobFailureCode>(
     this.store,
     "agent.runs"
+  )
+  readonly agentChildren = new InMemoryQueue<SubagentQueueJob, AgentQueueJobFailureCode>(
+    this.store,
+    "agent.children"
   )
 
   /** Nothing to reach: the store is a field of this object. */

@@ -100,7 +100,11 @@ describe("AI SDK agent adapters", () => {
             aborted: signal.aborted,
             toolCallId,
             hasArtifacts: artifacts === unusedArtifacts,
-            run: { id: run.id, agentId: run.agentId, threadId: run.threadId ?? null },
+            run: {
+              id: run.id,
+              agentId: run.agentId ?? null,
+              threadId: run.threadId ?? null,
+            },
           }
         }
       )

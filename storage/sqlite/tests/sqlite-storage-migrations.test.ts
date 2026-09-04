@@ -224,6 +224,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 28,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "029-subagent-runs",
+    status: "applied",
+    version: 29,
+  },
 ]
 
 afterEach(async () => {
@@ -1382,6 +1389,80 @@ describe("SQLite storage migrations", () => {
     }
   })
 
+  test("subagent migration preserves existing conversational runs and their execution", () => {
+    const db = new Database(":memory:")
+    try {
+      const migrationIndex = sqliteStorageMigrations.steps.findIndex(
+        (migration) => migration.id === "029-subagent-runs"
+      )
+      const migration = sqliteStorageMigrations.steps[migrationIndex]
+      if (!migration) throw new Error("SQLite subagent migration is missing.")
+      for (const previous of sqliteStorageMigrations.steps.slice(0, migrationIndex)) {
+        previous.up(db)
+      }
+
+      db.run(`
+        INSERT INTO auth_service_accounts (
+          project_id, id, name, status, created_at, updated_at
+        ) VALUES (
+          'project-a', 'svc_agent_assistant', 'Assistant', 'active',
+          '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'
+        )
+      `)
+      db.run(`
+        INSERT INTO executions (
+          project_id, id, executor_kind, executor_id, source_kind, source_id,
+          correlation_id, authority_kind, created_at
+        ) VALUES (
+          'project-a', 'exec-request', 'request', 'request-1', 'http', 'request-1',
+          'correlation-1', 'disabled', '2026-01-01T00:00:00.000Z'
+        )
+      `)
+      db.run(`
+        INSERT INTO executions (
+          project_id, id, executor_kind, executor_id, source_kind, source_id,
+          parent_execution_id, correlation_id, authority_kind, authority_service_account_id,
+          created_at
+        ) VALUES (
+          'project-a', 'exec-run-1', 'agent', 'run-1', 'execution', 'exec-request',
+          'exec-request', 'correlation-1', 'principal', 'svc_agent_assistant',
+          '2026-01-01T00:00:01.000Z'
+        )
+      `)
+      db.run(`
+        INSERT INTO agent_runs (
+          project_id, id, execution_id, thread_id, agent_id, trigger_message_id,
+          requester_group_ids, status, created_at
+        ) VALUES (
+          'project-a', 'run-1', 'exec-run-1', 'thread-1', 'assistant', 'message-1',
+          '["agent-users"]', 'queued', '2026-01-01T00:00:02.000Z'
+        )
+      `)
+
+      migration.up(db)
+
+      expect(
+        db
+          .query(
+            "SELECT kind, thread_id, agent_id, trigger_message_id, requester_group_ids FROM agent_runs WHERE id = 'run-1'"
+          )
+          .get()
+      ).toEqual({
+        kind: "conversation",
+        thread_id: "thread-1",
+        agent_id: "assistant",
+        trigger_message_id: "message-1",
+        requester_group_ids: '["agent-users"]',
+      })
+      expect(db.query("SELECT executor_id FROM executions WHERE id = 'exec-run-1'").get()).toEqual({
+        executor_id: "run-1",
+      })
+      expect(db.query("PRAGMA foreign_key_check").all()).toHaveLength(0)
+    } finally {
+      db.close()
+    }
+  })
+
   test("rejects legacy Sync and Pipeline runs instead of inventing execution authority", () => {
     for (const kind of ["sync", "pipeline"] as const) {
       const db = new Database(":memory:")
@@ -1746,6 +1827,9 @@ describe("SQLite storage migrations", () => {
     const agentRunColumns = readTableColumns(path, "agent_runs")
     const workflowAgentNodeColumns = readTableColumns(path, "workflow_agent_node_runs")
     expect(agentRunColumns).toContain("requester_group_ids")
+    expect(agentRunColumns).toEqual(
+      expect.arrayContaining(["kind", "parent_run_id", "spawn_key", "spec", "result"])
+    )
     expect(agentRunColumns).not.toContain("usage_input_tokens")
     expect(agentRunColumns).not.toContain("usage_output_tokens")
     expect(agentRunColumns).not.toContain("usage_total_tokens")

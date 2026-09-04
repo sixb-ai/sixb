@@ -1,4 +1,10 @@
-import { assertAgentRunExecution } from "@sixb/core/internal/agent-run-storage-provider"
+import {
+  assertAgentRunExecution,
+  assertCreateSubagentRunInput,
+  assertSubagentRunResult,
+  subagentRunMatchesCreateInput,
+} from "@sixb/core/internal/agent-run-storage-provider"
+import { MAIN_AGENT_ID } from "@sixb/core/internal/agents"
 import { normalizeRequesterGroupIds } from "@sixb/core/internal/auth"
 import { serializeSixbFailure } from "@sixb/core/internal/errors"
 import {
@@ -7,7 +13,9 @@ import {
   type AgentRunStore,
   AgentStorageError,
   type ConfirmAgentRunExecutionOwnershipInput,
+  type ConversationAgentRunRecord,
   type CreateAgentRunInput,
+  type CreateSubagentRunInput,
   type ExecutionStorage,
   type FinishAgentRunInput,
   type FinishQueuedAgentRunInput,
@@ -15,6 +23,7 @@ import {
   type ListAgentRunsResult,
   type ReclaimAgentRunInput,
   type StartAgentRunInput,
+  type SubagentRunRecord,
 } from "@sixb/core/storage"
 import type { SQLClient, SqlParameter } from "../pg-client"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "../run-list-query"
@@ -30,14 +39,17 @@ export class PgAgentRunStore implements AgentRunStore {
     private readonly executions: ExecutionStorage
   ) {}
 
-  async create(input: CreateAgentRunInput): Promise<AgentRunRecord> {
+  async create(input: CreateAgentRunInput): Promise<ConversationAgentRunRecord> {
     const createdAt = input.createdAt ?? new Date()
     await assertAgentRunExecution({
       executions: this.executions,
       projectId: input.projectId,
       executionId: input.executionId,
       runId: input.id,
-      agentId: input.agentId,
+      authority:
+        input.agentId === MAIN_AGENT_ID
+          ? { type: "inherited" }
+          : { type: "managed", agentId: input.agentId },
     })
 
     try {
@@ -67,6 +79,7 @@ export class PgAgentRunStore implements AgentRunStore {
             project_id,
             id,
             execution_id,
+            kind,
             thread_id,
             agent_id,
             trigger_message_id,
@@ -78,6 +91,7 @@ export class PgAgentRunStore implements AgentRunStore {
             ${input.projectId},
             ${input.id},
             ${input.executionId},
+            ${"conversation"},
             ${input.threadId},
             ${input.agentId},
             ${input.triggerMessageId},
@@ -94,7 +108,11 @@ export class PgAgentRunStore implements AgentRunStore {
           WHERE project_id = ${input.projectId} AND id = ${input.threadId}
         `
 
-        return rowToRunRecord(row)
+        const created = rowToRunRecord(row)
+        if (created.kind !== "conversation") {
+          throw new Error(`[SixbPg] Agent run insert '${input.id}' returned the wrong run kind.`)
+        }
+        return created
       })
     } catch (error) {
       if (isUniqueViolation(error)) {
@@ -104,6 +122,109 @@ export class PgAgentRunStore implements AgentRunStore {
         )
       }
 
+      throw error
+    }
+  }
+
+  async createSubagent(input: CreateSubagentRunInput): Promise<SubagentRunRecord> {
+    assertCreateSubagentRunInput(input, "SixbPg")
+    const execution = await assertAgentRunExecution({
+      executions: this.executions,
+      projectId: input.projectId,
+      executionId: input.executionId,
+      runId: input.id,
+      authority: { type: "inherited" },
+    })
+
+    try {
+      return await runPgTransaction(this.sql, async (tx) => {
+        const [parent] = await tx<AgentRunRow[]>`
+          SELECT * FROM agent_runs
+          WHERE project_id = ${input.projectId} AND id = ${input.parentRunId}
+          FOR UPDATE
+        `
+        if (!parent || parent.kind !== "conversation") {
+          throw new AgentStorageError(
+            "run_not_found",
+            `[SixbPg] Parent Agent run '${input.parentRunId}' was not found.`
+          )
+        }
+
+        const [existingRow] = await tx<AgentRunRow[]>`
+          SELECT * FROM agent_runs
+          WHERE project_id = ${input.projectId} AND id = ${input.id}
+        `
+        if (existingRow) {
+          const existing = rowToRunRecord(existingRow)
+          if (subagentRunMatchesCreateInput(existing, input)) return existing
+          throw new AgentStorageError(
+            "duplicate_id",
+            `[SixbPg] Subagent run '${input.id}' already exists with different immutable inputs.`
+          )
+        }
+        if (parent.status !== "running") {
+          throw new AgentStorageError(
+            "invalid_state",
+            `[SixbPg] Parent Agent run '${parent.id}' is not running (status '${parent.status}').`
+          )
+        }
+        if (
+          execution.source.type !== "execution" ||
+          execution.source.executionId !== parent.execution_id
+        ) {
+          throw new AgentStorageError(
+            "invalid_input",
+            `[SixbPg] Subagent execution '${execution.id}' is not a child of parent execution '${parent.execution_id}'.`
+          )
+        }
+        if (parent.execution_token !== input.parentExecutionToken) {
+          throw new AgentStorageError(
+            "execution_lost",
+            `[SixbPg] Parent Agent run '${parent.id}' is no longer owned by this execution.`
+          )
+        }
+        const parentRecord = rowToRunRecord(parent)
+
+        const [countRow] = await tx<{ count: string | number }[]>`
+          SELECT COUNT(*)::bigint AS count FROM agent_runs
+          WHERE project_id = ${input.projectId}
+            AND parent_run_id = ${input.parentRunId}
+            AND status IN (${"queued"}, ${"running"})
+        `
+        const activeChildren = Number(countRow?.count ?? 0)
+        if (activeChildren >= input.maxActiveChildren) {
+          throw new AgentStorageError(
+            "active_child_limit",
+            `[SixbPg] Agent run '${parent.id}' already has ${activeChildren} active subagents.`
+          )
+        }
+
+        const [row] = await tx<AgentRunRow[]>`
+          INSERT INTO agent_runs (
+            project_id, id, execution_id, kind, parent_run_id, spawn_key, spec,
+            requester_group_ids, status, attempt, created_at
+          ) VALUES (
+            ${input.projectId}, ${input.id}, ${input.executionId}, ${"subagent"},
+            ${input.parentRunId}, ${input.spawnKey},
+            ${JSON.stringify(input.spec)}::text::jsonb,
+            ${JSON.stringify(parentRecord.requesterGroupIds)}::text::jsonb,
+            ${"queued"}, ${0}, ${input.createdAt ?? new Date()}
+          )
+          RETURNING *
+        `
+        const created = rowToRunRecord(row)
+        if (created.kind !== "subagent") {
+          throw new Error(`[SixbPg] Subagent insert '${input.id}' returned the wrong run kind.`)
+        }
+        return created
+      })
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new AgentStorageError(
+          "duplicate_id",
+          `[SixbPg] Subagent run '${input.id}' conflicts with an existing durable spawn.`
+        )
+      }
       throw error
     }
   }
@@ -198,6 +319,20 @@ export class PgAgentRunStore implements AgentRunStore {
     return runPgTransaction(this.sql, async (tx) => {
       const run = await this.lockRunning(tx, input.projectId, input.id)
 
+      if (input.status === "succeeded" && run.kind === "subagent") {
+        assertSubagentRunResult(input.result, run.id, "SixbPg")
+      }
+      if (
+        input.status === "succeeded" &&
+        run.kind === "conversation" &&
+        input.result !== undefined
+      ) {
+        throw new AgentStorageError(
+          "invalid_input",
+          `[SixbPg] Conversational Agent run '${run.id}' cannot persist a subagent result.`
+        )
+      }
+
       if (run.execution_token !== input.executionToken) {
         throw new AgentStorageError(
           "execution_lost",
@@ -213,6 +348,7 @@ export class PgAgentRunStore implements AgentRunStore {
           finish_reason = ${input.finishReason ?? null},
           error = ${errorValue}::text::jsonb,
           diagnostics = ${input.diagnostics === undefined ? null : JSON.stringify(input.diagnostics)}::text::jsonb,
+          result = ${input.status === "succeeded" && input.result !== undefined ? JSON.stringify(input.result) : null}::text::jsonb,
           execution_token = ${null},
           execution_queue_lease_expires_at = ${null},
           completed_at = ${completedAt}
@@ -262,13 +398,18 @@ export class PgAgentRunStore implements AgentRunStore {
   }
 
   async list(input: ListAgentRunsInput): Promise<ListAgentRunsResult> {
-    if (hasEmptyStatuses(input)) {
+    if (hasEmptyStatuses(input) || input.kinds?.length === 0) {
       return { runs: [], hasMore: false, total: 0 }
     }
 
     const whereClauses = ["project_id = $1"]
     const params: SqlParameter[] = [input.projectId]
     let index = 2
+
+    if (input.kinds) {
+      whereClauses.push(`kind = ANY($${index++}::text[])`)
+      params.push(input.kinds as string[])
+    }
 
     if (input.threadId) {
       whereClauses.push(`thread_id = $${index++}`)
@@ -278,6 +419,11 @@ export class PgAgentRunStore implements AgentRunStore {
     if (input.agentId) {
       whereClauses.push(`agent_id = $${index++}`)
       params.push(input.agentId)
+    }
+
+    if (input.parentRunId) {
+      whereClauses.push(`parent_run_id = $${index++}`)
+      params.push(input.parentRunId)
     }
 
     index = appendRunListFilters(
@@ -336,6 +482,7 @@ export class PgAgentRunStore implements AgentRunStore {
   }
 
   private async releaseThread(sql: SQLClient, run: AgentRunRow, completedAt: Date): Promise<void> {
+    if (run.kind !== "conversation") return
     await sql`
       UPDATE agent_threads SET active_run_id = ${null}, updated_at = ${completedAt}
       WHERE project_id = ${run.project_id} AND id = ${run.thread_id} AND active_run_id = ${run.id}
