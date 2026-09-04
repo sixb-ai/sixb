@@ -7,6 +7,7 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuBadge,
@@ -18,17 +19,19 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query"
 import {
   Bolt,
-  Bot,
   Box,
   Cable,
   ChartNoAxesCombined,
+  ChevronRight,
   Database,
   GitBranch,
   Layers,
   LayoutGrid,
   ListChecks,
+  MessageCircle,
   RefreshCw,
   ScrollText,
+  Search,
   Settings,
   Workflow,
 } from "lucide-react"
@@ -55,21 +58,41 @@ interface NavItem {
   Icon: React.ComponentType<{ className?: string }>
 }
 
-const projectNavItems: NavItem[] = [
-  { id: "connectors", label: "Connectors", Icon: Cable },
-  { id: "datasets", label: "Datasets", Icon: Database },
-  { id: "syncs", label: "Syncs", Icon: RefreshCw },
-  { id: "pipelines", label: "Pipelines", Icon: Workflow },
-  { id: "projections", label: "Projections", Icon: Layers },
-  { id: "ontology", label: "Ontology", Icon: LayoutGrid },
-  { id: "home", label: "Objects", Icon: Box },
-  { id: "actions", label: "Actions", Icon: Bolt },
-  { id: "workflows", label: "Workflows", Icon: GitBranch },
-  { id: "agents", label: "Agents", Icon: Bot },
-  { id: "ai-usage", label: "AI usage", Icon: ChartNoAxesCombined },
-  { id: "logs", label: "Logs", Icon: ScrollText },
-  { id: "rules", label: "Rules", Icon: ListChecks },
-  { id: "settings", label: "Settings", Icon: Settings },
+const projectNavGroups: { label: string; items: NavItem[] }[] = [
+  {
+    label: "Data",
+    items: [
+      { id: "connectors", label: "Connectors", Icon: Cable },
+      { id: "datasets", label: "Datasets", Icon: Database },
+      { id: "syncs", label: "Syncs", Icon: RefreshCw },
+      { id: "pipelines", label: "Pipelines", Icon: Workflow },
+      { id: "projections", label: "Projections", Icon: Layers },
+    ],
+  },
+  {
+    label: "Model",
+    items: [
+      { id: "ontology", label: "Ontology", Icon: LayoutGrid },
+      { id: "home", label: "Objects", Icon: Box },
+    ],
+  },
+  {
+    label: "Automate",
+    items: [
+      { id: "actions", label: "Actions", Icon: Bolt },
+      { id: "workflows", label: "Workflows", Icon: GitBranch },
+      { id: "agents", label: "Chat", Icon: MessageCircle },
+    ],
+  },
+  {
+    label: "Operate",
+    items: [
+      { id: "ai-usage", label: "AI usage", Icon: ChartNoAxesCombined },
+      { id: "logs", label: "Logs", Icon: ScrollText },
+      { id: "rules", label: "Rules", Icon: ListChecks },
+      { id: "settings", label: "Settings", Icon: Settings },
+    ],
+  },
 ]
 
 function SixbMark({ className }: { className?: string }) {
@@ -98,16 +121,9 @@ interface SidebarProps {
   viewMode: ViewMode
   onViewChange: (mode: ViewMode) => void
   onViewIntent?: (mode: ViewMode) => void
-  datasetCount?: number
-  connectorCount?: number
-  syncCount?: number
-  pipelineCount?: number
-  projectionCount?: number
+  onOpenCommand: () => void
   workflowCount?: number
   actionCount?: number
-  agentCount?: number
-  ruleCount?: number
-  ontologyCount?: number
   objectCount?: number
 }
 
@@ -116,30 +132,15 @@ export function Sidebar({
   viewMode,
   onViewChange,
   onViewIntent,
-  datasetCount,
-  connectorCount,
-  syncCount,
-  pipelineCount,
-  projectionCount,
+  onOpenCommand,
   workflowCount,
   actionCount,
-  agentCount,
-  ruleCount,
-  ontologyCount,
   objectCount,
 }: SidebarProps) {
   const getCount = (id: ViewMode): number | undefined => {
     if (id === "home") return objectCount
-    if (id === "datasets") return datasetCount
-    if (id === "connectors") return connectorCount
-    if (id === "syncs") return syncCount
-    if (id === "projections") return projectionCount
-    if (id === "pipelines") return pipelineCount
     if (id === "workflows") return workflowCount
     if (id === "actions") return actionCount
-    if (id === "agents") return agentCount
-    if (id === "rules") return ruleCount
-    if (id === "ontology") return ontologyCount
     return undefined
   }
 
@@ -148,34 +149,63 @@ export function Sidebar({
       <AtlasSidebarHeader selectedProject={selectedProject} />
 
       <SidebarContent>
-        <SidebarGroup>
+        <SidebarGroup className="pt-1.5 pb-1">
           <SidebarGroupContent>
             <SidebarMenu>
-              {projectNavItems.map((item) => {
-                const count = getCount(item.id)
-                const isActive = viewMode === item.id
-                return (
-                  <SidebarMenuItem key={item.id}>
-                    <SidebarMenuButton
-                      isActive={isActive}
-                      tooltip={item.label}
-                      onPointerEnter={() => onViewIntent?.(item.id)}
-                      onPointerDown={() => onViewIntent?.(item.id)}
-                      onFocus={() => onViewIntent?.(item.id)}
-                      onClick={() => onViewChange(item.id)}
-                    >
-                      <item.Icon />
-                      <span>{item.label}</span>
-                    </SidebarMenuButton>
-                    {count !== undefined && count > 0 ? (
-                      <SidebarMenuBadge>{count}</SidebarMenuBadge>
-                    ) : null}
-                  </SidebarMenuItem>
-                )
-              })}
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  tooltip="Search"
+                  onClick={onOpenCommand}
+                  className="border border-sidebar-border bg-sidebar text-sidebar-foreground hover:border-foreground/15"
+                >
+                  <Search />
+                  <span>Search</span>
+                  <kbd className="ml-auto text-[10px] text-sidebar-foreground/60 group-data-[collapsible=icon]:hidden">
+                    ⌘K
+                  </kbd>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {projectNavGroups.map((group) => (
+          <SidebarGroup key={group.label} className="py-1">
+            <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {group.items.map((item) => {
+                  const count = getCount(item.id)
+                  const isActive = viewMode === item.id
+                  return (
+                    <SidebarMenuItem key={item.id}>
+                      <SidebarMenuButton
+                        isActive={isActive}
+                        tooltip={item.label}
+                        onPointerEnter={() => onViewIntent?.(item.id)}
+                        onPointerDown={() => onViewIntent?.(item.id)}
+                        onFocus={() => onViewIntent?.(item.id)}
+                        onClick={() => onViewChange(item.id)}
+                      >
+                        <item.Icon />
+                        <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                        {item.id === "agents" ? (
+                          <ChevronRight
+                            aria-hidden="true"
+                            className="ml-auto text-sidebar-foreground/55 group-data-[collapsible=icon]:hidden"
+                          />
+                        ) : null}
+                      </SidebarMenuButton>
+                      {count !== undefined && count > 0 ? (
+                        <SidebarMenuBadge>{count}</SidebarMenuBadge>
+                      ) : null}
+                    </SidebarMenuItem>
+                  )
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
 
         <SidebarGroup className="mt-auto">
           <SidebarGroupContent>
@@ -197,17 +227,17 @@ export function Sidebar({
 
 export function AtlasSidebarHeader({ selectedProject }: { selectedProject: ProjectInfo | null }) {
   return (
-    <SidebarHeader className="h-[54px] justify-center border-b border-sidebar-border">
-      <div className="flex items-center gap-3 px-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
+    <SidebarHeader className="h-[50px] justify-center">
+      <div className="flex items-center gap-2 px-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
         {/* Sixb's orbit mark anchors Atlas to the website identity. */}
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center text-sidebar-accent-foreground">
-          <SixbMark className="h-[18px] w-[22px]" />
+        <div className="flex h-8 w-4 shrink-0 items-center justify-center text-sidebar-accent-foreground">
+          <SixbMark className="h-[18px] w-[22px] max-w-none shrink-0" />
         </div>
         <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
-          <p className="truncate text-[14px] font-semibold tracking-[-0.02em] text-sidebar-accent-foreground">
+          <p className="truncate text-[14px] font-semibold leading-4 tracking-[-0.02em] text-sidebar-accent-foreground">
             Sixb Atlas
           </p>
-          <p className="truncate text-[11px] text-sidebar-foreground">
+          <p className="mt-0.5 truncate text-[11px] leading-4 text-sidebar-foreground/65">
             {selectedProject ? selectedProject.name : "Loading project"}
           </p>
         </div>

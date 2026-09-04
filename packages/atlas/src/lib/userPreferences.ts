@@ -58,7 +58,7 @@ function writeViewStyle(key: string, style: string) {
 }
 
 export function getObjectViewStyle(): "cards" | "table" {
-  return readViewStyle(viewStyleKey, ["cards", "table"], "cards")
+  return readViewStyle(viewStyleKey, ["cards", "table"], "table")
 }
 
 export function setObjectViewStyle(style: "cards" | "table") {

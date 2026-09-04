@@ -14,10 +14,8 @@ import {
   Card,
   CollectionCardButton,
   CollectionCardGrid,
-  CollectionHeader,
   CollectionViewToggle,
   EmptyState,
-  Input,
   Table,
   TableBody,
   TableCell,
@@ -41,6 +39,7 @@ import {
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import { CollectionPageHeader } from "../components/CollectionPageHeader"
 import { SixbFailureSummary } from "../components/SixbFailureSummary"
 import {
   isUnconfiguredStorageError,
@@ -654,10 +653,20 @@ export function ConnectorsPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-5xl">
-      <CollectionHeader
+    <div className="mx-auto w-full max-w-6xl">
+      <CollectionPageHeader
         title="Connectors"
-        count={filteredConnectors.length}
+        count={connectors.length}
+        singularLabel="connector"
+        search={
+          connectors.length > 0
+            ? {
+                value: searchQuery,
+                placeholder: "Search connectors, syncs, or webhooks…",
+                onChange: setSearchQuery,
+              }
+            : undefined
+        }
         actions={
           connectors.length > 0 ? (
             <CollectionViewToggle
@@ -671,19 +680,6 @@ export function ConnectorsPage() {
           ) : null
         }
       />
-
-      {connectors.length > 0 && (
-        <div className="relative mt-2">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            type="text"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Search connectors, syncs, or webhooks..."
-            className="pl-9"
-          />
-        </div>
-      )}
 
       <div className="mt-4">
         {connectors.length === 0 ? (

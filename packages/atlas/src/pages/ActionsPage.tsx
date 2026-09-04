@@ -44,10 +44,27 @@ import {
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
-import { AlertCircle, CheckCircle2, Loader2, Play, SquareActivity } from "lucide-react"
-import { type SyntheticEvent, useCallback, useMemo, useState } from "react"
+import {
+  AlertCircle,
+  CheckCircle2,
+  GitCommitHorizontal,
+  Loader2,
+  Play,
+  Search,
+  SquareActivity,
+  X,
+} from "lucide-react"
+import {
+  type ReactElement,
+  type ReactNode,
+  type SyntheticEvent,
+  useCallback,
+  useMemo,
+  useState,
+} from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { ActionParamNullControl } from "../components/ActionParamNullControl"
+import { CollectionSearchInput } from "../components/CollectionPageHeader"
 import { ErrorPage, LoadingPage, PageFrame } from "../components/common"
 import {
   FileRefUploadField,
@@ -63,6 +80,7 @@ import {
   buildActionParams,
   describeActionParamInput,
 } from "../lib/actions/params"
+import { humanizeIdentifier } from "../lib/labels"
 
 type ActionCatalogItem = ListActionsResponse[number]
 type ActionRunSummary = ListActionRunsResponse["runs"][number]
@@ -94,7 +112,7 @@ const actionRunStatusClasses: Record<ActionRunStatus, string> = {
 export function ActionsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const activeTab: ActionsPageTab = searchParams.get("tab") === "runs" ? "runs" : "actions"
-  useActionLiveUpdates({ enabled: activeTab === "runs" })
+  useActionLiveUpdates()
 
   const handleTabChange = (value: string) => {
     const nextTab: ActionsPageTab = value === "runs" ? "runs" : "actions"
@@ -108,7 +126,7 @@ export function ActionsPage() {
   return (
     <PageFrame title="Actions" headerDivider={false}>
       <Tabs value={activeTab} onValueChange={handleTabChange} className="gap-4">
-        <TabsList variant="line" className="border-b border-border">
+        <TabsList variant="line">
           <TabsTrigger value="actions">Actions</TabsTrigger>
           <TabsTrigger value="runs">Runs</TabsTrigger>
         </TabsList>
@@ -125,7 +143,74 @@ export function ActionsPage() {
 
 function ActionDefinitionsTab() {
   const actionsQuery = useQuery(listActionsOptions())
+  const runsQuery = useQuery({
+    ...listActionRunsOptions({ query: { limit: "50", order: "desc" } }),
+  })
   const actions = actionsQuery.data ?? []
+  const [searchParams, setSearchParams] = useSearchParams()
+  const query = searchParams.get("q") ?? ""
+  const scope =
+    searchParams.get("scope") === "global"
+      ? "global"
+      : searchParams.get("scope") === "object"
+        ? "object"
+        : "all"
+  const requestedType = searchParams.get("type") ?? "all"
+
+  const objectTypes = useMemo(
+    () =>
+      Array.from(
+        new Set(actions.flatMap((action) => (action.objectTypeId ? [action.objectTypeId] : [])))
+      ).sort((left, right) => humanizeIdentifier(left).localeCompare(humanizeIdentifier(right))),
+    [actions]
+  )
+  const objectType =
+    scope !== "global" && objectTypes.includes(requestedType) ? requestedType : "all"
+  const latestRunByAction = useMemo(() => {
+    const latest = new Map<string, ActionRunSummary>()
+    for (const run of runsQuery.data?.runs ?? []) {
+      if (!latest.has(run.actionId)) latest.set(run.actionId, run)
+    }
+    return latest
+  }, [runsQuery.data])
+  const filteredActions = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase()
+    return actions.filter((action) => {
+      if (scope === "global" && action.objectTypeId) return false
+      if (scope === "object" && !action.objectTypeId) return false
+      if (objectType !== "all" && action.objectTypeId !== objectType) return false
+      if (!normalizedQuery) return true
+      return [action.id, humanizeIdentifier(action.id), action.description, action.objectTypeId]
+        .filter((value): value is string => typeof value === "string")
+        .some((value) => value.toLowerCase().includes(normalizedQuery))
+    })
+  }, [actions, objectType, query, scope])
+  const filtersActive = query.trim().length > 0 || scope !== "all" || objectType !== "all"
+
+  const updateFilterParam = (key: "q" | "type", value: string) => {
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous)
+        if (!value || value === "all") next.delete(key)
+        else next.set(key, value)
+        return next
+      },
+      { replace: key === "q" }
+    )
+  }
+
+  const updateScope = (value: string) => {
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous)
+        if (value === "all") next.delete("scope")
+        else next.set("scope", value)
+        if (value === "global") next.delete("type")
+        return next
+      },
+      { replace: false }
+    )
+  }
 
   if (actionsQuery.isLoading) {
     return <LoadingPage label="Loading actions..." />
@@ -136,7 +221,7 @@ function ActionDefinitionsTab() {
   }
 
   return (
-    <section className="space-y-3">
+    <section className="space-y-4">
       {actions.length === 0 ? (
         <Card>
           <EmptyState
@@ -146,58 +231,147 @@ function ActionDefinitionsTab() {
           />
         </Card>
       ) : (
-        <div className="grid gap-3 lg:grid-cols-2">
-          {actions.map((action) => (
-            <ActionDefinitionCard key={action.id} action={action} />
-          ))}
-        </div>
+        <>
+          <div className="sticky top-0 z-20 flex flex-col gap-1.5 bg-background/92 py-2 backdrop-blur-xl supports-[backdrop-filter]:bg-background/82 lg:flex-row lg:items-center">
+            <CollectionSearchInput
+              value={query}
+              onChange={(value) => updateFilterParam("q", value)}
+              placeholder="Search actions…"
+            />
+            <Select value={scope} onValueChange={updateScope}>
+              <SelectTrigger className="h-9 w-full bg-white lg:w-36" aria-label="Action scope">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All scopes</SelectItem>
+                <SelectItem value="object">Object actions</SelectItem>
+                <SelectItem value="global">Global actions</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
+              value={scope === "global" ? "all" : objectType}
+              disabled={scope === "global"}
+              onValueChange={(value) => updateFilterParam("type", value)}
+            >
+              <SelectTrigger
+                className="h-9 w-full bg-white lg:w-48"
+                aria-label="Target object type"
+              >
+                <SelectValue placeholder="All object types" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All object types</SelectItem>
+                {objectTypes.map((type) => (
+                  <SelectItem key={type} value={type}>
+                    {humanizeIdentifier(type)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {filtersActive ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                className="size-9 shrink-0 bg-white"
+                aria-label="Clear action filters"
+                title="Clear action filters"
+                onClick={() => {
+                  setSearchParams((previous) => {
+                    const next = new URLSearchParams(previous)
+                    next.delete("q")
+                    next.delete("scope")
+                    next.delete("type")
+                    return next
+                  })
+                }}
+              >
+                <X className="size-4" />
+              </Button>
+            ) : null}
+          </div>
+
+          {filtersActive ? (
+            <p className="text-xs text-muted-foreground">
+              Showing <span className="font-medium text-foreground">{filteredActions.length}</span>{" "}
+              of {actions.length} actions
+            </p>
+          ) : null}
+
+          {filteredActions.length > 0 ? (
+            <div className="grid gap-3 lg:grid-cols-2">
+              {filteredActions.map((action) => (
+                <ActionCard
+                  key={action.id}
+                  action={action}
+                  latestRun={latestRunByAction.get(action.id)}
+                />
+              ))}
+            </div>
+          ) : (
+            <Card>
+              <EmptyState
+                icon={<Search className="size-10 stroke-1" />}
+                title="No matching actions"
+                description="Try another name, scope, or object type."
+              />
+            </Card>
+          )}
+        </>
       )}
     </section>
   )
 }
 
-function ActionDefinitionCard({ action }: { action: ActionCatalogItem }) {
+function ActionCard({
+  action,
+  latestRun,
+}: {
+  action: ActionCatalogItem
+  latestRun?: ActionRunSummary
+}) {
   const paramCount = action.params.length
+  const scopeLabel = action.objectTypeId
+    ? `${humanizeIdentifier(action.objectTypeId)} action`
+    : "Global action"
 
   return (
-    <Card className="overflow-hidden p-0">
-      <CardContent className="flex h-full flex-col gap-3 p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 space-y-1">
-            <h3 className="truncate font-medium text-foreground">{action.id}</h3>
-            <p className="text-sm text-muted-foreground">
-              {action.objectTypeId ? `Object action on ${action.objectTypeId}` : "Global action"} ·{" "}
-              {paramCount} {paramCount === 1 ? "param" : "params"}
-            </p>
-          </div>
-          <ActionRequestDialog action={action} />
-        </div>
+    <ActionRequestDialog
+      action={action}
+      trigger={
+        <button
+          type="button"
+          className="group flex h-full w-full flex-col overflow-hidden rounded-lg border bg-card text-left text-card-foreground outline-none transition-colors hover:border-[var(--atlas-border-hover)] hover:bg-[var(--atlas-surface-hover)] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        >
+          <span className="flex min-w-0 items-center gap-3 p-4">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[var(--atlas-panel-subtle)] text-muted-foreground">
+              <GitCommitHorizontal className="size-4" />
+            </span>
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-medium text-foreground">
+                {humanizeIdentifier(action.id)}
+              </span>
+              <span className="mt-1 block text-sm text-muted-foreground">
+                {scopeLabel} · {paramCount} input {paramCount === 1 ? "field" : "fields"}
+              </span>
+            </span>
+          </span>
 
-        {action.description ? (
-          <p className="line-clamp-2 text-sm text-muted-foreground">{action.description}</p>
-        ) : null}
-
-        <div className="mt-auto flex flex-wrap gap-2">
-          <PhaseBadge active={action.phases.writeback}>writeback</PhaseBadge>
-          <PhaseBadge active={action.phases.edits}>edits</PhaseBadge>
-          <PhaseBadge active={action.phases.effects}>effects</PhaseBadge>
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
-function PhaseBadge({ active, children }: { active: boolean; children: string }) {
-  return (
-    <Badge
-      variant="outline"
-      className={cn(
-        "rounded-md font-mono text-[10px]",
-        active ? "border-border bg-muted text-foreground" : "text-muted-foreground opacity-60"
-      )}
-    >
-      {children}
-    </Badge>
+          <span className="flex min-h-14 w-full items-center justify-between gap-3 border-t border-border px-4 py-3">
+            {latestRun ? (
+              <>
+                <span className="min-w-0 truncate text-sm text-muted-foreground">
+                  Latest run {formatRelativeTime(latestRun.queuedAt)}
+                </span>
+                <ActionRunStatusBadge status={latestRun.status} />
+              </>
+            ) : (
+              <span className="text-sm text-muted-foreground">No runs recorded</span>
+            )}
+          </span>
+        </button>
+      }
+    />
   )
 }
 
@@ -234,7 +408,7 @@ function ActionRunHistoryTab() {
 
 export function ActionRunTable({ runs }: { runs: readonly ActionRunSummary[] }) {
   return (
-    <Card className="overflow-hidden p-0">
+    <Card className="gap-0 overflow-hidden p-0">
       <Table>
         <TableHeader>
           <TableRow>
@@ -286,9 +460,11 @@ export function ActionRunStatusBadge({ status }: { status: ActionRunStatus }) {
 function ActionRequestDialog({
   action,
   subject,
+  trigger,
 }: {
   action: ActionCatalogItem
   subject?: { kind: "object"; objectTypeId: string; primaryId: string }
+  trigger?: ReactElement
 }) {
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
@@ -380,10 +556,12 @@ function ActionRequestDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
-        <Button type="button" size="sm">
-          <Play className="h-4 w-4" />
-          Request
-        </Button>
+        {trigger ?? (
+          <Button type="button" size="sm">
+            <Play className="h-4 w-4" />
+            Request
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="max-h-[min(48rem,calc(100vh-2rem))] sm:max-w-3xl">
         <DialogHeader>
@@ -684,7 +862,7 @@ export function ActionRunMetaGrid({ run }: { run: ActionRunSummary }) {
   )
 }
 
-function Metric({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
+function Metric({ label, value, mono }: { label: string; value: ReactNode; mono?: boolean }) {
   return (
     <Card className="p-0">
       <CardContent className="space-y-1.5 p-4">

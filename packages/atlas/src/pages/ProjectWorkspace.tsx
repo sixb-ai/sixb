@@ -3,15 +3,8 @@ import {
   getProjectInfoOptions,
   getWorkflowRunOptions,
   listActionsOptions,
-  listAgentsOptions,
-  listConnectorsOptions,
-  listDatasetsOptions,
   listObjectsPageOptions,
   listObjectTypesOptions,
-  listPipelinesOptions,
-  listProjectionsOptions,
-  listRulesOptions,
-  listSyncsOptions,
   listWorkflowsOptions,
   objectCountOptions,
 } from "@sixb/client/hooks"
@@ -141,7 +134,7 @@ export function ProjectWorkspace() {
           params.delete("offset")
           return params
         },
-        { replace: options?.replace ?? true }
+        { replace: options?.replace ?? false }
       )
     },
     [setSearchParams]
@@ -244,42 +237,10 @@ export function ProjectWorkspace() {
     return total
   }, [objectTypes, objectTypeCounts])
 
-  const allObjectsTotal = globalObjectCountQuery.data ?? objectTypeTotal ?? 0
-
   const overviewLoading =
     !classFilter &&
     (objectTypesLoading ||
       (objectTypes.length > 0 && objectTypePreviewQueries.some((query) => query.isLoading)))
-
-  const { data: connectors = [] } = useQuery({
-    ...listConnectorsOptions(),
-    enabled: !!projectInfo,
-  })
-
-  const { data: datasets = [] } = useQuery({
-    ...listDatasetsOptions(),
-    enabled: !!projectInfo,
-  })
-
-  const { data: syncs = [] } = useQuery({
-    ...listSyncsOptions(),
-    enabled: !!projectInfo,
-  })
-
-  const { data: pipelines = [] } = useQuery({
-    ...listPipelinesOptions(),
-    enabled: !!projectInfo,
-  })
-
-  const { data: projections } = useQuery({
-    ...listProjectionsOptions(),
-    enabled: !!projectInfo,
-  })
-  const projectionCount = projections
-    ? projections.objectProjections.length +
-      projections.linkProjections.length +
-      projections.telemetryProjections.length
-    : 0
 
   const { data: workflows = [] } = useQuery({
     ...listWorkflowsOptions(),
@@ -291,45 +252,19 @@ export function ProjectWorkspace() {
     enabled: !!projectInfo,
   })
 
-  const { data: rules = [] } = useQuery({
-    ...listRulesOptions(),
-    enabled: !!projectInfo,
-  })
-
-  const { data: agents = [] } = useQuery({
-    ...listAgentsOptions(),
-    enabled: !!projectInfo,
-  })
-
   const selectedObjectIdForSidebar = objectIdFromUrl
 
   useEffect(() => {
     setSidebarData({
       objectCount: globalObjectCountQuery.data ?? objectTypeTotal,
-      datasetCount: datasets.length,
-      connectorCount: connectors.length,
-      syncCount: syncs.length,
-      pipelineCount: pipelines.length,
-      projectionCount,
       workflowCount: workflows.length,
       actionCount: actions.length,
-      agentCount: agents.length,
-      ruleCount: rules.length,
-      ontologyCount: objectTypes.length,
     })
   }, [
     globalObjectCountQuery.data,
     objectTypeTotal,
-    datasets.length,
-    connectors.length,
-    syncs.length,
-    pipelines.length,
-    projectionCount,
     workflows.length,
     actions.length,
-    agents.length,
-    rules.length,
-    objectTypes.length,
     setSidebarData,
   ])
 
@@ -424,7 +359,6 @@ export function ProjectWorkspace() {
                   <ObjectsWorkbench
                     projectName={resolvedProjectName}
                     objectPageSize={OBJECT_PAGE_SIZE}
-                    allObjectsTotal={allObjectsTotal}
                     objectTypeCounts={objectTypeCounts}
                     overviewSections={objectTypePreviewSections}
                     overviewLoading={overviewLoading}

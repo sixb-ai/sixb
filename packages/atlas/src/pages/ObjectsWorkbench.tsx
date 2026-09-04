@@ -4,10 +4,8 @@ import {
   Card,
   CollectionCardButton,
   CollectionCardGrid,
-  CollectionHeader,
   CollectionViewToggle,
   EmptyState,
-  Input,
   Select,
   SelectContent,
   SelectItem,
@@ -22,10 +20,12 @@ import {
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
-import { Box, ChevronRight, Search } from "lucide-react"
+import { ArrowRight, Box, ChevronRight, X } from "lucide-react"
 import { type ReactNode, useDeferredValue, useEffect, useMemo, useState } from "react"
+import { CollectionPageTitle, CollectionSearchInput } from "../components/CollectionPageHeader"
 import { LetterAvatar, LoadingState } from "../components/common"
 import { ObjectIcon } from "../components/ObjectIcon"
+import { ObjectFilterPopover } from "../components/objects/ObjectFilterPopover"
 import { ObjectQueryBar, ObjectsQueryPagination } from "../components/objects/ObjectQueryBar"
 import { useObjectLiveUpdates } from "../features/objects/hooks/useObjectLiveUpdates"
 import { useProjectTelemetryUpdates } from "../features/objects/hooks/useObjectTelemetryUpdates"
@@ -62,7 +62,6 @@ export interface ObjectTypePreviewSection {
 interface ObjectsWorkbenchProps {
   projectName: string
   objectPageSize: number
-  allObjectsTotal: number
   objectTypeCounts: ReadonlyMap<string, number>
   overviewSections: ObjectTypePreviewSection[]
   overviewLoading: boolean
@@ -81,6 +80,7 @@ const objectViewOptions = [
   { value: "cards", label: "Cards" },
   { value: "table", label: "Table" },
 ] as const
+const emptyTelemetryUpdates = new Map<string, TelemetryUpdate[]>()
 
 function formatCompactValue(value: number | string | boolean): string {
   if (typeof value === "number") {
@@ -114,7 +114,6 @@ function objectMatchesQuery(candidate: ObjectSummary, query: string): boolean {
 export function ObjectsWorkbench({
   projectName,
   objectPageSize,
-  allObjectsTotal,
   objectTypeCounts,
   overviewSections,
   overviewLoading,
@@ -295,6 +294,16 @@ export function ObjectsWorkbench({
     )
   }, [filteredObjects])
 
+  const recentObjects = useMemo(() => {
+    const unique = new Map<string, ObjectSummary>()
+    for (const section of overviewSections) {
+      for (const object of section.objects) unique.set(object.id, object)
+    }
+    return Array.from(unique.values())
+      .sort((left, right) => +new Date(right.updatedAt) - +new Date(left.updatedAt))
+      .slice(0, 8)
+  }, [overviewSections])
+
   const handleSelectObject = (objectId: string) => {
     trackRecentObject(projectName, objectId)
     onSelectObject(objectId)
@@ -303,16 +312,6 @@ export function ObjectsWorkbench({
   const searching = queryMode
     ? searchQuery.trim().length > 0 || queryFilters.length > 0
     : searchQuery.trim().length > 0
-  const visibleObjectCount = selectedTypeMode
-    ? filteredObjects.length
-    : filteredOverviewSections.reduce((total, section) => total + section.objects.length, 0)
-  const headerCount = queryMode
-    ? queryTotal
-    : searching
-      ? visibleObjectCount
-      : selectedTypeMode
-        ? 0
-        : allObjectsTotal
   const pageLoading = queryMode
     ? queriedObjects.isLoading
     : selectedTypeMode && !selectedObjectType
@@ -323,13 +322,65 @@ export function ObjectsWorkbench({
     : filteredOverviewSections.some((section) => section.objects.length > 0)
   const queryError = queriedObjects.error ?? facetsQuery.error
   const querySortValue = querySort ? `${querySort.propertyId}:${querySort.direction}` : "default"
+  const queryObjectTypeLabel = humanizeIdentifier(
+    selectedObjectType?.name || classFilter || "objects"
+  )
 
   return (
-    <div className="mx-auto w-full max-w-5xl">
-      <CollectionHeader
+    <div className="mx-auto w-full max-w-6xl">
+      <CollectionPageTitle
         title="Objects"
-        count={headerCount}
-        actions={
+        count={availableClasses.length}
+        singularLabel="object type"
+      />
+
+      <div className="sticky top-0 z-30 mt-3 bg-background/92 py-2 backdrop-blur-xl supports-[backdrop-filter]:bg-background/82">
+        <div className="flex flex-col gap-1.5 md:flex-row md:items-center">
+          <CollectionSearchInput
+            value={searchQuery}
+            onChange={setSearchQuery}
+            placeholder={
+              queryMode
+                ? textSearchEnabled
+                  ? `Search ${queryObjectTypeLabel}…`
+                  : "Text search unavailable"
+                : "Search objects…"
+            }
+            disabled={queryMode && !textSearchEnabled}
+          />
+
+          <div className="flex w-full items-center gap-1.5 md:w-auto">
+            <Select
+              value={classFilter ?? "all"}
+              onValueChange={(value) => onClassFilterChange(value === "all" ? null : value)}
+            >
+              <SelectTrigger className="h-9 w-full bg-white md:w-48" aria-label="Object type">
+                <SelectValue placeholder="All object types" />
+              </SelectTrigger>
+              <SelectContent align="start">
+                <SelectItem value="all">All objects</SelectItem>
+                {availableClasses.map((cls) => (
+                  <SelectItem key={cls} value={cls}>
+                    {humanizeIdentifier(cls)} · {formatCount(objectTypeCounts.get(cls) ?? 0)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {classFilter ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                onClick={() => onClassFilterChange(null)}
+                className="size-9 shrink-0 bg-white"
+                aria-label="Show all objects"
+                title="Show all objects"
+              >
+                <X className="size-4" />
+              </Button>
+            ) : null}
+          </div>
+
           <div className="flex items-center gap-2">
             {queryMode ? (
               <Select
@@ -348,7 +399,11 @@ export function ObjectsWorkbench({
                   }
                 }}
               >
-                <SelectTrigger size="sm" className="h-8 w-36 text-xs" aria-label="Sort objects">
+                <SelectTrigger
+                  size="sm"
+                  className="h-9 w-36 bg-white text-xs"
+                  aria-label="Sort objects"
+                >
                   <SelectValue placeholder="Sort" />
                 </SelectTrigger>
                 <SelectContent align="end">
@@ -374,7 +429,11 @@ export function ObjectsWorkbench({
                   }
                 }}
               >
-                <SelectTrigger size="sm" className="h-8 w-28 text-xs" aria-label="Sort objects">
+                <SelectTrigger
+                  size="sm"
+                  className="h-9 w-32 bg-white text-xs"
+                  aria-label="Sort objects"
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent align="end">
@@ -383,77 +442,62 @@ export function ObjectsWorkbench({
                 </SelectContent>
               </Select>
             )}
-            {selectedTypeMode ? (
-              <CollectionViewToggle
-                value={viewStyle}
-                options={objectViewOptions}
-                onChange={(style) => {
-                  setViewStyle(style)
-                  setObjectViewStyle(style)
-                }}
+            {queryMode ? (
+              <div className="[&_[data-slot=toggle-group]]:h-9">
+                <CollectionViewToggle
+                  value={viewStyle}
+                  options={objectViewOptions}
+                  onChange={(style) => {
+                    setViewStyle(style)
+                    setObjectViewStyle(style)
+                  }}
+                />
+              </div>
+            ) : null}
+            {queryMode && selectedObjectType ? (
+              <ObjectFilterPopover
+                properties={filterableProperties}
+                filters={queryFilters}
+                facetResults={facetsQuery.data ?? []}
+                onAddFilter={(filter) => setQueryFilters((current) => [...current, filter])}
               />
             ) : null}
+            {queryMode && searching ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-9 px-2.5"
+                onClick={() => {
+                  setSearchQuery("")
+                  setQueryFilters([])
+                }}
+              >
+                <X />
+                Clear
+              </Button>
+            ) : null}
           </div>
-        }
-      />
-
-      {availableClasses.length > 1 ? (
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          <ClassChip
-            label="All"
-            count={allObjectsTotal}
-            active={classFilter == null}
-            onClick={() => onClassFilterChange(null)}
-          />
-          {availableClasses.map((cls) => (
-            <ClassChip
-              key={cls}
-              label={humanizeIdentifier(cls)}
-              count={objectTypeCounts.get(cls) ?? 0}
-              active={classFilter === cls}
-              onClick={() => onClassFilterChange(cls)}
-            />
-          ))}
         </div>
-      ) : null}
+      </div>
 
       {queryMode && selectedObjectType ? (
         <ObjectQueryBar
-          objectType={selectedObjectType}
-          searchQuery={searchQuery}
-          textSearchEnabled={textSearchEnabled}
           filters={queryFilters}
           matchMode={queryMatchMode}
-          filterableProperties={filterableProperties}
           propertiesById={queryPropertiesById}
           facetResults={facetsQuery.data ?? []}
           facetsLoading={facetsQuery.isLoading}
           queryError={queryError}
-          onSearchQueryChange={setSearchQuery}
           onAddFilter={(filter) => setQueryFilters((current) => [...current, filter])}
           onRemoveFilter={(filterId) =>
             setQueryFilters((current) => current.filter((filter) => filter.id !== filterId))
           }
-          onClear={() => {
-            setSearchQuery("")
-            setQueryFilters([])
-          }}
           onMatchModeChange={setQueryMatchMode}
         />
-      ) : (
-        <div className="relative mt-3">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            type="text"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Search objects, location, or class..."
-            className="pl-9"
-          />
-        </div>
-      )}
+      ) : null}
 
-      <div className="mt-4 space-y-4">
+      <div className="mt-6 space-y-6">
         {pageLoading ? (
           <div className="flex min-h-72 items-center justify-center">
             <LoadingState label="Loading objects..." />
@@ -468,35 +512,26 @@ export function ObjectsWorkbench({
                 : "Try a broader search query."
             }
           />
+        ) : !selectedTypeMode && searching ? (
+          <section className="space-y-3">
+            <SectionHeading
+              title="Matching previews"
+              description={`${formatCount(filteredObjects.length)} loaded objects match this search.`}
+            />
+            <TableView
+              objects={filteredObjects}
+              updatesByObject={emptyTelemetryUpdates}
+              selectedObjectId={selectedObjectId ?? null}
+              onSelectObject={handleSelectObject}
+            />
+          </section>
         ) : !selectedTypeMode ? (
-          <div className="space-y-6">
-            {filteredOverviewSections.map((section) => (
-              <ObjectCardSection
-                key={section.objectTypeId}
-                objectTypeId={section.objectTypeId}
-                objects={section.objects}
-                count={formatLoadedCount(
-                  section.objects.length,
-                  searching ? undefined : section.total
-                )}
-                selectedObjectId={selectedObjectId}
-                onSelectObject={handleSelectObject}
-                action={
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="ml-auto h-7 px-2 text-xs"
-                    title={`View ${humanizeIdentifier(section.objectTypeId)} objects`}
-                    onClick={() => onClassFilterChange(section.objectTypeId)}
-                  >
-                    View all
-                    <ChevronRight />
-                  </Button>
-                }
-              />
-            ))}
-          </div>
+          <ObjectsOverview
+            sections={filteredOverviewSections}
+            recentObjects={recentObjects}
+            onSelectType={onClassFilterChange}
+            onSelectObject={handleSelectObject}
+          />
         ) : viewStyle === "table" ? (
           <TableView
             objects={filteredObjects}
@@ -541,6 +576,113 @@ export function ObjectsWorkbench({
   )
 }
 
+function SectionHeading({ title, description }: { title: string; description?: string }) {
+  return (
+    <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+      <h2 className="text-base font-semibold tracking-[-0.02em] text-foreground">{title}</h2>
+      {description ? <p className="text-xs text-muted-foreground">{description}</p> : null}
+    </div>
+  )
+}
+
+function ObjectsOverview({
+  sections,
+  recentObjects,
+  onSelectType,
+  onSelectObject,
+}: {
+  sections: ObjectTypePreviewSection[]
+  recentObjects: ObjectSummary[]
+  onSelectType: (objectTypeId: string) => void
+  onSelectObject: (objectId: string) => void
+}) {
+  return (
+    <div className="space-y-8">
+      {recentObjects.length > 0 ? (
+        <section className="space-y-3">
+          <SectionHeading title="Recently updated" />
+          <div className="grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 xl:grid-cols-4">
+            {recentObjects.map((object) => {
+              const label = object.name || humanizeIdentifier(object.id)
+              return (
+                <button
+                  key={object.id}
+                  type="button"
+                  onClick={() => onSelectObject(object.id)}
+                  className="group flex min-h-24 min-w-0 flex-col items-start bg-card p-4 text-left transition-colors hover:bg-[var(--atlas-surface-hover)] focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <div className="flex w-full min-w-0 items-center gap-2">
+                    <ObjectIcon
+                      type={object.class}
+                      className="size-3.5 shrink-0 text-muted-foreground"
+                    />
+                    <span className="truncate text-sm font-medium text-foreground">{label}</span>
+                    <ArrowRight className="ml-auto size-3.5 shrink-0 text-muted-foreground opacity-0 transition-[opacity,transform] group-hover:translate-x-0.5 group-hover:opacity-100" />
+                  </div>
+                  <p className="mt-auto pt-3 text-[11px] text-muted-foreground">
+                    {humanizeIdentifier(object.class)} · {formatRelativeTime(object.updatedAt)}
+                  </p>
+                </button>
+              )
+            })}
+          </div>
+        </section>
+      ) : null}
+
+      <section className="space-y-3">
+        <SectionHeading
+          title="Browse by type"
+          description={`${formatCount(sections.length)} populated object types.`}
+        />
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {sections.map((section) => (
+            <ObjectTypeSummaryCard
+              key={section.objectTypeId}
+              section={section}
+              onClick={() => onSelectType(section.objectTypeId)}
+            />
+          ))}
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function ObjectTypeSummaryCard({
+  section,
+  onClick,
+}: {
+  section: ObjectTypePreviewSection
+  onClick: () => void
+}) {
+  const label = humanizeIdentifier(section.objectTypeId)
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group flex min-h-40 flex-col rounded-xl border border-border bg-card p-4 text-left transition-[border-color,background-color,transform] hover:-translate-y-0.5 hover:border-[var(--atlas-border-hover)] hover:bg-[var(--atlas-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <div className="flex w-full items-start gap-3">
+        <LetterAvatar label={label} />
+        <div className="min-w-0 flex-1">
+          <h3 className="truncate text-sm font-semibold text-foreground">{label}</h3>
+          <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">
+            {formatCount(section.total)} object{section.total === 1 ? "" : "s"}
+          </p>
+        </div>
+        <ChevronRight className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+      </div>
+      <div className="mt-4 w-full space-y-1.5 border-t border-border/70 pt-3">
+        {section.objects.slice(0, 3).map((object) => (
+          <p key={object.id} className="truncate text-xs text-muted-foreground">
+            {object.name || humanizeIdentifier(object.id)}
+          </p>
+        ))}
+      </div>
+    </button>
+  )
+}
+
 function ObjectCardSection({
   objectTypeId,
   objects,
@@ -579,36 +721,6 @@ function ObjectCardSection({
         ))}
       </CollectionCardGrid>
     </section>
-  )
-}
-
-function ClassChip({
-  label,
-  count,
-  active,
-  onClick,
-}: {
-  label: string
-  count: number
-  active: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "inline-flex h-7 items-center gap-1.5 rounded-full border px-3 text-xs transition-colors",
-        active
-          ? "border-foreground bg-foreground text-background"
-          : "border-border bg-card text-foreground hover:bg-muted"
-      )}
-    >
-      <span>{label}</span>
-      <span className={cn("tabular-nums", active ? "text-background/70" : "text-muted-foreground")}>
-        {formatCount(count)}
-      </span>
-    </button>
   )
 }
 
