@@ -9,7 +9,7 @@ CREATE TABLE ai_model_call_valuations (
   reason TEXT CHECK (
     reason IS NULL OR reason IN (
       'missingBillingIdentity',
-      'missingRateCard',
+      'missingCatalogEntry',
       'missingUsageMeter',
       'unsupportedPricingDimension',
       'invalidUsageForFormula'

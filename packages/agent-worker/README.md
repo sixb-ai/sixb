@@ -27,6 +27,10 @@ await worker.start()
 - The queued run is the dispatch intent; workers republish it with a deterministic queue job id until
   it is claimed, without a parallel outbox table.
 - The worker transitions the durable run from `queued` to `running` when it claims the job.
+- Before each conversation turn, the worker estimates the next model request and checkpoints older
+  complete turns when it crosses the model's input budget. Context limits come from the model
+  definition, then the pinned Models.dev snapshot, with a 128,000-token fallback when neither is available.
+  Agent `loop.context` values are optional overrides; omitting them keeps compaction enabled.
 - The queue lease is the sole authority for liveness and redelivery; the worker renews it during
   turns.
 - Every completed provider call from Sixb's owned model loop is appended to `storage.aiUsage` with
@@ -41,7 +45,7 @@ await worker.start()
 
 ## Usage accounting
 
-Every completed conversation and workflow-agent provider call is appended to `storage.aiUsage`,
+Every completed conversation, compaction-summary, and workflow-agent provider call is appended to `storage.aiUsage`,
 including individual calls in tool loops and calls completed before later cancellation, tool
 failure, output validation, or execution ownership loss. Workflow nodes use their own durable
 execution and inherit the parent workflow's admission-time group snapshot. Usage writes are
@@ -68,6 +72,9 @@ Each run has a broker stream named `agents.runs.${runId}`.
 The default `StreamSink` writes:
 
 - `agent.run.started`
+- `agent.compaction.started`
+- `agent.compaction.completed`
+- `agent.compaction.failed`
 - `agent.ui.chunk`
 - `agent.message.finalized`
 - `agent.run.finished`

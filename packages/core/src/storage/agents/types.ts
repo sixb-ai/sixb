@@ -407,6 +407,11 @@ export interface AgentContextCheckpointStore {
    * Repeating the same payload for the same creating run is idempotent.
    */
   create(input: CreateAgentContextCheckpointInput): Promise<AgentContextCheckpointRecord>
+  /** Return checkpoints created by the requested runs, in first-occurrence input order. */
+  getByRunIds(input: {
+    readonly projectId: string
+    readonly runIds: readonly string[]
+  }): Promise<readonly AgentContextCheckpointRecord[]>
   getLatest(input: {
     readonly projectId: string
     readonly threadId: string

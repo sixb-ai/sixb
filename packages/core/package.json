@@ -1,6 +1,6 @@
 {
   "name": "@sixb/core",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "description": "The ontology-first runtime for Sixb — objects, links, telemetry, actions, and provider contracts",
   "keywords": [
     "sixb",

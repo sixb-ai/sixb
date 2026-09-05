@@ -64,6 +64,10 @@ export interface LanguageModelRequest {
   readonly messages: readonly ModelMessage[]
   readonly tools: readonly ModelToolSpecification[]
   readonly reasoning?: ModelReasoning
+  /** Per-call output ceiling; providers must not exceed a stricter configured model limit. */
+  readonly maxOutputTokens?: number
+  /** Disable automatic prompt caching without overriding explicit provider configuration. */
+  readonly caching?: "auto" | "off"
   readonly responseFormat?: ModelResponseFormat
   readonly signal: AbortSignal
 }

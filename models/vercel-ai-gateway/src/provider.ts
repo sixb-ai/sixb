@@ -24,6 +24,7 @@ import {
   type ProviderData,
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
+import { withAutomaticPromptCaching } from "./provider-caching"
 import { decodeServerSentEvents } from "./sse"
 import { gatewayOutputSchema } from "./structured-output"
 
@@ -418,6 +419,18 @@ class VercelGatewayLanguageModel implements LanguageModel {
     readonly outputToolName?: string
   }> {
     const extra = this.options.request ?? {}
+    if (
+      request.maxOutputTokens !== undefined &&
+      (!Number.isSafeInteger(request.maxOutputTokens) || request.maxOutputTokens <= 0)
+    ) {
+      throw new TypeError("[SixbVercelGateway] maxOutputTokens must be a positive safe integer.")
+    }
+    const configuredMaxOutputTokens =
+      positiveInteger(extra.max_output_tokens) ?? this.definition.maxOutputTokens
+    const maxOutputTokens =
+      request.maxOutputTokens === undefined
+        ? undefined
+        : Math.min(request.maxOutputTokens, configuredMaxOutputTokens ?? request.maxOutputTokens)
     for (const reserved of [
       "model",
       "input",
@@ -465,15 +478,18 @@ class VercelGatewayLanguageModel implements LanguageModel {
     ) {
       throw new TypeError(`[SixbVercelGateway] Tool name '${OUTPUT_TOOL_NAME}' is reserved.`)
     }
+    const providerOptions = withAutomaticPromptCaching(
+      this.options.providerOptions,
+      request.caching
+    )
     return {
       body: {
         ...extra,
         model: this.modelId,
         input: messagesToInput(request.messages, this.providerId),
         stream: true,
-        ...(this.options.providerOptions === undefined
-          ? {}
-          : { providerOptions: this.options.providerOptions }),
+        ...(providerOptions === undefined ? {} : { providerOptions }),
+        ...(maxOutputTokens === undefined ? {} : { max_output_tokens: maxOutputTokens }),
         ...(tools.length === 0
           ? {}
           : {

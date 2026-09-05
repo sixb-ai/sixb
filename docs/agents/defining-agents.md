@@ -46,7 +46,7 @@ export const supportAgent = defineAgent("support-agent", {
 | `reasoning` | reasoning preference | No | `provider-default`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `{ budgetTokens }`. |
 | `groups` | `GroupDefinition[]` | No | Gate who can use the agent and what it can reach. See [Authorization](./authorization.md). |
 | `tools` | `AgentToolDefinition[]` | No | Worker-side tools this agent is explicitly allowed to call. Defaults to none. |
-| `loop` | `{ stopWhen?: { maxSteps?: number } }` | No | Step cap per turn. Defaults to **25**. |
+| `loop` | `AgentLoopConfig` | No | Step cap, prompt caching, and optional context-budget overrides. |
 
 ## The model
 
@@ -136,7 +136,7 @@ export const researcher = defineAgent("researcher", {
 Omitting it gives the agent no selected worker tools. Sixb still supplies sandboxed `read` and
 `bash`. See [Tools and gateway](./tools-and-gateway.md) for custom tools and Exa web access.
 
-## Loop
+## Loop and context budget
 
 An agent runs a tool-calling loop: the model produces output, may call tools, sees the results, and
 continues until it stops or hits `loop.stopWhen.maxSteps` (default 25).
@@ -144,6 +144,42 @@ continues until it stops or hits `loop.stopWhen.maxSteps` (default 25).
 ```ts
 loop: { stopWhen: { maxSteps: 12 } }
 ```
+
+For Gateway models, Sixb enables the Gateway's automatic prompt caching by default and records
+cache reads and writes in AI usage. Provider details stay out of project prompts and
+`providerOptions`. Opt out only when the workload requires it:
+
+```ts
+loop: { caching: "off" }
+```
+
+Direct-provider models retain their provider-specific caching behavior.
+
+Sixb automatically checkpoints long conversations before their next model request exceeds the
+selected model's context window. The worker prefers the owned model definition's context window,
+then resolves exact model limits from its pinned Models.dev snapshot. If neither is available,
+it uses a conservative 128,000-token window and logs one startup
+warning for that provider/model pair.
+
+The full transcript remains unchanged. Only the model-facing view becomes a continuation summary
+plus recent complete turns.
+
+Use `loop.context` only when a model deployment or workload needs an explicit override:
+
+```ts
+loop: {
+  stopWhen: { maxSteps: 12 },
+  caching: "auto",
+  context: {
+    windowTokens: 200_000,
+  },
+}
+```
+
+`windowTokens` overrides the catalog and is authoritative when set. `reserveTokens` defaults to the
+smaller of 16,384 or 25% of the resolved window. `keepRecentTokens` defaults to the smaller of
+20,000 or half the resolved input budget. All three fields are optional; omitting `context` keeps
+automatic compaction enabled with model-derived defaults.
 
 ## Discovery
 

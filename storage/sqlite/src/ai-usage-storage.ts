@@ -8,6 +8,7 @@ import {
   AiUsageStorageError,
   aggregateAiModelCallUsage,
   assertAiUsageExecutionId,
+  type GetLatestAiModelCallForExecutionInput,
   normalizeAiModelCallRecord,
   type RecordAiModelCallInput,
   type RecordAiModelCallResult,
@@ -83,6 +84,24 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
       executionIds: [input.executionId],
     })
     return summary!
+  }
+
+  async getLatestForExecution(
+    input: GetLatestAiModelCallForExecutionInput
+  ): Promise<AiModelCallUsageRecord | null> {
+    assertNonBlankProjectId(input.projectId)
+    assertAiUsageExecutionId(input.executionId)
+    const row = this.connection.db
+      .query(
+        `
+          SELECT * FROM ai_model_call_usage
+          WHERE project_id = ? AND execution_id = ?
+          ORDER BY occurred_at DESC, id DESC
+          LIMIT 1
+        `
+      )
+      .get(input.projectId, input.executionId) as AiUsageRow | null
+    return row ? this.rowToRecord(row) : null
   }
 
   async summarizeExecutions(

@@ -35,6 +35,8 @@ export interface RunModelLoopInput<TOutput = string> {
   readonly tools?: readonly ModelTool[]
   readonly output?: ModelOutput<TOutput>
   readonly reasoning?: ModelReasoning
+  readonly maxOutputTokens?: number
+  readonly caching?: "auto" | "off"
   readonly maxSteps: number
   readonly signal: AbortSignal
   /** Reserve the final provider call for a tool-free synthesis response. */
@@ -151,6 +153,8 @@ export async function runModelLoop<TOutput = string>(
         messages: requestMessages,
         tools: requestTools,
         ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
+        ...(input.maxOutputTokens === undefined ? {} : { maxOutputTokens: input.maxOutputTokens }),
+        ...(input.caching === undefined ? {} : { caching: input.caching }),
         ...(input.output === undefined
           ? {}
           : {
@@ -305,6 +309,12 @@ export async function runModelLoop<TOutput = string>(
 }
 
 function assertLoopInput(input: RunModelLoopInput<unknown>): void {
+  if (
+    input.maxOutputTokens !== undefined &&
+    (!Number.isSafeInteger(input.maxOutputTokens) || input.maxOutputTokens <= 0)
+  ) {
+    throw new TypeError("[SixbModels] maxOutputTokens must be a positive safe integer.")
+  }
   if (!Number.isInteger(input.maxSteps) || input.maxSteps <= 0) {
     throw new TypeError("[SixbModels] maxSteps must be a positive integer.")
   }

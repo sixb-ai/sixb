@@ -3168,6 +3168,9 @@
                   },
                   "returnTo": {
                     "type": "string"
+                  },
+                  "revealLink": {
+                    "type": "boolean"
                   }
                 },
                 "required": ["email"],
@@ -3198,6 +3201,9 @@
                   },
                   "returnTo": {
                     "type": "string"
+                  },
+                  "revealLink": {
+                    "type": "boolean"
                   }
                 },
                 "required": ["email"],
@@ -3228,6 +3234,9 @@
                   },
                   "returnTo": {
                     "type": "string"
+                  },
+                  "revealLink": {
+                    "type": "boolean"
                   }
                 },
                 "required": ["email"],
@@ -3296,6 +3305,20 @@
                         "status": {
                           "type": "string",
                           "enum": ["sent", "skipped", "rate_limited", "not_supported"]
+                        },
+                        "link": {
+                          "type": "object",
+                          "properties": {
+                            "url": {
+                              "type": "string",
+                              "format": "uri"
+                            },
+                            "expiresAt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["url"],
+                          "additionalProperties": false
                         }
                       },
                       "required": ["status"],
@@ -20856,9 +20879,13 @@
                       },
                       "required": ["validate", "writeback", "edits", "effects"],
                       "additionalProperties": false
+                    },
+                    "inputSchema": {
+                      "type": "object",
+                      "additionalProperties": {}
                     }
                   },
-                  "required": ["id", "name", "params", "phases"],
+                  "required": ["id", "name", "params", "phases", "inputSchema"],
                   "additionalProperties": false
                 }
               }
@@ -22999,6 +23026,27 @@
                               }
                             },
                             "additionalProperties": false
+                          },
+                          "context": {
+                            "type": "object",
+                            "properties": {
+                              "windowTokens": {
+                                "type": "integer",
+                                "exclusiveMinimum": true,
+                                "minimum": 0
+                              },
+                              "reserveTokens": {
+                                "type": "integer",
+                                "exclusiveMinimum": true,
+                                "minimum": 0
+                              },
+                              "keepRecentTokens": {
+                                "type": "integer",
+                                "exclusiveMinimum": true,
+                                "minimum": 0
+                              }
+                            },
+                            "additionalProperties": false
                           }
                         },
                         "additionalProperties": false
@@ -23091,6 +23139,27 @@
                           "type": "object",
                           "properties": {
                             "maxSteps": {
+                              "type": "integer",
+                              "exclusiveMinimum": true,
+                              "minimum": 0
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "context": {
+                          "type": "object",
+                          "properties": {
+                            "windowTokens": {
+                              "type": "integer",
+                              "exclusiveMinimum": true,
+                              "minimum": 0
+                            },
+                            "reserveTokens": {
+                              "type": "integer",
+                              "exclusiveMinimum": true,
+                              "minimum": 0
+                            },
+                            "keepRecentTokens": {
                               "type": "integer",
                               "exclusiveMinimum": true,
                               "minimum": 0
@@ -24275,6 +24344,22 @@
                               "required": ["code", "severity", "scope", "message"],
                               "additionalProperties": false
                             }
+                          },
+                          "compaction": {
+                            "type": "object",
+                            "properties": {
+                              "checkpointId": {
+                                "type": "string"
+                              },
+                              "summary": {
+                                "type": "string"
+                              },
+                              "createdAt": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["checkpointId", "summary", "createdAt"],
+                            "additionalProperties": false
                           },
                           "metadata": {
                             "description": "Any JSON-compatible value.",

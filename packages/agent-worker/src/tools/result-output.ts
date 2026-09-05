@@ -6,7 +6,7 @@ export type AgentToolModelOutput =
   | { readonly type: "text"; readonly value: string }
   | { readonly type: "json"; readonly value: JsonValue }
 
-/** Convert a durable Sixb tool result into the AI SDK's ephemeral, model-facing output. */
+/** Convert a durable Sixb tool result into bounded, provider-safe model-facing output. */
 export async function agentToolResultToModelOutput(input: {
   readonly output: JsonValue
   readonly blobStorage: BlobStorage

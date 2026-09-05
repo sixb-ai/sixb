@@ -11,6 +11,7 @@ import type { GroupDefinition, SecurityDefinitionCatalog } from "../security"
 import { AgentDefinitionError } from "./errors"
 import {
   AGENT_REASONING_LEVELS,
+  type AgentContextConfig,
   type AgentDefinition,
   type AgentLoopConfig,
   type AgentReasoning,
@@ -158,14 +159,47 @@ export function validateAgentToolsAtStartup(agents: readonly AgentDefinition[]):
   }
 }
 
-export function assertValidLoopConfig(loop: AgentLoopConfig | undefined): void {
+export function resolveAgentLoopConfig(
+  loop: AgentLoopConfig | undefined
+): AgentLoopConfig | undefined {
+  if (loop === undefined) return undefined
+
   const maxSteps = loop?.stopWhen?.maxSteps
-  if (maxSteps === undefined) {
-    return
-  }
-  if (!Number.isInteger(maxSteps) || maxSteps <= 0) {
+  if (maxSteps !== undefined && (!Number.isSafeInteger(maxSteps) || maxSteps <= 0)) {
     throw new AgentDefinitionError(
-      "[Sixb] Agent loop.stopWhen.maxSteps must be a positive finite integer."
+      "[Sixb] Agent loop.stopWhen.maxSteps must be a positive safe integer."
+    )
+  }
+  if (loop.caching !== undefined && loop.caching !== "auto" && loop.caching !== "off") {
+    throw new AgentDefinitionError("[Sixb] Agent loop.caching must be 'auto' or 'off'.")
+  }
+
+  const context = loop.context ? snapshotAgentContextConfig(loop.context) : undefined
+  return Object.freeze({
+    ...(loop.stopWhen === undefined
+      ? {}
+      : { stopWhen: Object.freeze({ ...(maxSteps === undefined ? {} : { maxSteps }) }) }),
+    ...(context === undefined ? {} : { context }),
+    ...(loop.caching === undefined ? {} : { caching: loop.caching }),
+  })
+}
+
+function snapshotAgentContextConfig(context: AgentContextConfig): AgentContextConfig {
+  const snapshot: Record<string, number> = {}
+  for (const field of ["windowTokens", "reserveTokens", "keepRecentTokens"] as const) {
+    const value = context[field]
+    if (value === undefined) continue
+    assertPositiveSafeInteger(value, field)
+    snapshot[field] = value
+  }
+
+  return Object.freeze(snapshot)
+}
+
+function assertPositiveSafeInteger(value: unknown, field: string): asserts value is number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+    throw new AgentDefinitionError(
+      `[Sixb] Agent loop.context.${field} must be a positive safe integer.`
     )
   }
 }

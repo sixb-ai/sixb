@@ -73,6 +73,23 @@ const echo: ModelTool<{ value: string }> = {
 }
 
 describe("runModelLoop", () => {
+  test("forwards and validates per-call output limits", async () => {
+    // Regression proof: remove maxOutputTokens from the model.stream request or its validation.
+    const model = new MockLanguageModel({
+      stream: async (request) => {
+        expect(request.maxOutputTokens).toBe(512)
+        expect(request.caching).toBe("off")
+        return streamFromArray([{ type: "stream-start" }, finish()])
+      },
+    })
+    const input = { model, messages: [], maxSteps: 1, signal: new AbortController().signal }
+    await runModelLoop({ ...input, maxOutputTokens: 512, caching: "off" })
+    for (const maxOutputTokens of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      await expect(runModelLoop({ ...input, maxOutputTokens })).rejects.toThrow(
+        "positive safe integer"
+      )
+    }
+  })
   test("streams text and awaits completed-call accounting", async () => {
     const events: ModelUiChunk[] = []
     const calls: ModelCallEndEvent[] = []

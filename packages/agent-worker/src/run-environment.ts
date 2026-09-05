@@ -2,24 +2,30 @@ import type { AgentDefinition, Sandbox } from "@sixb/core"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type { ModelTool } from "@sixb/core/models"
-import type { AgentRunRecord, WorkflowAgentNodeRunRecord } from "@sixb/core/storage"
+import type {
+  AgentMessageRecord,
+  AgentRunRecord,
+  WorkflowAgentNodeRunRecord,
+} from "@sixb/core/storage"
 import { type AgentExecutionMode, renderAgentSystemPrompt } from "./agent-prompt"
 import { assertAgentRuntimeProfile } from "./agent-runtime/preflight"
+import type { AgentSkill } from "./agent-skills"
 import { createAgentApiGatewayBaseUrl } from "./api-url"
 import {
   modelSupportsInlineImages,
   type PreparedAgentAttachmentContext,
   prepareAgentAttachments,
 } from "./attachments"
-import { type BashSandboxHandle, createBashTool } from "./bash-tool"
 import { modelToolsFromAgentDefinitions } from "./model-adapters"
-import { createReadTool } from "./read-tool"
 import { prepareAgentSandboxApiContext } from "./sandbox-api-context"
 import { AgentSandboxFileRegistry } from "./sandbox-file-registry"
-import { AgentToolArtifactBudget, createAgentToolArtifacts } from "./tool-artifacts"
-import { AgentToolResultMediaBridge } from "./tool-result-media"
+import type { AgentSandboxHandle } from "./sandbox-handle"
+import { AgentToolArtifactBudget, createAgentToolArtifacts } from "./tools/artifacts"
+import { createBashTool } from "./tools/bash"
+import { createReadTool } from "./tools/read"
+import { AgentToolResultMediaBridge } from "./tools/result-media"
+import { createViewFileTool } from "./tools/view-file"
 import type { AgentExecutionContext, AgentTurnContext, AgentWorkerContext } from "./types"
-import { createViewFileTool } from "./view-file-tool"
 import { prepareWorkflowInputAttachments } from "./workflow-input-attachments"
 
 export interface AgentExecutionEnvironment {
@@ -41,6 +47,10 @@ interface CreateAgentEnvironmentInput {
 
 export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvironmentInput {
   readonly run: AgentRunRecord
+  /** Retained model tail selected by preflight. Falls back to storage for direct callers. */
+  readonly messages?: readonly AgentMessageRecord[]
+  /** Skills already loaded while estimating the request. */
+  readonly skills?: readonly AgentSkill[]
 }
 
 export interface CreateWorkflowAgentNodeEnvironmentInput extends CreateAgentEnvironmentInput {
@@ -60,19 +70,22 @@ export async function createConversationAgentEnvironment(
     runId: run.id,
     executionToken: run.execution?.token,
   })
-  const [skills, history, inlineImages] = await Promise.all([
-    context.agentSkills,
-    context.storage.agents.messages.list({
-      projectId: context.id,
-      threadId: run.threadId,
-      order: "asc",
-    }),
+  const [skills, messages, inlineImages] = await Promise.all([
+    input.skills ?? context.agentSkills,
+    input.messages ??
+      context.storage.agents.messages
+        .list({
+          projectId: context.id,
+          threadId: run.threadId,
+          order: "asc",
+        })
+        .then((history) => history.messages),
     modelSupportsInlineImages(agent.model),
   ])
   const attachmentContext = await prepareAgentAttachments({
     projectId: context.id,
     threadId: run.threadId,
-    messages: history.messages,
+    messages,
     blobStorage: context.blobStorage,
     apiBaseUrl,
     inlineImages,
@@ -153,7 +166,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
     agentId: agent.id,
     ...(threadId ? { threadId } : {}),
   })
-  let ready: Promise<BashSandboxHandle>
+  let ready: Promise<AgentSandboxHandle>
   const fileRegistry = new AgentSandboxFileRegistry()
   const artifactBudget = new AgentToolArtifactBudget()
   const mediaBridge = new AgentToolResultMediaBridge({
@@ -263,7 +276,7 @@ interface ProvisionSandboxInput {
   readonly skills: Awaited<AgentWorkerContext["agentSkills"]>
 }
 
-async function provisionSandbox(input: ProvisionSandboxInput): Promise<BashSandboxHandle> {
+async function provisionSandbox(input: ProvisionSandboxInput): Promise<AgentSandboxHandle> {
   const { context, agent, run, apiBaseUrl, apiOrigin, skills } = input
   let sandbox: Sandbox | null = null
   try {
@@ -294,7 +307,7 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<BashSandb
 }
 
 function disposeEnvironment(
-  ready: Promise<BashSandboxHandle>,
+  ready: Promise<AgentSandboxHandle>,
   isSettled: () => boolean,
   onDetachedTeardown?: (teardown: Promise<void>) => void
 ): Promise<void> {

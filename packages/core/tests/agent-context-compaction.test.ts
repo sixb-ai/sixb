@@ -23,6 +23,23 @@ function message(seq: number, role: AgentMessageRecord["role"], text: string): A
 }
 
 describe("agent context token estimation", () => {
+  test("counts opaque provider state without exposing it to summary generation", () => {
+    // Regression proof: remove provider-state from either switch in context-compaction.ts.
+    const base = message(2, "assistant", "answer")
+    const withState: AgentMessageRecord = {
+      ...base,
+      parts: [
+        ...base.parts,
+        { type: "provider-state", providerId: "anthropic", data: { opaque: "secret".repeat(100) } },
+      ],
+    }
+    expect(estimateAgentContextMessagesTokens([withState]).tokens).toBeGreaterThan(
+      estimateAgentContextMessagesTokens([base]).tokens
+    )
+    expect(serializeAgentMessagesForSummary([withState])).toBe(
+      serializeAgentMessagesForSummary([base])
+    )
+  })
   test("compacts only above the reserved input budget", () => {
     const inputBudgetTokens = 8_000
     expect(shouldCompactAgentContext({ inputBudgetTokens, estimatedInputTokens: 7_999 })).toBe(

@@ -423,10 +423,20 @@ class AnthropicLanguageModel implements LanguageModel {
         "[SixbAnthropic] Model request option 'output_config.format' is owned by the adapter."
       )
     }
+    if (
+      request.maxOutputTokens !== undefined &&
+      (!Number.isSafeInteger(request.maxOutputTokens) || request.maxOutputTokens <= 0)
+    ) {
+      throw new TypeError("[SixbAnthropic] maxOutputTokens must be a positive safe integer.")
+    }
+    const maxOutputTokens = Math.min(
+      request.maxOutputTokens ?? this.maxOutputTokens,
+      this.maxOutputTokens
+    )
     const reasoning = anthropicReasoningRequest(
       request.reasoning,
       this.definition.capabilities.reasoning,
-      this.maxOutputTokens,
+      maxOutputTokens,
       this.modelId
     )
     const outputConfig: JsonObject = {
@@ -447,7 +457,7 @@ class AnthropicLanguageModel implements LanguageModel {
         model: this.modelId,
         messages: mapped.messages,
         stream: true,
-        max_tokens: this.maxOutputTokens,
+        max_tokens: maxOutputTokens,
         ...(mapped.system.length === 0 ? {} : { system: mapped.system }),
         ...(tools.length === 0
           ? {}

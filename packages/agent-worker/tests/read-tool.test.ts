@@ -5,7 +5,7 @@ import { join } from "node:path"
 import type { CommandResult, RunCommandOptions, Sandbox, SandboxFileRecord } from "@sixb/core"
 import type { ModelTool } from "@sixb/core/models"
 import { exec } from "@sixb/core/sandboxes"
-import { createReadTool, type ReadToolInput, type ReadToolOutput } from "../src/read-tool"
+import { createReadTool, type ReadToolInput, type ReadToolOutput } from "../src/tools/read"
 
 const roots: string[] = []
 

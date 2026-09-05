@@ -24,7 +24,6 @@ export function createAgentTurnRuntime(input: {
   >
   readonly run: AgentRunRecord
   readonly signal: AbortSignal
-  readonly providerOptions?: unknown
 }): AgentTurnRuntime {
   const usageRecorder = new AiModelCallRecorder({
     storage: input.context.storage,
@@ -32,7 +31,6 @@ export function createAgentTurnRuntime(input: {
     executionId: input.run.executionId,
     attempt: input.run.attempt,
     requesterGroupIds: input.run.requesterGroupIds,
-    providerOptions: input.providerOptions,
     recoverAiModelCall: input.context.recoverAiModelCall,
     errorRunId: input.run.id,
   })

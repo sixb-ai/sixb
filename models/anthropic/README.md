@@ -1,5 +1,8 @@
 # @sixb/anthropic
 
+Per-call `maxOutputTokens` limits (including compaction summaries) can lower, but never raise,
+the output ceiling configured on the model.
+
 Callable Anthropic provider for Sixb's core model contract. It uses the native Messages API and a
 small provider-owned rate card for Anthropic's published family prices. Current model metadata and
 limits remain available through the explicit catalog API.

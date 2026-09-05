@@ -147,6 +147,9 @@ function estimateMessageTokens(
       case "context":
         tokens += textTokens(stableJsonStringify(part.context))
         break
+      case "provider-state":
+        tokens += textTokens(stableJsonStringify(part.data))
+        break
       case "tool-call":
         tokens +=
           TOOL_OVERHEAD_TOKENS +
@@ -193,6 +196,7 @@ function serializeSummaryPart(
     case "text":
       return [`${indent}<text>${escapeXml(part.text)}</text>`]
     case "reasoning":
+    case "provider-state":
     case "step-start":
       return []
     case "context":

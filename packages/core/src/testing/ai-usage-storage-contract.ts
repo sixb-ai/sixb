@@ -146,6 +146,41 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
       })
     })
 
+    test("returns the latest completed call for one execution", async () => {
+      await withStorage(async (storage) => {
+        await expect(
+          storage.getLatestForExecution({ projectId, executionId: agentExecutionId })
+        ).resolves.toBeNull()
+
+        await storage.recordModelCall(
+          modelCallInput({
+            id: "usage_later",
+            callId: "call_later",
+            responseId: "response_later",
+            occurredAt: at("2026-06-23T10:02:00.000Z"),
+          })
+        )
+        await storage.recordModelCall(
+          modelCallInput({
+            id: "usage_earlier",
+            callId: "call_earlier",
+            responseId: "response_earlier",
+            occurredAt: at("2026-06-23T10:01:00.000Z"),
+          })
+        )
+
+        await expect(
+          storage.getLatestForExecution({ projectId, executionId: agentExecutionId })
+        ).resolves.toMatchObject({ id: "usage_later", responseId: "response_later" })
+        await expect(
+          storage.getLatestForExecution({
+            projectId: "other-project",
+            executionId: agentExecutionId,
+          })
+        ).resolves.toBeNull()
+      })
+    })
+
     test("bills the same call and response IDs again on a later delivery attempt", async () => {
       // Regression guard: remove `attempt` from a provider's idempotency key/query/index and the
       // second append collapses into the first, making the aggregate assertions fail.

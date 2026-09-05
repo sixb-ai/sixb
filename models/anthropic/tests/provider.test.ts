@@ -44,6 +44,25 @@ async function collect(stream: AsyncIterable<LanguageModelStreamEvent>) {
 }
 
 describe("Anthropic provider", () => {
+  test("honors per-call summary limits without raising the model ceiling", async () => {
+    // Regression proof: use this.maxOutputTokens unconditionally in prepareRequest.
+    const bodies: Record<string, unknown>[] = []
+    const provider = createAnthropic({
+      apiKey: "test",
+      fetch: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return sseResponse([])
+      },
+    })
+    const model = provider("claude-sonnet-4-5", { maxOutputTokens: 2_048 })
+    await model.stream(request({ maxOutputTokens: 512, reasoning: "none" }))
+    await model.stream(request({ maxOutputTokens: 4_096 }))
+    expect(bodies.map((body) => body.max_tokens)).toEqual([512, 2_048])
+    await expect(model.stream(request({ maxOutputTokens: 0 }))).rejects.toThrow(
+      "positive safe integer"
+    )
+    expect(bodies).toHaveLength(2)
+  })
   test("does not narrow open object schemas for the native decoder", () => {
     expect(
       anthropicOutputSchema({

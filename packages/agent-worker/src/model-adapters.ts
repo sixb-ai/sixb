@@ -16,7 +16,6 @@ import {
   validateAndNormalizeAgentToolInput,
 } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
-import { schemaRecordToJsonSchema } from "@sixb/core/internal/ontology"
 import type {
   JsonObject,
   ModelAssistantPart,
@@ -28,7 +27,8 @@ import type {
 } from "@sixb/core/models"
 import type { AiModelCallUsageInput } from "@sixb/core/storage"
 import { AgentToolExecutionError, AgentToolOutputError } from "./errors"
-import type { AgentToolModelOutput } from "./tool-result-output"
+import { agentModelToolSpecFromDefinition } from "./tools/model-spec"
+import type { AgentToolModelOutput } from "./tools/result-output"
 
 type AgentErrorDetails =
   | { readonly agentId: string; readonly runId: string }
@@ -86,15 +86,11 @@ function modelToolFromAgentDefinition(
   definition: AgentToolDefinition,
   context: Omit<ModelToolsFromAgentDefinitionsInput, "definitions">
 ): ModelTool<Readonly<Record<string, unknown>>> {
-  const inputSchema = schemaRecordToJsonSchema({
-    shape: definition.input,
-    valueTypesById: context.valueTypesById,
-  }) as JsonObject
+  const spec = agentModelToolSpecFromDefinition(definition, context.valueTypesById)
 
   return {
-    name: definition.name,
-    description: definition.description,
-    inputSchema,
+    ...spec,
+    inputSchema: spec.inputSchema as JsonObject,
     parseInput(value) {
       return validateAndNormalizeAgentToolInput(
         definition.name,

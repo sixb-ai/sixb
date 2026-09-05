@@ -7,9 +7,9 @@ import {
 } from "@sixb/core/internal/agents"
 import type { AgentMessageRecord } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
-import { MockLanguageModelV4 } from "ai/test"
 import { estimateAgentConversationInputTokens } from "../src/context-compaction"
 import type { AgentWorkerStorage } from "../src/types"
+import { WorkerTestModel } from "./worker-model-fixture"
 
 const projectId = "context-compaction-tests"
 const threadId = "thread"
@@ -84,7 +84,7 @@ describe("agent conversation context estimation", () => {
       parts: [{ type: "text", text: "Follow-up question with new details" }],
     })
 
-    const model = new MockLanguageModelV4({ modelId: "mock-model" })
+    const model = new WorkerTestModel({ modelId: "mock-model" })
     const agent = defineAgent("assistant", {
       name: "Assistant",
       model,
@@ -97,7 +97,7 @@ describe("agent conversation context estimation", () => {
       attempt: 1,
       callId: "call_1",
       requesterGroupIds: [],
-      providerId: model.provider,
+      providerId: model.providerId,
       requestedModelId: model.modelId,
       responseId: "response_1",
       usage: { inputTokens: 1_000, outputTokens: 200 },
@@ -226,7 +226,7 @@ describe("agent conversation context estimation", () => {
       parts: [{ type: "text", text: "Answer" }],
     })
 
-    const model = new MockLanguageModelV4({ modelId: "mock-model" })
+    const model = new WorkerTestModel({ modelId: "mock-model" })
     const agent = defineAgent("assistant", {
       name: "Assistant",
       model,
@@ -239,7 +239,7 @@ describe("agent conversation context estimation", () => {
       attempt: 1,
       callId: "call_zero",
       requesterGroupIds: [],
-      providerId: model.provider,
+      providerId: model.providerId,
       requestedModelId: model.modelId,
       responseId: "response_zero",
       usage: { inputTokens: 0, outputTokens: 0 },
