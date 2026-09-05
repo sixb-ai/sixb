@@ -1,3 +1,4 @@
+import type { ReadonlyJsonValue } from "../../json"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import type {
   ActionEditsHandler,
@@ -12,6 +13,18 @@ import type {
   GlobalActionWritebackHandler,
 } from "./handlers"
 import type { ActionParamsConfig, InferActionParams } from "./params"
+
+// Validate fields structurally so JSON-shaped interfaces do not need an index signature.
+// Builders infer the original result first, then check it without widening via NoInfer.
+type WritebackJsonValue<T> = T extends ReadonlyJsonValue
+  ? T
+  : T extends (...args: never[]) => unknown
+    ? never
+    : T extends object
+      ? { [K in keyof T]: WritebackJsonValue<T[K]> }
+      : never
+
+type WritebackResult<T> = T extends ReturnType<() => void> ? T : WritebackJsonValue<T>
 
 export interface BaseActionDefinition<
   TId extends string = string,
@@ -136,7 +149,11 @@ export interface GlobalActionPhaseBuilder<TId extends string, TParams extends Ac
     validator: GlobalActionValidator<InferActionParams<TParams>>
   ): GlobalActionPhaseBuilder<TId, TParams>
   writeback<const TResult>(
-    handler: GlobalActionWritebackHandler<InferActionParams<TParams>, TResult>
+    handler: GlobalActionWritebackHandler<InferActionParams<TParams>, TResult> &
+      GlobalActionWritebackHandler<
+        InferActionParams<TParams>,
+        WritebackResult<NoInfer<Awaited<TResult>>>
+      >
   ): GlobalActionAfterWritebackBuilder<TId, TParams, TResult>
   edits<const TResult extends ActionNoResultHandlerResult>(
     handler: GlobalActionEditsHandler<InferActionParams<TParams>, undefined, TResult>
@@ -152,7 +169,12 @@ export interface ObjectActionPhaseBuilder<
     validator: ActionValidator<TObjectType, InferActionParams<TParams>>
   ): ObjectActionPhaseBuilder<TId, TObjectType, TParams>
   writeback<const TResult>(
-    handler: ActionWritebackHandler<TObjectType, InferActionParams<TParams>, TResult>
+    handler: ActionWritebackHandler<TObjectType, InferActionParams<TParams>, TResult> &
+      ActionWritebackHandler<
+        TObjectType,
+        InferActionParams<TParams>,
+        WritebackResult<NoInfer<Awaited<TResult>>>
+      >
   ): ObjectActionAfterWritebackBuilder<TId, TObjectType, TParams, TResult>
   edits<const TResult extends ActionNoResultHandlerResult>(
     handler: ActionEditsHandler<TObjectType, InferActionParams<TParams>, undefined, TResult>
