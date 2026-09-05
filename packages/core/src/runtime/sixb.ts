@@ -11,6 +11,7 @@ import { createDatasetsRuntime, type DatasetsRuntime } from "../datasets/executi
 import { createEventsRuntime, type EventsRuntime } from "../events/execution"
 import type { ExecutionContext } from "../execution"
 import { resolveExecutionScopeAuthorization } from "../execution/authorization"
+import { assertAuthorizedObjectReaderBinding } from "../execution/authorized-object-reader"
 import { createLogsRuntime, type LogsRuntime } from "../logging/execution"
 import type { LoggingService } from "../logging/service"
 import { createObjectsRuntime, type ObjectsRuntime } from "../objects/execution"
@@ -63,6 +64,10 @@ export function createBoundSixb<TOntologySources extends readonly OntologySource
   resolveExecutionScopeAuthorization(runtime.projectId, {
     execution,
     authorization: runtime.runtimeAuthorization,
+  })
+  assertAuthorizedObjectReaderBinding({
+    reader: runtime.objectReader,
+    scope: { execution, authorization: runtime.runtimeAuthorization },
   })
   const sixb: Sixb<TOntologySources> = {
     execution,

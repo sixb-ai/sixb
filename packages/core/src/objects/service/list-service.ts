@@ -1,12 +1,10 @@
 /**
  * Cross-type object listing for dashboards and search.
  *
- * On principal-bound runtimes the type filter is authorized before the storage call:
- * explicitly requested types must all be viewable, and unfiltered listings
- * narrow to the principal's viewable types instead of post-filtering rows.
+ * Type hierarchies are expanded before the request reaches the canonical object
+ * reader, which owns authorization and provider-scope enforcement.
  */
 
-import { assertAuthorized } from "../../authorization"
 import type { ListResult, SixbRuntimeContext } from "../../runtime/types"
 import type { ObjectRow } from "../../storage"
 
@@ -28,14 +26,13 @@ export async function listObjects(
   runtime: SixbRuntimeContext,
   params: ListObjectsParams
 ): Promise<ListResult<ObjectRow>> {
-  const objectTypeIds = resolveAuthorizedTypeFilter(runtime, params.objectTypeIds)
+  const objectTypeIds = resolveTypeFilter(runtime, params.objectTypeIds)
 
-  if (runtime.authorization && objectTypeIds !== undefined && objectTypeIds.length === 0) {
+  if (objectTypeIds !== undefined && objectTypeIds.length === 0) {
     return { objects: [], hasMore: false, total: 0 }
   }
 
-  const result = await runtime.storage.objects.list({
-    projectId: runtime.projectId,
+  const result = await runtime.objectReader.list({
     objectTypeId: objectTypeIds?.length === 1 ? objectTypeIds[0] : objectTypeIds,
     primaryIdPrefix: params.idPrefix,
     primaryIdSuffix: params.idSuffix,
@@ -56,7 +53,7 @@ export async function listObjects(
   }
 }
 
-function resolveAuthorizedTypeFilter(
+function resolveTypeFilter(
   runtime: SixbRuntimeContext,
   requested: readonly string[] | undefined
 ): readonly string[] | undefined {
@@ -66,24 +63,7 @@ function resolveAuthorizedTypeFilter(
     }
   }
 
-  const expanded = requested
+  return requested
     ? [...new Set(requested.flatMap((id) => [id, ...runtime.ontology.listSubTypes(id)]))]
     : undefined
-
-  if (!runtime.authorization) {
-    return expanded
-  }
-
-  if (!expanded) {
-    // Broad listings narrow to the visible universe rather than failing. The
-    // set already contains every registered type when "all" was granted.
-    return [...runtime.authorization.grants["view:object"]]
-  }
-
-  // Explicitly requested types must all be viewable.
-  for (const objectTypeId of expanded) {
-    assertAuthorized(runtime, { kind: "object.view", objectTypeId })
-  }
-
-  return expanded
 }

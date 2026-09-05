@@ -1,5 +1,6 @@
 import { assertAuthorized, isAllowed } from "../authorization"
 import type { ExecutionContext } from "../execution"
+import { assertAuthorizedObjectReaderBinding } from "../execution/authorized-object-reader"
 import type { ValueType } from "../ontology"
 import { assertObjectTypeRegistered } from "../ontology"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
@@ -20,22 +21,17 @@ import type {
   TimeseriesHistoryBatchResult,
   TimeseriesPoint,
 } from "../storage"
-import {
-  countObjects,
-  type ExecuteObjectCountInput,
-  type ExecuteObjectCountResult,
-  type ExecuteObjectExistsInput,
-  type ExecuteObjectExistsResult,
-  type ExecuteObjectFacetsInput,
-  type ExecuteObjectFacetsResult,
-  type ExecuteObjectQueryInput,
-  type ExecuteObjectQueryLinksInput,
-  type ExecuteObjectQueryLinksResult,
-  type ExecuteObjectQueryResult,
-  executeObjectQuery,
-  executeObjectQueryLinks,
-  existsObjects,
-  facetObjects,
+import type {
+  ExecuteObjectCountInput,
+  ExecuteObjectCountResult,
+  ExecuteObjectExistsInput,
+  ExecuteObjectExistsResult,
+  ExecuteObjectFacetsInput,
+  ExecuteObjectFacetsResult,
+  ExecuteObjectQueryInput,
+  ExecuteObjectQueryLinksInput,
+  ExecuteObjectQueryLinksResult,
+  ExecuteObjectQueryResult,
 } from "./query"
 import { createObjectSet } from "./sdk"
 import type { ListObjectsParams } from "./service"
@@ -173,6 +169,10 @@ export function createObjectsRuntime<TOntologySources extends readonly OntologyS
   runtime: SixbRuntimeContext,
   execution: ExecutionContext
 ): ObjectsRuntime<TOntologySources> {
+  assertAuthorizedObjectReaderBinding({
+    reader: runtime.objectReader,
+    scope: { execution, authorization: runtime.runtimeAuthorization },
+  })
   const objects = Object.assign(
     <TObjectType extends RegisteredObjectType<TOntologySources>>(objectType: TObjectType) => {
       assertObjectTypeRegistered(runtime.ontology.getObjectTypesById(), objectType)
@@ -209,77 +209,21 @@ export function createObjectsRuntime<TOntologySources extends readonly OntologyS
       isValidLinkTarget: (expected: string | string[], actual: string) =>
         runtime.ontology.isValidLinkTarget(expected, actual),
       executeQuery: (input: Omit<ExecuteObjectQueryInput, "projectId">) =>
-        executeObjectQuery(
-          { projectId: runtime.projectId, ...input },
-          {
-            ontology: runtime.ontology,
-            storage: runtime.storage.objects,
-            runtimeAuthorization: runtime.runtimeAuthorization,
-            authorization: runtime.authorization,
-          }
-        ),
-      queryLinks: (input: ObjectQueryLinksInput) =>
-        executeObjectQueryLinks(
-          { projectId: runtime.projectId, ...input },
-          {
-            ontology: runtime.ontology,
-            storage: runtime.storage.objects,
-            runtimeAuthorization: runtime.runtimeAuthorization,
-            authorization: runtime.authorization,
-          }
-        ),
+        runtime.objectReader.executeQuery(input),
+      queryLinks: (input: ObjectQueryLinksInput) => runtime.objectReader.queryLinks(input),
       count: (input: Omit<ExecuteObjectCountInput, "projectId">) =>
-        countObjects(
-          { projectId: runtime.projectId, ...input },
-          {
-            ontology: runtime.ontology,
-            storage: runtime.storage.objects,
-            runtimeAuthorization: runtime.runtimeAuthorization,
-            authorization: runtime.authorization,
-          }
-        ),
+        runtime.objectReader.count(input),
       exists: (input: Omit<ExecuteObjectExistsInput, "projectId">) =>
-        existsObjects(
-          { projectId: runtime.projectId, ...input },
-          {
-            ontology: runtime.ontology,
-            storage: runtime.storage.objects,
-            runtimeAuthorization: runtime.runtimeAuthorization,
-            authorization: runtime.authorization,
-          }
-        ),
+        runtime.objectReader.exists(input),
       facet: (input: Omit<ExecuteObjectFacetsInput, "projectId">) =>
-        facetObjects(
-          { projectId: runtime.projectId, ...input },
-          {
-            ontology: runtime.ontology,
-            storage: runtime.storage.objects,
-            runtimeAuthorization: runtime.runtimeAuthorization,
-            authorization: runtime.authorization,
-          }
-        ),
+        runtime.objectReader.facet(input),
       listLinks: async (input: {
         objectTypeId: string
         objectId: string
         linkId?: string
         direction?: LinkDirection
       }) => {
-        assertAuthorized(runtime, { kind: "object.view", objectTypeId: input.objectTypeId })
-        const links = await runtime.storage.objects.listLinks({
-          projectId: runtime.projectId,
-          ...input,
-        })
-        return links.filter(
-          (link) =>
-            isAllowed(runtime.authorization, {
-              kind: "object.view",
-              objectTypeId: link.sourceTypeId,
-            }) &&
-            isAllowed(runtime.authorization, {
-              kind: "object.view",
-              objectTypeId: link.targetTypeId,
-            })
-        )
+        return runtime.objectReader.listLinks(input)
       },
       getTelemetryHistoryBatch: (input: Omit<TimeseriesHistoryBatchInput, "projectId">) =>
         getTelemetryHistoryBatch(
@@ -317,14 +261,8 @@ export function createObjectsRuntime<TOntologySources extends readonly OntologyS
         })
       },
       list: (params: ListObjectsParams) => objectService.listObjects(runtime, params),
-      get: async (objectTypeId: string, primaryId: string) => {
-        assertAuthorized(runtime, { kind: "object.view", objectTypeId })
-        return runtime.storage.objects.getByPrimaryId({
-          projectId: runtime.projectId,
-          objectTypeId,
-          primaryId,
-        })
-      },
+      get: (objectTypeId: string, primaryId: string) =>
+        runtime.objectReader.getByPrimaryId({ objectTypeId, primaryId }),
       getPrimaryPropertyId: (objectTypeId: string) => {
         assertAuthorized(runtime, { kind: "object.view", objectTypeId })
         return runtime.ontology.getPrimaryPropertyId(objectTypeId)
