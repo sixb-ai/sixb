@@ -81,6 +81,12 @@ export {
   seedObjectQueryContractData,
 } from "./object-query-contract"
 export {
+  type ObjectReadScopeContractHarness,
+  type ObjectReadScopeContractSuiteOptions,
+  objectReadScopeContractOntology,
+  runObjectReadScopeContractSuite,
+} from "./object-read-scope-contract"
+export {
   type OntologyStorageContractStorage,
   type OntologyStorageContractSuiteOptions,
   runOntologyStorageContractSuite,

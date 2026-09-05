@@ -345,6 +345,10 @@ export {
   step,
 } from "./migrations"
 export type {
+  CompiledObjectReadObjectSelection,
+  CompiledObjectReadRoot,
+  CompiledObjectReadStep,
+  CompiledSelectedObjectReadScope,
   CountObjectsInput,
   CountObjectsResult,
   ExistsObjectsInput,
@@ -365,6 +369,14 @@ export type {
   ObjectQueryCapabilityMap,
   ObjectQueryScalarOperation,
   ObjectQueryScalarOperations,
+  ObjectReadExecutionLimits,
+  ObjectReadLimitMetric,
+  ObjectReadLinkDefinitionSelection,
+  ObjectReadLinkSelection,
+  ObjectReadNode,
+  ObjectReadObjectSelection,
+  ObjectReadRoot,
+  ObjectReadScopeFactory,
   ObjectReadStorage,
   ObjectRow,
   ObjectRowLinks,
@@ -373,11 +385,19 @@ export type {
   QueryObjectLinksResult,
   QueryObjectsInput,
   QueryObjectsResult,
+  SelectedObjectReadScope,
 } from "./objects"
 export {
+  assertObjectReaderProject,
+  assertObjectReadFacetCount,
+  assertObjectReadOutputWithinLimit,
+  compileSelectedObjectReadScope,
   linkBatchKey,
+  MAX_OBJECT_READ_FACETS,
+  ObjectReadLimitExceededError,
   objectBatchKey,
   objectLinkCursor,
+  snapshotObjectReadExecutionLimits,
 } from "./objects"
 export type {
   AbandonSourceMaterializationCandidateInput,
